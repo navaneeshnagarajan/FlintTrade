@@ -24,7 +24,12 @@
  *     argument (the convention every existing caller uses).
  */
 
-import { getExpiry, getOptionChain, getOptionSymbol } from "@/services/api";
+import {
+  getExpiry,
+  getOptionChain,
+  getOptionSymbol,
+  MarketDataAuthorityChangedError,
+} from "@/services/api";
 import { buildCompactOptionSymbol, selectFutureExpiry } from "@/lib/optionSymbols";
 import type { OptionType } from "@/lib/optionSymbols";
 
@@ -51,14 +56,22 @@ export interface ResolvedOptionLeg {
 }
 
 /** Fetch the expiry list and choose the nearest future expiry. */
-async function resolveExpiry(underlying: string, exchange: string): Promise<string> {
+async function resolveExpiry(
+  underlying: string,
+  exchange: string,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+): Promise<string> {
   let list: string[] = [];
   try {
-    const result = await getExpiry(underlying, exchange, "options");
+    const result = await getExpiry(underlying, exchange, "options", signal, expectedDataScope);
     list = result?.expiry ?? [];
-  } catch {
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (error instanceof MarketDataAuthorityChangedError) throw error;
     throw new Error(`Could not load option expiries for ${underlying}`);
   }
+  signal?.throwIfAborted();
   const expiry = selectFutureExpiry(list) ?? list[0];
   if (!expiry) {
     throw new Error(`No option expiries available for ${underlying}`);
@@ -77,14 +90,19 @@ async function resolveATMStrike(
   underlying: string,
   exchange: string,
   expiry: string,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
 ): Promise<string> {
   let atmStrike: number | undefined;
   try {
-    const chain = await getOptionChain(underlying, exchange, expiry);
+    const chain = await getOptionChain(underlying, exchange, expiry, signal, expectedDataScope);
     atmStrike = (chain as unknown as { atm_strike?: number } | null)?.atm_strike;
-  } catch {
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (error instanceof MarketDataAuthorityChangedError) throw error;
     throw new Error(`Could not load the option chain for ${underlying} ${expiry}`);
   }
+  signal?.throwIfAborted();
   if (!atmStrike || !Number.isFinite(atmStrike)) {
     throw new Error(`Option chain for ${underlying} ${expiry} carries no ATM strike`);
   }
@@ -96,35 +114,55 @@ async function resolveATMStrike(
  * expiry and the ATM strike when unspecified. Throws with a descriptive
  * message when any step cannot produce a contract.
  */
-export async function resolveOptionLeg({
-  underlying,
-  exchange = DEFAULT_OPTION_EXCHANGE,
-  leg,
-  expiry,
-  strike,
-}: OptionLegRequest): Promise<ResolvedOptionLeg> {
+export async function resolveOptionLeg(
+  {
+    underlying,
+    exchange = DEFAULT_OPTION_EXCHANGE,
+    leg,
+    expiry,
+    strike,
+  }: OptionLegRequest,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+): Promise<ResolvedOptionLeg> {
+  signal?.throwIfAborted();
   const base = underlying.trim().toUpperCase();
   if (!base) {
     throw new Error("An option leg needs an underlying symbol");
   }
 
-  const legExpiry = expiry?.trim() ? expiry.trim() : await resolveExpiry(base, exchange);
+  const legExpiry = expiry?.trim()
+    ? expiry.trim()
+    : await resolveExpiry(base, exchange, signal, expectedDataScope);
+  signal?.throwIfAborted();
   // ThreePanel treated strike "0" as its ATM sentinel; preserve that.
   const legStrike = strike?.trim() && strike.trim() !== "0"
     ? strike.trim()
-    : await resolveATMStrike(base, exchange, legExpiry);
+    : await resolveATMStrike(base, exchange, legExpiry, signal, expectedDataScope);
+  signal?.throwIfAborted();
 
   // Broker resolver first, compact-symbol fallback second — ThreePanel's
   // resolver-then-fallback order, one leg at a time.
   let resolved: { symbol: string; exchange: string } | null = null;
   try {
-    const candidate = await getOptionSymbol(base, exchange, legExpiry, leg, legStrike);
+    const candidate = await getOptionSymbol(
+      base,
+      exchange,
+      legExpiry,
+      leg,
+      legStrike,
+      signal,
+      expectedDataScope,
+    );
     if (candidate?.symbol) {
       resolved = candidate;
     }
-  } catch {
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (error instanceof MarketDataAuthorityChangedError) throw error;
     // Resolver unavailable — fall through to the compact builder.
   }
+  signal?.throwIfAborted();
   if (!resolved) {
     const compact = buildCompactOptionSymbol(base, legExpiry, legStrike, leg);
     if (compact) {

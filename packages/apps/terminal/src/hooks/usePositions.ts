@@ -3,26 +3,32 @@ import { getPositionbook } from "@/services/api";
 import type { Position } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
 import { queryKeys } from "@/services/queryKeys";
-import { useDataScope } from "@/hooks/useDataScope";
+import {
+  useAccountReadContext,
+  type AccountReadContext,
+} from "@/hooks/useAccountReadsEnabled";
 
 interface BrokerDataQueryOptions {
   enabled?: boolean;
+  context?: AccountReadContext;
 }
 
 /**
  * Pure TanStack Query hook for the PositionBook REST endpoint.
  *
- * Does not write into any Zustand store — that mirror is maintained by
- * `useTradingStoreSync` at the app root so there is exactly one write
- * point.
+ * Scope, scheduling, and transport all come from one immutable account-read
+ * context. The transport never re-selects a different account from mutable
+ * stores after the query has already claimed its cache key.
  */
 export function usePositions(options: BrokerDataQueryOptions = {}) {
-  const enabled = options.enabled ?? true;
-  const scope = useDataScope();
+  const currentContext = useAccountReadContext();
+  const context = options.context ?? currentContext;
+  const enabled = (options.enabled ?? true) && context.enabled;
   return useQuery<Position[]>({
-    queryKey: queryKeys.positions.list(scope),
-    queryFn: getPositionbook,
+    queryKey: queryKeys.positions.list(context.identity.scopeKey),
+    queryFn: ({ signal }) => getPositionbook(context, signal),
     enabled,
+    retry: false,
     staleTime: 3_000,
     refetchInterval: () => (enabled ? (isMarketHours() ? 5_000 : 60_000) : false),
   });

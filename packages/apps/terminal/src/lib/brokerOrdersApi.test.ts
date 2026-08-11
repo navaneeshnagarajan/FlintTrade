@@ -128,6 +128,10 @@ describe("forever orders", () => {
     const { url, init } = lastCall();
     expect(url).toBe("/ft-api/api/v1/orders/forever?broker=dhan&account_id=A1");
     expect(init.method).toBe("GET");
+    expect(init.headers).toStrictEqual({
+      Authorization: "Bearer test-jwt",
+      "X-API-Key": "test-api-key",
+    });
     expect(rows).toStrictEqual([{ order_id: "G1", symbol: "RELIANCE" }]);
   });
 
@@ -181,6 +185,7 @@ describe("forever orders", () => {
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers["Authorization"]).toBe("Bearer test-jwt");
     expect(headers["X-API-Key"]).toBe("test-api-key");
+    expect(headers["X-FlintTrade-Mode"]).toBe("live");
     const body = lastBody();
     expect(body.variety).toBe("gtt");
     expect(body.symbol).toBe("RELIANCE");
@@ -245,6 +250,7 @@ describe("forever orders", () => {
     const { url, init } = lastCall();
     expect(url).toBe("/ft-api/api/v1/orders/forever/a%2Fb");
     expect(init.method).toBe("PUT");
+    expect(new Headers(init.headers).get("X-FlintTrade-Mode")).toBe("live");
     expect(lastBody()).toStrictEqual({
       changes: { price: 2900 },
       broker: "dhan",
@@ -257,6 +263,7 @@ describe("forever orders", () => {
     await cancelForeverOrder({ order_id: "G1", broker: "dhan", account_id: "A1" });
     const { url, init } = lastCall();
     expect(url).toBe("/ft-api/api/v1/orders/forever/G1?broker=dhan&account_id=A1");
+    expect(new Headers(init.headers).get("X-FlintTrade-Mode")).toBe("live");
     expect(init.method).toBe("DELETE");
     expect(init.body).toBeUndefined();
   });

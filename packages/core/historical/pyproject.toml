@@ -8,7 +8,7 @@ dependencies = [
     "duckdb~=1.5",
     "flask>=3.0",
     "yfinance>=1.5.2",
-    "jugaad-data>=0.31.0",
+    "jugaad-data>=0.35.2",
     "openchart>=0.1",
 ]
 

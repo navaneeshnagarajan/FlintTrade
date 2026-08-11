@@ -13,7 +13,7 @@
  * lightweight-charts into its chunk.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   CandlestickData,
   HistogramData,
@@ -39,9 +39,11 @@ interface SpotPricePaneProps {
   /** The SPOT exchange (NSE_INDEX / BSE_INDEX / MCX …), not the F&O one. */
   spotExchange: string;
   interval: SpotInterval;
+  /** Exact owner of this history read (mode + broker source/account). */
+  dataScope: string;
 }
 
-export function SpotPricePane({ symbol, spotExchange, interval }: SpotPricePaneProps) {
+export function SpotPricePane({ symbol, spotExchange, interval, dataScope }: SpotPricePaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -49,8 +51,10 @@ export function SpotPricePane({ symbol, spotExchange, interval }: SpotPricePaneP
   const flintChartRef = useRef<ReturnType<
     typeof createFlintCandlestickChart<IChartApi, ISeriesApi<"Candlestick">, ISeriesApi<"Histogram">>
   > | null>(null);
+  const historyControllerRef = useRef<AbortController | null>(null);
   const [legend, setLegend] = useState<FlintChartLegendState | null>(null);
   const chartTheme = useLightweightChartTheme();
+  const historyKey = `${dataScope}:${symbol}:${spotExchange}:${interval}`;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -103,9 +107,22 @@ export function SpotPricePane({ symbol, spotExchange, interval }: SpotPricePaneP
     });
   }, [chartTheme]);
 
+  // Retire the old authority before the browser paints the next scope. The
+  // async history effect below also aborts in cleanup; this layout fence makes
+  // both the cancellation and the visible empty chart synchronous on A -> B
+  // and Live -> Explore transitions.
+  useLayoutEffect(() => {
+    historyControllerRef.current?.abort();
+    historyControllerRef.current = null;
+    seriesRef.current?.setData([]);
+    volumeSeriesRef.current?.setData([]);
+    setLegend(null);
+  }, [historyKey]);
+
   useEffect(() => {
     if (!seriesRef.current || !volumeSeriesRef.current) return;
-    let cancelled = false;
+    const controller = new AbortController();
+    historyControllerRef.current = controller;
 
     const resolution = SPOT_INTERVAL_RESOLUTIONS[interval] ?? "15";
     const today = new Date();
@@ -114,9 +131,23 @@ export function SpotPricePane({ symbol, spotExchange, interval }: SpotPricePaneP
       .toISOString()
       .slice(0, 10);
 
-    getHistory(symbol, spotExchange, resolution, startDate, endDate)
+    getHistory(
+      symbol,
+      spotExchange,
+      resolution,
+      startDate,
+      endDate,
+      controller.signal,
+      dataScope,
+    )
       .then((bars) => {
-        if (cancelled || !seriesRef.current || !volumeSeriesRef.current || !Array.isArray(bars)) return;
+        if (
+          controller.signal.aborted
+          || historyControllerRef.current !== controller
+          || !seriesRef.current
+          || !volumeSeriesRef.current
+          || !Array.isArray(bars)
+        ) return;
         const candles: CandlestickData[] = bars
           .filter((b) => b.timestamp && b.open && b.high && b.low && b.close)
           .map((b) => ({
@@ -143,8 +174,13 @@ export function SpotPricePane({ symbol, spotExchange, interval }: SpotPricePaneP
         // The price strip fails silently — the OI view is the main feature.
       });
 
-    return () => { cancelled = true; };
-  }, [symbol, spotExchange, interval]);
+    return () => {
+      controller.abort();
+      if (historyControllerRef.current === controller) {
+        historyControllerRef.current = null;
+      }
+    };
+  }, [historyKey, symbol, spotExchange, interval, dataScope]);
 
   return (
     <div className="relative h-full w-full" data-testid="spot-price-pane">

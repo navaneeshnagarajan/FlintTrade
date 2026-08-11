@@ -42,14 +42,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useFunds } from "@/hooks/useFunds";
 import { usePositions } from "@/hooks/usePositions";
 import { useTradebook } from "@/hooks/useTradebook";
 import { positionMtm, realisedBySymbol } from "@/lib/pnl";
 import { useModeStore } from "@/stores/modeStore";
 import { useSettingsStore } from "@/stores/settingsStore";
-import type { Position } from "@/types/api";
+import { SAMPLE_POSITION_BOOK } from "@/widgets/trading/Positions/sampleBook";
+import { getDemoFunds } from "@/hooks/useModeData";
+import type { Trade } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { DrawdownView } from "./DrawdownView";
 import { LiveView } from "./LiveView";
@@ -105,6 +106,7 @@ const INITIAL_STATE: MonitorState = {
 
 /** Full session at the 5s market-hours cadence, with headroom. */
 const MAX_SERIES_POINTS = 6000;
+const EMPTY_TRADES: Trade[] = [];
 
 // ---------------------------------------------------------------------------
 // Main widget
@@ -115,25 +117,24 @@ function PnLMonitorWidget(props: WidgetProps) {
   const [view, setView] = useState<PnLMonitorView>(() => resolvePnLMonitorView(panelParams?.view));
 
   const mode = useModeStore((s) => s.mode);
-  const isConnected = useBrokerConnected();
   const accountReadsEnabled = useAccountReadsEnabled();
   const riskLimits = useSettingsStore(useShallow((s) => s.riskLimits));
+  const isExplore = mode === "explore";
 
-  // Shared caches — the same positions/tradebook/funds entries every other
-  // widget consumes, on the shared refetch cadence. Invalidating the shared
-  // keys (e.g. after an order) updates this widget too.
-  // Deliberately ungated: this widget renders an Explore preview from the
-  // API's labelled mock data behind a "Sample data" badge, the same policy
-  // Dashboard uses. Gating it to accountReadsEnabled would remove that
-  // preview, so the enablement asymmetry with Positions/Holdings is intended
-  // rather than an oversight. (A previous attempt to gate the retired
-  // IntradayPnL broke its whole suite and was reverted — do not re-gate.)
-  const positionsQuery = usePositions();
-  const tradebookQuery = useTradebook();
-  // Funds feed the Summary view's margin/balance cards. (The retired MTM
-  // Monitor subscribed to funds and discarded the payload; the merge finally
-  // consumes it.)
-  const fundsQuery = useFunds();
+  // Gated account-scoped reads per truthful provenance contract.
+  // Explore uses deterministic local sample pack (no network, no prohibited API calls).
+  const positionsQuery = usePositions({ enabled: accountReadsEnabled });
+  const fundsQuery = useFunds({ enabled: accountReadsEnabled });
+  const tradebookQuery = useTradebook({ enabled: accountReadsEnabled });
+
+  // Effective data selection per contract — Explore uses deterministic local sample pack.
+  const samplePositions = SAMPLE_POSITION_BOOK;
+  const sampleFunds = getDemoFunds();
+
+  const positions = isExplore ? samplePositions : positionsQuery.data;
+  const funds = isExplore ? sampleFunds : fundsQuery.data;
+  // Drawdown is empty in Explore until a deterministic sample trade pack exists.
+  const trades = isExplore ? EMPTY_TRADES : (tradebookQuery.data ?? EMPTY_TRADES);
 
   // Stable refs to avoid closing over stale state in the update effect
   const peakRef = useRef<number>(0);
@@ -145,7 +146,7 @@ function PnLMonitorWidget(props: WidgetProps) {
   const [state, setState] = useState<MonitorState>(INITIAL_STATE);
 
   useEffect(() => {
-    if (positionsQuery.isError) {
+    if (positionsQuery.isError && !isExplore) {
       setState((prev) => ({
         ...prev,
         loading: false,
@@ -156,8 +157,28 @@ function PnLMonitorWidget(props: WidgetProps) {
       }));
       return;
     }
-    const positions: Position[] | undefined = positionsQuery.data;
-    if (!positions) return;
+    if (!accountReadsEnabled && !isExplore) {
+      // Disconnected Live: honest empty state, no sample, no loading loop, no numeric claim
+      setState((prev) => ({
+        ...prev,
+        loading: false,
+        error: null,
+        netPnL: 0,
+        realisedPnL: 0,
+        unrealisedPnL: 0,
+        peakPnL: 0,
+        peakTime: "--:--",
+        minPnL: 0,
+        minTime: "--:--",
+        maxDrawdown: 0,
+        byStrategy: [],
+        series: [],
+      }));
+      return;
+    }
+    // For Explore sample, positions is always the bound pack (no early return, no loading)
+    if (!isExplore && !positions) return;
+    const effectivePositions = positions ?? [];
 
     // Booked realised P&L per symbol from today's tradebook (partial + full
     // closes). If the tradebook is unavailable the map is empty and realised
@@ -166,7 +187,7 @@ function PnLMonitorWidget(props: WidgetProps) {
 
     let realisedPnL = 0;
     let unrealisedPnL = 0;
-    for (const pos of positions) {
+    for (const pos of effectivePositions) {
       if (quantityOf(pos) === 0) {
         // Fully closed: the broker/computed pnl is the accurate realised,
         // including a position carried over from a prior day (which the
@@ -199,7 +220,7 @@ function PnLMonitorWidget(props: WidgetProps) {
       drawdownRef.current = dd;
     }
 
-    const byStrategy = buildStrategyPnL(positions);
+    const byStrategy = buildStrategyPnL(effectivePositions);
     const point: MtmPoint = { time: nowSec as UTCTimestamp, value: netPnL };
 
     setState((prev) => {
@@ -235,6 +256,9 @@ function PnLMonitorWidget(props: WidgetProps) {
     positionsQuery.error,
     positionsQuery.data,
     tradebookQuery.data,
+    isExplore,
+    accountReadsEnabled,
+    positions,
   ]);
 
   // Ticks every 10s so the last-updated chip can flag staleness between polls.
@@ -259,11 +283,16 @@ function PnLMonitorWidget(props: WidgetProps) {
     });
   }, [props.api]);
 
-  // Honest disclosure — in Explore (or Live without a broker) the P&L is
-  // computed from labelled SAMPLE data; in Practice it is the local sandbox.
+  // Truthful provenance derived from active data path (not mode alone).
+  const provenanceKind =
+    mode === "practice" && accountReadsEnabled ? "practice"
+    : isExplore ? "sample"
+    : mode === "live" && !accountReadsEnabled ? "unavailable"
+    : null;
+
   const provenance =
-    mode === "practice" ? "Practice data"
-    : mode === "explore" || !isConnected ? "Sample data"
+    provenanceKind === "practice" ? "Practice data"
+    : provenanceKind === "sample" ? "Sample data"
     : null;
 
   // Target / SL status badge (from the retired MTM Monitor), on the corrected
@@ -294,12 +323,12 @@ function PnLMonitorWidget(props: WidgetProps) {
               role="status"
               aria-label={
                 provenance === "Practice data"
-                  ? "Showing practice-account data from the local sandbox"
+                  ? "Showing practice-account data from your Practice account"
                   : "Showing sample positions; not connected to a live broker"
               }
               title={
                 provenance === "Practice data"
-                  ? "Practice mode — P&L is computed from your local sandbox account."
+                  ? "Practice mode — P&L is computed from your Practice account."
                   : "Not connected — P&L is computed from sample positions, not your real account."
               }
             >
@@ -395,19 +424,20 @@ function PnLMonitorWidget(props: WidgetProps) {
             series={state.series}
             loading={state.loading}
             riskLimits={riskLimits}
+            accountReadsEnabled={accountReadsEnabled}
           />
         </TabsContent>
 
         <TabsContent value="summary" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
           <SummaryView
-            positions={positionsQuery.data ?? []}
-            funds={fundsQuery.data}
+            positions={positions ?? []}
+            funds={funds}
             netPnL={state.netPnL}
           />
         </TabsContent>
 
         <TabsContent value="drawdown" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
-          <DrawdownView trades={tradebookQuery.data ?? []} />
+          <DrawdownView trades={trades} />
         </TabsContent>
       </Tabs>
     </div>

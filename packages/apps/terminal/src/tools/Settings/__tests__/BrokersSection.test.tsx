@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { BrokerAccount } from "@/types/broker";
@@ -17,6 +17,7 @@ vi.mock("@/services/ftApi.native", () => ({
 
 vi.mock("@/services/brokerAccountsApi", () => ({
   listBrokerAccounts: vi.fn(),
+  listNativeBrokerAccounts: vi.fn(),
   removeBrokerAccount: vi.fn(),
   reconnectBrokerAccount: vi.fn(),
   setPrimaryBrokerAccount: vi.fn(),
@@ -30,11 +31,13 @@ import {
 } from "@/services/ftApi.native";
 import {
   listBrokerAccounts,
+  listNativeBrokerAccounts,
   removeBrokerAccount,
   reconnectBrokerAccount,
   setPrimaryBrokerAccount,
 } from "@/services/brokerAccountsApi";
 import { useBrokerStore } from "@/stores/brokerStore";
+import { useAuthStore } from "@/stores/authStore";
 import { BrokersSection } from "../BrokersSection";
 
 const BROKERS = [
@@ -451,13 +454,38 @@ const MCP_BROKERS = [
   },
 ];
 
-function renderSection() {
+function renderSection(pollAccounts?: boolean) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <BrokersSection />
-    </QueryClientProvider>,
-  );
+  return {
+    ...render(
+      <QueryClientProvider client={qc}>
+        <BrokersSection pollAccounts={pollAccounts} />
+      </QueryClientProvider>,
+    ),
+    queryClient: qc,
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function submitDhanAccessToken(accountId: string, accountLabel = "") {
+  fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+  fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+  fireEvent.click(screen.getByRole("combobox", { name: /login method/i }));
+  fireEvent.click(await screen.findByRole("option", { name: "Access token" }));
+  fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: accountId } });
+  if (accountLabel) {
+    fireEvent.change(screen.getByLabelText(/account label/i), { target: { value: accountLabel } });
+  }
+  fireEvent.change(screen.getByLabelText("Dhan client ID"), { target: { value: accountId } });
+  fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "TOK" } });
+  fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 }
 
 function makeNativeAccount(overrides: Partial<BrokerAccount> = {}): BrokerAccount {
@@ -499,12 +527,33 @@ describe("BrokersSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     setClipboard();
-    (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue(BROKERS);
-    (listBrokerMcpCatalogue as ReturnType<typeof vi.fn>).mockResolvedValue(MCP_BROKERS);
-    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (listNativeBrokers as ReturnType<typeof vi.fn>).mockReset().mockResolvedValue(BROKERS);
+    (listBrokerMcpCatalogue as ReturnType<typeof vi.fn>).mockReset().mockResolvedValue(MCP_BROKERS);
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockReset().mockResolvedValue([]);
+    (listNativeBrokerAccounts as ReturnType<typeof vi.fn>).mockReset().mockResolvedValue([]);
     // The broker store is a module singleton; reset it so a seeded gateway
     // account from one test never leaks into the next.
     useBrokerStore.setState({ accounts: [], activeAccountId: null });
+    useAuthStore.setState({
+      status: "logged-in",
+      token: "settings-session",
+      reauthToken: null,
+      username: "settings-user",
+      sessionGeneration: 1,
+    });
+  });
+
+  it("can consume AppLayout's account snapshot without mounting another poll", async () => {
+    renderSection(false);
+
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+    expect(listBrokerAccounts).not.toHaveBeenCalled();
+  });
+
+  it("polls accounts by default for setup callers outside AppLayout", async () => {
+    renderSection();
+
+    await waitFor(() => expect(listBrokerAccounts).toHaveBeenCalledTimes(1));
   });
 
   it("shows the section heading and empty connected-accounts state", async () => {
@@ -814,20 +863,13 @@ describe("BrokersSection", () => {
 
   it("connects a direct-credential account (Dhan access token)", async () => {
     (connectNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({ connected: true, login: "ok" });
-    renderSection();
+    const refreshedAccount = makeNativeAccount({ account_id: "1234567890" });
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([refreshedAccount]);
+    renderSection(false);
     await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+    expect(listBrokerAccounts).not.toHaveBeenCalled();
 
-    // Pick Dhan (native select renders options once opened).
-    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
-    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
-    fireEvent.click(screen.getByRole("combobox", { name: /login method/i }));
-    fireEvent.click(await screen.findByRole("option", { name: "Access token" }));
-
-    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "1234567890" } });
-    fireEvent.change(screen.getByLabelText(/account label/i), { target: { value: "Dhan swing" } });
-    fireEvent.change(screen.getByLabelText("Dhan client ID"), { target: { value: "1234567890" } });
-    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "TOK" } });
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await submitDhanAccessToken("1234567890", "Dhan swing");
 
     await waitFor(() =>
       expect(connectNativeAccount).toHaveBeenCalledWith(
@@ -840,6 +882,74 @@ describe("BrokersSection", () => {
       ),
     );
     expect(await screen.findByText(/Dhan account 1234567890 connected/i)).toBeInTheDocument();
+    await waitFor(() => expect(listBrokerAccounts).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([refreshedAccount]));
+  });
+
+  it.each(["unmount", "retire-session"] as const)(
+    "does not apply a manual account refresh after %s",
+    async (boundary) => {
+      const refresh = deferred<BrokerAccount[]>();
+      (connectNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({ connected: true, login: "ok" });
+      (listBrokerAccounts as ReturnType<typeof vi.fn>).mockReturnValue(refresh.promise);
+      const view = renderSection(false);
+      await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+      await submitDhanAccessToken("STALE1");
+      await waitFor(() => expect(listBrokerAccounts).toHaveBeenCalledTimes(1));
+
+      if (boundary === "unmount") {
+        view.unmount();
+      } else {
+        act(() => useAuthStore.getState().setPinRequired());
+      }
+
+      await act(async () => {
+        refresh.resolve([makeNativeAccount({ account_id: "STALE1" })]);
+        await refresh.promise;
+        await Promise.resolve();
+      });
+
+      expect(useBrokerStore.getState().accounts).toEqual([]);
+      if (boundary === "unmount") {
+        expect(view.queryClient.getQueryData(["broker", "accounts"])).not.toEqual([
+          expect.objectContaining({ account_id: "STALE1" }),
+        ]);
+      }
+    },
+  );
+
+  it("does not let a cancelled AppLayout poll resurrect a disconnected account", async () => {
+    const account = makeNativeAccount({ account_id: "STALE-POLL", broker: "dhan", is_primary: false });
+    const stalePoll = deferred<BrokerAccount[]>();
+    (listBrokerAccounts as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(stalePoll.promise)
+      .mockResolvedValueOnce([]);
+    (removeBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    useBrokerStore.setState({ accounts: [account], activeAccountId: "native:dhan:STALE-POLL" });
+    const { queryClient } = renderSection(false);
+    await waitFor(() => expect(screen.getByLabelText(/disconnect dhan STALE-POLL/i)).toBeInTheDocument());
+
+    const staleResult = queryClient.fetchQuery({
+      queryKey: ["broker", "accounts"],
+      queryFn: ({ signal }) => listBrokerAccounts([account], signal),
+      retry: false,
+    }).catch(() => undefined);
+    await waitFor(() => expect(listBrokerAccounts).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByLabelText(/disconnect dhan STALE-POLL/i));
+    await waitFor(() => expect(removeBrokerAccount).toHaveBeenCalled());
+    await waitFor(() => expect(listBrokerAccounts).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([]));
+
+    await act(async () => {
+      stalePoll.resolve([account]);
+      await stalePoll.promise;
+      await staleResult;
+      await Promise.resolve();
+    });
+    expect(useBrokerStore.getState().accounts).toEqual([]);
+    expect(queryClient.getQueryData(["broker", "accounts"])).toEqual([]);
   });
 
   it("launches OAuth for Dhan app-consent logins", async () => {
@@ -878,6 +988,453 @@ describe("BrokersSection", () => {
     );
     expect(openSpy).toHaveBeenCalledWith(expect.stringContaining("auth.dhan.co"), "_blank", "noopener");
     expect(screen.getByText(/Postback .* is optional/i)).toBeInTheDocument();
+  });
+
+  it("does not open or poll an OAuth approval after its auth session retires", async () => {
+    const started = deferred<{
+      auth_url: string;
+      state: string;
+      redirect_uri: string;
+      postback_uri: string;
+    }>();
+    (oauthStartNativeAccount as ReturnType<typeof vi.fn>).mockReturnValue(started.promise);
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    renderSection(false);
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "DHAN-OLD" } });
+    fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "APPID" } });
+    fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
+    fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
+    await waitFor(() => expect(oauthStartNativeAccount).toHaveBeenCalledTimes(1));
+
+    useAuthStore.setState({
+      status: "logged-in",
+      token: "replacement-session",
+      reauthToken: null,
+      username: "replacement-user",
+      sessionGeneration: 2,
+    });
+    await act(async () => {
+      started.resolve({
+        auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=OLD",
+        state: "OLD",
+        redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+        postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
+      });
+      await started.promise;
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /log in with dhan/i })).not.toBeDisabled());
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(listNativeBrokerAccounts).not.toHaveBeenCalled();
+    expect(useBrokerStore.getState().accounts).toEqual([]);
+  });
+
+  it("bounds a Settings OAuth completion poll until the connected account appears", async () => {
+    const connectedAccount = makeNativeAccount({ account_id: "DHAN-LATE" });
+    (oauthStartNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=C1",
+      state: "S",
+      redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+      postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
+    });
+    (listNativeBrokerAccounts as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([connectedAccount]);
+    vi.spyOn(window, "open").mockReturnValue(null);
+    renderSection(false);
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "DHAN-LATE" } });
+    fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "APPID" } });
+    fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000);
+      });
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(2));
+      expect(useBrokerStore.getState().accounts).toEqual([]);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000);
+      });
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(3));
+      expect(useBrokerStore.getState().accounts).toEqual([connectedAccount]);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(3);
+      expect(listBrokerAccounts).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a pending OAuth handshake alive across an unrelated account mutation", async () => {
+    const existingAccount = makeNativeAccount({
+      account_id: "EXISTING",
+      broker: "dhan",
+      is_primary: false,
+    });
+    const oauthAccount = makeNativeAccount({ account_id: "DHAN-LATE", broker: "dhan" });
+    (oauthStartNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=C1",
+      state: "S",
+      redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+      postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
+    });
+    (listNativeBrokerAccounts as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([existingAccount])
+      .mockResolvedValueOnce([existingAccount, oauthAccount]);
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([existingAccount]);
+    (setPrimaryBrokerAccount as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    useBrokerStore.setState({ accounts: [existingAccount], activeAccountId: null });
+    vi.spyOn(window, "open").mockReturnValue(null);
+    renderSection(false);
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "DHAN-LATE" } });
+    fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "APPID" } });
+    fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(1));
+
+      fireEvent.click(screen.getByLabelText(/set dhan EXISTING as primary/i));
+      await waitFor(() => expect(setPrimaryBrokerAccount).toHaveBeenCalled());
+      await waitFor(() => expect(listBrokerAccounts).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000);
+      });
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([existingAccount, oauthAccount]));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps every pending OAuth target alive when a second approval starts", async () => {
+    const dhanAccount = makeNativeAccount({ account_id: "DHAN-LATE", broker: "dhan" });
+    const upstoxAccount = makeNativeAccount({ account_id: "UPSTOX-FIRST", broker: "upstox" });
+    (oauthStartNativeAccount as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=C1",
+        state: "DHAN-STATE",
+        redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+        postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
+      })
+      .mockResolvedValueOnce({
+        auth_url: "https://api.upstox.com/v2/login/authorization/dialog?client_id=K",
+        state: "UPSTOX-STATE",
+        redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+        postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/upstox",
+      });
+    (listNativeBrokerAccounts as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([upstoxAccount])
+      .mockResolvedValueOnce([upstoxAccount, dhanAccount]);
+    vi.spyOn(window, "open").mockReturnValue(null);
+    renderSection(false);
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "DHAN-LATE" } });
+    fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "APPID" } });
+    fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(1));
+
+      fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+      fireEvent.click(await screen.findByRole("option", { name: "Upstox" }));
+      fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "UPSTOX-FIRST" } });
+      fireEvent.change(screen.getByLabelText("API key"), { target: { value: "KEY" } });
+      fireEvent.change(screen.getByLabelText("API secret"), { target: { value: "SECRET" } });
+      fireEvent.click(screen.getByRole("button", { name: /log in with upstox/i }));
+
+      // A second approval joins the existing sequential coordinator. It must
+      // not abort or overlap the in-flight/next scheduled native-source read.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000);
+      });
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([upstoxAccount]));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000);
+      });
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([upstoxAccount, dhanAccount]));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not publish an old-session OAuth refresh into a replacement session", async () => {
+    const oldRefresh = deferred<BrokerAccount[]>();
+    const oldAccount = makeNativeAccount({ account_id: "DHAN-OLD", broker: "dhan" });
+    const replacementAccount = makeNativeAccount({ account_id: "UPSTOX-NEW", broker: "upstox" });
+    (oauthStartNativeAccount as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=OLD",
+        state: "OLD",
+        redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+        postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
+      })
+      .mockResolvedValueOnce({
+        auth_url: "https://api.upstox.com/v2/login/authorization/dialog?client_id=NEW",
+        state: "NEW",
+        redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+        postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/upstox",
+      });
+    (listNativeBrokerAccounts as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(oldRefresh.promise)
+      .mockResolvedValueOnce([replacementAccount]);
+    vi.spyOn(window, "open").mockReturnValue(null);
+    renderSection(false);
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "DHAN-OLD" } });
+    fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "APPID" } });
+    fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(1));
+
+      useAuthStore.setState({
+        status: "logged-in",
+        token: "replacement-session",
+        reauthToken: null,
+        username: "replacement-user",
+        sessionGeneration: 2,
+      });
+      fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+      fireEvent.click(await screen.findByRole("option", { name: "Upstox" }));
+      fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "UPSTOX-NEW" } });
+      fireEvent.change(screen.getByLabelText("API key"), { target: { value: "KEY" } });
+      fireEvent.change(screen.getByLabelText("API secret"), { target: { value: "SECRET" } });
+      fireEvent.click(screen.getByRole("button", { name: /log in with upstox/i }));
+      await waitFor(() => expect(oauthStartNativeAccount).toHaveBeenCalledTimes(2));
+
+      await act(async () => {
+        oldRefresh.resolve([oldAccount]);
+        await oldRefresh.promise;
+        await Promise.resolve();
+      });
+      expect(useBrokerStore.getState().accounts).toEqual([]);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000);
+      });
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([replacementAccount]));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves the canonical cache gateway slice when an OAuth result publishes", async () => {
+    const staleGateway = makeGatewayAccount({ account_id: "REMOVED-GATEWAY" });
+    const currentGateway = makeGatewayAccount({ account_id: "CURRENT-GATEWAY" });
+    const oauthAccount = makeNativeAccount({ account_id: "DHAN-LATE", broker: "dhan" });
+    (oauthStartNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=C1",
+      state: "S",
+      redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+      postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
+    });
+    (listNativeBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([oauthAccount]);
+    useBrokerStore.setState({ accounts: [staleGateway], activeAccountId: null });
+    vi.spyOn(window, "open").mockReturnValue(null);
+    const { queryClient } = renderSection(false);
+    queryClient.setQueryData(["broker", "accounts"], [currentGateway]);
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "DHAN-LATE" } });
+    fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "APPID" } });
+    fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
+    fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
+
+    await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([currentGateway, oauthAccount]));
+    expect(queryClient.getQueryData(["broker", "accounts"])).toEqual([currentGateway, oauthAccount]);
+  });
+
+  it("waits for a slow OAuth refresh before starting the next sequential read", async () => {
+    const firstRefresh = deferred<BrokerAccount[]>();
+    const connectedAccount = makeNativeAccount({ account_id: "DHAN-LATE" });
+    const refreshSignals: AbortSignal[] = [];
+    (oauthStartNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=C1",
+      state: "S",
+      redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+      postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
+    });
+    (listNativeBrokerAccounts as ReturnType<typeof vi.fn>).mockImplementation(
+      (signal?: AbortSignal) => {
+        if (signal) refreshSignals.push(signal);
+        return refreshSignals.length === 1
+          ? firstRefresh.promise
+          : Promise.resolve([connectedAccount]);
+      },
+    );
+    vi.spyOn(window, "open").mockReturnValue(null);
+    renderSection(false);
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "DHAN-LATE" } });
+    fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "APPID" } });
+    fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000);
+      });
+      expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(1);
+      expect(refreshSignals[0]?.aborted).toBe(false);
+
+      await act(async () => {
+        firstRefresh.resolve([]);
+        await firstRefresh.promise;
+        await Promise.resolve();
+      });
+      expect(useBrokerStore.getState().accounts).toEqual([]);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000);
+      });
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([connectedAccount]));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops failed Settings OAuth reads at the absolute approval-window boundary", async () => {
+    (oauthStartNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=C1",
+      state: "S",
+      redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+      postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
+    });
+    (listNativeBrokerAccounts as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("approval pending"));
+    useBrokerStore.setState({
+      accounts: [makeNativeAccount({ account_id: "DHAN-PENDING", broker: "dhan" })],
+      activeAccountId: "native:dhan:DHAN-PENDING",
+    });
+    vi.spyOn(window, "open").mockReturnValue(null);
+    renderSection(false);
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "DHAN-PENDING" } });
+    fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "APPID" } });
+    fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(15);
+      for (const [signal] of (listNativeBrokerAccounts as ReturnType<typeof vi.fn>).mock.calls) {
+        expect(signal).toBeInstanceOf(AbortSignal);
+        expect((signal as AbortSignal).aborted).toBe(false);
+      }
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(15);
+      expect(listBrokerAccounts).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("accepts an OAuth account found by the final allowed refresh", async () => {
+    const connectedAccount = makeNativeAccount({ account_id: "DHAN-FINAL", broker: "dhan" });
+    (oauthStartNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=C1",
+      state: "S",
+      redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
+      postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/dhan",
+    });
+    (listNativeBrokerAccounts as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([connectedAccount]);
+    vi.spyOn(window, "open").mockReturnValue(null);
+    renderSection(false);
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "DHAN-FINAL" } });
+    fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "APPID" } });
+    fireEvent.change(screen.getByLabelText("App secret"), { target: { value: "SECRET" } });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /log in with dhan/i }));
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(56_000);
+      });
+
+      await waitFor(() => expect(listNativeBrokerAccounts).toHaveBeenCalledTimes(15));
+      await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([connectedAccount]));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("launches OAuth for an oauth-method broker (Upstox)", async () => {

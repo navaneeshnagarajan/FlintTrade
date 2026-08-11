@@ -46,9 +46,16 @@ const MODE_NOTIFICATIONS: Record<AppMode, { title: string; body: string }> = {
  *
  * @example emitNotification({ category: "order", title: "Order rejected", body: msg })
  */
-export function emitNotification(payload: CreateNotificationPayload): void {
+export interface NotificationEventPayload extends CreateNotificationPayload {
+  /** Optional account cache scope for consumers that refresh account data. */
+  accountScopeKey?: string;
+  /** The emitter already ran its identity-guarded refresh boundary. */
+  skipAccountRefresh?: boolean;
+}
+
+export function emitNotification(payload: NotificationEventPayload): void {
   window.dispatchEvent(
-    new CustomEvent<CreateNotificationPayload>("flinttrade:notify", { detail: payload }),
+    new CustomEvent<NotificationEventPayload>("flinttrade:notify", { detail: payload }),
   );
 }
 

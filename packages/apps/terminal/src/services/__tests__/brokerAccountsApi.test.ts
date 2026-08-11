@@ -3,8 +3,8 @@ import type { BrokerAccount } from "@/types/broker";
 import type { NativeAccount } from "@/services/ftApi.native";
 
 const mocks = vi.hoisted(() => ({
-  listGateway: vi.fn<() => Promise<BrokerAccount[]>>(),
-  listNative: vi.fn<() => Promise<NativeAccount[]>>(),
+  listGateway: vi.fn<(signal?: AbortSignal) => Promise<BrokerAccount[]>>(),
+  listNative: vi.fn<(signal?: AbortSignal) => Promise<NativeAccount[]>>(),
   removeGateway: vi.fn(),
   reconnectGateway: vi.fn(),
   setGatewayPrimary: vi.fn(),
@@ -32,6 +32,7 @@ vi.mock("@/services/ftApi.native", () => ({
 import {
   listLiveNativeReadAccounts,
   listBrokerAccounts,
+  listNativeBrokerAccounts,
   reconnectBrokerAccount,
   removeBrokerAccount,
   selectNativeReadAccount,
@@ -108,6 +109,22 @@ describe("brokerAccountsApi", () => {
     ]);
   });
 
+  it("forwards one AbortSignal through both account sources and native discovery", async () => {
+    const controller = new AbortController();
+
+    await listBrokerAccounts([], controller.signal);
+    expect(mocks.listGateway).toHaveBeenCalledWith(controller.signal);
+    expect(mocks.listNative).toHaveBeenCalledWith(controller.signal);
+
+    mocks.listNative.mockClear();
+    await listNativeBrokerAccounts(controller.signal);
+    expect(mocks.listNative).toHaveBeenCalledWith(controller.signal);
+
+    mocks.listNative.mockClear();
+    await listLiveNativeReadAccounts(controller.signal);
+    expect(mocks.listNative).toHaveBeenCalledWith(controller.signal);
+  });
+
   it("keeps a failed source's previous rows until that source recovers", async () => {
     mocks.listGateway.mockRejectedValue(new Error("Gateway unavailable"));
 
@@ -170,15 +187,12 @@ describe("brokerAccountsApi", () => {
       account_id: "SHARED",
       is_primary: false,
     });
-    expect(selectNativeReadAccount(readAccounts, brokerAccounts, "gateway:zerodha:SHARED")).toEqual({
-      adapter_id: "dhan",
+    expect(selectNativeReadAccount(readAccounts, brokerAccounts, "gateway:zerodha:SHARED")).toBeUndefined();
+    expect(selectNativeReadAccount(readAccounts, brokerAccounts, "SHARED")).toBeUndefined();
+    expect(selectNativeReadAccount(readAccounts, brokerAccounts, null)).toEqual({
+      adapter_id: "upstox",
       account_id: "SHARED",
-      is_primary: true,
-    });
-    expect(selectNativeReadAccount(readAccounts, brokerAccounts, "SHARED")).toEqual({
-      adapter_id: "dhan",
-      account_id: "SHARED",
-      is_primary: true,
+      is_primary: false,
     });
   });
 });

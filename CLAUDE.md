@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-FlintTrade is open-source, self-hosted trading software for manual, automated, algorithmic, and AI-assisted workflows. It runs **its own native backend first** and treats OpenAlgo as one optional (bridge) broker adapter. Monorepo of **18 package surfaces** in a fat-core 4-way nest: 13 Python, 1 Rust/PyO3 (`ticks`), 1 shared TypeScript design-system, 1 React terminal, 1 Electron desktop shell, 1 Next.js site. Licensed AGPL-3.0. Target Python `>=3.12` (no upper bound; the repo currently runs 3.14), Node `>=22.22` (react-router@8's engine floor). The full architectural reference is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); contributor mechanics are [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md); CI is [docs/CI.md](docs/CI.md); the live roadmap is [PLAN.md](PLAN.md). Read those before non-trivial work.
+FlintTrade is open-source, self-hosted trading software for manual, automated, algorithmic, and AI-assisted workflows. It runs **its own native backend first** and treats OpenAlgo as one optional (bridge) broker adapter. Monorepo of **18 package surfaces** in a fat-core 4-way nest: 13 Python, 1 Rust/PyO3 (`ticks`), 1 shared TypeScript design-system, 1 React terminal, 1 Electron desktop shell, 1 Next.js site. Licensed AGPL-3.0. Target Python `>=3.12` (no upper bound; the repo currently runs 3.14), Node `>=22.22.2` (jsdom 30's engine floor). The full architectural reference is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); contributor mechanics are [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md); CI is [docs/CI.md](docs/CI.md); the live roadmap is [PLAN.md](PLAN.md). Read those before non-trivial work.
 
 Version: **v0.0.1** (clean-slate pre-1.0 baseline after the 2026-07-23 release reset; not production-ready). Python tooling is **uv** (workspace lockfile `uv.lock`); JS is **pnpm** (workspace lockfile `pnpm-lock.yaml`).
 
@@ -94,8 +94,10 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 
 (`chrome-extension` was dropped in the v0.6.0 restructure. The Tauri shell was
 first shipped in the beta line and is now retired in favour of the Electron
-source-bootstrap architecture; no complete Electron installer release is
-published yet. See [docs/DESKTOP.md](docs/DESKTOP.md).)
+source-bootstrap architecture. The source-built web app remains distinct from
+Electron-shell installers; a release is accepted only as all four canonical
+installers plus `SHA256SUMS.txt`, and retired Tauri and PyInstaller assets never
+satisfy that gate. See [docs/DESKTOP.md](docs/DESKTOP.md).)
 
 ## House rules that bite
 
@@ -133,7 +135,7 @@ OpenAlgo is an external service (formerly a submodule). For local testing, `scri
 
 ## Working style (this repo)
 
-- **Review pipeline:** claude (ultracode multi-agent panels) → maintainer. Codex is retired from the loop.
+- **Review pipeline:** build agents (Codex or Claude) → Claude ultracode multi-agent review panels → maintainer.
 - **Spec-first:** design work lives in `.local/specs/<area>/` with a `DESIGN_LOG.md`; `changelog.md` is for **shipped** code only.
 - After any build/commit wave, run a full multi-agent audit before declaring done. Fix everything, then re-audit.
 - `AGENTS.md` carries the full agent/tooling workflow; `PLAN.md` is the curated public roadmap (the detailed working plan lives in the maintainer's private workspace at `.local/agent-context/PLAN.md`).

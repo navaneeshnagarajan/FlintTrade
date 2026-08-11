@@ -11,6 +11,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import {
+  CONNECTED_NATIVE_READ_CONTEXT,
+  PRACTICE_READ_CONTEXT,
+  UNCONFIGURED_LIVE_READ_CONTEXT,
+} from "@/test-utils/accountReadFixtures";
 
 // ---------------------------------------------------------------------------
 // Mock modeStore — start in explore mode, allow switching
@@ -19,6 +25,9 @@ import React from "react";
 let currentMode: "explore" | "practice" | "live" = "explore";
 let brokerConnected = true;
 const modeListeners = new Set<() => void>();
+const accountReadState = vi.hoisted(() => ({
+  current: undefined as AccountReadContext | undefined,
+}));
 
 vi.mock("@/stores/modeStore", () => ({
   useModeStore: (selector: (s: { mode: string }) => unknown) => {
@@ -37,6 +46,11 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => brokerConnected,
 }));
 
+vi.mock("@/hooks/useAccountReadsEnabled", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/useAccountReadsEnabled")>()),
+  useAccountReadContext: () => accountReadState.current,
+}));
+
 function setTestMode(mode: "explore" | "practice" | "live") {
   currentMode = mode;
   modeListeners.forEach((cb) => cb());
@@ -51,13 +65,40 @@ const mockOrders = [{ orderId: "ORD001", symbol: "NIFTY", status: "COMPLETE" }];
 const mockHoldings = [{ symbol: "RELIANCE", exchange: "NSE", quantity: 10 }];
 const mockFunds = { available_balance: 50000, utilized_margin: 10000, total_balance: 60000 };
 const mockTrades = [{ trade_id: "T001", symbol: "RELIANCE", side: "BUY" }];
+const mockGetFunds = vi.fn((_context: AccountReadContext, _signal?: AbortSignal) =>
+  Promise.resolve(mockFunds));
+const mockGetHoldings = vi.fn((_context: AccountReadContext, _signal?: AbortSignal) =>
+  Promise.resolve(mockHoldings));
+const mockGetOrderbook = vi.fn((_context: AccountReadContext, _signal?: AbortSignal) =>
+  Promise.resolve(mockOrders));
+const mockGetPositionbook = vi.fn((_context: AccountReadContext, _signal?: AbortSignal) =>
+  Promise.resolve(mockPositions));
+const mockGetTradebook = vi.fn((_context: AccountReadContext, _signal?: AbortSignal) =>
+  Promise.resolve(mockTrades));
+const accountDataCases = [
+  ["positions", mockPositions, mockGetPositionbook],
+  ["orders", mockOrders, mockGetOrderbook],
+  ["holdings", mockHoldings, mockGetHoldings],
+  ["funds", mockFunds, mockGetFunds],
+  ["tradebook", mockTrades, mockGetTradebook],
+] as const;
+
+function accountTransportMocks() {
+  return [
+    mockGetPositionbook,
+    mockGetOrderbook,
+    mockGetHoldings,
+    mockGetFunds,
+    mockGetTradebook,
+  ];
+}
 
 vi.mock("@/services/api", () => ({
-  getFunds: () => Promise.resolve(mockFunds),
-  getHoldings: () => Promise.resolve(mockHoldings),
-  getOrderbook: () => Promise.resolve(mockOrders),
-  getPositionbook: () => Promise.resolve(mockPositions),
-  getTradebook: () => Promise.resolve(mockTrades),
+  getFunds: (context: AccountReadContext, signal?: AbortSignal) => mockGetFunds(context, signal),
+  getHoldings: (context: AccountReadContext, signal?: AbortSignal) => mockGetHoldings(context, signal),
+  getOrderbook: (context: AccountReadContext, signal?: AbortSignal) => mockGetOrderbook(context, signal),
+  getPositionbook: (context: AccountReadContext, signal?: AbortSignal) => mockGetPositionbook(context, signal),
+  getTradebook: (context: AccountReadContext, signal?: AbortSignal) => mockGetTradebook(context, signal),
 }));
 
 // Mock market hours
@@ -117,6 +158,7 @@ function createWrapper() {
 beforeEach(() => {
   currentMode = "explore";
   brokerConnected = true;
+  accountReadState.current = CONNECTED_NATIVE_READ_CONTEXT;
   modeListeners.clear();
   vi.clearAllMocks();
 });
@@ -203,57 +245,67 @@ describe("useModeData — live mode", () => {
     currentMode = "live";
   });
 
-  it("returns API positions data", async () => {
-    const { result } = renderHook(() => useModeData("positions"), {
-      wrapper: createWrapper(),
-    });
+  it.each(accountDataCases)(
+    "keeps %s idle when a broker boolean lacks selected account authority",
+    (key) => {
+      brokerConnected = true;
+      accountReadState.current = UNCONFIGURED_LIVE_READ_CONTEXT;
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-    const positions = result.current.data as Array<{ symbol: string }>;
-    expect(positions).toEqual(mockPositions);
-  });
+      const { result } = renderHook(() => useModeData(key), {
+        wrapper: createWrapper(),
+      });
 
-  it("returns API orders data", async () => {
-    const { result } = renderHook(() => useModeData("orders"), {
-      wrapper: createWrapper(),
-    });
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.data).toBeUndefined();
+      for (const transport of accountTransportMocks()) {
+        expect(transport).not.toHaveBeenCalled();
+      }
+    },
+  );
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.data).toEqual(mockOrders);
-  });
+  it.each(accountDataCases)(
+    "routes %s through the exact connected native authority",
+    async (key, expectedData, expectedTransport) => {
+      const { result } = renderHook(() => useModeData(key), {
+        wrapper: createWrapper(),
+      });
 
-  it("returns API funds data", async () => {
-    const { result } = renderHook(() => useModeData("funds"), {
-      wrapper: createWrapper(),
-    });
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.data).toEqual(mockFunds);
-  });
-
-  it("does not fetch account data when live mode has no broker connection", () => {
-    brokerConnected = false;
-
-    const { result } = renderHook(() => useModeData("orders"), {
-      wrapper: createWrapper(),
-    });
-
-    expect(result.current.isLoading).toBe(false);
-    expect(result.current.data).toBeUndefined();
-  });
+      await waitFor(() => expect(result.current.data).toEqual(expectedData));
+      expect(expectedTransport).toHaveBeenCalledOnce();
+      expect(expectedTransport).toHaveBeenCalledWith(
+        CONNECTED_NATIVE_READ_CONTEXT,
+        expect.any(AbortSignal),
+      );
+      for (const transport of accountTransportMocks()) {
+        if (transport !== expectedTransport) expect(transport).not.toHaveBeenCalled();
+      }
+    },
+  );
 });
 
 describe("useModeData — practice mode", () => {
-  it("reads the backend sandbox without requiring a live broker connection", async () => {
-    currentMode = "practice";
-    brokerConnected = false;
+  it.each(accountDataCases)(
+    "routes %s through sandbox authority without requiring a Live broker",
+    async (key, expectedData, expectedTransport) => {
+      currentMode = "practice";
+      brokerConnected = false;
+      accountReadState.current = PRACTICE_READ_CONTEXT;
 
-    const { result } = renderHook(() => useModeData("positions"), {
-      wrapper: createWrapper(),
-    });
+      const { result } = renderHook(() => useModeData(key), {
+        wrapper: createWrapper(),
+      });
 
-    await waitFor(() => expect(result.current.data).toEqual(mockPositions));
-  });
+      await waitFor(() => expect(result.current.data).toEqual(expectedData));
+      expect(expectedTransport).toHaveBeenCalledOnce();
+      expect(expectedTransport).toHaveBeenCalledWith(
+        PRACTICE_READ_CONTEXT,
+        expect.any(AbortSignal),
+      );
+      for (const transport of accountTransportMocks()) {
+        if (transport !== expectedTransport) expect(transport).not.toHaveBeenCalled();
+      }
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------

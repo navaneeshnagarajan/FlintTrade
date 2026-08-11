@@ -159,8 +159,8 @@ export async function listBrokerRecommendations(): Promise<BrokerRecommendations
   };
 }
 
-export async function listNativeAccounts(): Promise<NativeAccount[]> {
-  const r = await get<{ accounts: NativeAccount[] }>("native/accounts");
+export async function listNativeAccounts(signal?: AbortSignal): Promise<NativeAccount[]> {
+  const r = await get<{ accounts: NativeAccount[] }>("native/accounts", signal);
   return r?.accounts ?? [];
 }
 
@@ -213,9 +213,11 @@ export async function readNativeAccount<T>(
   accountId: string,
   kind: NativeReadKind,
   params?: NativeReadParams,
+  signal?: AbortSignal,
 ): Promise<T> {
   return get<T>(
     `native/accounts/${encodeURIComponent(adapterId)}/${encodeURIComponent(accountId)}/${kind}${serialiseNativeReadParams(params)}`,
+    signal,
   );
 }
 

@@ -1,5 +1,6 @@
 import { get, post, postV1 } from "./ftApi.helpers";
 import { classifySector } from "@/lib/sectors";
+import { requireCurrentMarketDataScope } from "@/hooks/useDataScope";
 import type {
   GEXData,
   GammaDensityData,
@@ -605,18 +606,26 @@ export interface OIChangeAnalysisData {
  * response's sibling ``is_sample_data`` flag is retained by ``parseResponse``
  * so callers can require explicit live provenance.
  */
-export const getOIChangeAnalysis = (
+export const getOIChangeAnalysis = async (
   symbol: string,
   exchange: string,
   expiry: string,
   priceChange: "up" | "down" | "flat",
-) =>
-  postV1<OIChangeAnalysisData>("oi/analysis", {
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+) => {
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
+  const result = await postV1<OIChangeAnalysisData>("oi/analysis", {
     symbol,
     exchange,
     expiry,
     price_change: priceChange,
-  });
+  }, signal);
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
+  return result;
+};
 
 /** One unusual-OI outlier (z-score over the strike OI-change distribution). */
 export interface UnusualOIRow {
@@ -640,18 +649,26 @@ export interface UnusualOIData {
  * Detect unusual OI activity — strikes whose OI change is a |z-score| ≥
  * ``threshold`` outlier. Registered at the bare ``/v1/oi`` family → {@link postV1}.
  */
-export const getUnusualOI = (
+export const getUnusualOI = async (
   symbol: string,
   exchange: string,
   expiry: string,
   threshold?: number,
-) =>
-  postV1<UnusualOIData>("oi/unusual", {
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+) => {
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
+  const result = await postV1<UnusualOIData>("oi/unusual", {
     symbol,
     exchange,
     expiry,
     ...(threshold !== undefined ? { threshold } : {}),
-  });
+  }, signal);
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
+  return result;
+};
 
 // --- Portfolio optimiser (bare /v1/portfolio family) ------------------------
 

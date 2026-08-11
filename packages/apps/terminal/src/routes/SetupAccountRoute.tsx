@@ -1,5 +1,5 @@
 /**
- * SetupAccountRoute — one-time account setup wizard (7 steps, 0-indexed).
+ * SetupAccountRoute — the authoritative /setup wizard (7 steps, 0-indexed).
  *
  * Step 0: Account Security  — username, email, password, optional PIN (POSTs /v1/auth/setup)
  * Step 1: Two-Factor Auth   — warning → QR + backup codes (forward-only once account exists)
@@ -327,7 +327,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
       if (error instanceof AccountSetupError && error.kind === "account-exists") {
         // Account already exists — don't wedge. Route the user to login,
         // which is the only sensible next step. Clear any stale progress
-        // so the next /setup-account entry won't try to re-submit.
+        // so the next canonical /setup entry won't try to re-submit.
         clearProgress();
         setAccountExists(true);
         setServerError(
@@ -934,7 +934,30 @@ const STEP_LABELS = [
 
 const TOTAL_STEPS = STEP_LABELS.length; // 7
 
-export default function SetupAccountRoute() {
+export interface SetupAccountRouteProps {
+  /** Requested by the canonical /setup deep link; validated against saved progress. */
+  requestedStep?: number;
+  /** Preselects the final trading mode without submitting or advancing setup. */
+  requestedMode?: AppMode;
+}
+
+function resolveInitialStep(progress: SetupProgress, requestedStep: number | undefined): number {
+  const persistedStep = Math.min(progress.currentStep, TOTAL_STEPS - 1);
+  if (requestedStep === undefined || !Number.isInteger(requestedStep)) return persistedStep;
+  if (requestedStep < 0 || requestedStep >= TOTAL_STEPS) return persistedStep;
+  if (!progress.accountCreated) return 0;
+  if (requestedStep === persistedStep) return persistedStep;
+
+  // Account/2FA steps are irreversible. A deep link may revisit only a
+  // completed, reversible preferences step; it can never skip forward.
+  if (requestedStep >= 3 && requestedStep < persistedStep) return requestedStep;
+  return persistedStep;
+}
+
+export default function SetupAccountRoute({
+  requestedStep,
+  requestedMode,
+}: SetupAccountRouteProps = {}) {
   const navigate = useNavigate();
   const setMode = useModeStore((s) => s.setMode);
 
@@ -944,10 +967,10 @@ export default function SetupAccountRoute() {
   // (finish setup, or "Start over" button). Auto-wiping based on client
   // auth-store heuristics was the source of multiple state-loss bugs.
   // ---------------------------------------------------------------------------
-  const initialProgress: SetupProgress = loadProgress() ?? EMPTY_PROGRESS;
+  const [initialProgress] = useState<SetupProgress>(() => loadProgress() ?? EMPTY_PROGRESS);
 
   const [currentStep, setCurrentStep] = useState(() =>
-    Math.min(initialProgress.currentStep, TOTAL_STEPS - 1),
+    resolveInitialStep(initialProgress, requestedStep),
   );
   const modeSelectionFence = useMemo(
     () => currentStep === TOTAL_STEPS - 1 ? captureAuthSessionFence() : null,
@@ -1231,7 +1254,10 @@ export default function SetupAccountRoute() {
                 <span>{modeSyncError}</span>
               </div>
             )}
-            <ModeSelectRoute onSelect={handleModeSelect} />
+            <ModeSelectRoute
+              initialMode={requestedMode}
+              onSelect={handleModeSelect}
+            />
           </div>
         ) : (
           <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">

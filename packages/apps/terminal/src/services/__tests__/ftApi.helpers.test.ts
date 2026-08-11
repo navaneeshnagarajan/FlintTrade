@@ -27,8 +27,7 @@ vi.mock("@/stores/connectionStore", () => ({
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: { getState: () => ({ token: "" }) },
 }));
-
-import { FtApiError, parseResponse, post, get, getV1, putV1, delV1 } from "../ftApi.helpers";
+import { FtApiError, parseResponse, post, postWithMode, get, getV1, putV1, delV1 } from "../ftApi.helpers";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useAuthStore } from "@/stores/authStore";
 
@@ -313,6 +312,18 @@ describe("bare /v1 helpers — shared gateway route client", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildHeaders — auth attachment", () => {
+  it("pins the current terminal mode onto an extended write request", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeJsonResponse({ data: { ok: true } }),
+    );
+
+    await postWithMode("positions/convert", { req: { symbol: "RELIANCE" } }, "practice");
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-FlintTrade-Mode"]).toBe("practice");
+  });
+
   it("post attaches X-API-Key and Authorization Bearer when stores are populated", async () => {
     // Re-mock the store getters for this test only.
     (useConnectionStore.getState as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({

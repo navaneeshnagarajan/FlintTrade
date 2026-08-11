@@ -1,5 +1,5 @@
 import { BRAND_SLOGAN_SENTENCE, BRAND_SLOGAN_WORDS, BRAND_WORDMARK, LogoIcon } from '@flinttrade/design-system/brand';
-import { ArrowRight, Bot, Cable, Download, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
+import { ArrowRight, Bot, Download, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 
@@ -121,7 +121,7 @@ export default function HomePage() {
             ))}
           </div>
           <p>
-            Open-source self-hosted trading software for local research, sandbox
+            Open-source self-hosted trading software for local research, sample-data
             testing, manual orders, automation, and AI-assisted workflows. One native
             app for macOS, Windows, and Linux.
           </p>
@@ -136,32 +136,29 @@ export default function HomePage() {
           <div className="hero-actions">
             <Link
               className="button primary"
+              href="/demo-app/welcome"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Start exploring the FlintTrade marketing demo in a new window"
+            >
+              Start exploring — no install needed <ExternalLink aria-hidden="true" size={17} />
+            </Link>
+            <Link
+              className="button secondary"
               href="/download"
               aria-label="Open the FlintTrade download page"
             >
-              Install desktop app <Download aria-hidden="true" size={17} />
+              Download desktop app <Download aria-hidden="true" size={17} />
             </Link>
             <Link
-              className="button primary"
+              className="button secondary"
               href="/download"
               aria-label="Open the one-line install commands for the self-hosted FlintTrade web app"
             >
               Run the web app <TerminalSquare aria-hidden="true" size={17} />
             </Link>
-            <Link
-              className="button shimmer"
-              href="/demo-app/welcome"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Open the FlintTrade sandbox demo in a new window"
-            >
-              Open sandbox demo <ExternalLink aria-hidden="true" size={17} />
-            </Link>
-            <Link className="button primary" href="/docs">
+            <Link className="button secondary" href="/docs">
               Read the docs <ArrowRight aria-hidden="true" size={17} />
-            </Link>
-            <Link className="button secondary" href="/mcp">
-              Use the docs MCP <Cable aria-hidden="true" size={17} />
             </Link>
           </div>
         </div>
@@ -211,7 +208,7 @@ export default function HomePage() {
             install commands only after a complete, checksummed Electron asset set is available.
           </p>
           <div className="section-actions">
-            <Link className="button primary" href="/download">
+            <Link className="button secondary" href="/download">
               Check installer status <ArrowRight aria-hidden="true" size={17} />
             </Link>
             <Link className="button secondary" href="/docs/desktop">

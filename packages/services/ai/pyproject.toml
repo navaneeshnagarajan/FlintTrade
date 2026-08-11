@@ -29,7 +29,7 @@ ml = [
 # ChromaDB-backed canonical RAG pipeline + agent memory.
 rag = [
     "chromadb>=0.5",
-    "pypdf>=5.0",
+    "pypdf>=6.15.0",
 ]
 
 [build-system]

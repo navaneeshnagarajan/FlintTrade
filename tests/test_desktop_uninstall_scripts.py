@@ -454,19 +454,32 @@ def test_missing_linux_integration_parent_is_reported_without_removing_shell(tmp
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="requires Linux /proc executable identity")
 def test_direct_appimage_process_requires_exact_appimage_environment_identity(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
+    # Reuse the interpreter already running pytest, while preserving the base
+    # runtime paths needed when a hosted-toolcache binary is copied elsewhere.
+    interpreter = Path(sys.executable).resolve(strict=True)
+    runtime_root = Path(sys.base_prefix).resolve(strict=True)
+    process_env = {**os.environ, "PYTHONHOME": str(runtime_root)}
+    runtime_lib = runtime_root / "lib"
+    if runtime_lib.is_dir():
+        process_env["LD_LIBRARY_PATH"] = os.pathsep.join(
+            part for part in (str(runtime_lib), os.environ.get("LD_LIBRARY_PATH", "")) if part
+        )
     mounted_executable = tmp_path / ".mount_FlintTrade" / "FlintTrade"
     mounted_executable.parent.mkdir()
-    shutil.copyfile("/bin/sleep", mounted_executable)
+    shutil.copyfile(interpreter, mounted_executable)
     mounted_executable.chmod(0o755)
     unrelated = tmp_path / "unrelated" / "FlintTrade"
     unrelated.parent.mkdir()
-    shutil.copyfile("/bin/sleep", unrelated)
+    shutil.copyfile(interpreter, unrelated)
     unrelated.chmod(0o755)
     shell_process = subprocess.Popen(
-        [str(mounted_executable), "30"],
-        env={**os.environ, "APPIMAGE": str(paths["appimage"].resolve())},
+        [str(mounted_executable), "-c", "import time; time.sleep(30)"],
+        env={**process_env, "APPIMAGE": str(paths["appimage"].resolve())},
     )
-    unrelated_process = subprocess.Popen([str(unrelated), "30"])
+    unrelated_process = subprocess.Popen(
+        [str(unrelated), "-c", "import time; time.sleep(30)"],
+        env=process_env,
+    )
     try:
         result = _run(tmp_path, os_name="Linux")
 

@@ -17,8 +17,8 @@ import { WifiOff, Settings, RefreshCw } from "lucide-react";
 import { useNavigate, useLocation } from "react-router";
 import { layerClassNames } from "@flinttrade/design-system";
 import { Button } from "@/components/ui/button";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { cn } from "@/lib/utils";
-import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 
 const DELAY_MS = 5000;
@@ -47,7 +47,7 @@ const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function NoConnectionOverlay() {
-  const status = useConnectionStore((s) => s.status);
+  const isBrokerConnected = useBrokerConnected();
   const mode = useModeStore((s) => s.mode);
   const [showOverlay, setShowOverlay] = useState(false);
   const navigate = useNavigate();
@@ -60,14 +60,14 @@ export function NoConnectionOverlay() {
   );
 
   useEffect(() => {
-    if (status === "disconnected" && mode === "live" && !isSuppressedRoute) {
+    if (!isBrokerConnected && mode === "live" && !isSuppressedRoute) {
       const timer = setTimeout(() => setShowOverlay(true), DELAY_MS);
       return () => clearTimeout(timer);
     }
     // Explore and Practice remain usable without broker data. Only Live mode
     // owns the blocking disconnection gate.
     setShowOverlay(false);
-  }, [isSuppressedRoute, mode, status]);
+  }, [isBrokerConnected, isSuppressedRoute, mode]);
 
   // Issue #56 — Auto-focus the first interactive element when the overlay opens.
   useEffect(() => {
@@ -172,13 +172,6 @@ export function NoConnectionOverlay() {
           </Button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowOverlay(false)}
-          className="text-xs text-text-muted hover:text-text-secondary transition-colors mt-1"
-        >
-          Dismiss — continue without live data
-        </button>
       </div>
     </div>
   );

@@ -144,10 +144,10 @@ function VolSurfaceWidget() {
           <span
             className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
             role="status"
-            aria-label="Showing demo data, not a live volatility surface"
-            title="Demo data — fabricated sample values, not a live option chain."
+            aria-label="Showing sample data, not a live volatility surface"
+            title="Sample data — fabricated sample values, not a live option chain."
           >
-            Demo data
+            Sample data
           </span>
         )}
         <Select value={symbol} onValueChange={setSymbol}>

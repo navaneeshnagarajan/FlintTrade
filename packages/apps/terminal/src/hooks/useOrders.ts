@@ -4,10 +4,14 @@ import { getOrderbook } from "@/services/api";
 import type { Order } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
 import { queryKeys } from "@/services/queryKeys";
-import { useDataScope } from "@/hooks/useDataScope";
+import {
+  useAccountReadContext,
+  type AccountReadContext,
+} from "@/hooks/useAccountReadsEnabled";
 
 interface BrokerDataQueryOptions {
   enabled?: boolean;
+  context?: AccountReadContext;
 }
 
 /**
@@ -45,8 +49,9 @@ export function emitOrdersChanged(): void {
 }
 
 export function useOrders(options: BrokerDataQueryOptions = {}) {
-  const enabled = options.enabled ?? true;
-  const scope = useDataScope();
+  const currentContext = useAccountReadContext();
+  const context = options.context ?? currentContext;
+  const enabled = (options.enabled ?? true) && context.enabled;
   const queryClient = useQueryClient();
 
   // Refetch on order placement events. Two triggers:
@@ -58,12 +63,19 @@ export function useOrders(options: BrokerDataQueryOptions = {}) {
   //      too — a "failed" order may still have partially reached the broker.
   useEffect(() => {
     if (!enabled) return;
+    const currentKey = queryKeys.orders.list(context.identity.scopeKey);
     const invalidate = () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+      void queryClient.invalidateQueries({ queryKey: currentKey, exact: true });
     };
     const onNotify = (e: Event) => {
-      const detail = (e as CustomEvent<{ category?: string }>).detail;
-      if (detail?.category === "order") invalidate();
+      const detail = (e as CustomEvent<{
+        category?: string;
+        accountScopeKey?: string;
+        skipAccountRefresh?: boolean;
+      }>).detail;
+      if (detail?.category !== "order" || detail.skipAccountRefresh) return;
+      if (detail.accountScopeKey && detail.accountScopeKey !== context.identity.scopeKey) return;
+      invalidate();
     };
     window.addEventListener(ORDERS_CHANGED_EVENT, invalidate);
     window.addEventListener("flinttrade:notify", onNotify);
@@ -71,12 +83,13 @@ export function useOrders(options: BrokerDataQueryOptions = {}) {
       window.removeEventListener(ORDERS_CHANGED_EVENT, invalidate);
       window.removeEventListener("flinttrade:notify", onNotify);
     };
-  }, [enabled, queryClient]);
+  }, [context.identity.scopeKey, enabled, queryClient]);
 
   return useQuery<Order[]>({
-    queryKey: queryKeys.orders.list(scope),
-    queryFn: getOrderbook,
+    queryKey: queryKeys.orders.list(context.identity.scopeKey),
+    queryFn: ({ signal }) => getOrderbook(context, signal),
     enabled,
+    retry: false,
     staleTime: 5_000,
     refetchInterval: () => {
       if (!enabled) return false;

@@ -73,4 +73,170 @@ describe("useSymbolSearch", () => {
 
     expect(searchSymbol).not.toHaveBeenCalled();
   });
+
+  it("clears prior-query results immediately when the query becomes too short", async () => {
+    const firstResults = [{ symbol: "RELIANCE", exchange: "NSE" }];
+    vi.mocked(searchSymbol).mockResolvedValue(firstResults);
+    vi.useFakeTimers();
+
+    const { result, rerender } = renderHook(
+      ({ query }) => useSymbolSearch(query),
+      {
+        initialProps: { query: "REL" },
+        wrapper: createWrapper(),
+      },
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(350);
+    });
+    vi.useRealTimers();
+
+    await waitFor(() => {
+      expect(result.current.results).toEqual(firstResults);
+    });
+
+    rerender({ query: "R" });
+
+    expect(result.current.results).toEqual([]);
+  });
+
+  it("suppresses prior-query results during the debounce for a new query", async () => {
+    const firstResults = [{ symbol: "RELIANCE", exchange: "NSE" }];
+    vi.mocked(searchSymbol).mockResolvedValue(firstResults);
+    vi.useFakeTimers();
+
+    const { result, rerender } = renderHook(
+      ({ query }) => useSymbolSearch(query),
+      {
+        initialProps: { query: "REL" },
+        wrapper: createWrapper(),
+      },
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(350);
+    });
+    vi.useRealTimers();
+
+    await waitFor(() => {
+      expect(result.current.results).toEqual(firstResults);
+    });
+
+    rerender({ query: "INFY" });
+
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.results).toEqual([]);
+  });
+
+  it("suppresses cached results after a refetch fails", async () => {
+    const cachedResults = [{ symbol: "RELIANCE", exchange: "NSE" }];
+    vi.mocked(searchSymbol).mockResolvedValue(cachedResults);
+    vi.useFakeTimers();
+
+    const { result } = renderHook(() => useSymbolSearch("REL"), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(350);
+    });
+    vi.useRealTimers();
+
+    await waitFor(() => {
+      expect(result.current.results).toEqual(cachedResults);
+    });
+
+    vi.mocked(searchSymbol).mockRejectedValueOnce(new Error("network error"));
+    await act(async () => {
+      await result.current.retry();
+    });
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+      expect(result.current.results).toEqual([]);
+    });
+
+    const recoveredResults = [{ symbol: "INFY", exchange: "NSE" }];
+    vi.mocked(searchSymbol).mockResolvedValueOnce(recoveredResults);
+    await act(async () => {
+      await result.current.retry();
+    });
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(false);
+      expect(result.current.results).toEqual(recoveredResults);
+    });
+  });
+
+  it("preserves the error alert state while an initial-error retry is in flight", async () => {
+    vi.mocked(searchSymbol).mockRejectedValueOnce(new Error("network error"));
+    vi.useFakeTimers();
+
+    const { result } = renderHook(() => useSymbolSearch("REL"), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(350);
+    });
+    vi.useRealTimers();
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+
+    let resolveRetry!: (value: Array<{ symbol: string; exchange: string }>) => void;
+    const retryResponse = new Promise<Array<{ symbol: string; exchange: string }>>(
+      (resolve) => {
+        resolveRetry = resolve;
+      },
+    );
+    vi.mocked(searchSymbol).mockReturnValueOnce(retryResponse);
+
+    let retryPromise: Promise<unknown> | undefined;
+    act(() => {
+      retryPromise = result.current.retry();
+    });
+
+    await waitFor(() => {
+      expect(result.current.isRetrying).toBe(true);
+      expect(result.current.isError).toBe(true);
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.results).toEqual([]);
+    });
+
+    const recoveredResults = [{ symbol: "INFY", exchange: "NSE" }];
+    resolveRetry(recoveredResults);
+    await act(async () => {
+      await retryPromise;
+    });
+
+    await waitFor(() => {
+      expect(result.current.isRetrying).toBe(false);
+      expect(result.current.isError).toBe(false);
+      expect(result.current.results).toEqual(recoveredResults);
+    });
+  });
+
+  it("exposes a rejected search as an error with a retry action", async () => {
+    vi.mocked(searchSymbol).mockRejectedValue(new Error("network error"));
+
+    vi.useFakeTimers();
+
+    const { result } = renderHook(() => useSymbolSearch("REL"), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(350);
+    });
+
+    vi.useRealTimers();
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+      expect(typeof result.current.retry).toBe("function");
+    });
+  });
 });

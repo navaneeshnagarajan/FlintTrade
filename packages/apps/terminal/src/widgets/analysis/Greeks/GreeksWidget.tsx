@@ -13,11 +13,16 @@
  *   - "No F&O positions" empty state
  */
 
-import { useState, useEffect, useCallback, useMemo, memo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import { RefreshCw, AlertCircle, TrendingDown, Activity } from "lucide-react";
 import { getPositionbook, getMultiOptionGreeks } from "@/services/api";
 import type { Position } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
+import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import {
+  accountAuthorityMatches,
+  captureAccountAuthority,
+} from "@/lib/accountQueryState";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -180,6 +185,11 @@ function GreekCard({ label, value, colorScheme, description }: GreekCardProps) {
 // ---------------------------------------------------------------------------
 
 function GreeksWidget() {
+  const accountReadContext = useAccountReadContext();
+  const currentContextRef = useRef(accountReadContext);
+  const positionControllerRef = useRef<AbortController | null>(null);
+  const requestIdRef = useRef(0);
+  currentContextRef.current = accountReadContext;
   const [positions,  setPositions]  = useState<RawPosition[]>([]);
   const [greeksMap,  setGreeksMap]  = useState<Record<string, RawGreeks>>({});
   const [ltpMap,     setLtpMap]     = useState<Record<string, number>>({});
@@ -192,17 +202,55 @@ function GreeksWidget() {
     [positions]
   );
 
+  useEffect(() => {
+    requestIdRef.current += 1;
+    positionControllerRef.current?.abort();
+    positionControllerRef.current = null;
+    setPositions([]);
+    setGreeksMap({});
+    setLtpMap({});
+    setLoading(false);
+    setError(null);
+    setLastRefresh(null);
+    return () => {
+      requestIdRef.current += 1;
+      positionControllerRef.current?.abort();
+      positionControllerRef.current = null;
+    };
+  }, [
+    accountReadContext.enabled,
+    accountReadContext.identity.accountId,
+    accountReadContext.identity.brokerType,
+    accountReadContext.identity.mode,
+    accountReadContext.identity.scopeKey,
+  ]);
+
   // Fetch all data
   const fetchAll = useCallback(async () => {
+    const context = accountReadContext;
+    if (!context.enabled) return;
+    const identity = captureAccountAuthority(context.identity);
+    const requestId = ++requestIdRef.current;
+    positionControllerRef.current?.abort();
+    const controller = new AbortController();
+    positionControllerRef.current = controller;
+    const isCurrent = () => (
+      requestId === requestIdRef.current
+      && !controller.signal.aborted
+      && currentContextRef.current.enabled
+      && accountAuthorityMatches(identity, currentContextRef.current.identity)
+    );
     setLoading(true);
     setError(null);
 
     try {
       let rawPositions: RawPosition[] = [];
       try {
-        const pb = await getPositionbook();
+        const pb = await getPositionbook(context, controller.signal);
+        if (!isCurrent()) return;
         rawPositions = Array.isArray(pb) ? (pb as RawPosition[]) : [];
       } catch (e) {
+        if (!isCurrent()) return;
         setError(`Positionbook error: ${(e as Error).message}`);
         return;
       }
@@ -243,6 +291,7 @@ function GreeksWidget() {
 
         try {
           const batchResults = await getMultiOptionGreeks(symbolRequests);
+          if (!isCurrent()) return;
           const resultsByContract = new Map<string, RawGreeks>();
           batchResults.forEach((data) => {
             const symbol = data.symbol?.trim().toUpperCase();
@@ -266,6 +315,7 @@ function GreeksWidget() {
             newGreeksMap[entry.pos.symbol] = data;
           });
         } catch (greeksError) {
+          if (!isCurrent()) return;
           setError(`Option Greeks error: ${(greeksError as Error).message}`);
         }
       }
@@ -273,9 +323,12 @@ function GreeksWidget() {
       setGreeksMap(newGreeksMap);
       setLastRefresh(new Date());
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
+      if (positionControllerRef.current === controller) {
+        positionControllerRef.current = null;
+      }
     }
-  }, []);
+  }, [accountReadContext]);
 
   // Auto-refresh
   useEffect(() => {

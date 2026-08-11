@@ -15,7 +15,7 @@ export function useBrokerAccounts(enabled = true) {
 
   const query = useQuery({
     queryKey: BROKER_ACCOUNTS_QUERY_KEY,
-    queryFn: () => listBrokerAccounts(useBrokerStore.getState().accounts),
+    queryFn: ({ signal }) => listBrokerAccounts(useBrokerStore.getState().accounts, signal),
     enabled,
     refetchInterval: 10_000,
     staleTime: 5_000,

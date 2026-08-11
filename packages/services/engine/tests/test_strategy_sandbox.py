@@ -37,8 +37,9 @@ def on_tick(ltp):
 
 
 @pytest.fixture()
-def runner(tmp_path):
+def runner(tmp_path, monkeypatch):
     """UserStrategyRunner backed by a temporary directory."""
+    monkeypatch.setattr(mod, "_find_bwrap_executable", lambda: None)
     return mod.UserStrategyRunner(strategies_dir=tmp_path / "strategies")
 
 
@@ -184,17 +185,20 @@ class TestBwrapCommand:
     def test_command_structure(self, tmp_path):
         wrapper = mod._create_sandbox_wrapper(tmp_path)
         start_gate = mod._create_strategy_start_gate(tmp_path)
+        readiness = mod._create_bwrap_readiness_file(tmp_path)
         strategy = tmp_path / "strategy.py"
         strategy.write_text("print('ok')\n", encoding="utf-8")
 
         cmd = mod._build_bwrap_command(
+            "/usr/bin/bwrap",
             sys.executable,
             str(wrapper),
             str(start_gate),
+            str(readiness),
             str(strategy),
         )
 
-        assert cmd[0] == "bwrap"
+        assert cmd[0] == "/usr/bin/bwrap"
         assert "--ro-bind" in cmd
         assert "--unshare-net" in cmd
         assert "--unshare-pid" in cmd
@@ -202,6 +206,7 @@ class TestBwrapCommand:
         assert "--tmpfs" in cmd
         assert str(wrapper.resolve()) in cmd
         assert str(start_gate.resolve()) in cmd
+        assert str(readiness.resolve()) in cmd
         assert str(strategy.resolve()) in cmd
 
     @pytest.mark.skipif(
@@ -211,30 +216,58 @@ class TestBwrapCommand:
     def test_command_ends_with_sandbox_paths_only(self, tmp_path):
         wrapper = mod._create_sandbox_wrapper(tmp_path)
         start_gate = mod._create_strategy_start_gate(tmp_path)
+        readiness = mod._create_bwrap_readiness_file(tmp_path)
         strategy = tmp_path / "strategy.py"
         strategy.write_text("print('ok')\n", encoding="utf-8")
 
         cmd = mod._build_bwrap_command(
+            "/usr/bin/bwrap",
             sys.executable,
             str(wrapper),
             str(start_gate),
+            str(readiness),
             str(strategy),
         )
 
-        assert cmd[-4].startswith("/run/flinttrade-python/bin/python")
-        assert cmd[-3:] == [
+        assert cmd[-4:] == [
             "/run/flinttrade-strategy/_sandbox_wrapper.py",
+            "/run/flinttrade-strategy/_bwrap_ready",
             "/run/flinttrade-strategy/_start_gate",
             "/run/flinttrade-strategy/strategy.py",
         ]
 
-    def test_is_bwrap_available_true(self):
-        with patch("shutil.which", return_value="/usr/bin/bwrap"):
-            assert mod._is_bwrap_available() is True
+    def test_bwrap_lookup_uses_only_the_fixed_system_path(self):
+        with (
+            patch("shutil.which", return_value=None) as which,
+            patch("os.path.lexists", return_value=False),
+        ):
+            assert mod._find_bwrap_executable() is None
 
-    def test_is_bwrap_available_false(self):
-        with patch("shutil.which", return_value=None):
-            assert mod._is_bwrap_available() is False
+        which.assert_called_once_with("bwrap", path=os.defpath)
+
+    def test_non_executable_system_bwrap_is_rejected_instead_of_falling_back(self):
+        with (
+            patch("shutil.which", return_value=None),
+            patch("os.path.lexists", return_value=True),
+            pytest.raises(RuntimeError, match="Installed bubblewrap executable is not runnable"),
+        ):
+            mod._find_bwrap_executable()
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="bubblewrap is Linux-only")
+    def test_bwrap_lookup_returns_the_resolved_real_system_executable(self):
+        expected = mod.shutil.which("bwrap", path=os.defpath)
+        if expected is None:
+            pytest.skip("trusted system bubblewrap is not installed")
+        assert expected is not None
+
+        assert mod._find_bwrap_executable() == os.path.realpath(expected)
+
+    def test_bwrap_lookup_rejects_an_executable_that_disappears(self):
+        with (
+            patch("shutil.which", return_value="/missing/system/bwrap"),
+            pytest.raises(RuntimeError, match="Installed bubblewrap executable is unavailable"),
+        ):
+            mod._find_bwrap_executable()
 
 
 # ---------------------------------------------------------------------------
@@ -426,7 +459,7 @@ class TestFallback:
 
         with (
             patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
-            patch.object(mod, "_is_bwrap_available", return_value=False),
+            patch.object(mod, "_find_bwrap_executable", return_value=None),
             patch("platform.system", return_value="Linux"),
         ):
             runner.start(strategy_id)
@@ -450,14 +483,16 @@ class TestFallback:
 
         with (
             patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
-            patch.object(mod, "_is_bwrap_available", return_value=True),
+            patch.object(mod, "_find_bwrap_executable", return_value="/usr/bin/bwrap"),
+            patch.object(mod, "_require_bwrap_startup") as require_startup,
             patch("platform.system", return_value="Linux"),
         ):
             runner.start(strategy_id)
 
         cmd = mock_popen.call_args[0][0]
-        assert cmd[0] == "bwrap"
+        assert cmd[0] == "/usr/bin/bwrap"
         assert mock_popen.call_args.kwargs["preexec_fn"] is None
+        require_startup.assert_called_once()
 
         runner.stop(strategy_id)
 
@@ -490,6 +525,8 @@ class TestFallback:
         with (
             patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
             patch.object(mod, "_build_preexec_fn", return_value=sentinel),
+            patch.object(mod, "_find_bwrap_executable", return_value=None),
+            patch("platform.system", return_value="Linux"),
         ):
             runner.start(strategy_id)
 
@@ -511,8 +548,10 @@ class TestFallback:
         cmd = mock_popen.call_args[0][0]
         # Second arg should be the wrapper script path
         assert "_sandbox_wrapper.py" in cmd[1]
-        # Third arg is the parent-owned start gate; fourth is the strategy.
-        assert "_start_gate" in cmd[2]
-        assert strategy_id in cmd[3]
+        # Third arg is child-to-parent readiness, fourth is the parent-owned
+        # start gate, and fifth is the uploaded strategy.
+        assert "_bwrap_ready" in cmd[2]
+        assert "_start_gate" in cmd[3]
+        assert strategy_id in cmd[4]
 
         runner.stop(strategy_id)

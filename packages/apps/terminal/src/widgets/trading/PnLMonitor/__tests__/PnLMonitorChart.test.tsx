@@ -16,6 +16,7 @@ import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useModeStore } from "@/stores/modeStore";
 
 const chartMocks = vi.hoisted(() => {
   const areaSeriesOptions: unknown[] = [];
@@ -236,22 +237,21 @@ describe("PnLMonitorWidget — chart and feed behaviour", () => {
     );
   });
 
-  it("keeps the shared caches polling ungated while the broker is disconnected", () => {
-    // DELIBERATE (inherited from IntradayPnL, whose gating attempt broke its
-    // suite and was reverted): the widget renders an Explore preview from the
-    // API's labelled sample data behind the "Sample data" badge instead of
-    // going dark behind a "Broker required" gate.
+  it("gates shared caches and shows Broker required (no Sample) when disconnected in Live", () => {
+    // Per truthful provenance contract: disconnected Live (no sample pack bound) must not
+    // fabricate Sample data or call prohibited account APIs. Shows honest Broker required.
+    useModeStore.setState({ mode: "live" });
     mockUseBrokerConnected.mockReturnValue(false);
     mockUseAccountReadsEnabled.mockReturnValue(false);
     mockUsePositions.mockReturnValue({ data: undefined });
 
     render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
 
-    expect(mockUsePositions).toHaveBeenCalledWith();
-    expect(mockUseFunds).toHaveBeenCalledWith();
-    expect(mockUseTradebook).toHaveBeenCalledWith();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
-    expect(screen.queryByText("Broker required")).not.toBeInTheDocument();
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUseTradebook).toHaveBeenCalledWith({ enabled: false });
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(screen.getByText(/Broker required|Connect a broker to load/i)).toBeInTheDocument();
   });
 
   // ── Error honesty + staleness — a silently frozen P&L is a trading hazard ──

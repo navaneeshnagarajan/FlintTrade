@@ -615,7 +615,7 @@ def require_pnpm() -> list[str]:
     argv = pnpm_argv()
     if argv is None:
         fail("No Node toolchain found (corepack, pnpm or npx).")
-        fail("Install Node 22.22+ from https://nodejs.org/ and re-run.")
+        fail("Install Node 22.22.2+ from https://nodejs.org/ and re-run.")
         raise SystemExit(1)
     return argv
 
@@ -1010,7 +1010,7 @@ def cmd_setup(_args: list[str]) -> int:
     pnpm = pnpm_argv()
     if pnpm is None:
         warn("No Node toolchain found; the terminal, site and desktop packages were skipped.")
-        warn("Install Node 22.22+ from https://nodejs.org/ and re-run setup.")
+        warn("Install Node 22.22.2+ from https://nodejs.org/ and re-run setup.")
     else:
         info("Installing the pnpm workspace...")
         run([*pnpm, "install", "--frozen-lockfile"], env=ci_env())

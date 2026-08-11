@@ -158,7 +158,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
         });
       } else if (action === "ai") {
         window.dispatchEvent(
-          new CustomEvent("flinttrade:navigate", { detail: { path: "/ai", context: { symbol, exchange } } }),
+          new CustomEvent("flinttrade:navigate", { detail: { path: "/ai", context: { symbol, exchange, source: "palette" } } }),
         );
       }
     },

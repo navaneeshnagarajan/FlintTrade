@@ -100,7 +100,6 @@ peerDependencyRules:
 # advisory has to exist at all.
 # Verify a target exists before pinning to it: npm view brace-expansion@<version> version
 overrides:
-  '@babel/core': 7.29.6
   '@hono/node-server': 2.0.10
   'body-parser@>=2.0.0 <2.3.0': 2.3.0
   'brace-expansion@<2.0.0': 2.1.4
@@ -109,9 +108,10 @@ overrides:
   'brace-expansion@>=4.0.0 <5.0.0': 3.0.6
   'brace-expansion@>=5.0.0 <5.0.9': 5.0.9
   esbuild: 0.28.1
-  fast-uri: 4.1.1
+  fast-uri: 4.1.2
   hono: 4.12.27
-  js-yaml: 4.3.0
+  ip-address: 10.3.1
+  js-yaml: 4.3.1
   postcss: 8.5.23
   sharp: 0.35.3
-  undici: 7.28.0
+  undici: 7.29.0

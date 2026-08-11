@@ -30,7 +30,7 @@ broker  →  OpenAlgo bridge  OR  FlintTrade native adapter  →  FlintTrade cor
 |---|---|---|
 | 0 | Ground-truth audit; documentation corrected; roadmap rewritten | **Closed 2026-07-03** |
 | 1 | Auth end-to-end (app + broker), SEBI-correct | In progress — core shipped; live broker-verification evidence remains |
-| 2 | Stabilise everything that exists | In progress — major waves landed; consolidation backlog remains |
+| 2 | Stabilise everything that exists | In progress — major rows landed; evidence-backed duplicate and native-CI validation remains |
 | 3 | Build the unmapped reference backlog | Exit criterion met 2026-07-06; closes after the standing audit |
 | 4 | Autonomous loop proven in Practice | In progress — safety layers and learning loop shipped; full-day run pending |
 | 5 | Distribution + public surfaces | In progress — Electron migration complete; release publication pending |
@@ -59,10 +59,10 @@ Done: server-side mode upgrades and downgrades; mode-preserving PIN unlock; a wo
 Done highlights:
 
 - Gated basket/split/options-strategy orders; sandbox fill realism; native GTT (forever-order) correctness across Dhan and Upstox with fail-closed cross-broker fields; explicit unknown-outcome recovery for response-lost writes; a hash-chained, verifiable audit log; a native two-way Telegram bot carrying the kill switch; a real searchable trade journal (SQLite + FTS5); honest provenance labels on every widget that can fall back to sample data; clean uninstall plus backend persistence for data that previously lived only in browser storage; CI test-visibility fixes so every terminal test file runs in a shard, with drift guards.
-- A terminal-wide widget consolidation (102 widgets → 69, PR #71) that merged duplicate surfaces onto shared kernels (options maths, position sizing, order guards, strategy templates) and closed real order-path defects the duplicated surfaces had hidden; verified by adversarial review passes that were themselves re-checked by a fresh-context reviewer.
+- A terminal-wide widget consolidation (102 widgets → 69 via PR #71; current catalogue pin 71 after follow-on merges) that merged duplicate surfaces onto shared kernels (options maths, position sizing, order guards, strategy templates) and closed real order-path defects the duplicated surfaces had hidden; verified by adversarial review passes that were themselves re-checked by a fresh-context reviewer.
 - Webhooks were narrowed by maintainer ruling (2026-07-26) to the generic HMAC-signed custom rail; the TradingView/ChartInk/GoCharting parsers and the n8n/WhatsApp bridges were removed.
 
-Remaining: the consolidation backlog (one broker-connect surface, the remaining duplicate implementations), the final two widget merges, and the Linux-only desktop CI failures.
+Remaining: validate the converged cross-platform nightly-CI repairs, continue evidence-backed duplicate consolidation, and close only the still-open rows after a fresh code-ground-truth audit. The older broker-connect, GTT UI, `post_market_analysis`, dead-admin-route, installer-duplication and “final two widget” rows are shipped or superseded.
 
 **Exit:** nothing user-visible crashes or silently fakes; the feature matrix has no broken rows and every partial or stub row is finished, visibly degraded, or explicitly deferred; full local verification green; multi-agent audit + re-audit clean.
 
@@ -77,6 +77,8 @@ Two build waves shipped 16 items across analytics (FII long/short ratios, gamma 
 **Goal:** prove the full autonomous chain — signal → SafetySystem L1–L5 → gated order → sandbox fill → journal → learning update — across a full trading day in Practice mode, with Live provably blocked throughout.
 
 Done: Layer 3 admission from native option Greeks with fail-closed instrument reconciliation; Layer 4 fed from locally computed daily P&L (never trusting broker aggregates); grep-guard hardening so no new ungated order dispatcher can land; the agent learning loop (post-session reflection persisting per-symbol lessons that inform later decisions but can never mutate safety limits or order parameters); operator-approved skill drafts; searchable AI session history; single-backend-per-workspace enforcement. A compressed synthetic-clock full-session integration test pins the chain end-to-end.
+
+AI3 (read-only Python-RPC tool scripting) is deferred to a maintainer sandbox-design call before any code or spec implementation.
 
 **Exit:** the loop survives a real full trading day in Practice with zero safety violations — rate limiting proven under load, a mid-run kill-switch drill, Live blocked server-side — and a complete journal/learning trail; audit + re-audit clean.
 

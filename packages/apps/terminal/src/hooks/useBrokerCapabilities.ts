@@ -8,13 +8,19 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
+import { resolveBrokerCapabilityScope, useMarketDataScope } from "@/hooks/useDataScope";
 import { getBrokerCapabilities } from "@/services/api";
 import type { BrokerCapabilities } from "@/types/api";
 
 export function useBrokerCapabilities(enabled = true) {
+  const dataScope = useMarketDataScope();
+  const capabilityScope = resolveBrokerCapabilityScope(dataScope);
+
   return useQuery<BrokerCapabilities>({
-    queryKey: ["broker", "capabilities"],
-    queryFn: getBrokerCapabilities,
+    // Capability data must not survive an authority change under the five
+    // minute freshness window. Deliberately key only on non-secret identity.
+    queryKey: ["broker", "capabilities", capabilityScope],
+    queryFn: ({ signal }) => getBrokerCapabilities(signal, capabilityScope),
     enabled,
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,

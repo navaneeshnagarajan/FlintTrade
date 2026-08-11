@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { Provider as JotaiProvider, createStore } from "jotai";
 
@@ -36,6 +36,26 @@ vi.mock("@glideapps/glide-data-grid/dist/index.css", () => ({}));
 const optionChainHookMocks = vi.hoisted(() => ({
   overrides: {} as Record<string, unknown>,
 }));
+
+const dataScopeState = vi.hoisted(() => ({
+  value: "live:native:upstox:U1",
+}));
+
+const accountAuthorityState = vi.hoisted(() => ({
+  value: {
+    mode: "live" as "explore" | "practice" | "live",
+    scopeKey: "live:native:upstox:U1",
+    brokerType: "upstox",
+    accountId: "U1",
+  },
+}));
+
+const MockMarketDataAuthorityChangedError = vi.hoisted(() => class extends Error {
+  constructor() {
+    super("Market data authority changed before the request could complete.");
+    this.name = "MarketDataAuthorityChangedError";
+  }
+});
 
 vi.mock("../useOptionChainData", () => ({
   useOptionChainData: () => ({
@@ -70,8 +90,20 @@ vi.mock("@/hooks/useSyntheticFuture", () => ({
   useSyntheticFuture: () => ({ data: null }),
 }));
 
+vi.mock("@/hooks/useDataScope", () => ({
+  useDataScope: () => dataScopeState.value,
+  useMarketDataScope: () => dataScopeState.value,
+  useAccountAuthorityIdentity: () => accountAuthorityState.value,
+  requireCurrentMarketDataScope: (expected?: string) => {
+    if (expected && expected !== dataScopeState.value) {
+      throw new MockMarketDataAuthorityChangedError();
+    }
+  },
+}));
+
 // Services
 vi.mock("@/services/api", () => ({
+  MarketDataAuthorityChangedError: MockMarketDataAuthorityChangedError,
   getInstruments: vi.fn().mockResolvedValue([]),
   getOptionSymbol: vi.fn().mockResolvedValue({ symbol: "TEST", exchange: "NFO" }),
   getSymbol: vi.fn().mockResolvedValue({}),
@@ -109,9 +141,27 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 // ---------------------------------------------------------------------------
 
 import OptionChainWidget from "../OptionChainWidget";
-import { getMaxPain, getSymbol } from "@/services/api";
+import {
+  getInstruments,
+  getMaxPain,
+  getOptionSymbol,
+  getSymbol,
+  MarketDataAuthorityChangedError,
+  placeOrder,
+} from "@/services/api";
 import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
+import { useModeStore } from "@/stores/modeStore";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, reject, resolve };
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -122,9 +172,20 @@ describe("OptionChainWidget", () => {
     queryClient.clear();
     vi.clearAllMocks();
     optionChainHookMocks.overrides = {};
+    dataScopeState.value = "live:native:upstox:U1";
+    accountAuthorityState.value = {
+      mode: "live",
+      scopeKey: "live:native:upstox:U1",
+      brokerType: "upstox",
+      accountId: "U1",
+    };
+    useModeStore.setState({ mode: "explore" });
     gridMocks.onCellClicked = null;
+    vi.mocked(getInstruments).mockReset().mockResolvedValue([]);
+    vi.mocked(getOptionSymbol).mockReset().mockResolvedValue({ symbol: "TEST", exchange: "NFO" });
     vi.mocked(getSymbol).mockReset().mockResolvedValue({} as never);
     vi.mocked(getMaxPain).mockReset().mockResolvedValue({} as never);
+    vi.mocked(placeOrder).mockReset().mockResolvedValue({} as never);
   });
 
   it("renders without crashing", () => {
@@ -136,7 +197,39 @@ describe("OptionChainWidget", () => {
     // The widget must seed from props.params.symbol, not just SYMBOLS[0].
     render(<OptionChainWidget params={{ symbol: "BANKNIFTY" }} />, { wrapper: Wrapper });
     await vi.waitFor(() =>
-      expect(getSymbol).toHaveBeenCalledWith("BANKNIFTY", "NFO"),
+      expect(getSymbol).toHaveBeenCalledWith(
+        "BANKNIFTY",
+        "NFO",
+        expect.any(AbortSignal),
+        dataScopeState.value,
+      ),
+    );
+  });
+
+  it("pins metadata reads to the rendered market-data authority", async () => {
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [] },
+    };
+
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+
+    await vi.waitFor(() => expect(getInstruments).toHaveBeenCalledWith(
+      expect.any(AbortSignal),
+      "live:native:upstox:U1",
+    ));
+    expect(getSymbol).toHaveBeenCalledWith(
+      "NIFTY",
+      "NFO",
+      expect.any(AbortSignal),
+      "live:native:upstox:U1",
+    );
+    expect(getMaxPain).toHaveBeenCalledWith(
+      "NIFTY",
+      "NFO",
+      "2026-04-10",
+      expect.any(AbortSignal),
+      "live:native:upstox:U1",
     );
   });
 
@@ -272,6 +365,7 @@ describe("OptionChainWidget", () => {
       "NFO",
       "2026-04-17",
       expect.any(AbortSignal),
+      dataScopeState.value,
     ));
     expect(screen.queryByText(/Max Pain:/)).not.toBeInTheDocument();
 
@@ -295,9 +389,17 @@ describe("OptionChainWidget", () => {
     expect(await screen.findByText("Max Pain: 25,000")).toBeInTheDocument();
 
     vi.mocked(getMaxPain).mockRejectedValue(new Error("Max Pain unavailable"));
-    await queryClient.refetchQueries({ queryKey: ["maxpain", "NIFTY", "NFO", "2026-04-10"] });
+    await queryClient.refetchQueries({
+      queryKey: ["maxpain", dataScopeState.value, "NIFTY", "NFO", "2026-04-10"],
+    });
     await vi.waitFor(() => {
-      expect(queryClient.getQueryState(["maxpain", "NIFTY", "NFO", "2026-04-10"])?.fetchStatus).toBe("idle");
+      expect(queryClient.getQueryState([
+        "maxpain",
+        dataScopeState.value,
+        "NIFTY",
+        "NFO",
+        "2026-04-10",
+      ])?.fetchStatus).toBe("idle");
     }, { timeout: 4000 });
     expect(screen.queryByText(/Max Pain:/)).not.toBeInTheDocument();
   });
@@ -311,7 +413,7 @@ describe("OptionChainWidget", () => {
     render(<OptionChainWidget />, { wrapper: Wrapper });
 
     const query = queryClient.getQueryCache().find({
-      queryKey: ["maxpain", "NIFTY", "NFO", "2026-04-10"],
+      queryKey: ["maxpain", dataScopeState.value, "NIFTY", "NFO", "2026-04-10"],
     });
     expect(query?.options).toMatchObject({
       refetchInterval: 60_000,
@@ -335,6 +437,32 @@ describe("OptionChainWidget", () => {
     expect(signal.aborted).toBe(true);
   });
 
+  it("aborts and disables Max Pain when Explore retires the Live authority", async () => {
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [] },
+    };
+    vi.mocked(getMaxPain).mockReturnValue(new Promise(() => {}) as never);
+
+    const view = render(<OptionChainWidget params={{ scopeProbe: "live" }} />, { wrapper: Wrapper });
+    await vi.waitFor(() => expect(getMaxPain).toHaveBeenCalledOnce());
+    const signal = vi.mocked(getMaxPain).mock.calls[0]?.[3] as AbortSignal;
+
+    dataScopeState.value = "explore:mock";
+    view.rerender(<OptionChainWidget params={{ scopeProbe: "explore" }} />);
+
+    expect(signal.aborted).toBe(true);
+    await act(async () => { await Promise.resolve(); });
+    expect(getMaxPain).toHaveBeenCalledTimes(1);
+    expect(queryClient.getQueryState([
+      "maxpain",
+      "explore:mock",
+      "NIFTY",
+      "NFO",
+      "2026-04-10",
+    ])?.fetchStatus).toBe("idle");
+  });
+
   it("clears basket legs when the selected contract identity changes", async () => {
     optionChainHookMocks.overrides = {
       selectedExpiry: "2026-04-10",
@@ -354,6 +482,231 @@ describe("OptionChainWidget", () => {
     rerender(<OptionChainWidget />);
 
     await waitFor(() => expect(screen.queryByText("Basket (1)")).not.toBeInTheDocument());
+  });
+
+  it("aborts an order when authority B takes over during symbol resolution", async () => {
+    const symbolResolution = deferred<{ symbol: string; exchange: string }>();
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [{ strike: 25000, ce: { ltp: 100 }, pe: null }] },
+      strikes: [{ strike: 25000, call: { ltp: 100 }, put: null }],
+      atmStrike: 25000,
+    };
+    vi.mocked(getSymbol).mockResolvedValue({ lotsize: 50 } as never);
+    vi.mocked(getOptionSymbol).mockReturnValue(symbolResolution.promise);
+    useModeStore.setState({ mode: "live" });
+
+    const view = render(<OptionChainWidget params={{ scopeProbe: "A" }} />, { wrapper: Wrapper });
+    await vi.waitFor(() => expect(queryClient.getQueryData([
+      "symbol",
+      "live:native:upstox:U1",
+      "NIFTY",
+      "NFO",
+    ])).toEqual({ lotsize: 50 }));
+    act(() => gridMocks.onCellClicked?.([0, 0]));
+    fireEvent.click(screen.getByRole("button", { name: "Buy All" }));
+    await vi.waitFor(() => expect(getOptionSymbol).toHaveBeenCalledWith(
+      "NIFTY",
+      "NFO",
+      "2026-04-10",
+      "CE",
+      "25000",
+      expect.any(AbortSignal),
+      "live:native:upstox:U1",
+    ));
+    const signal = vi.mocked(getOptionSymbol).mock.calls[0]?.[5] as AbortSignal;
+    expect(signal.aborted).toBe(false);
+
+    accountAuthorityState.value = {
+      mode: "live",
+      scopeKey: "live:native:upstox:U2",
+      brokerType: "upstox",
+      accountId: "U2",
+    };
+    dataScopeState.value = "live:native:upstox:U2";
+    view.rerender(<OptionChainWidget params={{ scopeProbe: "B" }} />);
+    expect(signal.aborted).toBe(true);
+
+    await act(async () => {
+      symbolResolution.resolve({ symbol: "NIFTY26APR25000CE", exchange: "NFO" });
+      await symbolResolution.promise;
+    });
+
+    expect(placeOrder).not.toHaveBeenCalled();
+  });
+
+  it("refuses a Practice order when its OpenAlgo market source changes during symbol resolution", async () => {
+    const symbolResolution = deferred<{ symbol: string; exchange: string }>();
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [{ strike: 25000, ce: { ltp: 100 }, pe: null }] },
+      strikes: [{ strike: 25000, call: { ltp: 100 }, put: null }],
+      atmStrike: 25000,
+    };
+    accountAuthorityState.value = {
+      mode: "practice",
+      scopeKey: "practice:sandbox:default",
+      brokerType: "sandbox",
+      accountId: "default",
+    };
+    dataScopeState.value = "practice:openalgo:source-a";
+    vi.mocked(getSymbol).mockResolvedValue({ lotsize: 50 } as never);
+    vi.mocked(getOptionSymbol).mockReturnValue(symbolResolution.promise);
+    useModeStore.setState({ mode: "practice" });
+
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+    await vi.waitFor(() => expect(queryClient.getQueryData([
+      "symbol",
+      "practice:openalgo:source-a",
+      "NIFTY",
+      "NFO",
+    ])).toEqual({ lotsize: 50 }));
+    act(() => gridMocks.onCellClicked?.([0, 0]));
+    fireEvent.click(screen.getByRole("button", { name: "Buy All" }));
+    await vi.waitFor(() => expect(getOptionSymbol).toHaveBeenCalled());
+
+    // The account/order authority is still the Practice sandbox. Only the
+    // real market-data source retires before React can commit a rerender.
+    dataScopeState.value = "practice:openalgo:source-b";
+    await act(async () => {
+      symbolResolution.reject(new MarketDataAuthorityChangedError());
+      await symbolResolution.promise.catch(() => undefined);
+      await Promise.resolve();
+    });
+
+    expect(placeOrder).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the Practice market source before ordering even before React cleanup runs", async () => {
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [{ strike: 25000, ce: { ltp: 100 }, pe: null }] },
+      strikes: [{ strike: 25000, call: { ltp: 100 }, put: null }],
+      atmStrike: 25000,
+    };
+    accountAuthorityState.value = {
+      mode: "practice",
+      scopeKey: "practice:sandbox:default",
+      brokerType: "sandbox",
+      accountId: "default",
+    };
+    dataScopeState.value = "practice:openalgo:source-a";
+    vi.mocked(getSymbol).mockResolvedValue({ lotsize: 50 } as never);
+    vi.mocked(getOptionSymbol).mockImplementation(async () => {
+      // Zustand can change synchronously before React commits the rerender that
+      // aborts lifecycle-owned work. The imperative guard must still refuse A.
+      dataScopeState.value = "practice:openalgo:source-b";
+      return { symbol: "NIFTY26APR25000CE", exchange: "NFO" };
+    });
+    useModeStore.setState({ mode: "practice" });
+
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+    await vi.waitFor(() => expect(queryClient.getQueryData([
+      "symbol",
+      "practice:openalgo:source-a",
+      "NIFTY",
+      "NFO",
+    ])).toEqual({ lotsize: 50 }));
+    act(() => gridMocks.onCellClicked?.([0, 0]));
+    fireEvent.click(screen.getByRole("button", { name: "Buy All" }));
+
+    await vi.waitFor(() => expect(getOptionSymbol).toHaveBeenCalled());
+    await act(async () => { await Promise.resolve(); });
+    expect(placeOrder).not.toHaveBeenCalled();
+  });
+
+  it("does not compact-fallback into an order after option-symbol resolution aborts", async () => {
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [{ strike: 25000, ce: { ltp: 100 }, pe: null }] },
+      strikes: [{ strike: 25000, call: { ltp: 100 }, put: null }],
+      atmStrike: 25000,
+    };
+    vi.mocked(getSymbol).mockResolvedValue({ lotsize: 50 } as never);
+    vi.mocked(getOptionSymbol).mockRejectedValue(new DOMException("aborted", "AbortError"));
+    useModeStore.setState({ mode: "live" });
+
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+    await vi.waitFor(() => expect(queryClient.getQueryData([
+      "symbol",
+      "live:native:upstox:U1",
+      "NIFTY",
+      "NFO",
+    ])).toEqual({ lotsize: 50 }));
+    act(() => gridMocks.onCellClicked?.([0, 0]));
+    fireEvent.click(screen.getByRole("button", { name: "Buy All" }));
+
+    await vi.waitFor(() => expect(getOptionSymbol).toHaveBeenCalled());
+    expect(placeOrder).not.toHaveBeenCalled();
+  });
+
+  it("keeps compact fallback for an ordinary resolver outage and pins the order authority", async () => {
+    const authorityAtClick = accountAuthorityState.value;
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [{ strike: 25000, ce: { ltp: 100 }, pe: null }] },
+      strikes: [{ strike: 25000, call: { ltp: 100 }, put: null }],
+      atmStrike: 25000,
+    };
+    vi.mocked(getSymbol).mockResolvedValue({ lotsize: 50 } as never);
+    vi.mocked(getOptionSymbol).mockRejectedValue(new Error("resolver unavailable"));
+    useModeStore.setState({ mode: "live" });
+
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+    await vi.waitFor(() => expect(queryClient.getQueryData([
+      "symbol",
+      "live:native:upstox:U1",
+      "NIFTY",
+      "NFO",
+    ])).toEqual({ lotsize: 50 }));
+    act(() => gridMocks.onCellClicked?.([0, 0]));
+    fireEvent.click(screen.getByRole("button", { name: "Buy All" }));
+
+    await vi.waitFor(() => expect(placeOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        symbol: "NIFTY10APR2625000CE",
+        exchange: "NFO",
+        action: "BUY",
+        quantity: 50,
+      }),
+      authorityAtClick,
+    ));
+  });
+
+  it("aborts pending option-symbol resolution on unmount and rechecks before ordering", async () => {
+    const symbolResolution = deferred<{ symbol: string; exchange: string }>();
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [{ strike: 25000, ce: { ltp: 100 }, pe: null }] },
+      strikes: [{ strike: 25000, call: { ltp: 100 }, put: null }],
+      atmStrike: 25000,
+    };
+    vi.mocked(getSymbol).mockResolvedValue({ lotsize: 50 } as never);
+    vi.mocked(getOptionSymbol).mockReturnValue(symbolResolution.promise);
+    useModeStore.setState({ mode: "live" });
+
+    const { unmount } = render(<OptionChainWidget />, { wrapper: Wrapper });
+    await vi.waitFor(() => expect(queryClient.getQueryData([
+      "symbol",
+      "live:native:upstox:U1",
+      "NIFTY",
+      "NFO",
+    ])).toEqual({ lotsize: 50 }));
+    act(() => gridMocks.onCellClicked?.([0, 0]));
+    fireEvent.click(screen.getByRole("button", { name: "Buy All" }));
+    await vi.waitFor(() => expect(getOptionSymbol).toHaveBeenCalled());
+    const signal = vi.mocked(getOptionSymbol).mock.calls[0]?.[5] as AbortSignal;
+
+    expect(signal.aborted).toBe(false);
+    unmount();
+    expect(signal.aborted).toBe(true);
+
+    await act(async () => {
+      symbolResolution.resolve({ symbol: "NIFTY26APR25000CE", exchange: "NFO" });
+      await symbolResolution.promise;
+      await Promise.resolve();
+    });
+    expect(placeOrder).not.toHaveBeenCalled();
   });
 
   it("mirrors visual change aliases and unavailable values in the accessible table", () => {
@@ -422,9 +775,20 @@ describe("OptionChainWidget — FDC3 channel following", () => {
     queryClient.clear();
     vi.clearAllMocks();
     optionChainHookMocks.overrides = {};
+    dataScopeState.value = "live:native:upstox:U1";
+    accountAuthorityState.value = {
+      mode: "live",
+      scopeKey: "live:native:upstox:U1",
+      brokerType: "upstox",
+      accountId: "U1",
+    };
+    useModeStore.setState({ mode: "explore" });
     gridMocks.onCellClicked = null;
+    vi.mocked(getInstruments).mockReset().mockResolvedValue([]);
+    vi.mocked(getOptionSymbol).mockReset().mockResolvedValue({ symbol: "TEST", exchange: "NFO" });
     vi.mocked(getSymbol).mockReset().mockResolvedValue({} as never);
     vi.mocked(getMaxPain).mockReset().mockResolvedValue({} as never);
+    vi.mocked(placeOrder).mockReset().mockResolvedValue({} as never);
   });
 
   /** Wrap in an explicit jotai store so tests can broadcast onto channels. */
@@ -450,7 +814,12 @@ describe("OptionChainWidget — FDC3 channel following", () => {
     // The broadcast SYMBOL becomes the chain underlying, normalised onto the
     // chain's own exchange (NFO), not the broadcast spot exchange.
     expect(screen.getByText(/strikes loaded for BANKNIFTY/)).toBeInTheDocument();
-    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith("BANKNIFTY", "NFO"));
+    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith(
+      "BANKNIFTY",
+      "NFO",
+      expect.any(AbortSignal),
+      dataScopeState.value,
+    ));
   });
 
   it("adopts the channel's current context on mount", async () => {
@@ -462,7 +831,12 @@ describe("OptionChainWidget — FDC3 channel following", () => {
     });
 
     expect(screen.getByText(/strikes loaded for GOLD/)).toBeInTheDocument();
-    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith("GOLD", "MCX"));
+    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith(
+      "GOLD",
+      "MCX",
+      expect.any(AbortSignal),
+      dataScopeState.value,
+    ));
   });
 
   it('ignores broadcasts when joined to no channel (channel: "none")', async () => {
@@ -478,9 +852,14 @@ describe("OptionChainWidget — FDC3 channel following", () => {
     act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "GOLD", exchange: "MCX" }));
 
     expect(screen.getByText(/strikes loaded for NIFTY/)).toBeInTheDocument();
-    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith("NIFTY", "NFO"));
-    expect(getSymbol).not.toHaveBeenCalledWith("BANKNIFTY", expect.anything());
-    expect(getSymbol).not.toHaveBeenCalledWith("GOLD", expect.anything());
+    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith(
+      "NIFTY",
+      "NFO",
+      expect.any(AbortSignal),
+      dataScopeState.value,
+    ));
+    expect(vi.mocked(getSymbol).mock.calls.map(([symbol]) => symbol)).not.toContain("BANKNIFTY");
+    expect(vi.mocked(getSymbol).mock.calls.map(([symbol]) => symbol)).not.toContain("GOLD");
   });
 
   it("keeps ignoring broadcasts when pinned by params.symbol", async () => {
@@ -496,9 +875,14 @@ describe("OptionChainWidget — FDC3 channel following", () => {
     act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "SENSEX", exchange: "BSE_INDEX" }));
 
     expect(screen.getByText(/strikes loaded for GOLD/)).toBeInTheDocument();
-    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith("GOLD", "MCX"));
-    expect(getSymbol).not.toHaveBeenCalledWith("BANKNIFTY", expect.anything());
-    expect(getSymbol).not.toHaveBeenCalledWith("SENSEX", expect.anything());
+    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith(
+      "GOLD",
+      "MCX",
+      expect.any(AbortSignal),
+      dataScopeState.value,
+    ));
+    expect(vi.mocked(getSymbol).mock.calls.map(([symbol]) => symbol)).not.toContain("BANKNIFTY");
+    expect(vi.mocked(getSymbol).mock.calls.map(([symbol]) => symbol)).not.toContain("SENSEX");
   });
 
   it("keeps the current underlying when the broadcast symbol is not a supported underlying", async () => {
@@ -510,8 +894,13 @@ describe("OptionChainWidget — FDC3 channel following", () => {
     act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "RELIANCE", exchange: "NSE" }));
 
     expect(screen.getByText(/strikes loaded for NIFTY/)).toBeInTheDocument();
-    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith("NIFTY", "NFO"));
-    expect(getSymbol).not.toHaveBeenCalledWith("RELIANCE", expect.anything());
+    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith(
+      "NIFTY",
+      "NFO",
+      expect.any(AbortSignal),
+      dataScopeState.value,
+    ));
+    expect(vi.mocked(getSymbol).mock.calls.map(([symbol]) => symbol)).not.toContain("RELIANCE");
   });
 
   it("lets a local pick beat the stale channel context, while a new broadcast still retargets", async () => {

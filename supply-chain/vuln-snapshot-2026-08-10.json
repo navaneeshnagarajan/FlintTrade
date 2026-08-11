@@ -7,7 +7,7 @@
     },
     {
       "name": "aiohttp",
-      "version": "3.14.1",
+      "version": "3.14.3",
       "vulns": []
     },
     {
@@ -17,12 +17,12 @@
     },
     {
       "name": "annotated-types",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "vulns": []
     },
     {
       "name": "anyio",
-      "version": "4.13.0",
+      "version": "4.14.2",
       "vulns": []
     },
     {
@@ -32,7 +32,7 @@
     },
     {
       "name": "apscheduler",
-      "version": "3.11.2",
+      "version": "3.11.3",
       "vulns": []
     },
     {
@@ -57,7 +57,7 @@
     },
     {
       "name": "beautifulsoup4",
-      "version": "4.14.3",
+      "version": "4.15.0",
       "vulns": []
     },
     {
@@ -82,17 +82,17 @@
     },
     {
       "name": "cffi",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "vulns": []
     },
     {
       "name": "charset-normalizer",
-      "version": "3.4.7",
+      "version": "3.4.9",
       "vulns": []
     },
     {
       "name": "click",
-      "version": "8.4.1",
+      "version": "8.4.2",
       "vulns": []
     },
     {
@@ -112,7 +112,7 @@
     },
     {
       "name": "cryptography",
-      "version": "49.0.0",
+      "version": "50.0.0",
       "vulns": []
     },
     {
@@ -137,12 +137,12 @@
     },
     {
       "name": "duckdb",
-      "version": "1.5.3",
+      "version": "1.5.5",
       "vulns": []
     },
     {
       "name": "filelock",
-      "version": "3.29.5",
+      "version": "3.32.2",
       "vulns": []
     },
     {
@@ -152,7 +152,7 @@
     },
     {
       "name": "flask-cors",
-      "version": "6.0.2",
+      "version": "6.0.5",
       "vulns": []
     },
     {
@@ -202,7 +202,7 @@
     },
     {
       "name": "idna",
-      "version": "3.16",
+      "version": "3.18",
       "vulns": []
     },
     {
@@ -222,7 +222,7 @@
     },
     {
       "name": "jugaad-data",
-      "version": "0.33.1",
+      "version": "0.35.2",
       "vulns": []
     },
     {
@@ -232,7 +232,7 @@
     },
     {
       "name": "lightgbm",
-      "version": "4.6.0",
+      "version": "4.7.0",
       "vulns": []
     },
     {
@@ -257,7 +257,7 @@
     },
     {
       "name": "matplotlib",
-      "version": "3.10.9",
+      "version": "3.11.1",
       "vulns": []
     },
     {
@@ -277,7 +277,7 @@
     },
     {
       "name": "narwhals",
-      "version": "2.21.2",
+      "version": "2.24.0",
       "vulns": []
     },
     {
@@ -317,7 +317,7 @@
     },
     {
       "name": "peewee",
-      "version": "4.0.6",
+      "version": "4.2.6",
       "vulns": []
     },
     {
@@ -327,12 +327,12 @@
     },
     {
       "name": "platformdirs",
-      "version": "4.9.6",
+      "version": "4.11.0",
       "vulns": []
     },
     {
       "name": "plotly",
-      "version": "6.7.0",
+      "version": "6.9.0",
       "vulns": []
     },
     {
@@ -382,12 +382,12 @@
     },
     {
       "name": "pyopenssl",
-      "version": "26.3.0",
+      "version": "26.4.0",
       "vulns": []
     },
     {
       "name": "pyotp",
-      "version": "2.9.0",
+      "version": "2.10.0",
       "vulns": []
     },
     {
@@ -407,7 +407,7 @@
     },
     {
       "name": "pytz",
-      "version": "2026.2",
+      "version": "2026.3.post1",
       "vulns": []
     },
     {
@@ -437,7 +437,7 @@
     },
     {
       "name": "scipy",
-      "version": "1.17.1",
+      "version": "1.18.0",
       "vulns": []
     },
     {
@@ -447,7 +447,7 @@
     },
     {
       "name": "sentry-sdk",
-      "version": "2.60.0",
+      "version": "2.66.1",
       "vulns": []
     },
     {
@@ -457,12 +457,12 @@
     },
     {
       "name": "soupsieve",
-      "version": "2.8.4",
+      "version": "2.9.1",
       "vulns": []
     },
     {
       "name": "structlog",
-      "version": "25.5.0",
+      "version": "26.1.0",
       "vulns": []
     },
     {
@@ -472,7 +472,7 @@
     },
     {
       "name": "typing-extensions",
-      "version": "4.15.0",
+      "version": "4.16.0",
       "vulns": []
     },
     {
@@ -482,12 +482,12 @@
     },
     {
       "name": "tzdata",
-      "version": "2026.2",
+      "version": "2026.3",
       "vulns": []
     },
     {
       "name": "tzlocal",
-      "version": "5.3.1",
+      "version": "5.4.4",
       "vulns": []
     },
     {
@@ -522,7 +522,7 @@
     },
     {
       "name": "websockets",
-      "version": "16.0",
+      "version": "17.0.1",
       "vulns": []
     },
     {
@@ -532,17 +532,17 @@
     },
     {
       "name": "wrapt",
-      "version": "2.2.1",
+      "version": "2.3.0",
       "vulns": []
     },
     {
       "name": "yarl",
-      "version": "1.24.2",
+      "version": "1.24.5",
       "vulns": []
     },
     {
       "name": "yfinance",
-      "version": "1.4.0",
+      "version": "1.5.2",
       "vulns": []
     },
     {
@@ -555,9 +555,9 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-07-26T06:35:48.777775Z",
-    "audited_at": "2026-07-26T06:35:48.777775Z",
-    "requirements_lock_sha256": "f69e3fad575d6c072558c0f74c951ed114a9e400edbbf3c3e4b300cd8a7a6df5",
+    "generated_at": "2026-08-10T19:32:55.308741Z",
+    "audited_at": "2026-08-10T19:32:55.308741Z",
+    "requirements_lock_sha256": "10e3fec9abd6caa6b3e1074a77dd193831ae74d1cbdcb9f3f9f6e3c9c8070c0c",
     "pip_audit_exit_code": 0
   }
 }

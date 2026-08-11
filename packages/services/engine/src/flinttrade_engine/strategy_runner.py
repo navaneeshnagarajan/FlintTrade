@@ -750,23 +750,87 @@ def _require_platform_enforcement(system: str, *, process_limit: int) -> None:
         raise RuntimeError("POSIX uploaded strategies support exactly one process per tree")
 
 
-def _is_bwrap_available() -> bool:
-    """Check if bubblewrap (bwrap) is installed on the system."""
-    return shutil.which("bwrap") is not None
+_BWRAP_STARTUP_TIMEOUT_SECONDS = 5.0
+_BWRAP_READY_STATE = "ready\n"
+_BWRAP_LAUNCH_LOCALE_KEYS = ("LANG", "LC_ALL", "LC_CTYPE", "TZ")
+
+
+class _BubblewrapStartupError(RuntimeError):
+    """Bubblewrap exited or failed its positive namespace-ready handshake."""
+
+
+def _build_bwrap_launcher_env() -> dict[str, str]:
+    """Return a minimal host environment for the trusted absolute bwrap.
+
+    The dynamic loader evaluates LD_* variables before bubblewrap can apply
+    ``--clearenv``.  Never inherit them (or any bwrap control variables) from
+    the parent process.
+    """
+    launcher_env = {"PATH": os.defpath}
+    for key in _BWRAP_LAUNCH_LOCALE_KEYS:
+        value = os.environ.get(key)
+        if value:
+            launcher_env[key] = value
+    return launcher_env
+
+
+def _find_bwrap_executable() -> str | None:
+    """Resolve bubblewrap from the fixed system path, never inherited PATH."""
+    executable = shutil.which("bwrap", path=os.defpath)
+    if executable is None:
+        trusted_candidates = (Path(directory) / "bwrap" for directory in os.defpath.split(os.pathsep) if directory)
+        if any(os.path.lexists(candidate) for candidate in trusted_candidates):
+            raise RuntimeError("Installed bubblewrap executable is not runnable")
+        return None
+    try:
+        resolved = Path(executable).resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError("Installed bubblewrap executable is unavailable") from exc
+    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+        raise RuntimeError("Installed bubblewrap executable is not runnable")
+    return str(resolved)
+
+
+def _require_bwrap_startup(process: subprocess.Popen[Any], readiness_path: Path) -> None:
+    """Require a positive signal emitted by the wrapper inside the namespace."""
+    deadline = time.monotonic() + _BWRAP_STARTUP_TIMEOUT_SECONDS
+    while True:
+        try:
+            readiness = readiness_path.read_bytes()
+        except OSError as exc:
+            raise _BubblewrapStartupError("Bubblewrap readiness file became unavailable") from exc
+
+        return_code = process.poll()
+        if return_code is not None:
+            raise _BubblewrapStartupError(
+                f"Bubblewrap sandbox exited during startup (exit code {return_code})"
+            )
+        if readiness == _BWRAP_READY_STATE.encode("ascii"):
+            return
+        if readiness:
+            raise _BubblewrapStartupError("Bubblewrap readiness handshake was invalid")
+
+        if time.monotonic() >= deadline:
+            raise _BubblewrapStartupError("Bubblewrap readiness handshake timed out")
+        time.sleep(0.01)
 
 
 def _build_bwrap_command(
+    bwrap_executable: str,
     python_exe: str,
     script_path: str,
     start_gate_path: str,
+    readiness_path: str,
     strategy_path: str,
 ) -> list[str]:
     """Build a bubblewrap sandbox command for running one strategy.
 
     Args:
+        bwrap_executable: Absolute path to the selected system bubblewrap.
         python_exe: Path to the Python interpreter.
         script_path: Path to the wrapper script to execute.
         start_gate_path: Path to the parent-owned start gate.
+        readiness_path: Path to the owner-only child-to-parent readiness file.
         strategy_path: Path to the validated uploaded strategy.
 
     Returns:
@@ -780,10 +844,11 @@ def _build_bwrap_command(
         interpreter = Path(python_exe).resolve(strict=True)
         wrapper = Path(script_path).resolve(strict=True)
         start_gate = Path(start_gate_path).resolve(strict=True)
+        readiness = Path(readiness_path).resolve(strict=True)
         strategy = Path(strategy_path).resolve(strict=True)
     except OSError as exc:
         raise RuntimeError("Uploaded-strategy sandbox inputs are unavailable") from exc
-    if not all(path.is_file() for path in (interpreter, wrapper, start_gate, strategy)):
+    if not all(path.is_file() for path in (interpreter, wrapper, start_gate, readiness, strategy)):
         raise RuntimeError("Uploaded-strategy sandbox inputs must be regular files")
 
     runtime_root = interpreter.parent.parent
@@ -797,7 +862,7 @@ def _build_bwrap_command(
     sandbox_runtime = Path("/run/flinttrade-python")
     sandbox_work = Path("/run/flinttrade-strategy")
     command = [
-        "bwrap",
+        bwrap_executable,
         "--dir",
         "/run",
         "--ro-bind",
@@ -811,6 +876,9 @@ def _build_bwrap_command(
         "--ro-bind",
         str(start_gate),
         str(sandbox_work / "_start_gate"),
+        "--bind",
+        str(readiness),
+        str(sandbox_work / "_bwrap_ready"),
         "--ro-bind",
         str(strategy),
         str(sandbox_work / "strategy.py"),
@@ -849,6 +917,7 @@ def _build_bwrap_command(
             "--",
             str(sandbox_runtime / runtime_executable),
             str(sandbox_work / "_sandbox_wrapper.py"),
+            str(sandbox_work / "_bwrap_ready"),
             str(sandbox_work / "_start_gate"),
             str(sandbox_work / "strategy.py"),
         ]
@@ -864,9 +933,10 @@ def _create_sandbox_wrapper(
 ) -> Path:
     """Create a sandbox wrapper script that restricts available builtins.
 
-    The wrapper is written into *temp_dir* and waits for the parent-owned gate
-    at ``sys.argv[1]`` before reading the strategy at ``sys.argv[2]``.  This
-    keeps uploaded code blocked until complete process-tree ownership has been
+    The wrapper is written into *temp_dir*, first writes the positive namespace
+    readiness marker at ``sys.argv[1]``, then waits for the parent-owned gate at
+    ``sys.argv[2]`` before reading the strategy at ``sys.argv[3]``.  This keeps
+    uploaded code blocked until complete process-tree ownership has been
     published.  The strategy then runs with a restricted ``__builtins__`` dict.
 
     Returns:
@@ -888,10 +958,16 @@ def _create_sandbox_wrapper(
             f"_resource.setrlimit(_resource.RLIMIT_AS, ({memory_limit_bytes}, {memory_limit_bytes}))\n"
         )
     wrapper_code = (
+        "import os as _os\n"
         "import sys\n"
         "import time\n"
         f"{resource_limits}"
-        "_gate = sys.argv[1]\n"
+        "_ready = sys.argv[1]\n"
+        "_gate = sys.argv[2]\n"
+        "with open(_ready, 'w', encoding='utf-8') as _ready_file:\n"
+        "    _ready_file.write('ready\\n')\n"
+        "    _ready_file.flush()\n"
+        "    _os.fsync(_ready_file.fileno())\n"
         "_deadline = time.monotonic() + 30.0\n"
         "while True:\n"
         "    try:\n"
@@ -906,7 +982,7 @@ def _create_sandbox_wrapper(
         "    time.sleep(0.01)\n"
         "_safe_names = " + safe_names_str + "\n"
         "_restricted = {n: __builtins__[n] if isinstance(__builtins__, dict) else getattr(__builtins__, n) for n in _safe_names}\n"
-        "_script = sys.argv[2]\n"
+        "_script = sys.argv[3]\n"
         "with open(_script) as _f:\n"
         "    _code = _f.read()\n"
         "exec(compile(_code, _script, 'exec'), "
@@ -915,6 +991,14 @@ def _create_sandbox_wrapper(
     wrapper_path = temp_dir / "_sandbox_wrapper.py"
     wrapper_path.write_text(wrapper_code, encoding="utf-8")
     return wrapper_path
+
+
+def _create_bwrap_readiness_file(temp_dir: Path) -> Path:
+    """Create the owner-only file written only after bwrap enters its namespace."""
+    readiness_path = temp_dir / "_bwrap_ready"
+    descriptor = os.open(readiness_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+    os.close(descriptor)
+    return readiness_path
 
 
 def _create_strategy_start_gate(temp_dir: Path) -> Path:
@@ -1218,23 +1302,35 @@ class UserStrategyRunner:
             process_limit=self._max_processes_per_strategy,
         )
         start_gate_path = _create_strategy_start_gate(temp_dir)
+        readiness_path = _create_bwrap_readiness_file(temp_dir)
 
         log_file = open(log_path, "a", encoding="utf-8")  # noqa: WPS515
         process: subprocess.Popen[Any] | None = None
+        tree: Any | None = None
 
         try:
             # Build command — bwrap on Linux when available, plain subprocess otherwise
-            use_bwrap = system == "Linux" and _is_bwrap_available()
+            bwrap_executable = _find_bwrap_executable() if system == "Linux" else None
+            use_bwrap = bwrap_executable is not None
             child_arg = str(wrapper_path)
             if use_bwrap:
+                assert bwrap_executable is not None
                 cmd: list[str] = _build_bwrap_command(
+                    bwrap_executable,
                     child_executable,
                     child_arg,
                     str(start_gate_path),
+                    str(readiness_path),
                     str(strategy_path),
                 )
             else:
-                cmd = [child_executable, child_arg, str(start_gate_path), str(strategy_path)]
+                cmd = [
+                    child_executable,
+                    child_arg,
+                    str(readiness_path),
+                    str(start_gate_path),
+                    str(strategy_path),
+                ]
 
             preexec_fn = (
                 None
@@ -1244,7 +1340,11 @@ class UserStrategyRunner:
                     memory_limit_bytes=self._memory_limit_bytes,
                 )
             )
-            child_env = {key: value for key, value in os.environ.items() if key not in _DESKTOP_CONTROL_ENV}
+            child_env = (
+                _build_bwrap_launcher_env()
+                if use_bwrap
+                else {key: value for key, value in os.environ.items() if key not in _DESKTOP_CONTROL_ENV}
+            )
 
             platform_spawn: dict[str, Any]
             if system == "Windows":
@@ -1263,6 +1363,7 @@ class UserStrategyRunner:
                 env=child_env,
                 close_fds=True,
                 preexec_fn=preexec_fn,
+                shell=False,
                 **platform_spawn,
             )
             tree = _create_process_tree(
@@ -1271,6 +1372,35 @@ class UserStrategyRunner:
                 memory_limit_bytes=self._memory_limit_bytes,
                 process_limit=self._max_processes_per_strategy,
             )
+            if use_bwrap:
+                _require_bwrap_startup(process, readiness_path)
+        except _BubblewrapStartupError:
+            assert process is not None
+            assert tree is not None
+            self._running[strategy_id] = _RunningStrategy(
+                strategy_id=strategy_id,
+                name=name,
+                process=process,
+                tree=tree,
+                started_at=datetime.now(UTC),
+                log_path=log_path,
+                memory_limit_mb=self._memory_limit_mb,
+                temp_dir=temp_dir,
+                log_file=log_file,
+            )
+            try:
+                self._stop_locked(strategy_id)
+            except Exception as cleanup_error:
+                logger.exception(
+                    "Bubblewrap startup failed and its owned process tree could not be reaped: %s (id=%s, pid=%d)",
+                    name,
+                    strategy_id,
+                    process.pid,
+                )
+                raise RuntimeError(
+                    "Bubblewrap startup failed and its process tree could not be terminated"
+                ) from cleanup_error
+            raise
         except _WindowsJobCreationRollbackError as exc:
             assert process is not None  # Popen completed before Job creation
             self._running[strategy_id] = _RunningStrategy(
@@ -1297,7 +1427,7 @@ class UserStrategyRunner:
                     strategy_id=strategy_id,
                     name=name,
                     process=process,
-                    tree=_PendingPosixProcessGroup(process),
+                    tree=tree if tree is not None else _PendingPosixProcessGroup(process),
                     started_at=datetime.now(UTC),
                     log_path=log_path,
                     memory_limit_mb=self._memory_limit_mb,

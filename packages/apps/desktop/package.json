@@ -7,7 +7,7 @@
   "type": "module",
   "main": "dist/electron-main.mjs",
   "engines": {
-    "node": ">=22.22.0"
+    "node": ">=22.22.2"
   },
   "scripts": {
     "dev": "node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && node scripts/bundle-electron.mjs --dev && electron .",
@@ -41,7 +41,7 @@
   "devDependencies": {
     "@electron/asar": "^4.2.1",
     "@electron/fuses": "^2.1.3",
-    "@types/node": "^24.0.0",
+    "@types/node": "^26.1.2",
     "@types/snappyjs": "0.7.1",
     "@types/yauzl": "^3.4.0",
     "electron": "43.2.0",

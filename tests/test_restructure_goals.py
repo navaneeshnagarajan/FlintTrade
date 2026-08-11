@@ -7,9 +7,12 @@ import re
 import runpy
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
+import pytest
 import yaml
+from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -384,7 +387,7 @@ def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
     ):
         assert name in workflow
     assert "SHA256SUMS.txt" in workflow
-    assert "actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1" in workflow
+    assert "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2" in workflow
     assert "permissions:\n  contents: read" in workflow
     publish_job = workflow.split("\n  publish:\n", 1)[1]
     assert "permissions:\n      contents: write\n      attestations: write\n      id-token: write" in publish_job
@@ -439,21 +442,272 @@ def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
     assert "pip-audit failed with status" in vuln_refresh
 
 
-def test_migration_workflows_pin_every_action_to_a_full_commit_sha() -> None:
-    """Mutable action tags must not control release artefacts or migration CI."""
-    workflow_names = (
-        "desktop-release.yml",
-        "nightly-cross-platform.yml",
-        "release-please.yml",
-        "supply-chain.yml",
-        "test.yml",
+def _workflow_paths(workflow_dir: Path) -> list[Path]:
+    return sorted((*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml")))
+
+
+def _uses_value_nodes(node: Node) -> Iterator[Node]:
+    """Yield every structurally parsed ``uses`` value at any YAML depth."""
+    if isinstance(node, MappingNode):
+        for key_node, value_node in node.value:
+            if isinstance(key_node, ScalarNode) and key_node.value == "uses":
+                yield value_node
+            yield from _uses_value_nodes(value_node)
+    elif isinstance(node, SequenceNode):
+        for item in node.value:
+            yield from _uses_value_nodes(item)
+
+
+def _yaml_comment_column(source_line: str, start_column: int) -> int | None:
+    """Locate the first real YAML comment after a scalar, ignoring quoted ``#``."""
+    in_single_quote = False
+    in_double_quote = False
+    column = start_column
+    while column < len(source_line):
+        character = source_line[column]
+        if in_single_quote:
+            if character == "'":
+                if column + 1 < len(source_line) and source_line[column + 1] == "'":
+                    column += 2
+                    continue
+                in_single_quote = False
+        elif in_double_quote:
+            if character == "\\":
+                column += 2
+                continue
+            if character == '"':
+                in_double_quote = False
+        elif character == "'":
+            in_single_quote = True
+        elif character == '"':
+            in_double_quote = True
+        elif character == "#" and (column == 0 or source_line[column - 1].isspace()):
+            return column
+        column += 1
+
+    return None
+
+
+def _has_readable_source_label(
+    source_lines: list[str],
+    value_node: Node,
+    uses_value_nodes: list[Node],
+) -> bool:
+    """Return whether a real YAML comment unambiguously labels this external pin."""
+    line_number = value_node.end_mark.line
+    if line_number >= len(source_lines):
+        return False
+    if sum(node.end_mark.line == line_number for node in uses_value_nodes) != 1:
+        return False
+
+    source_line = source_lines[line_number]
+    comment_column = _yaml_comment_column(source_line, value_node.end_mark.column)
+    if comment_column is None:
+        return False
+
+    between_value_and_comment = source_line[value_node.end_mark.column : comment_column]
+    if re.fullmatch(r"[\s\]}]*", between_value_and_comment) is None:
+        return False
+
+    label = source_line[comment_column + 1 :]
+    return re.search(r"[A-Za-z0-9]", label) is not None
+
+
+def _workflow_action_pin_violations(workflow_paths: list[Path]) -> list[str]:
+    violations: list[str] = []
+    for path in workflow_paths:
+        source = path.read_text(encoding="utf-8")
+        source_lines = source.splitlines()
+        try:
+            document = yaml.compose(source)
+        except yaml.YAMLError as error:
+            mark = getattr(error, "problem_mark", None)
+            line_number = mark.line + 1 if mark is not None else 1
+            problem = getattr(error, "problem", None) or str(error).splitlines()[0]
+            violations.append(
+                f"{path.name}:{line_number}: malformed workflow YAML: {problem}"
+            )
+            continue
+
+        if not isinstance(document, MappingNode):
+            violations.append(f"{path.name}:1: workflow YAML must be a mapping")
+            continue
+
+        uses_value_nodes = list(_uses_value_nodes(document))
+        for value_node in uses_value_nodes:
+            line_number = value_node.start_mark.line + 1
+            if not isinstance(value_node, ScalarNode) or value_node.tag != "tag:yaml.org,2002:str":
+                violations.append(
+                    f"{path.name}:{line_number}: uses value must be a string"
+                )
+                continue
+
+            target = value_node.value
+            if target.startswith("./"):
+                continue
+            if target.startswith("docker://"):
+                if (
+                    re.fullmatch(r"docker://[^@\s]+@sha256:[0-9a-f]{64}", target) is None
+                    or not _has_readable_source_label(
+                        source_lines, value_node, uses_value_nodes
+                    )
+                ):
+                    violations.append(f"{path.name}:{line_number}: {target}")
+                continue
+
+            action, separator, reference = target.rpartition("@")
+            if (
+                not separator
+                or re.fullmatch(r"[^/\s]+/[^@\s]+", action) is None
+                or re.fullmatch(r"[0-9a-f]{40}", reference) is None
+                or not _has_readable_source_label(
+                    source_lines, value_node, uses_value_nodes
+                )
+            ):
+                violations.append(f"{path.name}:{line_number}: {target}")
+
+    return violations
+
+
+@pytest.mark.parametrize(
+    ("name", "source", "expected_fragment"),
+    (
+        (
+            "alternate-whitespace.yml",
+            "jobs:\n  build:\n    steps:\n      - uses : actions/checkout@v7 # v7\n",
+            "actions/checkout@v7",
+        ),
+        (
+            "quoted-key.yml",
+            'jobs:\n  build:\n    steps:\n      - "uses": actions/checkout@v7 # v7\n',
+            "actions/checkout@v7",
+        ),
+        (
+            "flow-mapping.yml",
+            "jobs: {build: {steps: [{uses: actions/checkout@v7}]}} # v7\n",
+            "actions/checkout@v7",
+        ),
+        (
+            "nested-reusable.yml",
+            "jobs:\n  delegated:\n    uses: owner/project/.github/workflows/check.yml@main # v1\n",
+            "owner/project/.github/workflows/check.yml@main",
+        ),
+        (
+            "malformed.yml",
+            "jobs:\n  build: [\n",
+            "malformed workflow YAML",
+        ),
+        (
+            "non-string.yml",
+            "jobs:\n  build:\n    steps:\n      - uses: [actions/checkout@v7]\n",
+            "uses value must be a string",
+        ),
+        (
+            "uppercase-sha.yml",
+            f"jobs:\n  build:\n    steps:\n      - uses: actions/checkout@{'A' * 40} # v7\n",
+            f"actions/checkout@{'A' * 40}",
+        ),
+        (
+            "missing-label.yml",
+            f"jobs:\n  build:\n    steps:\n      - uses: actions/checkout@{'a' * 40}\n",
+            f"actions/checkout@{'a' * 40}",
+        ),
+        (
+            "flow-hash-in-quoted-value.yml",
+            "jobs: {build: {steps: [{uses: actions/checkout@"
+            + "a" * 40
+            + ', name: "# not a release comment"}]}}\n',
+            f"actions/checkout@{'a' * 40}",
+        ),
+        (
+            "flow-hash-after-escaped-double-quotes.yml",
+            "jobs: {build: {steps: [{uses: actions/setup-node@"
+            + "b" * 40
+            + r', name: "quoted \"value # still text\""}]}}'
+            + "\n",
+            f"actions/setup-node@{'b' * 40}",
+        ),
+        (
+            "flow-hash-after-doubled-single-quotes.yml",
+            "jobs: {build: {steps: [{uses: actions/upload-artifact@"
+            + "c" * 40
+            + ", name: 'quoted ''value # still text'''}]}}\n",
+            f"actions/upload-artifact@{'c' * 40}",
+        ),
+    ),
+)
+def test_workflow_action_pin_policy_detects_yaml_mutations(
+    tmp_path: Path,
+    name: str,
+    source: str,
+    expected_fragment: str,
+) -> None:
+    """Syntax changes must not hide mutable or malformed ``uses`` values."""
+    path = tmp_path / name
+    path.write_text(source, encoding="utf-8")
+
+    violations = _workflow_action_pin_violations([path])
+
+    assert any(expected_fragment in violation for violation in violations), violations
+
+
+def test_workflow_action_pin_policy_does_not_share_one_flow_label(
+    tmp_path: Path,
+) -> None:
+    """One trailing comment cannot label two external ``uses`` scalars."""
+    first = f"actions/checkout@{'a' * 40}"
+    second = f"actions/setup-node@{'b' * 40}"
+    path = tmp_path / "shared-flow-label.yml"
+    path.write_text(
+        f"jobs: {{build: {{steps: [{{uses: {first}}}, {{uses: {second}}}]}}}} # v7\n",
+        encoding="utf-8",
     )
-    unpinned: list[str] = []
-    for name in workflow_names:
-        text = (WORKFLOWS / name).read_text(encoding="utf-8")
-        for action, reference in re.findall(r"uses:\s+([^@\s]+)@([^\s#]+)", text):
-            if re.fullmatch(r"[0-9a-f]{40}", reference) is None:
-                unpinned.append(f"{name}: {action}@{reference}")
+
+    violations = _workflow_action_pin_violations([path])
+
+    assert len(violations) == 2, violations
+    assert first in violations[0]
+    assert second in violations[1]
+
+
+def test_workflow_action_pin_policy_accepts_structural_local_and_pinned_forms(
+    tmp_path: Path,
+) -> None:
+    """Local actions/workflows remain allowed and external references stay readable."""
+    path = tmp_path / "accepted.yaml"
+    path.write_text(
+        "jobs:\n"
+        "  build:\n"
+        "    steps:\n"
+        f"      - uses : actions/checkout@{'a' * 40} # v7\n"
+        f'      - "uses": actions/download-artifact@{'d' * 40} # v8.0.1\n'
+        '      - "uses": ./local-action\n'
+        f"      - {{uses: actions/setup-node@{'b' * 40}}} # v7.0.0\n"
+        f"      - uses: docker://ghcr.io/owner/image@sha256:{'e' * 64} # v1\n"
+        "  local-reusable:\n"
+        "    uses: ./.github/workflows/local.yml\n"
+        "  external-reusable:\n"
+        f"    uses: owner/project/.github/workflows/check.yml@{'c' * 40} # v1\n",
+        encoding="utf-8",
+    )
+
+    assert _workflow_action_pin_violations([path]) == []
+
+
+def test_workflow_action_pin_policy_discovers_yml_and_yaml_files(tmp_path: Path) -> None:
+    """Adding either supported workflow suffix automatically expands the policy surface."""
+    (tmp_path / "first.yml").write_text("jobs: {}\n", encoding="utf-8")
+    (tmp_path / "second.yaml").write_text("jobs: {}\n", encoding="utf-8")
+    (tmp_path / "ignored.txt").write_text("jobs: {}\n", encoding="utf-8")
+
+    assert [path.name for path in _workflow_paths(tmp_path)] == ["first.yml", "second.yaml"]
+
+
+def test_every_workflow_pins_external_actions_to_immutable_revisions() -> None:
+    """Every external action in every workflow is immutable and labelled."""
+    workflow_paths = _workflow_paths(WORKFLOWS)
+    assert workflow_paths, "no workflow files found"
+    unpinned = _workflow_action_pin_violations(workflow_paths)
 
     assert unpinned == []
 

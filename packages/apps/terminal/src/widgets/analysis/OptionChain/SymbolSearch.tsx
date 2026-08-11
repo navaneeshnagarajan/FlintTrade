@@ -3,7 +3,7 @@
  * Supports live API search with instrument-list fallback when offline.
  */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo } from "react";
 import { ChevronDown, Search, Loader2 } from "lucide-react";
 import {
   Popover,
@@ -73,17 +73,27 @@ export function instrumentToSymbolDef(inst: InstrumentRecord): SymbolDef {
 
 interface SymbolSearchProps {
   activeSymbol: SymbolDef;
+  dataScope: string;
   onSelect: (sym: SymbolDef) => void;
   instruments: InstrumentRecord[];
 }
 
-export default function SymbolSearch({ activeSymbol, onSelect, instruments }: SymbolSearchProps) {
+export default function SymbolSearch({ activeSymbol, dataScope, onSelect, instruments }: SymbolSearchProps) {
   const [open, setOpen]                       = useState(false);
   const [query, setQuery]                     = useState("");
   const [searchResults, setSearchResults]     = useState<SymbolSearchResult[]>([]);
   const [searchFailed, setSearchFailed]       = useState(false);
   const [searching, setSearching]             = useState(false);
   const debouncedQuery                        = useDebounce(query, 300);
+
+  useLayoutEffect(() => {
+    // Search results are authority-owned. Remove A's selectable contracts
+    // before the browser can paint B, then let the scoped effect repopulate.
+    setSearchResults([]);
+    setSearchFailed(false);
+    setSearching(false);
+    setOpen(false);
+  }, [dataScope]);
 
   // Known labels in the hardcoded SYMBOLS list — used for deduplication
   const hardcodedLabels = useMemo(() => new Set(SYMBOLS.map((s) => s.label)), []);
@@ -112,29 +122,35 @@ export default function SymbolSearch({ activeSymbol, onSelect, instruments }: Sy
       setSearching(false);
       return;
     }
-    let cancelled = false;
+    const controller = new AbortController();
+    setSearchResults([]);
     setSearching(true);
     setSearchFailed(false);
     (async () => {
       try {
-        const raw = await searchSymbol(debouncedQuery.trim());
-        if (cancelled) return;
+        const raw = await searchSymbol(
+          debouncedQuery.trim(),
+          undefined,
+          controller.signal,
+          dataScope,
+        );
+        if (controller.signal.aborted) return;
         const list = Array.isArray(raw)
           ? raw
           : ((raw as unknown as { data?: SymbolSearchResult[] })?.data ?? []);
         setSearchResults(list.slice(0, 15));
         setSearchFailed(false);
       } catch {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setSearchResults([]);
           setSearchFailed(true);
         }
       } finally {
-        if (!cancelled) setSearching(false);
+        if (!controller.signal.aborted) setSearching(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, [debouncedQuery]);
+    return () => controller.abort();
+  }, [debouncedQuery, dataScope]);
 
   const showingFallback = !searching && debouncedQuery.length >= 2 && (searchFailed || searchResults.length === 0) && instrumentFallbackResults.length > 0;
   const displayResults  = showingFallback ? instrumentFallbackResults : searchResults;

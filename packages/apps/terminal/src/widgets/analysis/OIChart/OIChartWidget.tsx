@@ -58,7 +58,17 @@
  *   - A missing figure renders as "--", never as 0.
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense, memo } from "react";
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useRef,
+  useMemo,
+  lazy,
+  Suspense,
+  memo,
+} from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { AlertCircle, Loader2, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 import type { WidgetProps } from "@/types/widgets";
@@ -75,6 +85,7 @@ import { SYMBOLS } from "@/widgets/analysis/OptionChain/types";
 import { isMarketHours } from "@/lib/market";
 import { useModeStore } from "@/stores/modeStore";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useMarketDataScope } from "@/hooks/useDataScope";
 import { useLatestRequest } from "@/hooks/useLatestRequest";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -345,6 +356,7 @@ function OIChartWidget(props: WidgetProps) {
 
   const isConnected = useBrokerConnected();
   const isExplore = useModeStore((s) => s.mode === "explore");
+  const dataScope = useMarketDataScope();
 
   const [view, setView] = useState<ViewMode>(initialView);
   // The retired OI Profile widget always showed its price strip, so a panel
@@ -376,12 +388,15 @@ function OIChartWidget(props: WidgetProps) {
   });
 
   const gridRef = useRef<HTMLDivElement>(null);
+  const chainControllerRef = useRef<AbortController | null>(null);
+  const maxPainControllerRef = useRef<AbortController | null>(null);
 
   const symDef = SYMBOL_CHOICES[symbolIdx];
   const exchange = symDef.exchange;
-  // A broker connection change swaps the data source, so it is part of the
-  // identity a response has to still match.
-  const identityKey = `${isConnected}:${symDef.label}:${exchange}`;
+  // The exact market-data authority owns every cache, request, and displayed
+  // value. A connected A -> connected B transition must retire A just as
+  // decisively as a disconnect or symbol change.
+  const identityKey = `${dataScope}:${isConnected}:${symDef.label}:${exchange}`;
   const currentExpiries = expiryIdentity === identityKey ? expiries : [];
   const expiryCandidate = typeof selectedExpiryValue === "string" ? selectedExpiryValue.trim() : "";
   const selectedExpiry = currentExpiries.includes(expiryCandidate) ? expiryCandidate : null;
@@ -394,7 +409,7 @@ function OIChartWidget(props: WidgetProps) {
 
   // Clear every displayed value the moment the identity changes, so nothing
   // from the previous contract survives on screen while the next load runs.
-  useEffect(() => {
+  useLayoutEffect(() => {
     setChain(null);
     setSpot(null);
     setMaxPainStrike(null);
@@ -420,10 +435,17 @@ function OIChartWidget(props: WidgetProps) {
     if (!isConnected) return;
 
     let cancelled = false;
+    const controller = new AbortController();
     (async () => {
       try {
-        const data = await getExpiry(symDef.label, exchange);
-        if (cancelled) return;
+        const data = await getExpiry(
+          symDef.label,
+          exchange,
+          "options",
+          controller.signal,
+          dataScope,
+        );
+        if (cancelled || controller.signal.aborted) return;
         const rawList = Array.isArray(data)
           ? data
           : ((data as { expiry?: unknown[] })?.expiry ?? []);
@@ -436,28 +458,36 @@ function OIChartWidget(props: WidgetProps) {
         setExpiryIdentity(identityKey);
         setSelectedExpiry(list[0] ?? null);
       } catch (e) {
-        if (!cancelled) setError(`Expiry load failed: ${(e as Error).message}`);
+        if (!cancelled && !controller.signal.aborted) {
+          setError(`Expiry load failed: ${(e as Error).message}`);
+        }
       }
     })();
 
-    return () => { cancelled = true; };
-  }, [identityKey, symDef.label, exchange, isConnected]);
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [identityKey, symDef.label, exchange, isConnected, dataScope]);
 
   // ---- Chain + spot --------------------------------------------------------
   const fetchData = useCallback(async () => {
     if (!isConnected || !selectedExpiry) return;
     const ticket = chainRequests.begin(requestKey);
     if (!ticket) return;
+    chainControllerRef.current?.abort();
+    const controller = new AbortController();
+    chainControllerRef.current = controller;
     setLoading(true);
     setError(null);
 
     try {
       const [chainRes, spotRes] = await Promise.allSettled([
-        getOptionChain(symDef.label, exchange, selectedExpiry),
-        getQuotes(symDef.spotSymbol, symDef.spotExchange),
+        getOptionChain(symDef.label, exchange, selectedExpiry, controller.signal, dataScope),
+        getQuotes(symDef.spotSymbol, symDef.spotExchange, controller.signal, dataScope),
       ]);
 
-      if (!ticket.isCurrent()) return;
+      if (controller.signal.aborted || !ticket.isCurrent()) return;
 
       if (chainRes.status === "fulfilled") {
         setChain(chainRes.value as unknown as RawOptionChain);
@@ -468,6 +498,9 @@ function OIChartWidget(props: WidgetProps) {
 
       setSpot(spotRes.status === "fulfilled" ? spotRes.value : null);
     } finally {
+      if (chainControllerRef.current === controller) {
+        chainControllerRef.current = null;
+      }
       if (ticket.settle()) {
         setLoading(false);
         setLastRefresh(new Date());
@@ -475,7 +508,7 @@ function OIChartWidget(props: WidgetProps) {
     }
   }, [
     chainRequests, requestKey, isConnected, selectedExpiry,
-    symDef.label, symDef.spotSymbol, symDef.spotExchange, exchange,
+    symDef.label, symDef.spotSymbol, symDef.spotExchange, exchange, dataScope,
   ]);
 
   useEffect(() => {
@@ -484,6 +517,8 @@ function OIChartWidget(props: WidgetProps) {
     const id = setInterval(() => void fetchData(), refreshIntervalMs());
     return () => {
       clearInterval(id);
+      chainControllerRef.current?.abort();
+      chainControllerRef.current = null;
       chainRequests.invalidate();
     };
   }, [chainRequests, fetchData, isConnected, selectedExpiry]);
@@ -493,11 +528,20 @@ function OIChartWidget(props: WidgetProps) {
     if (!isConnected || !selectedExpiry) return;
     const ticket = maxPainRequests.begin(requestKey);
     if (!ticket) return;
+    maxPainControllerRef.current?.abort();
+    const controller = new AbortController();
+    maxPainControllerRef.current = controller;
     setMaxPainStrike(null);
     setMaxPainRows(null);
     try {
-      const data = await getMaxPain(symDef.label, exchange, selectedExpiry);
-      if (!ticket.isCurrent()) return;
+      const data = await getMaxPain(
+        symDef.label,
+        exchange,
+        selectedExpiry,
+        controller.signal,
+        dataScope,
+      );
+      if (controller.signal.aborted || !ticket.isCurrent()) return;
       // Fail closed: a max pain that is not explicitly attested live is not
       // drawn at all, rather than drawn as if it were the real level.
       const isLive = data.is_sample_data === false;
@@ -517,14 +561,17 @@ function OIChartWidget(props: WidgetProps) {
         isLive && Array.isArray(data.strikes) && data.strikes.length > 0 ? data.strikes : null,
       );
     } catch {
-      if (ticket.isCurrent()) {
+      if (!controller.signal.aborted && ticket.isCurrent()) {
         setMaxPainStrike(null);
         setMaxPainRows(null);
       }
     } finally {
+      if (maxPainControllerRef.current === controller) {
+        maxPainControllerRef.current = null;
+      }
       ticket.settle();
     }
-  }, [maxPainRequests, requestKey, isConnected, selectedExpiry, symDef.label, exchange]);
+  }, [maxPainRequests, requestKey, isConnected, selectedExpiry, symDef.label, exchange, dataScope]);
 
   useEffect(() => {
     if (!isConnected || !selectedExpiry) return;
@@ -532,6 +579,8 @@ function OIChartWidget(props: WidgetProps) {
     const id = setInterval(() => void fetchMaxPain(), 60_000);
     return () => {
       clearInterval(id);
+      maxPainControllerRef.current?.abort();
+      maxPainControllerRef.current = null;
       maxPainRequests.invalidate();
     };
   }, [fetchMaxPain, maxPainRequests, isConnected, selectedExpiry]);
@@ -543,14 +592,28 @@ function OIChartWidget(props: WidgetProps) {
   const signalsExpiry = selectedExpiry ?? "";
   const signalsEnabled = isConnected && view === "signals" && signalsExpiry !== "";
   const analysisQuery = useQuery({
-    queryKey: ["oiAnalysis", symDef.label, exchange, signalsExpiry, priceDir],
-    queryFn: () => getOIChangeAnalysis(symDef.label, exchange, signalsExpiry, priceDir),
+    queryKey: ["oiAnalysis", dataScope, symDef.label, exchange, signalsExpiry, priceDir],
+    queryFn: ({ signal }) => getOIChangeAnalysis(
+      symDef.label,
+      exchange,
+      signalsExpiry,
+      priceDir,
+      signal,
+      dataScope,
+    ),
     enabled: signalsEnabled,
     refetchInterval: signalsEnabled ? refreshIntervalMs() : false,
   });
   const unusualQuery = useQuery({
-    queryKey: ["oiUnusual", symDef.label, exchange, signalsExpiry],
-    queryFn: () => getUnusualOI(symDef.label, exchange, signalsExpiry),
+    queryKey: ["oiUnusual", dataScope, symDef.label, exchange, signalsExpiry],
+    queryFn: ({ signal }) => getUnusualOI(
+      symDef.label,
+      exchange,
+      signalsExpiry,
+      undefined,
+      signal,
+      dataScope,
+    ),
     enabled: signalsEnabled,
     refetchInterval: signalsEnabled ? refreshIntervalMs() : false,
   });
@@ -1474,6 +1537,7 @@ function OIChartWidget(props: WidgetProps) {
               symbol={symDef.spotSymbol}
               spotExchange={symDef.spotExchange}
               interval={spotInterval}
+              dataScope={dataScope}
             />
           </Suspense>
         </div>

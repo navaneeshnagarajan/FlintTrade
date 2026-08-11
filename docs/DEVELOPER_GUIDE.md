@@ -53,7 +53,7 @@ Pick the guide for your platform and follow it end-to-end:
 - [Raspberry Pi setup](setup/raspberry-pi.md)
 - [Quick start (cross-platform)](setup/QUICKSTART.md)
 
-A complete dev environment includes Python 3.12, Node 22.22+ (24 recommended),
+A complete dev environment includes Python 3.12, Node 22.22.2+ (24 recommended),
 and Rust stable if you build `ticks`. OpenAlgo is optional: install it
 separately, or clone a local-dev copy into `.local/external/openalgo/` with
 `scripts/setup-test-deps.sh` (a bash script — on Windows run it in WSL2 or Git
@@ -195,12 +195,13 @@ are aliases for the same three targets.
 
 Output lands in `packages/apps/desktop/release/electron/`. The release workflow
 produces a universal macOS DMG, Windows x64 NSIS installer, and x64/ARM64 Linux
-AppImages. No Electron release is published yet; the prior Tauri/PyInstaller
-releases were deleted in the 2026-07-23 release reset to a clean `v0.0.1`
-baseline. The local macOS packaging
-target always uses an ad-hoc seal, which verifies bundle integrity but does not
-provide Developer ID trust or notarisation. Only release CI can use complete
-Apple distribution-signing and notarisation secret sets.
+AppImages. The source-built web app remains distinct from those Electron-shell
+installers. A release is accepted only as all four canonical installers plus
+`SHA256SUMS.txt`; retired Tauri and PyInstaller assets never satisfy that gate.
+The local macOS packaging target always uses an ad-hoc seal, which verifies
+bundle integrity but does not provide Developer ID trust or notarisation. Only
+release CI can use complete Apple distribution-signing and notarisation secret
+sets.
 
 First launch uses system Git or the official HTTPS archive fallback, verifies
 pinned tool distributions, provisions Python 3.12 with `uv`, installs from the

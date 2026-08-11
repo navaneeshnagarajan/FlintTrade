@@ -134,11 +134,11 @@ Updates use the same separation: the running checkout is immutable, candidate
 health proof uses an isolated temporary workspace, and promotion retains one
 last-known-good source for rollback.
 
-The Electron installer is not the application runtime. A release contains the
-shell and bootstrap resources only. Source/runtime updates and shell-installer
-updates are separate flows. No Electron installer release is published yet; the
-previous Tauri and PyInstaller release assets have been retired and do not
-satisfy this architecture.
+The Electron installer is not the application runtime. The source-built web app
+is distinct from Electron-shell installers, and source/runtime updates remain
+separate from shell-installer updates. A release is accepted only when it
+contains all four canonical installers plus `SHA256SUMS.txt`; retired Tauri and
+PyInstaller assets never satisfy this architecture.
 
 When the operator selects managed Ollama, the backend owns an on-demand sidecar
 process. FlintTrade selects an unpredictable free high loopback port, starts

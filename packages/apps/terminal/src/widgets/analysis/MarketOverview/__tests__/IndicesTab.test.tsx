@@ -31,6 +31,7 @@ import { tickAtomFamily } from "@/atoms/marketAtoms";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getGlobalIndices } from "@/services/ftApi";
 import type { GlobalIndexEntry } from "@/services/ftApi";
+import { useModeStore } from "@/stores/modeStore";
 import IndicesTab, { currencyForIndex, vixBandFor } from "../tabs/IndicesTab";
 import { SAMPLE_GLOBAL_INDICES } from "../sampleData";
 
@@ -64,6 +65,8 @@ beforeEach(() => {
     updated_at: new Date().toISOString(),
     is_sample_data: false,
   });
+  // Default to non-Explore so existing Live-with-tick assertions stay honest.
+  useModeStore.setState({ mode: "practice" });
 });
 
 // ---------------------------------------------------------------------------
@@ -91,6 +94,22 @@ describe("IndicesTab — NSE index cards", () => {
     expect(screen.getByText("22,150.4")).toBeInTheDocument();
     const heading = screen.getByText("NSE Indices");
     expect(heading.querySelector("span")?.textContent).toBe("Live");
+  });
+
+  it("Explore mode shows Sample even when sample-injected index ticks are present", () => {
+    // Regression: Explore injects ticks into the same atoms; ProvChip must be
+    // mode-aware and never claim Live against sample Explore data.
+    useModeStore.setState({ mode: "explore" });
+    seedTick("NSE_INDEX:NIFTY", { ltp: 22150.4, prevClose: 21965.15 });
+    seedTick("NSE_INDEX:INDIAVIX", { ltp: 14.5, prevClose: 14.0 });
+    renderTab();
+
+    const nseHeading = screen.getByText("NSE Indices");
+    expect(nseHeading.querySelector("span")?.textContent).toBe("Sample");
+    const vixHeading = screen.getByText("Volatility Regime");
+    expect(vixHeading.querySelector("span")?.textContent).toBe("Sample");
+    // Levels may still render from the injected ticks — only the chip changes.
+    expect(screen.getByText("22,150.4")).toBeInTheDocument();
   });
 });
 

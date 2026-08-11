@@ -14,6 +14,15 @@ import type { Dispatch, SetStateAction } from "react";
 import type { WidgetProps } from "@/types/widgets";
 import { ohlcvCacheKey } from "@/lib/chartCache";
 
+type TestLegendState = {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+  bull: boolean;
+};
+
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before the component import
 // ---------------------------------------------------------------------------
@@ -66,6 +75,7 @@ const indicatorHookMocks = vi.hoisted(() => ({
 
 const chartInitMocks = vi.hoisted(() => {
   let ready = false;
+  let legendSetter: ((value: TestLegendState | null) => void) | null = null;
   const timeScale = {
     fitContent: vi.fn(),
     setVisibleLogicalRange: vi.fn(),
@@ -98,8 +108,15 @@ const chartInitMocks = vi.hoisted(() => {
   return {
     candleSeries,
     chart,
+    captureLegendSetter: (setter: (value: TestLegendState | null) => void) => {
+      legendSetter = setter;
+    },
+    emitLegend: (legend: TestLegendState | null) => {
+      legendSetter?.(legend);
+    },
     reset: () => {
       ready = false;
+      legendSetter = null;
       chartRef.current = null;
       candleRef.current = null;
       volumeRef.current = null;
@@ -119,7 +136,10 @@ const chartInitMocks = vi.hoisted(() => {
 
 // Mock local chart hooks that touch the canvas
 vi.mock("../useChartInit", () => ({
-  useChartInit: () => chartInitMocks.refs(),
+  useChartInit: (setLegend: (value: TestLegendState | null) => void) => {
+    chartInitMocks.captureLegendSetter(setLegend);
+    return chartInitMocks.refs();
+  },
 }));
 
 vi.mock("../useDrawingTools", () => ({
@@ -155,16 +175,31 @@ vi.mock("../useChartReplay", () => ({
 }));
 
 const apiMocks = vi.hoisted(() => ({
+  searchSymbol: vi.fn<(
+    query: string,
+    exchange?: string,
+    signal?: AbortSignal,
+    expectedDataScope?: string,
+  ) => Promise<unknown[]>>(() => Promise.resolve([])),
   getHistory: vi.fn<(...args: unknown[]) => Promise<unknown[]>>(() => Promise.resolve([])),
-  getQuotes: vi.fn(() => Promise.resolve({})),
+  getIntervals: vi.fn<(
+    signal?: AbortSignal,
+    expectedDataScope?: string,
+  ) => Promise<string[]>>(() => Promise.resolve([])),
+  getQuotes: vi.fn<(
+    symbol: string,
+    exchange: string,
+    signal?: AbortSignal,
+    expectedDataScope?: string,
+  ) => Promise<Record<string, number>>>(() => Promise.resolve({})),
 }));
 
 // Services — prevent real API calls
 vi.mock("@/services/api", () => ({
-  searchSymbol: vi.fn(() => Promise.resolve([])),
+  searchSymbol: apiMocks.searchSymbol,
   getHistory: apiMocks.getHistory,
   getQuotes: apiMocks.getQuotes,
-  getIntervals: vi.fn(() => Promise.resolve([])),
+  getIntervals: apiMocks.getIntervals,
 }));
 
 vi.mock("@/lib/market", () => ({
@@ -178,6 +213,7 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 const dataScopeState = vi.hoisted(() => ({ value: "explore:mock" }));
 vi.mock("@/hooks/useDataScope", () => ({
   useDataScope: () => dataScopeState.value,
+  useMarketDataScope: () => dataScopeState.value,
 }));
 
 // Chart sync bus — the widget must not touch it at all without a syncGroup
@@ -325,6 +361,16 @@ import { searchSymbol } from "@/services/api";
 import ChartWidget from "../ChartWidget";
 import { useIndicators } from "../useIndicators";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -340,8 +386,12 @@ describe("ChartWidget", () => {
     drawingToolMocks.undoLastDrawing.mockClear();
     drawingToolMocks.lastOptions = null;
     dataScopeState.value = "explore:mock";
+    apiMocks.searchSymbol.mockReset();
+    apiMocks.searchSymbol.mockResolvedValue([]);
     apiMocks.getHistory.mockReset();
     apiMocks.getHistory.mockResolvedValue([]);
+    apiMocks.getIntervals.mockReset();
+    apiMocks.getIntervals.mockResolvedValue([]);
     apiMocks.getQuotes.mockReset();
     apiMocks.getQuotes.mockResolvedValue({});
   });
@@ -353,6 +403,165 @@ describe("ChartWidget", () => {
   it("renders without crashing", () => {
     const { container } = render(<ChartWidget />);
     expect(container.firstChild).toBeInTheDocument();
+  });
+
+  it("aborts and reloads interval capabilities when the data authority changes", async () => {
+    let resolveFirst!: (value: string[]) => void;
+    apiMocks.getIntervals
+      .mockImplementationOnce(() => new Promise<string[]>((resolve) => {
+        resolveFirst = resolve;
+      }))
+      .mockResolvedValueOnce([]);
+    dataScopeState.value = "live:native:upstox:U1";
+    const view = render(
+      <ChartWidget {...makeWidgetPanelProps({ params: { scopeProbe: "live" } })} />,
+    );
+    await waitFor(() => expect(apiMocks.getIntervals).toHaveBeenCalledTimes(1));
+    const firstSignal = apiMocks.getIntervals.mock.calls[0]?.[0];
+
+    dataScopeState.value = "explore:mock";
+    view.rerender(
+      <ChartWidget {...makeWidgetPanelProps({ params: { scopeProbe: "explore" } })} />,
+    );
+
+    await waitFor(() => expect(apiMocks.getIntervals).toHaveBeenCalledTimes(2));
+    expect(firstSignal?.aborted).toBe(true);
+    await act(async () => {
+      resolveFirst(["1m"]);
+      await Promise.resolve();
+    });
+    expect(apiMocks.getIntervals).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not request an interval unsupported by the next data authority", async () => {
+    chartInitMocks.setReady(true);
+    dataScopeState.value = "live:native:upstox:U1";
+    apiMocks.getIntervals
+      .mockResolvedValueOnce(["3m", "5m"])
+      .mockResolvedValueOnce(["5m"]);
+    const view = render(
+      <ChartWidget {...makeWidgetPanelProps({ params: { interval: "3m", scopeProbe: "upstox" } })} />,
+    );
+    await waitFor(() => expect(apiMocks.getHistory).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      "3m",
+      expect.any(String),
+      expect.any(String),
+      expect.any(AbortSignal),
+      "live:native:upstox:U1",
+    ));
+
+    apiMocks.getHistory.mockClear();
+    dataScopeState.value = "live:native:dhan:D1";
+    view.rerender(
+      <ChartWidget {...makeWidgetPanelProps({ params: { interval: "3m", scopeProbe: "dhan" } })} />,
+    );
+
+    await waitFor(() => expect(apiMocks.getIntervals).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiMocks.getHistory).toHaveBeenCalled());
+    expect(apiMocks.getHistory).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      "3m",
+      expect.any(String),
+      expect.any(String),
+      expect.any(AbortSignal),
+      "live:native:dhan:D1",
+    );
+    expect(apiMocks.getHistory).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(String),
+      "5m",
+      expect.any(String),
+      expect.any(String),
+      expect.any(AbortSignal),
+      "live:native:dhan:D1",
+    );
+  });
+
+  it("clears A candles, volume, and legend while B interval discovery is still pending", async () => {
+    chartInitMocks.setReady(true);
+    const pendingBIntervals = deferred<string[]>();
+    apiMocks.getIntervals
+      .mockResolvedValueOnce(["5m"])
+      .mockImplementationOnce(() => pendingBIntervals.promise);
+    apiMocks.getHistory.mockResolvedValueOnce([{
+      timestamp: "2026-07-11",
+      open: 910,
+      high: 915,
+      low: 905,
+      close: 912,
+      volume: 44,
+    }]);
+    dataScopeState.value = "live:native:upstox:U1";
+    const view = render(
+      <ChartWidget {...makeWidgetPanelProps({ params: { scopeProbe: "upstox" } })} />,
+    );
+
+    await waitFor(() => {
+      expect(chartInitMocks.candleSeries.setData).toHaveBeenLastCalledWith([
+        expect.objectContaining({ close: 912 }),
+      ]);
+    });
+    act(() => {
+      chartInitMocks.emitLegend({
+        open: 901,
+        high: 919,
+        low: 899,
+        close: 912,
+        volume: 44,
+        bull: true,
+      });
+    });
+    expect(screen.getByText("901.00")).toBeInTheDocument();
+
+    dataScopeState.value = "live:native:dhan:D1";
+    view.rerender(
+      <ChartWidget {...makeWidgetPanelProps({ params: { scopeProbe: "dhan" } })} />,
+    );
+
+    await waitFor(() => expect(apiMocks.getIntervals).toHaveBeenCalledTimes(2));
+    expect(chartInitMocks.candleSeries.setData).toHaveBeenLastCalledWith([]);
+    expect(chartInitMocks.volumeSeries.setData).toHaveBeenLastCalledWith([]);
+    expect(screen.queryByText("901.00")).not.toBeInTheDocument();
+    expect(apiMocks.getHistory.mock.calls.some((call) => call[6] === "live:native:dhan:D1"))
+      .toBe(false);
+  });
+
+  it("falls back after two seconds when interval discovery never settles and loads history", async () => {
+    vi.useFakeTimers();
+    try {
+      chartInitMocks.setReady(true);
+      apiMocks.getIntervals.mockImplementation(() => new Promise<string[]>(() => {}));
+      dataScopeState.value = "live:native:upstox:U1";
+
+      render(<ChartWidget {...makeWidgetPanelProps({ params: { scopeProbe: "upstox" } })} />);
+
+      expect(apiMocks.getIntervals).toHaveBeenCalledTimes(1);
+      expect(apiMocks.getHistory).not.toHaveBeenCalled();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_999);
+      });
+      expect(apiMocks.getHistory).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(apiMocks.getIntervals.mock.calls[0]?.[0]).toEqual(expect.any(AbortSignal));
+      expect((apiMocks.getIntervals.mock.calls[0]?.[0] as AbortSignal).aborted).toBe(true);
+      expect(apiMocks.getHistory).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        "5m",
+        expect.any(String),
+        expect.any(String),
+        expect.any(AbortSignal),
+        "live:native:upstox:U1",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the chart container div", () => {
@@ -447,6 +656,55 @@ describe("ChartWidget", () => {
     render(<ChartWidget />);
     const searchInput = screen.getByPlaceholderText("Search symbol...");
     expect(searchInput).toBeInTheDocument();
+  });
+
+  it("retires A symbol-search results and cannot let A hide B loading", async () => {
+    const user = userEvent.setup();
+    const pendingA = deferred<unknown[]>();
+    const pendingB = deferred<unknown[]>();
+    const aResult = { symbol: "A-RESULT", exchange: "NSE", name: "Authority A" };
+    const bResult = { symbol: "B-RESULT", exchange: "BSE", name: "Authority B" };
+    apiMocks.searchSymbol
+      .mockResolvedValueOnce([aResult])
+      .mockImplementationOnce(() => pendingA.promise)
+      .mockImplementationOnce(() => pendingB.promise);
+    dataScopeState.value = "live:native:upstox:U1";
+    const view = render(
+      <ChartWidget {...makeWidgetPanelProps({ params: { scopeProbe: "upstox" } })} />,
+    );
+    const searchInput = screen.getByPlaceholderText("Search symbol...");
+
+    await user.type(searchInput, "TC");
+    expect(await screen.findByRole("button", { name: /A-RESULT/ })).toBeInTheDocument();
+    await user.type(searchInput, "S");
+    await waitFor(() => expect(apiMocks.searchSymbol).toHaveBeenCalledTimes(2));
+    const retiredASignal = apiMocks.searchSymbol.mock.calls[1]?.[2] as AbortSignal;
+
+    dataScopeState.value = "live:native:dhan:D1";
+    view.rerender(
+      <ChartWidget {...makeWidgetPanelProps({ params: { scopeProbe: "dhan" } })} />,
+    );
+
+    expect(retiredASignal.aborted).toBe(true);
+    expect(screen.queryByRole("button", { name: /A-RESULT/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(apiMocks.searchSymbol).toHaveBeenCalledTimes(3));
+    expect(apiMocks.searchSymbol.mock.calls[2]?.[3]).toBe("live:native:dhan:D1");
+    const searchBox = searchInput.parentElement;
+    expect(searchBox).not.toBeNull();
+    expect(within(searchBox!).getByText("...")).toBeInTheDocument();
+
+    await act(async () => {
+      pendingA.reject(new DOMException("retired", "AbortError"));
+      await Promise.resolve();
+    });
+    expect(within(searchBox!).getByText("...")).toBeInTheDocument();
+
+    await act(async () => {
+      pendingB.resolve([bResult]);
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole("button", { name: /B-RESULT/ })).toBeInTheDocument();
+    expect(within(searchBox!).queryByText("...")).not.toBeInTheDocument();
   });
 
   it("uses shared chart keyboard shortcuts without stealing typing-field keys", () => {
@@ -1370,6 +1628,8 @@ describe("ChartWidget time-scale sync (params.syncGroup)", () => {
     localStorage.clear();
     chartInitMocks.reset();
     dataScopeState.value = "explore:mock";
+    apiMocks.getIntervals.mockReset();
+    apiMocks.getIntervals.mockResolvedValue([]);
     apiMocks.getHistory.mockReset();
     apiMocks.getHistory.mockResolvedValue([]);
     apiMocks.getQuotes.mockReset();
@@ -1473,6 +1733,8 @@ describe("ChartWidget option-leg panels (params.optionLeg)", () => {
     localStorage.clear();
     chartInitMocks.reset();
     dataScopeState.value = "explore:mock";
+    apiMocks.getIntervals.mockReset();
+    apiMocks.getIntervals.mockResolvedValue([]);
     apiMocks.getHistory.mockReset();
     apiMocks.getHistory.mockResolvedValue([]);
     apiMocks.getQuotes.mockReset();
@@ -1493,10 +1755,14 @@ describe("ChartWidget option-leg panels (params.optionLeg)", () => {
 
     render(<ChartWidget params={{ optionLeg: { underlying: "NIFTY", leg: "CE" } }} />);
 
-    expect(optionLegMocks.resolveOptionLeg).toHaveBeenCalledExactlyOnceWith({
-      underlying: "NIFTY",
-      leg: "CE",
-    });
+    expect(optionLegMocks.resolveOptionLeg).toHaveBeenCalledExactlyOnceWith(
+      {
+        underlying: "NIFTY",
+        leg: "CE",
+      },
+      expect.any(AbortSignal),
+      "explore:mock",
+    );
     expect(await screen.findByText("NIFTY30DEC9924800CE")).toBeInTheDocument();
 
     await waitFor(() => expect(apiMocks.getHistory).toHaveBeenCalled());
@@ -1533,6 +1799,108 @@ describe("ChartWidget option-leg panels (params.optionLeg)", () => {
     );
     expect(apiMocks.getHistory).not.toHaveBeenCalled();
     expect(apiMocks.getQuotes).not.toHaveBeenCalled();
+  });
+
+  it("retires an A resolution error while B is still pending", async () => {
+    optionLegMocks.resolveOptionLeg
+      .mockRejectedValueOnce(new Error("Upstox option discovery failed"))
+      .mockImplementationOnce(() => new Promise(() => {}));
+    dataScopeState.value = "live:native:upstox:U1";
+    const view = render(
+      <ChartWidget params={{ optionLeg: { underlying: "NIFTY", leg: "CE" }, scopeProbe: "upstox" }} />,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Upstox option discovery failed");
+
+    dataScopeState.value = "live:native:dhan:D1";
+    view.rerender(
+      <ChartWidget params={{ optionLeg: { underlying: "NIFTY", leg: "CE" }, scopeProbe: "dhan" }} />,
+    );
+
+    await waitFor(() => expect(optionLegMocks.resolveOptionLeg).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Upstox option discovery failed")).not.toBeInTheDocument();
+    expect(screen.getByText(/Resolving CE leg/)).toBeInTheDocument();
+    expect(screen.getByText("NIFTY")).toBeInTheDocument();
+  });
+
+  it("re-resolves an option leg when its data authority changes", async () => {
+    const firstLeg = {
+      ...CE_LEG,
+      symbol: "UPSTOX-NIFTY-CE",
+    };
+    const secondLeg = {
+      ...CE_LEG,
+      symbol: "DHAN-NIFTY-CE",
+    };
+    let resolveFirst!: (value: typeof firstLeg) => void;
+    optionLegMocks.resolveOptionLeg
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFirst = resolve;
+      }))
+      .mockResolvedValueOnce(secondLeg);
+    dataScopeState.value = "live:native:upstox:U1";
+    const view = render(
+      <ChartWidget params={{ optionLeg: { underlying: "NIFTY", leg: "CE" }, scopeProbe: "upstox" }} />,
+    );
+    await waitFor(() => expect(optionLegMocks.resolveOptionLeg).toHaveBeenCalledTimes(1));
+
+    dataScopeState.value = "live:native:dhan:D1";
+    view.rerender(
+      <ChartWidget params={{ optionLeg: { underlying: "NIFTY", leg: "CE" }, scopeProbe: "dhan" }} />,
+    );
+
+    await waitFor(() => expect(optionLegMocks.resolveOptionLeg).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("DHAN-NIFTY-CE")).toBeInTheDocument();
+    await act(async () => {
+      resolveFirst(firstLeg);
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("UPSTOX-NIFTY-CE")).not.toBeInTheDocument();
+  });
+
+  it("clears A quote while B option resolution is pending and keeps it clear on error", async () => {
+    const firstLeg = {
+      ...CE_LEG,
+      symbol: "UPSTOX-NIFTY-CE",
+    };
+    const pendingSecondLeg = deferred<typeof firstLeg>();
+    optionLegMocks.resolveOptionLeg
+      .mockResolvedValueOnce(firstLeg)
+      .mockImplementationOnce(() => pendingSecondLeg.promise);
+    apiMocks.getQuotes.mockResolvedValueOnce({ ltp: 321.5, close: 320 });
+    dataScopeState.value = "live:native:upstox:U1";
+    const view = render(
+      <ChartWidget params={{ optionLeg: { underlying: "NIFTY", leg: "CE" }, scopeProbe: "upstox" }} />,
+    );
+
+    expect(await screen.findByText("UPSTOX-NIFTY-CE")).toBeInTheDocument();
+    expect(await screen.findByText("321.50")).toBeInTheDocument();
+    expect(apiMocks.getQuotes).toHaveBeenCalledWith(
+      "UPSTOX-NIFTY-CE",
+      "NFO",
+      expect.any(AbortSignal),
+      "live:native:upstox:U1",
+    );
+
+    dataScopeState.value = "live:native:dhan:D1";
+    view.rerender(
+      <ChartWidget params={{ optionLeg: { underlying: "NIFTY", leg: "CE" }, scopeProbe: "dhan" }} />,
+    );
+
+    await waitFor(() => expect(optionLegMocks.resolveOptionLeg).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("UPSTOX-NIFTY-CE")).not.toBeInTheDocument();
+    expect(screen.getByText("NIFTY")).toBeInTheDocument();
+    expect(screen.queryByText("321.50")).not.toBeInTheDocument();
+    expect(apiMocks.getQuotes.mock.calls.some((call) => (
+      call[0] === "UPSTOX-NIFTY-CE" && call[3] === "live:native:dhan:D1"
+    ))).toBe(false);
+
+    await act(async () => {
+      pendingSecondLeg.reject(new Error("Dhan option discovery failed"));
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Dhan option discovery failed");
+    expect(screen.queryByText("321.50")).not.toBeInTheDocument();
   });
 
   it("keeps an option-leg chart pinned against watchlist selection", async () => {

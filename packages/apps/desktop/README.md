@@ -11,11 +11,10 @@ first launch the shell verifies pinned tools, builds the official source under
 `~/.flinttrade/src/FlintTrade`, and starts the source guardian from that
 checkout.
 
-> No complete Electron installer release has been published yet. Existing
-> `v0.6.0-beta.13` desktop assets use the retired packaging and are not accepted
-> by the new installer. Once this branch is deployed, the download page becomes
-> the release availability gate; the currently deployed beta.13 page predates
-> that cutover and still advertises the retired install path.
+> **Installer acceptance:** the source-built web app is distinct from the
+> Electron shell. The public download surface accepts and exposes an Electron
+> release only when it contains all four canonical installers plus
+> `SHA256SUMS.txt`; retired Tauri and PyInstaller assets never satisfy that gate.
 
 ## Main surfaces
 

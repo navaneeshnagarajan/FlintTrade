@@ -66,8 +66,16 @@ const { mockUseOpenAlgoConfigHydration } = vi.hoisted(() => ({
   mockUseOpenAlgoConfigHydration: vi.fn(),
 }));
 
+const { mockUseBrokerAccounts } = vi.hoisted(() => ({
+  mockUseBrokerAccounts: vi.fn(),
+}));
+
 vi.mock("@/hooks/useOpenAlgoConfigHydration", () => ({
   useOpenAlgoConfigHydration: mockUseOpenAlgoConfigHydration,
+}));
+
+vi.mock("@/hooks/useBrokerAccounts", () => ({
+  useBrokerAccounts: mockUseBrokerAccounts,
 }));
 
 vi.mock("@/hooks/usePrevClose", () => ({
@@ -129,10 +137,13 @@ vi.mock("@/stores/authStore", () => ({
 // ---------------------------------------------------------------------------
 
 import AppLayout from "../AppLayout";
+import useGlobalKeys from "@/hooks/useGlobalKeys";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const appLayoutSource = () =>
   readFileSync(resolve(testDir, "../AppLayout.tsx"), "utf8");
+const useGlobalKeysSource = () =>
+  readFileSync(resolve(testDir, "../../hooks/useGlobalKeys.ts"), "utf8");
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -213,12 +224,14 @@ describe("AppLayout", () => {
 
     expect(screen.queryByTestId("daily-welcome")).not.toBeInTheDocument();
     expect(mockUseOpenAlgoConfigHydration).toHaveBeenCalledWith(false);
+    expect(mockUseBrokerAccounts).toHaveBeenCalledWith(false);
   });
 
   it("hydrates broker config for an authenticated non-Explore session", () => {
     renderApp();
 
     expect(mockUseOpenAlgoConfigHydration).toHaveBeenCalledWith(true);
+    expect(mockUseBrokerAccounts).toHaveBeenCalledWith(true);
   });
 
   it("does not render the removed legacy dot tour overlay", () => {
@@ -294,5 +307,81 @@ describe("AppLayout", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/learn", {
       state: { selectedDocPath: "USER_GUIDE.md" },
     });
+  });
+
+  it("wires onGoHome / onGoTrade into the single useGlobalKeys mount", () => {
+    renderApp();
+
+    expect(useGlobalKeys).toHaveBeenCalled();
+    const calls = vi.mocked(useGlobalKeys).mock.calls;
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    const handlers = calls[0]?.[0] as {
+      onGoHome?: () => void;
+      onGoTrade?: () => void;
+    };
+    expect(typeof handlers.onGoHome).toBe("function");
+    expect(typeof handlers.onGoTrade).toBe("function");
+
+    act(() => {
+      handlers.onGoHome?.();
+    });
+    expect(mockNavigate).toHaveBeenCalledWith("/home");
+
+    act(() => {
+      handlers.onGoTrade?.();
+    });
+    expect(mockNavigate).toHaveBeenCalledWith("/trade");
+  });
+
+  it("source-guard: AppLayout is the sole useGlobalKeys mount and handles Alt+H/T", () => {
+    const layout = appLayoutSource();
+    const hook = useGlobalKeysSource();
+
+    // Exactly one hook call site in AppLayout (single mount).
+    const mountMatches = layout.match(/useGlobalKeys\s*\(/g) ?? [];
+    expect(mountMatches).toHaveLength(1);
+    expect(layout).toMatch(/onGoHome\s*:/);
+    expect(layout).toMatch(/onGoTrade\s*:/);
+    expect(layout).toMatch(/navigate\(\s*[\\\"']\/home[\\\"']\s*\)/);
+    expect(layout).toMatch(/navigate\(\s*[\\\"']\/trade[\\\"']\s*\)/);
+
+    // Real handlers exist in the hook (not dialog-only advertising).
+    expect(hook).toMatch(/onGoHome/);
+    expect(hook).toMatch(/onGoTrade/);
+    expect(hook).toMatch(/e\.altKey[\s\S]{0,80}[\\\"']h[\\\"']/);
+    expect(hook).toMatch(/e\.altKey[\s\S]{0,80}[\\\"']t[\\\"']/);
+  });
+
+  it("normalises and safely merges validated palette context into an existing /ai query", () => {
+    renderApp();
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("flinttrade:navigate", {
+          detail: {
+            path: "/ai?chat=saved%2Fchat#advisor",
+            context: { symbol: " nifty-26mar-fut ", exchange: "nfo", source: "palette" },
+          },
+        }),
+      );
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/ai?chat=saved%2Fchat&symbol=NIFTY-26MAR-FUT&exchange=NFO&source=palette#advisor",
+    );
+  });
+
+  it.each([
+    ["another route", { path: "/lab?view=ai", context: { symbol: "RELIANCE", exchange: "NSE", source: "palette" } }],
+    ["partial context", { path: "/ai?chat=one", context: { symbol: "RELIANCE", exchange: "NSE" } }],
+    ["invalid symbol", { path: "/ai", context: { symbol: "RELIANCE<script>", exchange: "NSE", source: "palette" } }],
+    ["unknown exchange", { path: "/ai", context: { symbol: "RELIANCE", exchange: "FAKE", source: "palette" } }],
+    ["untrusted source", { path: "/ai", context: { symbol: "RELIANCE", exchange: "NSE", source: "url" } }],
+  ])("does not append symbol context for %s", (_case, detail) => {
+    renderApp();
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:navigate", { detail }));
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith(detail.path);
   });
 });

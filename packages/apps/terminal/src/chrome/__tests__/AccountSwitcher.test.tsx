@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ---------------------------------------------------------------------------
@@ -77,11 +78,11 @@ import AccountSwitcher from "../AccountSwitcher";
 // Helpers
 // ---------------------------------------------------------------------------
 
-function renderWithProviders() {
+function renderWithProviders(children = <AccountSwitcher />) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <AccountSwitcher />
+      {children}
     </QueryClientProvider>,
   );
 }
@@ -97,10 +98,10 @@ describe("AccountSwitcher", () => {
     expect(screen.getByText("ZERODHA · Primary")).toBeInTheDocument();
   });
 
-  it("returns null when there are no accounts", () => {
+  it("keeps zero broker connectivity visible when there are no accounts", () => {
     storeState = { accounts: [], activeAccountId: null };
-    const { container } = renderWithProviders();
-    expect(container.innerHTML).toBe("");
+    renderWithProviders();
+    expect(screen.getByText("No broker connected")).toBeInTheDocument();
   });
 
   it("uses broker-aware active keys when account ids collide", () => {
@@ -129,5 +130,62 @@ describe("AccountSwitcher", () => {
     };
     renderWithProviders();
     expect(screen.getByText("UPSTOX · Upstox")).toBeInTheDocument();
+  });
+
+  it("keeps a connected trigger free of warning descriptions", () => {
+    storeState = { accounts: mockAccounts, activeAccountId: "acc-1" };
+    renderWithProviders();
+
+    const trigger = screen.getByRole("button", {
+      name: "Active account: ZERODHA · Primary. Click to switch account.",
+    });
+    expect(trigger).toHaveAccessibleName(
+      "Active account: ZERODHA · Primary. Click to switch account.",
+    );
+    expect(trigger).toHaveAccessibleDescription("");
+    expect(trigger).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("exposes a disconnected warning as the keyboard-focused trigger description", async () => {
+    const user = userEvent.setup();
+    storeState = { accounts: mockAccounts, activeAccountId: "acc-2" };
+    renderWithProviders();
+
+    const trigger = screen.getByRole("button", {
+      name: "Active account: FINVASIA · Secondary. Click to switch account.",
+    });
+    await user.tab();
+
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAccessibleDescription(
+      "Disconnected account. Reconnect this account before trading.",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Disconnected account. Reconnect this account before trading.",
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(trigger).not.toHaveTextContent(/disconnected|warning/i);
+  });
+
+  it("gives each disconnected switcher a stable unique description target", () => {
+    storeState = { accounts: mockAccounts, activeAccountId: "acc-2" };
+    renderWithProviders(
+      <>
+        <AccountSwitcher />
+        <AccountSwitcher />
+      </>,
+    );
+
+    const triggers = screen.getAllByRole("button", { name: /FINVASIA · Secondary/ });
+    const descriptionIds = triggers.map((trigger) => trigger.getAttribute("aria-describedby"));
+
+    expect(descriptionIds).toHaveLength(2);
+    expect(descriptionIds.every(Boolean)).toBe(true);
+    expect(new Set(descriptionIds).size).toBe(2);
+    for (const trigger of triggers) {
+      expect(trigger).toHaveAccessibleDescription(
+        "Disconnected account. Reconnect this account before trading.",
+      );
+    }
   });
 });

@@ -3,7 +3,7 @@
  *
  * Tests for the merged Positions widget — the position book's THREE views.
  * Covers the gated write path (per-row Convert, per-row square-off, the typed
- * exit-all flow, the broker-target threading and the fail-closed product
+ * exit-all flow, exact displayed-account authority and the fail-closed product
  * check), the Excel export, and the two absorbed views: netting/grouping/totals
  * (from the retired Net Position widget) and the treemap/grouping/chart-open
  * contract (from the retired Position Heat Map widget).
@@ -54,8 +54,18 @@ const mockBrokerState = vi.hoisted(() => ({
     label: string;
     source?: string;
     status?: string;
+    is_primary?: boolean;
+    read_only?: boolean;
   }>,
   activeAccountId: null as string | null,
+}));
+const mockReadState = vi.hoisted(() => ({
+  identity: null as null | {
+    mode: string;
+    scopeKey: string;
+    brokerType: string;
+    accountId: string;
+  },
 }));
 
 vi.mock("@/hooks/usePositions", () => ({
@@ -64,6 +74,51 @@ vi.mock("@/hooks/usePositions", () => ({
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => mockUseBrokerConnected(),
+}));
+
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadsEnabled: () => mockUseBrokerConnected(),
+  useAccountReadContext: () => {
+    const mode = mockModeState.mode;
+    const account = mockBrokerState.accounts.find((candidate) =>
+      mockBrokerAccountMatch(candidate, mockBrokerState.activeAccountId),
+    ) ?? mockBrokerState.accounts[0];
+    const identity = mockReadState.identity ?? (mode === "explore"
+      ? {
+          mode,
+          scopeKey: "explore:mock:default",
+          brokerType: "mock",
+          accountId: "default",
+        }
+      : mode === "practice"
+        ? {
+            mode,
+            scopeKey: "practice:sandbox:default",
+            brokerType: "sandbox",
+            accountId: "default",
+          }
+        : account
+          ? {
+              mode,
+              scopeKey: ["live", "native", account.broker, account.account_id]
+                .map(encodeURIComponent)
+                .join(":"),
+              brokerType: account.broker,
+              accountId: account.account_id,
+            }
+          : {
+              mode,
+              scopeKey: "live:openalgo:test",
+              brokerType: "openalgo",
+              accountId: "default",
+            });
+    return {
+      identity,
+      enabled: mockUseBrokerConnected(),
+      host: "",
+      apiKey: "",
+    };
+  },
 }));
 
 vi.mock("@/hooks/useTrackBehavior", () => ({
@@ -118,6 +173,11 @@ vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
 }));
 
 vi.mock("@/stores/brokerStore", () => ({
+  brokerAccountKey: (account: { account_id: string; broker: string; source?: string }) => [
+    account.source ?? "gateway",
+    account.broker,
+    account.account_id,
+  ].map(encodeURIComponent).join(":"),
   findBrokerAccountMatch: (
     accounts: Array<{ account_id: string; broker: string; source?: string }>,
     selector: string | null,
@@ -222,6 +282,7 @@ describe("PositionsWidget", () => {
     mockUseBrokerConnected.mockReturnValue(true);
     mockBrokerState.accounts = [];
     mockBrokerState.activeAccountId = null;
+    mockReadState.identity = null;
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
   });
 
@@ -244,12 +305,40 @@ describe("PositionsWidget", () => {
     expect(screen.getByText("No open positions")).toBeInTheDocument();
   });
 
+  it("shows pending status before first authoritative success (and no empty or error)", () => {
+    mockUsePositions.mockReturnValue(queryResult({ isPending: true, isLoading: true, data: undefined }));
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(screen.getByLabelText(/loading positions/i)).toBeInTheDocument();
+    expect(screen.queryByText("No open positions")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows error/unavailable on failure but never with empty when no prior data", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({ isError: true, error: new Error("network fail"), data: undefined }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toMatch(/failed to load positions/i);
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+    expect(screen.queryByText("No open positions")).not.toBeInTheDocument();
+  });
+
+  it("shows empty copy only after a successful empty response", () => {
+    mockUsePositions.mockReturnValue(queryResult({ isPending: false, isError: false, data: [] }));
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(screen.getByText("No open positions")).toBeInTheDocument();
+  });
+
   it("does not fetch or expose position actions without a broker connection", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
     render(<PositionsWidget {...defaultProps} />);
 
-    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUsePositions).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(screen.getByText("Broker required")).toBeInTheDocument();
     expect(screen.getByText("Connect a broker to load positions")).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: /broker account/i })).not.toBeInTheDocument();
@@ -261,7 +350,7 @@ describe("PositionsWidget", () => {
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
     render(<PositionsWidget {...viewProps("heat")} />);
 
-    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUsePositions).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(screen.getByText("Broker required")).toBeInTheDocument();
     expect(screen.getByText("Connect a broker to load positions")).toBeInTheDocument();
   });
@@ -300,7 +389,7 @@ describe("PositionsWidget", () => {
     );
     render(<PositionsWidget {...defaultProps} />);
 
-    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: true });
+    expect(mockUsePositions).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
     expect(screen.getByText("Read-only")).toBeInTheDocument();
     // Provenance is labelled separately from capability: sandbox book, no writes.
     expect(screen.getByText("Practice")).toBeInTheDocument();
@@ -437,7 +526,7 @@ describe("PositionsWidget", () => {
 
   // ── Interaction tests ────────────────────────────────────────────────────
 
-  it("shows error banner and Retry button when data fetch fails", () => {
+  it("shows an unfrozen error banner and Retry button when the initial fetch has no data", () => {
     mockUsePositions.mockReturnValue(
       queryResult({
         data: undefined,
@@ -449,9 +538,9 @@ describe("PositionsWidget", () => {
 
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toMatch(/failed to load positions/i);
-    // The banner says the figures are frozen — a silently stale P&L is worse
-    // than a loud error.
-    expect(alert.textContent).toMatch(/frozen/i);
+    // No prior row or successful update exists, so nothing can truthfully be
+    // described as frozen.
+    expect(alert.textContent).not.toMatch(/frozen/i);
     expect(alert.textContent).toContain("Network timeout");
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
@@ -548,7 +637,7 @@ describe("PositionsWidget", () => {
     );
     render(<PositionsWidget {...defaultProps} />);
 
-    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUsePositions).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByText("Sample")).toBeInTheDocument();
@@ -609,6 +698,17 @@ describe("PositionsWidget", () => {
   // ── Convert + exit-all safety actions ───────────────────────────────────
 
   describe("position actions", () => {
+    beforeEach(() => {
+      mockBrokerState.accounts = [{
+        broker: "dhan",
+        account_id: "POSITIONS-A",
+        label: "Positions account",
+        source: "native",
+        status: "connected",
+      }];
+      mockBrokerState.activeAccountId = "native:dhan:POSITIONS-A";
+    });
+
     afterEach(() => {
       vi.unstubAllGlobals();
     });
@@ -664,11 +764,12 @@ describe("PositionsWidget", () => {
       const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(url).toBe("/ft-api/api/v1/positions/convert");
       expect(init.method).toBe("POST");
+      expect(new Headers(init.headers).get("X-FlintTrade-Mode")).toBe("live");
       const body = JSON.parse(String(init.body)) as {
         broker: string;
         req: Record<string, unknown>;
       };
-      expect(body.broker).toBe("openalgo");
+      expect(body.broker).toBe("dhan");
       expect(body.req).toMatchObject({
         symbol: "NIFTY24APR24000CE",
         exchange: "NFO",
@@ -737,10 +838,11 @@ describe("PositionsWidget", () => {
       const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(url).toBe("/ft-api/api/v1/positions/exit-all");
       expect(init.method).toBe("POST");
+      expect(new Headers(init.headers).get("X-FlintTrade-Mode")).toBe("live");
       expect(JSON.parse(String(init.body))).toStrictEqual({
         confirm: true,
-        broker: "openalgo",
-        account_id: "default",
+        broker: "dhan",
+        account_id: "POSITIONS-A",
       });
 
       await waitFor(() => expect(mockRefetch).toHaveBeenCalledTimes(1));
@@ -812,6 +914,11 @@ describe("PositionsWidget", () => {
         price: 0,
         triggerPrice: 0,
         strategy: "FlintPositions",
+      }, {
+        mode: "live",
+        scopeKey: "live:native:dhan:POSITIONS-A",
+        brokerType: "dhan",
+        accountId: "POSITIONS-A",
       });
       await waitFor(() => expect(mockRefetch).toHaveBeenCalledTimes(1));
       expect(mockEmitNotification).toHaveBeenCalledWith(
@@ -836,6 +943,11 @@ describe("PositionsWidget", () => {
           product: "MIS",
           orderType: "MARKET",
           quantity: 10,
+        }),
+        expect.objectContaining({
+          scopeKey: "live:native:dhan:POSITIONS-A",
+          brokerType: "dhan",
+          accountId: "POSITIONS-A",
         }),
       );
     });
@@ -884,13 +996,177 @@ describe("PositionsWidget", () => {
       expect(mockPlaceOrder).not.toHaveBeenCalled();
     });
 
-    // ── Broker-target selector (HONESTY: convert/exit-all are native-only verbs) ──
+    it("exposes no mutations when account A owns the displayed book but account B is selected", () => {
+      const fetchMock = stubFetch();
+      mockReadState.identity = {
+        mode: "live",
+        scopeKey: "live:native:dhan:ACCOUNT-A",
+        brokerType: "dhan",
+        accountId: "ACCOUNT-A",
+      };
+      mockBrokerState.accounts = [
+        {
+          broker: "dhan",
+          account_id: "ACCOUNT-A",
+          label: "Account A",
+          source: "native",
+          status: "connected",
+        },
+        {
+          broker: "upstox",
+          account_id: "ACCOUNT-B",
+          label: "Account B",
+          source: "native",
+          status: "connected",
+        },
+      ];
+      mockBrokerState.activeAccountId = "native:upstox:ACCOUNT-B";
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
 
-    it("renders the broker-target selector so the operator can pick a native account", () => {
+      render(<PositionsWidget {...defaultProps} />);
+
+      expect(screen.queryByRole("button", { name: "Square off NIFTY24APR24000CE" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Convert NIFTY24APR24000CE" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Exit all positions" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("combobox", { name: /broker account/i })).not.toBeInTheDocument();
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("keeps native-only convert and exit-all off an OpenAlgo position book", () => {
+      mockConnectionState.apiKey = "openalgo-key";
+      mockReadState.identity = {
+        mode: "live",
+        scopeKey: "live:openalgo:book-scope",
+        brokerType: "openalgo",
+        accountId: "default",
+      };
+      mockBrokerState.accounts = [{
+        broker: "dhan",
+        account_id: "ACCOUNT-A",
+        label: "Native account",
+        source: "native",
+        status: "connected",
+      }];
+      mockBrokerState.activeAccountId = "native:dhan:ACCOUNT-A";
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+
+      render(<PositionsWidget {...defaultProps} />);
+
+      expect(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Convert NIFTY24APR24000CE" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Exit all positions" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("combobox", { name: /broker account/i })).not.toBeInTheDocument();
+    });
+
+    it("refuses mutation when a primary native book is shown without an active selection", () => {
+      const fetchMock = stubFetch();
+      mockReadState.identity = {
+        mode: "live",
+        scopeKey: "live:native:dhan:PRIMARY-A",
+        brokerType: "dhan",
+        accountId: "PRIMARY-A",
+      };
+      mockBrokerState.accounts = [{
+        broker: "dhan",
+        account_id: "PRIMARY-A",
+        label: "Primary account",
+        source: "native",
+        status: "connected",
+        is_primary: true,
+      }];
+      mockBrokerState.activeAccountId = null;
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+
+      render(<PositionsWidget {...defaultProps} />);
+
+      expect(screen.queryByRole("button", { name: "Square off NIFTY24APR24000CE" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Convert NIFTY24APR24000CE" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Exit all positions" })).not.toBeInTheDocument();
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("does not square off account A after account B is selected while confirmation is open", async () => {
+      mockReadState.identity = {
+        mode: "live",
+        scopeKey: "live:native:dhan:ACCOUNT-A",
+        brokerType: "dhan",
+        accountId: "ACCOUNT-A",
+      };
+      mockBrokerState.accounts = [
+        {
+          broker: "dhan",
+          account_id: "ACCOUNT-A",
+          label: "Account A",
+          source: "native",
+          status: "connected",
+        },
+        {
+          broker: "upstox",
+          account_id: "ACCOUNT-B",
+          label: "Account B",
+          source: "native",
+          status: "connected",
+        },
+      ];
+      mockBrokerState.activeAccountId = "native:dhan:ACCOUNT-A";
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      const { rerender } = render(<PositionsWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
+      mockBrokerState.activeAccountId = "native:upstox:ACCOUNT-B";
+      rerender(<PositionsWidget {...makeWidgetPanelProps()} />);
+
+      const confirm = screen.queryByRole("button", { name: "Confirm square off NIFTY24APR24000CE" });
+      if (confirm) fireEvent.click(confirm);
+      await waitFor(() => expect(mockPlaceOrder).not.toHaveBeenCalled());
+    });
+
+    it("pins the exact displayed account identity into square-off placeOrder", async () => {
+      mockReadState.identity = {
+        mode: "live",
+        scopeKey: "live:native:upstox:ACCOUNT-A",
+        brokerType: "upstox",
+        accountId: "ACCOUNT-A",
+      };
+      mockBrokerState.accounts = [{
+        broker: "upstox",
+        account_id: "ACCOUNT-A",
+        label: "Account A",
+        source: "native",
+        status: "connected",
+      }];
+      mockBrokerState.activeAccountId = "native:upstox:ACCOUNT-A";
+      mockPlaceOrder.mockResolvedValue({ orderId: "SQ-EXACT" });
       mockUsePositions.mockReturnValue(queryResult({ data: positions }));
       render(<PositionsWidget {...defaultProps} />);
-      // The selector is the BrokerTargetSelect from the orders widgets.
-      expect(screen.getByRole("combobox", { name: /broker account/i })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          symbol: "NIFTY24APR24000CE",
+          action: "SELL",
+          quantity: 75,
+        }),
+        {
+          mode: "live",
+          scopeKey: "live:native:upstox:ACCOUNT-A",
+          brokerType: "upstox",
+          accountId: "ACCOUNT-A",
+        },
+      );
+    });
+
+    // ── Exact displayed-account target (convert/exit-all are native-only) ──
+
+    it("does not render an independent broker-target selector for position mutations", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+      expect(screen.queryByRole("combobox", { name: /broker account/i })).not.toBeInTheDocument();
     });
 
     it("defaults gated position writes to the active native account in native-only Live mode", async () => {
@@ -918,17 +1194,18 @@ describe("PositionsWidget", () => {
       expect(body.account_id).toBe("UP-9");
     });
 
-    it("threads the selected native broker into the convert request", async () => {
-      // A native account is available — the operator can target it instead of
-      // the OpenAlgo bridge (which implements neither verb → always 501).
-      mockBrokerState.accounts = [{ broker: "dhan", account_id: "DHAN-1", label: "Primary", status: "connected" }];
+    it("threads the exact displayed native account into the convert request", async () => {
+      mockBrokerState.accounts = [{
+        broker: "dhan",
+        account_id: "DHAN-1",
+        label: "Primary",
+        source: "native",
+        status: "connected",
+      }];
+      mockBrokerState.activeAccountId = "native:dhan:DHAN-1";
       const fetchMock = stubFetch();
       mockUsePositions.mockReturnValue(queryResult({ data: positions }));
       render(<PositionsWidget {...defaultProps} />);
-
-      // Pick the native broker target.
-      fireEvent.click(screen.getByRole("combobox", { name: /broker account/i }));
-      fireEvent.click(await screen.findByRole("option", { name: /DHAN/i }));
 
       fireEvent.click(screen.getByRole("button", { name: "Convert NIFTY24APR24000CE" }));
       fireEvent.click(screen.getByRole("button", { name: "Convert NIFTY24APR24000CE to MIS" }));
@@ -940,14 +1217,18 @@ describe("PositionsWidget", () => {
       expect(body.account_id).toBe("DHAN-1");
     });
 
-    it("threads the selected native broker into the exit-all request", async () => {
-      mockBrokerState.accounts = [{ broker: "upstox", account_id: "UP-9", label: "F&O", status: "connected" }];
+    it("threads the exact displayed native account into the exit-all request", async () => {
+      mockBrokerState.accounts = [{
+        broker: "upstox",
+        account_id: "UP-9",
+        label: "F&O",
+        source: "native",
+        status: "connected",
+      }];
+      mockBrokerState.activeAccountId = "native:upstox:UP-9";
       const fetchMock = stubFetch({ status: "success", data: { status: "ok" } });
       mockUsePositions.mockReturnValue(queryResult({ data: positions }));
       render(<PositionsWidget {...defaultProps} />);
-
-      fireEvent.click(screen.getByRole("combobox", { name: /broker account/i }));
-      fireEvent.click(await screen.findByRole("option", { name: /UPSTOX/i }));
 
       fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
       fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), {

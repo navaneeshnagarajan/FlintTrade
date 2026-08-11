@@ -342,9 +342,9 @@ describe("DOMHeatmapWidget — live view", () => {
     expect(screen.queryByRole("slider", { name: "Replay position" })).toBeNull();
   });
 
-  it("does not show the Demo data badge outside Explore mode", () => {
+  it("does not show the Sample data badge outside Explore mode", () => {
     render(<DOMHeatmapWidget {...liveProps} />);
-    expect(screen.queryByText("Demo data")).toBeNull();
+    expect(screen.queryByText("Sample data")).toBeNull();
   });
 });
 
@@ -410,18 +410,18 @@ describe("DOMHeatmapWidget — Explore demo data", () => {
     expect(mockGetDepth).not.toHaveBeenCalled();
   });
 
-  it("labels generated data with a permanent 'Demo data' badge", () => {
+  it("labels generated data with a permanent 'Sample data' badge", () => {
     render(<DOMHeatmapWidget {...liveProps} />);
-    const badge = screen.getByText("Demo data");
+    const badge = screen.getByText("Sample data");
     expect(badge).toBeInTheDocument();
     expect(badge.getAttribute("role")).toBe("status");
   });
 
-  it("says 'demo data' in the chart's accessible description", () => {
+  it("says 'sample data' in the chart's accessible description", () => {
     render(<DOMHeatmapWidget {...liveProps} />);
     expect(
       screen.getByTestId("domheatmap-container").getAttribute("aria-label"),
-    ).toContain("demo data");
+    ).toContain("sample data");
   });
 
   it("fills the ring from the deterministic generator", () => {

@@ -53,6 +53,8 @@ import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import useWebSocket from "@/hooks/useWebSocket";
 import { useOrders } from "@/hooks/useOrders";
+import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import type { AccountAuthorityIdentity } from "@/hooks/useDataScope";
 import { useDepthData } from "@/hooks/useDepthData";
 import { useModeStore } from "@/stores/modeStore";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
@@ -76,6 +78,8 @@ export interface PendingOrder {
   localId: string;
   /** Real broker order id from the placeOrder response; null until known. */
   brokerOrderId: string | null;
+  /** Exact account/query provenance captured before this order was placed. */
+  authority: AccountAuthorityIdentity;
   side: Side;
   price: number;
   qty: number;
@@ -387,6 +391,7 @@ function OrderLadderWidget(props: Props) {
   const initialTick = resolveTickSize(props.tick ?? panelParams?.tick);
 
   const mode  = useModeStore((s) => s.mode);
+  const { identity: accountIdentity } = useAccountReadContext();
   const isExplore = mode === "explore";
   const track = useTrackBehavior();
 
@@ -556,10 +561,22 @@ function OrderLadderWidget(props: Props) {
     );
     if (lotRefusal) { showMsg(lotRefusal); return; }
     const localId = `lo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const order: PendingOrder = { localId, brokerOrderId: null, side: action === "BUY" ? "buy" : "sell", price, qty, status: "placing" };
+    const authority = accountIdentity;
+    const order: PendingOrder = {
+      localId,
+      brokerOrderId: null,
+      authority,
+      side: action === "BUY" ? "buy" : "sell",
+      price,
+      qty,
+      status: "placing",
+    };
     setPendingOrders((p) => [...p, order]);
     try {
-      const result = await placeOrder({ symbol, exchange, action, quantity: qty, price, triggerPrice: 0, product: "MIS", orderType: "LIMIT", strategy: "orderladder" });
+      const result = await placeOrder(
+        { symbol, exchange, action, quantity: qty, price, triggerPrice: 0, product: "MIS", orderType: "LIMIT", strategy: "orderladder" },
+        authority,
+      );
       // Store the REAL broker order id — cancel is disabled until it is known,
       // so the ladder can never send a fabricated id to the broker.
       const brokerOrderId = extractBrokerOrderId(result);
@@ -574,7 +591,7 @@ function OrderLadderWidget(props: Props) {
       showMsg(err instanceof Error ? err.message : "Order failed");
       setPendingOrders((p) => p.filter((o) => o.localId !== localId));
     }
-  }, [mode, liveLtp, qty, symbol, exchange, lotSize, lotSizeKnown, track, showMsg]);
+  }, [mode, accountIdentity, liveLtp, qty, symbol, exchange, lotSize, lotSizeKnown, track, showMsg]);
 
   const cancelPending = useCallback(async (localId: string) => {
     const order = pendingOrders.find((o) => o.localId === localId);
@@ -586,7 +603,7 @@ function OrderLadderWidget(props: Props) {
     const brokerOrderId = order.brokerOrderId;
     setPendingOrders((p) => p.map((o) => o.localId === localId ? { ...o, status: "cancelling" } : o));
     try {
-      await cancelOrder(brokerOrderId, "orderladder");
+      await cancelOrder(brokerOrderId, "orderladder", order.authority);
       setPendingOrders((p) => p.filter((o) => o.localId !== localId));
       showMsg("Order cancelled");
     } catch (err) {
@@ -618,8 +635,8 @@ function OrderLadderWidget(props: Props) {
         </Select>
         {isExplore && (
           <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-            aria-label="Showing demo data">
-            Demo data
+            aria-label="Showing sample data">
+            Sample data
           </span>
         )}
         <div className="flex-1" />

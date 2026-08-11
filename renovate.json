@@ -80,7 +80,7 @@
       "automerge": false
     },
     {
-      "description": "engines.node is NOT Renovate's to raise. flint.toml [requirements].node_requires is the single source of truth for the floor and tests/test_minimum_requirements_single_source.py pins five package.json files to it. The floor is set by what the dependency tree genuinely needs (react-router@8's >=22.22.0 today), so a Renovate bump here breaks installs on platforms that are fine. Move flint.toml first; scripts/check-toolchain-freshness.py is what notices when the floor reaches end of life.",
+      "description": "engines.node is NOT Renovate's to raise. flint.toml [requirements].node_requires is the single source of truth for the floor and tests/test_minimum_requirements_single_source.py pins five package.json files to it. The floor is set by what the dependency tree genuinely needs (jsdom 30's >=22.22.2 today), so a Renovate bump here breaks installs on platforms that are fine. Move flint.toml first; scripts/check-toolchain-freshness.py is what notices when the floor reaches end of life.",
       "matchDepTypes": ["engines"],
       "enabled": false
     },

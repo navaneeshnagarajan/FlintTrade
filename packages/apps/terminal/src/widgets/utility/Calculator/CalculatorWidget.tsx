@@ -34,7 +34,7 @@
  *   openalgo-chart/src/utils/indicators/riskCalculator.ts
  */
 
-import { useCallback, useEffect, useMemo, useState, memo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import {
   useForm,
   Controller,
@@ -59,6 +59,12 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { WidgetProps } from "@/types/widgets";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import type { AccountAuthorityIdentity } from "@/hooks/useDataScope";
+import {
+  accountAuthorityMatches,
+  captureAccountAuthority,
+} from "@/lib/accountQueryState";
 import { getMargin, getFunds } from "@/services/api";
 import type { MarginData, Funds } from "@/types/api";
 import {
@@ -1170,6 +1176,7 @@ const marginSchema = z.object({
 });
 
 interface MarginCalcState {
+  authority:      AccountAuthorityIdentity | null;
   spanMargin:     number;
   exposureMargin: number;
   totalMargin:    number;
@@ -1179,7 +1186,25 @@ interface MarginCalcState {
   error:          string | null;
 }
 
+function initialMarginCalcState(): MarginCalcState {
+  return {
+    authority: null,
+    spanMargin: 0,
+    exposureMargin: 0,
+    totalMargin: 0,
+    availableCash: null,
+    source: "estimate",
+    loading: false,
+    error: null,
+  };
+}
+
 function MarginCalcTab() {
+  const accountReadContext = useAccountReadContext();
+  const currentContextRef = useRef(accountReadContext);
+  const fundsControllerRef = useRef<AbortController | null>(null);
+  const requestIdRef = useRef(0);
+  currentContextRef.current = accountReadContext;
   const {
     register,
     control,
@@ -1201,15 +1226,25 @@ function MarginCalcTab() {
     mode: "onChange",
   });
 
-  const [calcState, setCalcState] = useState<MarginCalcState>({
-    spanMargin:     0,
-    exposureMargin: 0,
-    totalMargin:    0,
-    availableCash:  null,
-    source:         "estimate",
-    loading:        false,
-    error:          null,
-  });
+  const [calcState, setCalcState] = useState<MarginCalcState>(initialMarginCalcState);
+
+  useEffect(() => {
+    requestIdRef.current += 1;
+    fundsControllerRef.current?.abort();
+    fundsControllerRef.current = null;
+    setCalcState(initialMarginCalcState());
+    return () => {
+      requestIdRef.current += 1;
+      fundsControllerRef.current?.abort();
+      fundsControllerRef.current = null;
+    };
+  }, [
+    accountReadContext.enabled,
+    accountReadContext.identity.accountId,
+    accountReadContext.identity.brokerType,
+    accountReadContext.identity.mode,
+    accountReadContext.identity.scopeKey,
+  ]);
 
   const values = watch();
 
@@ -1231,25 +1266,57 @@ function MarginCalcTab() {
 
   const onCalculate = useCallback(
     async (vals: MarginFormValues) => {
-      setCalcState((s) => ({ ...s, loading: true, error: null }));
+      const context = accountReadContext;
+      const identity = captureAccountAuthority(context.identity);
+      if (!context.enabled) {
+        requestIdRef.current += 1;
+        fundsControllerRef.current?.abort();
+        fundsControllerRef.current = null;
+        setCalcState({ ...initialMarginCalcState(), authority: identity, error: "Broker required" });
+        return;
+      }
 
-      // Fetch available funds in parallel
+      const requestId = ++requestIdRef.current;
+      fundsControllerRef.current?.abort();
+      const controller = new AbortController();
+      fundsControllerRef.current = controller;
+      const isCurrent = () => (
+        requestId === requestIdRef.current
+        && !controller.signal.aborted
+        && currentContextRef.current.enabled
+        && accountAuthorityMatches(identity, currentContextRef.current.identity)
+      );
+      setCalcState((state) => ({
+        ...(state.authority != null && accountAuthorityMatches(state.authority, identity)
+          ? state
+          : initialMarginCalcState()),
+        authority: identity,
+        loading: true,
+        error: null,
+      }));
+
       let funds: Funds | null = null;
       try {
-        funds = await getFunds();
+        funds = await getFunds(context, controller.signal);
       } catch {
+        if (!isCurrent()) return;
         // non-fatal — we just won't show comparison
       }
+      if (!isCurrent()) return;
 
       try {
         const marginData: MarginData = await getMargin(
+          context,
           vals.symbol,
           vals.exchange,
           num(vals.quantity) * num(vals.legs),
           vals.product,
           vals.action,
+          controller.signal,
         );
+        if (!isCurrent()) return;
         setCalcState({
+          authority:      identity,
           spanMargin:     marginData.span_margin,
           exposureMargin: marginData.exposure_margin,
           totalMargin:    marginData.total_margin_required,
@@ -1259,30 +1326,46 @@ function MarginCalcTab() {
           error:          null,
         });
       } catch {
+        if (!isCurrent()) return;
         // Fall back to estimate
         const estimate = estimateMargin(vals);
         setCalcState({
           ...estimate,
+          authority:     identity,
           availableCash: funds?.availableCash ?? null,
           loading:       false,
           error:         "API unavailable — showing estimate",
         });
+      } finally {
+        if (fundsControllerRef.current === controller) {
+          fundsControllerRef.current = null;
+        }
       }
     },
-    [estimateMargin],
+    [accountReadContext, estimateMargin],
   );
 
   // Live estimate on form change (no API call)
   const liveEstimate = useMemo(() => estimateMargin(values), [values, estimateMargin]);
+  const visibleCalcState = calcState.authority == null
+    || accountAuthorityMatches(calcState.authority, accountReadContext.identity)
+    ? calcState
+    : initialMarginCalcState();
 
   const hasSufficient =
-    calcState.availableCash != null
-      ? calcState.availableCash >= calcState.totalMargin
+    visibleCalcState.availableCash != null
+      ? visibleCalcState.availableCash >= visibleCalcState.totalMargin
       : null;
 
-  const displayTotal = calcState.totalMargin > 0 ? calcState.totalMargin : liveEstimate.totalMargin;
-  const displaySpan  = calcState.totalMargin > 0 ? calcState.spanMargin : liveEstimate.spanMargin;
-  const displayExposure = calcState.totalMargin > 0 ? calcState.exposureMargin : liveEstimate.exposureMargin;
+  const displayTotal = visibleCalcState.totalMargin > 0
+    ? visibleCalcState.totalMargin
+    : liveEstimate.totalMargin;
+  const displaySpan = visibleCalcState.totalMargin > 0
+    ? visibleCalcState.spanMargin
+    : liveEstimate.spanMargin;
+  const displayExposure = visibleCalcState.totalMargin > 0
+    ? visibleCalcState.exposureMargin
+    : liveEstimate.exposureMargin;
 
   return (
     <div className="flex flex-col gap-3 overflow-auto h-full p-3">
@@ -1414,10 +1497,10 @@ function MarginCalcTab() {
 
         <button
           type="submit"
-          disabled={calcState.loading}
+          disabled={visibleCalcState.loading}
           className="h-6 text-xs bg-accent/20 hover:bg-accent/30 text-accent border border-accent/40 rounded font-medium transition-colors disabled:opacity-50"
         >
-          {calcState.loading ? "Fetching…" : "Get Live Margin"}
+          {visibleCalcState.loading ? "Fetching…" : "Get Live Margin"}
         </button>
       </form>
 
@@ -1426,29 +1509,31 @@ function MarginCalcTab() {
         <div className="flex items-center justify-between mb-1">
           <p className="text-xxs text-text-muted uppercase tracking-wider">Margin Required</p>
           <span className="text-xxs font-mono bg-surface-hover text-text-muted border border-border-default rounded px-1">
-            {calcState.source === "api" ? "LIVE" : "ESTIMATE"}
+            {visibleCalcState.source === "api" ? "LIVE" : "ESTIMATE"}
           </span>
         </div>
 
-        {calcState.error && <p className="text-xxs text-warning mb-1">{calcState.error}</p>}
+        {visibleCalcState.error && (
+          <p className="text-xxs text-warning mb-1">{visibleCalcState.error}</p>
+        )}
 
         <ResultRow label="SPAN Margin"     value={formatINR(displaySpan)} />
         <ResultRow label="Exposure Margin" value={formatINR(displayExposure)} />
         <div className="border-t border-border-default my-1" />
         <ResultRow label="Total Required"  value={formatINR(displayTotal)} highlight="loss" />
 
-        {calcState.availableCash != null && (
+        {visibleCalcState.availableCash != null && (
           <>
             <div className="border-t border-border-default my-1" />
             <ResultRow
               label="Available Funds"
-              value={formatINR(calcState.availableCash)}
+              value={formatINR(visibleCalcState.availableCash)}
               highlight={hasSufficient === true ? "profit" : hasSufficient === false ? "loss" : "neutral"}
             />
             <ResultRow
               label="After Margin"
-              value={formatINR(calcState.availableCash - displayTotal)}
-              highlight={(calcState.availableCash - displayTotal) >= 0 ? "profit" : "loss"}
+              value={formatINR(visibleCalcState.availableCash - displayTotal)}
+              highlight={(visibleCalcState.availableCash - displayTotal) >= 0 ? "profit" : "loss"}
             />
           </>
         )}

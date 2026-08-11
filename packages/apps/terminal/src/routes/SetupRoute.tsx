@@ -1,4 +1,8 @@
 /**
+ * Legacy workspace-preferences wizard retained as an unmounted compatibility
+ * implementation. It is not a route authority; /setup is owned by
+ * CanonicalSetupRoute and /setup-account explicitly aliases /setup.
+ *
  * SetupRoute — multi-step first-time setup wizard orchestrator.
  * Modes: Quick (2 steps), Guided (7 steps), Advanced (9 steps).
  * Saves to connectionStore + settingsStore, then navigates based on persona.

@@ -68,12 +68,10 @@ files (Windows), from a clone instead.
 
 ### Electron desktop shell
 
-The Electron desktop shell wraps that same local backend, but no complete,
-checksum-published Electron installer release exists yet. Once this branch is
-deployed, the download page will expose no one-command install until all four
-Electron installers and `SHA256SUMS.txt` are available together. The currently
-deployed beta.13 page predates that gate and still advertises the retired
-packaging; do not use it as an Electron source-bootstrap installer.
+The Electron desktop shell wraps that same local backend. The public download
+surface distinguishes the source-built web-app install above from Electron
+shell installers and withholds Electron commands and downloads unless one
+release contains all four canonical installers plus `SHA256SUMS.txt`.
 
 To build and verify the Electron shell locally (these lines run unchanged in
 bash, zsh and Windows PowerShell):

@@ -1218,7 +1218,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
               aria-label="Showing generated demo depth — not a live order book"
               title="Explore mode: the book is generated from a deterministic seed, not a broker feed."
             >
-              Demo data
+              Sample data
             </Badge>
           )}
           {!isExplore && !error && snapshotCount > 0 && (
@@ -1348,7 +1348,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
         ref={containerRef}
         className="flex-1 relative min-h-0"
         role="img"
-        aria-label={`DOM heatmap for ${symbol}${isExplore ? " (demo data)" : ""}. ${
+        aria-label={`DOM heatmap for ${symbol}${isExplore ? " (sample data)" : ""}. ${
           isReplay
             ? "Replay view: scrub the captured snapshots with the transport controls below."
             : "Live view: snapshots accumulate left to right."

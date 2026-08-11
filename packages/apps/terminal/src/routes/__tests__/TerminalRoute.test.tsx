@@ -13,6 +13,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { WorkspaceApi } from "@/layout/flexLayoutAdapter";
+import { useLayoutStore } from "@/stores/layoutStore";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -103,14 +104,18 @@ vi.mock("@/routes/trade/TradeBottomPanel", () => ({
 }));
 
 // Stores
-vi.mock("@/stores/layoutStore", () => ({
-  useLayoutStore: Object.assign(
-    vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-      selector(mockLayoutState),
+vi.mock("@/stores/layoutStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/stores/layoutStore")>();
+  return {
+    ...actual,
+    useLayoutStore: Object.assign(
+      vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
+        selector(mockLayoutState),
+      ),
+      { getState: () => mockLayoutState, setState: vi.fn() },
     ),
-    { getState: () => mockLayoutState, setState: vi.fn() },
-  ),
-}));
+  };
+});
 
 vi.mock("@/stores/themeStore", () => ({
   useThemeStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
@@ -264,6 +269,28 @@ describe("TerminalRoute", () => {
     renderTerminalRoute();
 
     expect(screen.getByText("Trade Workspace")).toBeInTheDocument();
+  });
+
+  it("reports a transient workspace binding persistence failure instead of crashing", async () => {
+    vi.mocked(useLayoutStore.setState).mockImplementationOnce(() => {
+      throw new Error("quota exceeded");
+    });
+
+    renderTerminalRoute();
+
+    expect(await screen.findByRole("alert", { name: "Workspace layout storage error" }))
+      .toHaveTextContent("Workspace layout could not be saved: quota exceeded");
+  });
+
+  it("reports a workspace API registration persistence failure instead of crashing", async () => {
+    mockLayoutState.setWorkspaceApi.mockImplementationOnce(() => {
+      throw new Error("storage unavailable");
+    });
+
+    renderTerminalRoute();
+
+    expect(await screen.findByRole("alert", { name: "Workspace layout storage error" }))
+      .toHaveTextContent("Workspace layout could not be saved: storage unavailable");
   });
 
   it("registers a workspace api on mount and clears it when the trade route unmounts", async () => {
@@ -587,6 +614,45 @@ describe("TerminalRoute saved-layout restore", () => {
     return mockLayoutState.workspaceApi as unknown as WorkspaceApi;
   }
 
+  it("surfaces and quarantines an invalid FlexLayout document without overwriting it", async () => {
+    const corruptLayout = { global: {}, borders: [], layout: null };
+    mockLayoutState.getTabLayout.mockReturnValue(corruptLayout);
+
+    renderTerminalRoute();
+
+    expect(await screen.findByRole("alert", { name: "Workspace layout storage error" }))
+      .toHaveTextContent(/layout is corrupted and has been quarantined/i);
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    expect(mockLayoutState.saveTabLayout).not.toHaveBeenCalled();
+    expect(mockLayoutState.getTabLayout("default")).toBe(corruptLayout);
+  });
+
+  it("quarantines a FlexLayout root that Model.fromJson permissively normalises", async () => {
+    const malformedRoot = { layout: {} };
+    mockLayoutState.getTabLayout.mockReturnValue(malformedRoot);
+
+    renderTerminalRoute();
+
+    expect(await screen.findByRole("alert", { name: "Workspace layout storage error" }))
+      .toHaveTextContent(/layout is corrupted and has been quarantined/i);
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    expect(mockLayoutState.saveTabLayout).not.toHaveBeenCalled();
+    expect(mockLayoutState.getTabLayout("default")).toBe(malformedRoot);
+  });
+
+  it("quarantines a non-empty FlexLayout document whose root was truncated away", async () => {
+    const missingRoot = { global: {}, borders: [] };
+    mockLayoutState.getTabLayout.mockReturnValue(missingRoot);
+
+    renderTerminalRoute();
+
+    expect(await screen.findByRole("alert", { name: "Workspace layout storage error" }))
+      .toHaveTextContent(/layout is corrupted and has been quarantined/i);
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    expect(mockLayoutState.saveTabLayout).not.toHaveBeenCalled();
+    expect(mockLayoutState.getTabLayout("default")).toBe(missingRoot);
+  });
+
   it("restores a persisted FlexLayout document instead of the default preset", async () => {
     // trading-desk: indexstrip + positions + riskdashboard + orders
     mockLayoutState.getTabLayout.mockReturnValue(
@@ -682,6 +748,31 @@ describe("TerminalRoute saved-layout restore", () => {
         expect(call[0]).toBe("default");
       }
     }
+    mockLayoutState.activeTabId = "default";
+  });
+
+  it("reports a layout persistence failure during workspace switching instead of crashing", async () => {
+    const { rerender, queryClient } = renderTerminalRoute();
+    await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
+    mockLayoutState.saveTabLayout.mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
+    mockLayoutState.activeTabId = "second";
+    mockLayoutState.getTabLayout.mockImplementation((id: string) =>
+      id === "second"
+        ? (buildPresetJsonById("trading-desk") as unknown as Record<string, unknown>)
+        : null,
+    );
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <TerminalRoute />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("alert", { name: "Workspace layout storage error" }))
+      .toHaveTextContent("Workspace layout could not be saved: quota exceeded");
+    expect(JSON.stringify(registeredApi().toJSON())).toContain('"riskdashboard"');
     mockLayoutState.activeTabId = "default";
   });
 });

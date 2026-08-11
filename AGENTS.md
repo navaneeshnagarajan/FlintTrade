@@ -74,19 +74,22 @@ verification and a clean cross-platform icon re-review. Evidence is under
 `.local/specs/desktop-electron/evidence/icon-followup-20260729/`; the older Task
 8 bundle remains historical evidence for the installed-app acceptance.
 
-No Electron installer release is published. The site still withholds install
-commands until all four installers and `SHA256SUMS.txt` exist together. Local
+No Electron installer release is published. The site exposes the distinct
+source-built web-app install path, but withholds Electron-shell installer
+commands and downloads until all four installers and `SHA256SUMS.txt` exist
+together. Local
 macOS output is ad-hoc sealed with no Team ID; Apple distribution
 signing/notarisation, Windows/Linux native runtime evidence and the accepted
 RF3 Windows job-supervisor digest pin remain maintainer/native-runner work.
-Count pins remain 102 widgets, 35 brokers and 18 packages. `PLAN.md` is the
+Count pins remain 71 widgets, 35 brokers and 18 packages. `PLAN.md` is the
 curated public roadmap; the detailed working plan of record lives at
-`.local/agent-context/PLAN.md` — resume from its phase tracker, verify branch/PR
-state live, and never push without explicit maintainer permission.
+`.local/agent-context/PLAN.md` — resume from its ordered delivery/status/current
+work queue, verify branch/PR state live, and never push without explicit
+maintainer permission.
 
 **Next-work queue (in order):**
-1. **Phase 2 stabilisation remainder** — G40 broker-connect merge, infra script duplicates, GTT order UI, post_market_analysis cron handler, dead admin-route dispositions (G31/G32/U18 shipped).
-2. **Phase 4 learning loop** — AI1–AI3 + the full-day Practice run; spec first in `.local/specs/`.
+1. **Phase 2 stabilisation remainder** — validate the converged cross-platform nightly-CI repairs and continue only evidence-backed duplicate consolidation. G40 broker-connect, infra-script de-duplication, native GTT UI, `post_market_analysis`, dead admin-route wiring, G31/G32/U18 and the final two widget merges are shipped or superseded.
+2. **Phase 4 learning loop** — AI1 and AI2 shipped; AI3 is deferred to a maintainer sandbox-design call. The remaining execution gate is the full-day Practice run on a market day.
 3. **Phase 5 publication/signing** — publish only after native CI evidence and the complete release set; add Apple signing/notarisation secrets when the maintainer is ready, and never describe an ad-hoc seal as distribution signing.
 4. **Bracket follow-ups** — OCO monitoring (one leg fills → cancel sibling) is refused at placement today, not silently accepted; a proper engine-side monitor is the next step. `BrokerRouter`/`_resolve_target` private-config coupling in `bracket_routes.py` mirrors core order routes — refactor both together or neither.
 5. **Human-gated (do not attempt autonomously):** Groww session approval, Kotak Neo live probe, funded order smoke, W6 spec, B3 order-capable MCP decision.

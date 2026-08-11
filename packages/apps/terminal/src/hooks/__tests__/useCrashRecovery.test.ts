@@ -12,6 +12,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 
 // ---------------------------------------------------------------------------
 // localStorage mock — must be set up before any import that reads it.
@@ -44,8 +45,23 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => _isConnected,
 }));
 
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadContext: () => ({
+    identity: {
+      mode: "live",
+      scopeKey: "live:openalgo:default",
+      brokerType: "openalgo",
+      accountId: "default",
+    },
+    enabled: _isConnected,
+    host: "",
+    apiKey: "",
+  }),
+}));
+
 vi.mock("@/services/api", () => ({
-  getPositionbook: () => Promise.resolve(_positions),
+  getPositionbook: (_context: AccountReadContext, _signal?: AbortSignal) =>
+    Promise.resolve(_positions),
 }));
 
 // Mock TanStack Query — we control the return value directly

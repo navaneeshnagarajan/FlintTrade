@@ -27,17 +27,17 @@ import type { BrokerAccount } from "@/types/broker";
 // Mocks — declared BEFORE the hook import so vi.mock hoisting works correctly.
 // ---------------------------------------------------------------------------
 
-const mockListAccounts = vi.fn<() => Promise<BrokerAccount[]>>();
-const mockListNativeAccounts = vi.fn<() => Promise<NativeAccount[]>>();
+const mockListAccounts = vi.fn<(signal?: AbortSignal) => Promise<BrokerAccount[]>>();
+const mockListNativeAccounts = vi.fn<(signal?: AbortSignal) => Promise<NativeAccount[]>>();
 
 vi.mock("@/services/gatewayApi", () => ({
   gatewayApi: {
-    listAccounts: () => mockListAccounts(),
+    listAccounts: (signal?: AbortSignal) => mockListAccounts(signal),
   },
 }));
 
 vi.mock("@/services/ftApi.native", () => ({
-  listNativeAccounts: () => mockListNativeAccounts(),
+  listNativeAccounts: (signal?: AbortSignal) => mockListNativeAccounts(signal),
 }));
 
 const mockSetAccounts = vi.fn<(accounts: BrokerAccount[]) => void>();
@@ -217,6 +217,8 @@ describe("useBrokerAccounts — successful response", () => {
 
     await waitFor(() => expect(mockListAccounts).toHaveBeenCalledTimes(1));
     expect(mockListNativeAccounts).toHaveBeenCalledTimes(1);
+    expect(mockListAccounts).toHaveBeenCalledWith(expect.any(AbortSignal));
+    expect(mockListNativeAccounts).toHaveBeenCalledWith(expect.any(AbortSignal));
   });
 
   it("syncs returned accounts to brokerStore when query succeeds", async () => {

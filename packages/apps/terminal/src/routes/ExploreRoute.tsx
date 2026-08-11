@@ -1,5 +1,12 @@
 /**
- * ExploreRoute — demo/preview page at /explore.
+ * ExploreRoute — public-demo landing at /explore (Explore mode).
+ *
+ * Build-aware contract (demoSession.exploreRoutePolicy / main.tsx):
+ * this page is rendered only on the public demo build. Installed builds
+ * redirect bare `/explore` to welcome; sample-data entry is Welcome → Home.
+ *
+ * Inside the app the mode is always **Explore** (not Demo). Public site/nav
+ * may still market the overall experience as a demo.
  *
  * Shows all 6 FlintTrade modules with hardcoded sample data.
  * No broker connection required. Every module card navigates to the
@@ -557,7 +564,7 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
     target: ".grid.grid-cols-1",
     title: "Six Modules",
     description:
-      "FlintTrade serves three personas from one app: Trader (F&O scalping), Investor (MFs, SIPs, net worth), and Beginner (guided learning, paper trading).",
+      "FlintTrade serves three personas from one app: Trader (F&O scalping), Investor (MFs, SIPs, net worth), and Beginner (guided learning and Practice workflows).",
     placement: "top",
   },
   {
@@ -591,7 +598,7 @@ export default function ExploreRoute() {
     [navigate],
   );
 
-  const startDemoMode = useCallback(() => {
+  const startExploreMode = useCallback(() => {
     useModeStore.getState().setMode("explore");
     markDemoSessionActive();
     useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
@@ -609,7 +616,7 @@ export default function ExploreRoute() {
     <>
       <PublicRouteShell
         mainLabel="Explore mode"
-        eyebrow="Sample workspace"
+        eyebrow="Explore"
         title="Explore FlintTrade"
         subtitle="Open every module with simulated data, then connect OpenAlgo or a verified native broker when you are ready for live data."
         actions={
@@ -619,9 +626,9 @@ export default function ExploreRoute() {
               variant="ghost"
               size="sm"
               className="text-xs text-text-muted hover:text-text-primary"
-              onClick={startDemoMode}
+              onClick={startExploreMode}
             >
-              Demo Mode
+              Enter Explore
             </Button>
             <Button
               variant="ghost"
@@ -635,7 +642,7 @@ export default function ExploreRoute() {
               type="button"
               size="sm"
               className="text-xs"
-              onClick={() => navigate("/setup-account")}
+              onClick={() => navigate("/setup")}
             >
               Get Started
               <ArrowRight className="size-3.5" aria-hidden="true" />
@@ -666,9 +673,9 @@ export default function ExploreRoute() {
                 type="button"
                 size="sm"
                 className="w-full sm:w-auto"
-                onClick={startDemoMode}
+                onClick={startExploreMode}
               >
-                Enter Demo Workspace
+                Enter Explore
                 <ArrowRight className="size-3.5" aria-hidden="true" />
               </Button>
               <Button
@@ -739,7 +746,7 @@ export default function ExploreRoute() {
                 <div className="flex flex-col gap-3 sm:flex-row">
                   <Button
                     type="button"
-                    onClick={() => navigate("/setup-account")}
+                    onClick={() => navigate("/setup")}
                     className="sm:min-w-44"
                   >
                     Set Up Workspace
@@ -750,7 +757,7 @@ export default function ExploreRoute() {
                     className="border-border-default text-text-primary hover:bg-surface-hover sm:min-w-44"
                     asChild
                   >
-                    <Link to="/setup-account">
+                    <Link to="/setup">
                       Connect Gateway
                     </Link>
                   </Button>

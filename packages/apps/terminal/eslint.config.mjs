@@ -59,9 +59,10 @@
 // the node it keys off (TSAnyKeyword) is emitted by this parser too, so the
 // check itself costs nothing beyond the rule in ./eslint-local-rules.mjs.
 //
-// @babel/core is already in the tree; the parser adds only @babel/eslint-parser
-// and @babel/preset-typescript on top of eslint + eslint-plugin-react-hooks
-// (which itself has zero runtime dependencies at 5.x).
+// @babel/core is already in the tree; the parser adds only
+// @babel/eslint-parser on top of eslint + eslint-plugin-react-hooks (which
+// itself has zero runtime dependencies at 5.x). ESLint needs syntax only, so
+// the parser plugins below deliberately avoid Babel transform presets.
 //
 // KNOWN LIMITATION OF THAT PARSER CHOICE - READ THIS BEFORE "FIXING" A REPORT
 // --------------------------------------------------------------------------
@@ -95,24 +96,6 @@ export default [
   {
     files: ["src/**/*.{ts,tsx}"],
     plugins: { "react-hooks": reactHooks, local: localRules },
-    languageOptions: {
-      parser: babelParser,
-      parserOptions: {
-        // There is no babel.config.* in this package - Vite drives the build via
-        // esbuild/SWC - so the parser is configured inline instead.
-        requireConfigFile: false,
-        babelOptions: {
-          babelrc: false,
-          configFile: false,
-          // preset-typescript enables the TSX syntax plugins for .tsx files and
-          // the plain TS ones for .ts, keyed off the filename.
-          presets: ["@babel/preset-typescript"],
-        },
-        ecmaFeatures: { jsx: true },
-      },
-      ecmaVersion: 2022,
-      sourceType: "module",
-    },
     linterOptions: {
       // A suppression that suppresses nothing is worse than none: it reads as
       // "this was considered and accepted" when nothing was.
@@ -162,6 +145,66 @@ export default [
 
       // @ts-ignore and @ts-nocheck outright; @ts-expect-error only with an issue
       // link, per the house rules. Also clean at zero findings today.
+      "local/no-ts-suppression": "error",
+    },
+  },
+  {
+    files: ["src/**/*.ts"],
+    languageOptions: {
+      parser: babelParser,
+      parserOptions: {
+        // Babel 8's no-config fast path consumes parser plugins directly.
+        // Keeping JSX out of .ts preserves angle-bracket generic syntax.
+        requireConfigFile: false,
+        babelOptions: {
+          babelrc: false,
+          configFile: false,
+          parserOpts: { plugins: ["typescript"] },
+        },
+      },
+      ecmaVersion: 2022,
+      sourceType: "module",
+    },
+  },
+  {
+    files: ["src/**/*.tsx"],
+    languageOptions: {
+      parser: babelParser,
+      parserOptions: {
+        requireConfigFile: false,
+        babelOptions: {
+          babelrc: false,
+          configFile: false,
+          parserOpts: { plugins: ["typescript", "jsx"] },
+        },
+      },
+      ecmaVersion: 2022,
+      sourceType: "module",
+    },
+  },
+  {
+    // Playwright infrastructure is outside src/, but carries the same two
+    // TypeScript safety rules. Hooks rules are irrelevant to non-React E2E code.
+    files: ["e2e/**/*.ts", "playwright.config.ts", "playwright.infra.config.ts"],
+    plugins: { local: localRules },
+    languageOptions: {
+      parser: babelParser,
+      parserOptions: {
+        requireConfigFile: false,
+        babelOptions: {
+          babelrc: false,
+          configFile: false,
+          parserOpts: { plugins: ["typescript"] },
+        },
+      },
+      ecmaVersion: 2022,
+      sourceType: "module",
+    },
+    linterOptions: {
+      reportUnusedDisableDirectives: "error",
+    },
+    rules: {
+      "local/no-explicit-any": "error",
       "local/no-ts-suppression": "error",
     },
   },

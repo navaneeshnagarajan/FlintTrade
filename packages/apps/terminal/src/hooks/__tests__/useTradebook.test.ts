@@ -6,12 +6,30 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import {
+  CONNECTED_NATIVE_READ_CONTEXT,
+  PRACTICE_READ_CONTEXT,
+  UNCONFIGURED_LIVE_READ_CONTEXT,
+} from "@/test-utils/accountReadFixtures";
 import type { Trade } from "@/types/api";
 
-const mockGetTradebook = vi.fn<() => Promise<Trade[]>>();
+const accountReadState = vi.hoisted(() => ({
+  current: undefined as AccountReadContext | undefined,
+}));
+const mockGetTradebook = vi.fn<(
+  context: AccountReadContext,
+  signal?: AbortSignal,
+) => Promise<Trade[]>>();
 
 vi.mock("@/services/api", () => ({
-  getTradebook: () => mockGetTradebook(),
+  getTradebook: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetTradebook(context, signal),
+}));
+
+vi.mock("@/hooks/useAccountReadsEnabled", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/useAccountReadsEnabled")>()),
+  useAccountReadContext: () => accountReadState.current,
 }));
 
 import { useTradebook } from "../useTradebook";
@@ -41,13 +59,42 @@ function makeTrade(overrides: Partial<Trade> = {}): Trade {
   };
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  accountReadState.current = CONNECTED_NATIVE_READ_CONTEXT;
+  vi.clearAllMocks();
+});
 
-describe("useTradebook — URL is called", () => {
-  it("calls getTradebook exactly once on mount", async () => {
+describe("useTradebook — immutable account authority", () => {
+  it("passes the exact connected native context and AbortSignal to getTradebook", async () => {
     mockGetTradebook.mockResolvedValue([makeTrade()]);
     renderHook(() => useTradebook(), { wrapper: createWrapper() });
-    await waitFor(() => expect(mockGetTradebook).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockGetTradebook).toHaveBeenCalledOnce());
+    expect(mockGetTradebook).toHaveBeenCalledWith(
+      CONNECTED_NATIVE_READ_CONTEXT,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("stays idle and makes no transport call without selected Live authority", () => {
+    accountReadState.current = UNCONFIGURED_LIVE_READ_CONTEXT;
+    mockGetTradebook.mockResolvedValue([makeTrade()]);
+
+    const { result } = renderHook(() => useTradebook(), { wrapper: createWrapper() });
+
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(mockGetTradebook).not.toHaveBeenCalled();
+  });
+
+  it("uses Practice sandbox authority without a Live broker", async () => {
+    accountReadState.current = PRACTICE_READ_CONTEXT;
+    mockGetTradebook.mockResolvedValue([]);
+
+    renderHook(() => useTradebook(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(mockGetTradebook).toHaveBeenCalledWith(
+      PRACTICE_READ_CONTEXT,
+      expect.any(AbortSignal),
+    ));
   });
 
   it("does not call getTradebook when disabled", () => {

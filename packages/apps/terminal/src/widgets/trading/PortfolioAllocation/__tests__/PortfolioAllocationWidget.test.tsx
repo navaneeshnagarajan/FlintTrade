@@ -8,6 +8,12 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import {
+  CONNECTED_NATIVE_READ_CONTEXT,
+  EXPLORE_READ_CONTEXT,
+  PRACTICE_READ_CONTEXT,
+} from "@/test-utils/accountReadFixtures";
 
 beforeAll(() => {
   global.ResizeObserver = class {
@@ -22,11 +28,17 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 }));
 
 const state = vi.hoisted(() => ({ connected: false, scope: "explore:mock" }));
+const accountReadState = vi.hoisted(() => ({
+  current: undefined as AccountReadContext | undefined,
+}));
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => state.connected,
 }));
 vi.mock("@/hooks/useDataScope", () => ({
   useDataScope: () => state.scope,
+}));
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadContext: () => accountReadState.current,
 }));
 
 const mockGetPositionbook = vi.hoisted(() => vi.fn());
@@ -46,6 +58,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 beforeEach(() => {
   state.connected = false;
   state.scope = "explore:mock";
+  accountReadState.current = EXPLORE_READ_CONTEXT;
   mockGetPositionbook.mockReset();
   mockGetHoldings.mockReset();
   mockGetPositionbook.mockResolvedValue([]);
@@ -111,7 +124,8 @@ describe("PortfolioAllocationWidget", () => {
 
   it("shows an honest empty state for a connected portfolio with no allocation", async () => {
     state.connected = true;
-    state.scope = "live:openalgo:default";
+    state.scope = CONNECTED_NATIVE_READ_CONTEXT.identity.scopeKey;
+    accountReadState.current = CONNECTED_NATIVE_READ_CONTEXT;
 
     render(<PortfolioAllocationWidget />, { wrapper });
 
@@ -128,6 +142,7 @@ describe("PortfolioAllocationWidget", () => {
 
   it("reads and labels the Practice sandbox without a live broker", async () => {
     state.scope = "practice:sandbox:default";
+    accountReadState.current = PRACTICE_READ_CONTEXT;
     mockGetPositionbook.mockResolvedValue([
       { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 2, averagePrice: 800, ltp: 810, pnl: 20 },
     ]);

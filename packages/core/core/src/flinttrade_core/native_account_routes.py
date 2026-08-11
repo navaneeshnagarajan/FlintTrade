@@ -2238,6 +2238,7 @@ def connect_native_account() -> Any:
 
 _OAUTH_PENDING: dict[str, dict[str, Any]] = {}
 _OAUTH_TTL_SECONDS = 600.0
+_OAUTH_PENDING_LOCK = threading.Lock()
 
 
 def _default_oauth_redirect_uri() -> str:
@@ -2255,12 +2256,15 @@ def _default_oauth_redirect_uri() -> str:
     )
 
 
-def _purge_expired_oauth() -> None:
-    import time  # noqa: PLC0415
-
+def _purge_expired_oauth_unlocked() -> None:
     now = time.time()
     for state in [s for s, v in _OAUTH_PENDING.items() if now - v.get("ts", 0) > _OAUTH_TTL_SECONDS]:
         _OAUTH_PENDING.pop(state, None)
+
+
+def _purge_expired_oauth() -> None:
+    with _OAUTH_PENDING_LOCK:
+        _purge_expired_oauth_unlocked()
 
 
 def _pop_pending_oauth_callback(*, state: str, returned_token_id: bool) -> tuple[dict[str, Any] | None, str | None]:
@@ -2273,23 +2277,25 @@ def _pop_pending_oauth_callback(*, state: str, returned_token_id: bool) -> tuple
     never accepted.
     """
 
-    if state:
-        pending = _OAUTH_PENDING.pop(state, None)
-        if pending is None:
+    with _OAUTH_PENDING_LOCK:
+        _purge_expired_oauth_unlocked()
+        if state:
+            pending = _OAUTH_PENDING.pop(state, None)
+            if pending is None:
+                return None, "Login link expired or invalid - start again from FlintTrade."
+            return pending, None
+
+        if not returned_token_id:
             return None, "Login link expired or invalid - start again from FlintTrade."
-        return pending, None
 
-    if not returned_token_id:
-        return None, "Login link expired or invalid - start again from FlintTrade."
-
-    matches = [(s, v) for s, v in _OAUTH_PENDING.items() if v.get("adapter_id") == "dhan"]
-    if len(matches) == 1:
-        matched_state, pending = matches[0]
-        _OAUTH_PENDING.pop(matched_state, None)
-        return pending, None
-    if not matches:
-        return None, "Login link expired or invalid - start again from FlintTrade."
-    return None, "Dhan login link is ambiguous or expired - start again from FlintTrade."
+        matches = [(s, v) for s, v in _OAUTH_PENDING.items() if v.get("adapter_id") == "dhan"]
+        if len(matches) == 1:
+            matched_state, pending = matches[0]
+            _OAUTH_PENDING.pop(matched_state, None)
+            return pending, None
+        if not matches:
+            return None, "Login link expired or invalid - start again from FlintTrade."
+        return None, "Dhan login link is ambiguous or expired - start again from FlintTrade."
 
 
 @native_accounts_bp.route("/oauth/start", methods=["POST"])
@@ -2342,8 +2348,7 @@ def native_oauth_start() -> Any:
 
     redirect_uri = _default_oauth_redirect_uri()
     state = secrets.token_urlsafe(24)
-    _purge_expired_oauth()
-    _OAUTH_PENDING[state] = {
+    pending = {
         "adapter_id": adapter_id,
         "account_id": account_id,
         "api_key": api_key,
@@ -2353,6 +2358,19 @@ def native_oauth_start() -> Any:
         "is_primary": bool(body.get("is_primary", False)),
         "ts": time.time(),
     }
+    with _OAUTH_PENDING_LOCK:
+        _purge_expired_oauth_unlocked()
+        if adapter_id == "dhan" and any(
+            item.get("adapter_id") == "dhan" for item in _OAUTH_PENDING.values()
+        ):
+            # Dhan's callback carries tokenId but no state, so two outstanding
+            # approvals cannot be attributed safely. Reject the second start
+            # before retaining its secret rather than making both ambiguous.
+            return jsonify({
+                "status": "error",
+                "message": "A Dhan login is already pending. Finish it or wait for it to expire before starting another.",
+            }), 409
+        _OAUTH_PENDING[state] = pending
     try:
         params = inspect.signature(builder).parameters
         if "account_id" in params or "api_secret" in params:
@@ -2360,7 +2378,8 @@ def native_oauth_start() -> Any:
         else:
             auth_url = builder(api_key, redirect_uri, state)
     except Exception as exc:  # noqa: BLE001 - never echo app secrets / broker responses
-        _OAUTH_PENDING.pop(state, None)
+        with _OAUTH_PENDING_LOCK:
+            _OAUTH_PENDING.pop(state, None)
         logger.warning("Native OAuth start failed for %s (%s)", adapter_id, type(exc).__name__)
         return jsonify({"status": "error", "message": "Could not start broker OAuth login."}), 502
     return jsonify({
@@ -2388,7 +2407,6 @@ def native_oauth_callback() -> Any:
     token_id = request.args.get("tokenId") or request.args.get("token_id") or ""
     code = oauth_code or token_id
     state = request.args.get("state", "")
-    _purge_expired_oauth()
     pending, error = _pop_pending_oauth_callback(state=state, returned_token_id=bool(token_id and not oauth_code))
     if pending is None:
         return _oauth_result_html(error or "Login link expired or invalid - start again from FlintTrade.", ok=False), 400

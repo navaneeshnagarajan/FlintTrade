@@ -10,15 +10,20 @@ describe("MiniChartCard", () => {
   it("renders the NIFTY illustrative sparkline through the shared Flint primitive", () => {
     render(<MiniChartCard />);
 
-    const sparkline = screen.getByRole("img", { name: /NIFTY 50 1D illustrative sparkline/i });
+    const sparkline = screen.getByRole("img", {
+      name: /NIFTY 50 1D illustrative sparkline \(sample data\)/i,
+    });
     expect(sparkline).toHaveAttribute("viewBox", "0 0 160 42");
     expect(sparkline.querySelector("polyline")).not.toBeInTheDocument();
     expect(sparkline.querySelectorAll("path").length).toBeGreaterThan(0);
   });
 
-  it("badges the sparkline as Demo (it is illustrative shape, not live data)", () => {
+  it("badges the sparkline as SAMPLE (illustrative shape, not live data)", () => {
     render(<MiniChartCard />);
-    expect(screen.getByTestId("mini-chart-demo-badge")).toHaveTextContent(/demo/i);
+    const badge = screen.getByTestId("mini-chart-demo-badge");
+    expect(badge).toHaveTextContent(/^Sample$/i);
+    expect(badge).toHaveAttribute("data-provenance", "Sample");
+    expect(badge).not.toHaveTextContent(/demo/i);
   });
 
   it("shows a dash, never a fabricated price, when there is no live NIFTY tick", () => {

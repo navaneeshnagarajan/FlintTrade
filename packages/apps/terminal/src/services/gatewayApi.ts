@@ -41,8 +41,8 @@ export const gatewayApi = {
       ...(data !== undefined ? { data } : {}),
     })).then((r) => r.limits),
 
-  listAccounts: () =>
-    gateway(getV1<{ accounts: BrokerAccount[] }>("accounts")).then((r) => r.accounts),
+  listAccounts: (signal?: AbortSignal) =>
+    gateway(getV1<{ accounts: BrokerAccount[] }>("accounts", signal)).then((r) => r.accounts),
 
   removeAccount: (accountId: string) =>
     gateway(delV1<{ status: string }>(`accounts/${encodeURIComponent(accountId)}`)),

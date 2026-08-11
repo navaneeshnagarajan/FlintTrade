@@ -56,7 +56,7 @@ export function SymbolSearchTab({
   onActiveIndexChange,
   onActiveSymbolChange,
 }: SymbolSearchTabProps) {
-  const { results, isLoading } = useSymbolSearch(query);
+  const { results, isLoading, isError, isRetrying, retry } = useSymbolSearch(query);
 
   // Clamp activeIndex to list bounds
   useEffect(() => {
@@ -87,6 +87,23 @@ export function SymbolSearchTab({
     return (
       <div className="flex items-center justify-center py-12 text-text-muted">
         <p className="text-sm">Searching&hellip;</p>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div role="alert" className="flex flex-col items-center justify-center py-12 text-text-muted gap-2">
+        <p className="text-sm">Symbol search unavailable</p>
+        <p className="text-sm">Check your connection and try again.</p>
+        <button
+          type="button"
+          disabled={isRetrying}
+          onClick={() => retry?.()}
+          className="mt-2 text-sm text-text-primary underline hover:no-underline disabled:cursor-wait disabled:opacity-60"
+        >
+          {isRetrying ? "Retrying…" : "Try again"}
+        </button>
       </div>
     );
   }
@@ -124,9 +141,7 @@ export function SymbolSearchTab({
               {r.exchange}
             </span>
           </span>
-
           <SymbolPrice symbol={r.symbol} exchange={r.exchange} />
-
           {/* Quick actions — visible on hover / active */}
           <span
             className={cn(

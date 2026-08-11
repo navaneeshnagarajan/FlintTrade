@@ -11,6 +11,15 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import {
+  CONNECTED_NATIVE_READ_CONTEXT,
+  UNCONFIGURED_LIVE_READ_CONTEXT,
+} from "@/test-utils/accountReadFixtures";
+
+const accountReadState = vi.hoisted(() => ({
+  current: undefined as AccountReadContext | undefined,
+}));
 
 // ---------------------------------------------------------------------------
 // Mock framer-motion
@@ -131,6 +140,12 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => true,
 }));
 
+vi.mock("@/hooks/useAccountReadsEnabled", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/useAccountReadsEnabled")>()),
+  useAccountReadContext: () => accountReadState.current,
+  useAccountReadsEnabled: () => accountReadState.current?.enabled ?? false,
+}));
+
 // ---------------------------------------------------------------------------
 // Mock Jotai atoms
 // ---------------------------------------------------------------------------
@@ -165,6 +180,7 @@ function createDataTransfer() {
 
 beforeEach(() => {
   localStorage.clear();
+  accountReadState.current = CONNECTED_NATIVE_READ_CONTEXT;
   // These tests assert against the mocked REST hook fixtures; the dashboard
   // cards now branch on mode (explore => demo data), so pin to a non-explore
   // mode so the fixtures flow. Demo-mode behaviour is covered separately.
@@ -431,5 +447,15 @@ describe("HomeRoute", () => {
     // totalPnl = 2500 → should render +₹2,500 in welcome card
     const welcomeCard = screen.getByTestId("welcome-card");
     expect(welcomeCard.textContent).toMatch(/₹2,500/);
+  });
+
+  it("WelcomeCard keeps Live P&L fail-closed without selected account authority", () => {
+    accountReadState.current = UNCONFIGURED_LIVE_READ_CONTEXT;
+
+    renderHomeRoute();
+
+    const welcomeCard = screen.getByTestId("welcome-card");
+    expect(welcomeCard).toHaveTextContent("Broker required");
+    expect(welcomeCard.textContent).not.toMatch(/₹2,500/);
   });
 });

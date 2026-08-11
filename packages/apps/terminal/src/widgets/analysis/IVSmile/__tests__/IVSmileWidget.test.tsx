@@ -8,7 +8,7 @@
  *     Unavailable);
  *   - the fail-closed live gate, including the connected-but-flagged-sample
  *     payload and the connected-payload-with-no-provenance case (which the old
- *     IVSmile promoted to a chart under a "Demo data" badge);
+ *     IVSmile promoted to a chart under a "Sample data" badge);
  *   - the skew view rendering through the shared Flint banded-line primitive
  *     with no hand-rolled local SVG;
  *   - the deliberate absence of a refresh control.

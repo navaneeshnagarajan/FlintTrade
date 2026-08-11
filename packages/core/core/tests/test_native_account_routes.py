@@ -709,6 +709,40 @@ def test_dhan_oauth_start_generates_consent_url(client, monkeypatch):
     assert data["postback_uri"].endswith("/api/v1/native/postbacks/dhan")
 
 
+def test_dhan_oauth_start_rejects_a_second_ambiguous_pending_login(client, monkeypatch):
+    c, _app, _tmp = client
+    from flinttrade_core import native_account_routes as native_routes
+    from flinttrade_gateway.brokers.dhan import DhanAdapter
+
+    monkeypatch.setattr(
+        DhanAdapter,
+        "build_login_url",
+        staticmethod(
+            lambda _app_id, _redirect_uri, _state, **_kwargs: (
+                "https://auth.dhan.co/login/consentApp-login?consentAppId=CONSENT1"
+            )
+        ),
+    )
+    first = c.post(
+        "/api/v1/native/oauth/start",
+        headers=_h(),
+        json={"adapter_id": "dhan", "account_id": "DHANCLIENT1", "api_key": "APPID", "api_secret": "SECRET"},
+    )
+    second = c.post(
+        "/api/v1/native/oauth/start",
+        headers=_h(),
+        json={"adapter_id": "dhan", "account_id": "DHANCLIENT2", "api_key": "APPID", "api_secret": "SECRET"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.get_json()["message"] == (
+        "A Dhan login is already pending. Finish it or wait for it to expire before starting another."
+    )
+    assert len(native_routes._OAUTH_PENDING) == 1
+    assert next(iter(native_routes._OAUTH_PENDING.values()))["account_id"] == "DHANCLIENT1"
+
+
 def test_oauth_start_builder_failure_drops_pending_secret(client, monkeypatch, caplog):
     c, _app, _tmp = client
     from flinttrade_core import native_account_routes as native_routes

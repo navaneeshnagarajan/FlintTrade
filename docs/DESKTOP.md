@@ -5,14 +5,14 @@ API from one origin, and a normal browser remains the primary supported way to
 run it. The desktop package is a small Electron 43 shell around that same local
 application.
 
-> **Installer availability:** no desktop installer release is published yet; the
-> current source baseline is `v0.0.1`, and the previous Tauri and PyInstaller
-> releases and their assets have been retired.
-> When the Electron pipeline publishes its first release, the
-> [download page](https://flinttrade.vercel.app/download) will withhold commands
-> and download buttons until one release contains the complete Electron asset
-> set (four installers plus `SHA256SUMS.txt`). Until then, use the
-> [source web-app setup](setup/QUICKSTART.md) or build the Electron shell locally.
+> **Installer availability:** the current source baseline is `v0.0.1`. Previous
+> Tauri and PyInstaller assets do not satisfy the Electron source-bootstrap contract. The public
+> [download surface](https://flinttrade.vercel.app/download) distinguishes the
+> source-built web-app install from Electron-shell installers.
+> It withholds Electron commands and download buttons unless one release
+> contains the complete asset set (four installers plus `SHA256SUMS.txt`). Use the
+> [source web-app setup](setup/QUICKSTART.md) or build the Electron shell locally
+> whenever that complete set is unavailable.
 
 ## Delivery model
 
@@ -125,9 +125,10 @@ and unexpected child windows are denied.
 
 ## Install after an Electron release is available
 
-The branch-local [download page](https://flinttrade.vercel.app/download)
-implementation is the availability gate. Once this branch is deployed and the
-page reports a complete Electron release, the supported one-command paths are:
+The public [download surface](https://flinttrade.vercel.app/download)
+distinguishes the source-built web-app install from Electron-shell installers.
+It exposes the supported one-command Electron paths only when one release
+contains all four canonical installers plus `SHA256SUMS.txt`:
 
 ```bash
 # macOS or Linux
@@ -431,11 +432,10 @@ single local Mac run is not cross-platform proof.
 
 ## Troubleshooting
 
-- **The deployed download page still shows beta.13 install instructions.** It
-  predates the branch-local Electron availability gate. Do not use the older
-  assets as if they followed the source-bootstrap contract; after this branch
-  is deployed, the page will report “Electron installer release pending” until
-  the first complete Electron release is published.
+- **The download page does not show Electron install commands or downloads.**
+  This is expected unless one release contains all four canonical installers
+  plus `SHA256SUMS.txt`. Use the distinct source-built web-app setup or build
+  the Electron shell locally when the complete set is unavailable.
 - **First launch remains on the splash.** Read the redacted bootstrap log in
   the workspace's `logs/` directory. Retry resumes through a new attempt; a
   failed candidate does not replace the active source. FlintTrade durably caps

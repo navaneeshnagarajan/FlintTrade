@@ -6,6 +6,10 @@ import { BentoCard } from "@/components/bento/BentoCard";
 import { useOrders } from "@/hooks/useOrders";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoOrders } from "@/hooks/useModeData";
+import {
+  resolveAccountQueryUi,
+  runGuardedAccountRefetch,
+} from "@/lib/accountQueryState";
 import { useModeStore } from "@/stores/modeStore";
 import { DemoBadge } from "./DemoBadge";
 import { ClipboardList, Loader2 } from "lucide-react";
@@ -15,8 +19,16 @@ export function OrdersCard() {
   const accountReadsEnabled = useAccountReadsEnabled();
   const query = useOrders({ enabled: accountReadsEnabled });
   const orders = isExplore ? getDemoOrders() : query.data;
-  const isLoading = !accountReadsEnabled ? false : query.isLoading;
   const recentOrders = orders?.slice(0, 3) ?? [];
+  const isError = !isExplore && query.isError;
+  const queryUi = resolveAccountQueryUi({
+    accountReadsEnabled,
+    fetchStatus: query.fetchStatus,
+    hasData: recentOrders.length > 0,
+    isError,
+    isExplore,
+    isLoading: query.isLoading,
+  });
 
   return (
     <BentoCard size="default" label="Recent Orders" data-testid="orders-card">
@@ -29,17 +41,39 @@ export function OrdersCard() {
           </p>
         </div>
 
-        {isLoading ? (
+        {isError && (
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-2 text-[10px] text-loss"
+          >
+            <span>
+              Orders unavailable
+              {queryUi.isFrozen ? " — displayed orders are frozen" : ""}
+            </span>
+            <button
+              type="button"
+              onClick={() => runGuardedAccountRefetch(queryUi.canRefetch, query.refetch)}
+              disabled={!queryUi.canRefetch || query.isFetching}
+              className="shrink-0 font-medium underline disabled:opacity-50"
+            >
+              {query.isFetching ? "Retrying…" : "Retry orders"}
+            </button>
+          </div>
+        )}
+
+        {queryUi.isFrozen && !isError && (
+          <p role="status" className="text-[10px] text-warning">
+            {queryUi.isPaused
+              ? "Offline — displayed orders are frozen"
+              : "Broker disconnected — displayed orders are frozen"}
+          </p>
+        )}
+
+        {queryUi.showInitialLoading ? (
           <div className="flex-1 flex items-center justify-center">
             <Loader2 size={16} className="animate-spin text-text-muted" aria-label="Loading orders" />
           </div>
-        ) : recentOrders.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center">
-            <p className="text-xs text-text-muted">
-              {isExplore || accountReadsEnabled ? "No recent orders" : "Connect a broker to load orders"}
-            </p>
-          </div>
-        ) : (
+        ) : recentOrders.length > 0 ? (
           <div className="flex-1 space-y-2">
             {recentOrders.map((order) => {
               const isBuy = order.action === "BUY";
@@ -90,7 +124,19 @@ export function OrdersCard() {
               );
             })}
           </div>
-        )}
+        ) : !isError ? (
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-xs text-text-muted">
+              {isExplore
+                ? "No recent orders"
+                : queryUi.isPaused
+                  ? "Orders unavailable while offline"
+                  : accountReadsEnabled
+                    ? "No recent orders"
+                    : "Connect a broker to load orders"}
+            </p>
+          </div>
+        ) : null}
       </div>
     </BentoCard>
   );

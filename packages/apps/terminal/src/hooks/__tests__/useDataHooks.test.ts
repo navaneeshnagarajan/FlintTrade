@@ -17,6 +17,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
+
+const mockAccountReadContext = vi.hoisted(() => Object.freeze({
+  identity: Object.freeze({
+    mode: "live" as const,
+    scopeKey: "live:native:dhan:A1",
+    brokerType: "dhan",
+    accountId: "A1",
+  }),
+  enabled: true,
+  host: "",
+  apiKey: "",
+}));
 
 // ---------------------------------------------------------------------------
 // Mock api service
@@ -30,19 +43,47 @@ const mockGetTradebook = vi.fn();
 const mockGetOptionChain = vi.fn();
 const mockGetMargin = vi.fn();
 const mockGetSyntheticFuture = vi.fn();
+const mockDataScope = vi.hoisted(() => ({ value: "live:native:dhan:A1" }));
 
 vi.mock("@/services/api", () => ({
-  getFunds: () => mockGetFunds(),
-  getHoldings: () => mockGetHoldings(),
-  getOrderbook: () => mockGetOrderbook(),
-  getPositionbook: () => mockGetPositionbook(),
-  getTradebook: () => mockGetTradebook(),
+  getFunds: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetFunds(context, signal),
+  getHoldings: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetHoldings(context, signal),
+  getOrderbook: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetOrderbook(context, signal),
+  getPositionbook: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetPositionbook(context, signal),
+  getTradebook: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetTradebook(context, signal),
   getOptionChain: (symbol: string, exchange: string, expiry?: string) =>
     mockGetOptionChain(symbol, exchange, expiry),
-  getMargin: (symbol: string, exchange: string, qty: number, product: string, action: string) =>
-    mockGetMargin(symbol, exchange, qty, product, action),
-  getSyntheticFuture: (symbol: string, exchange: string, expiry?: string) =>
-    mockGetSyntheticFuture(symbol, exchange, expiry),
+  getMargin: (
+    context: AccountReadContext,
+    symbol: string,
+    exchange: string,
+    qty: number,
+    product: string,
+    action: string,
+    signal?: AbortSignal,
+  ) => mockGetMargin(context, symbol, exchange, qty, product, action, signal),
+  getSyntheticFuture: (
+    symbol: string,
+    exchange: string,
+    expiry?: string,
+    signal?: AbortSignal,
+    expectedDataScope?: string,
+  ) => mockGetSyntheticFuture(symbol, exchange, expiry, signal, expectedDataScope),
+}));
+
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadsEnabled: () => true,
+  useAccountReadContext: () => mockAccountReadContext,
+}));
+
+vi.mock("@/hooks/useDataScope", () => ({
+  useDataScope: () => mockDataScope.value,
+  useMarketDataScope: () => mockDataScope.value,
 }));
 
 // Mock market hours (default: market closed so refetchInterval doesn't interfere)
@@ -95,6 +136,7 @@ function createWrapper() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockDataScope.value = "live:native:dhan:A1";
 });
 
 // ---------------------------------------------------------------------------
@@ -120,6 +162,10 @@ describe("useFunds", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(fundsData);
+    expect(mockGetFunds).toHaveBeenCalledWith(
+      mockAccountReadContext,
+      expect.any(AbortSignal),
+    );
   });
 
   it("returns error state on failure", async () => {
@@ -152,6 +198,10 @@ describe("useHoldings", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveLength(1);
     expect(result.current.data![0].symbol).toBe("RELIANCE");
+    expect(mockGetHoldings).toHaveBeenCalledWith(
+      mockAccountReadContext,
+      expect.any(AbortSignal),
+    );
   });
 
   it("returns error state on failure (retry disabled)", async () => {
@@ -183,6 +233,10 @@ describe("useOrders", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveLength(1);
+    expect(mockGetOrderbook).toHaveBeenCalledWith(
+      mockAccountReadContext,
+      expect.any(AbortSignal),
+    );
   });
 
   it("returns error state on failure", async () => {
@@ -214,8 +268,11 @@ describe("usePositions", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveLength(1);
+    expect(mockGetPositionbook).toHaveBeenCalledWith(
+      mockAccountReadContext,
+      expect.any(AbortSignal),
+    );
   });
-
 });
 
 // ---------------------------------------------------------------------------
@@ -239,6 +296,10 @@ describe("useTradebook", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveLength(1);
+    expect(mockGetTradebook).toHaveBeenCalledWith(
+      mockAccountReadContext,
+      expect.any(AbortSignal),
+    );
   });
 
   it("returns error state on failure", async () => {
@@ -329,7 +390,15 @@ describe("useMargin", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(marginData);
-    expect(mockGetMargin).toHaveBeenCalledWith("NIFTY", "NFO", 50, "MIS", "BUY");
+    expect(mockGetMargin).toHaveBeenCalledWith(
+      mockAccountReadContext,
+      "NIFTY",
+      "NFO",
+      50,
+      "MIS",
+      "BUY",
+      expect.any(AbortSignal),
+    );
   });
 });
 
@@ -365,6 +434,63 @@ describe("useSyntheticFuture", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(futureData);
-    expect(mockGetSyntheticFuture).toHaveBeenCalledWith("NIFTY", "NFO", "2026-04-03");
+    expect(mockGetSyntheticFuture).toHaveBeenCalledWith(
+      "NIFTY",
+      "NFO",
+      "2026-04-03",
+      expect.any(AbortSignal),
+      mockDataScope.value,
+    );
+  });
+
+  it("does not retain a Live synthetic future after switching to Explore", async () => {
+    const futureData = { synthetic_price: 23520.5, basis: 20.5, annualized_basis: 3.2 };
+    mockGetSyntheticFuture.mockResolvedValue(futureData);
+    const { result, rerender } = renderHook(
+      () => useSyntheticFuture("NIFTY", "NFO", "2026-04-03"),
+      { wrapper: createWrapper() },
+    );
+    await waitFor(() => expect(result.current.data).toEqual(futureData));
+
+    mockDataScope.value = "explore:mock";
+    rerender();
+
+    await waitFor(() => expect(result.current.fetchStatus).toBe("idle"));
+    expect(result.current.data).toBeUndefined();
+    expect(mockGetSyntheticFuture).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts an in-flight Live synthetic future when Explore retires its authority", async () => {
+    let resolveLive!: (value: { synthetic_price: number }) => void;
+    let liveSignal: AbortSignal | undefined;
+    mockGetSyntheticFuture.mockImplementation(
+      (
+        _symbol: string,
+        _exchange: string,
+        _expiry: string,
+        signal?: AbortSignal,
+        expectedDataScope?: string,
+      ) => {
+        expect(expectedDataScope).toBe("live:native:dhan:A1");
+        liveSignal = signal;
+        return new Promise((resolve) => {
+          resolveLive = resolve;
+        });
+      },
+    );
+    const { result, rerender } = renderHook(
+      () => useSyntheticFuture("NIFTY", "NFO", "2026-04-03"),
+      { wrapper: createWrapper() },
+    );
+    await waitFor(() => expect(result.current.fetchStatus).toBe("fetching"));
+
+    mockDataScope.value = "explore:mock";
+    rerender();
+
+    expect(liveSignal).toBeInstanceOf(AbortSignal);
+    expect(liveSignal?.aborted).toBe(true);
+    resolveLive({ synthetic_price: 23520.5 });
+    await waitFor(() => expect(result.current.fetchStatus).toBe("idle"));
+    expect(result.current.data).toBeUndefined();
   });
 });

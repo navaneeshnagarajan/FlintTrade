@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -28,6 +28,7 @@ const ftApiMocks = vi.hoisted(() => ({
 
 const state = vi.hoisted(() => ({ connected: false }));
 const mockMode = vi.hoisted(() => ({ current: "live" }));
+const dataScopeState = vi.hoisted(() => ({ current: "live:native:dhan:A1" }));
 
 vi.mock("@/services/api", () => ({
   getExpiry: apiMocks.getExpiry,
@@ -46,6 +47,10 @@ vi.mock("@/lib/market", () => ({ isMarketHours: () => false }));
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => state.connected,
+}));
+
+vi.mock("@/hooks/useDataScope", () => ({
+  useMarketDataScope: () => dataScopeState.current,
 }));
 
 vi.mock("@/stores/modeStore", () => ({
@@ -84,17 +89,26 @@ function unusualResponse(isSampleData?: boolean) {
   };
 }
 
-function wrapper({ children }: { children: React.ReactNode }) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
-}
-
 /** The signals view is what the retired `oisignals` panel id resolves to. */
 function renderSignals() {
-  return render(
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
     <OIChartWidget {...makeWidgetPanelProps({ params: { view: "signals" } })} />,
-    { wrapper },
+    {
+      wrapper: ({ children }: { children: React.ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    },
   );
+  return { ...view, queryClient };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 beforeAll(() => {
@@ -109,6 +123,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.connected = false;
   mockMode.current = "live";
+  dataScopeState.current = "live:native:dhan:A1";
   apiMocks.getExpiry.mockResolvedValue(["2026-07-30"]);
   apiMocks.getOptionChain.mockResolvedValue({
     underlying_ltp: 25_000,
@@ -154,9 +169,11 @@ describe("OI Analytics signals view", () => {
     renderSignals();
 
     await waitFor(() => expect(ftApiMocks.getOIChangeAnalysis).toHaveBeenCalledWith(
-      "NIFTY", "NFO", "2026-07-30", "flat",
+      "NIFTY", "NFO", "2026-07-30", "flat", expect.any(AbortSignal), dataScopeState.current,
     ));
-    expect(ftApiMocks.getUnusualOI).toHaveBeenCalledWith("NIFTY", "NFO", "2026-07-30");
+    expect(ftApiMocks.getUnusualOI).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "2026-07-30", undefined, expect.any(AbortSignal), dataScopeState.current,
+    );
     // An empty expiry is what made the retired widget's Live state unreachable.
     expect(ftApiMocks.getOIChangeAnalysis).not.toHaveBeenCalledWith("NIFTY", "NFO", "", "flat");
   });
@@ -173,7 +190,7 @@ describe("OI Analytics signals view", () => {
     fireEvent.click(await screen.findByRole("option", { name: "SENSEX" }));
 
     await waitFor(() => expect(ftApiMocks.getOIChangeAnalysis).toHaveBeenCalledWith(
-      "SENSEX", "BFO", "2026-07-30", "flat",
+      "SENSEX", "BFO", "2026-07-30", "flat", expect.any(AbortSignal), dataScopeState.current,
     ));
   });
 
@@ -189,8 +206,69 @@ describe("OI Analytics signals view", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Price ↑" }));
 
     await waitFor(() => expect(ftApiMocks.getOIChangeAnalysis).toHaveBeenCalledWith(
-      "NIFTY", "NFO", "2026-07-30", "up",
+      "NIFTY", "NFO", "2026-07-30", "up", expect.any(AbortSignal), dataScopeState.current,
     ));
+  });
+
+  it("retires source A signal requests and cannot publish them after source B wins", async () => {
+    state.connected = true;
+    const lateAAnalysis = deferred<ReturnType<typeof analysisResponse>>();
+    const lateAUnusual = deferred<ReturnType<typeof unusualResponse>>();
+    const sourceBAnalysis = {
+      ...analysisResponse(false),
+      signals: [{
+        ...analysisResponse(false).signals[0],
+        strike: 25100,
+      }],
+    };
+    const sourceBUnusual = {
+      ...unusualResponse(false),
+      unusual: [{
+        ...unusualResponse(false).unusual[0],
+        strike: 25100,
+      }],
+    };
+    ftApiMocks.getOIChangeAnalysis
+      .mockReturnValueOnce(lateAAnalysis.promise)
+      .mockResolvedValue(sourceBAnalysis);
+    ftApiMocks.getUnusualOI
+      .mockReturnValueOnce(lateAUnusual.promise)
+      .mockResolvedValue(sourceBUnusual);
+
+    const view = renderSignals();
+    await waitFor(() => expect(ftApiMocks.getUnusualOI).toHaveBeenCalledOnce());
+    const aAnalysisSignal = ftApiMocks.getOIChangeAnalysis.mock.calls[0]?.[4] as AbortSignal | undefined;
+    const aUnusualSignal = ftApiMocks.getUnusualOI.mock.calls[0]?.[4] as AbortSignal | undefined;
+
+    dataScopeState.current = "live:native:upstox:B1";
+    view.rerender(<OIChartWidget {...makeWidgetPanelProps({ params: { view: "signals" } })} />);
+
+    expect(aAnalysisSignal?.aborted).toBe(true);
+    expect(aUnusualSignal?.aborted).toBe(true);
+    await waitFor(() => expect(ftApiMocks.getOIChangeAnalysis).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "2026-07-30", "flat", expect.any(AbortSignal), dataScopeState.current,
+    ));
+    expect(await screen.findAllByText("25100")).not.toHaveLength(0);
+
+    await act(async () => {
+      lateAAnalysis.resolve({
+        ...analysisResponse(false),
+        signals: [{ ...analysisResponse(false).signals[0], strike: 25200 }],
+      });
+      lateAUnusual.resolve({
+        ...unusualResponse(false),
+        unusual: [{ ...unusualResponse(false).unusual[0], strike: 25200 }],
+      });
+      await Promise.all([lateAAnalysis.promise, lateAUnusual.promise]);
+    });
+
+    expect(screen.queryByText("25200")).not.toBeInTheDocument();
+    expect(view.queryClient.getQueryData([
+      "oiAnalysis", "live:native:dhan:A1", "NIFTY", "NFO", "2026-07-30", "flat",
+    ])).toBeUndefined();
+    expect(view.queryClient.getQueryData([
+      "oiUnusual", "live:native:dhan:A1", "NIFTY", "NFO", "2026-07-30",
+    ])).toBeUndefined();
   });
 
   it("shows mixed provenance instead of Live while unusual OI falls back locally", async () => {

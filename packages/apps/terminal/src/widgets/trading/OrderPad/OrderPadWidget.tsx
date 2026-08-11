@@ -59,6 +59,13 @@ import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { isMarketHours, tickKeyFor } from "@/lib/market";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
+import { PracticeOrderReviewStage } from "./PracticeOrderReviewStage";
+import {
+  createPracticeOrderReviewSnapshot,
+  isPracticeOrderReviewCurrent,
+  practiceOrderIntentIdentity,
+  type PracticeOrderReviewSnapshot,
+} from "./practiceOrderReview";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -379,8 +386,23 @@ function OrderPadWidget(props: WidgetProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastParamsRef = useRef<PlaceOrderParams | null>(null);
+  const lastSubmissionModeRef = useRef<"practice" | "live" | null>(null);
+  const practiceConfirmInFlightRef = useRef(false);
 
-  const { control, handleSubmit, watch, setValue, setError, clearErrors, formState: { errors } } = useForm<OrderFormValues>({
+  // Practice review/confirm state — distinct stage only for practice mode.
+  // The snapshot is immutable; edits or mode changes invalidate it.
+  const [practiceReview, setPracticeReview] = useState<PracticeOrderReviewSnapshot | null>(null);
+
+  const {
+    control,
+    getValues,
+    handleSubmit,
+    watch,
+    setValue,
+    setError,
+    clearErrors,
+    formState: { errors },
+  } = useForm<OrderFormValues>({
     // zod v4 + @hookform/resolvers v5 type mismatch with z.coerce — safe at runtime
     resolver: zodResolver(orderSchema) as unknown as Resolver<OrderFormValues>,
     defaultValues: {
@@ -404,6 +426,7 @@ function OrderPadWidget(props: WidgetProps) {
   const product = watch("product");
   const price = watch("price");
   const trigPrice = watch("trigPrice");
+  const discQty = watch("discQty");
 
   const priceEnabled = PRICE_ENABLED.has(orderType);
   const triggerEnabled = TRIGGER_ENABLED.has(orderType);
@@ -617,10 +640,13 @@ function OrderPadWidget(props: WidgetProps) {
     );
   }
 
-  const submitOrder = useCallback(async (params: PlaceOrderParams) => {
+  const submitOrder = useCallback(async (
+    params: Readonly<PlaceOrderParams>,
+    authority?: { mode: "practice" | "live" },
+  ): Promise<boolean> => {
     setLoading(true);
     try {
-      const result = await placeOrder(params);
+      const result = await placeOrder(params, authority);
       const orderId = (result as { orderId?: string; order_id?: string; orderid?: string }).orderId ??
         (result as { order_id?: string }).order_id ??
         (result as { orderid?: string }).orderid ?? "";
@@ -631,6 +657,7 @@ function OrderPadWidget(props: WidgetProps) {
         title: `Order placed: ${params.action} ${params.quantity} ${params.symbol}`,
         body: orderId ? `Order ID ${orderId}` : "Submitted to the broker.",
       });
+      return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Order failed";
       const retryable = isRetryableError(msg);
@@ -643,6 +670,7 @@ function OrderPadWidget(props: WidgetProps) {
         // back to the trade terminal to re-place; a hard rejection does not.
         ...(retryable ? { action: { label: "Back to terminal", href: "/trade" } } : {}),
       });
+      return false;
     } finally {
       setLoading(false);
     }
@@ -650,6 +678,33 @@ function OrderPadWidget(props: WidgetProps) {
 
   const appMode = useModeStore((s) => s.mode);
   const isPracticeOrExplore = appMode === "practice" || appMode === "explore";
+  const currentIntentIdentity = practiceOrderIntentIdentity({
+    symbol,
+    exchange,
+    action,
+    orderType,
+    product,
+    qty,
+    price,
+    trigPrice,
+    discQty,
+  });
+
+  // A mode switch or any edit revokes the captured confirmation. The final
+  // confirm handler repeats both checks synchronously before calling placeOrder.
+  useEffect(() => {
+    if (practiceReview && appMode !== "practice") {
+      setPracticeReview(null);
+      showToast("error", "Mode changed — the Practice review was invalidated.", 4000);
+    }
+  }, [appMode, practiceReview, showToast]);
+
+  useEffect(() => {
+    if (practiceReview && practiceReview.identity !== currentIntentIdentity) {
+      setPracticeReview(null);
+      showToast("error", "Order details changed — review the Practice order again.", 4000);
+    }
+  }, [currentIntentIdentity, practiceReview, showToast]);
 
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
     clearErrors("qty");
@@ -725,16 +780,74 @@ function OrderPadWidget(props: WidgetProps) {
         : {}),
       strategy: "FlintOrderPad",
     };
+    if (appMode === "practice") {
+      // Practice opens a dedicated review stage; no placement call occurs yet.
+      // Do not contaminate lastParamsRef — a later Live retry must never reuse
+      // a Practice payload that only opened a review dialog.
+      setPracticeReview(createPracticeOrderReviewSnapshot(values, params));
+      return;
+    }
     lastParamsRef.current = params;
-    await submitOrder(params);
+    lastSubmissionModeRef.current = "live";
+    await submitOrder(params, { mode: "live" });
   };
 
-  const handleRetry = useCallback(() => {
-    if (lastParamsRef.current) {
-      setToast(null);
-      void submitOrder(lastParamsRef.current);
+  const handlePracticeBack = useCallback(() => {
+    if (practiceConfirmInFlightRef.current) return;
+    setPracticeReview(null);
+  }, []);
+
+  const handlePracticeConfirm = useCallback(async () => {
+    const review = practiceReview;
+    if (!review || practiceConfirmInFlightRef.current) return;
+
+    // Query the store synchronously at the irreversible boundary. This catches
+    // a mode switch even when React has not rendered the selector update yet.
+    if (useModeStore.getState().mode !== "practice") {
+      setPracticeReview(null);
+      showToast("error", "Mode changed — the Practice review was invalidated.", 4000);
+      return;
     }
-  }, [submitOrder]);
+
+    // Compare every operator-controlled field with the reviewed identity. The
+    // frozen payload, not mutable form state, is the only payload submitted.
+    if (!isPracticeOrderReviewCurrent(review, getValues())) {
+      setPracticeReview(null);
+      showToast("error", "Order details changed — review the Practice order again.", 4000);
+      return;
+    }
+
+    practiceConfirmInFlightRef.current = true;
+    lastSubmissionModeRef.current = "practice";
+    try {
+      // Pin Practice authority into the transport so a mid-flight mode flip
+      // cannot retarget the reviewed sandbox payload onto Live/native.
+      const succeeded = await submitOrder(review.params, { mode: "practice" });
+      if (succeeded) {
+        setPracticeReview((current) => current === review ? null : current);
+      }
+    } finally {
+      practiceConfirmInFlightRef.current = false;
+    }
+  }, [getValues, practiceReview, showToast, submitOrder]);
+
+  function handleRetry() {
+    const mode = useModeStore.getState().mode;
+    setToast(null);
+    if (mode === "practice") {
+      // A Practice retry must be reviewed again; it can never call placement
+      // directly from a stale toast action.
+      void handleSubmit(onSubmit)();
+      return;
+    }
+    if (mode === "live" && lastSubmissionModeRef.current === "live" && lastParamsRef.current) {
+      void submitOrder(lastParamsRef.current, { mode: "live" });
+      return;
+    }
+    showToast("error", mode === "explore"
+      ? "Explore mode is read-only. Connect a broker to place orders."
+      : "A Practice order cannot be retried after switching to Live mode.", 5000);
+  }
 
   const btnBase =
     "flex items-center justify-center gap-2 w-full h-9 rounded font-semibold text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed";
@@ -743,7 +856,7 @@ function OrderPadWidget(props: WidgetProps) {
     : "bg-loss hover:bg-loss/85 active:bg-loss/70 text-white";
 
   return (
-    <div className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden" data-tour-target="order-pad">
+    <div className="relative h-full flex flex-col bg-surface-base text-text-primary overflow-hidden" data-tour-target="order-pad">
       {/* Header */}
       <div className="flex-none bg-surface-card border-b border-border-default px-3 py-2 flex items-center gap-2">
         <FileEdit size={13} className="text-accent shrink-0" aria-hidden="true" />
@@ -1232,6 +1345,15 @@ function OrderPadWidget(props: WidgetProps) {
 
       {/* Toast */}
       <Toast msg={toast} onRetry={handleRetry} />
+
+      {practiceReview ? (
+        <PracticeOrderReviewStage
+          review={practiceReview}
+          confirming={loading}
+          onBack={handlePracticeBack}
+          onConfirm={() => void handlePracticeConfirm()}
+        />
+      ) : null}
     </div>
   );
 }
