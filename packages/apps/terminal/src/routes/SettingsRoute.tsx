@@ -184,7 +184,7 @@ export default function SettingsRoute() {
       case "appearance": return <AppearanceSection />;
       case "ticker":     return <TickerSettings />;
       case "api":        return <ConnectionSection settings={connection} onSaved={acceptConnection} />;
-      case "brokers":    return <BrokerConnect />;
+      case "brokers":    return <BrokerConnect pollAccounts={false} />;
       case "trading":    return <TradingSection    settings={trading}    onChange={updateTradingDefaults} />;
       case "risk":       return <RiskSection       settings={risk}       onChange={updateRiskLimits} />;
       case "leverage":   return <LeverageSection />;

@@ -23,6 +23,9 @@ const llmRouteMocks = vi.hoisted(() => ({
   updateLLMProvider: vi.fn(),
   removeLLMCredential: vi.fn(),
 }));
+const brokerRouteMocks = vi.hoisted(() => ({
+  props: null as null | Record<string, unknown>,
+}));
 
 vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
@@ -65,7 +68,10 @@ vi.mock("@/tools/Settings/ConnectionSection", () => ({
   ConnectionSection: () => <div data-testid="connection-section">Connection</div>,
 }));
 vi.mock("@/components/account/BrokerConnect", () => ({
-  BrokerConnect: () => <div data-testid="brokers-section">Brokers</div>,
+  BrokerConnect: (props: Record<string, unknown>) => {
+    brokerRouteMocks.props = props;
+    return <div data-testid="brokers-section">Brokers</div>;
+  },
 }));
 vi.mock("@/tools/Settings/TradingSection", () => ({
   TradingSection: () => <div data-testid="trading-section">Trading</div>,
@@ -190,7 +196,16 @@ describe("SettingsRoute", () => {
     llmRouteMocks.saveState = "saved";
     llmRouteMocks.hydrationState = "ready";
     llmRouteMocks.setupPending = false;
+    brokerRouteMocks.props = null;
     window.history.replaceState(null, "", "/settings");
+  });
+
+  it("delegates broker-account polling to the surrounding AppLayout", () => {
+    window.history.replaceState(null, "", "/settings#brokers");
+
+    render(<SettingsRoute />);
+
+    expect(brokerRouteMocks.props).toEqual({ pollAccounts: false });
   });
 
   it("renders the Settings heading", () => {

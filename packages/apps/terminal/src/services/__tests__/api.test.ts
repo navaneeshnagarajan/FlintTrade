@@ -1106,6 +1106,31 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
+  it("uses Explore broker capabilities without discovering live native accounts", async () => {
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "explore";
+    fetchSpy.mockResolvedValueOnce(jsonResponse({
+      brokers: [{
+        broker_name: "unexpected-live-catalogue",
+        broker_type: "equity",
+        supported_exchanges: ["NSE"],
+      }],
+    }));
+
+    await expect(getBrokerCapabilities()).resolves.toEqual({
+      broker_name: "Explore",
+      broker_type: "multi",
+      supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
+      features: {
+        market_protection: false,
+        leverage: false,
+        bracket_orders: false,
+        cover_orders: false,
+      },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("uses FlintTrade native interval metadata for the active broker without an OpenAlgo key", async () => {
     mockConnectionState.apiKey = "";
     mockBrokerState.accounts = [

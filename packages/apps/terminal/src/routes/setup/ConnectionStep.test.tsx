@@ -6,16 +6,26 @@ import { useBrokerStore } from "@/stores/brokerStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { ConnectionStep } from "./ConnectionStep";
 
+const setupMocks = vi.hoisted(() => ({
+  useBrokerAccounts: vi.fn(() => ({ isLoading: false, error: null, refetch: vi.fn() })),
+  brokerConnectProps: null as null | Record<string, unknown>,
+}));
+
 vi.mock("@/hooks/useBrokerAccounts", () => ({
-  useBrokerAccounts: () => ({ isLoading: false, error: null, refetch: vi.fn() }),
+  useBrokerAccounts: setupMocks.useBrokerAccounts,
 }));
 
 vi.mock("@/components/account/BrokerConnect", () => ({
-  BrokerConnect: () => <div>Native brokers section</div>,
+  BrokerConnect: (props: Record<string, unknown>) => {
+    setupMocks.brokerConnectProps = props;
+    return <div>Native brokers section</div>;
+  },
 }));
 
 describe("ConnectionStep", () => {
   beforeEach(() => {
+    setupMocks.useBrokerAccounts.mockClear();
+    setupMocks.brokerConnectProps = null;
     act(() => {
       useBrokerStore.setState({ accounts: [], activeAccountId: null });
       useConnectionStore.setState({ host: "", apiKey: "", wsUrl: "" });
@@ -159,6 +169,8 @@ describe("ConnectionStep", () => {
     expect(screen.getByRole("button", { name: /connect a write-capable broker/i })).toBeDisabled();
     // No connected accounts at all — the read-only demotion reason must not show.
     expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    expect(setupMocks.useBrokerAccounts).not.toHaveBeenCalled();
+    expect(setupMocks.brokerConnectProps).toEqual({});
   });
 
   it("allows continuing when a native broker has a live session", () => {

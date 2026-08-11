@@ -9,7 +9,7 @@
  * establishes the session.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
@@ -37,6 +37,10 @@ import { Badge } from "@/components/ui/badge";
 import { BROKER_ACCOUNTS_QUERY_KEY, useBrokerAccounts } from "@/hooks/useBrokerAccounts";
 import { canPromotePrimaryAccount } from "@/lib/brokerAccountRules";
 import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
+import {
+  captureAuthSessionFence,
+  isAuthSessionFenceCurrent,
+} from "@/stores/authStore";
 import type { BrokerAccount } from "@/types/broker";
 import {
   reconnectBrokerAccount,
@@ -171,11 +175,18 @@ function McpSetupValue({
   );
 }
 
-export function BrokerConnect() {
+export interface BrokerConnectProps {
+  /** Setup owns this poll; Settings delegates to its surrounding AppLayout. */
+  pollAccounts?: boolean;
+}
+
+export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   const qc = useQueryClient();
+  const mountedRef = useRef(false);
+  const delayedRefreshesRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const brokersQuery = useQuery({ queryKey: BROKERS_KEY, queryFn: listNativeBrokers });
   const mcpQuery = useQuery({ queryKey: MCP_KEY, queryFn: listBrokerMcpCatalogue });
-  useBrokerAccounts();
+  const accountsQuery = useBrokerAccounts(pollAccounts);
   const brokerAccounts = useBrokerStore((s) => s.accounts);
 
   const brokers = brokersQuery.data ?? [];
@@ -201,6 +212,16 @@ export function BrokerConnect() {
   const [error, setError] = useState<string>("");
   const [notice, setNotice] = useState<string>("");
 
+  useEffect(() => {
+    mountedRef.current = true;
+    const delayedRefreshes = delayedRefreshesRef.current;
+    return () => {
+      mountedRef.current = false;
+      for (const timer of delayedRefreshes) clearTimeout(timer);
+      delayedRefreshes.clear();
+    };
+  }, []);
+
   const broker = brokers.find((b) => b.adapter_id === selectedBroker);
   const method: NativeAuthMethod | undefined = broker?.auth_methods.find((m) => m.id === selectedMethodId);
   const brokerConnectable = broker?.connectable ?? false;
@@ -219,11 +240,32 @@ export function BrokerConnect() {
   }
 
   function invalidateAccountQueries(delay = 0) {
+    const sessionFence = captureAuthSessionFence();
     const refresh = () => {
-      void qc.invalidateQueries({ queryKey: BROKER_ACCOUNTS_QUERY_KEY });
+      if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return;
+      if (pollAccounts) {
+        void qc.invalidateQueries({ queryKey: BROKER_ACCOUNTS_QUERY_KEY });
+        return;
+      }
+      // Settings delegates continuous polling to AppLayout. After an explicit
+      // user mutation, perform exactly one refresh and synchronise its result
+      // so Explore does not need a background protected-account observer.
+      void accountsQuery.refetch().then((result) => {
+        if (
+          result.data
+          && mountedRef.current
+          && isAuthSessionFenceCurrent(sessionFence)
+        ) {
+          useBrokerStore.getState().setAccounts(result.data);
+        }
+      });
     };
     if (delay > 0) {
-      setTimeout(refresh, delay);
+      const timer = setTimeout(() => {
+        delayedRefreshesRef.current.delete(timer);
+        refresh();
+      }, delay);
+      delayedRefreshesRef.current.add(timer);
     } else {
       refresh();
     }

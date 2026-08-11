@@ -66,8 +66,16 @@ const { mockUseOpenAlgoConfigHydration } = vi.hoisted(() => ({
   mockUseOpenAlgoConfigHydration: vi.fn(),
 }));
 
+const { mockUseBrokerAccounts } = vi.hoisted(() => ({
+  mockUseBrokerAccounts: vi.fn(),
+}));
+
 vi.mock("@/hooks/useOpenAlgoConfigHydration", () => ({
   useOpenAlgoConfigHydration: mockUseOpenAlgoConfigHydration,
+}));
+
+vi.mock("@/hooks/useBrokerAccounts", () => ({
+  useBrokerAccounts: mockUseBrokerAccounts,
 }));
 
 vi.mock("@/hooks/usePrevClose", () => ({
@@ -216,12 +224,14 @@ describe("AppLayout", () => {
 
     expect(screen.queryByTestId("daily-welcome")).not.toBeInTheDocument();
     expect(mockUseOpenAlgoConfigHydration).toHaveBeenCalledWith(false);
+    expect(mockUseBrokerAccounts).toHaveBeenCalledWith(false);
   });
 
   it("hydrates broker config for an authenticated non-Explore session", () => {
     renderApp();
 
     expect(mockUseOpenAlgoConfigHydration).toHaveBeenCalledWith(true);
+    expect(mockUseBrokerAccounts).toHaveBeenCalledWith(true);
   });
 
   it("does not render the removed legacy dot tour overlay", () => {

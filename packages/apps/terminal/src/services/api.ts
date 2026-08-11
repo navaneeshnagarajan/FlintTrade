@@ -2789,6 +2789,11 @@ export const sendTelegram = (message: string, options: TelegramSendOptions = {})
 // workspaces use FlintTrade's own unified capability registry, normalised back
 // into the compact terminal contract consumed by Order Pad and Settings.
 export const getBrokerCapabilities = async () => {
+  if (isExploreMode()) {
+    // Explore capabilities are local demo metadata. Never let a stale bridge
+    // key or native-account snapshot turn this read into a protected request.
+    return get<BrokerCapabilities>("../broker/capabilities");
+  }
   if (getApiKey().trim().length > 0) {
     return get<BrokerCapabilities>("../broker/capabilities"); // actual path: /api/broker/capabilities
   }

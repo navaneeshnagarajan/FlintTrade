@@ -11,6 +11,11 @@ import { render, screen, act } from "@testing-library/react";
 
 let connectionStatus = "disconnected";
 let tradingMode = "live";
+let brokerAccounts: Array<{ status: string; source: "gateway" | "native" }> = [];
+
+const brokerMocks = vi.hoisted(() => ({
+  useBrokerAccounts: vi.fn(),
+}));
 
 vi.mock("@/stores/connectionStore", () => ({
   useConnectionStore: (selector: (s: { status: string }) => unknown) =>
@@ -20,6 +25,22 @@ vi.mock("@/stores/connectionStore", () => ({
 vi.mock("@/stores/modeStore", () => ({
   useModeStore: (selector: (s: { mode: string }) => unknown) =>
     selector({ mode: tradingMode }),
+}));
+
+vi.mock("@/stores/brokerStore", () => ({
+  useBrokerStore: (
+    selector: (s: {
+      accounts: Array<{ status: string; source: "gateway" | "native" }>;
+    }) => unknown,
+  ) => selector({ accounts: brokerAccounts }),
+}));
+
+vi.mock("@/hooks/useBrokerAccounts", () => ({
+  useBrokerAccounts: brokerMocks.useBrokerAccounts,
+}));
+
+vi.mock("zustand/react/shallow", () => ({
+  useShallow: (selector: unknown) => selector,
 }));
 
 const mockNavigate = vi.fn();
@@ -43,6 +64,8 @@ describe("NoConnectionOverlay", () => {
     vi.useFakeTimers();
     connectionStatus = "disconnected";
     tradingMode = "live";
+    brokerAccounts = [];
+    brokerMocks.useBrokerAccounts.mockClear();
   });
 
   afterEach(() => {
@@ -78,6 +101,42 @@ describe("NoConnectionOverlay", () => {
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /dismiss/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/continue without live data/i)).not.toBeInTheDocument();
+  });
+
+  it("does not block a native-only Live workspace while OpenAlgo is disconnected", () => {
+    brokerAccounts = [{ status: "connected", source: "native" }];
+    render(<NoConnectionOverlay />);
+
+    act(() => {
+      vi.advanceTimersByTime(5100);
+    });
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("uses the requested composite Live state when another native account is connected", () => {
+    brokerAccounts = [
+      { status: "disconnected", source: "native" },
+      { status: "connected", source: "native" },
+    ];
+    render(<NoConnectionOverlay />);
+
+    act(() => {
+      vi.advanceTimersByTime(5100);
+    });
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("still accepts the legacy OpenAlgo-connected path when no account snapshot exists", () => {
+    connectionStatus = "connected";
+    render(<NoConnectionOverlay />);
+
+    act(() => {
+      vi.advanceTimersByTime(5100);
+    });
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 
   it.each(["explore", "practice"])(

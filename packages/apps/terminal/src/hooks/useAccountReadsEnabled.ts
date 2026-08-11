@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 
-import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
 import {
   resolveAccountAuthorityIdentity,
   resolveNativeDataAccount,
@@ -76,7 +75,9 @@ export function accountIdentityReadsEnabled(
  * The object and nested identity are immutable for the lifetime of a render.
  */
 export function useAccountReadContext(): AccountReadContext {
-  useBrokerAccounts();
+  // AppLayout owns the single auth- and mode-gated broker-account poll. Query
+  // hooks consume that store snapshot without mounting enabled observers that
+  // could leak protected account discovery into Explore.
   const mode = useModeStore((state) => state.mode);
   const host = useConnectionStore((state) => state.host);
   const apiKey = useConnectionStore((state) => state.apiKey);

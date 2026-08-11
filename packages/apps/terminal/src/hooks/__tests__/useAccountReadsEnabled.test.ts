@@ -1,8 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  useBrokerAccounts: vi.fn(),
+}));
+
+vi.mock("@/hooks/useBrokerAccounts", () => ({
+  useBrokerAccounts: mocks.useBrokerAccounts,
+}));
 
 import {
   resolveAccountReadsEnabled,
   resolveScopedAccountReadsEnabled,
+  useAccountReadContext,
 } from "@/hooks/useAccountReadsEnabled";
 import type { BrokerAccount } from "@/types/broker";
 
@@ -16,6 +26,18 @@ const account = (overrides: Partial<BrokerAccount>): BrokerAccount => ({
   connected_at: null,
   error_message: null,
   ...overrides,
+});
+
+describe("useAccountReadContext broker discovery", () => {
+  beforeEach(() => {
+    mocks.useBrokerAccounts.mockClear();
+  });
+
+  it("consumes AppLayout's gated account snapshot without mounting another poll", () => {
+    renderHook(() => useAccountReadContext());
+
+    expect(mocks.useBrokerAccounts).not.toHaveBeenCalled();
+  });
 });
 
 describe("resolveAccountReadsEnabled", () => {

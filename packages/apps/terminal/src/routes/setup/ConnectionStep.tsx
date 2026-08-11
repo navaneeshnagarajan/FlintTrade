@@ -14,7 +14,6 @@ import { ArrowRight, CheckCheck, Info } from "lucide-react";
 import { BrokerConnect } from "@/components/account/BrokerConnect";
 import { OpenAlgoConnectionForm } from "@/components/account/OpenAlgoConnectionForm";
 import { Button } from "@/components/ui/button";
-import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
 import { useBrokerStore } from "@/stores/brokerStore";
 import type { BrokerAccount } from "@/types/broker";
 import type { ConnectionFormValues } from "./connectionForm";
@@ -70,7 +69,6 @@ interface DirectConnectPanelProps {
 }
 
 function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
-  useBrokerAccounts();
   const hasWriteCapableBroker = useBrokerStore((state) =>
     state.accounts.some(isWriteCapableBrokerAccount),
   );

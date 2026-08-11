@@ -17,51 +17,10 @@ interface PersistedLayoutState {
   state: PersistedWorkspaceState["layouts"];
 }
 
-test("creates, clones, switches, and restores two canonical workspaces", async ({
-  page,
-  syntheticApi,
-}) => {
+test("creates, clones, switches, and restores two canonical workspaces", async ({ page }) => {
   await seedExploreDemoSession(page);
-  syntheticApi.register({
-    name: "list gateway accounts during workspace changes",
-    method: "GET",
-    path: "/ft-api/v1/accounts",
-    expectedCalls: 2,
-    handler: (request) => {
-      expect(request.headers()["authorization"]).toBe("Bearer demo-user");
-      expect(request.postData()).toBeNull();
-      return { json: { accounts: [] } };
-    },
-  });
-  syntheticApi.register({
-    name: "list native accounts during workspace changes",
-    method: "GET",
-    path: "/ft-api/api/v1/native/accounts",
-    expectedCalls: 3,
-    handler: (request) => {
-      expect(request.headers()["authorization"]).toBe("Bearer demo-user");
-      expect(request.postData()).toBeNull();
-      return { json: { accounts: [] } };
-    },
-  });
-  syntheticApi.register({
-    name: "read Explore broker capabilities",
-    method: "GET",
-    path: "/ft-api/api/v1/broker/capabilities",
-    expectedCalls: 1,
-    handler: (request) => {
-      expect(request.headers()["authorization"]).toBe("Bearer demo-user");
-      expect(request.postData()).toBeNull();
-      return {
-        json: {
-          broker_name: "Explore",
-          broker_type: "multi",
-          supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
-          features: {},
-        },
-      };
-    },
-  });
+  // No API handlers are registered intentionally: the automatic fail-closed
+  // fixture proves Explore workspace lifecycle makes no /ft-api request.
   await page.goto("/trade");
 
   const workspace = page.locator('[data-tour-target="workspace"]');

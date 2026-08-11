@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { BrokerAccount } from "@/types/broker";
@@ -35,6 +35,7 @@ import {
   setPrimaryBrokerAccount,
 } from "@/services/brokerAccountsApi";
 import { useBrokerStore } from "@/stores/brokerStore";
+import { useAuthStore } from "@/stores/authStore";
 import { BrokersSection } from "../BrokersSection";
 
 const BROKERS = [
@@ -451,13 +452,35 @@ const MCP_BROKERS = [
   },
 ];
 
-function renderSection() {
+function renderSection(pollAccounts?: boolean) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <BrokersSection />
+      <BrokersSection pollAccounts={pollAccounts} />
     </QueryClientProvider>,
   );
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function submitDhanAccessToken(accountId: string, accountLabel = "") {
+  fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+  fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
+  fireEvent.click(screen.getByRole("combobox", { name: /login method/i }));
+  fireEvent.click(await screen.findByRole("option", { name: "Access token" }));
+  fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: accountId } });
+  if (accountLabel) {
+    fireEvent.change(screen.getByLabelText(/account label/i), { target: { value: accountLabel } });
+  }
+  fireEvent.change(screen.getByLabelText("Dhan client ID"), { target: { value: accountId } });
+  fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "TOK" } });
+  fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 }
 
 function makeNativeAccount(overrides: Partial<BrokerAccount> = {}): BrokerAccount {
@@ -505,6 +528,26 @@ describe("BrokersSection", () => {
     // The broker store is a module singleton; reset it so a seeded gateway
     // account from one test never leaks into the next.
     useBrokerStore.setState({ accounts: [], activeAccountId: null });
+    useAuthStore.setState({
+      status: "logged-in",
+      token: "settings-session",
+      reauthToken: null,
+      username: "settings-user",
+      sessionGeneration: 1,
+    });
+  });
+
+  it("can consume AppLayout's account snapshot without mounting another poll", async () => {
+    renderSection(false);
+
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+    expect(listBrokerAccounts).not.toHaveBeenCalled();
+  });
+
+  it("polls accounts by default for setup callers outside AppLayout", async () => {
+    renderSection();
+
+    await waitFor(() => expect(listBrokerAccounts).toHaveBeenCalledTimes(1));
   });
 
   it("shows the section heading and empty connected-accounts state", async () => {
@@ -814,20 +857,13 @@ describe("BrokersSection", () => {
 
   it("connects a direct-credential account (Dhan access token)", async () => {
     (connectNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({ connected: true, login: "ok" });
-    renderSection();
+    const refreshedAccount = makeNativeAccount({ account_id: "1234567890" });
+    (listBrokerAccounts as ReturnType<typeof vi.fn>).mockResolvedValue([refreshedAccount]);
+    renderSection(false);
     await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+    expect(listBrokerAccounts).not.toHaveBeenCalled();
 
-    // Pick Dhan (native select renders options once opened).
-    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
-    fireEvent.click(await screen.findByRole("option", { name: "Dhan" }));
-    fireEvent.click(screen.getByRole("combobox", { name: /login method/i }));
-    fireEvent.click(await screen.findByRole("option", { name: "Access token" }));
-
-    fireEvent.change(screen.getByLabelText(/account id/i), { target: { value: "1234567890" } });
-    fireEvent.change(screen.getByLabelText(/account label/i), { target: { value: "Dhan swing" } });
-    fireEvent.change(screen.getByLabelText("Dhan client ID"), { target: { value: "1234567890" } });
-    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "TOK" } });
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await submitDhanAccessToken("1234567890", "Dhan swing");
 
     await waitFor(() =>
       expect(connectNativeAccount).toHaveBeenCalledWith(
@@ -840,7 +876,37 @@ describe("BrokersSection", () => {
       ),
     );
     expect(await screen.findByText(/Dhan account 1234567890 connected/i)).toBeInTheDocument();
+    await waitFor(() => expect(listBrokerAccounts).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(useBrokerStore.getState().accounts).toEqual([refreshedAccount]));
   });
+
+  it.each(["unmount", "retire-session"] as const)(
+    "does not apply a manual account refresh after %s",
+    async (boundary) => {
+      const refresh = deferred<BrokerAccount[]>();
+      (connectNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({ connected: true, login: "ok" });
+      (listBrokerAccounts as ReturnType<typeof vi.fn>).mockReturnValue(refresh.promise);
+      const view = renderSection(false);
+      await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+      await submitDhanAccessToken("STALE1");
+      await waitFor(() => expect(listBrokerAccounts).toHaveBeenCalledTimes(1));
+
+      if (boundary === "unmount") {
+        view.unmount();
+      } else {
+        act(() => useAuthStore.getState().setPinRequired());
+      }
+
+      await act(async () => {
+        refresh.resolve([makeNativeAccount({ account_id: "STALE1" })]);
+        await refresh.promise;
+        await Promise.resolve();
+      });
+
+      expect(useBrokerStore.getState().accounts).toEqual([]);
+    },
+  );
 
   it("launches OAuth for Dhan app-consent logins", async () => {
     (oauthStartNativeAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
