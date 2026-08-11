@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+
 import { expect, test as baseTest, type Page } from "@playwright/test";
 
 import {
@@ -15,10 +17,11 @@ async function createRegistry(
   page: Page,
   name: string,
   benignConsoleErrors: readonly BenignConsoleError[] = [],
+  frontendOrigin = FRONTEND_ORIGIN,
 ): Promise<SyntheticFixtureRegistry> {
   return createSyntheticFixtureRegistry(page, {
     name,
-    frontendOrigin: FRONTEND_ORIGIN,
+    frontendOrigin,
     benignConsoleErrors,
   });
 }
@@ -40,7 +43,207 @@ async function expectFetchToFail(page: Page, method: HttpMethod, path: string): 
   await expect(fetchJson(page, method, path)).rejects.toThrow();
 }
 
+const FRONTEND_RESOURCE_TYPES = [
+  "document",
+  "font",
+  "image",
+  "manifest",
+  "script",
+  "stylesheet",
+] as const;
+
+type FrontendResourceType = (typeof FRONTEND_RESOURCE_TYPES)[number];
+
+interface StaticFrontendServer {
+  origin: string;
+  close(): Promise<void>;
+}
+
+async function startStaticFrontendServer(): Promise<StaticFrontendServer> {
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (url.pathname === "/manifest-probe.html") {
+      const target = url.searchParams.get("target") ?? "/manifest.webmanifest";
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<link rel="manifest" href="${target}">`);
+      return;
+    }
+
+    const extension = url.pathname.split(".").at(-1);
+    const contentType =
+      extension === "css"
+        ? "text/css"
+        : extension === "js"
+          ? "text/javascript"
+          : extension === "svg"
+            ? "image/svg+xml"
+            : extension === "webmanifest"
+              ? "application/manifest+json"
+              : "text/html";
+    const body =
+      extension === "svg"
+        ? '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" />'
+        : extension === "webmanifest"
+          ? '{"name":"FlintTrade","short_name":"FlintTrade","start_url":"/"}'
+          : extension === "js"
+            ? "void 0;"
+            : extension === "css"
+              ? ":root {}"
+              : "<!doctype html><title>frontend resource</title>";
+    response.writeHead(200, { "content-type": contentType });
+    response.end(body);
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("static frontend test server did not bind a TCP port");
+  }
+
+  return {
+    origin: `http://127.0.0.1:${address.port}`,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      }),
+  };
+}
+
+async function requestFrontendResource(
+  page: Page,
+  resourceType: FrontendResourceType,
+  frontendOrigin: string,
+  path: string,
+): Promise<void> {
+  const requestUrl = `${frontendOrigin}${path}`;
+  const requestStarted = page.waitForRequest((request) => request.url() === requestUrl);
+
+  if (resourceType === "manifest") {
+    const target = encodeURIComponent(path);
+    await page.goto(`${frontendOrigin}/manifest-probe.html?target=${target}`);
+    const devtools = await page.context().newCDPSession(page);
+    try {
+      await devtools.send("Page.getAppManifest");
+    } finally {
+      await devtools.detach();
+    }
+  } else {
+    await page.evaluate(
+      ({ type, url }) => {
+        if (type === "font") {
+          const preload = document.createElement("link");
+          preload.rel = "preload";
+          preload.as = "font";
+          preload.href = url;
+          document.head.append(preload);
+          return;
+        }
+
+        const element = document.createElement(
+          type === "document" ? "iframe" : type === "image" ? "img" : "link",
+        );
+        if (element instanceof HTMLIFrameElement || element instanceof HTMLImageElement) {
+          element.src = url;
+        } else if (type === "stylesheet") {
+          element.rel = "stylesheet";
+          element.href = url;
+        } else {
+          const script = document.createElement("script");
+          script.src = url;
+          document.body.append(script);
+          return;
+        }
+        document.body.append(element);
+      },
+      { type: resourceType, url: requestUrl },
+    );
+  }
+
+  const request = await requestStarted;
+  expect(request.resourceType()).toBe(resourceType);
+  await request.response();
+}
+
 baseTest.describe("fail-closed synthetic fixture registry", () => {
+  for (const resourceType of FRONTEND_RESOURCE_TYPES) {
+    baseTest(`records and aborts an unregistered /ft-api ${resourceType} request`, async ({
+      page,
+    }) => {
+      const server = await startStaticFrontendServer();
+      try {
+        const registry = await createRegistry(
+          page,
+          `unregistered ${resourceType} API request`,
+          [],
+          server.origin,
+        );
+        const extension =
+          resourceType === "manifest"
+            ? ".webmanifest"
+            : resourceType === "stylesheet"
+              ? ".css"
+              : resourceType === "script"
+                ? ".js"
+                : resourceType === "image"
+                  ? ".svg"
+                  : ".html";
+        const path = `/ft-api/unregistered-${resourceType}${extension}`;
+
+        await requestFrontendResource(page, resourceType, server.origin, path);
+
+        await expect(registry.dispose()).rejects.toThrow(
+          new RegExp(`unexpected request.*GET ${path.replace(".", "\\.")}`, "is"),
+        );
+      } finally {
+        await server.close();
+      }
+    });
+  }
+
+  baseTest("allows a same-origin static frontend image to load", async ({ page }) => {
+    const server = await startStaticFrontendServer();
+    try {
+      const registry = await createRegistry(page, "valid frontend image", [], server.origin);
+      const imageUrl = `${server.origin}/assets/logo.svg`;
+      const response = page.waitForResponse((candidate) => candidate.url() === imageUrl);
+
+      await page.setContent(`<img src="${imageUrl}" alt="FlintTrade">`);
+
+      expect((await response).ok()).toBe(true);
+      await expect(registry.dispose()).resolves.toBeUndefined();
+    } finally {
+      await server.close();
+    }
+  });
+
+  baseTest("counts one registered /ft-api image request exactly", async ({ page }) => {
+    const server = await startStaticFrontendServer();
+    try {
+      const registry = await createRegistry(page, "registered API image", [], server.origin);
+      const path = "/ft-api/registered-image.svg";
+      registry.register({
+        name: "registered API image",
+        method: "GET",
+        path,
+        handler: () => ({
+          contentType: "image/svg+xml",
+          body: '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" />',
+        }),
+      });
+
+      await requestFrontendResource(page, "image", server.origin, path);
+
+      expect(registry.callCount("GET", path)).toBe(1);
+      await expect(registry.dispose()).resolves.toBeUndefined();
+    } finally {
+      await server.close();
+    }
+  });
+
   baseTest("serves one exact named method-and-path handler", async ({ page }) => {
     const registry = await createRegistry(page, "exact handler");
     registry.register({

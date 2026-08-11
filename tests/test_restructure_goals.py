@@ -439,21 +439,38 @@ def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
     assert "pip-audit failed with status" in vuln_refresh
 
 
-def test_migration_workflows_pin_every_action_to_a_full_commit_sha() -> None:
-    """Mutable action tags must not control release artefacts or migration CI."""
-    workflow_names = (
-        "desktop-release.yml",
-        "nightly-cross-platform.yml",
-        "release-please.yml",
-        "supply-chain.yml",
-        "test.yml",
-    )
+def test_every_workflow_pins_external_actions_to_immutable_revisions() -> None:
+    """Every external action in every workflow is immutable and labelled."""
+    workflow_paths = sorted((*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")))
+    assert workflow_paths, "no workflow files found"
     unpinned: list[str] = []
-    for name in workflow_names:
-        text = (WORKFLOWS / name).read_text(encoding="utf-8")
-        for action, reference in re.findall(r"uses:\s+([^@\s]+)@([^\s#]+)", text):
-            if re.fullmatch(r"[0-9a-f]{40}", reference) is None:
-                unpinned.append(f"{name}: {action}@{reference}")
+    for path in workflow_paths:
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if re.match(r"^\s*-?\s*uses:", line) is None:
+                continue
+            match = re.match(r"^\s*-?\s*uses:\s*([^\s#]+)(?:\s+#\s*(.+?))?\s*$", line)
+            if match is None:
+                unpinned.append(f"{path.name}:{line_number}: unclassified uses syntax")
+                continue
+            target, release_label = match.groups()
+            if target.startswith("./"):
+                continue
+            if target.startswith("docker://"):
+                if (
+                    re.fullmatch(r"docker://[^@\s]+@sha256:[0-9a-f]{64}", target) is None
+                    or not release_label
+                ):
+                    unpinned.append(f"{path.name}:{line_number}: {target}")
+                continue
+
+            action, separator, reference = target.rpartition("@")
+            if (
+                not separator
+                or re.fullmatch(r"[^/\s]+/[^@\s]+", action) is None
+                or re.fullmatch(r"[0-9a-f]{40}", reference) is None
+                or not release_label
+            ):
+                unpinned.append(f"{path.name}:{line_number}: {target}")
 
     assert unpinned == []
 

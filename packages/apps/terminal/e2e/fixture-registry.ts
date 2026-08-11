@@ -76,6 +76,13 @@ interface CapturedFailure {
 const DEFAULT_FRONTEND_ORIGIN = "http://localhost:5173";
 const ROUTE_PATTERN = "**/*";
 const UNHANDLED_REJECTION_PREFIX = "[flinttrade-e2e unhandled rejection] ";
+const API_PATH_PREFIXES = ["/api", "/ft-api"] as const;
+
+function isApiPath(pathname: string): boolean {
+  return API_PATH_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
 
 function isFrontendResourceType(resourceType: string): boolean {
   return (
@@ -152,7 +159,8 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
   };
 
   private async handleRoute(route: Route, request: Request): Promise<void> {
-    if (this.isFrontendResource(request)) {
+    const url = new URL(request.url());
+    if (!isApiPath(url.pathname) && this.isFrontendResource(request)) {
       await route.continue();
       return;
     }

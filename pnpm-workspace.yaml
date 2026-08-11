@@ -58,7 +58,7 @@ peerDependencyRules:
     '@napi-rs/wasm-runtime>@emnapi/core': '1'
     '@napi-rs/wasm-runtime>@emnapi/runtime': '1'
 
-# These sixteen entries are now the only copy: the duplicate "pnpm.overrides"
+# These fifteen entries are now the only copy: the duplicate "pnpm.overrides"
 # block in package.json was removed in the pnpm 10 migration, so this block is
 # what pnpm actually resolves against. Nothing cross-checks it any more - the
 # lockfile's own `overrides:` header is the audit trail, and an entry deleted
@@ -100,7 +100,6 @@ peerDependencyRules:
 # advisory has to exist at all.
 # Verify a target exists before pinning to it: npm view brace-expansion@<version> version
 overrides:
-  '@babel/core': 8.0.1
   '@hono/node-server': 2.0.10
   'body-parser@>=2.0.0 <2.3.0': 2.3.0
   'brace-expansion@<2.0.0': 2.1.4
