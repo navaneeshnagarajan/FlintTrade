@@ -157,6 +157,13 @@ async function assertListedSlashNamedPackageIsReadable(client: Client): Promise<
   expect(firstContent.text).toContain('Source: packages/apps/site/README.md');
 }
 
+async function assertMalformedDocSlugReturnsNotFound(client: Client): Promise<void> {
+  const read = await client.readResource({ uri: 'flinttrade://docs/%' });
+  expect(read.contents).toHaveLength(1);
+  const firstContent = read.contents[0] as { text?: string };
+  expect(firstContent.text).toBe('No document found for %.');
+}
+
 describe('MCP 2026 dual-era protocol matrix (target-state RED/GREEN)', () => {
   it('1. Modern HTTP: versionNegotiation pinned 2026-07-28 connects as era=modern, lists exact tools/resources/prompts, and calls one read-only tool', async () => {
     const fetchFn = createTestHandler();
@@ -173,6 +180,7 @@ describe('MCP 2026 dual-era protocol matrix (target-state RED/GREEN)', () => {
 
     await assertExactPublicCatalogue(client);
     await assertListedSlashNamedPackageIsReadable(client);
+    await assertMalformedDocSlugReturnsNotFound(client);
 
     const result = await client.callTool({ name: 'search_docs', arguments: { query: 'gateway' } });
     assertToolTextResult(result);
@@ -207,6 +215,7 @@ describe('MCP 2026 dual-era protocol matrix (target-state RED/GREEN)', () => {
 
     await assertExactPublicCatalogue(client);
     await assertListedSlashNamedPackageIsReadable(client);
+    await assertMalformedDocSlugReturnsNotFound(client);
 
     const result = await client.callTool({ name: 'list_packages', arguments: {} });
     assertToolTextResult(result);

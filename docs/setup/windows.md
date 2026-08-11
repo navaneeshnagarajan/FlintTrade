@@ -89,15 +89,13 @@ powershell -ExecutionPolicy Bypass -File scripts\install\flinttrade-uninstall.ps
 
 ## Electron installer status
 
-No complete, checksum-published Electron release exists yet. The public
-[download page](https://flinttrade.vercel.app/download) will withhold installer
-commands until the Windows NSIS installer, the universal macOS DMG, both Linux
-AppImages and `SHA256SUMS.txt` are published together once this branch is
-deployed. The currently deployed beta.13 page predates that gate and still
-advertises the retired packaging; do not use those instructions as an Electron
-source-bootstrap install.
+The public [download surface](https://flinttrade.vercel.app/download)
+distinguishes the source-built web-app install above from Electron-shell
+installers. It withholds Electron commands and downloads unless one release
+contains the Windows x64 NSIS installer, the universal macOS DMG, both Linux
+AppImages, and `SHA256SUMS.txt`.
 
-After that gate opens, the one-command install is:
+For a release that passes that gate, the one-command install is:
 
 ```powershell
 irm https://flinttrade.vercel.app/install.ps1 | iex

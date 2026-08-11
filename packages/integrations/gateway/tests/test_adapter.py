@@ -51,14 +51,14 @@ from flinttrade_gateway.models import BrokerInfo  # noqa: E402 — see comment a
 class TestBrokerCatalog:
     """Verify the BROKER_CATALOG constants are consistent and complete."""
 
-    def test_broker_catalog_has_31_non_sandbox_entries(self):
-        """Exactly 32 live (non-sandbox) brokers must be in the catalog.
+    def test_broker_catalog_has_34_non_sandbox_entries(self):
+        """Exactly 34 live (non-sandbox) brokers must be in the 35-entry catalogue.
 
-        31 track OpenAlgo upstream exactly (upstream gained ``iiflcapital`` in
-        v2.0.1.1) plus 1 FlintTrade-native-only entry, ``kotakneo`` (Kotak Neo) —
-        distinct from the upstream ``kotak`` (Kotak Securities). Groww remains an
-        upstream OpenAlgo entry too, now with FlintTrade-native metadata attached.
-        A future addition on either side trips this assertion.
+        33 track OpenAlgo upstream: 31 from the pinned clone (which gained
+        ``iiflcapital`` in v2.0.1.1) plus the post-pin ``arrow`` and ``tradesmart``
+        additions. The remaining live entry is FlintTrade-native ``kotakneo``
+        (Kotak Neo), distinct from upstream ``kotak`` (Kotak Securities). The
+        ``dhan_sandbox`` entry brings the complete catalogue to 35.
         """
         live = [info for info in BROKER_CATALOG.values() if not info.is_sandbox]
         # 34 live = 31 pinned-clone upstream + 2 post-pin upstream additions

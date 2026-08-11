@@ -9,7 +9,7 @@ import fs from "fs";
 import path from "path";
 
 function readFlintTradeVersion(): string {
-  const repoRoot = path.resolve(__dirname, "../../..");
+  const repoRoot = path.resolve(import.meta.dirname, "../../..");
   const versionPath = path.join(repoRoot, "VERSION");
   try {
     const value = fs.readFileSync(versionPath, "utf8").trim();
@@ -47,12 +47,12 @@ export default defineConfig({
     // this also guarantees a single React copy in the bundle.
     dedupe: ["react", "react-dom"],
     alias: {
-      "@": path.resolve(__dirname, "src"),
-      "@flinttrade/design-system/tokens.css": path.resolve(__dirname, "../../core/design-system/src/tokens.css"),
-      "@flinttrade/design-system/glass.css": path.resolve(__dirname, "../../core/design-system/src/glass.css"),
-      "@flinttrade/design-system/cinematic.css": path.resolve(__dirname, "../../core/design-system/src/cinematic.css"),
-      "@flinttrade/design-system/brand": path.resolve(__dirname, "../../core/design-system/src/brand/index.ts"),
-      "@flinttrade/design-system": path.resolve(__dirname, "../../core/design-system/src/index.ts"),
+      "@": path.resolve(import.meta.dirname, "src"),
+      "@flinttrade/design-system/tokens.css": path.resolve(import.meta.dirname, "../../core/design-system/src/tokens.css"),
+      "@flinttrade/design-system/glass.css": path.resolve(import.meta.dirname, "../../core/design-system/src/glass.css"),
+      "@flinttrade/design-system/cinematic.css": path.resolve(import.meta.dirname, "../../core/design-system/src/cinematic.css"),
+      "@flinttrade/design-system/brand": path.resolve(import.meta.dirname, "../../core/design-system/src/brand/index.ts"),
+      "@flinttrade/design-system": path.resolve(import.meta.dirname, "../../core/design-system/src/index.ts"),
       // Plotly widgets render through plotly.js-dist-min directly. Redirect
       // legacy Plotly specifiers so old imports do not leak the full bundle.
       "plotly.js/dist/plotly": "plotly.js-dist-min",

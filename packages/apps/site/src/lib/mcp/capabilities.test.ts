@@ -81,8 +81,8 @@ describe('docs index generation', () => {
     const downloadSource = readFileSync(resolve(process.cwd(), 'src/app/download/page.tsx'), 'utf8');
     const desktopDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/DESKTOP.md');
 
-    // The download page remains the release gate and carries the commands only
-    // inside the complete Electron-release branch.
+    // The download surface distinguishes the source-built web app from the
+    // Electron shell and carries Electron commands only for a complete release.
     expect(headerSource).toContain("href: '/download'");
     expect(pageSource).toContain('href="/download"');
     expect(pageSource).toContain('Download desktop app');
@@ -92,7 +92,8 @@ describe('docs index generation', () => {
     expect(pageSource).toContain('href="/docs/desktop"');
     expect(footerSource).toContain('href="/docs/desktop"');
     expect(desktopDoc?.content).toContain('exactly four shell installers plus one checksum');
-    expect(desktopDoc?.content).toContain('no desktop installer release is published yet');
+    expect(desktopDoc?.content).toContain('source-built web-app install from Electron-shell installers');
+    expect(desktopDoc?.content).toContain('withholds Electron commands and download buttons unless one release');
     expect(desktopDoc?.content).toContain('inspectable source checkout on first launch');
     expect(desktopDoc?.content).not.toContain('desktop release manifest');
   });

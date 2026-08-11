@@ -78,15 +78,13 @@ bash scripts/install/flinttrade-uninstall.sh
 
 ## Electron installer status
 
-No complete, checksum-published Electron release exists yet. The public
-[download page](https://flinttrade.vercel.app/download) will withhold the
-install command until the universal Electron DMG, the Windows installer, both
-Linux AppImages and `SHA256SUMS.txt` are published together once this branch is
-deployed. The currently deployed beta.13 page predates that gate and still
-advertises the retired packaging; do not treat its assets or instructions as
-Electron/source-bootstrap packages.
+The public [download surface](https://flinttrade.vercel.app/download)
+distinguishes the source-built web-app install above from Electron-shell
+installers. It withholds Electron commands and downloads unless one release
+contains the universal macOS DMG, the Windows x64 NSIS installer, both Linux
+AppImages, and `SHA256SUMS.txt`.
 
-After that gate opens, the macOS one-command path is:
+For a release that passes that gate, the macOS one-command path is:
 
 ```bash
 curl -fsSL https://flinttrade.vercel.app/install.sh | bash

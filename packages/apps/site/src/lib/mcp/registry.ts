@@ -193,13 +193,13 @@ export function registerFlintDocsMcp(server: McpServer): void {
       mimeType: 'text/markdown',
     },
     async (uri, variables) => {
-      const slug = decodeURIComponent(String(variables.slug));
-      const doc = getDoc(slug);
+      const slug = decodeUriComponentSafely(String(variables.slug));
+      const doc = slug === undefined ? undefined : getDoc(slug);
       return {
         contents: [{
           uri: uri.href,
           mimeType: 'text/markdown',
-          text: doc ? `# ${doc.title}\n\nSource: ${doc.sourcePath}\n\n${doc.content}` : `No document found for ${slug}.`,
+          text: doc ? `# ${doc.title}\n\nSource: ${doc.sourcePath}\n\n${doc.content}` : `No document found for ${slug ?? String(variables.slug)}.`,
         }],
       };
     },

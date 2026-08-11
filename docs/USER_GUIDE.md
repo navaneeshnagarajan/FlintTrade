@@ -120,13 +120,11 @@ downloading a frozen backend payload. Its release contract is one universal
 macOS DMG, one Windows x64 NSIS installer, Linux x64 and ARM64 AppImages, and
 `SHA256SUMS.txt`.
 
-No complete, checksum-published Electron release exists yet. The
-branch-local [download page](https://flinttrade.vercel.app/download) will hide
-the commands below until all five assets are present once this branch is
-deployed. The currently deployed beta.13 page predates that gate and still
-advertises the retired packaging; do not use those instructions as an Electron
-source-bootstrap install. After the cutover and the gate opens, the supported
-commands are:
+The public [download surface](https://flinttrade.vercel.app/download)
+distinguishes the source-built web-app install above from Electron-shell
+installers. It withholds Electron commands and downloads unless one release
+contains all four canonical installers plus `SHA256SUMS.txt`. For a release
+that passes that gate, the supported commands are:
 
 ```bash
 # macOS / Linux
