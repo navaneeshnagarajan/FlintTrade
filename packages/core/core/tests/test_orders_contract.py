@@ -33,6 +33,7 @@ decides whether to wire it up or remove it.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -44,28 +45,257 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _API_TS = _REPO_ROOT / "packages" / "apps" / "terminal" / "src" / "services" / "api.ts"
 
-# Regex hits `postOrder<…>("leaf", …)` and
-# `postOrderMutation<…>("leaf", …)`, capturing only a literal lower-kebab
-# leaf. The generic-type angle brackets are optional because the call site may
-# or may not annotate the response type.
-_ORDER_HELPER_CALL_RE = re.compile(
-    r"\b(?:postOrderMutation|postOrder)\b\s*(?:<[^>]*>)?\s*\(\s*\"(?P<leaf>[a-z][a-z0-9-]*)\"",
-    re.MULTILINE,
-)
+_ORDER_HELPERS = frozenset({"postOrder", "postOrderMutation"})
+_EXPECTED_FRONTEND_ORDER_LEAVES = {
+    "basket",
+    "cancel",
+    "cancel-all",
+    "close-position",
+    "modify",
+    "open-position",
+    "options",
+    "options-multi",
+    "place",
+    "place-smart",
+    "split",
+}
+_LOWER_KEBAB_RE = re.compile(r"[a-z][a-z0-9-]*\Z")
+_REGEX_PREFIXES = frozenset({"(", "[", "{", ",", ";", ":", "=", "=>", "!", "?", "return", "throw"})
+_TWO_CHARACTER_TOKENS = frozenset({"?.", "=>", "&&", "||", "??", "==", "!=", "<=", ">="})
+
+
+@dataclass(frozen=True, slots=True)
+class _TypeScriptToken:
+    """A deliberately small token used by the order-contract scanner."""
+
+    kind: str
+    value: str
+    brace_depth: int
+
+
+def _skip_delimited(
+    source: str,
+    start: int,
+    delimiter: str,
+    *,
+    stop_at_newline: bool = False,
+    character_classes: bool = False,
+) -> int | None:
+    """Skip one opaque string, template, or regex body."""
+    index = start + 1
+    in_character_class = False
+    while index < len(source):
+        if stop_at_newline and source[index] in "\r\n":
+            return None
+        if source[index] == "\\":
+            index += 2
+            continue
+        if character_classes and source[index] == "[":
+            in_character_class = True
+        elif character_classes and source[index] == "]":
+            in_character_class = False
+        elif source[index] == delimiter and not in_character_class:
+            return index + 1
+        index += 1
+    return None if stop_at_newline else len(source)
+
+
+def _skip_template(source: str, start: int) -> int:
+    """Skip a template plus nested interpolation and template bodies."""
+    index = start + 1
+    interpolation_depth = 0
+    while index < len(source):
+        if source[index] == "\\":
+            index += 2
+        elif not interpolation_depth and source[index] == "`":
+            return index + 1
+        elif source.startswith("${", index):
+            interpolation_depth += 1
+            index += 2
+        elif interpolation_depth and source.startswith("//", index):
+            newline = source.find("\n", index + 2)
+            index = len(source) if newline == -1 else newline + 1
+        elif interpolation_depth and source.startswith("/*", index):
+            closing = source.find("*/", index + 2)
+            index = len(source) if closing == -1 else closing + 2
+        elif interpolation_depth and source[index] in {'"', "'"}:
+            index = _skip_delimited(source, index, source[index]) or len(source)
+        elif interpolation_depth and source[index] == "`":
+            index = _skip_template(source, index)
+        elif interpolation_depth and source[index] == "{":
+            interpolation_depth += 1
+            index += 1
+        elif interpolation_depth and source[index] == "}":
+            interpolation_depth -= 1
+            index += 1
+        else:
+            index += 1
+    return len(source)
+
+
+def _typescript_tokens(source: str) -> list[_TypeScriptToken]:
+    """Lex only the TypeScript forms needed for static helper-call discovery."""
+    tokens: list[_TypeScriptToken] = []
+    index = 0
+    brace_depth = 0
+    while index < len(source):
+        character = source[index]
+        if character.isspace():
+            index += 1
+            continue
+        if source.startswith("//", index):
+            newline = source.find("\n", index + 2)
+            index = len(source) if newline == -1 else newline + 1
+            continue
+        if source.startswith("/*", index):
+            closing = source.find("*/", index + 2)
+            index = len(source) if closing == -1 else closing + 2
+            continue
+        if character in {'"', "'"}:
+            end = _skip_delimited(source, index, character) or len(source)
+            raw = source[index:end]
+            closed = len(raw) >= 2 and raw[-1] == character
+            interior = raw[1:-1] if closed else raw[1:]
+            kind = "double_string" if character == '"' and closed and "\\" not in interior else "string"
+            tokens.append(_TypeScriptToken(kind, interior, brace_depth))
+            index = end
+            continue
+        if character == "`":
+            index = _skip_template(source, index)
+            tokens.append(_TypeScriptToken("opaque", "template", brace_depth))
+            continue
+        if character == "/" and (not tokens or tokens[-1].value in _REGEX_PREFIXES):
+            end = _skip_delimited(source, index, "/", stop_at_newline=True, character_classes=True)
+            if end is not None:
+                tokens.append(_TypeScriptToken("opaque", "regex", brace_depth))
+                index = end
+                continue
+        if character.isalpha() or character in "_$":
+            end = index + 1
+            while end < len(source) and (source[end].isalnum() or source[end] in "_$"):
+                end += 1
+            tokens.append(_TypeScriptToken("identifier", source[index:end], brace_depth))
+            index = end
+            continue
+        pair = source[index : index + 2]
+        if pair in _TWO_CHARACTER_TOKENS:
+            tokens.append(_TypeScriptToken("punctuation", pair, brace_depth))
+            index += 2
+            continue
+        if character == "}":
+            brace_depth = max(0, brace_depth - 1)
+        tokens.append(_TypeScriptToken("punctuation", character, brace_depth))
+        if character == "{":
+            brace_depth += 1
+        index += 1
+    return tokens
+
+
+def _after_type_arguments(tokens: list[_TypeScriptToken], start: int) -> int | None:
+    """Return the token after one balanced optional TypeScript generic."""
+    if start >= len(tokens) or tokens[start].value != "<":
+        return start
+    depth = 0
+    for index in range(start, len(tokens)):
+        if tokens[index].value == "<":
+            depth += 1
+        elif tokens[index].value == ">":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return None
+
+
+def _export_arrow_parameters(tokens: list[_TypeScriptToken], call_index: int) -> set[str] | None:
+    """Return parameters for the module ``export const`` arrow owning a call."""
+    arrow_index: int | None = None
+    for index in range(call_index - 1, -1, -1):
+        if tokens[index].brace_depth:
+            continue
+        if tokens[index].value == ";":
+            return None
+        if tokens[index].value == "=>":
+            arrow_index = index
+            break
+    if arrow_index is None or arrow_index == 0 or tokens[arrow_index - 1].value != ")":
+        return None
+
+    depth = 0
+    open_paren: int | None = None
+    for index in range(arrow_index - 1, -1, -1):
+        if tokens[index].value == ")":
+            depth += 1
+        elif tokens[index].value == "(":
+            depth -= 1
+            if depth == 0:
+                open_paren = index
+                break
+    if open_paren is None or open_paren < 4:
+        return None
+    prefix = tokens[open_paren - 4 : open_paren]
+    if (
+        prefix[0].value != "export"
+        or prefix[1].value != "const"
+        or prefix[2].kind != "identifier"
+        or prefix[3].value != "="
+    ):
+        return None
+    return {
+        token.value
+        for token in tokens[open_paren + 1 : arrow_index - 1]
+        if token.kind == "identifier" and token.value in _ORDER_HELPERS
+    }
+
+
+def _extract_order_helper_leaves(source: str) -> set[str]:
+    """Extract literal leaves from module export-arrow helper calls.
+
+    ``api.ts`` owns the canonical helper declarations inside function bodies,
+    while every real literal call is an expression-bodied module-scope
+    ``export const`` initialiser. Requiring that shape makes nested/local
+    shadowing fail closed without pretending to parse all TypeScript scopes.
+    """
+    tokens = _typescript_tokens(source)
+    leaves: set[str] = set()
+    for index, token in enumerate(tokens):
+        if token.kind != "identifier" or token.value not in _ORDER_HELPERS or token.brace_depth != 0:
+            continue
+        if index and tokens[index - 1].value in {".", "?."}:
+            continue
+        if index + 1 < len(tokens) and tokens[index + 1].value in {".", "?."}:
+            continue
+        arrow_parameters = _export_arrow_parameters(tokens, index)
+        if arrow_parameters is None or token.value in arrow_parameters:
+            continue
+        cursor = _after_type_arguments(tokens, index + 1)
+        if cursor is None or cursor >= len(tokens) or tokens[cursor].value != "(":
+            continue
+        first_argument = cursor + 1
+        if first_argument >= len(tokens) or tokens[first_argument].kind != "double_string":
+            continue
+        leaf = tokens[first_argument].value
+        after_argument = first_argument + 1
+        if (
+            not _LOWER_KEBAB_RE.fullmatch(leaf)
+            or after_argument >= len(tokens)
+            or tokens[after_argument].value not in {",", ")"}
+        ):
+            continue
+        leaves.add(leaf)
+    return leaves
 
 
 def _frontend_order_leaves() -> set[str]:
     """Return literal ``postOrder*`` helper leaf names from ``api.ts``.
 
     Reads the source file as text rather than executing TypeScript so the
-    test can run without a Node toolchain. The regex is intentionally narrow
-    — only matches lower-kebab-case leaves to avoid false positives in
-    comments or strings used for other purposes.
+    test can run without a Node toolchain. The lexer is intentionally narrow:
+    only module-scope bare helpers with literal lower-kebab leaves count.
     """
     if not _API_TS.exists():
         pytest.skip(f"Frontend service file not found at {_API_TS}")
     source = _API_TS.read_text(encoding="utf-8")
-    return {m.group("leaf") for m in _ORDER_HELPER_CALL_RE.finditer(source)}
+    return _extract_order_helper_leaves(source)
 
 
 def _backend_order_route_leaves() -> set[str]:
@@ -95,6 +325,146 @@ def _backend_order_route_leaves() -> set[str]:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+class TestOrderHelperExtraction:
+    """The static scanner recognises only executable canonical helper calls."""
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            '// postOrder("line-comment", {});',
+            '/* postOrderMutation("block-comment", {}, authority); */',
+            "const text = 'postOrder(\"single-prose\", {})';",
+            'const text = "postOrderMutation(\\"double-prose\\", {}, authority)";',
+            'const text = `postOrder("template-prose", {})`;',
+            'const text = `outer ${`postOrder("nested-template", {})`} tail`;',
+            'client.postOrder("member-qualified", {});',
+            'client?.postOrderMutation("optional-qualified", {}, authority);',
+            'postOrder?.("optional-call", {});',
+            """
+                function wrapper() {
+                    const postOrder = fakePostOrder;
+                    return postOrder("shadow-variable", {});
+                }
+            """,
+            """
+                function wrapper() {
+                    function postOrderMutation(endpoint: string, body: object, authority: unknown) {}
+                    return postOrderMutation("shadow-function", {}, authority);
+                }
+            """,
+            """
+                function wrapper(postOrder: OrderHelper) {
+                    return postOrder("shadow-parameter", {});
+                }
+            """,
+            """
+                const wrapper = (postOrderMutation: OrderHelper) => {
+                    return postOrderMutation("shadow-arrow-parameter", {}, authority);
+                };
+            """,
+            """
+                const wrapper = (postOrderMutation: OrderHelper) =>
+                    postOrderMutation("shadow-arrow-expression", {}, authority);
+            """,
+            """
+                export const wrapper = (postOrderMutation: OrderHelper) =>
+                    postOrderMutation("shadow-exported-arrow-parameter", {}, authority);
+            """,
+            'const postOrderMutation = fake; postOrderMutation("shadow-top-level", {}, authority);',
+            "postOrder(endpoint, {});",
+            "postOrder('single-quoted', {});",
+            "postOrder(`template-argument`, {});",
+            'postOrder("escaped\\x2dleaf", {});',
+            'postOrder("concatenated-" + leaf, {});',
+            'postOrder("invalid_leaf", {});',
+        ],
+        ids=[
+            "line-comment",
+            "block-comment",
+            "single-quoted-prose",
+            "double-quoted-prose",
+            "template-prose",
+            "nested-template-prose",
+            "member-qualified",
+            "optional-member-qualified",
+            "optional-call",
+            "shadowed-variable",
+            "shadowed-function",
+            "shadowed-function-parameter",
+            "shadowed-arrow-parameter",
+            "shadowed-expression-arrow-parameter",
+            "shadowed-exported-arrow-parameter",
+            "shadowed-top-level-variable",
+            "variable-first-argument",
+            "single-quoted-argument",
+            "template-argument",
+            "escaped-argument",
+            "concatenated-argument",
+            "non-kebab-argument",
+        ],
+    )
+    def test_rejects_noncanonical_or_nonliteral_calls(
+        self,
+        source: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Non-calls and shadowed helpers cannot satisfy route parity."""
+        api_ts = tmp_path / "api.ts"
+        api_ts.write_text(source, encoding="utf-8")
+        monkeypatch.setitem(globals(), "_API_TS", api_ts)
+
+        assert _frontend_order_leaves() == set()
+
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ('export const placeOrder = (body: object) => postOrder("place", body);', {"place"}),
+            (
+                """
+                    export const placeSmartOrder = (body: object) =>
+                        postOrder<{ orderId: string; meta: { ok: boolean } }>("place-smart", body);
+                """,
+                {"place-smart"},
+            ),
+            (
+                """
+                    export const modifyOrder = (
+                        params: object,
+                        authority: OrderAuthorityPin,
+                    ) =>
+                        postOrderMutation<
+                            { orderId: string }
+                        >(
+                            "modify",
+                            params,
+                            authority,
+                        );
+                """,
+                {"modify"},
+            ),
+            (
+                'export const optionsMultiOrder = (body: object) => postOrder("options-multi", body);',
+                {"options-multi"},
+            ),
+        ],
+        ids=["bare", "object-generic", "multiline-mutation", "lower-kebab"],
+    )
+    def test_accepts_literal_bare_canonical_calls(
+        self,
+        source: str,
+        expected: set[str],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Real bare helpers retain generic, multiline, and kebab support."""
+        api_ts = tmp_path / "api.ts"
+        api_ts.write_text(source, encoding="utf-8")
+        monkeypatch.setitem(globals(), "_API_TS", api_ts)
+
+        assert _frontend_order_leaves() == expected
 
 
 class TestOrderContract:
@@ -133,17 +503,18 @@ class TestOrderContract:
         )
 
     def test_frontend_extraction_finds_known_calls(self):
-        """Sanity check on the regex — at minimum, the canonical
+        """Sanity check on the lexer — at minimum, the canonical
         `place`, `cancel`, `modify`, and `options` calls must be detected. If
-        this breaks, the regex needs adjusting before the other two tests
+        this breaks, the lexer needs adjusting before the other two tests
         become meaningful."""
         frontend = _frontend_order_leaves()
         for required in ("place", "cancel", "modify", "options"):
             assert required in frontend, (
-                f'Regex failed to find an order-helper call for "{required}" in '
-                f"{_API_TS} — adjust _ORDER_HELPER_CALL_RE before trusting "
+                f'Lexer failed to find an order-helper call for "{required}" in '
+                f"{_API_TS} — adjust the bounded lexer before trusting "
                 "the contract assertions."
             )
+        assert frontend == _EXPECTED_FRONTEND_ORDER_LEAVES
 
 
 # ---------------------------------------------------------------------------
