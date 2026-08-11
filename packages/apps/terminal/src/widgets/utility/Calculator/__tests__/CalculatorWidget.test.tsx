@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useLayoutEffect, type ReactNode } from "react";
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -40,6 +41,9 @@ const accountReadState = vi.hoisted(() => {
     set current(value: AccountReadContext | undefined) {
       current = value;
       listeners.forEach((listener) => listener());
+    },
+    replaceWithoutNotify(value: AccountReadContext | undefined) {
+      current = value;
     },
     subscribe(listener: () => void) {
       listeners.add(listener);
@@ -116,6 +120,11 @@ function renderWithTab(tab: string) {
   return render(
     <CalculatorWidget {...makeWidgetPanelProps<{ tab: string }>({ params: { tab } })} />,
   );
+}
+
+function CommitProbe({ children, onCommit }: { children: ReactNode; onCommit: () => void }) {
+  useLayoutEffect(onCommit);
+  return children;
 }
 
 /** Read the value cell of a labelled result or legend row. */
@@ -661,16 +670,64 @@ describe("Margin tab", () => {
     );
   });
 
-  it("clears account-A funds immediately when account B becomes active", async () => {
+  it("suppresses account-A funds, margin, and loading on the first account-B commit", async () => {
+    const pendingA = deferred<typeof ACCOUNT_A_FUNDS>();
+    let captureNextCommit = false;
+    let firstAccountBCommit = "";
     const props = makeWidgetPanelProps<{ tab: string }>({ params: { tab: "margin" } });
-    const { rerender } = render(<CalculatorWidget {...props} />);
+    const view = () => (
+      <CommitProbe onCommit={() => {
+        if (!captureNextCommit) return;
+        firstAccountBCommit = document.body.textContent ?? "";
+        captureNextCommit = false;
+      }}>
+        <CalculatorWidget {...props} api={{ ...props.api }} />
+      </CommitProbe>
+    );
+    const { rerender } = render(view());
     await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
     await waitFor(() => expect(resultValue("Available Funds")).toBe("₹1,00,000"));
+    apiMocks.getFunds.mockReturnValueOnce(pendingA.promise);
+    fireEvent.submit(screen.getByRole("button", { name: /get live margin/i }).closest("form")!);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Fetching…" })).toBeDisabled());
+    expect(screen.getByText("LIVE")).toBeInTheDocument();
+    expect(resultValue("Available Funds")).toBe("₹1,00,000");
+    expect(resultValue("Total Required")).toBe("₹20,000");
 
-    act(() => { accountReadState.current = ACCOUNT_B_READ_CONTEXT; });
-    rerender(<CalculatorWidget {...props} />);
+    captureNextCommit = true;
+    accountReadState.replaceWithoutNotify(ACCOUNT_B_READ_CONTEXT);
+    rerender(view());
 
-    await waitFor(() => expect(screen.queryByText("Available Funds")).not.toBeInTheDocument());
+    expect(firstAccountBCommit).not.toContain("LIVE");
+    expect(firstAccountBCommit).not.toContain("Available Funds");
+    expect(firstAccountBCommit).not.toContain("₹1,00,000");
+    expect(firstAccountBCommit).not.toContain("₹20,000");
+    expect(firstAccountBCommit).not.toContain("Fetching…");
+  });
+
+  it("suppresses an account-A error on the first account-B commit", async () => {
+    let captureNextCommit = false;
+    let firstAccountBCommit = "";
+    apiMocks.getMargin.mockRejectedValueOnce(new Error("offline"));
+    const props = makeWidgetPanelProps<{ tab: string }>({ params: { tab: "margin" } });
+    const view = () => (
+      <CommitProbe onCommit={() => {
+        if (!captureNextCommit) return;
+        firstAccountBCommit = document.body.textContent ?? "";
+        captureNextCommit = false;
+      }}>
+        <CalculatorWidget {...props} api={{ ...props.api }} />
+      </CommitProbe>
+    );
+    const { rerender } = render(view());
+    await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
+    await waitFor(() => expect(screen.getByText("API unavailable — showing estimate")).toBeInTheDocument());
+
+    captureNextCommit = true;
+    accountReadState.replaceWithoutNotify(ACCOUNT_B_READ_CONTEXT);
+    rerender(view());
+
+    expect(firstAccountBCommit).not.toContain("API unavailable — showing estimate");
   });
 
   it("aborts and ignores a late account-A funds response after switching to B", async () => {
