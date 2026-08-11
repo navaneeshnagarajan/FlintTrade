@@ -62,6 +62,21 @@ _EXPECTED_FRONTEND_ORDER_LEAVES = {
 _LOWER_KEBAB_RE = re.compile(r"[a-z][a-z0-9-]*\Z")
 _REGEX_PREFIXES = frozenset({"(", "[", "{", ",", ";", ":", "=", "=>", "!", "?", "return", "throw"})
 _TWO_CHARACTER_TOKENS = frozenset({"?.", "=>", "&&", "||", "??", "==", "!=", "<=", ">="})
+_MODULE_BINDING_KEYWORDS = frozenset({"class", "const", "function", "let", "var"})
+
+_CANONICAL_ORDER_HELPER_DECLARATIONS = """
+async function postOrder<T>(ftEndpoint: string, body: object = {}): Promise<T> {
+    throw new Error(ftEndpoint);
+}
+
+async function postOrderMutation<T>(
+    ftEndpoint: "cancel" | "modify",
+    body: object,
+    authority: OrderAuthorityPin,
+): Promise<T> {
+    throw new Error(ftEndpoint);
+}
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +206,50 @@ def _typescript_tokens(source: str) -> list[_TypeScriptToken]:
     return tokens
 
 
+def _is_top_level_async_function_declaration(tokens: list[_TypeScriptToken], name_index: int) -> bool:
+    """Return whether a helper name belongs to a module async declaration."""
+    if name_index < 2 or tokens[name_index - 1].value != "function" or tokens[name_index - 2].value != "async":
+        return False
+    statement_prefix = name_index - 3
+    if statement_prefix < 0 or tokens[statement_prefix].value in {";", "}"}:
+        return True
+    if tokens[statement_prefix].value != "export":
+        return False
+    before_export = statement_prefix - 1
+    return before_export < 0 or tokens[before_export].value in {";", "}"}
+
+
+def _module_import_binds_order_helper(tokens: list[_TypeScriptToken]) -> bool:
+    """Reject static imports that can own either canonical helper name."""
+    for index, token in enumerate(tokens):
+        if token.value != "import" or token.brace_depth != 0 or index + 1 >= len(tokens):
+            continue
+        if tokens[index + 1].value in {"(", "."}:
+            continue
+        for imported in tokens[index + 1 :]:
+            if imported.kind in {"double_string", "string"} or (imported.value == ";" and imported.brace_depth == 0):
+                break
+            if imported.kind == "identifier" and imported.value in _ORDER_HELPERS:
+                return True
+    return False
+
+
+def _has_canonical_order_helper_bindings(tokens: list[_TypeScriptToken]) -> bool:
+    """Prove both helpers have one canonical declaration and no competitor."""
+    if _module_import_binds_order_helper(tokens):
+        return False
+    declaration_counts = dict.fromkeys(_ORDER_HELPERS, 0)
+    for index, token in enumerate(tokens):
+        if token.kind != "identifier" or token.value not in _ORDER_HELPERS or token.brace_depth != 0:
+            continue
+        if _is_top_level_async_function_declaration(tokens, index):
+            declaration_counts[token.value] += 1
+            continue
+        if index and tokens[index - 1].brace_depth == 0 and tokens[index - 1].value in _MODULE_BINDING_KEYWORDS:
+            return False
+    return all(count == 1 for count in declaration_counts.values())
+
+
 def _after_type_arguments(tokens: list[_TypeScriptToken], start: int) -> int | None:
     """Return the token after one balanced optional TypeScript generic."""
     if start >= len(tokens) or tokens[start].value != "<":
@@ -256,6 +315,8 @@ def _extract_order_helper_leaves(source: str) -> set[str]:
     shadowing fail closed without pretending to parse all TypeScript scopes.
     """
     tokens = _typescript_tokens(source)
+    if not _has_canonical_order_helper_bindings(tokens):
+        return set()
     leaves: set[str] = set()
     for index, token in enumerate(tokens):
         if token.kind != "identifier" or token.value not in _ORDER_HELPERS or token.brace_depth != 0:
@@ -373,6 +434,33 @@ class TestOrderHelperExtraction:
                     postOrderMutation("shadow-exported-arrow-parameter", {}, authority);
             """,
             'const postOrderMutation = fake; postOrderMutation("shadow-top-level", {}, authority);',
+            """
+                const postOrder = fake;
+                export const placeOrder = (body: object) =>
+                    postOrder("shadow-const-binding", body);
+            """,
+            """
+                let postOrderMutation = fake;
+                export const modifyOrder = (body: object, authority: OrderAuthorityPin) =>
+                    postOrderMutation("shadow-let-binding", body, authority);
+            """,
+            """
+                var postOrder = fake;
+                export const basketOrder = (body: object) =>
+                    postOrder("shadow-var-binding", body);
+            """,
+            """
+                import { postOrderMutation } from "./shadow";
+                export const cancelOrder = (body: object, authority: OrderAuthorityPin) =>
+                    postOrderMutation("shadow-import-binding", body, authority);
+            """,
+            """
+                async function postOrder<T>(ftEndpoint: string, body: object): Promise<T> {
+                    throw new Error(ftEndpoint);
+                }
+                export const optionsOrder = (body: object) =>
+                    postOrder("duplicate-canonical-binding", body);
+            """,
             "postOrder(endpoint, {});",
             "postOrder('single-quoted', {});",
             "postOrder(`template-argument`, {});",
@@ -397,6 +485,11 @@ class TestOrderHelperExtraction:
             "shadowed-expression-arrow-parameter",
             "shadowed-exported-arrow-parameter",
             "shadowed-top-level-variable",
+            "shadowed-const-binding",
+            "shadowed-let-binding",
+            "shadowed-var-binding",
+            "shadowed-import-binding",
+            "duplicate-canonical-binding",
             "variable-first-argument",
             "single-quoted-argument",
             "template-argument",
@@ -412,6 +505,73 @@ class TestOrderHelperExtraction:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Non-calls and shadowed helpers cannot satisfy route parity."""
+        api_ts = tmp_path / "api.ts"
+        api_ts.write_text(f"{_CANONICAL_ORDER_HELPER_DECLARATIONS}\n{source}", encoding="utf-8")
+        monkeypatch.setitem(globals(), "_API_TS", api_ts)
+
+        assert _frontend_order_leaves() == set()
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            """
+                async function postOrderMutation<T>(
+                    ftEndpoint: "cancel" | "modify",
+                    body: object,
+                    authority: OrderAuthorityPin,
+                ): Promise<T> {
+                    throw new Error(ftEndpoint);
+                }
+                export const placeOrder = (body: object) => postOrder("place", body);
+            """,
+            """
+                async function postOrder<T>(ftEndpoint: string, body: object): Promise<T> {
+                    throw new Error(ftEndpoint);
+                }
+                async function renamedPostOrderMutation<T>(
+                    ftEndpoint: "cancel" | "modify",
+                    body: object,
+                    authority: OrderAuthorityPin,
+                ): Promise<T> {
+                    throw new Error(ftEndpoint);
+                }
+                export const modifyOrder = (body: object, authority: OrderAuthorityPin) =>
+                    postOrderMutation("modify", body, authority);
+            """,
+            """
+                async function postOrder<T>(ftEndpoint: string, body: object): Promise<T> {
+                    throw new Error(ftEndpoint);
+                }
+                const postOrderMutation = fake;
+                export const modifyOrder = (body: object, authority: OrderAuthorityPin) =>
+                    postOrderMutation("modify", body, authority);
+            """,
+            """
+                import { postOrder } from "./shadow";
+                async function postOrderMutation<T>(
+                    ftEndpoint: "cancel" | "modify",
+                    body: object,
+                    authority: OrderAuthorityPin,
+                ): Promise<T> {
+                    throw new Error(ftEndpoint);
+                }
+                export const placeOrder = (body: object) => postOrder("place", body);
+            """,
+        ],
+        ids=[
+            "canonical-helper-removed",
+            "canonical-helper-renamed",
+            "canonical-helper-replaced-by-const",
+            "canonical-helper-replaced-by-import",
+        ],
+    )
+    def test_rejects_calls_without_both_canonical_helper_declarations(
+        self,
+        source: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Missing or renamed canonical helpers invalidate ownership proof."""
         api_ts = tmp_path / "api.ts"
         api_ts.write_text(source, encoding="utf-8")
         monkeypatch.setitem(globals(), "_API_TS", api_ts)
@@ -461,7 +621,7 @@ class TestOrderHelperExtraction:
     ) -> None:
         """Real bare helpers retain generic, multiline, and kebab support."""
         api_ts = tmp_path / "api.ts"
-        api_ts.write_text(source, encoding="utf-8")
+        api_ts.write_text(f"{_CANONICAL_ORDER_HELPER_DECLARATIONS}\n{source}", encoding="utf-8")
         monkeypatch.setitem(globals(), "_API_TS", api_ts)
 
         assert _frontend_order_leaves() == expected
