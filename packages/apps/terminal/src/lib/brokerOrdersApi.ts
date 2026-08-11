@@ -199,7 +199,7 @@ async function request<T>(
   try {
     resp = await fetch(url, {
       method,
-      headers: buildHeaders(hasBody, mode),
+      headers: buildHeaders(hasBody, method !== "GET" ? mode : undefined),
       body: hasBody ? JSON.stringify(options.body) : undefined,
     });
   } catch {

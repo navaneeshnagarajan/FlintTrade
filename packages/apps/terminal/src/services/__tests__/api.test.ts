@@ -81,6 +81,7 @@ import {
   exitAllPositions,
   cancelOrder,
   modifyOrder,
+  type OrderAuthorityPin,
   orderStatus,
   getGttOrderbook,
   getQuotes,
@@ -2853,6 +2854,76 @@ describe("OpenAlgo API client (api.ts)", () => {
       strategy: "OrderLadder",
     });
   });
+
+  const runtimeInvalidMutationPins = [
+    {
+      pinName: "undefined",
+      authority: undefined as unknown as OrderAuthorityPin,
+    },
+    {
+      pinName: "mode-only",
+      authority: { mode: "live" } as unknown as OrderAuthorityPin,
+    },
+    {
+      pinName: "malformed",
+      authority: {
+        mode: "live",
+        scopeKey: "live:openalgo:7d290c41e91d8f71",
+        brokerType: "openalgo",
+      } as unknown as OrderAuthorityPin,
+    },
+    {
+      pinName: "unsupported-source",
+      authority: {
+        mode: "explore",
+        scopeKey: "explore:mock",
+        brokerType: "mock",
+        accountId: "default",
+      } as unknown as OrderAuthorityPin,
+      configure: () => {
+        mockModeState.mode = "explore";
+      },
+    },
+  ];
+
+  const runtimeGuardedMutations = [
+    {
+      mutationName: "cancelOrder",
+      mutate: (authority: OrderAuthorityPin) => cancelOrder("A-ORDER", "Orders", authority),
+    },
+    {
+      mutationName: "modifyOrder",
+      mutate: (authority: OrderAuthorityPin) => modifyOrder(
+        {
+          orderId: "A-ORDER",
+          symbol: "RELIANCE",
+          exchange: "NSE",
+          action: "BUY",
+          quantity: 1,
+          price: 101,
+          product: "MIS",
+          orderType: "LIMIT",
+          strategy: "Orders",
+        },
+        authority,
+      ),
+    },
+  ];
+
+  it.each(runtimeGuardedMutations.flatMap((mutation) => (
+    runtimeInvalidMutationPins.map((invalidPin) => ({ ...mutation, ...invalidPin }))
+  )))(
+    "$mutationName rejects a runtime $pinName authority before transport",
+    async ({ authority, configure, mutate }) => {
+      configure?.();
+      fetchSpy.mockResolvedValue(
+        jsonResponse({ status: "success", data: { orderId: "DEFAULT-FALLBACK" } }),
+      );
+
+      await expect(mutate(authority)).rejects.toThrow(/exact.*authority|authority.*exact/i);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     [

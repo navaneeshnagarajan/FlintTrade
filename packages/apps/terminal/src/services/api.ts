@@ -1947,12 +1947,36 @@ export type OrderAuthorityPin = AccountAuthorityIdentity;
 type PostOrderAuthorityPin = ModeOrderAuthorityPin | OrderAuthorityPin;
 
 function isExactOrderAuthorityPin(
-  authority: PostOrderAuthorityPin | undefined,
+  authority: unknown,
 ): authority is OrderAuthorityPin {
-  return authority !== undefined
+  return authority !== null
+    && typeof authority === "object"
     && "scopeKey" in authority
     && "brokerType" in authority
     && "accountId" in authority;
+}
+
+function isRuntimeOrderMutationAuthorityPin(authority: unknown): authority is OrderAuthorityPin {
+  if (!isExactOrderAuthorityPin(authority)) return false;
+  const { mode, scopeKey, brokerType, accountId } = authority;
+  if (
+    typeof scopeKey !== "string"
+    || typeof brokerType !== "string"
+    || typeof accountId !== "string"
+    || !scopeKey
+    || !brokerType
+    || !accountId
+  ) return false;
+  if (mode === "practice") {
+    return scopeKey === "practice:sandbox:default"
+      && brokerType === "sandbox"
+      && accountId === "default";
+  }
+  if (mode !== "live") return false;
+  if (brokerType === "openalgo") {
+    return /^live:openalgo:[0-9a-f]{16}$/.test(scopeKey) && accountId === "default";
+  }
+  return scopeKey === `live:native:${encodeURIComponent(brokerType)}:${encodeURIComponent(accountId)}`;
 }
 
 function exactOrderAuthorityMatchesCurrent(
@@ -2079,6 +2103,17 @@ async function postOrder<T>(
     throw new Error(json.message || `Order API ${ftEndpoint} error`);
   }
   return (json.data ?? json) as T;
+}
+
+async function postOrderMutation<T>(
+  ftEndpoint: "cancel" | "modify",
+  body: object,
+  authority: OrderAuthorityPin,
+): Promise<T> {
+  if (!isRuntimeOrderMutationAuthorityPin(authority)) {
+    throw new Error("Order blocked: cancel and modify require exact supported account authority.");
+  }
+  return postOrder<T>(ftEndpoint, body, authority);
 }
 
 async function post<T>(endpoint: string, extra: object = {}): Promise<T> {
@@ -2219,7 +2254,7 @@ export const cancelOrder = (
   orderId: string,
   strategy: string,
   authority: OrderAuthorityPin,
-) => postOrder<void>("cancel", { orderId, strategy }, authority);
+) => postOrderMutation<void>("cancel", { orderId, strategy }, authority);
 export const closePosition = (strategy = "Flint") =>
   postOrder<void>("close-position", { strategy });
 export const exitAllPositions = () => {
@@ -2236,7 +2271,7 @@ export const exitAllPositions = () => {
   return postFtApiWithMode<void>("positions/exit-all", { confirm: true, ...target }, mode);
 };
 export const modifyOrder = (params: ModifyOrderParams, authority: OrderAuthorityPin) =>
-  postOrder<{ orderId: string }>("modify", params, authority);
+  postOrderMutation<{ orderId: string }>("modify", params, authority);
 export const orderStatus = (params: OrderStatusParams) =>
   post<{ status: string }>("orderstatus", params);
 export const openPosition = (params: OpenPositionParams) =>
