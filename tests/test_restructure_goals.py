@@ -458,14 +458,59 @@ def _uses_value_nodes(node: Node) -> Iterator[Node]:
             yield from _uses_value_nodes(item)
 
 
-def _has_readable_source_label(source_lines: list[str], value_node: Node) -> bool:
-    """Return whether the source line labels an external pin for reviewers."""
+def _yaml_comment_column(source_line: str, start_column: int) -> int | None:
+    """Locate the first real YAML comment after a scalar, ignoring quoted ``#``."""
+    in_single_quote = False
+    in_double_quote = False
+    column = start_column
+    while column < len(source_line):
+        character = source_line[column]
+        if in_single_quote:
+            if character == "'":
+                if column + 1 < len(source_line) and source_line[column + 1] == "'":
+                    column += 2
+                    continue
+                in_single_quote = False
+        elif in_double_quote:
+            if character == "\\":
+                column += 2
+                continue
+            if character == '"':
+                in_double_quote = False
+        elif character == "'":
+            in_single_quote = True
+        elif character == '"':
+            in_double_quote = True
+        elif character == "#" and (column == 0 or source_line[column - 1].isspace()):
+            return column
+        column += 1
+
+    return None
+
+
+def _has_readable_source_label(
+    source_lines: list[str],
+    value_node: Node,
+    uses_value_nodes: list[Node],
+) -> bool:
+    """Return whether a real YAML comment unambiguously labels this external pin."""
     line_number = value_node.end_mark.line
     if line_number >= len(source_lines):
         return False
-    source_tail = source_lines[line_number][value_node.end_mark.column :]
-    match = re.search(r"#\s*(\S.*)$", source_tail)
-    return match is not None and re.search(r"[A-Za-z0-9]", match.group(1)) is not None
+    if sum(node.end_mark.line == line_number for node in uses_value_nodes) != 1:
+        return False
+
+    source_line = source_lines[line_number]
+    comment_column = _yaml_comment_column(source_line, value_node.end_mark.column)
+    if comment_column is None:
+        return False
+
+    between_value_and_comment = source_line[value_node.end_mark.column : comment_column]
+    if re.fullmatch(r"[\s\]}]*", between_value_and_comment) is None:
+        return False
+
+    label = source_line[comment_column + 1 :]
+    return re.search(r"[A-Za-z0-9]", label) is not None
 
 
 def _workflow_action_pin_violations(workflow_paths: list[Path]) -> list[str]:
@@ -488,7 +533,8 @@ def _workflow_action_pin_violations(workflow_paths: list[Path]) -> list[str]:
             violations.append(f"{path.name}:1: workflow YAML must be a mapping")
             continue
 
-        for value_node in _uses_value_nodes(document):
+        uses_value_nodes = list(_uses_value_nodes(document))
+        for value_node in uses_value_nodes:
             line_number = value_node.start_mark.line + 1
             if not isinstance(value_node, ScalarNode) or value_node.tag != "tag:yaml.org,2002:str":
                 violations.append(
@@ -502,7 +548,9 @@ def _workflow_action_pin_violations(workflow_paths: list[Path]) -> list[str]:
             if target.startswith("docker://"):
                 if (
                     re.fullmatch(r"docker://[^@\s]+@sha256:[0-9a-f]{64}", target) is None
-                    or not _has_readable_source_label(source_lines, value_node)
+                    or not _has_readable_source_label(
+                        source_lines, value_node, uses_value_nodes
+                    )
                 ):
                     violations.append(f"{path.name}:{line_number}: {target}")
                 continue
@@ -512,7 +560,9 @@ def _workflow_action_pin_violations(workflow_paths: list[Path]) -> list[str]:
                 not separator
                 or re.fullmatch(r"[^/\s]+/[^@\s]+", action) is None
                 or re.fullmatch(r"[0-9a-f]{40}", reference) is None
-                or not _has_readable_source_label(source_lines, value_node)
+                or not _has_readable_source_label(
+                    source_lines, value_node, uses_value_nodes
+                )
             ):
                 violations.append(f"{path.name}:{line_number}: {target}")
 
@@ -562,6 +612,28 @@ def _workflow_action_pin_violations(workflow_paths: list[Path]) -> list[str]:
             f"jobs:\n  build:\n    steps:\n      - uses: actions/checkout@{'a' * 40}\n",
             f"actions/checkout@{'a' * 40}",
         ),
+        (
+            "flow-hash-in-quoted-value.yml",
+            "jobs: {build: {steps: [{uses: actions/checkout@"
+            + "a" * 40
+            + ', name: "# not a release comment"}]}}\n',
+            f"actions/checkout@{'a' * 40}",
+        ),
+        (
+            "flow-hash-after-escaped-double-quotes.yml",
+            "jobs: {build: {steps: [{uses: actions/setup-node@"
+            + "b" * 40
+            + r', name: "quoted \"value # still text\""}]}}'
+            + "\n",
+            f"actions/setup-node@{'b' * 40}",
+        ),
+        (
+            "flow-hash-after-doubled-single-quotes.yml",
+            "jobs: {build: {steps: [{uses: actions/upload-artifact@"
+            + "c" * 40
+            + ", name: 'quoted ''value # still text'''}]}}\n",
+            f"actions/upload-artifact@{'c' * 40}",
+        ),
     ),
 )
 def test_workflow_action_pin_policy_detects_yaml_mutations(
@@ -579,6 +651,25 @@ def test_workflow_action_pin_policy_detects_yaml_mutations(
     assert any(expected_fragment in violation for violation in violations), violations
 
 
+def test_workflow_action_pin_policy_does_not_share_one_flow_label(
+    tmp_path: Path,
+) -> None:
+    """One trailing comment cannot label two external ``uses`` scalars."""
+    first = f"actions/checkout@{'a' * 40}"
+    second = f"actions/setup-node@{'b' * 40}"
+    path = tmp_path / "shared-flow-label.yml"
+    path.write_text(
+        f"jobs: {{build: {{steps: [{{uses: {first}}}, {{uses: {second}}}]}}}} # v7\n",
+        encoding="utf-8",
+    )
+
+    violations = _workflow_action_pin_violations([path])
+
+    assert len(violations) == 2, violations
+    assert first in violations[0]
+    assert second in violations[1]
+
+
 def test_workflow_action_pin_policy_accepts_structural_local_and_pinned_forms(
     tmp_path: Path,
 ) -> None:
@@ -589,8 +680,10 @@ def test_workflow_action_pin_policy_accepts_structural_local_and_pinned_forms(
         "  build:\n"
         "    steps:\n"
         f"      - uses : actions/checkout@{'a' * 40} # v7\n"
+        f'      - "uses": actions/download-artifact@{'d' * 40} # v8.0.1\n'
         '      - "uses": ./local-action\n'
         f"      - {{uses: actions/setup-node@{'b' * 40}}} # v7.0.0\n"
+        f"      - uses: docker://ghcr.io/owner/image@sha256:{'e' * 64} # v1\n"
         "  local-reusable:\n"
         "    uses: ./.github/workflows/local.yml\n"
         "  external-reusable:\n"
