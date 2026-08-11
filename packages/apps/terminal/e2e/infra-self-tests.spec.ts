@@ -60,15 +60,31 @@ interface StaticFrontendServer {
   close(): Promise<void>;
 }
 
-async function startStaticFrontendServer(): Promise<StaticFrontendServer> {
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+async function startStaticFrontendServer(
+  manifestTargetPath?: string,
+): Promise<StaticFrontendServer> {
   const hits = new Map<string, number>();
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     hits.set(url.pathname, (hits.get(url.pathname) ?? 0) + 1);
     if (url.pathname === "/manifest-probe.html") {
-      const target = url.searchParams.get("target") ?? "/manifest.webmanifest";
+      if (!manifestTargetPath) {
+        response.writeHead(404, { "content-type": "text/plain" });
+        response.end("manifest target is not configured");
+        return;
+      }
       response.writeHead(200, { "content-type": "text/html" });
-      response.end(`<link rel="manifest" href="${target}">`);
+      response.end(
+        `<link rel="manifest" href="${escapeHtmlAttribute(manifestTargetPath)}">`,
+      );
       return;
     }
 
@@ -127,8 +143,7 @@ async function requestFrontendResource(
   const requestStarted = page.waitForRequest((request) => request.url() === requestUrl);
 
   if (resourceType === "manifest") {
-    const target = encodeURIComponent(path);
-    await page.goto(`${frontendOrigin}/manifest-probe.html?target=${target}`);
+    await page.goto(`${frontendOrigin}/manifest-probe.html`);
     const devtools = await page.context().newCDPSession(page);
     try {
       await devtools.send("Page.getAppManifest");
@@ -182,12 +197,41 @@ const API_RESOURCE_BOUNDARIES = [
 ] as const;
 
 baseTest.describe("fail-closed synthetic fixture registry", () => {
+  baseTest("manifest probe uses only its escaped closure-bound target", async ({ page }) => {
+    const manifestTarget = '/manifest.webmanifest?probe=&"<>';
+    const reflectedTarget = '"><script data-injected="true"></script><link href="';
+    const server = await startStaticFrontendServer(manifestTarget);
+    try {
+      await page.goto(
+        `${server.origin}/manifest-probe.html?target=${encodeURIComponent(reflectedTarget)}`,
+      );
+
+      await expect(page.locator('link[rel="manifest"]')).toHaveAttribute("href", manifestTarget);
+      await expect(page.locator('script[data-injected="true"]')).toHaveCount(0);
+    } finally {
+      await server.close();
+    }
+  });
+
   for (const boundary of API_RESOURCE_BOUNDARIES) {
     for (const resourceType of FRONTEND_RESOURCE_TYPES) {
       baseTest(`records and aborts an unregistered ${boundary.label} ${resourceType} request`, async ({
         page,
       }) => {
-        const server = await startStaticFrontendServer();
+        const extension =
+          resourceType === "manifest"
+            ? ".webmanifest"
+            : resourceType === "stylesheet"
+              ? ".css"
+              : resourceType === "script"
+                ? ".js"
+                : resourceType === "image"
+                  ? ".svg"
+                  : ".html";
+        const path = `${boundary.pathStem}-${resourceType}${extension}`;
+        const server = await startStaticFrontendServer(
+          resourceType === "manifest" ? path : undefined,
+        );
         try {
           const registry = await createRegistry(
             page,
@@ -195,17 +239,6 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
             [],
             server.origin,
           );
-          const extension =
-            resourceType === "manifest"
-              ? ".webmanifest"
-              : resourceType === "stylesheet"
-                ? ".css"
-                : resourceType === "script"
-                  ? ".js"
-                  : resourceType === "image"
-                    ? ".svg"
-                    : ".html";
-          const path = `${boundary.pathStem}-${resourceType}${extension}`;
 
           const request = await requestFrontendResource(page, resourceType, server.origin, path);
 
@@ -354,6 +387,10 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
     const handlerEntered = new Promise<void>((resolve) => {
       markHandlerEntered = resolve;
     });
+    let markHandlerCompleted: (() => void) | undefined;
+    const handlerCompleted = new Promise<void>((resolve) => {
+      markHandlerCompleted = resolve;
+    });
     let releaseHandler: (() => void) | undefined;
     const handlerGate = new Promise<void>((resolve) => {
       releaseHandler = resolve;
@@ -365,21 +402,46 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
       handler: async () => {
         markHandlerEntered?.();
         await handlerGate;
+        markHandlerCompleted?.();
         return { json: { drained: true } };
       },
     });
 
-    const firstRequest = fetchJson(page, "GET", "/api/slow-success");
+    const firstRequestOutcome = fetchJson(page, "GET", "/api/slow-success").then(
+      (value) => ({ status: "resolved" as const, value }),
+      (error: unknown) => ({
+        status: "rejected" as const,
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
     await handlerEntered;
     const disposal = registry.dispose();
+    let disposalSettled = false;
+    void disposal.then(
+      () => {
+        disposalSettled = true;
+      },
+      () => {
+        disposalSettled = true;
+      },
+    );
     const secondRequest = fetchJson(page, "GET", "/api/slow-success");
 
     await expect(secondRequest).rejects.toThrow();
+    await Promise.resolve();
+    expect(disposalSettled).toBe(false);
+    expect(page.isClosed()).toBe(false);
     releaseHandler?.();
-    await expect(firstRequest).resolves.toEqual({ drained: true });
+    await handlerCompleted;
     await expect(disposal).rejects.toThrow(
       /request during teardown.*GET \/api\/slow-success/is,
     );
+    const firstRequest = await firstRequestOutcome;
+    if (firstRequest.status === "resolved") {
+      expect(firstRequest.value).toEqual({ drained: true });
+    } else {
+      expect(firstRequest.message).toMatch(/Target page, context or browser has been closed/i);
+    }
     expect(page.isClosed()).toBe(true);
   });
 
