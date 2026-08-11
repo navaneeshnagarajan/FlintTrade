@@ -186,9 +186,11 @@ describe("OI Analytics heat view — connected with live data", () => {
     renderHeat();
 
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "NIFTY", "NFO", "24-APR-25",
+      "NIFTY", "NFO", "24-APR-25", expect.any(AbortSignal), expect.any(String),
     ));
-    expect(apiMocks.getOptionChain).not.toHaveBeenCalledWith("NIFTY", "NFO", "");
+    expect(apiMocks.getOptionChain).not.toHaveBeenCalledWith(
+      "NIFTY", "NFO", "", expect.any(AbortSignal), expect.any(String),
+    );
   });
 
   it("refresh button is enabled when connected with a validated expiry", async () => {
@@ -340,10 +342,14 @@ describe("OI Analytics heat view — connected with live data", () => {
     ));
     renderHeat();
 
-    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith("NIFTY", "NFO", "24-APR-25"));
+    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "24-APR-25", expect.any(AbortSignal), expect.any(String),
+    ));
     // The expiry strip prints a formatted label, not the raw broker token.
     fireEvent.click(await screen.findByRole("button", { name: "1 May" }));
-    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith("NIFTY", "NFO", "01-MAY-25"));
+    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "01-MAY-25", expect.any(AbortSignal), expect.any(String),
+    ));
 
     await act(async () => {
       secondExpiry.resolve({
@@ -383,19 +389,21 @@ describe("OI Analytics heat view — connected with live data", () => {
 
     renderHeat();
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "NIFTY", "NFO", "24-APR-25",
+      "NIFTY", "NFO", "24-APR-25", expect.any(AbortSignal), expect.any(String),
     ));
 
     await selectSymbol("BANKNIFTY");
     await act(async () => { await Promise.resolve(); });
-    expect(apiMocks.getOptionChain).not.toHaveBeenCalledWith("BANKNIFTY", "NFO", "24-APR-25");
+    expect(apiMocks.getOptionChain).not.toHaveBeenCalledWith(
+      "BANKNIFTY", "NFO", "24-APR-25", expect.any(AbortSignal), expect.any(String),
+    );
 
     await act(async () => {
       bankExpiry.resolve({ expiry: ["01-MAY-25"] });
       await bankExpiry.promise;
     });
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "BANKNIFTY", "NFO", "01-MAY-25",
+      "BANKNIFTY", "NFO", "01-MAY-25", expect.any(AbortSignal), expect.any(String),
     ));
   });
 
@@ -417,12 +425,12 @@ describe("OI Analytics heat view — connected with live data", () => {
 
     renderHeat();
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "NIFTY", "NFO", "24-APR-25",
+      "NIFTY", "NFO", "24-APR-25", expect.any(AbortSignal), expect.any(String),
     ));
 
     await selectSymbol("BANKNIFTY");
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "BANKNIFTY", "NFO", "01-MAY-25",
+      "BANKNIFTY", "NFO", "01-MAY-25", expect.any(AbortSignal), expect.any(String),
     ));
 
     await selectSymbol("NIFTY");

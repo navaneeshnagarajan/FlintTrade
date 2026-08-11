@@ -159,8 +159,8 @@ export async function listBrokerRecommendations(): Promise<BrokerRecommendations
   };
 }
 
-export async function listNativeAccounts(): Promise<NativeAccount[]> {
-  const r = await get<{ accounts: NativeAccount[] }>("native/accounts");
+export async function listNativeAccounts(signal?: AbortSignal): Promise<NativeAccount[]> {
+  const r = await get<{ accounts: NativeAccount[] }>("native/accounts", signal);
   return r?.accounts ?? [];
 }
 

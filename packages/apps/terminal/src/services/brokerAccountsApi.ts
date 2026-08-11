@@ -40,14 +40,21 @@ export function nativeToBrokerAccount(account: NativeAccount): BrokerAccount {
   };
 }
 
-export async function listGatewayBrokerAccounts(): Promise<BrokerAccount[]> {
-  return gatewayApi.listAccounts();
+export async function listGatewayBrokerAccounts(signal?: AbortSignal): Promise<BrokerAccount[]> {
+  return gatewayApi.listAccounts(signal);
 }
 
-export async function listBrokerAccounts(previous: BrokerAccount[] = []): Promise<BrokerAccount[]> {
+export async function listNativeBrokerAccounts(signal?: AbortSignal): Promise<BrokerAccount[]> {
+  return (await listNativeAccounts(signal)).map(nativeToBrokerAccount);
+}
+
+export async function listBrokerAccounts(
+  previous: BrokerAccount[] = [],
+  signal?: AbortSignal,
+): Promise<BrokerAccount[]> {
   const [gatewayResult, nativeResult] = await Promise.allSettled([
-    listGatewayBrokerAccounts(),
-    listNativeAccounts(),
+    listGatewayBrokerAccounts(signal),
+    listNativeBrokerAccounts(signal),
   ]);
 
   if (gatewayResult.status === "rejected" && nativeResult.status === "rejected") {
@@ -60,13 +67,13 @@ export async function listBrokerAccounts(previous: BrokerAccount[] = []): Promis
     ? gatewayResult.value
     : previous.filter((a) => a.source !== "native");
   const nativeAccounts = nativeResult.status === "fulfilled"
-    ? nativeResult.value.map(nativeToBrokerAccount)
+    ? nativeResult.value
     : previous.filter((a) => a.source === "native");
   return [...gatewayAccounts, ...nativeAccounts];
 }
 
-export async function listLiveNativeReadAccounts(): Promise<NativeReadAccountRef[]> {
-  return (await listNativeAccounts())
+export async function listLiveNativeReadAccounts(signal?: AbortSignal): Promise<NativeReadAccountRef[]> {
+  return (await listNativeAccounts(signal))
     .filter((account) => account.has_session === true)
     .map((account) => ({
       adapter_id: account.adapter_id,
@@ -81,7 +88,8 @@ export function selectNativeReadAccount(
   activeAccountId: string | null,
 ): NativeReadAccountRef | undefined {
   const active = findBrokerAccountMatch(brokerAccounts, activeAccountId);
-  if (active && (active.source ?? "gateway") === "native") {
+  if (activeAccountId) {
+    if (!active || (active.source ?? "gateway") !== "native") return undefined;
     const selected = accounts.find((account) => (
       account.account_id === active.account_id && account.adapter_id === active.broker
     ));
@@ -92,7 +100,15 @@ export function selectNativeReadAccount(
     // undefined lets the caller surface the needs-relogin state instead.
     return selected;
   }
-  return accounts.find((account) => account.is_primary) ?? accounts[0];
+
+  const nativeBrokerAccounts = brokerAccounts.filter((account) => account.source === "native");
+  const selectedBrokerAccount = nativeBrokerAccounts.find((account) => account.is_primary)
+    ?? (nativeBrokerAccounts.length === 1 ? nativeBrokerAccounts[0] : undefined);
+  if (!selectedBrokerAccount) return undefined;
+  return accounts.find((account) => (
+    account.account_id === selectedBrokerAccount.account_id
+    && account.adapter_id === selectedBrokerAccount.broker
+  ));
 }
 
 export async function removeBrokerAccount(account: BrokerAccountRef): Promise<void> {

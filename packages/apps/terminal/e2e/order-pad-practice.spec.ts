@@ -126,7 +126,10 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
     name: "list gateway accounts for the Practice workspace",
     method: "GET",
     path: "/ft-api/v1/accounts",
-    expectedCalls: 1,
+    // TanStack now propagates its AbortSignal through account discovery. In
+    // React StrictMode the development-only first mount may therefore abort
+    // and remount instead of sharing the original in-flight request.
+    expectedCalls: { minimum: 1, maximum: 2 },
     handler: (request) => {
       expectAuthenticatedGet(request);
       return { json: { accounts: [] } };
@@ -136,10 +139,13 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
     name: "list native accounts for Practice market-data resolution",
     method: "GET",
     path: "/ft-api/api/v1/native/accounts",
-    // Auth/mode activation and the lazy Order Pad observer can settle in either
-    // order, producing five or six legitimate mount-time reads. The bounded
-    // range still aborts any seventh request and authenticates every allowed one.
-    expectedCalls: { minimum: 5, maximum: 6 },
+    // AppLayout account hydration, Order Pad capability discovery, and Order
+    // Pad symbol metadata each run twice under StrictMode. TopBar timing
+    // discovery can run one to three times under the default retry policy.
+    // That makes 7-9 ordinary mount reads (5 remains the abort-tolerant floor).
+    // The controlled clock remains below the scheduled five- and ten-second
+    // refreshes, while the fail-closed registry still rejects a tenth request.
+    expectedCalls: { minimum: 5, maximum: 9 },
     handler: (request) => {
       expectAuthenticatedGet(request);
       return { json: { accounts: [] } };
@@ -311,7 +317,7 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   await expect.poll(
     () => syntheticApi.callCount("GET", "/ft-api/api/v1/native/accounts"),
   ).toBeGreaterThanOrEqual(5);
-  expect(syntheticApi.callCount("GET", "/ft-api/api/v1/native/accounts")).toBeLessThanOrEqual(6);
+  expect(syntheticApi.callCount("GET", "/ft-api/api/v1/native/accounts")).toBeLessThanOrEqual(9);
   await limitOrderType.click();
   await page.getByRole("spinbutton", { name: "Price", exact: true }).fill("123.45");
   await page.getByRole("button", { name: "Practice Buy" }).click();

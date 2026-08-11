@@ -26,6 +26,7 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 const mockMode = vi.hoisted(() => ({ current: "live" }));
+const dataScopeState = vi.hoisted(() => ({ current: "live:native:dhan:A1" }));
 
 const plotlyMocks = vi.hoisted(() => {
   const state = {
@@ -58,6 +59,10 @@ vi.mock("@/lib/market", () => ({
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(true),
+}));
+
+vi.mock("@/hooks/useDataScope", () => ({
+  useMarketDataScope: () => dataScopeState.current,
 }));
 
 vi.mock("@/stores/modeStore", () => ({
@@ -112,6 +117,7 @@ describe("OI Analytics — shell and bars view", () => {
     vi.clearAllMocks();
     plotlyMocks.reset();
     mockMode.current = "live";
+    dataScopeState.current = "live:native:dhan:A1";
     mockUseBrokerConnected.mockReturnValue(true);
     apiMocks.getExpiry.mockResolvedValue([]);
     apiMocks.getOptionChain.mockResolvedValue({ calls: [], puts: [] });
@@ -226,9 +232,11 @@ describe("OI Analytics — shell and bars view", () => {
     renderWidget();
 
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "NIFTY", "NFO", "2026-07-30",
+      "NIFTY", "NFO", "2026-07-30", expect.any(AbortSignal), dataScopeState.current,
     ));
-    expect(apiMocks.getOptionChain).not.toHaveBeenCalledWith("NIFTY", "NFO", "");
+    expect(apiMocks.getOptionChain).not.toHaveBeenCalledWith(
+      "NIFTY", "NFO", "", expect.any(AbortSignal), dataScopeState.current,
+    );
   });
 
   it("keeps missing OI and dependent totals unavailable while preserving explicit zero", async () => {
@@ -532,6 +540,132 @@ describe("OI Analytics — shell and bars view", () => {
     expect(screen.queryByText("ATM:")).not.toBeInTheDocument();
   });
 
+  it("retires every A-source option request and clears A data before loading source B", async () => {
+    const sourceBExpiry = deferred<{ expiry: string[] }>();
+    const lateAChain = deferred<Record<string, unknown>>();
+    const lateAQuote = deferred<{ ltp: number }>();
+    const lateAMaxPain = deferred<Record<string, unknown>>();
+
+    apiMocks.getExpiry
+      .mockResolvedValueOnce({ expiry: ["2026-07-30"] })
+      .mockReturnValueOnce(sourceBExpiry.promise);
+    apiMocks.getOptionChain
+      .mockResolvedValueOnce({
+        underlying_ltp: 25000,
+        chain: [{ strike: 25000, ce: { oi: 111 }, pe: { oi: 211 } }],
+      })
+      .mockReturnValueOnce(lateAChain.promise)
+      .mockResolvedValueOnce({
+        underlying_ltp: 26000,
+        chain: [{ strike: 26000, ce: { oi: 222 }, pe: { oi: 322 } }],
+      });
+    apiMocks.getQuotes
+      .mockResolvedValueOnce({ ltp: 25000 })
+      .mockReturnValueOnce(lateAQuote.promise)
+      .mockResolvedValueOnce({ ltp: 26000 });
+    apiMocks.getMaxPain
+      .mockReturnValueOnce(lateAMaxPain.promise)
+      .mockResolvedValueOnce({ is_sample_data: false, max_pain_strike: 26000 });
+
+    const view = renderWidget();
+    await waitFor(() => expect(screen.getByText("CE 111")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("refresh-btn"));
+    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledTimes(2));
+
+    const aExpirySignal = apiMocks.getExpiry.mock.calls[0]?.[3] as AbortSignal | undefined;
+    const aChainSignal = apiMocks.getOptionChain.mock.calls[1]?.[3] as AbortSignal | undefined;
+    const aQuoteSignal = apiMocks.getQuotes.mock.calls[1]?.[2] as AbortSignal | undefined;
+    const aMaxPainSignal = apiMocks.getMaxPain.mock.calls[0]?.[3] as AbortSignal | undefined;
+
+    dataScopeState.current = "live:native:upstox:B1";
+    view.rerender(<OIChartWidget {...makeWidgetPanelProps()} />);
+
+    expect(screen.queryByText("CE 111")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("plotly-chart")).not.toBeInTheDocument();
+    expect(screen.getByText("Spot: —")).toBeInTheDocument();
+    expect(aExpirySignal?.aborted).toBe(true);
+    expect(aChainSignal?.aborted).toBe(true);
+    expect(aQuoteSignal?.aborted).toBe(true);
+    expect(aMaxPainSignal?.aborted).toBe(true);
+    await waitFor(() => expect(apiMocks.getExpiry).toHaveBeenCalledTimes(2));
+    expect(apiMocks.getExpiry).toHaveBeenLastCalledWith(
+      "NIFTY",
+      "NFO",
+      "options",
+      expect.any(AbortSignal),
+      "live:native:upstox:B1",
+    );
+
+    await act(async () => {
+      sourceBExpiry.resolve({ expiry: ["2026-08-06"] });
+      await sourceBExpiry.promise;
+    });
+    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledTimes(3));
+    expect(apiMocks.getOptionChain).toHaveBeenLastCalledWith(
+      "NIFTY",
+      "NFO",
+      "2026-08-06",
+      expect.any(AbortSignal),
+      "live:native:upstox:B1",
+    );
+    expect(apiMocks.getQuotes).toHaveBeenLastCalledWith(
+      "NIFTY",
+      "NSE_INDEX",
+      expect.any(AbortSignal),
+      "live:native:upstox:B1",
+    );
+    expect(apiMocks.getMaxPain).toHaveBeenLastCalledWith(
+      "NIFTY",
+      "NFO",
+      "2026-08-06",
+      expect.any(AbortSignal),
+      "live:native:upstox:B1",
+    );
+    await waitFor(() => expect(screen.getByText("CE 222")).toBeInTheDocument());
+
+    await act(async () => {
+      lateAChain.resolve({
+        underlying_ltp: 24900,
+        chain: [{ strike: 24900, ce: { oi: 999 }, pe: { oi: 999 } }],
+      });
+      lateAQuote.resolve({ ltp: 24900 });
+      lateAMaxPain.resolve({ is_sample_data: false, max_pain_strike: 24900 });
+      await Promise.all([lateAChain.promise, lateAQuote.promise, lateAMaxPain.promise]);
+    });
+
+    expect(screen.getByText("CE 222")).toBeInTheDocument();
+    expect(screen.queryByText("CE 999")).not.toBeInTheDocument();
+    expect(screen.queryByText("Max Pain: 24,900")).not.toBeInTheDocument();
+  });
+
+  it("aborts Live option requests and starts no protected refresh when Explore wins", async () => {
+    const pendingExpiry = deferred<{ expiry: string[] }>();
+    apiMocks.getExpiry.mockReturnValue(pendingExpiry.promise);
+
+    const view = renderWidget();
+    await waitFor(() => expect(apiMocks.getExpiry).toHaveBeenCalledOnce());
+    const liveSignal = apiMocks.getExpiry.mock.calls[0]?.[3] as AbortSignal | undefined;
+
+    mockMode.current = "explore";
+    dataScopeState.current = "explore:mock";
+    mockUseBrokerConnected.mockReturnValue(false);
+    view.rerender(<OIChartWidget {...makeWidgetPanelProps()} />);
+
+    expect(liveSignal?.aborted).toBe(true);
+    expect(screen.getByText("Spot: —")).toBeInTheDocument();
+    expect(apiMocks.getExpiry).toHaveBeenCalledTimes(1);
+    expect(apiMocks.getOptionChain).not.toHaveBeenCalled();
+    expect(apiMocks.getQuotes).not.toHaveBeenCalled();
+    expect(apiMocks.getMaxPain).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingExpiry.resolve({ expiry: ["2026-07-30"] });
+      await pendingExpiry.promise;
+    });
+    expect(apiMocks.getOptionChain).not.toHaveBeenCalled();
+  });
+
   it("does not request a new symbol with the previous symbol's expiry", async () => {
     const bankExpiry = deferred<{ expiry: string[] }>();
     apiMocks.getExpiry.mockImplementation((symbol: string) => (
@@ -546,13 +680,13 @@ describe("OI Analytics — shell and bars view", () => {
 
     renderWidget();
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "NIFTY", "NFO", "2026-07-30",
+      "NIFTY", "NFO", "2026-07-30", expect.any(AbortSignal), dataScopeState.current,
     ));
 
     await selectSymbol("BANKNIFTY");
     await act(async () => { await Promise.resolve(); });
     expect(apiMocks.getOptionChain).not.toHaveBeenCalledWith(
-      "BANKNIFTY", "NFO", "2026-07-30",
+      "BANKNIFTY", "NFO", "2026-07-30", expect.any(AbortSignal), dataScopeState.current,
     );
 
     await act(async () => {
@@ -560,7 +694,7 @@ describe("OI Analytics — shell and bars view", () => {
       await bankExpiry.promise;
     });
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "BANKNIFTY", "NFO", "2026-08-06",
+      "BANKNIFTY", "NFO", "2026-08-06", expect.any(AbortSignal), dataScopeState.current,
     ));
   });
 
@@ -580,12 +714,12 @@ describe("OI Analytics — shell and bars view", () => {
 
     renderWidget();
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "NIFTY", "NFO", "2026-07-30",
+      "NIFTY", "NFO", "2026-07-30", expect.any(AbortSignal), dataScopeState.current,
     ));
 
     await selectSymbol("BANKNIFTY");
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "BANKNIFTY", "NFO", "2026-08-06",
+      "BANKNIFTY", "NFO", "2026-08-06", expect.any(AbortSignal), dataScopeState.current,
     ));
 
     await selectSymbol("NIFTY");
@@ -690,6 +824,7 @@ describe("OI Analytics data provenance", () => {
     vi.clearAllMocks();
     plotlyMocks.reset();
     mockMode.current = "live";
+    dataScopeState.current = "live:native:dhan:A1";
     mockUseBrokerConnected.mockReturnValue(true);
     apiMocks.getExpiry.mockResolvedValue(["2026-07-30"]);
     apiMocks.getOptionChain.mockResolvedValue({

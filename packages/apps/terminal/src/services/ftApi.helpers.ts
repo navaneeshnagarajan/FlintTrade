@@ -189,11 +189,16 @@ export async function get<T>(endpoint: string, signal?: AbortSignal): Promise<T>
  * the ``/v1`` family is no longer a dead end. ``getBase()`` resolves correctly in
  * both dev (``/ft-api/v1/...`` → stripped to ``/v1/...``) and prod (``/v1/...``).
  */
-export async function postV1<T>(endpoint: string, body: object = {}): Promise<T> {
+export async function postV1<T>(
+  endpoint: string,
+  body: object = {},
+  signal?: AbortSignal,
+): Promise<T> {
   const resp = await fetch(`${getBase()}/v1/${endpoint}`, {
     method: "POST",
     headers: buildHeaders(true),
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   if (!resp.ok) await throwHttpError(resp, endpoint);
   return parseResponse<T>(resp, endpoint);

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { connectionScopeFingerprint, resolveDataScope } from "@/hooks/useDataScope";
+import {
+  connectionScopeFingerprint,
+  resolveDataScope,
+  resolveMarketDataScope,
+} from "@/hooks/useDataScope";
 import type { BrokerAccount } from "@/types/broker";
 
 function account(overrides: Partial<BrokerAccount>): BrokerAccount {
@@ -38,6 +42,34 @@ describe("resolveDataScope", () => {
     })).toBe("practice:sandbox:default");
   });
 
+  it("partitions Practice market data by its real OpenAlgo or native authority", () => {
+    const openAlgoA = resolveMarketDataScope({
+      mode: "practice",
+      host: "https://oa.example/TenantA",
+      apiKey: "configured",
+      accounts: [],
+      activeAccountId: null,
+    });
+    const openAlgoB = resolveMarketDataScope({
+      mode: "practice",
+      host: "https://oa.example/TenantB",
+      apiKey: "configured",
+      accounts: [],
+      activeAccountId: null,
+    });
+    const native = resolveMarketDataScope({
+      mode: "practice",
+      host: "",
+      apiKey: "",
+      accounts: [account({ broker: "upstox", account_id: "U1", is_primary: true })],
+      activeAccountId: null,
+    });
+
+    expect(openAlgoA).toMatch(/^practice:openalgo:[0-9a-f]{16}$/);
+    expect(new Set([openAlgoA, openAlgoB, native])).toHaveLength(3);
+    expect(native).toBe("practice:native:upstox:U1");
+  });
+
   it("isolates OpenAlgo caches by host and key without retaining either value", () => {
     const first = resolveDataScope({
       mode: "live",
@@ -66,7 +98,9 @@ describe("resolveDataScope", () => {
     expect(first).not.toContain("127.0.0.1");
     expect(new Set([first, second, third])).toHaveLength(3);
     expect(connectionScopeFingerprint("http://127.0.0.1:5000/", "configured"))
-      .toBe(connectionScopeFingerprint("http://127.0.0.1:5000", "configured"));
+      .not.toBe(connectionScopeFingerprint("http://127.0.0.1:5000", "configured"));
+    expect(connectionScopeFingerprint("https://oa.example/TenantA", "configured"))
+      .not.toBe(connectionScopeFingerprint("https://oa.example/tenanta", "configured"));
   });
 
   it("distinguishes same-id native accounts by source and broker", () => {

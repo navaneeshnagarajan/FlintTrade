@@ -42,13 +42,17 @@ import type {
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
-import { findBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
+import { useBrokerStore } from "@/stores/brokerStore";
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import {
+  requireCurrentBrokerCapabilityScope,
+  requireCurrentMarketDataScope,
   resolveAccountAuthorityIdentity,
+  resolveNativeDataAccount,
   type AccountAuthorityIdentity,
 } from "@/hooks/useDataScope";
+export { MarketDataAuthorityChangedError } from "@/hooks/useDataScope";
 import {
   assertNativeWriteTargetReadyOrThrow,
   pickNativeBrokerOrderTarget,
@@ -170,6 +174,27 @@ function isExploreMode(): boolean {
   return useModeStore.getState().mode === "explore";
 }
 
+async function awaitMarketDataAuthority<T>(
+  operation: () => Promise<T>,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+): Promise<T> {
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
+  try {
+    const value = await operation();
+    signal?.throwIfAborted();
+    requireCurrentMarketDataScope(expectedDataScope);
+    return value;
+  } catch (error) {
+    // A transport failure from authority A must not be downgraded to an
+    // ordinary fallback after the UI has already retired A for authority B.
+    signal?.throwIfAborted();
+    requireCurrentMarketDataScope(expectedDataScope);
+    throw error;
+  }
+}
+
 type NativeReadAccountCandidate = Awaited<ReturnType<typeof listLiveNativeReadAccounts>>[number];
 
 function pickNativeReadAccount(accounts: Awaited<ReturnType<typeof listLiveNativeReadAccounts>>) {
@@ -177,14 +202,33 @@ function pickNativeReadAccount(accounts: Awaited<ReturnType<typeof listLiveNativ
   return selectNativeReadAccount(accounts, brokerAccounts, activeAccountId);
 }
 
-async function primaryNativeReadAccountFor(kind: NativeReadKind): Promise<NativeReadAccountCandidate | undefined> {
+async function primaryNativeReadAccountFor(
+  kind: NativeReadKind,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+): Promise<NativeReadAccountCandidate | undefined> {
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   if (getApiKey().trim().length > 0 || isExploreMode()) return undefined;
   // Account-scoped reads expose the REAL broker account and must be Live-only.
   // Market-data kinds stay readable in every mode.
   if (NATIVE_ACCOUNT_SCOPED_KINDS.has(kind) && useModeStore.getState().mode !== "live") {
     return undefined;
   }
-  return pickNativeReadAccount(await listLiveNativeReadAccounts());
+  const accounts = await awaitMarketDataAuthority(
+    () => listLiveNativeReadAccounts(signal),
+    signal,
+    expectedDataScope,
+  );
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
+  // Mode can change while discovery is in flight. Revalidate before the
+  // caller starts the account-specific broker request on this authority.
+  if (getApiKey().trim().length > 0 || isExploreMode()) return undefined;
+  if (NATIVE_ACCOUNT_SCOPED_KINDS.has(kind) && useModeStore.getState().mode !== "live") {
+    return undefined;
+  }
+  return pickNativeReadAccount(accounts);
 }
 
 function normaliseOrderBody(body: object): Record<string, unknown> {
@@ -1249,9 +1293,15 @@ async function getNativeSyntheticFuture(
   symbol: string,
   exchange: string,
   expiry_date?: string,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
 ): Promise<SyntheticFutureData | undefined> {
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   if (getApiKey().trim().length > 0 || isExploreMode()) return undefined;
-  const chain = await getOptionChain(symbol, exchange, expiry_date);
+  const chain = await getOptionChain(symbol, exchange, expiry_date, signal, expectedDataScope);
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   return syntheticFutureFromOptionChain(chain, symbol, expiry_date);
 }
 
@@ -1352,24 +1402,47 @@ function intervalsFromCapability(value: BackendBrokerCapabilitiesData): string[]
 
 function nativeCapabilityBrokerFromStore(): string | undefined {
   const { accounts, activeAccountId } = useBrokerStore.getState();
-  const active = findBrokerAccountMatch(accounts, activeAccountId);
-  const selected = active ?? accounts.find((account) => account.is_primary) ?? accounts[0];
-  return selected?.source === "native" ? selected.broker : undefined;
+  return resolveNativeDataAccount(accounts, activeAccountId)?.broker;
 }
 
-async function nativeCapabilityBroker(): Promise<string | undefined> {
+async function nativeCapabilityBroker(
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+): Promise<string | undefined> {
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   const broker = nativeCapabilityBrokerFromStore();
   if (broker) return broker;
-  const account = pickNativeReadAccount(await listLiveNativeReadAccounts());
+  const accounts = await awaitMarketDataAuthority(
+    () => listLiveNativeReadAccounts(signal),
+    signal,
+    expectedDataScope,
+  );
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
+  const account = pickNativeReadAccount(accounts);
   return account?.adapter_id;
 }
 
-async function getNativeIntervals(): Promise<string[] | undefined> {
+async function getNativeIntervals(
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+): Promise<string[] | undefined> {
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   if (getApiKey().trim().length > 0 || isExploreMode()) return undefined;
-  const broker = await nativeCapabilityBroker();
-  if (!broker) return undefined;
+  const broker = await nativeCapabilityBroker(signal, expectedDataScope);
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
+  if (!broker || getApiKey().trim().length > 0 || isExploreMode()) return undefined;
   const endpoint = `broker/capabilities?broker=${encodeURIComponent(broker)}`;
-  const intervals = intervalsFromCapability(await getFtApi<BackendBrokerCapabilitiesData>(endpoint));
+  const intervals = intervalsFromCapability(await awaitMarketDataAuthority(
+    () => getFtApi<BackendBrokerCapabilitiesData>(endpoint, signal),
+    signal,
+    expectedDataScope,
+  ));
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   return intervals.length > 0 ? intervals : undefined;
 }
 
@@ -1392,17 +1465,40 @@ function normaliseNativeRead(endpoint: string, value: unknown): unknown {
   return value;
 }
 
-async function readPrimaryNative<T>(endpoint: string, extra: object = {}): Promise<T | undefined> {
+async function readPrimaryNative<T>(
+  endpoint: string,
+  extra: object = {},
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+): Promise<T | undefined> {
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   const kind = NATIVE_READ_ENDPOINTS[endpoint];
   if (!kind) return undefined;
-  const account = await primaryNativeReadAccountFor(kind);
-  if (!account) return undefined;
-  const value = await readNativeAccount<unknown>(
-    account.adapter_id,
-    account.account_id,
-    kind,
-    buildNativeReadParams(endpoint, extra),
+  const account = await awaitMarketDataAuthority(
+    () => primaryNativeReadAccountFor(kind, signal, expectedDataScope),
+    signal,
+    expectedDataScope,
   );
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
+  if (!account || getApiKey().trim().length > 0 || isExploreMode()) return undefined;
+  if (NATIVE_ACCOUNT_SCOPED_KINDS.has(kind) && useModeStore.getState().mode !== "live") {
+    return undefined;
+  }
+  const value = await awaitMarketDataAuthority(
+    () => readNativeAccount<unknown>(
+      account.adapter_id,
+      account.account_id,
+      kind,
+      buildNativeReadParams(endpoint, extra),
+      signal,
+    ),
+    signal,
+    expectedDataScope,
+  );
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   return normaliseNativeRead(endpoint, value) as T;
 }
 
@@ -1865,20 +1961,24 @@ function getExploreGetFallback<T>(endpoint: string): T | undefined {
     case "intervals":
       return ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"] as T;
     case "../broker/capabilities":
-      return {
-        broker_name: "Explore",
-        broker_type: "multi",
-        supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
-        features: {
-          market_protection: false,
-          leverage: false,
-          bracket_orders: false,
-          cover_orders: false,
-        },
-      } as T;
+      return getExploreBrokerCapabilities() as T;
     default:
       return undefined;
   }
+}
+
+function getExploreBrokerCapabilities(): BrokerCapabilities {
+  return {
+    broker_name: "Explore",
+    broker_type: "multi",
+    supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
+    features: {
+      market_protection: false,
+      leverage: false,
+      bracket_orders: false,
+      cover_orders: false,
+    },
+  };
 }
 
 /**
@@ -2117,7 +2217,14 @@ async function postOrderMutation<T>(
   return postOrder<T>(ftEndpoint, body, authority);
 }
 
-async function post<T>(endpoint: string, extra: object = {}): Promise<T> {
+async function post<T>(
+  endpoint: string,
+  extra: object = {},
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+): Promise<T> {
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   // Enforce rate limits before making the request
   if (SMART_ORDER_ENDPOINTS.has(endpoint)) {
     if (!smartOrderLimiter.tryConsume()) {
@@ -2142,31 +2249,55 @@ async function post<T>(endpoint: string, extra: object = {}): Promise<T> {
     }
   }
 
-  const practiceRead = await readPracticeAccountData<T>(endpoint, extra);
+  const practiceRead = await awaitMarketDataAuthority(
+    () => readPracticeAccountData<T>(endpoint, extra),
+    signal,
+    expectedDataScope,
+  );
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   if (practiceRead !== undefined) return practiceRead;
 
-  const nativeRead = await readPrimaryNative<T>(endpoint, extra);
+  const nativeRead = await awaitMarketDataAuthority(
+    () => readPrimaryNative<T>(endpoint, extra, signal, expectedDataScope),
+    signal,
+    expectedDataScope,
+  );
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   if (nativeRead !== undefined) return nativeRead;
 
   if (isExploreMode()) {
+    const fallback = getExplorePostFallback<T>(endpoint, extra);
+    if (fallback !== undefined) return fallback;
     requireApiKey(endpoint);
   } else {
     requireApiKey(endpoint);
   }
 
   let resp: Response;
+  requireCurrentMarketDataScope(expectedDataScope);
   try {
     resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ apikey: getApiKey(), ...extra }),
+      signal,
     });
   } catch {
+    signal?.throwIfAborted();
+    requireCurrentMarketDataScope(expectedDataScope);
     throw new Error("Connection failed. Check OpenAlgo is running.");
   }
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
 
   if (!resp.ok) {
-    const body = await resp.json().catch(() => null) as { message?: string; error?: string } | null;
+    const body = await awaitMarketDataAuthority(
+      () => resp.json().catch(() => null) as Promise<{ message?: string; error?: string } | null>,
+      signal,
+      expectedDataScope,
+    );
     const serverMsg = body?.message ?? body?.error ?? null;
     if (resp.status === 401) {
       throw new Error("API key invalid. Check Settings → Connection.");
@@ -2180,7 +2311,7 @@ async function post<T>(endpoint: string, extra: object = {}): Promise<T> {
     throw new Error(serverMsg ?? `Server error (${resp.status})`);
   }
 
-  const json = await resp.json();
+  const json = await awaitMarketDataAuthority(() => resp.json(), signal, expectedDataScope);
   if (json.status === "error") throw new Error(json.message || `API ${endpoint} error`);
   const data = json.data ?? json;
   if (endpoint === "optionchain") return normaliseOpenAlgoOptionChain(data) as T;
@@ -2188,7 +2319,13 @@ async function post<T>(endpoint: string, extra: object = {}): Promise<T> {
   return data as T;
 }
 
-async function get<T>(endpoint: string): Promise<T> {
+async function get<T>(
+  endpoint: string,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+): Promise<T> {
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   if (!generalLimiter.tryConsume()) {
     throw new Error(`Rate limit exceeded for GET ${endpoint}`);
   }
@@ -2202,19 +2339,31 @@ async function get<T>(endpoint: string): Promise<T> {
   }
 
   let resp: Response;
+  requireCurrentMarketDataScope(expectedDataScope);
   try {
-    resp = await fetch(`${getBase()}/api/v1/${endpoint}`);
+    resp = await fetch(
+      `${getBase()}/api/v1/${endpoint}`,
+      signal ? { signal } : undefined,
+    );
   } catch {
+    signal?.throwIfAborted();
+    requireCurrentMarketDataScope(expectedDataScope);
     throw new Error("Connection failed. Check OpenAlgo is running.");
   }
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
   if (!resp.ok) {
-    const body = await resp.json().catch(() => null) as { message?: string; error?: string } | null;
+    const body = await awaitMarketDataAuthority(
+      () => resp.json().catch(() => null) as Promise<{ message?: string; error?: string } | null>,
+      signal,
+      expectedDataScope,
+    );
     const serverMsg = body?.message ?? body?.error ?? null;
     if (resp.status === 401) throw new Error("API key invalid. Check Settings → Connection.");
     if (resp.status === 500) throw new Error(serverMsg ?? "OpenAlgo server error. Try again in a few seconds.");
     throw new Error(serverMsg ?? `Server error (${resp.status})`);
   }
-  const json = await resp.json();
+  const json = await awaitMarketDataAuthority(() => resp.json(), signal, expectedDataScope);
   if (json.status === "error") throw new Error(json.message || `API ${endpoint} error`);
   return (json.data ?? json) as T;
 }
@@ -2489,8 +2638,12 @@ export interface MultiQuoteResult {
   data: Quote;
 }
 
-export const getQuotes = (symbol: string, exchange = "NSE") =>
-  post<Quote>("quotes", { symbol, exchange });
+export const getQuotes = (
+  symbol: string,
+  exchange = "NSE",
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+) => post<Quote>("quotes", { symbol, exchange }, signal, expectedDataScope);
 
 /**
  * Canonical row shape the core reads facade guarantees for ltp/quote_details —
@@ -2583,23 +2736,45 @@ export const getHistory = (
   interval: string,
   start_date: string,
   end_date: string,
-) => post<OHLCVBar[]>("history", { symbol, exchange, interval, start_date, end_date });
-export const getOptionChain = (symbol: string, exchange = "NFO", expiry?: string) =>
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+) => post<OHLCVBar[]>(
+  "history",
+  { symbol, exchange, interval, start_date, end_date },
+  signal,
+  expectedDataScope,
+);
+export const getOptionChain = (
+  symbol: string,
+  exchange = "NFO",
+  expiry?: string,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+) =>
   post<OptionChainData>("optionchain", {
     underlying: symbol, // OpenAlgo v2 uses 'underlying' not 'symbol'
     exchange,
     ...(expiry ? { expiry } : {}),
     // OpenAlgo expiry format: "24MAR26" (no dashes). Expiry API returns "24-MAR-26".
     ...(expiry ? { expiry_date: expiry.replace(/-/g, "") } : {}),
-  });
+  }, signal, expectedDataScope);
 export const getExpiry = (
   symbol: string,
   exchange = "NFO",
   instrumenttype: "options" | "futures" = "options",
-) => post<{ expiry: string[] }>("expiry", { symbol, exchange, instrumenttype });
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+) => post<{ expiry: string[] }>(
+  "expiry",
+  { symbol, exchange, instrumenttype },
+  signal,
+  expectedDataScope,
+);
 export function searchSymbol(
   query: string,
   exchange?: string,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
 ): Promise<Array<{ symbol: string; exchange: string }>> {
   // Sanitize: strip characters that are not word chars, spaces, hyphens, or dots
   const sanitized = query.replace(/[^\w\s\-.]/g, "").slice(0, 50).trim();
@@ -2608,9 +2783,16 @@ export function searchSymbol(
   }
   const body: Record<string, string> = { query: sanitized };
   if (exchange) body.exchange = exchange;
-  return post<Array<{ symbol: string; exchange: string }>>("search", body);
+  return post<Array<{ symbol: string; exchange: string }>>(
+    "search",
+    body,
+    signal,
+    expectedDataScope,
+  );
 }
-export const getIntervals = async () => (await getNativeIntervals()) ?? get<string[]>("intervals");
+export const getIntervals = async (signal?: AbortSignal, expectedDataScope?: string) =>
+  (await getNativeIntervals(signal, expectedDataScope))
+    ?? get<string[]>("intervals", signal, expectedDataScope);
 export async function getMultiOptionGreeks(
   symbols: Array<{ symbol: string; exchange: string }>,
 ): Promise<Greeks[]> {
@@ -2658,22 +2840,61 @@ export const getOptionSymbol = (
   expiry_date: string,
   option_type: string,
   offset: string,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
 ) => {
-  if (getApiKey().trim().length === 0) {
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
+  if (isExploreMode() || getApiKey().trim().length === 0) {
     return Promise.resolve(compactOptionSymbolResult(underlying, exchange, expiry_date, option_type, offset));
   }
-  return post<{ symbol: string; exchange: string }>("optionsymbol", { underlying, exchange, expiry_date, option_type, offset });
+  return post<{ symbol: string; exchange: string }>(
+    "optionsymbol",
+    { underlying, exchange, expiry_date, option_type, offset },
+    signal,
+    expectedDataScope,
+  );
 };
-export const getSymbol = (symbol: string, exchange: string) =>
-  post<{ symbol: string; name: string; exchange: string; instrumenttype: string; lotsize: number; tick_size: number }>("symbol", { symbol, exchange });
-export const getSyntheticFuture = async (symbol: string, exchange: string, expiry_date?: string) =>
-  (await getNativeSyntheticFuture(symbol, exchange, expiry_date))
-    ?? post<SyntheticFutureData>("syntheticfuture", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) });
+export const getSymbol = (
+  symbol: string,
+  exchange: string,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+) =>
+  post<{ symbol: string; name: string; exchange: string; instrumenttype: string; lotsize: number; tick_size: number }>(
+    "symbol",
+    { symbol, exchange },
+    signal,
+    expectedDataScope,
+  );
+export const getSyntheticFuture = async (
+  symbol: string,
+  exchange: string,
+  expiry_date?: string,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+) =>
+  (await getNativeSyntheticFuture(symbol, exchange, expiry_date, signal, expectedDataScope))
+    ?? post<SyntheticFutureData>(
+      "syntheticfuture",
+      { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) },
+      signal,
+      expectedDataScope,
+    );
 export const getTicker = (symbol: string, exchange: string) =>
   post<Quote>("ticker", { symbol, exchange });
-export const getInstruments = async (): Promise<InstrumentRow[]> => {
-  if (getApiKey().trim().length === 0) return [];
-  return normaliseInstrumentList(await get<InstrumentRow[] | { data?: InstrumentRow[]; instruments?: InstrumentRow[] }>("instruments"));
+export const getInstruments = async (
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+): Promise<InstrumentRow[]> => {
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
+  if (isExploreMode() || getApiKey().trim().length === 0) return [];
+  return normaliseInstrumentList(await get<InstrumentRow[] | { data?: InstrumentRow[]; instruments?: InstrumentRow[] }>(
+    "instruments",
+    signal,
+    expectedDataScope,
+  ));
 };
 export const getGex = (symbol: string, exchange: string, expiry_date?: string, signal?: AbortSignal) =>
   postFtApi<BackendGexData | Array<BackendGexEntry | GexEntry>>("gex", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
@@ -2681,9 +2902,29 @@ export const getGex = (symbol: string, exchange: string, expiry_date?: string, s
 export const getIVSmile = (symbol: string, exchange: string, expiry_date?: string, signal?: AbortSignal) =>
   postFtApi<BackendIVSmileData | IVSmileEntry[]>("ivsmile", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
     .then(normaliseIVSmileEntries);
-export const getMaxPain = (symbol: string, exchange: string, expiry_date?: string, signal?: AbortSignal) =>
-  postFtApi<BackendMaxPainData>("maxpain", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
-    .then(normaliseMaxPainData);
+export const getMaxPain = async (
+  symbol: string,
+  exchange: string,
+  expiry_date?: string,
+  signal?: AbortSignal,
+  expectedDataScope?: string,
+) => {
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
+  if (isExploreMode()) throw new Error("Max Pain is not available in Explore mode.");
+  const value = await awaitMarketDataAuthority(
+    () => postFtApi<BackendMaxPainData>(
+      "maxpain",
+      { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) },
+      signal,
+    ),
+    signal,
+    expectedDataScope,
+  );
+  signal?.throwIfAborted();
+  requireCurrentMarketDataScope(expectedDataScope);
+  return normaliseMaxPainData(value);
+};
 export const getOIProfile = (symbol: string, exchange: string, expiry_date?: string, signal?: AbortSignal) =>
   postFtApi<BackendOIProfileData | OIProfileEntry[]>("oiprofile", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
     .then(normaliseOIProfileEntries);
@@ -2788,20 +3029,45 @@ export const sendTelegram = (message: string, options: TelegramSendOptions = {})
 // OpenAlgo-key workspaces keep using OpenAlgo's broker metadata. Native-only
 // workspaces use FlintTrade's own unified capability registry, normalised back
 // into the compact terminal contract consumed by Order Pad and Settings.
-export const getBrokerCapabilities = async () => {
+export const getBrokerCapabilities = async (
+  signal?: AbortSignal,
+  expectedCapabilityScope?: string,
+) => {
+  signal?.throwIfAborted();
+  requireCurrentBrokerCapabilityScope(expectedCapabilityScope);
   if (isExploreMode()) {
     // Explore capabilities are local demo metadata. Never let a stale bridge
     // key or native-account snapshot turn this read into a protected request.
-    return get<BrokerCapabilities>("../broker/capabilities");
+    return getExploreBrokerCapabilities();
   }
   if (getApiKey().trim().length > 0) {
-    return get<BrokerCapabilities>("../broker/capabilities"); // actual path: /api/broker/capabilities
+    const value = await get<BrokerCapabilities>(
+      "../broker/capabilities",
+      signal,
+    ); // actual path: /api/broker/capabilities
+    signal?.throwIfAborted();
+    requireCurrentBrokerCapabilityScope(expectedCapabilityScope);
+    return value;
   }
-  const broker = await nativeCapabilityBroker();
+  const broker = await nativeCapabilityBroker(signal);
+  signal?.throwIfAborted();
+  requireCurrentBrokerCapabilityScope(expectedCapabilityScope);
+  // The authority can retire while native account discovery is in flight.
+  // Never issue the follow-up protected capability request after Explore wins.
+  if (isExploreMode()) return getExploreBrokerCapabilities();
+  if (getApiKey().trim().length > 0) {
+    const value = await get<BrokerCapabilities>("../broker/capabilities", signal);
+    signal?.throwIfAborted();
+    requireCurrentBrokerCapabilityScope(expectedCapabilityScope);
+    return value;
+  }
   const endpoint = broker
     ? `broker/capabilities?broker=${encodeURIComponent(broker)}`
     : "broker/capabilities";
-  return normaliseBrokerCapabilities(await getFtApi<BackendBrokerCapabilitiesData>(endpoint));
+  const value = await getFtApi<BackendBrokerCapabilitiesData>(endpoint, signal);
+  signal?.throwIfAborted();
+  requireCurrentBrokerCapabilityScope(expectedCapabilityScope);
+  return normaliseBrokerCapabilities(value);
 };
 export const getLeverageSettings = async (): Promise<LeverageSettings> => {
   const { status: _status, ...settings } = await getFtApi<LeverageSettings & { status?: string }>("leverage/margin/current");

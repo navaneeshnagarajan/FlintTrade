@@ -12,12 +12,14 @@ const apiMocks = vi.hoisted(() => ({
   getExpiry: vi.fn(),
   getOptionChain: vi.fn(),
   getOptionSymbol: vi.fn(),
+  MarketDataAuthorityChangedError: class MarketDataAuthorityChangedError extends Error {},
 }));
 
 vi.mock("@/services/api", () => ({
   getExpiry: apiMocks.getExpiry,
   getOptionChain: apiMocks.getOptionChain,
   getOptionSymbol: apiMocks.getOptionSymbol,
+  MarketDataAuthorityChangedError: apiMocks.MarketDataAuthorityChangedError,
 }));
 
 import { resolveOptionLeg } from "@/lib/optionLegSymbols";
@@ -39,7 +41,9 @@ describe("resolveOptionLeg", () => {
       strike: "24800",
     });
 
-    expect(apiMocks.getOptionSymbol).toHaveBeenCalledWith("NIFTY", "NFO", "25-JUN-99", "CE", "24800");
+    expect(apiMocks.getOptionSymbol).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "25-JUN-99", "CE", "24800", undefined, undefined,
+    );
     expect(apiMocks.getExpiry).not.toHaveBeenCalled();
     expect(apiMocks.getOptionChain).not.toHaveBeenCalled();
     expect(leg).toEqual({
@@ -58,8 +62,10 @@ describe("resolveOptionLeg", () => {
 
     const leg = await resolveOptionLeg({ underlying: "NIFTY", leg: "PE", strike: "24800" });
 
-    expect(apiMocks.getExpiry).toHaveBeenCalledWith("NIFTY", "NFO", "options");
-    expect(apiMocks.getOptionSymbol).toHaveBeenCalledWith("NIFTY", "NFO", "25-JUN-99", "PE", "24800");
+    expect(apiMocks.getExpiry).toHaveBeenCalledWith("NIFTY", "NFO", "options", undefined, undefined);
+    expect(apiMocks.getOptionSymbol).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "25-JUN-99", "PE", "24800", undefined, undefined,
+    );
     expect(leg.expiry).toBe("25-JUN-99");
   });
 
@@ -69,8 +75,12 @@ describe("resolveOptionLeg", () => {
 
     const leg = await resolveOptionLeg({ underlying: "NIFTY", leg: "CE", expiry: "25-JUN-99" });
 
-    expect(apiMocks.getOptionChain).toHaveBeenCalledWith("NIFTY", "NFO", "25-JUN-99");
-    expect(apiMocks.getOptionSymbol).toHaveBeenCalledWith("NIFTY", "NFO", "25-JUN-99", "CE", "24850");
+    expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "25-JUN-99", undefined, undefined,
+    );
+    expect(apiMocks.getOptionSymbol).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "25-JUN-99", "CE", "24850", undefined, undefined,
+    );
     expect(leg.strike).toBe("24850");
   });
 
@@ -85,7 +95,9 @@ describe("resolveOptionLeg", () => {
       strike: "0",
     });
 
-    expect(apiMocks.getOptionChain).toHaveBeenCalledWith("BANKNIFTY", "NFO", "25-JUN-99");
+    expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
+      "BANKNIFTY", "NFO", "25-JUN-99", undefined, undefined,
+    );
     expect(leg.strike).toBe("51200");
   });
 

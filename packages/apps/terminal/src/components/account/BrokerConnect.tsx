@@ -43,6 +43,8 @@ import {
 } from "@/stores/authStore";
 import type { BrokerAccount } from "@/types/broker";
 import {
+  listBrokerAccounts,
+  listNativeBrokerAccounts,
   reconnectBrokerAccount,
   removeBrokerAccount,
   setPrimaryBrokerAccount,
@@ -61,6 +63,21 @@ import { isDesktopShell, openExternalUrl } from "@/lib/desktopShell";
 
 const BROKERS_KEY = ["native", "brokers"] as const;
 const MCP_KEY = ["broker", "mcp"] as const;
+const OAUTH_ACCOUNT_REFRESH_INTERVAL_MS = 4_000;
+const OAUTH_ACCOUNT_REFRESH_WINDOW_MS = 60_000;
+
+type OAuthAccountTarget = {
+  source: "native";
+  broker: string;
+  account_id: string;
+};
+
+type PendingOAuthAccount = {
+  target: OAuthAccountTarget;
+  sessionFence: ReturnType<typeof captureAuthSessionFence>;
+  expiresAt: number;
+  expiryTimer: ReturnType<typeof setTimeout>;
+};
 
 function expiryLabel(expiresAt?: number | null): string {
   if (!expiresAt) return "";
@@ -184,9 +201,16 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   const qc = useQueryClient();
   const mountedRef = useRef(false);
   const delayedRefreshesRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const accountRefreshControllersRef = useRef<Set<AbortController>>(new Set());
+  const accountRefreshGenerationRef = useRef(0);
+  const activeManualRefreshGenerationRef = useRef<number | null>(null);
+  const pendingOAuthAccountsRef = useRef<Map<string, PendingOAuthAccount>>(new Map());
+  const oauthRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const oauthRefreshControllerRef = useRef<AbortController | null>(null);
+  const oauthRefreshRequestIdRef = useRef(0);
   const brokersQuery = useQuery({ queryKey: BROKERS_KEY, queryFn: listNativeBrokers });
   const mcpQuery = useQuery({ queryKey: MCP_KEY, queryFn: listBrokerMcpCatalogue });
-  const accountsQuery = useBrokerAccounts(pollAccounts);
+  useBrokerAccounts(pollAccounts);
   const brokerAccounts = useBrokerStore((s) => s.accounts);
 
   const brokers = brokersQuery.data ?? [];
@@ -215,12 +239,31 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   useEffect(() => {
     mountedRef.current = true;
     const delayedRefreshes = delayedRefreshesRef.current;
+    const accountRefreshControllers = accountRefreshControllersRef.current;
+    const pendingOAuthAccounts = pendingOAuthAccountsRef.current;
     return () => {
       mountedRef.current = false;
+      accountRefreshGenerationRef.current += 1;
       for (const timer of delayedRefreshes) clearTimeout(timer);
       delayedRefreshes.clear();
+      for (const controller of accountRefreshControllers) controller.abort();
+      accountRefreshControllers.clear();
+      oauthRefreshControllerRef.current?.abort();
+      pendingOAuthAccounts.clear();
+      oauthRefreshTimerRef.current = null;
+      oauthRefreshControllerRef.current = null;
+      if (activeManualRefreshGenerationRef.current !== null) {
+        // A Settings-owned fetchQuery can otherwise populate the canonical
+        // cache after this surface retires, letting AppLayout publish its stale
+        // result back into the cleared account store.
+        void qc.cancelQueries(
+          { queryKey: BROKER_ACCOUNTS_QUERY_KEY, exact: true },
+          { revert: false },
+        );
+        activeManualRefreshGenerationRef.current = null;
+      }
     };
-  }, []);
+  }, [qc]);
 
   const broker = brokers.find((b) => b.adapter_id === selectedBroker);
   const method: NativeAuthMethod | undefined = broker?.auth_methods.find((m) => m.id === selectedMethodId);
@@ -239,35 +282,208 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
     setNotice("");
   }
 
-  function invalidateAccountQueries(delay = 0) {
+  function scheduleTrackedRefresh(refresh: () => void, delay: number) {
+    const timer = setTimeout(() => {
+      delayedRefreshesRef.current.delete(timer);
+      refresh();
+    }, delay);
+    delayedRefreshesRef.current.add(timer);
+    return timer;
+  }
+
+  function retireAccountRefreshSequence(): number {
+    accountRefreshGenerationRef.current += 1;
+    for (const controller of accountRefreshControllersRef.current) controller.abort();
+    accountRefreshControllersRef.current.clear();
+    return accountRefreshGenerationRef.current;
+  }
+
+  function accountRefreshIsCurrent(sessionFence: ReturnType<typeof captureAuthSessionFence>, generation: number) {
+    return mountedRef.current
+      && generation === accountRefreshGenerationRef.current
+      && isAuthSessionFenceCurrent(sessionFence);
+  }
+
+  function invalidateAccountQueries() {
     const sessionFence = captureAuthSessionFence();
-    const refresh = () => {
-      if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return;
+    // Retire stale results but preserve a pending OAuth handshake's timers: an
+    // unrelated set-primary/reconnect/remove action must not silently stop the
+    // user-triggered approval window for another account.
+    const generation = retireAccountRefreshSequence();
+    activeManualRefreshGenerationRef.current = generation;
+    // Any AppLayout poll that began before this user mutation owns a stale
+    // pre-mutation snapshot. Cancel it before starting the replacement fetch;
+    // `revert:false` preserves optimistic removals already written to cache.
+    void qc.cancelQueries(
+      { queryKey: BROKER_ACCOUNTS_QUERY_KEY, exact: true },
+      { revert: false },
+    ).then(async () => {
+      if (!accountRefreshIsCurrent(sessionFence, generation)) return;
       if (pollAccounts) {
-        void qc.invalidateQueries({ queryKey: BROKER_ACCOUNTS_QUERY_KEY });
+        await qc.invalidateQueries({ queryKey: BROKER_ACCOUNTS_QUERY_KEY, exact: true });
         return;
       }
-      // Settings delegates continuous polling to AppLayout. After an explicit
-      // user mutation, perform exactly one refresh and synchronise its result
-      // so Explore does not need a background protected-account observer.
-      void accountsQuery.refetch().then((result) => {
-        if (
-          result.data
-          && mountedRef.current
-          && isAuthSessionFenceCurrent(sessionFence)
-        ) {
-          useBrokerStore.getState().setAccounts(result.data);
+      try {
+        // Coordinate the one-shot Settings refresh through the canonical query
+        // key with retries disabled. AppLayout can observe this same fetch but
+        // cannot race it with an independent stale request.
+        const accounts = await qc.fetchQuery({
+          queryKey: BROKER_ACCOUNTS_QUERY_KEY,
+          queryFn: ({ signal }) => listBrokerAccounts(useBrokerStore.getState().accounts, signal),
+          retry: false,
+          staleTime: 0,
+        });
+        if (accountRefreshIsCurrent(sessionFence, generation)) {
+          useBrokerStore.getState().setAccounts(accounts);
         }
+      } catch {
+        // A failed explicit refresh leaves the optimistic/current snapshot in place.
+      }
+    }).finally(() => {
+      if (activeManualRefreshGenerationRef.current === generation) {
+        activeManualRefreshGenerationRef.current = null;
+      }
+    });
+  }
+
+  function clearOAuthRefreshTimer() {
+    const timer = oauthRefreshTimerRef.current;
+    if (timer === null) return;
+    clearTimeout(timer);
+    delayedRefreshesRef.current.delete(timer);
+    oauthRefreshTimerRef.current = null;
+  }
+
+  function stopPendingOAuthAccount(key: string) {
+    const pending = pendingOAuthAccountsRef.current.get(key);
+    if (!pending) return;
+    clearTimeout(pending.expiryTimer);
+    delayedRefreshesRef.current.delete(pending.expiryTimer);
+    pendingOAuthAccountsRef.current.delete(key);
+    if (pendingOAuthAccountsRef.current.size === 0) {
+      clearOAuthRefreshTimer();
+      oauthRefreshControllerRef.current?.abort();
+    }
+  }
+
+  function prunePendingOAuthAccounts() {
+    const now = Date.now();
+    for (const [key, pending] of pendingOAuthAccountsRef.current) {
+      if (
+        !mountedRef.current
+        || !isAuthSessionFenceCurrent(pending.sessionFence)
+        || now >= pending.expiresAt
+      ) {
+        stopPendingOAuthAccount(key);
+      }
+    }
+  }
+
+  function scheduleOAuthAccountRefresh(delay: number) {
+    if (oauthRefreshTimerRef.current !== null || pendingOAuthAccountsRef.current.size === 0) return;
+    oauthRefreshTimerRef.current = scheduleTrackedRefresh(() => {
+      oauthRefreshTimerRef.current = null;
+      refreshPendingOAuthAccounts();
+    }, delay);
+  }
+
+  function refreshPendingOAuthAccounts() {
+    prunePendingOAuthAccounts();
+    if (pendingOAuthAccountsRef.current.size === 0) return;
+    if (activeManualRefreshGenerationRef.current !== null) {
+      scheduleOAuthAccountRefresh(OAUTH_ACCOUNT_REFRESH_INTERVAL_MS);
+      return;
+    }
+
+    const generation = accountRefreshGenerationRef.current;
+    const requestSessionFence = captureAuthSessionFence();
+    const requestId = oauthRefreshRequestIdRef.current + 1;
+    oauthRefreshRequestIdRef.current = requestId;
+    const refreshController = new AbortController();
+    oauthRefreshControllerRef.current = refreshController;
+    accountRefreshControllersRef.current.add(refreshController);
+
+    void listNativeBrokerAccounts(refreshController.signal).then(async (nativeAccounts) => {
+      if (
+        refreshController.signal.aborted
+        || requestId !== oauthRefreshRequestIdRef.current
+        || !mountedRef.current
+        || generation !== accountRefreshGenerationRef.current
+        || !isAuthSessionFenceCurrent(requestSessionFence)
+      ) return;
+      prunePendingOAuthAccounts();
+      if (pendingOAuthAccountsRef.current.size === 0) return;
+      // A shared AppLayout poll may have started while OAuth approval was in
+      // flight. Cancel it before publishing the fresh native-source result.
+      await qc.cancelQueries(
+        { queryKey: BROKER_ACCOUNTS_QUERY_KEY, exact: true },
+        { revert: false },
+      );
+      if (
+        refreshController.signal.aborted
+        || requestId !== oauthRefreshRequestIdRef.current
+        || !mountedRef.current
+        || generation !== accountRefreshGenerationRef.current
+        || !isAuthSessionFenceCurrent(requestSessionFence)
+      ) return;
+      prunePendingOAuthAccounts();
+      if (pendingOAuthAccountsRef.current.size === 0) return;
+
+      // The canonical cache may be one React effect ahead of Zustand. Preserve
+      // its freshest gateway slice while replacing native rows with this
+      // fresh-source response, then publish that exact combined snapshot.
+      let accounts: BrokerAccount[] = [];
+      qc.setQueryData<BrokerAccount[]>(BROKER_ACCOUNTS_QUERY_KEY, (cached) => {
+        const previous = cached ?? useBrokerStore.getState().accounts;
+        accounts = [
+          ...previous.filter((account) => account.source !== "native"),
+          ...nativeAccounts,
+        ];
+        return accounts;
       });
-    };
-    if (delay > 0) {
-      const timer = setTimeout(() => {
-        delayedRefreshesRef.current.delete(timer);
-        refresh();
-      }, delay);
-      delayedRefreshesRef.current.add(timer);
-    } else {
-      refresh();
+      useBrokerStore.getState().setAccounts(accounts);
+
+      for (const [key, pending] of pendingOAuthAccountsRef.current) {
+        const connected = nativeAccounts.some((account) => (
+          brokerAccountKey(account) === brokerAccountKey(pending.target)
+          && account.status === "connected"
+        ));
+        if (connected) stopPendingOAuthAccount(key);
+      }
+    }).catch(() => undefined).finally(() => {
+      accountRefreshControllersRef.current.delete(refreshController);
+      if (oauthRefreshControllerRef.current === refreshController) {
+        oauthRefreshControllerRef.current = null;
+      }
+      prunePendingOAuthAccounts();
+      scheduleOAuthAccountRefresh(OAUTH_ACCOUNT_REFRESH_INTERVAL_MS);
+    });
+  }
+
+  function refreshUntilOAuthAccountAppears(target: OAuthAccountTarget) {
+    if (pollAccounts) {
+      // Setup already owns the continuous observer; wake it immediately.
+      invalidateAccountQueries();
+      return;
+    }
+
+    const sessionFence = captureAuthSessionFence();
+    const key = brokerAccountKey(target);
+    stopPendingOAuthAccount(key);
+    const expiresAt = Date.now() + OAUTH_ACCOUNT_REFRESH_WINDOW_MS;
+    const expiryTimer = scheduleTrackedRefresh(() => {
+      stopPendingOAuthAccount(key);
+    }, OAUTH_ACCOUNT_REFRESH_WINDOW_MS);
+    pendingOAuthAccountsRef.current.set(key, {
+      target,
+      sessionFence,
+      expiresAt,
+      expiryTimer,
+    });
+    // Include every pending target in the next fresh-source snapshot. Starting
+    // B must not retire A's still-open approval window.
+    if (!oauthRefreshControllerRef.current && oauthRefreshTimerRef.current === null) {
+      scheduleOAuthAccountRefresh(0);
     }
   }
 
@@ -293,7 +509,8 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   }
 
   const connectMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (sessionFence: ReturnType<typeof captureAuthSessionFence>) => {
+      if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return null;
       if (!broker || !method) throw new Error("Pick a broker and a login method.");
       if (!broker.connectable) throw new Error(`${broker.display_name} native connect is coming soon.`);
       if (!sdkReadyForConnect(broker)) {
@@ -313,12 +530,19 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
           ...(label ? { label } : {}),
         };
         const started = await oauthStartNativeAccount(payload);
+        if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return null;
         // The Electron bridge routes OAuth through the operator's system
         // browser instead of navigating the protected desktop renderer.
         await openExternalUrl(started.auth_url);
+        if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return null;
         const postback = started.postback_uri ?? brokerPostbackUri;
         return {
-          oauth: true,
+          oauth: true as const,
+          target: {
+            source: "native" as const,
+            broker: broker.adapter_id,
+            account_id: accountId.trim(),
+          },
           message: (
             `Approve access in the ${isDesktopShell() ? "browser window" : "new tab"} that just opened. ` +
             `Use redirect ${started.redirect_uri}. ` +
@@ -335,12 +559,22 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
           ...Object.fromEntries(method.fields.map((f) => [f.name, fields[f.name] ?? ""])),
         },
       });
+      if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return null;
       // A failed connect is a non-2xx that already threw the backend message
       // inside connectNativeAccount; a 2xx always carries connected:true.
       if (!result.connected) throw new Error("Login did not establish a session.");
-      return { oauth: false, message: `${broker.display_name} account ${accountId.trim()} connected.` };
+      return {
+        oauth: false as const,
+        target: {
+          source: "native" as const,
+          broker: broker.adapter_id,
+          account_id: accountId.trim(),
+        },
+        message: `${broker.display_name} account ${accountId.trim()} connected.`,
+      };
     },
-    onSuccess: (r) => {
+    onSuccess: (r, sessionFence) => {
+      if (!r || !mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return;
       setError("");
       if (!r.oauth) {
         setFields({});
@@ -348,11 +582,14 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
         setAccountLabel("");
       }
       setNotice(r.message);
-      // OAuth completes out-of-band in the callback tab; refresh accounts shortly after.
-      if (r.oauth) invalidateAccountQueries(4000);
-      invalidateAccountQueries();
+      // OAuth completes out-of-band. Settings has no passive Explore poll, so
+      // keep a bounded, user-triggered handshake alive until this exact account
+      // appears; setup relies on its existing continuous observer.
+      if (r.oauth) refreshUntilOAuthAccountAppears(r.target);
+      else invalidateAccountQueries();
     },
-    onError: (e: unknown) => {
+    onError: (e: unknown, sessionFence) => {
+      if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return;
       setNotice("");
       setError(e instanceof Error ? e.message : "Connection failed.");
     },
@@ -1020,7 +1257,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
             ))}
 
             <Button
-              onClick={() => connectMutation.mutate()}
+              onClick={() => connectMutation.mutate(captureAuthSessionFence())}
               disabled={connectMutation.isPending || !brokerConnectable || !brokerSdkReady}
               className="w-full sm:w-auto"
             >

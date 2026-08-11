@@ -17,7 +17,7 @@ const state = vi.hoisted(() => ({
 }));
 
 const mocks = vi.hoisted(() => ({
-  getBrokerCapabilities: vi.fn(async () => ({
+  getBrokerCapabilities: vi.fn(async (_signal?: AbortSignal, _expectedDataScope?: string) => ({
     broker_name: "test",
     broker_type: "equity" as const,
     supported_exchanges: ["NSE"],
@@ -45,6 +45,8 @@ vi.mock("@/stores/connectionStore", () => ({
 }));
 
 vi.mock("@/stores/brokerStore", () => ({
+  brokerAccountKey: (account: (typeof state.accounts)[number]) =>
+    `${account.source}:${account.broker}:${account.account_id}`,
   findBrokerAccountMatch: (
     accounts: typeof state.accounts,
     selector: string | null,
@@ -60,6 +62,7 @@ vi.mock("@/stores/brokerStore", () => ({
 }));
 
 import { useBrokerCapabilities } from "../useBrokerCapabilities";
+import { connectionScopeFingerprint } from "../useDataScope";
 
 function makeWrapper(queryClient: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -105,5 +108,82 @@ describe("useBrokerCapabilities cache authority", () => {
     state.apiKey = "different-configured-key";
     rerender();
     await waitFor(() => expect(mocks.getBrokerCapabilities).toHaveBeenCalledTimes(5));
+    for (const [signal] of mocks.getBrokerCapabilities.mock.calls) {
+      expect(signal).toBeInstanceOf(AbortSignal);
+    }
+    expect(mocks.getBrokerCapabilities.mock.calls.map(([, scope]) => scope)).toEqual([
+      "explore:mock",
+      "live:native:upstox",
+      "live:native:dhan",
+      `live:openalgo:${connectionScopeFingerprint("http://openalgo-a.test", "configured-openalgo-key")}`,
+      `live:openalgo:${connectionScopeFingerprint("http://openalgo-b.test", "different-configured-key")}`,
+    ]);
+  });
+
+  it("keys the native broker even when a gateway row precedes it", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    state.mode = "live";
+    state.accounts = [
+      { account_id: "GW1", broker: "zerodha", source: "gateway", is_primary: true },
+      { account_id: "D1", broker: "dhan", source: "native", is_primary: true },
+    ];
+    const { rerender } = renderHook(() => useBrokerCapabilities(), {
+      wrapper: makeWrapper(queryClient),
+    });
+    await waitFor(() => expect(mocks.getBrokerCapabilities).toHaveBeenCalledTimes(1));
+
+    state.accounts = [
+      { account_id: "GW1", broker: "zerodha", source: "gateway", is_primary: true },
+      { account_id: "U1", broker: "upstox", source: "native", is_primary: true },
+    ];
+    rerender();
+
+    await waitFor(() => expect(mocks.getBrokerCapabilities).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps an in-flight broker-wide capability read valid across same-broker account changes", async () => {
+    let resolveCapabilities!: (value: {
+      broker_name: string;
+      broker_type: "equity";
+      supported_exchanges: string[];
+      features: {
+        market_protection: boolean;
+        leverage: boolean;
+        bracket_orders: boolean;
+        cover_orders: boolean;
+      };
+    }) => void;
+    mocks.getBrokerCapabilities.mockImplementationOnce((_signal, expectedScope) => {
+      expect(expectedScope).toBe("live:native:upstox");
+      return new Promise((resolve) => { resolveCapabilities = resolve; });
+    });
+    state.mode = "live";
+    state.accounts = [{ account_id: "U1", broker: "upstox", source: "native" }];
+    state.activeAccountId = "native:upstox:U1";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result, rerender } = renderHook(() => useBrokerCapabilities(), {
+      wrapper: makeWrapper(queryClient),
+    });
+    await waitFor(() => expect(mocks.getBrokerCapabilities).toHaveBeenCalledTimes(1));
+
+    state.accounts = [{ account_id: "U2", broker: "upstox", source: "native" }];
+    state.activeAccountId = "native:upstox:U2";
+    rerender();
+    expect(mocks.getBrokerCapabilities).toHaveBeenCalledTimes(1);
+
+    resolveCapabilities({
+      broker_name: "Upstox",
+      broker_type: "equity",
+      supported_exchanges: ["NSE"],
+      features: {
+        market_protection: false,
+        leverage: false,
+        bracket_orders: false,
+        cover_orders: false,
+      },
+    });
+    await waitFor(() => expect(result.current.data?.broker_name).toBe("Upstox"));
   });
 });

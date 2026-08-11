@@ -23,6 +23,7 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 const mockMode = vi.hoisted(() => ({ current: "live" }));
+const dataScopeState = vi.hoisted(() => ({ current: "live:native:dhan:A1" }));
 
 const plotlyMocks = vi.hoisted(() => ({
   props: [] as Array<{
@@ -59,6 +60,10 @@ vi.mock("@/stores/modeStore", () => ({
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock("@/hooks/useDataScope", () => ({
+  useMarketDataScope: () => dataScopeState.current,
 }));
 
 vi.mock("@/components/charts/PlotlyChart", () => ({
@@ -146,6 +151,7 @@ beforeEach(() => {
   chartMocks.series = [];
   chartMocks.fitContent.mockReset();
   mockMode.current = "live";
+  dataScopeState.current = "live:native:dhan:A1";
   mockUseBrokerConnected.mockReturnValue(false);
   apiMocks.getExpiry.mockResolvedValue(["2026-03-27"]);
   apiMocks.getOptionChain.mockResolvedValue(LIVE_CHAIN);
@@ -296,6 +302,121 @@ describe("OI Analytics spot price strip", () => {
     expect(symbol).toBe("NIFTY");
     expect(exchange).toBe("NSE_INDEX");
     expect(resolution).toBe("15");
+    expect(apiMocks.getHistory).toHaveBeenCalledWith(
+      "NIFTY",
+      "NSE_INDEX",
+      "15",
+      expect.any(String),
+      expect.any(String),
+      expect.any(AbortSignal),
+      dataScopeState.current,
+    );
+  });
+
+  it("clears and aborts source A history before source B can publish", async () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    const lateAHistory = deferred<Array<Record<string, number>>>();
+    apiMocks.getHistory
+      .mockReturnValueOnce(lateAHistory.promise)
+      .mockResolvedValueOnce([{
+        timestamp: 1_780_000_000_000,
+        open: 222,
+        high: 224,
+        low: 220,
+        close: 223,
+        volume: 2_000,
+      }]);
+
+    const view = renderButterfly();
+    await waitFor(() => expect(apiMocks.getHistory).toHaveBeenCalledOnce());
+    const aSignal = apiMocks.getHistory.mock.calls[0]?.[5] as AbortSignal | undefined;
+    const [candleSeries, volumeSeries] = chartMocks.series;
+
+    dataScopeState.current = "live:native:upstox:B1";
+    view.rerender(
+      <OIChartWidget {...makeWidgetPanelProps({ params: { view: "butterfly" } })} />,
+    );
+
+    expect(aSignal?.aborted).toBe(true);
+    expect(candleSeries?.setData).toHaveBeenCalledWith([]);
+    expect(volumeSeries?.setData).toHaveBeenCalledWith([]);
+    await waitFor(() => expect(apiMocks.getHistory).toHaveBeenCalledWith(
+      "NIFTY",
+      "NSE_INDEX",
+      "15",
+      expect.any(String),
+      expect.any(String),
+      expect.any(AbortSignal),
+      dataScopeState.current,
+    ));
+    await waitFor(() => expect(candleSeries?.setData).toHaveBeenCalledWith([
+      expect.objectContaining({ open: 222 }),
+    ]));
+
+    await act(async () => {
+      lateAHistory.resolve([{
+        timestamp: 1_779_000_000_000,
+        open: 111,
+        high: 114,
+        low: 110,
+        close: 113,
+        volume: 1_000,
+      }]);
+      await lateAHistory.promise;
+    });
+
+    const publishedOpens = candleSeries?.setData.mock.calls.flatMap(([rows]) => (
+      rows as Array<{ open?: number }>
+    ).flatMap((row) => row.open ?? [])) ?? [];
+    expect(publishedOpens).toContain(222);
+    expect(publishedOpens).not.toContain(111);
+  });
+
+  it("retires Live history and fences the replacement read to Explore", async () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    const lateLiveHistory = deferred<Array<Record<string, number>>>();
+    apiMocks.getHistory
+      .mockReturnValueOnce(lateLiveHistory.promise)
+      .mockResolvedValueOnce([]);
+
+    const view = renderButterfly();
+    await waitFor(() => expect(apiMocks.getHistory).toHaveBeenCalledOnce());
+    const liveSignal = apiMocks.getHistory.mock.calls[0]?.[5] as AbortSignal | undefined;
+    const [candleSeries] = chartMocks.series;
+
+    mockMode.current = "explore";
+    dataScopeState.current = "explore:mock";
+    mockUseBrokerConnected.mockReturnValue(false);
+    view.rerender(
+      <OIChartWidget {...makeWidgetPanelProps({ params: { view: "butterfly" } })} />,
+    );
+
+    expect(liveSignal?.aborted).toBe(true);
+    await waitFor(() => expect(apiMocks.getHistory).toHaveBeenCalledWith(
+      "NIFTY",
+      "NSE_INDEX",
+      "15",
+      expect.any(String),
+      expect.any(String),
+      expect.any(AbortSignal),
+      "explore:mock",
+    ));
+
+    await act(async () => {
+      lateLiveHistory.resolve([{
+        timestamp: 1_779_000_000_000,
+        open: 111,
+        high: 114,
+        low: 110,
+        close: 113,
+        volume: 1_000,
+      }]);
+      await lateLiveHistory.promise;
+    });
+    const publishedOpens = candleSeries?.setData.mock.calls.flatMap(([rows]) => (
+      rows as Array<{ open?: number }>
+    ).flatMap((row) => row.open ?? [])) ?? [];
+    expect(publishedOpens).not.toContain(111);
   });
 
   it("shows the shared OHLCV readout when the spot chart crosshair moves", async () => {

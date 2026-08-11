@@ -43,6 +43,7 @@ const mockGetTradebook = vi.fn();
 const mockGetOptionChain = vi.fn();
 const mockGetMargin = vi.fn();
 const mockGetSyntheticFuture = vi.fn();
+const mockDataScope = vi.hoisted(() => ({ value: "live:native:dhan:A1" }));
 
 vi.mock("@/services/api", () => ({
   getFunds: (context: AccountReadContext, signal?: AbortSignal) =>
@@ -66,13 +67,23 @@ vi.mock("@/services/api", () => ({
     action: string,
     signal?: AbortSignal,
   ) => mockGetMargin(context, symbol, exchange, qty, product, action, signal),
-  getSyntheticFuture: (symbol: string, exchange: string, expiry?: string) =>
-    mockGetSyntheticFuture(symbol, exchange, expiry),
+  getSyntheticFuture: (
+    symbol: string,
+    exchange: string,
+    expiry?: string,
+    signal?: AbortSignal,
+    expectedDataScope?: string,
+  ) => mockGetSyntheticFuture(symbol, exchange, expiry, signal, expectedDataScope),
 }));
 
 vi.mock("@/hooks/useAccountReadsEnabled", () => ({
   useAccountReadsEnabled: () => true,
   useAccountReadContext: () => mockAccountReadContext,
+}));
+
+vi.mock("@/hooks/useDataScope", () => ({
+  useDataScope: () => mockDataScope.value,
+  useMarketDataScope: () => mockDataScope.value,
 }));
 
 // Mock market hours (default: market closed so refetchInterval doesn't interfere)
@@ -125,6 +136,7 @@ function createWrapper() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockDataScope.value = "live:native:dhan:A1";
 });
 
 // ---------------------------------------------------------------------------
@@ -422,6 +434,63 @@ describe("useSyntheticFuture", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(futureData);
-    expect(mockGetSyntheticFuture).toHaveBeenCalledWith("NIFTY", "NFO", "2026-04-03");
+    expect(mockGetSyntheticFuture).toHaveBeenCalledWith(
+      "NIFTY",
+      "NFO",
+      "2026-04-03",
+      expect.any(AbortSignal),
+      mockDataScope.value,
+    );
+  });
+
+  it("does not retain a Live synthetic future after switching to Explore", async () => {
+    const futureData = { synthetic_price: 23520.5, basis: 20.5, annualized_basis: 3.2 };
+    mockGetSyntheticFuture.mockResolvedValue(futureData);
+    const { result, rerender } = renderHook(
+      () => useSyntheticFuture("NIFTY", "NFO", "2026-04-03"),
+      { wrapper: createWrapper() },
+    );
+    await waitFor(() => expect(result.current.data).toEqual(futureData));
+
+    mockDataScope.value = "explore:mock";
+    rerender();
+
+    await waitFor(() => expect(result.current.fetchStatus).toBe("idle"));
+    expect(result.current.data).toBeUndefined();
+    expect(mockGetSyntheticFuture).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts an in-flight Live synthetic future when Explore retires its authority", async () => {
+    let resolveLive!: (value: { synthetic_price: number }) => void;
+    let liveSignal: AbortSignal | undefined;
+    mockGetSyntheticFuture.mockImplementation(
+      (
+        _symbol: string,
+        _exchange: string,
+        _expiry: string,
+        signal?: AbortSignal,
+        expectedDataScope?: string,
+      ) => {
+        expect(expectedDataScope).toBe("live:native:dhan:A1");
+        liveSignal = signal;
+        return new Promise((resolve) => {
+          resolveLive = resolve;
+        });
+      },
+    );
+    const { result, rerender } = renderHook(
+      () => useSyntheticFuture("NIFTY", "NFO", "2026-04-03"),
+      { wrapper: createWrapper() },
+    );
+    await waitFor(() => expect(result.current.fetchStatus).toBe("fetching"));
+
+    mockDataScope.value = "explore:mock";
+    rerender();
+
+    expect(liveSignal).toBeInstanceOf(AbortSignal);
+    expect(liveSignal?.aborted).toBe(true);
+    resolveLive({ synthetic_price: 23520.5 });
+    await waitFor(() => expect(result.current.fetchStatus).toBe("idle"));
+    expect(result.current.data).toBeUndefined();
   });
 });

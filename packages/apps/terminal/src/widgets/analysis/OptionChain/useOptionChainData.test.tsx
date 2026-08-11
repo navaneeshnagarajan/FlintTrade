@@ -6,6 +6,7 @@ const apiMocks = vi.hoisted(() => ({
   getOptionChain: vi.fn(),
   getQuotes: vi.fn(),
 }));
+const dataScopeState = vi.hoisted(() => ({ value: "live:native:upstox:U1" }));
 
 vi.mock("@/services/api", () => ({
   getExpiry: apiMocks.getExpiry,
@@ -15,6 +16,11 @@ vi.mock("@/services/api", () => ({
 
 vi.mock("@/lib/market", () => ({
   isMarketHours: () => false,
+}));
+
+vi.mock("@/hooks/useDataScope", () => ({
+  useDataScope: () => dataScopeState.value,
+  useMarketDataScope: () => dataScopeState.value,
 }));
 
 import { useOptionChainData } from "./useOptionChainData";
@@ -45,6 +51,7 @@ function deferred<T>() {
 describe("useOptionChainData", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dataScopeState.value = "live:native:upstox:U1";
     apiMocks.getExpiry.mockResolvedValue({ expiry: ["2026-07-30"] });
     apiMocks.getQuotes.mockResolvedValue({ ltp: 25000, close: 24900 });
   });
@@ -172,7 +179,9 @@ describe("useOptionChainData", () => {
 
     await waitFor(() => expect(result.current.expiries).toEqual(["2026-07-30"]));
     expect(result.current.selectedExpiry).toBe("2026-07-30");
-    expect(apiMocks.getOptionChain).toHaveBeenCalledWith("NIFTY", "NFO", "2026-07-30");
+    expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "2026-07-30", expect.any(AbortSignal), dataScopeState.value,
+    );
   });
 
   it("does not let a stale symbol response overwrite the current chain", async () => {
@@ -191,10 +200,14 @@ describe("useOptionChainData", () => {
       ({ symbol }) => useOptionChainData(symbol, "NFO"),
       { initialProps: { symbol: NIFTY } },
     );
-    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith("NIFTY", "NFO", "2026-07-30"));
+    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "2026-07-30", expect.any(AbortSignal), dataScopeState.value,
+    ));
 
     rerender({ symbol: BANKNIFTY });
-    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith("BANKNIFTY", "NFO", "2026-07-30"));
+    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
+      "BANKNIFTY", "NFO", "2026-07-30", expect.any(AbortSignal), dataScopeState.value,
+    ));
 
     await act(async () => {
       bankNiftyChain.resolve({
@@ -217,6 +230,67 @@ describe("useOptionChainData", () => {
     expect(result.current.strikes.map((row) => row.strike)).toEqual([55000]);
   });
 
+  it("does not publish a late Live chain after the authority switches to Explore", async () => {
+    const liveChain = deferred<Record<string, unknown>>();
+    const exploreChain = deferred<Record<string, unknown>>();
+    apiMocks.getOptionChain
+      .mockReturnValueOnce(liveChain.promise)
+      .mockReturnValueOnce(exploreChain.promise);
+
+    const { result, rerender } = renderHook(
+      ({ scopeProbe }) => {
+        void scopeProbe;
+        return useOptionChainData(NIFTY, "NFO");
+      },
+      { initialProps: { scopeProbe: "live" } },
+    );
+    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledTimes(1));
+
+    dataScopeState.value = "explore:mock";
+    rerender({ scopeProbe: "explore" });
+    await act(async () => { await Promise.resolve(); });
+
+    await act(async () => {
+      liveChain.resolve({
+        atm_strike: 25000,
+        chain: [{ strike: 25000, ce: { oi: 10 }, pe: { oi: 15 } }],
+      });
+      await liveChain.promise;
+    });
+
+    expect(result.current.chain).toBeNull();
+    expect(result.current.atmStrike).toBeNull();
+    expect(result.current.strikes).toEqual([]);
+  });
+
+  it("withholds the prior authority chain and spot on the first scope-B result", async () => {
+    const replacementChain = deferred<Record<string, unknown>>();
+    apiMocks.getOptionChain
+      .mockResolvedValueOnce({
+        atm_strike: 25000,
+        chain: [{ strike: 25000, ce: { oi: 10 }, pe: { oi: 15 } }],
+      })
+      .mockReturnValueOnce(replacementChain.promise);
+
+    const { result, rerender } = renderHook(
+      ({ scopeProbe }) => {
+        void scopeProbe;
+        return useOptionChainData(NIFTY, "NFO");
+      },
+      { initialProps: { scopeProbe: "A" } },
+    );
+    await waitFor(() => expect(result.current.chain).not.toBeNull());
+    expect(result.current.spot?.ltp).toBe(25000);
+
+    dataScopeState.value = "explore:mock";
+    rerender({ scopeProbe: "B" });
+
+    expect(result.current.chain).toBeNull();
+    expect(result.current.spot).toBeNull();
+    expect(result.current.strikes).toEqual([]);
+    expect(result.current.spotLtp).toBeNull();
+  });
+
   it("never starts the next symbol with the previous identity expiry", async () => {
     const bankExpiry = deferred<{ expiry: string[] }>();
     apiMocks.getExpiry.mockImplementation((symbol: string) => (
@@ -233,13 +307,13 @@ describe("useOptionChainData", () => {
       { initialProps: { symbol: NIFTY } },
     );
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "NIFTY", "NFO", "2026-07-30",
+      "NIFTY", "NFO", "2026-07-30", expect.any(AbortSignal), dataScopeState.value,
     ));
 
     rerender({ symbol: BANKNIFTY });
     await act(async () => { await Promise.resolve(); });
     expect(apiMocks.getOptionChain).not.toHaveBeenCalledWith(
-      "BANKNIFTY", "NFO", "2026-07-30",
+      "BANKNIFTY", "NFO", "2026-07-30", expect.any(AbortSignal), dataScopeState.value,
     );
 
     await act(async () => {
@@ -247,7 +321,7 @@ describe("useOptionChainData", () => {
       await bankExpiry.promise;
     });
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "BANKNIFTY", "NFO", "2026-08-06",
+      "BANKNIFTY", "NFO", "2026-08-06", expect.any(AbortSignal), dataScopeState.value,
     ));
   });
 
@@ -269,12 +343,12 @@ describe("useOptionChainData", () => {
       { initialProps: { symbol: NIFTY } },
     );
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "NIFTY", "NFO", "2026-07-30",
+      "NIFTY", "NFO", "2026-07-30", expect.any(AbortSignal), dataScopeState.value,
     ));
 
     rerender({ symbol: BANKNIFTY });
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
-      "BANKNIFTY", "NFO", "2026-08-06",
+      "BANKNIFTY", "NFO", "2026-08-06", expect.any(AbortSignal), dataScopeState.value,
     ));
 
     rerender({ symbol: NIFTY });

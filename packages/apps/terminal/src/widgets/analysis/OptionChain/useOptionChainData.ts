@@ -8,10 +8,11 @@
  *   - Return all processed data needed by the widget
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import type { Quote } from "@/types/api";
 import { getExpiry, getOptionChain, getQuotes } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
+import { useMarketDataScope } from "@/hooks/useDataScope";
 import { useLatestRequest } from "@/hooks/useLatestRequest";
 import type {
   SymbolDef,
@@ -80,30 +81,46 @@ export function useOptionChainData(
   symDef: SymbolDef,
   exchange: string,
 ): OptionChainData {
+  const dataScope = useMarketDataScope();
   const [expiries, setExpiries]           = useState<string[]>([]);
   const [selectedExpiryValue, setSelectedExpiry] = useState<string | null>(null);
   const [expiryIdentity, setExpiryIdentity] = useState<string | null>(null);
   const [chain, setChain]                 = useState<RawOptionChain | null>(null);
+  const [chainIdentity, setChainIdentity] = useState<string | null>(null);
   const [spot, setSpot]                   = useState<Quote | null>(null);
+  const [spotIdentity, setSpotIdentity]   = useState<string | null>(null);
   const [loading, setLoading]             = useState(false);
   const [error, setError]                 = useState<string | null>(null);
   const [lastRefresh, setLastRefresh]     = useState<Date | null>(null);
-  const identityKey = `${symDef.label}:${exchange}`;
+  const identityKey = `${dataScope}:${symDef.label}:${exchange}`;
   const currentExpiries = expiryIdentity === identityKey ? expiries : [];
   const expiryCandidate = typeof selectedExpiryValue === "string" ? selectedExpiryValue.trim() : "";
   const selectedExpiry = currentExpiries.includes(expiryCandidate) ? expiryCandidate : null;
-  const requestKey = `${symDef.label}:${exchange}:${selectedExpiry ?? ""}`;
+  const requestKey = `${identityKey}:${selectedExpiry ?? ""}`;
+  // State setters retire in passive effects, but render-time identity tagging
+  // prevents even the first paint under authority B from exposing A's values.
+  const currentChain = chainIdentity === requestKey ? chain : null;
+  const currentSpot = spotIdentity === requestKey ? spot : null;
   // Shared guard: identity changes invalidate every in-flight response and a
   // pending request for the same key makes the next poll tick a no-op.
   const requests = useLatestRequest(requestKey);
+  const requestControllerRef = useRef<AbortController | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setChain(null);
+    setChainIdentity(null);
     setSpot(null);
+    setSpotIdentity(null);
     setLoading(false);
     setError(null);
     setLastRefresh(null);
   }, [requestKey]);
+
+  useEffect(() => () => {
+    requestControllerRef.current?.abort();
+    requestControllerRef.current = null;
+    requests.invalidate();
+  }, [requestKey, requests]);
 
   // Fetch expiries when symbol/exchange changes
   useEffect(() => {
@@ -113,11 +130,17 @@ export function useOptionChainData(
     setChain(null);
     setError(null);
 
-    let cancelled = false;
+    const controller = new AbortController();
     (async () => {
       try {
-        const data = await getExpiry(symDef.label, exchange);
-        if (cancelled) return;
+        const data = await getExpiry(
+          symDef.label,
+          exchange,
+          "options",
+          controller.signal,
+          dataScope,
+        );
+        if (controller.signal.aborted) return;
         const rawList = Array.isArray(data)
           ? data
           : ((data as { expiry?: unknown[] })?.expiry ?? []);
@@ -130,50 +153,68 @@ export function useOptionChainData(
         setExpiryIdentity(identityKey);
         setSelectedExpiry(list[0] ?? null);
       } catch (e) {
-        if (!cancelled) setError(`Failed to load expiries: ${(e as Error).message}`);
+        if (!controller.signal.aborted) setError(`Failed to load expiries: ${(e as Error).message}`);
       }
     })();
-    return () => { cancelled = true; };
+    return () => controller.abort();
    
-  }, [identityKey, symDef.label, exchange]);
+  }, [identityKey, symDef.label, exchange, dataScope]);
 
   const fetchData = useCallback(async () => {
     if (!selectedExpiry) return;
 
     const ticket = requests.begin(requestKey);
     if (!ticket) return;
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setLoading(true);
     setError(null);
 
     try {
       const [chainResult, spotResult] = await Promise.allSettled([
-        getOptionChain(symDef.label, exchange, selectedExpiry),
-        getQuotes(symDef.spotSymbol, symDef.spotExchange),
+        getOptionChain(symDef.label, exchange, selectedExpiry, controller.signal, dataScope),
+        getQuotes(symDef.spotSymbol, symDef.spotExchange, controller.signal, dataScope),
       ]);
 
       if (!ticket.isCurrent()) return;
 
       if (chainResult.status === "fulfilled") {
         setChain(chainResult.value as unknown as RawOptionChain);
+        setChainIdentity(requestKey);
         setError(null);
       } else {
         setChain(null);
+        setChainIdentity(requestKey);
         setError(`Chain error: ${(chainResult.reason as Error)?.message}`);
       }
 
       if (spotResult.status === "fulfilled") {
         setSpot(spotResult.value);
+        setSpotIdentity(requestKey);
       } else {
         setSpot(null);
+        setSpotIdentity(requestKey);
       }
     } finally {
+      if (requestControllerRef.current === controller) {
+        requestControllerRef.current = null;
+      }
       if (ticket.settle()) {
         setLoading(false);
         setLastRefresh(new Date());
       }
     }
    
-  }, [requests, requestKey, selectedExpiry, symDef.label, symDef.spotSymbol, symDef.spotExchange, exchange]);
+  }, [
+    dataScope,
+    requests,
+    requestKey,
+    selectedExpiry,
+    symDef.label,
+    symDef.spotSymbol,
+    symDef.spotExchange,
+    exchange,
+  ]);
 
   // Auto-refresh at market-aware intervals
   useEffect(() => {
@@ -186,7 +227,7 @@ export function useOptionChainData(
 
   // Compute ordered strike list, ATM, max OI, PCR
   const { strikes, atmStrike, maxCallOI, maxPutOI, totalCallOI, totalPutOI, computedPCR } = useMemo(() => {
-    if (!chain) return {
+    if (!currentChain) return {
       strikes: [] as StrikeRow[],
       atmStrike: null as number | null,
       maxCallOI: 0,
@@ -199,9 +240,9 @@ export function useOptionChainData(
     const callMap: Record<number, RawOptionRow> = {};
     const putMap:  Record<number, RawOptionRow> = {};
 
-    if (chain.chain && chain.chain.length > 0) {
+    if (currentChain.chain && currentChain.chain.length > 0) {
       // OpenAlgo v2 format: chain[].strike, chain[].ce, chain[].pe
-      for (const entry of chain.chain) {
+      for (const entry of currentChain.chain) {
         const strike = positiveFiniteNumber(entry.strike);
         if (strike === null) continue;
         if (entry.ce) callMap[strike] = { ...entry.ce, strike };
@@ -209,11 +250,11 @@ export function useOptionChainData(
       }
     } else {
       // Legacy v1 format: separate calls[] and puts[] arrays
-      for (const call of chain.calls ?? []) {
+      for (const call of currentChain.calls ?? []) {
         const strike = positiveFiniteNumber(call.strike_price ?? call.strike);
         if (strike !== null) callMap[strike] = call;
       }
-      for (const put of chain.puts ?? []) {
+      for (const put of currentChain.puts ?? []) {
         const strike = positiveFiniteNumber(put.strike_price ?? put.strike);
         if (strike !== null) putMap[strike] = put;
       }
@@ -226,8 +267,8 @@ export function useOptionChainData(
       ])
     ).sort((a, b) => a - b);
 
-    const spotLtp = positiveFiniteNumber(spot?.ltp)
-      ?? positiveFiniteNumber(chain.underlying_ltp);
+    const spotLtp = positiveFiniteNumber(currentSpot?.ltp)
+      ?? positiveFiniteNumber(currentChain.underlying_ltp);
     const atm = spotLtp !== null && allStrikes.length > 0
       ? allStrikes.reduce((prev, cur) => (
           Math.abs(cur - spotLtp) < Math.abs(prev - spotLtp) ? cur : prev
@@ -262,19 +303,19 @@ export function useOptionChainData(
       totalPutOI,
       computedPCR,
     };
-  }, [chain, spot]);
+  }, [currentChain, currentSpot]);
 
   // Spot display values
-  const spotLtp       = positiveFiniteNumber(spot?.ltp);
+  const spotLtp       = positiveFiniteNumber(currentSpot?.ltp);
   const spotPrevClose = positiveFiniteNumber(
-    (spot as unknown as { prev_close?: number })?.prev_close ?? spot?.close,
+    (currentSpot as unknown as { prev_close?: number })?.prev_close ?? currentSpot?.close,
   );
   const spotChange    = spotLtp !== null && spotPrevClose !== null ? spotLtp - spotPrevClose : null;
   const spotChangePct = spotChange !== null && spotPrevClose !== null
     ? (spotChange / spotPrevClose) * 100
     : null;
   const spotUp        = spotChange == null ? null : spotChange >= 0;
-  const responsePCR   = nonNegativeFiniteNumber(chain?.pcr);
+  const responsePCR   = nonNegativeFiniteNumber(currentChain?.pcr);
   const pcr           = totalCallOI !== null && totalCallOI > 0 && totalPutOI !== null
     ? responsePCR ?? computedPCR
     : null;
@@ -283,8 +324,8 @@ export function useOptionChainData(
     expiries: currentExpiries,
     selectedExpiry,
     setSelectedExpiry,
-    chain,
-    spot,
+    chain: currentChain,
+    spot: currentSpot,
     loading,
     error,
     lastRefresh,

@@ -27,7 +27,10 @@ export interface AccountAuthorityIdentity {
 
 /** Build an opaque deterministic identifier without retaining raw connection values. */
 export function connectionScopeFingerprint(host: string, apiKey: string): string {
-  const value = `${host.trim().toLowerCase().replace(/\/+$/, "")}\u0000${apiKey.trim()}`;
+  // The transport appends its path to the raw configured host, so path case
+  // and even a trailing slash can change the actual request URL. Hash that
+  // exact trimmed authority string so distinct transports never share a key.
+  const value = `${host.trim()}\u0000${apiKey.trim()}`;
   let first = 0xdeadbeef ^ value.length;
   let second = 0x41c6ce57 ^ value.length;
   for (let index = 0; index < value.length; index += 1) {
@@ -120,6 +123,67 @@ export function resolveDataScope(input: DataScopeInput): string {
   return resolveAccountAuthorityIdentity(input).scopeKey;
 }
 
+/** Resolve the exact market-data authority, including its current app mode. */
+export function resolveMarketDataScope({
+  mode,
+  host,
+  apiKey,
+  accounts,
+  activeAccountId,
+}: DataScopeInput): string {
+  if (mode === "explore") return "explore:mock";
+  if (apiKey.trim()) {
+    return `${mode}:openalgo:${connectionScopeFingerprint(host, apiKey)}`;
+  }
+  const nativeAccount = resolveNativeDataAccount(accounts, activeAccountId);
+  return nativeAccount
+    ? `${mode}:${brokerAccountKey(nativeAccount)}`
+    : `${mode}:unconfigured`;
+}
+
+export class MarketDataAuthorityChangedError extends Error {
+  constructor() {
+    super("Market data authority changed before the request could complete.");
+    this.name = "MarketDataAuthorityChangedError";
+  }
+}
+
+/** Broker capabilities are broker-wide, so native account IDs never enter their cache key. */
+export function resolveBrokerCapabilityScope(dataScope: string): string {
+  const parts = dataScope.split(":");
+  return parts[1] === "native" ? parts.slice(0, 3).join(":") : dataScope;
+}
+
+/** Imperatively validate a render-captured market authority at a fetch boundary. */
+export function requireCurrentMarketDataScope(expectedDataScope?: string): void {
+  if (!expectedDataScope) return;
+  const { host, apiKey } = useConnectionStore.getState();
+  const { accounts, activeAccountId } = useBrokerStore.getState();
+  const actual = resolveMarketDataScope({
+    mode: useModeStore.getState().mode,
+    host,
+    apiKey,
+    accounts,
+    activeAccountId,
+  });
+  if (actual !== expectedDataScope) throw new MarketDataAuthorityChangedError();
+}
+
+/** Validate the broker-wide capability authority represented by a query key. */
+export function requireCurrentBrokerCapabilityScope(expectedScope?: string): void {
+  if (!expectedScope) return;
+  const { host, apiKey } = useConnectionStore.getState();
+  const { accounts, activeAccountId } = useBrokerStore.getState();
+  const actual = resolveBrokerCapabilityScope(resolveMarketDataScope({
+    mode: useModeStore.getState().mode,
+    host,
+    apiKey,
+    accounts,
+    activeAccountId,
+  }));
+  if (actual !== expectedScope) throw new MarketDataAuthorityChangedError();
+}
+
 /** Reactive immutable authority identity for account queries and actions. */
 export function useAccountAuthorityIdentity(): AccountAuthorityIdentity {
   const mode = useModeStore((state) => state.mode);
@@ -137,4 +201,18 @@ export function useAccountAuthorityIdentity(): AccountAuthorityIdentity {
 /** Reactive provenance key for TanStack queries and local chart caches. */
 export function useDataScope(): string {
   return useAccountAuthorityIdentity().scopeKey;
+}
+
+/** Reactive provenance key for market data and its local caches. */
+export function useMarketDataScope(): string {
+  const mode = useModeStore((state) => state.mode);
+  const host = useConnectionStore((state) => state.host);
+  const apiKey = useConnectionStore((state) => state.apiKey);
+  const accounts = useBrokerStore((state) => state.accounts);
+  const activeAccountId = useBrokerStore((state) => state.activeAccountId);
+
+  return useMemo(
+    () => resolveMarketDataScope({ mode, host, apiKey, accounts, activeAccountId }),
+    [mode, host, apiKey, accounts, activeAccountId],
+  );
 }

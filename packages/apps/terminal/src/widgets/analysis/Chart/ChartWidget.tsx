@@ -1,4 +1,12 @@
-import { useState, useEffect, useRef, useCallback, memo, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useCallback,
+  memo,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import type { WidgetProps } from "@/types/widgets";
 import {
   FLINT_CHART_VIEW_STATE_STORAGE_KEY,
@@ -67,7 +75,7 @@ import { publishChartSync, subscribeChartSync } from "@/lib/chartSyncBus";
 import { resolveOptionLeg } from "@/lib/optionLegSymbols";
 import type { OptionType } from "@/lib/optionSymbols";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { useDataScope } from "@/hooks/useDataScope";
+import { useMarketDataScope } from "@/hooks/useDataScope";
 import type { LogicalRange, Time } from "lightweight-charts";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
 import {
@@ -119,6 +127,7 @@ import type {
 
 const DEFAULT_SYMBOL = "NIFTY";
 const DEFAULT_EXCHANGE = "NSE_INDEX";
+const INTERVAL_CAPABILITY_TIMEOUT_MS = 2_000;
 
 /** The object form `getIntervals()` may return. Named rather than inlined as an
  * `as { … }` cast: see the parser note in `eslint.config.mjs`. */
@@ -232,9 +241,12 @@ function formatChangePct(v: number | null): string {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-interface SymbolSearchProps { onSelect: (item: SymbolSearchResult) => void }
+interface SymbolSearchProps {
+  dataScope: string;
+  onSelect: (item: SymbolSearchResult) => void;
+}
 
-function SymbolSearch({ onSelect }: SymbolSearchProps) {
+function SymbolSearch({ dataScope, onSelect }: SymbolSearchProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SymbolSearchResult[]>([]);
   const [open, setOpen] = useState(false);
@@ -244,22 +256,48 @@ function SymbolSearch({ onSelect }: SymbolSearchProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const dropRef = useRef<HTMLDivElement>(null);
 
+  useLayoutEffect(() => {
+    setResults([]);
+    setOpen(false);
+    setActiveIdx(-1);
+    setLoading(false);
+  }, [dataScope]);
+
   useEffect(() => {
+    let active = true;
+    let controller: AbortController | null = null;
     if (timerRef.current) clearTimeout(timerRef.current);
+    setResults([]);
+    setOpen(false);
+    setActiveIdx(-1);
+    setLoading(false);
     if (!query.trim() || query.length < 2) { setResults([]); setOpen(false); return; }
     timerRef.current = setTimeout(async () => {
+      if (!active) return;
+      const requestController = new AbortController();
+      controller = requestController;
       setLoading(true);
       try {
-        const raw = await searchSymbol(query.trim());
+        const raw = await searchSymbol(query.trim(), undefined, requestController.signal, dataScope);
+        if (!active || requestController.signal.aborted) return;
         const list = Array.isArray(raw) ? raw : ((raw as { data?: SymbolSearchResult[] })?.data ?? []);
         setResults(list.slice(0, 12));
         setOpen(list.length > 0);
         setActiveIdx(-1);
-      } catch { setResults([]); setOpen(false); }
-      finally { setLoading(false); }
+      } catch {
+        if (!active || requestController.signal.aborted) return;
+        setResults([]);
+        setOpen(false);
+      } finally {
+        if (active) setLoading(false);
+      }
     }, 300);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [query]);
+    return () => {
+      active = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      controller?.abort();
+    };
+  }, [query, dataScope]);
 
   useEffect(() => {
     function handle(e: MouseEvent) {
@@ -450,7 +488,7 @@ interface ChartPanelParams {
 
 function ChartWidget(props: Partial<WidgetProps> = {}) {
   const track = useTrackBehavior();
-  const dataScope = useDataScope();
+  const dataScope = useMarketDataScope();
   useEffect(() => { track("trade", "widgetsUsed"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [workspaceWidth, setWorkspaceWidth] = useState(0);
@@ -493,6 +531,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
   const [exchange, setExchange] = useState(() => pinnedParams?.exchange ?? initialChartView?.exchange ?? DEFAULT_EXCHANGE);
   const [interval, setInterval] = useState(() => pinnedParams?.interval ?? initialChartView?.interval ?? "5m");
   const [intervals, setIntervals] = useState<IntervalOption[]>(STATIC_INTERVALS);
+  const [intervalDataScope, setIntervalDataScope] = useState<string | null>(null);
   const [visibleLogicalRange, setVisibleLogicalRange] = useState<FlintChartVisibleLogicalRange | null>(
     () => initialChartView?.visibleLogicalRange ?? null,
   );
@@ -536,33 +575,48 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
   // ---------------------------------------------------------------------------
   const optionLegUnderlying = pinnedParams?.optionLeg?.underlying;
   const optionLegType = pinnedParams?.optionLeg?.leg;
-  const [optionLegResolved, setOptionLegResolved] = useState(false);
-  const [optionLegError, setOptionLegError] = useState<string | null>(null);
-  const awaitingOptionLeg = Boolean(optionLegUnderlying && optionLegType) && !optionLegResolved;
+  const [optionLegResolvedScope, setOptionLegResolvedScope] = useState<string | null>(null);
+  const [optionLegError, setOptionLegError] = useState<{ message: string; scope: string } | null>(null);
+  const awaitingOptionLeg = Boolean(optionLegUnderlying && optionLegType)
+    && optionLegResolvedScope !== dataScope;
+  const currentOptionLegError = optionLegError?.scope === dataScope
+    ? optionLegError.message
+    : null;
+  const displayedSymbol = awaitingOptionLeg && optionLegUnderlying
+    ? optionLegUnderlying
+    : symbol;
+  const displayedExchange = awaitingOptionLeg
+    ? (pinnedParams?.exchange ?? DEFAULT_EXCHANGE)
+    : exchange;
 
   useEffect(() => {
     if (!optionLegUnderlying || !optionLegType) return;
-    let cancelled = false;
-    setOptionLegResolved(false);
+    const controller = new AbortController();
+    setOptionLegResolvedScope(null);
     setOptionLegError(null);
     (async () => {
       try {
-        const leg = await resolveOptionLeg({ underlying: optionLegUnderlying, leg: optionLegType });
-        if (cancelled) return;
+        const leg = await resolveOptionLeg(
+          { underlying: optionLegUnderlying, leg: optionLegType },
+          controller.signal,
+          dataScope,
+        );
+        if (controller.signal.aborted) return;
         setSymbol(leg.symbol);
         setExchange(leg.exchange);
-        setOptionLegResolved(true);
+        setOptionLegResolvedScope(dataScope);
       } catch (error) {
-        if (cancelled) return;
-        setOptionLegError(
-          error instanceof Error && error.message
+        if (controller.signal.aborted) return;
+        setOptionLegError({
+          message: error instanceof Error && error.message
             ? error.message
             : `Could not resolve the ${optionLegUnderlying} ${optionLegType} leg`,
-        );
+          scope: dataScope,
+        });
       }
     })();
-    return () => { cancelled = true; };
-  }, [optionLegUnderlying, optionLegType]);
+    return () => controller.abort();
+  }, [optionLegUnderlying, optionLegType, dataScope]);
 
   useEffect(() => {
     const node = workspaceRef.current;
@@ -1016,11 +1070,30 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isReplaying]);
 
-  // Load available intervals from API once
+  // Interval capabilities belong to the active mode/account authority.
   useEffect(() => {
-    getIntervals()
+    const controller = new AbortController();
+    let active = true;
+    setIntervalDataScope(null);
+    setIntervals(STATIC_INTERVALS);
+    const settle = (nextIntervals: IntervalOption[]) => {
+      if (!active) return;
+      setIntervals(nextIntervals);
+      setInterval((current) => (
+        nextIntervals.some((candidate) => candidate.value === current)
+          ? current
+          : (nextIntervals[0]?.value ?? current)
+      ));
+      setIntervalDataScope(dataScope);
+    };
+    const fallbackTimer = window.setTimeout(() => {
+      controller.abort();
+      settle(STATIC_INTERVALS);
+    }, INTERVAL_CAPABILITY_TIMEOUT_MS);
+    getIntervals(controller.signal, dataScope)
       .then((raw) => {
-        if (!raw) return;
+        if (!active || controller.signal.aborted) return;
+        window.clearTimeout(fallbackTimer);
         let list: IntervalOption[] = [];
         if (Array.isArray(raw)) {
           list = raw.map((v) => typeof v === "string" ? { label: v, value: v } : (v as IntervalOption));
@@ -1029,31 +1102,31 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
             typeof v === "string" ? { label: v, value: v } : { label: String(v), value: String(v) },
           );
         }
+        let nextIntervals = STATIC_INTERVALS;
         if (list.length > 0) {
           const apiValues = new Set(list.map((x) => x.value));
           const filtered = STATIC_INTERVALS.filter((x) => apiValues.has(x.value));
-          if (filtered.length > 0) setIntervals(filtered);
+          if (filtered.length > 0) nextIntervals = filtered;
         }
+        settle(nextIntervals);
       })
-      .catch(() => { /* use static fallback */ });
-  }, []);
+      .catch(() => {
+        if (!active || controller.signal.aborted) return;
+        window.clearTimeout(fallbackTimer);
+        settle(STATIC_INTERVALS);
+      });
+    return () => {
+      active = false;
+      window.clearTimeout(fallbackTimer);
+      controller.abort();
+    };
+  }, [dataScope]);
 
-  // Fetch OHLCV data with localStorage cache
-  useEffect(() => {
-    // An unresolved option leg has no real instrument yet — fetching would
-    // load the placeholder underlying's candles under the wrong identity.
-    if (awaitingOptionLeg) return;
+  useLayoutEffect(() => {
     const candle = candleRef.current;
     const volume = volumeRef.current;
-    if (!candle || !volume) return;
-    // Capture non-null references so the async closure and applyBars can use them safely
-    const candleSeries = candle;
-    const volumeSeries = volume;
-    let cancelled = false;
-
     // A symbol, interval, mode, account, host, or API-key change creates a new
-    // data identity. Remove the previous identity synchronously so an empty or
-    // failed response cannot leave stale candles displayed under the new one.
+    // data identity. Retire imperative series before the browser paints B.
     if (isReplayingRef.current) {
       exitReplay();
       isReplayingRef.current = false;
@@ -1062,11 +1135,43 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     timesRef.current = [];
     setLegend(null);
     try {
-      candleSeries.setData([]);
-      volumeSeries.setData([]);
+      candle?.setData([]);
+      volume?.setData([]);
     } catch { /* chart may be disposing */ }
     refreshIndicatorsRef.current?.();
     refreshServerIndicatorsRef.current?.();
+  }, [
+    symbol,
+    exchange,
+    interval,
+    dataScope,
+    intervalDataScope,
+    awaitingOptionLeg,
+    candleRef,
+    volumeRef,
+    exitReplay,
+  ]);
+
+  useLayoutEffect(() => {
+    setLtp(null);
+    setChange(null);
+    setChangePct(null);
+  }, [symbol, exchange, dataScope, awaitingOptionLeg]);
+
+  // Fetch OHLCV data with localStorage cache
+  useEffect(() => {
+    const candle = candleRef.current;
+    const volume = volumeRef.current;
+
+    if (intervalDataScope !== dataScope) return;
+    // An unresolved option leg has no real instrument yet — fetching would
+    // load the placeholder underlying's candles under the wrong identity.
+    if (awaitingOptionLeg || !candle || !volume) return;
+    // Capture non-null references so the async closure and applyBars can use them safely
+    const candleSeries = candle;
+    const volumeSeries = volume;
+    const controller = new AbortController();
+    let cancelled = false;
 
     function applyBars(data: OhlcvBar[]) {
       if (cancelled) return;
@@ -1113,7 +1218,15 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
       try {
         const endDate = formatDate(new Date());
         const startDate = getStartDate(interval);
-        const data = await getHistory(symbol, exchange, interval, startDate, endDate);
+        const data = await getHistory(
+          symbol,
+          exchange,
+          interval,
+          startDate,
+          endDate,
+          controller.signal,
+          dataScope,
+        );
         if (cancelled || !Array.isArray(data) || data.length === 0) return;
 
         writeOhlcvCache(localStorage, dataScope, symbol, exchange, interval, data as OhlcvBar[]);
@@ -1122,19 +1235,23 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
       } catch { /* API unavailable — cached data already shown */ }
     })();
 
-    return () => { cancelled = true; };
-  }, [symbol, exchange, interval, dataScope, awaitingOptionLeg, candleRef, volumeRef, chartRef, exitReplay]);
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [symbol, exchange, interval, dataScope, intervalDataScope, awaitingOptionLeg, candleRef, volumeRef, chartRef, exitReplay]);
 
   // Fetch quote (LTP / change)
   useEffect(() => {
-    if (awaitingOptionLeg) return;
-    let cancelled = false;
     setLtp(null);
     setChange(null);
     setChangePct(null);
+    if (awaitingOptionLeg) return;
+    const controller = new AbortController();
+    let cancelled = false;
     (async () => {
       try {
-        const q = await getQuotes(symbol, exchange);
+        const q = await getQuotes(symbol, exchange, controller.signal, dataScope);
         if (cancelled || !q) return;
         const ltpVal = q.ltp ?? null;
         const prevClose = (q as unknown as { prev_close?: number }).prev_close ?? q.close ?? null;
@@ -1143,7 +1260,10 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
         if (!cancelled) { setLtp(ltpVal); setChange(chg); setChangePct(chgPct); }
       } catch { /* quote unavailable */ }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [symbol, exchange, dataScope, awaitingOptionLeg]);
 
   // Event handlers
@@ -1151,7 +1271,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     if (optionLegUnderlying) {
       // The operator re-pointed an option-leg panel manually — stop treating
       // it as awaiting resolution and drop any resolution error.
-      setOptionLegResolved(true);
+      setOptionLegResolvedScope(dataScope);
       setOptionLegError(null);
     }
     setSymbol(item.symbol);
@@ -1167,7 +1287,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
         if (ind[k]) { try { chart.removeSeries(ind[k]!); } catch { /* ignore */ } ind[k] = null; }
       });
     }
-  }, [chartRef, indRef, optionLegUnderlying]);
+  }, [chartRef, dataScope, indRef, optionLegUnderlying]);
 
   const handleIntervalChange = useCallback((v: string) => {
     visibleLogicalRangeRef.current = null;
@@ -1321,23 +1441,23 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
       {/* Header */}
       <div className="flex flex-col gap-1 px-2 py-1 bg-surface-base border-b border-border-default shrink-0">
         <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-          <SymbolSearch onSelect={handleSymbolSelect} />
+          <SymbolSearch dataScope={dataScope} onSelect={handleSymbolSelect} />
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span className="text-sm font-heading font-semibold text-text-primary leading-none whitespace-nowrap">{symbol}</span>
-            <span className="text-xs text-text-muted whitespace-nowrap">{exchange}</span>
+            <span className="text-sm font-heading font-semibold text-text-primary leading-none whitespace-nowrap">{displayedSymbol}</span>
+            <span className="text-xs text-text-muted whitespace-nowrap">{displayedExchange}</span>
             {dataScope === "explore:mock" && (
               <span className="rounded border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-xxs text-warning" role="status">
                 Sample history
               </span>
             )}
-            {awaitingOptionLeg && !optionLegError && (
+            {awaitingOptionLeg && !currentOptionLegError && (
               <span className="text-xxs text-text-muted animate-pulse whitespace-nowrap" role="status">
                 Resolving {optionLegType} leg…
               </span>
             )}
-            {optionLegError && (
+            {currentOptionLegError && (
               <span className="rounded border border-loss/30 bg-loss/10 px-1.5 py-0.5 text-xxs text-loss" role="alert">
-                {optionLegError}
+                {currentOptionLegError}
               </span>
             )}
             {ltp != null && <span className="text-lg font-mono font-bold text-text-primary leading-none whitespace-nowrap">{formatPrice(ltp)}</span>}

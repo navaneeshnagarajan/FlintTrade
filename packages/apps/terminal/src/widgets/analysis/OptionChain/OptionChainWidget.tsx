@@ -36,11 +36,23 @@ import {
   ShoppingBasket,
   Layers,
 } from "lucide-react";
-import { getInstruments, getOptionSymbol, getSymbol, placeOrder, getMaxPain } from "@/services/api";
+import {
+  getInstruments,
+  getOptionSymbol,
+  getSymbol,
+  placeOrder,
+  getMaxPain,
+  MarketDataAuthorityChangedError,
+} from "@/services/api";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import { isMarketHours } from "@/lib/market";
 import { useModeStore } from "@/stores/modeStore";
+import {
+  requireCurrentMarketDataScope,
+  useAccountAuthorityIdentity,
+  useMarketDataScope,
+} from "@/hooks/useDataScope";
 import { checkOrderEntryMode, resolveLotQuantity } from "@/lib/orderGuards";
 import { useOptionChainData } from "./useOptionChainData";
 import SymbolSearch from "./SymbolSearch";
@@ -66,10 +78,19 @@ import type { WidgetProps } from "@/types/widgets";
 // Main widget
 // ---------------------------------------------------------------------------
 
+function isAbortError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "name" in error
+    && error.name === "AbortError";
+}
+
 function OptionChainWidget(props: Partial<WidgetProps> = {}) {
   const glideTheme = useGlideTheme();
   const mode = useModeStore((s) => s.mode);
   const isExplore = mode === "explore";
+  const dataScope = useMarketDataScope();
+  const accountAuthority = useAccountAuthorityIdentity();
   // Honour a pinned symbol from the workspace panel params (e.g. the options-
   // scalper preset pins `{ symbol: "NIFTY" }`). Falls back to the first known
   // underlying. Previously the widget ignored params and only worked for the
@@ -88,6 +109,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
   const [secondsAgo, setSecondsAgo]             = useState<number | null>(null);
   const orderMsgTimerRef                        = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scrollTimerRef                          = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const orderSymbolControllersRef               = useRef<Set<AbortController>>(new Set());
   const gridRef                                 = useRef<DataEditorRef>(null);
 
   // Flash animation tracking: Map<"strikeIndex_CE|PE", "up"|"down"> cleared after 500ms
@@ -103,6 +125,20 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
     flashTimersRef.current.forEach(clearTimeout);
     flashTimersRef.current.clear();
   }, []);
+
+  useEffect(() => {
+    const controllers = orderSymbolControllersRef.current;
+    return () => {
+      for (const controller of controllers) controller.abort();
+      controllers.clear();
+    };
+  }, [
+    dataScope,
+    accountAuthority.mode,
+    accountAuthority.scopeKey,
+    accountAuthority.brokerType,
+    accountAuthority.accountId,
+  ]);
 
   // FDC3 channel membership (Phase 2). A widget pinned by params.symbol is
   // joined to nothing and keeps ignoring broadcasts, exactly as it ignored
@@ -138,8 +174,9 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
 
   // Instruments — fetched once per hour, filtered to option exchanges
   const { data: rawInstruments } = useQuery({
-    queryKey: ["instruments"],
-    queryFn: getInstruments,
+    queryKey: ["instruments", dataScope],
+    queryFn: ({ signal }) => getInstruments(signal, dataScope),
+    enabled: dataScope !== "explore:mock",
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
     retry: 1,
@@ -152,8 +189,8 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
 
   // Symbol details — lot size
   const { data: symbolDetails } = useQuery({
-    queryKey: ["symbol", symDef.label, exchange],
-    queryFn: () => getSymbol(symDef.label, exchange),
+    queryKey: ["symbol", dataScope, symDef.label, exchange],
+    queryFn: ({ signal }) => getSymbol(symDef.label, exchange, signal, dataScope),
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
     retry: 1,
@@ -214,9 +251,15 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
     isRefetchError: isMaxPainRefetchError,
     isFetching: isMaxPainFetching,
   } = useQuery({
-    queryKey: ["maxpain", symDef.label, exchange, selectedExpiry],
-    queryFn: ({ signal }) => getMaxPain(symDef.label, exchange, selectedExpiry ?? undefined, signal),
-    enabled: !!selectedExpiry,
+    queryKey: ["maxpain", dataScope, symDef.label, exchange, selectedExpiry],
+    queryFn: ({ signal }) => getMaxPain(
+      symDef.label,
+      exchange,
+      selectedExpiry ?? undefined,
+      signal,
+      dataScope,
+    ),
+    enabled: dataScope !== "explore:mock" && !!selectedExpiry,
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchInterval: 60 * 1000,
@@ -343,58 +386,95 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
 
   // Order placement — resolves canonical trading symbol via getOptionSymbol
   async function handleOrder({ symbol, exchange: legExchange, strike, optionType, expiry, action }: OrderParams) {
-    const typedOptionType = optionType === "PE" ? "PE" : "CE";
-    let orderSymbol   = buildCompactOptionSymbol(symbol, expiry, strike, typedOptionType)
-      ?? `${symbol}${expiry}${strike}${typedOptionType}`;
-    let orderExchange = legExchange;
+    // Pin both identities at the click boundary. Symbol resolution is async;
+    // an account or connection switch while it is in flight must not retarget
+    // the eventual order onto the newly selected real broker account.
+    const orderAuthority = accountAuthority;
+    const expectedDataScope = dataScope;
+    const symbolResolutionController = new AbortController();
+    orderSymbolControllersRef.current.add(symbolResolutionController);
     try {
-      const resolved = await getOptionSymbol(symbol, legExchange, expiry, typedOptionType, String(strike));
-      orderSymbol   = resolved.symbol;
-      orderExchange = resolved.exchange;
-    } catch {
-      // Fall back to manually constructed symbol
-    }
-    // Shared pre-trade guards. This path used to send `quantity: 1` against an
-    // NFO/BFO option symbol — a single unit of a contract that trades in lots,
-    // which is exactly the non-lot-multiple order every other ticket in the
-    // terminal refuses. It also never checked the app mode.
-    const modeRefusal = checkOrderEntryMode(mode);
-    if (modeRefusal) {
-      setOrderMsg({ text: modeRefusal, ok: false });
-      clearTimeout(orderMsgTimerRef.current);
-      orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 3000);
-      return;
-    }
-    const lotSize = symbolDetails?.lotsize ?? 0;
-    const quantity = resolveLotQuantity(orderExchange, 1, {
-      lotSize,
-      verified: lotSize > 0,
-    });
-    if (quantity == null) {
-      setOrderMsg({
-        text: `Lot size for ${orderSymbol} is unverified — order not sent`,
-        ok: false,
+      const typedOptionType = optionType === "PE" ? "PE" : "CE";
+      let orderSymbol   = buildCompactOptionSymbol(symbol, expiry, strike, typedOptionType)
+        ?? `${symbol}${expiry}${strike}${typedOptionType}`;
+      let orderExchange = legExchange;
+      try {
+        const resolved = await getOptionSymbol(
+          symbol,
+          legExchange,
+          expiry,
+          typedOptionType,
+          String(strike),
+          symbolResolutionController.signal,
+          expectedDataScope,
+        );
+        orderSymbol   = resolved.symbol;
+        orderExchange = resolved.exchange;
+      } catch (error) {
+        if (
+          symbolResolutionController.signal.aborted
+          || error instanceof MarketDataAuthorityChangedError
+          || isAbortError(error)
+        ) return;
+        // An ordinary resolver outage may still use the deterministic compact symbol.
+      }
+      try {
+        requireCurrentMarketDataScope(expectedDataScope);
+      } catch {
+        return;
+      }
+      // Shared pre-trade guards. This path used to send `quantity: 1` against an
+      // NFO/BFO option symbol — a single unit of a contract that trades in lots,
+      // which is exactly the non-lot-multiple order every other ticket refuses. It
+      // also never checked the app mode.
+      const modeRefusal = checkOrderEntryMode(mode);
+      if (modeRefusal) {
+        setOrderMsg({ text: modeRefusal, ok: false });
+        clearTimeout(orderMsgTimerRef.current);
+        orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 3000);
+        return;
+      }
+      const lotSize = symbolDetails?.lotsize ?? 0;
+      const quantity = resolveLotQuantity(orderExchange, 1, {
+        lotSize,
+        verified: lotSize > 0,
       });
-      clearTimeout(orderMsgTimerRef.current);
-      orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
-      return;
-    }
-    try {
-      await placeOrder({
-        strategy: "FlintChain",
-        symbol: orderSymbol,
-        exchange: orderExchange,
-        action: action === "B" ? "BUY" : "SELL",
-        quantity,
-        orderType: "MARKET",
-        product: "MIS",
-      });
-      setOrderMsg({ text: `${action} ${orderSymbol} sent`, ok: true });
-    } catch (e) {
-      setOrderMsg({ text: (e as Error).message, ok: false });
+      if (quantity == null) {
+        setOrderMsg({
+          text: `Lot size for ${orderSymbol} is unverified — order not sent`,
+          ok: false,
+        });
+        clearTimeout(orderMsgTimerRef.current);
+        orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
+        return;
+      }
+      // Authority-change cleanup can run after the resolver settles. Check the
+      // lifecycle-owned signal at the last synchronous boundary before the write.
+      if (symbolResolutionController.signal.aborted) return;
+      try {
+        requireCurrentMarketDataScope(expectedDataScope);
+      } catch {
+        return;
+      }
+      try {
+        await placeOrder({
+          strategy: "FlintChain",
+          symbol: orderSymbol,
+          exchange: orderExchange,
+          action: action === "B" ? "BUY" : "SELL",
+          quantity,
+          orderType: "MARKET",
+          product: "MIS",
+        }, orderAuthority);
+        setOrderMsg({ text: `${action} ${orderSymbol} sent`, ok: true });
+      } catch (e) {
+        setOrderMsg({ text: (e as Error).message, ok: false });
+      } finally {
+        clearTimeout(orderMsgTimerRef.current);
+        orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 3000);
+      }
     } finally {
-      clearTimeout(orderMsgTimerRef.current);
-      orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 3000);
+      orderSymbolControllersRef.current.delete(symbolResolutionController);
     }
   }
 
@@ -464,6 +544,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
         <div className="flex items-center gap-1.5 flex-wrap">
           <SymbolSearch
             activeSymbol={symDef}
+            dataScope={dataScope}
             onSelect={(newSym) => { setSymDef(newSym); setExchangeOverride(null); }}
             instruments={optionInstruments}
           />
