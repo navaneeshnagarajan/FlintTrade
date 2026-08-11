@@ -83,8 +83,9 @@ signing/notarisation, Windows/Linux native runtime evidence and the accepted
 RF3 Windows job-supervisor digest pin remain maintainer/native-runner work.
 Count pins remain 71 widgets, 35 brokers and 18 packages. `PLAN.md` is the
 curated public roadmap; the detailed working plan of record lives at
-`.local/agent-context/PLAN.md` — resume from its phase tracker, verify branch/PR
-state live, and never push without explicit maintainer permission.
+`.local/agent-context/PLAN.md` — resume from its ordered delivery/status/current
+work queue, verify branch/PR state live, and never push without explicit
+maintainer permission.
 
 **Next-work queue (in order):**
 1. **Phase 2 stabilisation remainder** — validate the converged cross-platform nightly-CI repairs and continue only evidence-backed duplicate consolidation. G40 broker-connect, infra-script de-duplication, native GTT UI, `post_market_analysis`, dead admin-route wiring, G31/G32/U18 and the final two widget merges are shipped or superseded.
