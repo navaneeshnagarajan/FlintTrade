@@ -136,7 +136,10 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
     name: "list native accounts for Practice market-data resolution",
     method: "GET",
     path: "/ft-api/api/v1/native/accounts",
-    expectedCalls: 5,
+    // Auth/mode activation and the lazy Order Pad observer can settle in either
+    // order, producing five or six legitimate mount-time reads. The bounded
+    // range still aborts any seventh request and authenticates every allowed one.
+    expectedCalls: { minimum: 5, maximum: 6 },
     handler: (request) => {
       expectAuthenticatedGet(request);
       return { json: { accounts: [] } };
@@ -307,7 +310,8 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   await expect(limitOrderType).toBeVisible();
   await expect.poll(
     () => syntheticApi.callCount("GET", "/ft-api/api/v1/native/accounts"),
-  ).toBe(5);
+  ).toBeGreaterThanOrEqual(5);
+  expect(syntheticApi.callCount("GET", "/ft-api/api/v1/native/accounts")).toBeLessThanOrEqual(6);
   await limitOrderType.click();
   await page.getByRole("spinbutton", { name: "Price", exact: true }).fill("123.45");
   await page.getByRole("button", { name: "Practice Buy" }).click();

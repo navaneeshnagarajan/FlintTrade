@@ -466,6 +466,99 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
     );
   });
 
+  baseTest("accepts both inclusive edges of a bounded handler call range", async ({ page }) => {
+    const minimumRegistry = await createRegistry(page, "bounded minimum");
+    minimumRegistry.register({
+      name: "minimum poll",
+      method: "GET",
+      path: "/api/minimum-poll",
+      expectedCalls: { minimum: 2, maximum: 3 },
+      handler: () => ({ json: { ok: true } }),
+    });
+
+    await expect(fetchJson(page, "GET", "/api/minimum-poll")).resolves.toEqual({ ok: true });
+    await expect(fetchJson(page, "GET", "/api/minimum-poll")).resolves.toEqual({ ok: true });
+    await expect(minimumRegistry.dispose()).resolves.toBeUndefined();
+
+    const maximumRegistry = await createRegistry(page, "bounded maximum");
+    maximumRegistry.register({
+      name: "maximum poll",
+      method: "GET",
+      path: "/api/maximum-poll",
+      expectedCalls: { minimum: 2, maximum: 3 },
+      handler: () => ({ json: { ok: true } }),
+    });
+
+    for (let call = 0; call < 3; call += 1) {
+      await expect(fetchJson(page, "GET", "/api/maximum-poll")).resolves.toEqual({ ok: true });
+    }
+    await expect(maximumRegistry.dispose()).resolves.toBeUndefined();
+  });
+
+  baseTest("rejects bounded handler underuse", async ({ page }) => {
+    const registry = await createRegistry(page, "bounded underuse");
+    registry.register({
+      name: "required poll range",
+      method: "GET",
+      path: "/api/required-poll",
+      expectedCalls: { minimum: 2, maximum: 3 },
+      handler: () => ({ json: { ok: true } }),
+    });
+
+    await expect(fetchJson(page, "GET", "/api/required-poll")).resolves.toEqual({ ok: true });
+    await expect(registry.dispose()).rejects.toThrow(
+      /unused handler.*required poll range.*expected 2-3.*observed 1/is,
+    );
+  });
+
+  baseTest("rejects bounded handler overuse without invoking it past the maximum", async ({
+    page,
+  }) => {
+    const registry = await createRegistry(page, "bounded overuse");
+    let invocations = 0;
+    registry.register({
+      name: "bounded poll",
+      method: "GET",
+      path: "/api/bounded-poll",
+      expectedCalls: { minimum: 2, maximum: 3 },
+      handler: () => {
+        invocations += 1;
+        return { json: { invocation: invocations } };
+      },
+    });
+
+    for (let call = 1; call <= 3; call += 1) {
+      await expect(fetchJson(page, "GET", "/api/bounded-poll")).resolves.toEqual({ invocation: call });
+    }
+    await expectFetchToFail(page, "GET", "/api/bounded-poll");
+    expect(invocations).toBe(3);
+    await expect(registry.dispose()).rejects.toThrow(
+      /handler overuse.*bounded poll.*expected 2-3.*observed 4/is,
+    );
+  });
+
+  baseTest("rejects invalid bounded handler call ranges", async ({ page }) => {
+    const registry = await createRegistry(page, "invalid bounded calls");
+
+    for (const [name, expectedCalls] of [
+      ["zero minimum", { minimum: 0, maximum: 1 }],
+      ["fractional maximum", { minimum: 1, maximum: 1.5 }],
+      ["inverted range", { minimum: 3, maximum: 2 }],
+    ] as const) {
+      expect(() => {
+        registry.register({
+          name,
+          method: "GET",
+          path: `/api/${name.replace(" ", "-")}`,
+          expectedCalls,
+          handler: () => ({ json: { unreachable: true } }),
+        });
+      }).toThrow(/expectedCalls range requires positive integer minimum\/maximum with minimum <= maximum/i);
+    }
+
+    await expect(registry.dispose()).resolves.toBeUndefined();
+  });
+
   baseTest("dispose clears state so a fresh registry can reuse the same exact handler", async ({ page }) => {
     const first = await createRegistry(page, "first isolated registry");
     first.register({

@@ -23,7 +23,10 @@ export interface SyntheticHandlerRegistration {
   name: string;
   method: HttpMethod;
   path: string;
-  expectedCalls?: number;
+  expectedCalls?: number | {
+    minimum: number;
+    maximum: number;
+  };
   handler: (request: Request) => SyntheticResponse | Promise<SyntheticResponse>;
 }
 
@@ -48,8 +51,9 @@ export interface SyntheticFixtureRegistry {
   dispose(): Promise<void>;
 }
 
-interface RegisteredHandler extends SyntheticHandlerRegistration {
-  expectedCalls: number;
+interface RegisteredHandler extends Omit<SyntheticHandlerRegistration, "expectedCalls"> {
+  minimumCalls: number;
+  maximumCalls: number;
   calls: number;
 }
 
@@ -184,12 +188,12 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
     }
 
     registered.calls += 1;
-    if (registered.calls > registered.expectedCalls) {
+    if (registered.calls > registered.maximumCalls) {
       this.failures.push({
         kind: "handler overuse",
         evidence:
           `handler overuse: "${registered.name}" ${key}; ` +
-          `expected ${registered.expectedCalls} call(s), observed ${registered.calls}`,
+          `expected ${this.expectedCallsLabel(registered)} call(s), observed ${registered.calls}`,
       });
       await this.abortRoute(route);
       return;
@@ -299,10 +303,30 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
     }
 
     const expectedCalls = registration.expectedCalls ?? 1;
-    if (!Number.isInteger(expectedCalls) || expectedCalls < 1) {
-      throw new Error(
-        `[fail-closed registry "${this.name}"] handler "${name}" expectedCalls must be a positive integer`,
-      );
+    let minimumCalls: number;
+    let maximumCalls: number;
+    if (typeof expectedCalls === "number") {
+      if (!Number.isInteger(expectedCalls) || expectedCalls < 1) {
+        throw new Error(
+          `[fail-closed registry "${this.name}"] handler "${name}" expectedCalls must be a positive integer`,
+        );
+      }
+      minimumCalls = expectedCalls;
+      maximumCalls = expectedCalls;
+    } else {
+      minimumCalls = expectedCalls.minimum;
+      maximumCalls = expectedCalls.maximum;
+      if (
+        !Number.isInteger(minimumCalls)
+        || !Number.isInteger(maximumCalls)
+        || minimumCalls < 1
+        || maximumCalls < minimumCalls
+      ) {
+        throw new Error(
+          `[fail-closed registry "${this.name}"] handler "${name}" expectedCalls range requires ` +
+            "positive integer minimum/maximum with minimum <= maximum",
+        );
+      }
     }
 
     const key = methodAndPath(registration.method, registration.path);
@@ -321,7 +345,15 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
       );
     }
 
-    this.handlers.set(key, { ...registration, name, expectedCalls, calls: 0 });
+    this.handlers.set(key, {
+      name,
+      method: registration.method,
+      path: registration.path,
+      handler: registration.handler,
+      minimumCalls,
+      maximumCalls,
+      calls: 0,
+    });
   }
 
   callCount(method: HttpMethod, path: string): number {
@@ -403,11 +435,11 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
   private buildAssertionError(): Error | undefined {
     const evidence = this.failures.map((failure) => failure.evidence);
     for (const handler of this.handlers.values()) {
-      if (handler.calls !== handler.expectedCalls) {
+      if (handler.calls < handler.minimumCalls || handler.calls > handler.maximumCalls) {
         evidence.push(
           `unused handler or usage mismatch: "${handler.name}" ` +
             `${methodAndPath(handler.method, handler.path)}; ` +
-            `expected ${handler.expectedCalls} call(s), observed ${handler.calls}`,
+            `expected ${this.expectedCallsLabel(handler)} call(s), observed ${handler.calls}`,
         );
       }
     }
@@ -429,6 +461,12 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
       `[fail-closed registry "${this.name}"] ${evidence.length} failure(s):\n` +
         evidence.map((item, index) => `${index + 1}. ${item}`).join("\n"),
     );
+  }
+
+  private expectedCallsLabel(handler: RegisteredHandler): string {
+    return handler.minimumCalls === handler.maximumCalls
+      ? String(handler.minimumCalls)
+      : `${handler.minimumCalls}-${handler.maximumCalls}`;
   }
 
   private captureRequestMismatch(method: string, path: string): void {
