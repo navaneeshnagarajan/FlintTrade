@@ -175,7 +175,7 @@ Two-tier config. No exceptions.
 
 ## Monorepo Structure
 
-18 package surfaces in a four-way nest under `packages/`: **13 Python + 1 Rust + 1 TS design-system + 3 apps** (terminal, desktop, site). Python source for each package lives under `src/flinttrade_<pkg>/` (never a bare `src/<file>.py`). The `chrome-extension` package was dropped in the v0.6.0 restructure. The Tauri desktop shell shipped in v0.0.1 and is retired; the active desktop package is Electron 40 with verified local-source bootstrap. No complete Electron installer release is published yet.
+18 package surfaces in a four-way nest under `packages/`: **13 Python + 1 Rust + 1 TS design-system + 3 apps** (terminal, desktop, site). Python source for each package lives under `src/flinttrade_<pkg>/` (never a bare `src/<file>.py`). The `chrome-extension` package was dropped in the v0.6.0 restructure. The active desktop package is Electron 43 with verified local-source bootstrap. The source-built web app remains distinct from Electron-shell installers; a release is accepted only as all four canonical installers plus `SHA256SUMS.txt`, and retired Tauri and PyInstaller assets never satisfy that gate.
 
 #### `packages/core/` — runtime foundation (4 Python + 1 Rust + 1 TS)
 

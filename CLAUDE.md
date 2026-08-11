@@ -94,8 +94,10 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 
 (`chrome-extension` was dropped in the v0.6.0 restructure. The Tauri shell was
 first shipped in the beta line and is now retired in favour of the Electron
-source-bootstrap architecture; no complete Electron installer release is
-published yet. See [docs/DESKTOP.md](docs/DESKTOP.md).)
+source-bootstrap architecture. The source-built web app remains distinct from
+Electron-shell installers; a release is accepted only as all four canonical
+installers plus `SHA256SUMS.txt`, and retired Tauri and PyInstaller assets never
+satisfy that gate. See [docs/DESKTOP.md](docs/DESKTOP.md).)
 
 ## House rules that bite
 

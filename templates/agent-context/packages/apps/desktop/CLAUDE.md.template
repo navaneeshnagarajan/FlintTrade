@@ -1,6 +1,6 @@
 # FlintTrade — desktop
 
-> Electron 40 shell with verified local-source bootstrap and guardian lifecycle
+> Electron 43 shell with verified local-source bootstrap and guardian lifecycle
 > Serves: selected loopback origin only | Branch: follow the current task context
 
 ## Quick commands
@@ -35,8 +35,9 @@ make desktop-dev        # run against the managed source bootstrap
   or a generic command string to the renderer.
 - Never mutate the running source checkout or include user data in
   promotion/rollback.
-- No complete Electron release is published yet. Do not present beta.13's
-  retired assets as source-bootstrap installers.
+- The source-built web app remains distinct from Electron-shell installers. A
+  release is accepted only as all four canonical installers plus
+  `SHA256SUMS.txt`; retired Tauri and PyInstaller assets never satisfy that gate.
 - A macOS package is not Windows/Linux proof. Cross-platform evidence belongs
   to deterministic tests and CI/contributor runs.
 

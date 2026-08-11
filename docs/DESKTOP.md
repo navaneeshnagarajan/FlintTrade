@@ -5,8 +5,8 @@ API from one origin, and a normal browser remains the primary supported way to
 run it. The desktop package is a small Electron 43 shell around that same local
 application.
 
-> **Installer availability:** previous Tauri and PyInstaller assets do not
-> satisfy the Electron source-bootstrap contract. The public
+> **Installer availability:** the current source baseline is `v0.0.1`. Previous
+> Tauri and PyInstaller assets do not satisfy the Electron source-bootstrap contract. The public
 > [download surface](https://flinttrade.vercel.app/download) distinguishes the
 > source-built web-app install from Electron-shell installers.
 > It withholds Electron commands and download buttons unless one release

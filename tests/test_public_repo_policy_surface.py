@@ -2,11 +2,28 @@
 
 from __future__ import annotations
 
+import json
+import re
 import subprocess
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CURRENT_ELECTRON_GUIDANCE = (
+    Path("packages/apps/desktop/README.md"),
+    Path("readme.md"),
+    Path("docs/ARCHITECTURE.md"),
+    Path("docs/DEVELOPER_GUIDE.md"),
+    Path("CLAUDE.md"),
+    Path("templates/agent-context/CLAUDE.md.template"),
+    Path("templates/agent-context/packages/apps/desktop/CLAUDE.md.template"),
+)
+ELECTRON_CI_GUIDANCE = Path("docs/CI.md")
+ELECTRON_RUNTIME_TEMPLATES = (
+    Path("templates/agent-context/CLAUDE.md.template"),
+    Path("templates/agent-context/packages/apps/desktop/AGENTS.md.template"),
+    Path("templates/agent-context/packages/apps/desktop/CLAUDE.md.template"),
+)
 TEXT_SUFFIXES = {
     ".css",
     ".html",
@@ -146,3 +163,59 @@ def test_public_descriptions_preserve_trading_software_identity() -> None:
     assert "self-hosted trading software" in combined
     assert "manual, automated, algorithmic, and AI-assisted workflows" in _read(surfaces["README"])
     assert "manual orders, automation, and AI-assisted workflows" in _read(surfaces["site home"])
+
+
+def test_current_electron_guidance_describes_the_stable_release_gate() -> None:
+    """Current guidance must describe repository behaviour, not external release status."""
+    # This exact current-guidance set deliberately excludes PLAN.md and AGENTS.md,
+    # which are live status ledgers, and docs/releases/, which is historical.
+    violations: dict[str, list[str]] = {}
+    unstable_status_patterns = {
+        "current publication status": re.compile(r"\bpublished yet\b", re.IGNORECASE),
+        "future first-release prediction": re.compile(r"\bfirst release\b", re.IGNORECASE),
+        "branch deployment prediction": re.compile(r"\bthis branch\b.{0,80}\bdeployed\b", re.IGNORECASE | re.DOTALL),
+        "current deployment assertion": re.compile(r"\bcurrently deployed\b", re.IGNORECASE),
+        "retired beta install reference": re.compile(r"\bbeta\.13\b", re.IGNORECASE),
+    }
+
+    for relative_path in CURRENT_ELECTRON_GUIDANCE:
+        content = _read(ROOT / relative_path)
+        issues = [label for label, pattern in unstable_status_patterns.items() if pattern.search(content)]
+        if not re.search(r"source-built web[ -]app", content, re.IGNORECASE):
+            issues.append("missing distinct source-built web-app path")
+        if not re.search(r"four\s+(?:canonical\s+)?(?:Electron\s+)?installers", content, re.IGNORECASE):
+            issues.append("missing four-installer gate")
+        if "SHA256SUMS.txt" not in content:
+            issues.append("missing checksum-set gate")
+        if not re.search(
+            r"Tauri(?:\s+and\s+|/)PyInstaller\s+assets?\s+(?:never|do\s+not)\s+satisfy",
+            content,
+            re.IGNORECASE,
+        ):
+            issues.append("missing retired-asset rejection")
+        if issues:
+            violations[relative_path.as_posix()] = issues
+
+    ci_content = _read(ROOT / ELECTRON_CI_GUIDANCE)
+    ci_issues = [label for label, pattern in unstable_status_patterns.items() if pattern.search(ci_content)]
+    for required in ("manual dispatch only", "four Electron installers", "SHA256SUMS.txt", "empty release target"):
+        if required not in ci_content:
+            ci_issues.append(f"missing CI contract: {required}")
+    if ci_issues:
+        violations[ELECTRON_CI_GUIDANCE.as_posix()] = ci_issues
+
+    assert violations == {}
+
+
+def test_agent_templates_match_the_pinned_electron_runtime_major() -> None:
+    """Generated agent guidance must name the Electron major pinned by desktop."""
+    package = json.loads(_read(ROOT / "packages/apps/desktop/package.json"))
+    electron_pin = package["devDependencies"]["electron"]
+    expected_major = electron_pin.split(".", maxsplit=1)[0]
+    violations = {
+        path.as_posix(): f"expected Electron {expected_major} for pinned {electron_pin}"
+        for path in ELECTRON_RUNTIME_TEMPLATES
+        if f"Electron {expected_major}" not in _read(ROOT / path)
+    }
+
+    assert violations == {}

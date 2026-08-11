@@ -168,12 +168,11 @@ inspectable local source checkout under `~/.flinttrade/src/FlintTrade`, starts
 the source guardian, and opens the terminal only after its loopback health
 check passes.
 
-No desktop installer release is published yet; the previous Tauri and
-PyInstaller releases and their assets have been retired. When the Electron
-pipeline publishes its first release, the
-[download page](https://flinttrade.vercel.app/download) will withhold
-one-command installs until all four Electron installers and `SHA256SUMS.txt`
-are available together:
+The public [download surface](https://flinttrade.vercel.app/download)
+distinguishes the source-built web app from Electron-shell installers. It
+accepts and exposes an Electron release only when it contains all four
+canonical installers plus `SHA256SUMS.txt`; retired Tauri and PyInstaller assets
+never satisfy that gate:
 
 | OS | Electron installer | Architectures |
 |---|---|---|
@@ -181,7 +180,7 @@ are available together:
 | Windows | `.exe` (NSIS, per-user) | x64; Windows 11 on ARM uses emulation |
 | Linux | `.AppImage` | x64 + arm64 |
 
-Once that gate opens, the desktop install is one command:
+For a release that passes that gate, the desktop install is one command:
 
 ```bash
 # macOS / Linux
