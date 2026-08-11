@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { getMargin } from "@/services/api";
-import { useDataScope } from "@/hooks/useDataScope";
+import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import { queryKeys } from "@/services/queryKeys";
 import type { MarginData } from "@/types/api";
 
@@ -12,11 +12,18 @@ export function useMargin(
   action: string,
   enabled = true,
 ) {
-  const scope = useDataScope();
+  const context = useAccountReadContext();
   return useQuery<MarginData>({
-    queryKey: queryKeys.margin.detail(scope, symbol, exchange, qty, product, action),
-    queryFn: () => getMargin(symbol, exchange, qty, product, action),
-    enabled: enabled && !!symbol && !!exchange && qty > 0,
+    queryKey: queryKeys.margin.detail(
+      context.identity.scopeKey,
+      symbol,
+      exchange,
+      qty,
+      product,
+      action,
+    ),
+    queryFn: ({ signal }) => getMargin(context, symbol, exchange, qty, product, action, signal),
+    enabled: enabled && context.enabled && !!symbol && !!exchange && qty > 0,
     staleTime: 10_000, // 10s — margin changes with market
   });
 }

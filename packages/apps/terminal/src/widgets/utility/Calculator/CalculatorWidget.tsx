@@ -34,7 +34,7 @@
  *   openalgo-chart/src/utils/indicators/riskCalculator.ts
  */
 
-import { useCallback, useEffect, useMemo, useState, memo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import {
   useForm,
   Controller,
@@ -59,6 +59,11 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { WidgetProps } from "@/types/widgets";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import {
+  accountAuthorityMatches,
+  captureAccountAuthority,
+} from "@/lib/accountQueryState";
 import { getMargin, getFunds } from "@/services/api";
 import type { MarginData, Funds } from "@/types/api";
 import {
@@ -1179,7 +1184,24 @@ interface MarginCalcState {
   error:          string | null;
 }
 
+function initialMarginCalcState(): MarginCalcState {
+  return {
+    spanMargin: 0,
+    exposureMargin: 0,
+    totalMargin: 0,
+    availableCash: null,
+    source: "estimate",
+    loading: false,
+    error: null,
+  };
+}
+
 function MarginCalcTab() {
+  const accountReadContext = useAccountReadContext();
+  const currentContextRef = useRef(accountReadContext);
+  const fundsControllerRef = useRef<AbortController | null>(null);
+  const requestIdRef = useRef(0);
+  currentContextRef.current = accountReadContext;
   const {
     register,
     control,
@@ -1201,15 +1223,25 @@ function MarginCalcTab() {
     mode: "onChange",
   });
 
-  const [calcState, setCalcState] = useState<MarginCalcState>({
-    spanMargin:     0,
-    exposureMargin: 0,
-    totalMargin:    0,
-    availableCash:  null,
-    source:         "estimate",
-    loading:        false,
-    error:          null,
-  });
+  const [calcState, setCalcState] = useState<MarginCalcState>(initialMarginCalcState);
+
+  useEffect(() => {
+    requestIdRef.current += 1;
+    fundsControllerRef.current?.abort();
+    fundsControllerRef.current = null;
+    setCalcState(initialMarginCalcState());
+    return () => {
+      requestIdRef.current += 1;
+      fundsControllerRef.current?.abort();
+      fundsControllerRef.current = null;
+    };
+  }, [
+    accountReadContext.enabled,
+    accountReadContext.identity.accountId,
+    accountReadContext.identity.brokerType,
+    accountReadContext.identity.mode,
+    accountReadContext.identity.scopeKey,
+  ]);
 
   const values = watch();
 
@@ -1231,24 +1263,48 @@ function MarginCalcTab() {
 
   const onCalculate = useCallback(
     async (vals: MarginFormValues) => {
+      const context = accountReadContext;
+      if (!context.enabled) {
+        requestIdRef.current += 1;
+        fundsControllerRef.current?.abort();
+        fundsControllerRef.current = null;
+        setCalcState({ ...initialMarginCalcState(), error: "Broker required" });
+        return;
+      }
+
+      const identity = captureAccountAuthority(context.identity);
+      const requestId = ++requestIdRef.current;
+      fundsControllerRef.current?.abort();
+      const controller = new AbortController();
+      fundsControllerRef.current = controller;
+      const isCurrent = () => (
+        requestId === requestIdRef.current
+        && !controller.signal.aborted
+        && currentContextRef.current.enabled
+        && accountAuthorityMatches(identity, currentContextRef.current.identity)
+      );
       setCalcState((s) => ({ ...s, loading: true, error: null }));
 
-      // Fetch available funds in parallel
       let funds: Funds | null = null;
       try {
-        funds = await getFunds();
+        funds = await getFunds(context, controller.signal);
       } catch {
+        if (!isCurrent()) return;
         // non-fatal — we just won't show comparison
       }
+      if (!isCurrent()) return;
 
       try {
         const marginData: MarginData = await getMargin(
+          context,
           vals.symbol,
           vals.exchange,
           num(vals.quantity) * num(vals.legs),
           vals.product,
           vals.action,
+          controller.signal,
         );
+        if (!isCurrent()) return;
         setCalcState({
           spanMargin:     marginData.span_margin,
           exposureMargin: marginData.exposure_margin,
@@ -1259,6 +1315,7 @@ function MarginCalcTab() {
           error:          null,
         });
       } catch {
+        if (!isCurrent()) return;
         // Fall back to estimate
         const estimate = estimateMargin(vals);
         setCalcState({
@@ -1267,9 +1324,13 @@ function MarginCalcTab() {
           loading:       false,
           error:         "API unavailable — showing estimate",
         });
+      } finally {
+        if (fundsControllerRef.current === controller) {
+          fundsControllerRef.current = null;
+        }
       }
     },
-    [estimateMargin],
+    [accountReadContext, estimateMargin],
   );
 
   // Live estimate on form change (no API call)

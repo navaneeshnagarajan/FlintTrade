@@ -17,8 +17,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import {
+  CONNECTED_NATIVE_READ_CONTEXT,
+  PRACTICE_READ_CONTEXT,
+  UNCONFIGURED_LIVE_READ_CONTEXT,
+} from "@/test-utils/accountReadFixtures";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be defined before component import
@@ -83,6 +89,22 @@ const apiMocks = vi.hoisted(() => ({
   getPositionbook: vi.fn(),
 }));
 
+const accountReadState = vi.hoisted(() => {
+  let current: AccountReadContext | undefined;
+  const listeners = new Set<() => void>();
+  return {
+    get current() { return current; },
+    set current(value: AccountReadContext | undefined) {
+      current = value;
+      listeners.forEach((listener) => listener());
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+});
+
 // Mock API calls used by the widget
 vi.mock("@/services/api", () => ({
   getExpiry: apiMocks.getExpiry,
@@ -90,6 +112,16 @@ vi.mock("@/services/api", () => ({
   getQuotes: apiMocks.getQuotes,
   getPositionbook: apiMocks.getPositionbook,
 }));
+
+vi.mock("@/hooks/useAccountReadsEnabled", async () => {
+  const { useSyncExternalStore } = await import("react");
+  return {
+    useAccountReadContext: () => useSyncExternalStore(
+      accountReadState.subscribe,
+      () => accountReadState.current,
+    ),
+  };
+});
 
 // Mock market hours helper
 vi.mock("@/lib/market", () => ({
@@ -131,6 +163,33 @@ vi.mock("@/hooks/useChartTheme", () => ({
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import StraddleWidget, { computeImpliedMove } from "../StraddleWidget";
 
+const ACCOUNT_B_READ_CONTEXT = Object.freeze({
+  identity: Object.freeze({
+    mode: "live",
+    scopeKey: "live:native:upstox:B2",
+    brokerType: "upstox",
+    accountId: "B2",
+  }),
+  enabled: true,
+  host: "",
+  apiKey: "",
+}) satisfies AccountReadContext;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+const straddlePosition = (pnl: number) => ({
+  symbol: "NIFTY25000CE",
+  exchange: "NFO",
+  quantity: 1,
+  pnl,
+});
+
 /** Renders the widget with a Dockview panel-props stub and optional params. */
 function renderWidget(params: Record<string, unknown> = {}) {
   return render(<StraddleWidget {...makeWidgetPanelProps({ params })} />);
@@ -156,11 +215,12 @@ function liveChainMocks() {
 describe("StraddleWidget", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    accountReadState.current = CONNECTED_NATIVE_READ_CONTEXT;
     chartMocks.reset();
-    apiMocks.getExpiry.mockResolvedValue([]);
-    apiMocks.getOptionChain.mockResolvedValue({ calls: [], puts: [] });
-    apiMocks.getQuotes.mockResolvedValue({ ltp: 0 });
-    apiMocks.getPositionbook.mockResolvedValue([]);
+    apiMocks.getExpiry.mockReset().mockResolvedValue([]);
+    apiMocks.getOptionChain.mockReset().mockResolvedValue({ calls: [], puts: [] });
+    apiMocks.getQuotes.mockReset().mockResolvedValue({ ltp: 0 });
+    apiMocks.getPositionbook.mockReset().mockResolvedValue([]);
   });
 
   it("renders without crashing", () => {
@@ -258,6 +318,69 @@ describe("StraddleWidget", () => {
       );
     });
   });
+
+  it("makes zero position requests when Live account reads are unconfigured", async () => {
+    accountReadState.current = UNCONFIGURED_LIVE_READ_CONTEXT;
+    liveChainMocks();
+
+    renderWidget();
+    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledOnce());
+
+    expect(apiMocks.getPositionbook).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["native Live", CONNECTED_NATIVE_READ_CONTEXT],
+    ["Practice", PRACTICE_READ_CONTEXT],
+  ])("pins %s positions to the exact account context and an AbortSignal", async (_label, context) => {
+    accountReadState.current = context;
+    liveChainMocks();
+
+    renderWidget();
+
+    await waitFor(() => expect(apiMocks.getPositionbook).toHaveBeenCalledOnce());
+    expect(apiMocks.getPositionbook).toHaveBeenCalledWith(context, expect.any(AbortSignal));
+  });
+
+  it("clears account-A P&L immediately when account B becomes active", async () => {
+    const pendingB = deferred<ReturnType<typeof straddlePosition>[]>();
+    liveChainMocks();
+    apiMocks.getPositionbook
+      .mockResolvedValueOnce([straddlePosition(111)])
+      .mockImplementationOnce(() => pendingB.promise);
+    const props = makeWidgetPanelProps();
+    const { rerender } = render(<StraddleWidget {...props} />);
+    expect(await screen.findByText("P&L +111")).toBeInTheDocument();
+
+    act(() => { accountReadState.current = ACCOUNT_B_READ_CONTEXT; });
+    rerender(<StraddleWidget {...props} />);
+
+    await waitFor(() => expect(screen.queryByText("P&L +111")).not.toBeInTheDocument());
+  });
+
+  it("aborts and ignores a late account-A position response after switching to B", async () => {
+    const pendingA = deferred<ReturnType<typeof straddlePosition>[]>();
+    liveChainMocks();
+    apiMocks.getPositionbook
+      .mockImplementationOnce(() => pendingA.promise)
+      .mockResolvedValueOnce([straddlePosition(222)]);
+    const props = makeWidgetPanelProps();
+    const { rerender } = render(<StraddleWidget {...props} />);
+    await waitFor(() => expect(apiMocks.getPositionbook).toHaveBeenCalledTimes(1));
+    const accountASignal = apiMocks.getPositionbook.mock.calls[0]?.[1] as AbortSignal | undefined;
+
+    act(() => { accountReadState.current = ACCOUNT_B_READ_CONTEXT; });
+    rerender(<StraddleWidget {...props} />);
+    expect(await screen.findByText("P&L +222")).toBeInTheDocument();
+
+    await act(async () => {
+      pendingA.resolve([straddlePosition(111)]);
+      await pendingA.promise;
+    });
+    expect(screen.getByText("P&L +222")).toBeInTheDocument();
+    expect(screen.queryByText("P&L +111")).not.toBeInTheDocument();
+    expect(accountASignal?.aborted).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -267,11 +390,12 @@ describe("StraddleWidget", () => {
 describe("StraddleWidget — implied-move view", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    accountReadState.current = CONNECTED_NATIVE_READ_CONTEXT;
     chartMocks.reset();
-    apiMocks.getExpiry.mockResolvedValue([]);
-    apiMocks.getOptionChain.mockResolvedValue({ calls: [], puts: [] });
-    apiMocks.getQuotes.mockResolvedValue({ ltp: 0 });
-    apiMocks.getPositionbook.mockResolvedValue([]);
+    apiMocks.getExpiry.mockReset().mockResolvedValue([]);
+    apiMocks.getOptionChain.mockReset().mockResolvedValue({ calls: [], puts: [] });
+    apiMocks.getQuotes.mockReset().mockResolvedValue({ ltp: 0 });
+    apiMocks.getPositionbook.mockReset().mockResolvedValue([]);
   });
 
   it("opens on the σ-band view when params.view is impliedmove", async () => {

@@ -12,31 +12,92 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import {
+  CONNECTED_NATIVE_READ_CONTEXT,
+  PRACTICE_READ_CONTEXT,
+  UNCONFIGURED_LIVE_READ_CONTEXT,
+} from "@/test-utils/accountReadFixtures";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("@/services/api", () => ({
-  getMargin: vi.fn().mockResolvedValue({
-    span_margin: 12000,
-    exposure_margin: 8000,
-    total_margin_required: 20000,
-  }),
-  getFunds: vi.fn().mockResolvedValue({
-    availableCash: 100000,
-    usedMargin: 20000,
-    totalBalance: 120000,
-  }),
+const apiMocks = vi.hoisted(() => ({
+  getMargin: vi.fn(),
+  getFunds: vi.fn(),
 }));
+
+const accountReadState = vi.hoisted(() => {
+  let current: AccountReadContext | undefined;
+  const listeners = new Set<() => void>();
+  return {
+    get current() { return current; },
+    set current(value: AccountReadContext | undefined) {
+      current = value;
+      listeners.forEach((listener) => listener());
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+});
+
+vi.mock("@/services/api", () => ({
+  getMargin: apiMocks.getMargin,
+  getFunds: apiMocks.getFunds,
+}));
+
+vi.mock("@/hooks/useAccountReadsEnabled", async () => {
+  const { useSyncExternalStore } = await import("react");
+  return {
+    useAccountReadContext: () => useSyncExternalStore(
+      accountReadState.subscribe,
+      () => accountReadState.current,
+    ),
+  };
+});
 
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
+
+const ACCOUNT_B_READ_CONTEXT = Object.freeze({
+  identity: Object.freeze({
+    mode: "live",
+    scopeKey: "live:native:upstox:B2",
+    brokerType: "upstox",
+    accountId: "B2",
+  }),
+  enabled: true,
+  host: "",
+  apiKey: "",
+}) satisfies AccountReadContext;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+const LIVE_MARGIN = {
+    span_margin: 12000,
+    exposure_margin: 8000,
+    total_margin_required: 20000,
+};
+
+const ACCOUNT_A_FUNDS = {
+    availableCash: 100000,
+    usedMargin: 20000,
+    totalBalance: 120000,
+};
 
 // ---------------------------------------------------------------------------
 // Import component under test
@@ -94,6 +155,9 @@ function selectMethod(name: string): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  accountReadState.current = CONNECTED_NATIVE_READ_CONTEXT;
+  apiMocks.getMargin.mockReset().mockResolvedValue(LIVE_MARGIN);
+  apiMocks.getFunds.mockReset().mockResolvedValue(ACCOUNT_A_FUNDS);
 });
 
 // ---------------------------------------------------------------------------
@@ -561,5 +625,161 @@ describe("Margin tab", () => {
     expect(resultValue("Total Required")).toBe("₹20,000");
     expect(resultValue("Available Funds")).toBe("₹1,00,000");
     expect(resultValue("After Margin")).toBe("₹80,000");
+  });
+
+  it("makes zero account requests when Live account reads are unconfigured", async () => {
+    accountReadState.current = UNCONFIGURED_LIVE_READ_CONTEXT;
+    renderWithTab("margin");
+
+    await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
+
+    expect(apiMocks.getFunds).not.toHaveBeenCalled();
+    expect(apiMocks.getMargin).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["native Live", CONNECTED_NATIVE_READ_CONTEXT],
+    ["Practice", PRACTICE_READ_CONTEXT],
+  ])("pins %s funds and margin to the same exact account context and AbortSignal", async (_label, context) => {
+    accountReadState.current = context;
+    renderWithTab("margin");
+
+    await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
+
+    await waitFor(() => expect(apiMocks.getMargin).toHaveBeenCalledOnce());
+    const signal = apiMocks.getFunds.mock.calls[0]?.[1] as AbortSignal | undefined;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(apiMocks.getFunds).toHaveBeenCalledWith(context, signal);
+    expect(apiMocks.getMargin).toHaveBeenCalledWith(
+      context,
+      "NIFTY",
+      "NFO",
+      25,
+      "NRML",
+      "BUY",
+      signal,
+    );
+  });
+
+  it("clears account-A funds immediately when account B becomes active", async () => {
+    const props = makeWidgetPanelProps<{ tab: string }>({ params: { tab: "margin" } });
+    const { rerender } = render(<CalculatorWidget {...props} />);
+    await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
+    await waitFor(() => expect(resultValue("Available Funds")).toBe("₹1,00,000"));
+
+    act(() => { accountReadState.current = ACCOUNT_B_READ_CONTEXT; });
+    rerender(<CalculatorWidget {...props} />);
+
+    await waitFor(() => expect(screen.queryByText("Available Funds")).not.toBeInTheDocument());
+  });
+
+  it("aborts and ignores a late account-A funds response after switching to B", async () => {
+    const pendingA = deferred<typeof ACCOUNT_A_FUNDS>();
+    apiMocks.getFunds
+      .mockImplementationOnce(() => pendingA.promise)
+      .mockResolvedValueOnce({
+        availableCash: 200000,
+        usedMargin: 10000,
+        totalBalance: 210000,
+      });
+    const props = makeWidgetPanelProps<{ tab: string }>({ params: { tab: "margin" } });
+    const { rerender } = render(<CalculatorWidget {...props} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
+    await waitFor(() => expect(apiMocks.getFunds).toHaveBeenCalledTimes(1));
+    const accountASignal = apiMocks.getFunds.mock.calls[0]?.[1] as AbortSignal | undefined;
+
+    act(() => { accountReadState.current = ACCOUNT_B_READ_CONTEXT; });
+    rerender(<CalculatorWidget {...props} />);
+    await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
+    await waitFor(() => expect(resultValue("Available Funds")).toBe("₹2,00,000"));
+
+    pendingA.resolve(ACCOUNT_A_FUNDS);
+    await pendingA.promise;
+    await waitFor(() => expect(resultValue("Available Funds")).toBe("₹2,00,000"));
+    expect(accountASignal?.aborted).toBe(true);
+  });
+
+  it("does not retarget or commit a late non-abortable account-A margin after switching to B", async () => {
+    const pendingA = deferred<typeof LIVE_MARGIN>();
+    const accountBMargin = {
+      span_margin: 18000,
+      exposure_margin: 12000,
+      total_margin_required: 30000,
+    };
+    apiMocks.getMargin
+      .mockImplementationOnce(() => pendingA.promise)
+      .mockResolvedValueOnce(accountBMargin);
+    apiMocks.getFunds
+      .mockResolvedValueOnce(ACCOUNT_A_FUNDS)
+      .mockResolvedValueOnce({
+        availableCash: 200000,
+        usedMargin: 10000,
+        totalBalance: 210000,
+      });
+    const props = makeWidgetPanelProps<{ tab: string }>({ params: { tab: "margin" } });
+    const { rerender } = render(<CalculatorWidget {...props} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
+    await waitFor(() => expect(apiMocks.getMargin).toHaveBeenCalledTimes(1));
+    const accountASignal = apiMocks.getMargin.mock.calls[0]?.[6] as AbortSignal | undefined;
+    expect(apiMocks.getMargin.mock.calls[0]?.[0]).toBe(CONNECTED_NATIVE_READ_CONTEXT);
+
+    act(() => { accountReadState.current = ACCOUNT_B_READ_CONTEXT; });
+    rerender(<CalculatorWidget {...props} />);
+    await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
+    await waitFor(() => expect(resultValue("Total Required")).toBe("₹30,000"));
+    expect(apiMocks.getMargin.mock.calls[1]?.[0]).toBe(ACCOUNT_B_READ_CONTEXT);
+
+    pendingA.resolve(LIVE_MARGIN);
+    await pendingA.promise;
+    await waitFor(() => expect(resultValue("Total Required")).toBe("₹30,000"));
+    expect(accountASignal?.aborted).toBe(true);
+  });
+
+  it("keeps only the latest result from overlapping requests on the same authority", async () => {
+    const first = deferred<typeof LIVE_MARGIN>();
+    const second = deferred<typeof LIVE_MARGIN>();
+    apiMocks.getMargin
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+    renderWithTab("margin");
+    const form = screen.getByRole("button", { name: /get live margin/i }).closest("form");
+    expect(form).not.toBeNull();
+
+    fireEvent.submit(form!);
+    await waitFor(() => expect(apiMocks.getMargin).toHaveBeenCalledTimes(1));
+    const firstSignal = apiMocks.getMargin.mock.calls[0]?.[6] as AbortSignal | undefined;
+    fireEvent.submit(form!);
+    await waitFor(() => expect(apiMocks.getMargin).toHaveBeenCalledTimes(2));
+    const secondSignal = apiMocks.getMargin.mock.calls[1]?.[6] as AbortSignal | undefined;
+
+    expect(firstSignal?.aborted).toBe(true);
+    expect(secondSignal?.aborted).toBe(false);
+    second.resolve({
+      span_margin: 18000,
+      exposure_margin: 12000,
+      total_margin_required: 30000,
+    });
+    await waitFor(() => expect(resultValue("Total Required")).toBe("₹30,000"));
+
+    first.resolve(LIVE_MARGIN);
+    await first.promise;
+    await waitFor(() => expect(resultValue("Total Required")).toBe("₹30,000"));
+  });
+
+  it("aborts the shared funds and margin signal on unmount", async () => {
+    apiMocks.getMargin.mockReturnValue(new Promise(() => {}));
+    const { unmount } = renderWithTab("margin");
+
+    await userEvent.click(screen.getByRole("button", { name: /get live margin/i }));
+    await waitFor(() => expect(apiMocks.getMargin).toHaveBeenCalledOnce());
+    const fundsSignal = apiMocks.getFunds.mock.calls[0]?.[1] as AbortSignal | undefined;
+    const marginSignal = apiMocks.getMargin.mock.calls[0]?.[6] as AbortSignal | undefined;
+
+    expect(marginSignal).toBe(fundsSignal);
+    unmount();
+    expect(fundsSignal?.aborted).toBe(true);
+    expect(marginSignal?.aborted).toBe(true);
   });
 });

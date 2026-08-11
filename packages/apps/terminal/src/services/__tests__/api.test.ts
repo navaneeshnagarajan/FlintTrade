@@ -113,6 +113,7 @@ import {
   ping,
   searchSymbol,
   getHoldings,
+  getOrderbook,
   getPositionbook,
   getTradebook,
   getQuoteDetails,
@@ -128,9 +129,37 @@ import {
 } from "@/services/rateLimiter";
 import {
   CONNECTED_NATIVE_READ_CONTEXT,
+  EXPLORE_READ_CONTEXT,
   PRACTICE_READ_CONTEXT,
   UNCONFIGURED_LIVE_READ_CONTEXT,
 } from "@/test-utils/accountReadFixtures";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
+
+const OPENALGO_READ_CONTEXT = Object.freeze({
+  identity: Object.freeze({
+    mode: "live",
+    scopeKey: "live:openalgo:test-scope",
+    brokerType: "openalgo",
+    accountId: "default",
+  }),
+  enabled: true,
+  host: "",
+  apiKey: "test-key-123",
+}) satisfies AccountReadContext;
+
+function nativeReadContext(brokerType: string, accountId: string): AccountReadContext {
+  return Object.freeze({
+    identity: Object.freeze({
+      mode: "live" as const,
+      scopeKey: `live:native:${brokerType}:${accountId}`,
+      brokerType,
+      accountId,
+    }),
+    enabled: true,
+    host: "",
+    apiKey: "",
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -174,7 +203,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       jsonResponse({ status: "success", data: { available: 50000 } }),
     );
 
-    await getFunds();
+    await getFunds(OPENALGO_READ_CONTEXT);
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -187,33 +216,22 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(body).toHaveProperty("apikey", "test-key-123");
   });
 
-  it("uses the primary live native account for funds when no OpenAlgo key is configured", async () => {
+  it("uses the exact captured live native account for funds without account discovery", async () => {
     mockConnectionState.apiKey = "";
-    fetchSpy
-      .mockResolvedValueOnce(
-        jsonResponse({
-          status: "success",
-          data: {
-            accounts: [
-              { adapter_id: "dhan", account_id: "D1", is_primary: true, has_session: true },
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          status: "success",
-          data: { available_balance: "100.50", used_margin: "20.25", total_balance: "120.75" },
-        }),
-      );
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: { available_balance: "100.50", used_margin: "20.25", total_balance: "120.75" },
+      }),
+    );
 
-    const result = await getFunds();
+    const result = await getFunds(nativeReadContext("dhan", "D1"));
 
     expect(result).toEqual({ availableCash: 100.5, usedMargin: 20.25, totalBalance: 120.75 });
-    expect((fetchSpy.mock.calls[0] as [string, RequestInit | undefined])[0]).toContain("/api/v1/native/accounts");
-    expect((fetchSpy.mock.calls[1] as [string, RequestInit | undefined])[0]).toContain(
+    expect((fetchSpy.mock.calls[0] as [string, RequestInit | undefined])[0]).toContain(
       "/api/v1/native/accounts/dhan/D1/funds",
     );
+    expect(fetchSpy).toHaveBeenCalledOnce();
     expect(fetchSpy).not.toHaveBeenCalledWith(
       expect.stringContaining("/api/v1/funds"),
       expect.anything(),
@@ -228,82 +246,70 @@ describe("OpenAlgo API client (api.ts)", () => {
       }),
     );
 
-    await expect(getFunds()).resolves.toEqual({
+    await expect(getFunds(OPENALGO_READ_CONTEXT)).resolves.toEqual({
       availableCash: 80000.5,
       usedMargin: 19500,
       totalBalance: 100000,
     });
   });
 
-  it("uses the active live native account before the primary native fallback", async () => {
+  it("keeps a captured active native position read pinned when mutable stores change", async () => {
     mockConnectionState.apiKey = "";
     mockBrokerState.accounts = [
       { account_id: "D1", broker: "dhan", source: "native" },
       { account_id: "U1", broker: "upstox", source: "native" },
     ];
     mockBrokerState.activeAccountId = "U1";
-    fetchSpy
-      .mockResolvedValueOnce(
-        jsonResponse({
-          status: "success",
-          data: {
-            accounts: [
-              { adapter_id: "dhan", account_id: "D1", is_primary: true, has_session: true },
-              { adapter_id: "upstox", account_id: "U1", is_primary: false, has_session: true },
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          status: "success",
-          data: [{ symbol: "INFY", quantity: 2 }],
-        }),
-      );
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: [{ symbol: "INFY", quantity: 2 }],
+      }),
+    );
 
-    const result = await getPositionbook();
+    const result = await getPositionbook(nativeReadContext("upstox", "U1"));
 
     expect(result).toEqual([{ symbol: "INFY", quantity: 2 }]);
-    expect((fetchSpy.mock.calls[1] as [string, RequestInit | undefined])[0]).toContain(
+    expect((fetchSpy.mock.calls[0] as [string, RequestInit | undefined])[0]).toContain(
       "/api/v1/native/accounts/upstox/U1/positions",
     );
   });
 
-  it("uses a broker-aware active native key when multiple brokers share the same account id", async () => {
+  it("uses the broker encoded in context when multiple brokers share an account id", async () => {
     mockConnectionState.apiKey = "";
     mockBrokerState.accounts = [
       { account_id: "SHARED", broker: "dhan", source: "native" },
       { account_id: "SHARED", broker: "upstox", source: "native" },
     ];
     mockBrokerState.activeAccountId = "native:upstox:SHARED";
-    fetchSpy
-      .mockResolvedValueOnce(
-        jsonResponse({
-          status: "success",
-          data: {
-            accounts: [
-              { adapter_id: "dhan", account_id: "SHARED", is_primary: true, has_session: true },
-              { adapter_id: "upstox", account_id: "SHARED", is_primary: false, has_session: true },
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          status: "success",
-          data: [{ symbol: "SBIN", quantity: 5 }],
-        }),
-      );
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: [{ symbol: "SBIN", quantity: 5 }],
+      }),
+    );
 
-    const result = await getPositionbook();
+    const result = await getPositionbook(nativeReadContext("upstox", "SHARED"));
 
     expect(result).toEqual([{ symbol: "SBIN", quantity: 5 }]);
-    expect((fetchSpy.mock.calls[1] as [string, RequestInit | undefined])[0]).toContain(
+    expect((fetchSpy.mock.calls[0] as [string, RequestInit | undefined])[0]).toContain(
       "/api/v1/native/accounts/upstox/SHARED/positions",
     );
   });
 
   it.each([
+    {
+      name: "orderbook",
+      read: getOrderbook,
+      response: [{ orderId: "O-1", symbol: "SBIN", exchange: "NSE" }],
+      path: "/api/v1/native/accounts/dhan/A1/orders",
+    },
+    {
+      name: "positionbook",
+      read: getPositionbook,
+      response: [{ symbol: "SBIN", exchange: "NSE", quantity: 2 }],
+      path: "/api/v1/native/accounts/dhan/A1/positions",
+    },
     {
       name: "holdings",
       read: getHoldings,
@@ -336,6 +342,44 @@ describe("OpenAlgo API client (api.ts)", () => {
       expect(init.signal).toBe(controller.signal);
     },
   );
+
+  it.each([
+    ["funds", getFunds],
+    ["orderbook", getOrderbook],
+    ["positionbook", getPositionbook],
+  ])("rejects %s before transport when immutable account context is missing", async (_name, read) => {
+    fetchSpy.mockResolvedValue(jsonResponse({ status: "success", data: [] }));
+
+    await expect(
+      (read as unknown as (context?: AccountReadContext) => Promise<unknown>)(undefined),
+    ).rejects.toThrow("Account read context is required");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects margin before transport when immutable account context is missing", async () => {
+    fetchSpy.mockResolvedValue(jsonResponse({ status: "success", data: {} }));
+
+    await expect(
+      (getMargin as unknown as (
+        context: AccountReadContext | undefined,
+        symbol: string,
+        exchange: string,
+        qty: number,
+        product: string,
+        action: string,
+      ) => Promise<unknown>)(undefined, "INFY", "NSE", 10, "MIS", "BUY"),
+    ).rejects.toThrow("Account read context is required");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects margin before transport when immutable Live authority is unavailable", async () => {
+    fetchSpy.mockResolvedValue(jsonResponse({ status: "success", data: {} }));
+
+    await expect(
+      getMargin(UNCONFIGURED_LIVE_READ_CONTEXT, "INFY", "NSE", 10, "MIS", "BUY"),
+    ).rejects.toThrow("Account reads are unavailable");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 
   it.each([
     ["holdings", getHoldings],
@@ -375,37 +419,28 @@ describe("OpenAlgo API client (api.ts)", () => {
       }),
     );
 
-    await expect(getPositionbook()).rejects.toThrow();
+    await expect(getPositionbook(UNCONFIGURED_LIVE_READ_CONTEXT)).rejects.toThrow(
+      "Account reads are unavailable",
+    );
     const urls = fetchSpy.mock.calls.map(([url]) => String(url));
     expect(urls.some((url) => url.includes("/api/v1/native/accounts/dhan/D1/positions"))).toBe(false);
   });
 
-  it("still uses the primary native account when no account is actively selected", async () => {
+  it("reads a caller-captured primary native account without a mutable fallback", async () => {
     mockConnectionState.apiKey = "";
     mockBrokerState.accounts = [];
     mockBrokerState.activeAccountId = null;
-    fetchSpy
-      .mockResolvedValueOnce(
-        jsonResponse({
-          status: "success",
-          data: {
-            accounts: [
-              { adapter_id: "dhan", account_id: "D1", is_primary: true, has_session: true },
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          status: "success",
-          data: [{ symbol: "RELIANCE", quantity: 1 }],
-        }),
-      );
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: [{ symbol: "RELIANCE", quantity: 1 }],
+      }),
+    );
 
-    const result = await getPositionbook();
+    const result = await getPositionbook(nativeReadContext("dhan", "D1"));
 
     expect(result).toEqual([{ symbol: "RELIANCE", quantity: 1 }]);
-    expect((fetchSpy.mock.calls[1] as [string, RequestInit | undefined])[0]).toContain(
+    expect((fetchSpy.mock.calls[0] as [string, RequestInit | undefined])[0]).toContain(
       "/api/v1/native/accounts/dhan/D1/positions",
     );
   });
@@ -569,31 +604,33 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
   });
 
-  it("uses native margin calculator when a live native account is connected without an OpenAlgo key", async () => {
-    mockConnectionState.apiKey = "";
-    fetchSpy
-      .mockResolvedValueOnce(
-        jsonResponse({
-          status: "success",
-          data: {
-            accounts: [
-              { adapter_id: "upstox", account_id: "U1", is_primary: true, has_session: true },
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          status: "success",
-          data: {
-            required_margin: "2500.5",
-            span_margin: "2000.25",
-            exposure_margin: "500.25",
-          },
-        }),
-      );
+  it("uses the exact captured native account and AbortSignal for margin", async () => {
+    mockConnectionState.apiKey = "mutable-openalgo-key";
+    mockBrokerState.accounts = [
+      { account_id: "B2", broker: "upstox", source: "native", status: "connected" },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:B2";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: {
+          required_margin: "2500.5",
+          span_margin: "2000.25",
+          exposure_margin: "500.25",
+        },
+      }),
+    );
+    const controller = new AbortController();
 
-    const result = await getMargin("INFY", "NSE", 10, "MIS", "BUY");
+    const result = await getMargin(
+      CONNECTED_NATIVE_READ_CONTEXT,
+      "INFY",
+      "NSE",
+      10,
+      "MIS",
+      "BUY",
+      controller.signal,
+    );
 
     expect(result).toMatchObject({
       required_margin: 2500.5,
@@ -601,13 +638,28 @@ describe("OpenAlgo API client (api.ts)", () => {
       span_margin: 2000.25,
       exposure_margin: 500.25,
     });
-    expect((fetchSpy.mock.calls[1] as [string, RequestInit | undefined])[0]).toContain(
-      "/api/v1/native/accounts/upstox/U1/margin?symbol=INFY&exchange=NSE&qty=10&product=MIS&action=BUY",
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain(
+      "/api/v1/native/accounts/dhan/A1/margin?symbol=INFY&exchange=NSE&qty=10&product=MIS&action=BUY",
     );
-    expect(fetchSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining("/api/v1/margin"),
-      expect.anything(),
-    );
+    expect(url).not.toContain("upstox/B2");
+    expect(init.signal).toBe(controller.signal);
+  });
+
+  it("keeps Practice margin on sandbox authority without touching a Live target", async () => {
+    mockConnectionState.apiKey = "configured-live-key";
+    mockBrokerState.accounts = [
+      { account_id: "D1", broker: "dhan", source: "native", status: "connected" },
+    ];
+    mockBrokerState.activeAccountId = "native:dhan:D1";
+    fetchSpy.mockResolvedValue(jsonResponse({ status: "success", data: {} }));
+    const controller = new AbortController();
+
+    await expect(
+      getMargin(PRACTICE_READ_CONTEXT, "INFY", "NSE", 10, "MIS", "BUY", controller.signal),
+    ).rejects.toThrow("margin is not available from the Practice sandbox");
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("reads native broker verbs as thin envelope readers with no per-broker branching", async () => {
@@ -2197,13 +2249,11 @@ describe("OpenAlgo API client (api.ts)", () => {
     });
   });
 
-  it("keeps explore mode on sample account data instead of touching native accounts", async () => {
+  it("refuses account funds in Explore instead of inventing an account fallback", async () => {
     mockConnectionState.apiKey = "";
     mockModeState.mode = "explore";
 
-    const result = await getFunds();
-
-    expect(result).toEqual({ availableCash: 250_000, usedMargin: 48_500, totalBalance: 298_500 });
+    await expect(getFunds(EXPLORE_READ_CONTEXT)).rejects.toThrow("Account reads are unavailable");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -2256,7 +2306,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       },
     }));
 
-    await expect(getFunds()).resolves.toEqual({
+    await expect(getFunds(PRACTICE_READ_CONTEXT)).resolves.toEqual({
       availableCash: 900_000,
       usedMargin: 112_500,
       totalBalance: 1_012_500,
@@ -2285,7 +2335,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       },
     }));
 
-    await expect(getPositionbook()).resolves.toEqual([{
+    await expect(getPositionbook(PRACTICE_READ_CONTEXT)).resolves.toEqual([{
       symbol: "INFY",
       exchange: "NSE",
       product: "MIS",
@@ -3390,7 +3440,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       jsonResponse({ status: "success", data: { positions } }),
     );
 
-    const result = await getPositionbook();
+    const result = await getPositionbook(OPENALGO_READ_CONTEXT);
     expect(result).toEqual(positions);
   });
 
@@ -3409,13 +3459,13 @@ describe("OpenAlgo API client (api.ts)", () => {
       jsonResponse({ error: "DB connection lost" }, 500),
     );
 
-    await expect(getFunds()).rejects.toThrow("DB connection lost");
+    await expect(getFunds(OPENALGO_READ_CONTEXT)).rejects.toThrow("DB connection lost");
   });
 
   it("throws generic message for unexpected status codes", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({}, 429));
 
-    await expect(getFunds()).rejects.toThrow("Server error (429)");
+    await expect(getFunds(OPENALGO_READ_CONTEXT)).rejects.toThrow("Server error (429)");
   });
 
   it("throws on status: error in JSON body", async () => {
@@ -3431,7 +3481,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   it("throws descriptive error on network failure (POST)", async () => {
     fetchSpy.mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
-    await expect(getFunds()).rejects.toThrow(
+    await expect(getFunds(OPENALGO_READ_CONTEXT)).rejects.toThrow(
       "Connection failed. Check OpenAlgo is running.",
     );
   });
@@ -3449,7 +3499,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   it("throws when general rate limiter is exhausted (POST)", async () => {
     vi.mocked(generalLimiter.tryConsume).mockReturnValue(false);
 
-    await expect(getFunds()).rejects.toThrow("Rate limit exceeded");
+    await expect(getFunds(OPENALGO_READ_CONTEXT)).rejects.toThrow("Rate limit exceeded");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

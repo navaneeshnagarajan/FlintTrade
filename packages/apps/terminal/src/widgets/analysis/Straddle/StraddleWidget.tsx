@@ -57,6 +57,11 @@ import {
 } from "@/services/api";
 import type { Quote, Position } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
+import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import {
+  accountAuthorityMatches,
+  captureAccountAuthority,
+} from "@/lib/accountQueryState";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -758,6 +763,11 @@ function StraddleWidget(props: WidgetProps) {
   const panelView = panelParams?.view;
 
   const track = useTrackBehavior();
+  const accountReadContext = useAccountReadContext();
+  const currentContextRef = useRef(accountReadContext);
+  const positionControllerRef = useRef<AbortController | null>(null);
+  const requestIdRef = useRef(0);
+  currentContextRef.current = accountReadContext;
   const [view, setView] = useState<ViewMode>(() => resolveViewMode(panelView));
   const [activeSymbolIdx, setActiveSymbolIdx] = useState(0);
   const [expiries, setExpiries]               = useState<string[]>([]);
@@ -778,6 +788,24 @@ function StraddleWidget(props: WidgetProps) {
 
   const symDef   = SYMBOLS[activeSymbolIdx];
   const exchange = symDef.exchange;
+
+  useEffect(() => {
+    requestIdRef.current += 1;
+    positionControllerRef.current?.abort();
+    positionControllerRef.current = null;
+    setPositions(null);
+    return () => {
+      requestIdRef.current += 1;
+      positionControllerRef.current?.abort();
+      positionControllerRef.current = null;
+    };
+  }, [
+    accountReadContext.enabled,
+    accountReadContext.identity.accountId,
+    accountReadContext.identity.brokerType,
+    accountReadContext.identity.mode,
+    accountReadContext.identity.scopeKey,
+  ]);
 
   // fetch expiries
   useEffect(() => {
@@ -808,6 +836,18 @@ function StraddleWidget(props: WidgetProps) {
   // main data fetch
   const fetchData = useCallback(async () => {
     if (!selectedExpiry) return;
+    const context = accountReadContext;
+    const identity = captureAccountAuthority(context.identity);
+    const requestId = ++requestIdRef.current;
+    positionControllerRef.current?.abort();
+    const controller = context.enabled ? new AbortController() : null;
+    positionControllerRef.current = controller;
+    const isCurrent = () => (
+      requestId === requestIdRef.current
+      && !controller?.signal.aborted
+      && accountAuthorityMatches(identity, currentContextRef.current.identity)
+      && context.enabled === currentContextRef.current.enabled
+    );
     setLoading(true);
     setError(null);
 
@@ -815,8 +855,12 @@ function StraddleWidget(props: WidgetProps) {
       const [chainRes, spotRes, posRes] = await Promise.allSettled([
         getOptionChain(symDef.label, exchange, selectedExpiry),
         getQuotes(symDef.spotSymbol, symDef.spotExchange),
-        getPositionbook(),
+        context.enabled
+          ? getPositionbook(context, controller!.signal)
+          : Promise.resolve<Position[] | null>(null),
       ]);
+
+      if (!isCurrent()) return;
 
       let newChain: RawOptionChain | null = null;
       let newSpot: Quote | null  = null;
@@ -867,10 +911,15 @@ function StraddleWidget(props: WidgetProps) {
         }
       }
     } finally {
-      setLoading(false);
-      setLastRefresh(new Date());
+      if (isCurrent()) {
+        setLoading(false);
+        setLastRefresh(new Date());
+      }
+      if (positionControllerRef.current === controller) {
+        positionControllerRef.current = null;
+      }
     }
-  }, [selectedExpiry, symDef, exchange]);
+  }, [accountReadContext, selectedExpiry, symDef, exchange]);
 
   // auto-refresh
   useEffect(() => {

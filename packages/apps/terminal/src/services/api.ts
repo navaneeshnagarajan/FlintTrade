@@ -1737,6 +1737,7 @@ async function readAccountSnapshot<T>(
   context: AccountReadContext,
   signal?: AbortSignal,
 ): Promise<T> {
+  if (!context) throw new Error(`Account read context is required for ${endpoint}.`);
   if (!context.enabled) throw new Error(`Account reads are unavailable for ${endpoint}.`);
   if (!generalLimiter.tryConsume()) {
     throw new Error(`Rate limit exceeded for ${endpoint} (general: 50/s)`);
@@ -2688,13 +2689,23 @@ export const getOIProfile = (symbol: string, exchange: string, expiry_date?: str
     .then(normaliseOIProfileEntries);
 
 // --- Account ---
-export const getFunds = async (context?: AccountReadContext, signal?: AbortSignal) => normaliseFundsShape(
-  context
-    ? await readAccountSnapshot<unknown>("funds", {}, context, signal)
-    : await post<unknown>("funds"),
+export const getFunds = async (context: AccountReadContext, signal?: AbortSignal) => normaliseFundsShape(
+  await readAccountSnapshot<unknown>("funds", {}, context, signal),
 );
-export const getMargin = (symbol: string, exchange: string, qty: number, product: string, action: string) =>
-  post<MarginData>("margin", { symbol, exchange, qty, product, action });
+export const getMargin = (
+  context: AccountReadContext,
+  symbol: string,
+  exchange: string,
+  qty: number,
+  product: string,
+  action: string,
+  signal?: AbortSignal,
+) => readAccountSnapshot<MarginData>(
+  "margin",
+  { symbol, exchange, qty, product, action },
+  context,
+  signal,
+);
 export const getOrderHistory = (orderId: string) =>
   readRequiredPrimaryNative<Array<Record<string, unknown>>>("orderhistory", { order_id: orderId });
 export const getOrderTrades = (orderId: string) =>
@@ -2705,12 +2716,10 @@ export const getOrderTrades = (orderId: string) =>
 // We extract the nested array and fall back to the raw value for brokers that
 // return a plain array (future-proofing / broker inconsistency).
 export const getOrderbook = async (
-  context?: AccountReadContext,
+  context: AccountReadContext,
   signal?: AbortSignal,
 ): Promise<Order[]> => {
-  const raw = context
-    ? await readAccountSnapshot<Order[] | { orders?: Order[] }>("orderbook", {}, context, signal)
-    : await post<Order[] | { orders?: Order[] }>("orderbook");
+  const raw = await readAccountSnapshot<Order[] | { orders?: Order[] }>("orderbook", {}, context, signal);
   if (Array.isArray(raw)) return raw;
   return Array.isArray(raw.orders) ? raw.orders : [];
 };
@@ -2730,12 +2739,15 @@ export const getTradebook = async (
 };
 
 export const getPositionbook = async (
-  context?: AccountReadContext,
+  context: AccountReadContext,
   signal?: AbortSignal,
 ): Promise<Position[]> => {
-  const raw = context
-    ? await readAccountSnapshot<Position[] | { positions?: Position[] }>("positionbook", {}, context, signal)
-    : await post<Position[] | { positions?: Position[] }>("positionbook");
+  const raw = await readAccountSnapshot<Position[] | { positions?: Position[] }>(
+    "positionbook",
+    {},
+    context,
+    signal,
+  );
   if (Array.isArray(raw)) return raw;
   return Array.isArray(raw.positions) ? raw.positions : [];
 };

@@ -19,23 +19,46 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import type { Order, Position, MarginData } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Mocks — declared BEFORE the hook imports so vi.mock hoisting applies.
 // ---------------------------------------------------------------------------
 
-const mockGetOrderbook = vi.fn<() => Promise<Order[]>>();
-const mockGetPositionbook = vi.fn<() => Promise<Position[]>>();
+const mockGetOrderbook = vi.fn<
+  (context: AccountReadContext, signal?: AbortSignal) => Promise<Order[]>
+>();
+const mockGetPositionbook = vi.fn<
+  (context: AccountReadContext, signal?: AbortSignal) => Promise<Position[]>
+>();
 const mockGetMargin = vi.fn<
-  (sym: string, exch: string, qty: number, prod: string, act: string) => Promise<MarginData>
+  (
+    context: AccountReadContext,
+    sym: string,
+    exch: string,
+    qty: number,
+    prod: string,
+    act: string,
+    signal?: AbortSignal,
+  ) => Promise<MarginData>
 >();
 const dataScopeState = vi.hoisted(() => ({ value: "live:openalgo:first" }));
 
 vi.mock("@/services/api", () => ({
-  getOrderbook: () => mockGetOrderbook(),
-  getPositionbook: () => mockGetPositionbook(),
-  getMargin: (...args: [string, string, number, string, string]) => mockGetMargin(...args),
+  getOrderbook: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetOrderbook(context, signal),
+  getPositionbook: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetPositionbook(context, signal),
+  getMargin: (
+    context: AccountReadContext,
+    symbol: string,
+    exchange: string,
+    qty: number,
+    product: string,
+    action: string,
+    signal?: AbortSignal,
+  ) => mockGetMargin(context, symbol, exchange, qty, product, action, signal),
 }));
 
 vi.mock("@/hooks/useDataScope", () => ({
@@ -111,6 +134,20 @@ describe("useOrders", () => {
     renderHook(() => useOrders(), { wrapper: createWrapper() });
 
     await waitFor(() => expect(mockGetOrderbook).toHaveBeenCalledTimes(1));
+    expect(mockGetOrderbook).toHaveBeenCalledWith(
+      {
+        identity: {
+          mode: "live",
+          scopeKey: "live:openalgo:first",
+          brokerType: "openalgo",
+          accountId: "default",
+        },
+        enabled: true,
+        host: "",
+        apiKey: "",
+      },
+      expect.any(AbortSignal),
+    );
   });
 
   it("does not call getOrderbook when disabled", () => {
@@ -260,6 +297,20 @@ describe("usePositions", () => {
     renderHook(() => usePositions(), { wrapper: createWrapper() });
 
     await waitFor(() => expect(mockGetPositionbook).toHaveBeenCalledTimes(1));
+    expect(mockGetPositionbook).toHaveBeenCalledWith(
+      {
+        identity: {
+          mode: "live",
+          scopeKey: "live:openalgo:first",
+          brokerType: "openalgo",
+          accountId: "default",
+        },
+        enabled: true,
+        host: "",
+        apiKey: "",
+      },
+      expect.any(AbortSignal),
+    );
   });
 
   it("does not call getPositionbook when disabled", () => {
@@ -316,7 +367,17 @@ describe("useMargin — enabled gate", () => {
     );
 
     await waitFor(() => expect(mockGetMargin).toHaveBeenCalledTimes(1));
-    expect(mockGetMargin).toHaveBeenCalledWith("NIFTY", "NFO", 50, "MIS", "BUY");
+    expect(mockGetMargin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identity: expect.objectContaining({ scopeKey: "live:openalgo:first" }),
+      }),
+      "NIFTY",
+      "NFO",
+      50,
+      "MIS",
+      "BUY",
+      expect.any(AbortSignal),
+    );
   });
 
   it("does NOT fire when symbol is empty", () => {

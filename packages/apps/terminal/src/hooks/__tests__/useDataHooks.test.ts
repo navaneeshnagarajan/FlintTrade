@@ -45,17 +45,27 @@ const mockGetMargin = vi.fn();
 const mockGetSyntheticFuture = vi.fn();
 
 vi.mock("@/services/api", () => ({
-  getFunds: () => mockGetFunds(),
+  getFunds: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetFunds(context, signal),
   getHoldings: (context: AccountReadContext, signal?: AbortSignal) =>
     mockGetHoldings(context, signal),
-  getOrderbook: () => mockGetOrderbook(),
-  getPositionbook: () => mockGetPositionbook(),
+  getOrderbook: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetOrderbook(context, signal),
+  getPositionbook: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetPositionbook(context, signal),
   getTradebook: (context: AccountReadContext, signal?: AbortSignal) =>
     mockGetTradebook(context, signal),
   getOptionChain: (symbol: string, exchange: string, expiry?: string) =>
     mockGetOptionChain(symbol, exchange, expiry),
-  getMargin: (symbol: string, exchange: string, qty: number, product: string, action: string) =>
-    mockGetMargin(symbol, exchange, qty, product, action),
+  getMargin: (
+    context: AccountReadContext,
+    symbol: string,
+    exchange: string,
+    qty: number,
+    product: string,
+    action: string,
+    signal?: AbortSignal,
+  ) => mockGetMargin(context, symbol, exchange, qty, product, action, signal),
   getSyntheticFuture: (symbol: string, exchange: string, expiry?: string) =>
     mockGetSyntheticFuture(symbol, exchange, expiry),
 }));
@@ -140,6 +150,10 @@ describe("useFunds", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(fundsData);
+    expect(mockGetFunds).toHaveBeenCalledWith(
+      mockAccountReadContext,
+      expect.any(AbortSignal),
+    );
   });
 
   it("returns error state on failure", async () => {
@@ -207,6 +221,10 @@ describe("useOrders", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveLength(1);
+    expect(mockGetOrderbook).toHaveBeenCalledWith(
+      mockAccountReadContext,
+      expect.any(AbortSignal),
+    );
   });
 
   it("returns error state on failure", async () => {
@@ -238,8 +256,11 @@ describe("usePositions", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveLength(1);
+    expect(mockGetPositionbook).toHaveBeenCalledWith(
+      mockAccountReadContext,
+      expect.any(AbortSignal),
+    );
   });
-
 });
 
 // ---------------------------------------------------------------------------
@@ -357,7 +378,15 @@ describe("useMargin", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(marginData);
-    expect(mockGetMargin).toHaveBeenCalledWith("NIFTY", "NFO", 50, "MIS", "BUY");
+    expect(mockGetMargin).toHaveBeenCalledWith(
+      mockAccountReadContext,
+      "NIFTY",
+      "NFO",
+      50,
+      "MIS",
+      "BUY",
+      expect.any(AbortSignal),
+    );
   });
 });
 
