@@ -155,7 +155,7 @@ these may be chained with it.
 | 4 | Draft-PR guard on every test job | Wasted CI on work-in-progress PRs. |
 | 5 | `paths-ignore` for inert files, plus the `changed-surfaces` classifier gating the expensive lanes on doc/site-only edits | Routine doc updates burning runner minutes — without blinding the guards that police documentation. |
 | 6 | `continue-on-error: true` confined to the nightly workflow — never `test.yml` | Cosmetic matrix entries inflating perceived failure rate. |
-| 7 | Stop-time review gate (`/codex:setup --enable-review-gate`) — **legacy/optional**: Codex was retired from the review pipeline (2026-06-05), so this gate is no longer part of the standard flow (claude ultracode panels → maintainer). Kept only for contributors who still run a local Codex CLI | High-level design / contract / safety issues unit tests cannot see. |
+| 7 | Local stop-time review gate (`/codex:setup --enable-review-gate`) — **legacy/optional local contributor option**, not a required hosted CI job. Its optional status does not retire Codex build agents or replace the canonical build agents (Codex or Claude) → Claude ultracode multi-agent review panels → maintainer pipeline. | High-level design / contract / safety issues unit tests cannot see. |
 | 8 | Nightly cross-platform matrix (Sunday cron) | Slow-burn Python and Electron-package regressions on macOS, Windows and Linux before they pile up. |
 
 ---
