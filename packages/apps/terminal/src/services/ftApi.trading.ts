@@ -1,4 +1,4 @@
-import { buildHeaders, get, getBase, isDemoAuthSession, post, del } from "./ftApi.helpers";
+import { buildHeaders, get, getBase, isDemoAuthSession, post, postWithMode, del } from "./ftApi.helpers";
 import { assertNativeWriteTargetReadyOrThrow, pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
@@ -210,8 +210,10 @@ export const approveOrder = async (id: string) => {
   const mode = useModeStore.getState().mode;
   const apiKey = useConnectionStore.getState().apiKey;
   assertNativeWriteTargetReadyOrThrow(mode, apiKey);
-  return post<{ status: string }>(
+  return postWithMode<{ status: string }>(
     "action-center/approve/" + encodeURIComponent(id),
+    {},
+    mode,
   );
 };
 

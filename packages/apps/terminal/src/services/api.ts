@@ -75,7 +75,13 @@ import {
   selectNativeReadAccount,
 } from "@/services/brokerAccountsApi";
 import { z } from "zod";
-import { get as getFtApi, getBase as getFtBase, getV1 as getFtV1, post as postFtApi } from "./ftApi.helpers";
+import {
+  get as getFtApi,
+  getBase as getFtBase,
+  getV1 as getFtV1,
+  post as postFtApi,
+  postWithMode as postFtApiWithMode,
+} from "./ftApi.helpers";
 
 // Endpoints subject to the 10/s order rate limit (excludes placesmartorder which has its own)
 const ORDER_ENDPOINTS = new Set([
@@ -1935,13 +1941,14 @@ type ModeOrderAuthorityPin = {
   mode: "practice" | "live";
 };
 
-type ExactOrderAuthorityPin = AccountAuthorityIdentity;
+/** Exact immutable account/query provenance required by order mutations. */
+export type OrderAuthorityPin = AccountAuthorityIdentity;
 
-type OrderAuthorityPin = ModeOrderAuthorityPin | ExactOrderAuthorityPin;
+type PostOrderAuthorityPin = ModeOrderAuthorityPin | OrderAuthorityPin;
 
 function isExactOrderAuthorityPin(
-  authority: OrderAuthorityPin | undefined,
-): authority is ExactOrderAuthorityPin {
+  authority: PostOrderAuthorityPin | undefined,
+): authority is OrderAuthorityPin {
   return authority !== undefined
     && "scopeKey" in authority
     && "brokerType" in authority
@@ -1949,7 +1956,7 @@ function isExactOrderAuthorityPin(
 }
 
 function exactOrderAuthorityMatchesCurrent(
-  authority: ExactOrderAuthorityPin,
+  authority: OrderAuthorityPin,
   currentMode: "explore" | "practice" | "live",
 ): boolean {
   const { host, apiKey, openAlgoHydrated, status } = useConnectionStore.getState();
@@ -1982,7 +1989,7 @@ function exactOrderAuthorityMatchesCurrent(
 async function postOrder<T>(
   ftEndpoint: string,
   body: object = {},
-  authority?: OrderAuthorityPin,
+  authority?: PostOrderAuthorityPin,
 ): Promise<T> {
   // Apply the order rate limit (10/s) — identical to OpenAlgo direct calls
   if (!orderLimiter.tryConsume()) {
@@ -2202,14 +2209,17 @@ async function get<T>(endpoint: string): Promise<T> {
 // path for bridge parity.
 export const placeOrder = (
   params: PlaceOrderParams,
-  authority?: OrderAuthorityPin,
+  authority?: PostOrderAuthorityPin,
 ) => postOrder<{ orderId: string }>("place", params, authority);
 export const placeSmartOrder = (params: PlaceOrderParams & { position_size: number }) =>
   postOrder<{ orderId: string }>("place-smart", params);
 export const cancelAllOrders = () =>
   postOrder<void>("cancel-all");
-export const cancelOrder = (orderId: string, strategy = "Flint") =>
-  postOrder<void>("cancel", { orderId, strategy });
+export const cancelOrder = (
+  orderId: string,
+  strategy: string,
+  authority: OrderAuthorityPin,
+) => postOrder<void>("cancel", { orderId, strategy }, authority);
 export const closePosition = (strategy = "Flint") =>
   postOrder<void>("close-position", { strategy });
 export const exitAllPositions = () => {
@@ -2223,10 +2233,10 @@ export const exitAllPositions = () => {
   const target = nativeTarget
     ? { broker: nativeTarget.broker, account_id: nativeTarget.accountId }
     : { broker: "openalgo", account_id: "default" };
-  return postFtApi<void>("positions/exit-all", { confirm: true, ...target });
+  return postFtApiWithMode<void>("positions/exit-all", { confirm: true, ...target }, mode);
 };
-export const modifyOrder = (params: ModifyOrderParams) =>
-  postOrder<{ orderId: string }>("modify", params);
+export const modifyOrder = (params: ModifyOrderParams, authority: OrderAuthorityPin) =>
+  postOrder<{ orderId: string }>("modify", params, authority);
 export const orderStatus = (params: OrderStatusParams) =>
   post<{ status: string }>("orderstatus", params);
 export const openPosition = (params: OpenPositionParams) =>

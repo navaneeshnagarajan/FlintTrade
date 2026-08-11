@@ -50,6 +50,7 @@ vi.mock("@/stores/brokerStore", () => ({
 }));
 
 import {
+  approveOrder,
   BracketApiError,
   getSafetyConfigForTarget,
   placeBracketOrder,
@@ -109,6 +110,29 @@ function requestBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknow
   const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
   return JSON.parse(String(init.body)) as Record<string, unknown>;
 }
+
+describe("approveOrder", () => {
+  beforeEach(() => {
+    storeState.mode = "live";
+    storeState.apiKey = "openalgo-key";
+    storeState.token = "live-jwt";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      jsonResponse({ status: "success", data: { status: "approved" } }),
+    ));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("pins the current mode on the live-gated approval request", async () => {
+    await approveOrder("pending/1");
+
+    const [url, init] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/action-center/approve/pending%2F1");
+    expect(new Headers(init.headers).get("X-FlintTrade-Mode")).toBe("live");
+  });
+});
 
 describe("startSmartRoute", () => {
   let fetchMock: ReturnType<typeof vi.fn>;

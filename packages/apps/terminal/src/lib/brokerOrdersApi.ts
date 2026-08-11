@@ -174,6 +174,7 @@ async function request<T>(
   path: string,
   options: { body?: object; query?: Record<string, string | undefined> } = {},
 ): Promise<T> {
+  const mode = useModeStore.getState().mode;
   // Every non-GET here is a live broker-management WRITE (forever/GTT, super,
   // conditional-trigger, multi, cancel-all, cancel-smart). Fail closed on the
   // same conditions as the primary order path: refuse while the OpenAlgo config
@@ -182,7 +183,7 @@ async function request<T>(
   // selected native account is not confirmed connected.
   if (method !== "GET") {
     assertNativeWriteTargetReadyOrThrow(
-      useModeStore.getState().mode,
+      mode,
       useConnectionStore.getState().apiKey,
     );
   }
@@ -198,7 +199,7 @@ async function request<T>(
   try {
     resp = await fetch(url, {
       method,
-      headers: buildHeaders(hasBody),
+      headers: buildHeaders(hasBody, mode),
       body: hasBody ? JSON.stringify(options.body) : undefined,
     });
   } catch {

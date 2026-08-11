@@ -181,6 +181,7 @@ describe("forever orders", () => {
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers["Authorization"]).toBe("Bearer test-jwt");
     expect(headers["X-API-Key"]).toBe("test-api-key");
+    expect(headers["X-FlintTrade-Mode"]).toBe("live");
     const body = lastBody();
     expect(body.variety).toBe("gtt");
     expect(body.symbol).toBe("RELIANCE");

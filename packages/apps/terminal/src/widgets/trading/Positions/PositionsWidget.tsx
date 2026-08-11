@@ -79,7 +79,7 @@ import {
 } from "@/components/ui/select";
 import { FlintSegmentTracker } from "@flinttrade/design-system";
 import { downloadExcel } from "@/services/ftApi.data";
-import { post } from "@/services/ftApi.helpers";
+import { postWithMode } from "@/services/ftApi.helpers";
 import { placeOrder } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -223,7 +223,7 @@ function ConvertPositionDialog({
       // The backend signs the req object through the gated convert_position
       // verb; the field superset covers each adapter's expected names
       // (from/to_product, old/new_product, position_type, transaction_type).
-      await post("positions/convert", {
+      await postWithMode("positions/convert", {
         broker: mutationIdentity.brokerType,
         account_id: mutationIdentity.accountId,
         req: {
@@ -238,7 +238,7 @@ function ConvertPositionDialog({
           to_product: toProduct,
           new_product: toProduct,
         },
-      });
+      }, mutationIdentity.mode);
       if (
         !isActionAllowed()
         || !accountAuthorityMatches(mutationIdentity, getCurrentIdentity())
@@ -519,11 +519,11 @@ function ExitAllDialog({
     setIsSubmitting(true);
     setErrorMsg(null);
     try {
-      await post("positions/exit-all", {
+      await postWithMode("positions/exit-all", {
         confirm: true,
         broker: mutationIdentity.brokerType,
         account_id: mutationIdentity.accountId,
-      });
+      }, mutationIdentity.mode);
       if (
         !isActionAllowed()
         || !accountAuthorityMatches(mutationIdentity, getCurrentIdentity())

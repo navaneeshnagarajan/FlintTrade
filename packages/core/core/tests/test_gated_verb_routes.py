@@ -166,6 +166,45 @@ def _practice_headers() -> dict[str, str]:
     return _headers(_create_token("nava", mode="practice"))
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("DELETE", "/api/v1/orders/forever/GTT-MODE?broker=dhan", None),
+        ("POST", "/api/v1/positions/exit-all", {"confirm": True, "broker": "dhan"}),
+    ],
+    ids=("forever-cancel", "positions-exit-all"),
+)
+def test_extended_live_write_rejects_mode_header_mismatch_before_unlock_gate_or_router(
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    path: str,
+    body: dict[str, Any] | None,
+) -> None:
+    """A client mode assertion may narrow, never contradict, signed JWT authority."""
+    import flinttrade_core.order_routes as order_routes_module
+    import flinttrade_engine.safety as safety_module
+
+    router = _gated_router(result=None)
+    safety = _passing_safety()
+    unlock_check = MagicMock(return_value=True)
+    gate = MagicMock(return_value=object())
+    monkeypatch.setattr(order_routes_module, "_is_live_mode_unlocked", unlock_check)
+    monkeypatch.setattr(safety_module, "gate_broker_write", gate)
+    app = _app(broker_router=router, safety=safety)
+    headers = {**_live_headers(), "X-FlintTrade-Mode": "practice"}
+
+    response = app.test_client().open(path, method=method, json=body, headers=headers)
+
+    assert (
+        response.status_code,
+        unlock_check.call_count,
+        safety.l5_kill.validate.call_count,
+        gate.call_count,
+        router.execute_gated.await_count,
+    ) == (403, 0, 0, 0, 0)
+    assert response.get_json()["message"] == "X-FlintTrade-Mode does not match the authenticated mode"
+
+
 def _passing_safety() -> SafetySystem:
     """A SafetySystem stub whose check_order and kill switch both pass."""
     safety = SafetySystem(SafetyConfig(check_market_hours=False))

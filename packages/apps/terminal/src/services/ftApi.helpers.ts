@@ -1,5 +1,6 @@
 ﻿import { useAuthStore } from "@/stores/authStore";
 import { useConnectionStore } from "@/stores/connectionStore";
+import type { AppMode } from "@/stores/modeStore";
 
 export class FtApiError<T = unknown> extends Error {
   readonly status: number;
@@ -44,8 +45,9 @@ export function isDemoUserSession(): boolean {
  * methods (POST/PUT) so that GET/DELETE preflights are not affected.
  *
  * @param includeJson — add ``Content-Type: application/json`` (true for POST/PUT).
+ * @param mode — pin a mode assertion on live-gated extended-write requests.
  */
-export function buildHeaders(includeJson: boolean): Record<string, string> {
+export function buildHeaders(includeJson: boolean, mode?: AppMode): Record<string, string> {
   const headers: Record<string, string> = {};
   if (includeJson) headers["Content-Type"] = "application/json";
 
@@ -54,6 +56,7 @@ export function buildHeaders(includeJson: boolean): Record<string, string> {
   const apiKey = useConnectionStore.getState().apiKey;
   const jwt = useAuthStore.getState().token;
 
+  if (mode) headers["X-FlintTrade-Mode"] = mode;
   if (apiKey) headers["X-API-Key"] = apiKey;
   if (jwt) headers["Authorization"] = `Bearer ${jwt}`;
 
@@ -144,6 +147,23 @@ export async function post<T>(endpoint: string, body: object = {}, signal?: Abor
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "POST",
     headers: buildHeaders(true),
+    body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
+  });
+  if (!resp.ok) await throwHttpError(resp, endpoint);
+  return parseResponse<T>(resp, endpoint);
+}
+
+/** POST to an extended live-write route with an immutable mode assertion. */
+export async function postWithMode<T>(
+  endpoint: string,
+  body: object,
+  mode: AppMode,
+  signal?: AbortSignal,
+): Promise<T> {
+  const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
+    method: "POST",
+    headers: buildHeaders(true, mode),
     body: JSON.stringify(body),
     ...(signal ? { signal } : {}),
   });

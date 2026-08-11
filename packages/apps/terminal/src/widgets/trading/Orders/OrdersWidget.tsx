@@ -432,7 +432,7 @@ function OrdersWidget(_props: WidgetProps) {
     setActionPending(true);
     setActionError(null);
     try {
-      await cancelOrder(row.orderId!, row.strategy);
+      await cancelOrder(row.orderId!, row.strategy, mutationIdentity);
       if (accountAuthorityMatches(mutationIdentity, currentIdentityRef.current)) {
         emitNotification({
           category: "order",
@@ -486,7 +486,7 @@ function OrdersWidget(_props: WidgetProps) {
         strategy: row.strategy,
       };
       try {
-        await modifyOrder(params);
+        await modifyOrder(params, mutationIdentity);
         if (accountAuthorityMatches(mutationIdentity, currentIdentityRef.current)) {
           emitNotification({
             category: "order",

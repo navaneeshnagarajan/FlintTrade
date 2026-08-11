@@ -274,7 +274,12 @@ describe("OrdersWidget", () => {
 
     await waitFor(() => {
       expect(mockCancelOrder).toHaveBeenCalledTimes(1);
-      expect(mockCancelOrder).toHaveBeenCalledWith("ORD123", "Flint");
+      expect(mockCancelOrder).toHaveBeenCalledWith("ORD123", "Flint", {
+        mode: "live",
+        scopeKey: "live:openalgo:test",
+        brokerType: "openalgo",
+        accountId: "default",
+      });
     });
   });
 
@@ -313,6 +318,12 @@ describe("OrdersWidget", () => {
           product: "MIS",
           price: 155.5,
         }),
+        {
+          mode: "live",
+          scopeKey: "live:openalgo:test",
+          brokerType: "openalgo",
+          accountId: "default",
+        },
       );
     });
   });

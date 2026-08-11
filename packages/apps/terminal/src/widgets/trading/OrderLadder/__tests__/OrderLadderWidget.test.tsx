@@ -16,6 +16,12 @@ const mockGetSymbol = vi.hoisted(() =>
   vi.fn(() => Promise.resolve({ symbol: "NIFTY", exchange: "NSE", lotsize: 1, tick_size: 0.05 })),
 );
 const mockCancelOrder = vi.hoisted(() => vi.fn());
+const mockAccountIdentity = vi.hoisted(() => ({
+  mode: "live" as const,
+  scopeKey: "live:native:upstox:LADDER-A",
+  brokerType: "upstox",
+  accountId: "LADDER-A",
+}));
 // Live orderbook feed the widget reconciles its rows against (useOrders).
 // null = no book response yet; set an Order[] to drive reconciliation.
 const mockBrokerOrders = vi.hoisted(() => ({ value: null as unknown }));
@@ -42,6 +48,15 @@ vi.mock("@/hooks/useWebSocket", () => ({
 
 vi.mock("@/hooks/useOrders", () => ({
   useOrders: () => ({ data: mockBrokerOrders.value }),
+}));
+
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadContext: () => ({
+    identity: mockAccountIdentity,
+    enabled: true,
+    host: "",
+    apiKey: "",
+  }),
 }));
 
 vi.mock("@/hooks/useDepthData", () => ({
@@ -293,7 +308,11 @@ describe("OrderLadderWidget live cancel", () => {
 
     await waitFor(() => {
       expect(mockCancelOrder).toHaveBeenCalledTimes(1);
-      expect(mockCancelOrder).toHaveBeenCalledWith("BRK-98765", "orderladder");
+      expect(mockCancelOrder).toHaveBeenCalledWith(
+        "BRK-98765",
+        "orderladder",
+        mockAccountIdentity,
+      );
     });
     // Never the fabricated local id
     expect(mockCancelOrder).not.toHaveBeenCalledWith(
@@ -355,6 +374,7 @@ describe("reconcilePendingOrders", () => {
     return {
       localId: "lo_1",
       brokerOrderId: "BRK-1",
+      authority: mockAccountIdentity,
       side: "buy",
       price: 105,
       qty: 25,

@@ -35,7 +35,7 @@ vi.mock("@/services/api", () => ({
   placeOrder: mockPlaceOrder,
 }));
 vi.mock("@/services/ftApi.helpers", () => ({
-  post: mockPost,
+  postWithMode: mockPost,
 }));
 vi.mock("@/services/ftApi.data", () => ({
   downloadExcel: mockDownloadExcel,

@@ -764,6 +764,7 @@ describe("PositionsWidget", () => {
       const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(url).toBe("/ft-api/api/v1/positions/convert");
       expect(init.method).toBe("POST");
+      expect(new Headers(init.headers).get("X-FlintTrade-Mode")).toBe("live");
       const body = JSON.parse(String(init.body)) as {
         broker: string;
         req: Record<string, unknown>;
@@ -837,6 +838,7 @@ describe("PositionsWidget", () => {
       const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(url).toBe("/ft-api/api/v1/positions/exit-all");
       expect(init.method).toBe("POST");
+      expect(new Headers(init.headers).get("X-FlintTrade-Mode")).toBe("live");
       expect(JSON.parse(String(init.body))).toStrictEqual({
         confirm: true,
         broker: "dhan",

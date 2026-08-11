@@ -2794,17 +2794,25 @@ describe("OpenAlgo API client (api.ts)", () => {
       jsonResponse({ status: "success", data: { orderId: "UP-7" } }),
     );
 
-    await modifyOrder({
-      orderId: "UP-7",
-      symbol: "RELIANCE",
-      exchange: "NSE",
-      action: "BUY",
-      quantity: 1,
-      price: 101,
-      product: "MIS",
-      orderType: "LIMIT",
-      strategy: "TestStrategy",
-    });
+    await modifyOrder(
+      {
+        orderId: "UP-7",
+        symbol: "RELIANCE",
+        exchange: "NSE",
+        action: "BUY",
+        quantity: 1,
+        price: 101,
+        product: "MIS",
+        orderType: "LIMIT",
+        strategy: "TestStrategy",
+      },
+      {
+        mode: "live",
+        scopeKey: "live:native:upstox:U1",
+        brokerType: "upstox",
+        accountId: "U1",
+      },
+    );
 
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/v1/orders/upstox/modify");
@@ -2828,7 +2836,12 @@ describe("OpenAlgo API client (api.ts)", () => {
       jsonResponse({ status: "success", data: { orderId: "UP-7" } }),
     );
 
-    await cancelOrder("UP-7", "OrderLadder");
+    await cancelOrder("UP-7", "OrderLadder", {
+      mode: "live",
+      scopeKey: "live:native:upstox:U1",
+      brokerType: "upstox",
+      accountId: "U1",
+    });
 
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/v1/orders/upstox/cancel");
@@ -2839,6 +2852,54 @@ describe("OpenAlgo API client (api.ts)", () => {
       orderid: "UP-7",
       strategy: "OrderLadder",
     });
+  });
+
+  it.each([
+    [
+      "cancel",
+      () => cancelOrder("A-ORDER", "Orders", {
+        mode: "live",
+        scopeKey: "live:native:dhan:ACCOUNT-A",
+        brokerType: "dhan",
+        accountId: "ACCOUNT-A",
+      }),
+    ],
+    [
+      "modify",
+      () => modifyOrder(
+        {
+          orderId: "A-ORDER",
+          symbol: "RELIANCE",
+          exchange: "NSE",
+          action: "BUY",
+          quantity: 1,
+          price: 101,
+          product: "MIS",
+          orderType: "LIMIT",
+          strategy: "Orders",
+        },
+        {
+          mode: "live",
+          scopeKey: "live:native:dhan:ACCOUNT-A",
+          brokerType: "dhan",
+          accountId: "ACCOUNT-A",
+        },
+      ),
+    ],
+  ])("refuses a stale account-A %s pin after the imperative stores switch to B", async (_kind, mutate) => {
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "live";
+    mockBrokerState.accounts = [
+      { account_id: "ACCOUNT-A", broker: "dhan", source: "native", status: "connected" },
+      { account_id: "ACCOUNT-B", broker: "upstox", source: "native", status: "connected" },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:ACCOUNT-B";
+    fetchSpy.mockResolvedValue(
+      jsonResponse({ status: "success", data: { orderId: "WRONG-ACCOUNT" } }),
+    );
+
+    await expect(mutate()).rejects.toThrow(/authority|account|scope/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("sends native broker/account selectors for live cancelAllOrders", async () => {
@@ -3086,6 +3147,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       broker: "upstox",
       account_id: "U1",
     });
+    expect(new Headers(init.headers).get("X-FlintTrade-Mode")).toBe("live");
   });
 
   it("uses the explicit OpenAlgo selector for a bridge exit-all", async () => {
