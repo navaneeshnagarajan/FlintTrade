@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 
-import { expect, test as baseTest, type Page } from "@playwright/test";
+import { expect, test as baseTest, type Page, type Request } from "@playwright/test";
 
 import {
   createSyntheticFixtureRegistry,
@@ -56,12 +56,15 @@ type FrontendResourceType = (typeof FRONTEND_RESOURCE_TYPES)[number];
 
 interface StaticFrontendServer {
   origin: string;
+  hitCount(path: string): number;
   close(): Promise<void>;
 }
 
 async function startStaticFrontendServer(): Promise<StaticFrontendServer> {
+  const hits = new Map<string, number>();
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    hits.set(url.pathname, (hits.get(url.pathname) ?? 0) + 1);
     if (url.pathname === "/manifest-probe.html") {
       const target = url.searchParams.get("target") ?? "/manifest.webmanifest";
       response.writeHead(200, { "content-type": "text/html" });
@@ -106,6 +109,7 @@ async function startStaticFrontendServer(): Promise<StaticFrontendServer> {
 
   return {
     origin: `http://127.0.0.1:${address.port}`,
+    hitCount: (path: string) => hits.get(path) ?? 0,
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
@@ -118,7 +122,7 @@ async function requestFrontendResource(
   resourceType: FrontendResourceType,
   frontendOrigin: string,
   path: string,
-): Promise<void> {
+): Promise<Request> {
   const requestUrl = `${frontendOrigin}${path}`;
   const requestStarted = page.waitForRequest((request) => request.url() === requestUrl);
 
@@ -165,43 +169,56 @@ async function requestFrontendResource(
 
   const request = await requestStarted;
   expect(request.resourceType()).toBe(resourceType);
-  await request.response();
+  return request;
 }
 
+const API_RESOURCE_BOUNDARIES = [
+  { label: "canonical /api", pathStem: "/api/unregistered" },
+  { label: "canonical /ft-api", pathStem: "/ft-api/unregistered" },
+  { label: "raw /api lookalike", pathStem: "/apiary/unregistered" },
+  { label: "raw /ft-api lookalike", pathStem: "/ft-apiary/unregistered" },
+  { label: "encoded /api separator", pathStem: "/api%2Funregistered" },
+  { label: "encoded /ft-api separator", pathStem: "/ft-api%2Funregistered" },
+] as const;
+
 baseTest.describe("fail-closed synthetic fixture registry", () => {
-  for (const resourceType of FRONTEND_RESOURCE_TYPES) {
-    baseTest(`records and aborts an unregistered /ft-api ${resourceType} request`, async ({
-      page,
-    }) => {
-      const server = await startStaticFrontendServer();
-      try {
-        const registry = await createRegistry(
-          page,
-          `unregistered ${resourceType} API request`,
-          [],
-          server.origin,
-        );
-        const extension =
-          resourceType === "manifest"
-            ? ".webmanifest"
-            : resourceType === "stylesheet"
-              ? ".css"
-              : resourceType === "script"
-                ? ".js"
-                : resourceType === "image"
-                  ? ".svg"
-                  : ".html";
-        const path = `/ft-api/unregistered-${resourceType}${extension}`;
+  for (const boundary of API_RESOURCE_BOUNDARIES) {
+    for (const resourceType of FRONTEND_RESOURCE_TYPES) {
+      baseTest(`records and aborts an unregistered ${boundary.label} ${resourceType} request`, async ({
+        page,
+      }) => {
+        const server = await startStaticFrontendServer();
+        try {
+          const registry = await createRegistry(
+            page,
+            `unregistered ${boundary.label} ${resourceType} request`,
+            [],
+            server.origin,
+          );
+          const extension =
+            resourceType === "manifest"
+              ? ".webmanifest"
+              : resourceType === "stylesheet"
+                ? ".css"
+                : resourceType === "script"
+                  ? ".js"
+                  : resourceType === "image"
+                    ? ".svg"
+                    : ".html";
+          const path = `${boundary.pathStem}-${resourceType}${extension}`;
 
-        await requestFrontendResource(page, resourceType, server.origin, path);
+          const request = await requestFrontendResource(page, resourceType, server.origin, path);
 
-        await expect(registry.dispose()).rejects.toThrow(
-          new RegExp(`unexpected request.*GET ${path.replace(".", "\\.")}`, "is"),
-        );
-      } finally {
-        await server.close();
-      }
-    });
+          expect(await request.response()).toBeNull();
+          expect(server.hitCount(path)).toBe(0);
+          await expect(registry.dispose()).rejects.toThrow(
+            new RegExp(`unexpected request.*GET ${path.replace(".", "\\.")}`, "is"),
+          );
+        } finally {
+          await server.close();
+        }
+      });
+    }
   }
 
   baseTest("allows a same-origin static frontend image to load", async ({ page }) => {
@@ -214,6 +231,7 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
       await page.setContent(`<img src="${imageUrl}" alt="FlintTrade">`);
 
       expect((await response).ok()).toBe(true);
+      expect(server.hitCount("/assets/logo.svg")).toBe(1);
       await expect(registry.dispose()).resolves.toBeUndefined();
     } finally {
       await server.close();
@@ -235,9 +253,11 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
         }),
       });
 
-      await requestFrontendResource(page, "image", server.origin, path);
+      const request = await requestFrontendResource(page, "image", server.origin, path);
 
+      expect((await request.response())?.ok()).toBe(true);
       expect(registry.callCount("GET", path)).toBe(1);
+      expect(server.hitCount(path)).toBe(0);
       await expect(registry.dispose()).resolves.toBeUndefined();
     } finally {
       await server.close();

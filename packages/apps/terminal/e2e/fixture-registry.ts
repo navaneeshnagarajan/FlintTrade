@@ -78,10 +78,8 @@ const ROUTE_PATTERN = "**/*";
 const UNHANDLED_REJECTION_PREFIX = "[flinttrade-e2e unhandled rejection] ";
 const API_PATH_PREFIXES = ["/api", "/ft-api"] as const;
 
-function isApiPath(pathname: string): boolean {
-  return API_PATH_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
+function isViteProxiedApiPath(pathname: string): boolean {
+  return API_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
 function isFrontendResourceType(resourceType: string): boolean {
@@ -160,7 +158,7 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
 
   private async handleRoute(route: Route, request: Request): Promise<void> {
     const url = new URL(request.url());
-    if (!isApiPath(url.pathname) && this.isFrontendResource(request)) {
+    if (!isViteProxiedApiPath(url.pathname) && this.isFrontendResource(request)) {
       await route.continue();
       return;
     }
