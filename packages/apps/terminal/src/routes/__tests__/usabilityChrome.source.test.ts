@@ -17,9 +17,9 @@ describe("terminal usability chrome", () => {
     const main = read("main.tsx");
     const gate = read("routes/ProtectedRoute.tsx");
     expect(main).toContain("text-text-muted");
-    expect(main).not.toMatch(/className="[^"]*\btext-muted\b/);
+    expect(main).not.toMatch(/(?<![-\w])text-muted(?![-\w])/);
     expect(gate).toContain("text-text-muted");
-    expect(gate).not.toMatch(/className="[^"]*\btext-muted\b/);
+    expect(gate).not.toMatch(/(?<![-\w])text-muted(?![-\w])/);
     expect(gate).toContain("bg-surface-base");
   });
 
