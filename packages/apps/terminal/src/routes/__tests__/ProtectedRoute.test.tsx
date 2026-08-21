@@ -30,6 +30,7 @@ describe("ProtectedRoute", () => {
 
     expect(accountRead).not.toHaveBeenCalled();
     expect(screen.queryByText("Private layout")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Redirecting to welcome");
   });
 
   it("mounts descendants only after authentication is established", () => {

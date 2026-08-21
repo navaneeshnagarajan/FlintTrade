@@ -77,6 +77,9 @@
     --color-text-secondary: #8b8b95;
     --color-text-muted: #9898a4;
     --color-text-disabled: #636370;
+    /* Brand accent fallback before themeStore.applyTheme() writes the live value. */
+    --color-accent: #22c55e;
+    --color-accent-text: #ffffff;
     --color-profit: #22c55e;
     --color-loss: #ef4444;
     --color-warning: #eab308;
@@ -123,6 +126,8 @@
       --color-text-secondary: #52525b;
       --color-text-muted: #71717a;
       --color-text-disabled: #a1a1aa;
+      --color-accent: #15803d;
+      --color-accent-text: #ffffff;
       /* WCAG AA contrast on white backgrounds — safer contrast margin */
       --color-profit: #15803d;
       --color-loss: #b91c1c;
@@ -171,8 +176,9 @@
   --color-secondary-foreground: hsl(var(--secondary-foreground));
   --color-muted: hsl(var(--muted));
   --color-muted-foreground: hsl(var(--muted-foreground));
-  --color-accent: hsl(var(--accent));
-  --color-accent-foreground: hsl(var(--accent-foreground));
+  /* Cinematic brand accent (themeStore --color-accent), not the shadcn muted hover surface. */
+  --color-accent: var(--color-accent);
+  --color-accent-foreground: var(--color-accent-text, hsl(var(--accent-foreground)));
   --color-destructive: hsl(var(--destructive));
   --color-destructive-foreground: hsl(var(--destructive-foreground));
   --color-border: hsl(var(--border));

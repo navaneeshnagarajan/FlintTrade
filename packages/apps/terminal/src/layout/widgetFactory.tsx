@@ -1,6 +1,7 @@
 import { lazy, Suspense, Component, useCallback } from "react";
 import type { ReactNode, ErrorInfo } from "react";
 import type { TabNode } from "flexlayout-react";
+import { Button } from "@/components/ui/button";
 import type { WidgetMeta, WidgetProps } from "@/types/widgets";
 import { widgetPropsForNode } from "@/layout/flexLayoutAdapter";
 
@@ -640,13 +641,15 @@ function WidgetError({ name, message, onRetry }: { name: string; message?: strin
       <span className="text-text-muted text-xs">
         {message ? `Error: ${message}` : "Check console for errors"}
       </span>
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         onClick={handleRetry}
-        className="px-3 py-1.5 text-xs font-medium rounded border border-border-default text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+        className="text-xs"
       >
         Retry
-      </button>
+      </Button>
     </div>
   );
 }

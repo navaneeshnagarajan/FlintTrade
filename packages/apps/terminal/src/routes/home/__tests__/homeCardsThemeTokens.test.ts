@@ -34,4 +34,12 @@ describe("home dashboard theme tokens", () => {
 
     expect(offenders).toEqual([]);
   });
+
+  it("overlays home widget chrome so resize/remove controls do not steal card height", () => {
+    const frame = readFileSync(join(homeDir, "HomeWidgetFrame.tsx"), "utf8");
+    expect(frame).toContain("home-widget-toolbar");
+    expect(frame).toContain("absolute top-1.5 right-1.5");
+    expect(frame).toContain("group-hover:opacity-100");
+    expect(frame).toContain("group-focus-within:opacity-100");
+  });
 });

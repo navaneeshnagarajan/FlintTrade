@@ -147,8 +147,8 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
   // AND their backup codes can still mint fresh ones with just their password.
   if (mode === "full" && recovering) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-surface-base p-6">
-        <div className="w-full max-w-sm space-y-6">
+      <div className="flex min-h-screen flex-col bg-surface-base p-6">
+        <div className="m-auto w-full max-w-sm space-y-6">
           <div className="flex justify-center">
             <LogoIcon size={40} className="text-accent" />
           </div>
@@ -160,8 +160,8 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
 
   if (mode === "full" && resettingPassword) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-surface-base p-6">
-        <div className="w-full max-w-sm space-y-6">
+      <div className="flex min-h-screen flex-col bg-surface-base p-6">
+        <div className="m-auto w-full max-w-sm space-y-6">
           <div className="flex justify-center">
             <LogoIcon size={40} className="text-accent" />
           </div>
@@ -172,8 +172,8 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-surface-base p-6">
-      <div className="w-full max-w-sm space-y-6">
+    <div className="flex min-h-screen flex-col bg-surface-base p-6">
+      <div className="m-auto w-full max-w-sm space-y-6">
         {/* Logo */}
         <div className="flex justify-center">
           <LogoIcon size={40} className="text-accent" />
