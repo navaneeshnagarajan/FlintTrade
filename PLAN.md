@@ -62,7 +62,7 @@ Done highlights:
 - A terminal-wide widget consolidation (102 widgets → 69 via PR #71; current catalogue pin 71 after follow-on merges) that merged duplicate surfaces onto shared kernels (options maths, position sizing, order guards, strategy templates) and closed real order-path defects the duplicated surfaces had hidden; verified by adversarial review passes that were themselves re-checked by a fresh-context reviewer.
 - Webhooks were narrowed by maintainer ruling (2026-07-26) to the generic HMAC-signed custom rail; the TradingView/ChartInk/GoCharting parsers and the n8n/WhatsApp bridges were removed.
 
-Remaining: validate the converged cross-platform nightly-CI repairs, continue evidence-backed duplicate consolidation, and close only the still-open rows after a fresh code-ground-truth audit. The older broker-connect, GTT UI, `post_market_analysis`, dead-admin-route, installer-duplication and “final two widget” rows are shipped or superseded.
+Remaining: continue evidence-backed duplicate consolidation, and close only the still-open rows after a fresh code-ground-truth audit. Cross-platform nightly-CI repairs landed in #140. The older broker-connect, GTT UI, `post_market_analysis`, dead-admin-route, installer-duplication and “final two widget” rows are shipped or superseded.
 
 **Exit:** nothing user-visible crashes or silently fakes; the feature matrix has no broken rows and every partial or stub row is finished, visibly degraded, or explicitly deferred; full local verification green; multi-agent audit + re-audit clean.
 
@@ -76,7 +76,7 @@ Two build waves shipped 16 items across analytics (FII long/short ratios, gamma 
 
 **Goal:** prove the full autonomous chain — signal → SafetySystem L1–L5 → gated order → sandbox fill → journal → learning update — across a full trading day in Practice mode, with Live provably blocked throughout.
 
-Done: Layer 3 admission from native option Greeks with fail-closed instrument reconciliation; Layer 4 fed from locally computed daily P&L (never trusting broker aggregates); grep-guard hardening so no new ungated order dispatcher can land; the agent learning loop (post-session reflection persisting per-symbol lessons that inform later decisions but can never mutate safety limits or order parameters); operator-approved skill drafts; searchable AI session history; single-backend-per-workspace enforcement. A compressed synthetic-clock full-session integration test pins the chain end-to-end.
+Done: Layer 3 admission from native option Greeks with fail-closed instrument reconciliation; Layer 4 fed from locally computed daily P&L (never trusting broker aggregates); grep-guard hardening so no new ungated order dispatcher can land; the agent learning loop (post-session reflection persisting per-symbol lessons that inform later decisions but can never mutate safety limits or order parameters); operator-approved skill drafts; searchable AI session history; single-backend-per-workspace enforcement. A compressed synthetic-clock full-session integration test pins the agent chain end-to-end. A real-`SandboxEngine` HTTP burst pins Practice rate limiting (10 accepted / 11 refused under a frozen clock) and contradictory Live-header rejection before sandbox or router dispatch.
 
 AI3 (read-only Python-RPC tool scripting) is deferred to a maintainer sandbox-design call before any code or spec implementation.
 
