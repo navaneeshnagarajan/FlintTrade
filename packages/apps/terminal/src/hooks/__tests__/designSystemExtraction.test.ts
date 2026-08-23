@@ -52,10 +52,15 @@ describe("design-system extraction contract", () => {
       "[data-separator]",
       "body {",
       "*:focus-visible",
-      "ring-scale-in",
+      "outline: 2px solid var(--color-accent",
     ]) {
       expect(tokensCss).not.toContain(terminalOnlySelector);
       expect(terminalCss).toContain(terminalOnlySelector);
     }
+
+    // The old scale-in focus animation stacked leftover outlines. Keep it
+    // out of both shared tokens and terminal chrome.
+    expect(tokensCss).not.toContain("ring-scale-in");
+    expect(terminalCss).not.toContain("ring-scale-in");
   });
 });

@@ -34,4 +34,16 @@ describe("home dashboard theme tokens", () => {
 
     expect(offenders).toEqual([]);
   });
+
+  it("overlays home widget chrome so resize/remove controls do not steal card height", () => {
+    const frame = readFileSync(join(homeDir, "HomeWidgetFrame.tsx"), "utf8");
+    expect(frame).toContain("home-widget-toolbar");
+    expect(frame).toContain("absolute top-1.5 right-1.5");
+    // Hover-reveal is limited to fine pointers; coarse/touch keeps the
+    // toolbar visible so drag / resize / remove stay tappable.
+    expect(frame).toContain("@media (hover: hover) and (pointer: fine)");
+    expect(frame).toContain(".home-widget-frame:focus-within .home-widget-toolbar");
+    expect(frame).not.toContain("pointer-events-none");
+    expect(frame).not.toContain("group-hover:opacity-100");
+  });
 });

@@ -2,6 +2,7 @@ import type { DragEvent, PointerEvent as ReactPointerEvent, ReactNode } from "re
 import { GripVertical, Maximize2, RectangleHorizontal, RectangleVertical, Square, Trash2 } from "lucide-react";
 import type { BentoCardConfig } from "@/stores/bentoStore";
 import type { BentoCardSize } from "@/components/bento/BentoCard";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const SIZE_STYLES: Record<BentoCardSize, React.CSSProperties> = {
@@ -62,7 +63,7 @@ export function HomeWidgetFrame({
       data-new-widget={isHighlighted ? "true" : undefined}
       tabIndex={-1}
       className={cn(
-        "home-widget-frame group relative flex min-h-28 flex-col gap-1 transition-[opacity,outline-color,transform,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+        "home-widget-frame group relative flex min-h-28 flex-col transition-[opacity,outline-color,transform,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
         isDragOver && "rounded outline outline-2 outline-accent/60",
         isHighlighted && "rounded outline outline-2 outline-accent/80 shadow-[0_0_0_1px_rgba(34,197,94,0.28),0_0_28px_rgba(34,197,94,0.18)]",
       )}
@@ -71,20 +72,22 @@ export function HomeWidgetFrame({
       onDragLeave={() => onDragLeave(card.id)}
       onDrop={(event) => onDrop(card.id, event)}
     >
-      <div className="home-widget-toolbar ml-auto flex h-8 items-center gap-1 rounded border border-border-default/80 bg-surface-card/90 p-1 shadow-sm backdrop-blur-sm opacity-80 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-        <button
+      <div className="home-widget-toolbar absolute top-1.5 right-1.5 z-10 ml-auto flex h-8 items-center gap-1 rounded border border-border-default/80 bg-surface-card/95 p-1 shadow-sm backdrop-blur-sm transition-opacity">
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           draggable
           data-drag-handle="true"
           aria-label={`Drag ${label} widget`}
           title={`Drag ${label}`}
-          className="flex size-6 cursor-grab items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+          className="size-6 cursor-grab text-text-muted hover:bg-surface-hover hover:text-text-primary active:cursor-grabbing"
           onDragStart={(event) => onDragStart(card.id, event)}
           onDragEnd={onDragEnd}
           onPointerDown={(event) => onPointerDragStart(card.id, event)}
         >
           <GripVertical size={13} aria-hidden="true" />
-        </button>
+        </Button>
 
         <span aria-hidden="true" className="h-4 w-px bg-border-default" />
 
@@ -92,36 +95,40 @@ export function HomeWidgetFrame({
           const Icon = option.icon;
           const isActive = card.size === option.size;
           return (
-            <button
+            <Button
               key={option.size}
               type="button"
+              variant="ghost"
+              size="icon-xs"
               aria-label={`Make ${label} widget ${option.label}`}
               aria-pressed={isActive}
               title={`${label}: ${option.label}`}
               className={cn(
-                "flex size-6 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+                "size-6",
                 isActive
-                  ? "bg-accent/15 text-accent"
+                  ? "bg-accent/15 text-accent hover:bg-accent/20 hover:text-accent"
                   : "text-text-muted hover:bg-surface-hover hover:text-text-primary",
               )}
               onClick={() => onResize(card.id, option.size)}
             >
               <Icon size={12} aria-hidden="true" />
-            </button>
+            </Button>
           );
         })}
 
         <span aria-hidden="true" className="h-4 w-px bg-border-default" />
 
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           aria-label={`Remove ${label} widget`}
           title={`Remove ${label}`}
-          className="flex size-6 items-center justify-center rounded text-text-muted transition-colors hover:bg-loss/10 hover:text-loss focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-loss/40"
+          className="size-6 text-text-muted hover:bg-loss/10 hover:text-loss"
           onClick={() => onRemove(card.id)}
         >
           <Trash2 size={12} aria-hidden="true" />
-        </button>
+        </Button>
       </div>
 
       {children}
@@ -131,6 +138,26 @@ export function HomeWidgetFrame({
           flex: 1 1 auto;
           height: 100%;
           min-height: 100%;
+        }
+
+        /* Coarse / touch pointers never synthesise :hover, so the toolbar
+           stays visible and tappable. Hover-reveal is limited to devices
+           that can hover with a fine pointer. Keyboard :focus-within
+           still reveals the chrome on every pointer class. */
+        .home-widget-toolbar {
+          pointer-events: auto;
+          opacity: 1;
+        }
+        @media (hover: hover) and (pointer: fine) {
+          .home-widget-toolbar {
+            pointer-events: none;
+            opacity: 0;
+          }
+          .home-widget-frame:hover .home-widget-toolbar,
+          .home-widget-frame:focus-within .home-widget-toolbar {
+            pointer-events: auto;
+            opacity: 1;
+          }
         }
       `}</style>
     </div>
