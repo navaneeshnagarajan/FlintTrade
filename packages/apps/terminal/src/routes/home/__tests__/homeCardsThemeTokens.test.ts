@@ -39,7 +39,11 @@ describe("home dashboard theme tokens", () => {
     const frame = readFileSync(join(homeDir, "HomeWidgetFrame.tsx"), "utf8");
     expect(frame).toContain("home-widget-toolbar");
     expect(frame).toContain("absolute top-1.5 right-1.5");
-    expect(frame).toContain("group-hover:opacity-100");
-    expect(frame).toContain("group-focus-within:opacity-100");
+    // Hover-reveal is limited to fine pointers; coarse/touch keeps the
+    // toolbar visible so drag / resize / remove stay tappable.
+    expect(frame).toContain("@media (hover: hover) and (pointer: fine)");
+    expect(frame).toContain(".home-widget-frame:focus-within .home-widget-toolbar");
+    expect(frame).not.toContain("pointer-events-none");
+    expect(frame).not.toContain("group-hover:opacity-100");
   });
 });

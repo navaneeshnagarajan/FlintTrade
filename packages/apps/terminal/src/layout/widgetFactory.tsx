@@ -646,7 +646,7 @@ function WidgetError({ name, message, onRetry }: { name: string; message?: strin
         variant="outline"
         size="sm"
         onClick={handleRetry}
-        className="text-xs"
+        className="text-xs hover:text-text-primary"
       >
         Retry
       </Button>

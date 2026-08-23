@@ -53,6 +53,23 @@ describe("terminal usability chrome", () => {
     expect(css).toContain("var(--color-accent, hsl(var(--primary)))");
   });
 
+  it("keeps home widget chrome tappable without hover and readable on focus", () => {
+    const frame = read("routes/home/HomeWidgetFrame.tsx");
+    expect(frame).toContain("@media (hover: hover) and (pointer: fine)");
+    expect(frame).toContain(".home-widget-frame:focus-within .home-widget-toolbar");
+    expect(frame).not.toContain("pointer-events-none");
+  });
+
+  it("keeps the widget Retry label readable on dark hover surfaces", () => {
+    const factory = read("layout/widgetFactory.tsx");
+    const retryBlock = factory.slice(
+      factory.indexOf("function WidgetError"),
+      factory.indexOf("class WidgetErrorBoundary"),
+    );
+    expect(retryBlock).toContain("hover:text-text-primary");
+    expect(retryBlock).not.toContain("hover:text-accent-foreground");
+  });
+
   it("keeps the mode pill reachable when the top bar is crowded", () => {
     const topbar = read("chrome/TopBarV2.tsx");
     expect(topbar).toContain("overflow-x-auto");

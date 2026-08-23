@@ -72,7 +72,7 @@ export function HomeWidgetFrame({
       onDragLeave={() => onDragLeave(card.id)}
       onDrop={(event) => onDrop(card.id, event)}
     >
-      <div className="home-widget-toolbar pointer-events-none absolute top-1.5 right-1.5 z-10 ml-auto flex h-8 items-center gap-1 rounded border border-border-default/80 bg-surface-card/95 p-1 shadow-sm backdrop-blur-sm opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+      <div className="home-widget-toolbar absolute top-1.5 right-1.5 z-10 ml-auto flex h-8 items-center gap-1 rounded border border-border-default/80 bg-surface-card/95 p-1 shadow-sm backdrop-blur-sm transition-opacity">
         <Button
           type="button"
           variant="ghost"
@@ -138,6 +138,26 @@ export function HomeWidgetFrame({
           flex: 1 1 auto;
           height: 100%;
           min-height: 100%;
+        }
+
+        /* Coarse / touch pointers never synthesise :hover, so the toolbar
+           stays visible and tappable. Hover-reveal is limited to devices
+           that can hover with a fine pointer. Keyboard :focus-within
+           still reveals the chrome on every pointer class. */
+        .home-widget-toolbar {
+          pointer-events: auto;
+          opacity: 1;
+        }
+        @media (hover: hover) and (pointer: fine) {
+          .home-widget-toolbar {
+            pointer-events: none;
+            opacity: 0;
+          }
+          .home-widget-frame:hover .home-widget-toolbar,
+          .home-widget-frame:focus-within .home-widget-toolbar {
+            pointer-events: auto;
+            opacity: 1;
+          }
         }
       `}</style>
     </div>
