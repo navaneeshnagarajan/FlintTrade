@@ -386,9 +386,9 @@ class TestErrorLogCount:
 
     def test_count_with_since_filters_correctly(self):
         log = _make_log()
-        # Log an error "in the past" by checking count before and after
         log.log("/v1/old", "GET", 500)
-        cutoff = datetime.now(IST)
+        first_ts = datetime.fromisoformat(log.recent(limit=1)[0]["timestamp"])
+        cutoff = first_ts + timedelta(microseconds=1)
         log.log("/v1/new", "GET", 500)
         count_total = log.count()
         count_after = log.count(since=cutoff)

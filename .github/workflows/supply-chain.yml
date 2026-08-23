@@ -262,8 +262,12 @@ jobs:
     name: CLA GPG fingerprint binding (Identity H8)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # only fires on external PRs (forks); the founder's own branches are auto-attested
-    if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name != github.repository }}
+    # External-fork pull requests only. On push/schedule/dispatch,
+    # github.event.pull_request is empty, so the old "not our repo" comparison
+    # evaluated true and the job ran against GITHUB_ACTOR (the merger — often
+    # cursor[bot] after a squash-merge). Owner and same-repo branches stay
+    # auto-attested; Identity H8 remains required for real external contributors.
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name != github.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }   # full history for GPG signature verification

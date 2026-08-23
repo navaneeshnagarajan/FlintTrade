@@ -68,6 +68,8 @@ def _run(
     os_name: str,
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    if os.name == "nt":
+        pytest.skip(NO_POSIX_MODES_REASON)
     env = {"PATH": _fake_bin(tmp_path, os_name), "HOME": str(tmp_path)}
     env.update(extra_env or {})
     return subprocess.run(
@@ -269,6 +271,7 @@ def _remove_linux_data_roots(home: Path) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason=NO_POSIX_MODES_REASON)
 def test_unix_uninstaller_is_valid_bash() -> None:
     subprocess.run(["bash", "-n", str(SH)], check=True, cwd=ROOT)
 
@@ -987,7 +990,7 @@ $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
     [System.Security.AccessControl.PropagationFlags]::None,
     [System.Security.AccessControl.AccessControlType]::Allow)
 $acl.AddAccessRule($rule)
-[System.IO.Directory]::SetAccessControl($Path, $acl)
+Set-Acl -LiteralPath $Path -AclObject $acl
 """
     result = subprocess.run(
         [POWERSHELL, "-NoProfile", "-Command", script],
@@ -1125,7 +1128,7 @@ $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
     [System.Security.AccessControl.FileSystemRights]::Modify,
     [System.Security.AccessControl.AccessControlType]::Allow)
 $acl.AddAccessRule($rule)
-[System.IO.File]::SetAccessControl($Path, $acl)
+Set-Acl -LiteralPath $Path -AclObject $acl
 """
     changed = subprocess.run(
         [POWERSHELL, "-NoProfile", "-Command", script],
