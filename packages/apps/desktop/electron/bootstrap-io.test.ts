@@ -465,6 +465,22 @@ describe("bootstrap system boundaries", () => {
     expect(parsed).toEqual({ contained: true, exitCode: helperExit, stderr: "target error\n" });
   });
 
+  it("treats the supervisor proof-separator blank line as empty leftover stderr", () => {
+    const token = "ab".repeat(16);
+    const proof = `FLINTTRADE_JOB_SUPERVISOR\t1\t${token}\tsettled\tnatural\t0\t0`;
+
+    expect(parseWindowsSupervisorProof(`\n${proof}\n`, token, 0, false)).toEqual({
+      contained: true,
+      exitCode: 0,
+      stderr: "",
+    });
+    expect(parseWindowsSupervisorProof(`\r\n${proof}\r\n`, token, 0, false)).toEqual({
+      contained: true,
+      exitCode: 0,
+      stderr: "",
+    });
+  });
+
   it("rejects an otherwise exact Windows settlement proof when stderr was truncated", () => {
     const token = "ab".repeat(16);
     const stderr = `FLINTTRADE_JOB_SUPERVISOR\t1\t${token}\tsettled\tnatural\t0\t0\n`;

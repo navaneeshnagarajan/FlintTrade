@@ -53,7 +53,9 @@ def _monotonic_timestamp(previous: datetime | None) -> datetime:
     """
     now = datetime.now(IST)
     if previous is not None and now <= previous:
-        return previous + timedelta(microseconds=1)
+        # DuckDB TIMESTAMP can collapse adjacent microseconds; one
+        # millisecond survives storage and keeps recency queries ordered.
+        return previous + timedelta(milliseconds=1)
     return now
 
 # Keys whose values must never be persisted.
@@ -310,7 +312,7 @@ class ErrorLog:
                 SELECT entry_id, timestamp, route, method, status_code,
                        request_body, error_class, error_message, traceback, user_id
                 FROM error_log
-                ORDER BY timestamp DESC
+                ORDER BY timestamp DESC, rowid DESC
                 LIMIT ? OFFSET ?
                 """,
                 [limit, offset],
@@ -358,7 +360,7 @@ class ErrorLog:
                 """
                 SELECT timestamp, route, method, status_code, error_class
                 FROM error_log
-                ORDER BY timestamp DESC
+                ORDER BY timestamp DESC, rowid DESC
                 LIMIT ? OFFSET ?
                 """,
                 [limit, offset],

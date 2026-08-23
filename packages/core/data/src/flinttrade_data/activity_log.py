@@ -36,7 +36,7 @@ def _monotonic_timestamp(previous: datetime | None) -> datetime:
     """
     now = datetime.now(IST)
     if previous is not None and now <= previous:
-        return previous + timedelta(microseconds=1)
+        return previous + timedelta(milliseconds=1)
     return now
 
 # observability §6.2 — canonical action catalogue. Every literal logged across
