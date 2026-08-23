@@ -32,6 +32,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -53,7 +54,9 @@ NO_BASH_REASON = "bash is not available on this runner"
 # whichever the operator has — so the parse gate must hold under BOTH, each
 # skipping cleanly when absent rather than silently preferring pwsh.
 PWSH = shutil.which("pwsh")
-WINDOWS_POWERSHELL = shutil.which("powershell")
+# Hosted macOS runners now ship a `powershell` binary. Get-Acl and Windows
+# path guards are Windows-only, so treat that name as present only on win32.
+WINDOWS_POWERSHELL = shutil.which("powershell") if sys.platform == "win32" else None
 POWERSHELL = PWSH or WINDOWS_POWERSHELL
 NO_POWERSHELL_REASON = "PowerShell (pwsh/powershell) is not available on this runner"
 GIT = shutil.which("git")
@@ -903,7 +906,7 @@ $everyoneRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
     [System.Security.AccessControl.FileSystemRights]::FullControl,
     [System.Security.AccessControl.AccessControlType]::Allow)
 $insecure.AddAccessRule($everyoneRule)
-[System.IO.File]::SetAccessControl($WebReceiptPath, $insecure)
+Set-Acl -LiteralPath $WebReceiptPath -AclObject $insecure
 Write-WebInstallReceipt
 Write-Output "UNSAFE_RECEIPT_REWRITTEN"
 """,
@@ -1019,7 +1022,7 @@ $everyoneRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
     [System.Security.AccessControl.FileSystemRights]::Modify,
     [System.Security.AccessControl.AccessControlType]::Allow)
 $insecure.AddAccessRule($everyoneRule)
-[System.IO.File]::SetAccessControl($WebReceiptPath, $insecure)
+Set-Acl -LiteralPath $WebReceiptPath -AclObject $insecure
 $recorded = Get-RecordedWebInstallField "source="
 if ($recorded) { throw "trusted an Everyone-writable receipt: $recorded" }
 Write-Output "UNSAFE_RECEIPT_REJECTED"

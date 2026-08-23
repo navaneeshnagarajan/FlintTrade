@@ -1488,7 +1488,7 @@ def test_shutdown_deadline_includes_transition_state_guard_admission(runtime_app
     def hold_lock() -> None:
         with state.guard:
             lock_held.set()
-            time.sleep(0.25)
+            time.sleep(1.0)
 
     holder = threading.Thread(target=hold_lock)
     holder.start()
@@ -1501,7 +1501,9 @@ def test_shutdown_deadline_includes_transition_state_guard_admission(runtime_app
         holder.join(timeout=2.0)
 
     assert shutdown_result is False
-    assert elapsed < 0.15
+    # Must return well before the lock holder finishes; 0.15 was too tight
+    # for macOS CI scheduling while still proving the deadline is honoured.
+    assert elapsed < 0.4
     assert holder.is_alive() is False
     assert runtime.calls == []
 
@@ -1514,7 +1516,7 @@ def test_shutdown_deadline_includes_transition_state_creation_admission(runtime_
     def hold_lock() -> None:
         with local_ai_routes._RUNTIME_TRANSITION_STATE_LOCK:
             lock_held.set()
-            time.sleep(0.25)
+            time.sleep(1.0)
 
     holder = threading.Thread(target=hold_lock)
     holder.start()
@@ -1527,7 +1529,7 @@ def test_shutdown_deadline_includes_transition_state_creation_admission(runtime_
         holder.join(timeout=2.0)
 
     assert shutdown_result is False
-    assert elapsed < 0.15
+    assert elapsed < 0.4
     assert holder.is_alive() is False
     assert runtime.calls == []
 
