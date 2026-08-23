@@ -255,7 +255,14 @@ export function createWindowsSourceFilesystemBoundary(
       );
     }
     if (result.stdoutTruncated || result.stderrTruncated || result.stderr !== "") {
-      throw new Error("Windows source filesystem helper returned truncated or unexpected output.");
+      const reasons = [
+        result.stdoutTruncated ? "stdout truncated" : "",
+        result.stderrTruncated ? "stderr truncated" : "",
+        result.stderr !== "" ? "unexpected stderr" : "",
+      ].filter((reason) => reason !== "");
+      throw new Error(
+        `Windows source filesystem helper returned truncated or unexpected output (${reasons.join(", ")}).`,
+      );
     }
     const response = parseResponse(result.stdout);
     const helperAfter = await options.dependencies.fileSystem.fileIdentity(helper);

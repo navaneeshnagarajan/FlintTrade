@@ -9,12 +9,15 @@ Failure modes:
   - declared cla_text_sha256 != current CLA.md hash  -> stale_cla_artefact
 
 Bootstrap / founder handling:
-  - The CI job runs this ONLY on external forks (see supply-chain.yml `if:`), so the
-    founder's own branches never reach it.
+  - The CI job runs this ONLY on external-fork pull_request events (see
+    supply-chain.yml `if:`). Push, schedule, dispatch, owner branches, and
+    same-repo bot merges never reach the job.
   - If the repo owner's record does not yet carry a fingerprint, the script treats
     it as owner auto-attestation and exits 0. External contributors must provide a
     fingerprinted record before merge.
-  - When run with no PR context (local invocation) it verifies what it can and exits 0.
+  - When run with no PR context (local invocation, or CI push/schedule where the
+    workflow `if:` was bypassed) it verifies what it can and exits 0. GITHUB_ACTOR
+    is the pusher/merger in those events — not a CLA subject.
 
 Sub-spec §9.3-§9.4; acceptance gate #13.
 """
@@ -69,6 +72,24 @@ def _norm_fp(fp: str) -> str:
     return fp.replace(" ", "").strip().upper()
 
 
+def _resolve_pr_author() -> str:
+    """Return the CLA subject, or empty when Identity H8 does not apply.
+
+    ``PR_AUTHOR`` is the only authoritative subject. ``GITHUB_ACTOR`` on
+    push/schedule/dispatch is the merger, scheduler, or bot (for example
+    ``cursor[bot]`` after a squash-merge) and must not be treated as a
+    contributor PR author. Local dry-runs without a GitHub event name may
+    still use ``GITHUB_ACTOR``.
+    """
+    author = (os.environ.get("PR_AUTHOR") or "").strip()
+    if author:
+        return author.lower()
+    event = (os.environ.get("GITHUB_EVENT_NAME") or "").strip().lower()
+    if event and event != "pull_request":
+        return ""
+    return (os.environ.get("GITHUB_ACTOR") or "").strip().lower()
+
+
 def main() -> int:
     if not CLA_CONFIG.exists():
         print(f"FAIL: {CLA_CONFIG} missing", file=sys.stderr)
@@ -79,9 +100,9 @@ def main() -> int:
         for c in cfg.get("contributors", [])
     }
 
-    actor = (os.environ.get("PR_AUTHOR") or os.environ.get("GITHUB_ACTOR") or "").lower()
+    actor = _resolve_pr_author()
     if not actor:
-        print("NOTE: no PR author in environment (local run); CLA binding not enforced")
+        print("NOTE: no PR author in environment (local run or non-PR CI event); CLA binding not enforced")
         return 0
 
     record = contributors.get(actor)

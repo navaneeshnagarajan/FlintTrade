@@ -175,6 +175,8 @@ def _run(
             default_asset_name = f"FlintTrade-9.9.9-beta.1-linux-{arch}.AppImage"
         env.setdefault("FLINTTRADE_UPDATE_ASSET_NAME", default_asset_name)
         env.setdefault("FLINTTRADE_UPDATE_ASSET_SHA256", hashlib.sha256(asset_bytes).hexdigest())
+    if not POSIX_INSTALL_SEMANTICS:
+        pytest.skip(NO_POSIX_INSTALL_REASON)
     return subprocess.run(
         ["bash", str(SH), *args],
         cwd=ROOT,
@@ -220,6 +222,7 @@ def _plant_linux_integrations(home: Path, executable: Path) -> tuple[Path, Path]
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_unix_installer_is_valid_bash() -> None:
     subprocess.run(["bash", "-n", str(SH)], check=True, cwd=ROOT)
 
@@ -1206,6 +1209,7 @@ def test_source_build_refuses_managed_active_checkout(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_SHELL_REASON)
 def test_source_build_tag_resolution_prefers_stable_at_equal_version(tmp_path: Path) -> None:
     result = subprocess.run(
         ["bash", str(SH)],
@@ -1224,6 +1228,7 @@ def test_source_build_tag_resolution_prefers_stable_at_equal_version(tmp_path: P
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_SHELL_REASON)
 def test_source_build_default_beta_channel_excludes_newer_alpha_and_rc_tags(tmp_path: Path) -> None:
     result = subprocess.run(
         ["bash", str(SH)],

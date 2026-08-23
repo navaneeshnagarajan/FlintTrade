@@ -1585,14 +1585,16 @@ async def test_threadsafe_start_timeout_waits_for_revocation_and_rollback() -> N
     runner.scheduler = _open_time_scheduler()
     runner.client.quotes = AsyncMock(return_value=None)
     scheduler.bind_runtime_loop(asyncio.get_running_loop())
-    scheduler._runtime_call_timeout = 0.02
+    scheduler._runtime_call_timeout = 0.05
 
     request = asyncio.create_task(
         asyncio.to_thread(scheduler.start_one_threadsafe, strategy.name)
     )
     await asyncio.wait_for(start_entered.wait(), timeout=1.0)
     try:
-        await asyncio.sleep(0.04)
+        # Stay blocked well past the route timeout so loaded CI cannot
+        # complete the start before ``future.result`` expires.
+        await asyncio.sleep(0.25)
         assert not request.done(), "the route-facing call returned before rollback could finish"
     finally:
         release_start.set()
