@@ -1350,11 +1350,9 @@ function Set-OwnerOnlyWebAcl(
                 [System.Security.AccessControl.AccessControlType]::Allow)
         }
         $acl.AddAccessRule($rule)
-        if ($Directory) {
-            [System.IO.Directory]::SetAccessControl($Path, $acl)
-        } else {
-            [System.IO.File]::SetAccessControl($Path, $acl)
-        }
+        # PowerShell 7 / .NET Core removed [System.IO.File|Directory]::SetAccessControl.
+        # Set-Acl is the supported cmdlet on both Windows PowerShell 5.1 and pwsh 7.
+        Set-Acl -LiteralPath $Path -AclObject $acl
         if (-not (Test-OwnerOnlyWebAcl $Path $Inheritance)) {
             throw "the resulting ACL was not owner-only"
         }

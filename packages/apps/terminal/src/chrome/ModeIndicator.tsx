@@ -17,6 +17,7 @@
 
 import { useState, useCallback } from "react";
 import { Compass, FlaskConical, Zap } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
@@ -137,19 +138,20 @@ export default function ModeIndicator() {
   if (mode === "explore") {
     return (
       <div className="flex items-center gap-2">
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={handleExploreClick}
           aria-label={
             token === "demo-user"
               ? "Explore mode active — sample data only. Click to set up Practice mode."
               : "Explore mode active — sample data only. Click to switch to Practice mode."
           }
-          className="flex items-center gap-1 h-7 px-2.5 rounded text-xs font-medium font-heading bg-text-muted/15 text-text-secondary border border-text-muted/20 hover:bg-text-muted/25 hover:text-text-primary transition-colors"
+          className="h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-text-muted/15 text-text-secondary border border-text-muted/20 hover:bg-text-muted/25 hover:text-text-primary"
         >
           <Compass size={11} aria-hidden="true" />
           EXPLORE
-        </button>
+        </Button>
         {toggleError && (
           <span role="alert" className="text-xs text-loss">
             {toggleError}
@@ -164,14 +166,16 @@ export default function ModeIndicator() {
   if (mode === "practice") {
     return (
       <>
-        <button
+        <Button
+          type="button"
+          variant="ghost"
           onClick={handleToggle}
           aria-label="Practice mode active — virtual capital. Click to switch to Live trading."
-          className="flex items-center gap-1 h-7 px-2.5 rounded text-xs font-medium font-heading bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 transition-colors"
+          className="h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 hover:text-amber-400"
         >
           <FlaskConical size={11} aria-hidden="true" />
           PRACTICE
-        </button>
+        </Button>
 
         <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
           <AlertDialogContent>
@@ -239,14 +243,16 @@ export default function ModeIndicator() {
   // mode === "live"
   return (
     <div className="flex items-center gap-2">
-      <button
+      <Button
+        type="button"
+        variant="ghost"
         onClick={handleToggle}
         aria-label="Live trading mode active — real money. Click to switch to Practice mode."
-        className="flex items-center gap-1 h-7 px-2.5 rounded text-xs font-medium font-heading bg-profit/20 text-profit border border-profit/40 hover:bg-profit/30 transition-colors"
+        className="h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-profit/20 text-profit border border-profit/40 hover:bg-profit/30 hover:text-profit"
       >
         <Zap size={11} aria-hidden="true" />
         LIVE
-      </button>
+      </Button>
       {toggleError && (
         <span
           role="alert"

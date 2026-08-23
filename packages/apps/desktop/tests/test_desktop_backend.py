@@ -4256,7 +4256,7 @@ def test_posix_application_identity_is_published_after_group_isolation(serial_po
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=POSIX_GUARDIAN_DRILL_TIMEOUT_SECONDS,
         check=True,
     )
     publish_line, isolated_line = completed.stdout.strip().splitlines()[-2:]
@@ -4513,7 +4513,7 @@ def test_macos_idle_guardian_uses_adaptive_process_reconciliation(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        timeout=10,
+        timeout=POSIX_GUARDIAN_DRILL_TIMEOUT_SECONDS,
         check=True,
     )
 

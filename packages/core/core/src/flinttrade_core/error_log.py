@@ -44,6 +44,20 @@ logger = logging.getLogger("flinttrade.core.error_log")
 # IST as a fixed-offset timezone — no pytz dependency required.
 IST = timezone(timedelta(hours=5, minutes=30))
 
+
+def _monotonic_timestamp(previous: datetime | None) -> datetime:
+    """Return *now* that is strictly later than ``previous``.
+
+    Windows clock resolution can make successive ``datetime.now`` calls
+    collide. Recency queries and ``count(since=...)`` need a total order.
+    """
+    now = datetime.now(IST)
+    if previous is not None and now <= previous:
+        # DuckDB TIMESTAMP can collapse adjacent microseconds; one
+        # millisecond survives storage and keeps recency queries ordered.
+        return previous + timedelta(milliseconds=1)
+    return now
+
 # Keys whose values must never be persisted.
 # Substring needles, not exact keys: field names like ``bot_token``,
 # ``access_token`` or ``api_secret`` must redact too. Over-redaction of a
@@ -182,6 +196,7 @@ class ErrorLog:
 
         self._conn = duckdb.connect(self._db_path)
         self._lock = threading.RLock()
+        self._last_timestamp: datetime | None = None
         self._init_schema()
 
     # ------------------------------------------------------------------
@@ -228,7 +243,6 @@ class ErrorLog:
             The ``entry_id`` assigned to this entry (16-char hex string).
         """
         entry_id = secrets.token_hex(8)
-        timestamp = datetime.now(IST)
 
         sanitised = _sanitise(request_body) if request_body else None
         body_json = json.dumps(sanitised, default=str) if sanitised is not None else None
@@ -244,6 +258,8 @@ class ErrorLog:
             err_tb = None
 
         with self._lock:
+            timestamp = _monotonic_timestamp(self._last_timestamp)
+            self._last_timestamp = timestamp
             self._conn.execute(
                 """
                 INSERT INTO error_log
@@ -296,7 +312,7 @@ class ErrorLog:
                 SELECT entry_id, timestamp, route, method, status_code,
                        request_body, error_class, error_message, traceback, user_id
                 FROM error_log
-                ORDER BY timestamp DESC
+                ORDER BY timestamp DESC, rowid DESC
                 LIMIT ? OFFSET ?
                 """,
                 [limit, offset],
@@ -344,7 +360,7 @@ class ErrorLog:
                 """
                 SELECT timestamp, route, method, status_code, error_class
                 FROM error_log
-                ORDER BY timestamp DESC
+                ORDER BY timestamp DESC, rowid DESC
                 LIMIT ? OFFSET ?
                 """,
                 [limit, offset],

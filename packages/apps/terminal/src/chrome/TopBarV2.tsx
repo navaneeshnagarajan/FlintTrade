@@ -373,7 +373,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
 
   return (
     <div
-      className="sticky top-0 z-100 flex items-center h-9.5 px-3 shrink-0 select-none animate-fade-in"
+      className="sticky top-0 z-100 flex items-center min-h-9.5 px-3 shrink-0 select-none animate-fade-in overflow-x-auto"
       style={barStyle}
       data-testid="topbar-v2"
     >
@@ -450,19 +450,24 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
         <AccountSwitcher />
         <WorkspaceSwitcher />
 
-        {/* Fullscreen toggle */}
-        <FullscreenButton />
+        {/* Trading mode switch first — it must stay reachable when the bar
+            is crowded. Secondary chrome can hide on narrower viewports. */}
+        <ModeIndicator />
 
         <Divider />
 
-        {/* Trading mode switch (Explore / Practice / Live) */}
-        <ModeIndicator />
+        {/* Fullscreen toggle */}
+        <FullscreenButton />
 
         {/* Market session state — separate from the Live execution mode */}
-        <MarketSessionStatus />
+        <div className="hidden lg:block">
+          <MarketSessionStatus />
+        </div>
 
         {/* IST clock */}
-        <ISTClock />
+        <div className="hidden xl:block">
+          <ISTClock />
+        </div>
 
         {/* Avatar */}
         <Avatar />

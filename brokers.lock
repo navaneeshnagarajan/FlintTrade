@@ -11,14 +11,14 @@ notes = "wave 1 baseline. Repo-managed through flinttrade-gateway's dhanhq==2.2.
 
 [[broker]]
 name = "upstox-python-sdk"
-version = "2.28.0"
-sha256 = "bf271b8ee977550b26fd3fadc2104598db20e13ec09545e4bbed7dbb8d995b20"
+version = "2.29.0"
+sha256 = "14e614d9ebc8ecf27a310f31625d80ca2c6516069690418001505c6429b3185c"
 licence = "MIT"
 licence_source = "upstream LICENSE.txt (MIT, Copyright 2023 Upstox); sha256 is the requirements.lock sdist hash"
 homepage = "https://github.com/upstox/upstox-python"
 sandbox_tested = "2026-07-03"
 approved_by = "navaneeshnagarajan"
-notes = "wave 2 activated. Repo-managed through flinttrade-gateway's upstox-python-sdk==2.28.0 dependency and requirements.lock. Runtime attestation gates on the installed distribution version."
+notes = "wave 2 activated. Repo-managed through flinttrade-gateway's upstox-python-sdk==2.29.0 dependency and requirements.lock. Runtime attestation gates on the installed distribution version."
 
 [[broker]]
 name = "neo-api-client"
