@@ -42,7 +42,9 @@ export default function PageTransition({
         exit={{ opacity: 0 }}
         transition={motionConfig.transitions.page}
         // Fill the parent <main> completely so transitions don't affect layout.
-        style={{ height: "100%", width: "100%" }}
+        // minHeight/overflow keep Flex-less routes (Home, Settings, …) able to
+        // scroll inside <main className="overflow-hidden"> instead of clipping.
+        style={{ height: "100%", width: "100%", minHeight: 0, overflow: "hidden" }}
       >
         {children}
       </motion.div>

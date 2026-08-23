@@ -27,6 +27,18 @@ logger = logging.getLogger("flinttrade.data.activity_log")
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
+
+def _monotonic_timestamp(previous: datetime | None) -> datetime:
+    """Return *now* that is strictly later than ``previous``.
+
+    Windows clock resolution can make successive ``datetime.now`` calls
+    collide, which then makes ``ORDER BY timestamp DESC`` unstable.
+    """
+    now = datetime.now(IST)
+    if previous is not None and now <= previous:
+        return previous + timedelta(milliseconds=1)
+    return now
+
 # observability §6.2 — canonical action catalogue. Every literal logged across
 # packages/ should appear here; gateway.*, mcp.tool.*, audit.*, and the auth
 # lifecycle verbs join the legacy order/position/auth set.
@@ -115,6 +127,7 @@ class ActivityLog:
 
     def __init__(self, db_path: str = ":memory:") -> None:
         self._conn = open_sqlite(db_path, durability="normal")
+        self._last_timestamp: datetime | None = None
         self._conn.execute(_CREATE_TABLE_SQL)
         # Migrate existing databases that lack the source column.
         try:
@@ -142,7 +155,9 @@ class ActivityLog:
         catalogue, not an enforcement gate.
         """
         log_id = secrets.token_hex(8)
-        timestamp = datetime.now(IST).isoformat()
+        stamped = _monotonic_timestamp(self._last_timestamp)
+        self._last_timestamp = stamped
+        timestamp = stamped.isoformat()
         details_json = json.dumps(details, default=str, ensure_ascii=False)
 
         self._conn.execute(
@@ -188,7 +203,7 @@ class ActivityLog:
             SELECT log_id, timestamp, action, user, ip, details, source
             FROM activity_log
             {where}
-            ORDER BY timestamp DESC
+            ORDER BY timestamp DESC, rowid DESC
             LIMIT ?
         """
         rows = self._conn.execute(sql, params).fetchall()

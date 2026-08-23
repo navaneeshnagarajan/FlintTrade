@@ -500,7 +500,9 @@ class TestLLMPath:
         )
 
         assert result is not None
-        assert heartbeat_at < chat_finished_at
+        # Windows clock resolution can make two monotonic reads collide.
+        # The heartbeat still ran at or before the blocking chat returned.
+        assert heartbeat_at <= chat_finished_at
 
     @pytest.mark.asyncio
     async def test_numeric_string_prices_still_reach_rule_fallback(self) -> None:

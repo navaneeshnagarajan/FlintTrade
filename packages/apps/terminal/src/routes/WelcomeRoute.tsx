@@ -670,14 +670,15 @@ export default function WelcomeRoute() {
                     >
                       Get Started
                     </ShimmerButton>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
                       onClick={handleExplore}
-                      className="rounded px-2 py-1 text-sm text-text-muted transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      className="text-sm text-text-muted hover:text-text-primary"
                       aria-label="Try with sample data without creating an account"
                     >
                       Try with sample data →
-                    </button>
+                    </Button>
                   </>
                 ) : (
                   <Button type="button" variant="ghost" onClick={skipToEnd}>

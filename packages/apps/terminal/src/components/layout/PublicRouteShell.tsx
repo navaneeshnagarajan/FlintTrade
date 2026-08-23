@@ -156,32 +156,37 @@ export default function PublicRouteShell({
         id="public-main"
         tabIndex={-1}
         className={cn(
-          "relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] w-full flex-col items-center justify-center px-4 py-8 text-center outline-none sm:px-6 sm:py-10",
+          "relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] w-full flex-col items-center px-4 py-8 text-center outline-none sm:px-6 sm:py-10",
           widthClass[maxWidth],
           contentClassName,
         )}
       >
-        {(eyebrow || title || subtitle) && (
-          <section className="mx-auto mb-7 max-w-3xl space-y-3">
-            {eyebrow && (
-              <p className="text-xxs font-semibold uppercase tracking-[0.32em] text-accent/80">
-                {eyebrow}
-              </p>
-            )}
-            {title && (
-              <h1 className="font-heading text-3xl font-bold text-text-primary drop-shadow-[0_0_28px_rgba(34,197,94,0.16)] sm:text-5xl">
-                {title}
-              </h1>
-            )}
-            {subtitle && (
-              <p className="mx-auto max-w-2xl text-sm leading-relaxed text-text-secondary sm:text-base">
-                {subtitle}
-              </p>
-            )}
-          </section>
-        )}
+        {/* my-auto centres short pages (welcome, mode pick) but collapses to
+            zero when the form is taller than the viewport, so the first
+            setup field stays reachable instead of sitting above the fold. */}
+        <div className="my-auto w-full">
+          {(eyebrow || title || subtitle) && (
+            <section className="mx-auto mb-7 max-w-3xl space-y-3">
+              {eyebrow && (
+                <p className="text-xxs font-semibold uppercase tracking-[0.32em] text-accent/80">
+                  {eyebrow}
+                </p>
+              )}
+              {title && (
+                <h1 className="font-heading text-3xl font-bold text-text-primary drop-shadow-[0_0_28px_rgba(34,197,94,0.16)] sm:text-5xl">
+                  {title}
+                </h1>
+              )}
+              {subtitle && (
+                <p className="mx-auto max-w-2xl text-sm leading-relaxed text-text-secondary sm:text-base">
+                  {subtitle}
+                </p>
+              )}
+            </section>
+          )}
 
-        <div className="w-full">{children}</div>
+          <div className="w-full">{children}</div>
+        </div>
       </div>
     </main>
   );

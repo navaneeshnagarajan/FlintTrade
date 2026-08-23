@@ -518,7 +518,10 @@ export function parseWindowsSupervisorProof(
   const lines = stderr.replaceAll("\r\n", "\n").split("\n");
   const protocolIndexes = lines.flatMap((line, index) => (line.startsWith(`${WINDOWS_SUPERVISOR_PREFIX}\t`) ? [index] : []));
   const filtered = lines.filter((_line, index) => !protocolIndexes.includes(index));
-  const ordinaryStderr = filtered.join("\n").replace(/\n{2,}$/, "\n");
+  // The supervisor writes a blank line before the proof so an unterminated
+  // helper fragment cannot glue onto it. That separator is not helper stderr.
+  const joined = filtered.join("\n").replace(/\n{2,}$/, "\n");
+  const ordinaryStderr = joined.trim() === "" ? "" : joined;
   let finalNonEmpty = -1;
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     if (lines[index]!.length > 0) {
@@ -2253,7 +2256,14 @@ async function runAtomicPromotionHelper(
     throw new Error("Atomic promotion helper process containment could not be proven.");
   }
   if (result.stdoutTruncated || result.stderrTruncated || result.stderr !== "") {
-    throw new Error("Atomic promotion helper returned truncated or unexpected output.");
+    const reasons = [
+      result.stdoutTruncated ? "stdout truncated" : "",
+      result.stderrTruncated ? "stderr truncated" : "",
+      result.stderr !== "" ? "unexpected stderr" : "",
+    ].filter((reason) => reason !== "");
+    throw new Error(
+      `Atomic promotion helper returned truncated or unexpected output (${reasons.join(", ")}).`,
+    );
   }
   const response = parseNativePromotionResponse(result.stdout);
   if (response.ok !== (result.exitCode === 0)) {
