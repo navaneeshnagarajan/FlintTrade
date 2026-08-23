@@ -88,7 +88,7 @@ work queue, verify branch/PR state live, and never push without explicit
 maintainer permission.
 
 **Next-work queue (in order):**
-1. **Phase 2 stabilisation remainder** — validate the converged cross-platform nightly-CI repairs and continue only evidence-backed duplicate consolidation. G40 broker-connect, infra-script de-duplication, native GTT UI, `post_market_analysis`, dead admin-route wiring, G31/G32/U18 and the final two widget merges are shipped or superseded.
+1. **Phase 2 stabilisation remainder** — continue only evidence-backed duplicate consolidation. Cross-platform nightly-CI repairs landed in #140. G40 broker-connect, infra-script de-duplication, native GTT UI, `post_market_analysis`, dead admin-route wiring, G31/G32/U18 and the final two widget merges are shipped or superseded.
 2. **Phase 4 learning loop** — AI1 and AI2 shipped; AI3 is deferred to a maintainer sandbox-design call. The remaining execution gate is the full-day Practice run on a market day.
 3. **Phase 5 publication/signing** — publish only after native CI evidence and the complete release set; add Apple signing/notarisation secrets when the maintainer is ready, and never describe an ad-hoc seal as distribution signing.
 4. **Bracket follow-ups** — OCO monitoring (one leg fills → cancel sibling) is refused at placement today, not silently accepted; a proper engine-side monitor is the next step. `BrokerRouter`/`_resolve_target` private-config coupling in `bracket_routes.py` mirrors core order routes — refactor both together or neither.
