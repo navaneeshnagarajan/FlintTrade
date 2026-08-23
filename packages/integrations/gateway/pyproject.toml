@@ -10,7 +10,7 @@ dependencies = [
     "websockets>=17.0.1",
     "cryptography>=50.0.0",
     "dhanhq==2.2.0",
-    "upstox-python-sdk==2.28.0",
+    "upstox-python-sdk==2.29.0",
     "neo-api-client==2.0.0",
     "growwapi==1.5.0",
 ]
