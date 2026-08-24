@@ -6,7 +6,7 @@ python-dotenv>=1.2.3
 websockets>=17.0.1
 duckdb>=1.5.5
 flask>=3.0
-ruff>=0.16.3
+ruff>=0.16.4
 pytest>=9.1.1
 pytest-asyncio>=0.23.0
 # Parallel test execution (CI uses `-n auto`); harmless locally
