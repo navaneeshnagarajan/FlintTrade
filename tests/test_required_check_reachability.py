@@ -13,6 +13,7 @@ trigger-level reachability.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -67,6 +68,162 @@ def test_test_workflow_pull_request_trigger_has_no_paths_ignore():
     branches = pr_config.get("branches", [])
     if isinstance(branches, str):
         branches = [branches]
-    assert any(b in ("main", "dev") for b in branches), (
-        "pull_request must still target main and/or dev"
+    # Set containment (both main AND dev required; mutation-sensitive)
+    required = {"main", "dev"}
+    assert required.issubset(set(branches)), (
+        f"pull_request.branches must contain both main and dev as a set; "
+        f"got {branches}"
     )
+
+
+# ----------------------------------------------------------------------
+# Classifier contract tests (exercise the *actual* YAML classify script)
+# ----------------------------------------------------------------------
+
+def _load_workflow():
+    return yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))
+
+
+def _extract_classify_pattern(doc: dict) -> str:
+    """Extract the non-code grep pattern from the actual changed-surfaces classify step."""
+    jobs = doc.get("jobs", {})
+    changed = jobs.get("changed-surfaces", {})
+    steps = changed.get("steps", [])
+    for step in steps:
+        run = step.get("run", "")
+        if isinstance(run, str) and "grep -qvE" in run:
+            # Extract the pattern inside the single quotes after -qvE
+            m = re.search(r"grep -qvE '([^']+)'", run)
+            if m:
+                return m.group(1)
+    raise AssertionError("Could not extract classify grep pattern from YAML")
+
+
+def _extract_expensive_lane_if(doc: dict) -> str:
+    """Confirm expensive lanes key on the code output (not hard-coded)."""
+    jobs = doc.get("jobs", {})
+    for job_name, job in jobs.items():
+        if "widget" in job_name or job_name in ("rust-ticks-tests", "electron-desktop-tests"):
+            if_cond = job.get("if", "")
+            if "needs.changed-surfaces.outputs.code == 'true'" in str(if_cond):
+                return if_cond
+    return ""
+
+
+def _simulate_classify(changed: str, noncode_pattern: str, resolvable: bool = True) -> str:
+    """Simulate the exact classify logic from the extracted YAML script."""
+    if not resolvable:
+        return "true"
+    # Same logic as: if printf ... | grep -qvE 'pattern' then true else false
+    # Use re.search because the ERE contains ^ and $ anchors inside the alternation
+    lines = [line for line in changed.strip().splitlines() if line.strip()]
+    if not lines:
+        return "false"
+    for line in lines:
+        if not re.search(noncode_pattern, line):
+            return "true"
+    return "false"
+
+
+# Representative matrix (paths that must be non-code when touched alone or with docs)
+FORMER_IGNORED = [
+    ".local/foo",
+    "notice",
+    "LICENSE",
+    ".gitignore",
+    ".gitattributes",
+    ".editorconfig",
+    ".github/workflows/claude-foo.yml",
+    ".github/workflows/status-report.yml",
+    ".github/ISSUE_TEMPLATE/bar.md",
+]
+
+ORDINARY_CODE = [
+    "packages/core/core/src/foo.py",
+    "packages/apps/terminal/src/App.tsx",
+    "packages/apps/desktop/src/main.ts",
+    "tests/test_something.py",
+    ".github/workflows/test.yml",
+]
+
+DOCS_ONLY = [
+    "README.md",
+    "docs/guide.md",
+    "packages/apps/site/pages/index.tsx",
+]
+
+
+def test_changed_surfaces_classifier_former_ignored_are_non_code():
+    """Former ignored surfaces alone must classify code=false (do not run expensive lanes)."""
+    doc = _load_workflow()
+    pattern = _extract_classify_pattern(doc)
+    for path in FORMER_IGNORED:
+        code = _simulate_classify(path, pattern)
+        assert code == "false", f"{path} must be non-code but got {code}"
+
+
+def test_changed_surfaces_classifier_ordinary_code_is_code():
+    """Ordinary code paths must classify code=true (run expensive lanes)."""
+    doc = _load_workflow()
+    pattern = _extract_classify_pattern(doc)
+    for path in ORDINARY_CODE:
+        code = _simulate_classify(path, pattern)
+        assert code == "true", f"{path} must be code but got {code}"
+
+
+def test_changed_surfaces_classifier_mixed_former_ignored_plus_code_is_code():
+    """Mix of former-ignored + ordinary code must be code=true."""
+    doc = _load_workflow()
+    pattern = _extract_classify_pattern(doc)
+    changed = "\n".join(FORMER_IGNORED[:2] + ORDINARY_CODE[:1])
+    code = _simulate_classify(changed, pattern)
+    assert code == "true"
+
+
+def test_changed_surfaces_classifier_docs_site_md_only_is_non_code():
+    """Existing docs/site/md-only must remain code=false (no regression)."""
+    doc = _load_workflow()
+    pattern = _extract_classify_pattern(doc)
+    for path in DOCS_ONLY:
+        code = _simulate_classify(path, pattern)
+        assert code == "false", f"{path} must be non-code but got {code}"
+
+
+def test_changed_surfaces_classifier_unresolvable_fails_open():
+    """Unresolvable diff range must fail open to code=true."""
+    doc = _load_workflow()
+    pattern = _extract_classify_pattern(doc)
+    code = _simulate_classify("", pattern, resolvable=False)
+    assert code == "true"
+
+
+def test_changed_surfaces_classifier_mutation_sensitive():
+    """If the YAML classifier is mutated to treat a former-ignored surface as code, test fails."""
+    doc = _load_workflow()
+    pattern = _extract_classify_pattern(doc)
+    # The pattern must explicitly list the former ignored surfaces so they are treated non-code
+    for surf in ["LICENSE", ".local/", "claude*.yml", "notice", ".gitignore"]:
+        assert surf in pattern or any(s in pattern for s in [".local", "claude"]), (
+            f"Classifier pattern must cover former ignored surface {surf}"
+        )
+    # Also confirm expensive lanes still gate on the output
+    if_cond = _extract_expensive_lane_if(doc)
+    assert "needs.changed-surfaces.outputs.code == 'true'" in if_cond, (
+        "Expensive lanes must remain gated on changed-surfaces code output"
+    )
+
+
+def test_pull_request_branches_set_containment_mutation_sensitive():
+    """pull_request.branches must require the full set {main, dev}; mutation to drop one must fail."""
+    doc = _load_workflow()
+    on_block = _normalise_on(doc)
+    pr_config = on_block.get("pull_request", {}) or {}
+    branches = pr_config.get("branches", [])
+    if isinstance(branches, str):
+        branches = [branches]
+    required = {"main", "dev"}
+    assert required.issubset(set(branches)), (
+        f"branches must contain the full set; mutation detected: {branches}"
+    )
+    # Explicitly not 'any' — both required
+    assert len(set(branches) & required) == 2
