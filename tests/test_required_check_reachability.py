@@ -2,8 +2,9 @@
 
 The Test workflow (and its check contexts) must never be entirely suppressed
 by a top-level `pull_request.paths-ignore` when targeting protected branches
-main or dev. Such suppression would allow a PR (e.g. dependabot updating
-claude*.yml) to merge without ever instantiating the required checks.
+main or dev. Such suppression would cause the PR to omit the required check
+contexts, leaving the PR deadlocked / blocked from normal merge under branch
+protection (it cannot merge through normal branch protection).
 
 Filtering for expensive lanes stays inside the `changed-surfaces` job and
 per-job `if:` conditions (already present). This test only guards the
@@ -14,7 +15,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 
