@@ -198,15 +198,40 @@ def test_changed_surfaces_classifier_unresolvable_fails_open():
 
 
 def test_changed_surfaces_classifier_mutation_sensitive():
-    """If the YAML classifier is mutated to treat a former-ignored surface as code, test fails."""
+    """If the YAML classifier is mutated (any single former-ignored fragment removed), test fails.
+    Uses explicit per-surface ERE fragments; omission of each makes its representative path code=true.
+    """
     doc = _load_workflow()
     pattern = _extract_classify_pattern(doc)
-    # The pattern must explicitly list the former ignored surfaces so they are treated non-code
-    for surf in ["LICENSE", ".local/", "claude*.yml", "notice", ".gitignore"]:
-        assert surf in pattern or any(s in pattern for s in [".local", "claude"]), (
-            f"Classifier pattern must cover former ignored surface {surf}"
+    # Normalise: strip outer grouping parens so every fragment appears verbatim as alternation term
+    # and mutations keep valid regex for re.search in _simulate_classify
+    if pattern.startswith("(") and pattern.endswith(")"):
+        pattern = pattern[1:-1]
+
+    # Explicit per-surface expected ERE fragments (must match live YAML exactly; no any() fallback)
+    per_surface = {
+        ".local/**": ("^\\.local/", ".local/foo"),
+        "notice": ("^notice$", "notice"),
+        "LICENSE": ("^LICENSE$", "LICENSE"),
+        ".gitignore": ("^\\.gitignore$", ".gitignore"),
+        ".gitattributes": ("^\\.gitattributes$", ".gitattributes"),
+        ".editorconfig": ("^\\.editorconfig$", ".editorconfig"),
+        ".github/workflows/claude*.yml": ("^\\.github/workflows/claude.*\\.yml$", ".github/workflows/claude-foo.yml"),
+        ".github/workflows/status-report.yml": ("^\\.github/workflows/status-report\\.yml$", ".github/workflows/status-report.yml"),
+        ".github/ISSUE_TEMPLATE/**": ("^\\.github/ISSUE_TEMPLATE/", ".github/ISSUE_TEMPLATE/config.json"),
+    }
+
+    for surf, (frag, rep) in per_surface.items():
+        assert frag in pattern, f"Expected fragment {frag} for {surf} missing from pattern"
+        # Mutation sensitivity: replace ONLY this fragment with sentinel (removes its protection);
+        # representative must now classify as code. (String replace keeps regex syntax valid.)
+        mutated = pattern.replace(frag, "NEVER_MATCH_SURFACE_42")
+        code = _simulate_classify(rep, mutated)
+        assert code == "true", (
+            f"After removing {frag} ({surf}), {rep} must become code=true (was non-code); got {code}"
         )
-    # Also confirm expensive lanes still gate on the output
+
+    # Also confirm expensive lanes still gate on the output (unchanged requirement)
     if_cond = _extract_expensive_lane_if(doc)
     assert "needs.changed-surfaces.outputs.code == 'true'" in if_cond, (
         "Expensive lanes must remain gated on changed-surfaces code output"
