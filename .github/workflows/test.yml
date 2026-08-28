@@ -3,29 +3,6 @@ on:
   pull_request:
     branches: [main, dev]
     types: [opened, synchronize, ready_for_review, reopened]
-    paths-ignore:
-      # NOTE: '**.md', 'docs/**' and 'packages/apps/site/**' are deliberately NOT
-      # ignored. python-tests is the only job that runs
-      # tests/test_windows_command_docs.py — the guard that stops a Windows setup
-      # page from telling the reader to run `make`, or a shell fence from chaining
-      # with '&&'. Ignoring documentation skipped precisely the job that polices
-      # documentation, so a docs-only PR reintroducing the defect merged green.
-      # The heavy lanes stay off doc/site edits via the `changed-surfaces`
-      # classifier below rather than via paths-ignore.
-      #
-      # NOTE: flinttrade-design/ is NOT ignored — its tracked content is the
-      # baselines/ artefacts that this workflow's baseline-verification job +
-      # test_baseline_artifacts.py consume, so a baseline change MUST trigger
-      # the matrix (ignoring it silently skipped the very job that guards it).
-      - '.local/**'
-      - 'notice'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.gitattributes'
-      - '.editorconfig'
-      - '.github/workflows/claude*.yml'
-      - '.github/workflows/status-report.yml'
-      - '.github/ISSUE_TEMPLATE/**'
   push:
     branches: [main, dev]
     paths-ignore:
