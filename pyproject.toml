@@ -50,7 +50,7 @@ dev = [
     "pytest-timeout>=2.3",    # CI runs `pytest --timeout=60 --timeout-method=thread`
                              # (test.yml / nightly); the plugin must be in the synced env
     "pyfakefs>=5.6",          # baselines §4.4 disk-full migration test (HI24)
-    "ruff>=0.16.3",              # lint gate — CI runs `uv run ruff check` (test.yml), so it
+    "ruff>=0.16.5",              # lint gate — CI runs `uv run ruff check` (test.yml), so it
                              # must be in the synced env, not merely on PATH
 ]
 
