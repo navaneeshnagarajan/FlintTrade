@@ -875,7 +875,7 @@ OPENALGO_PLATFORM_MCP: dict[str, Any] = {
 
 
 BROKER_CATALOG: dict[str, BrokerInfo] = {
-    # ---- OAuth redirect flow (10) ----------------------------------------
+    # ---- OAuth redirect flow (14) ----------------------------------------
     "zerodha": BrokerInfo(
         name="zerodha",
         display_name="Zerodha",
@@ -897,8 +897,8 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         auth_flow=AuthFlowType.oauth_redirect,
         exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),
-    # P12 (2026-07-06): the two bridge brokers OpenAlgo added after our pinned
-    # clone — metadata from upstream broker/<name>/plugin.json + auth_api.py.
+    # Arrow and TradeSmart were catalogued ahead of the previous test pin; both
+    # are present in the verified OpenAlgo v2.0.2.2 bridge set.
     "arrow": BrokerInfo(
         name="arrow",
         display_name="Arrow",
@@ -910,6 +910,20 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         name="tradesmart",
         display_name="TradeSmart",
         # Noren v2 family (flattrade/shoonya): code + password + TOTP exchange.
+        auth_flow=AuthFlowType.oauth_redirect,
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
+    ),
+    # Both HDFC plugins use the browser request-token exchange documented by
+    # OpenAlgo v2.0.2.2 (api_key + request_token + apiSecret).
+    "hdfcsecurities": BrokerInfo(
+        name="hdfcsecurities",
+        display_name="HDFC Securities",
+        auth_flow=AuthFlowType.oauth_redirect,
+        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
+    ),
+    "hdfcsky": BrokerInfo(
+        name="hdfcsky",
+        display_name="HDFC Sky",
         auth_flow=AuthFlowType.oauth_redirect,
         exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "MCX", "NSE_INDEX", "BSE_INDEX"],
     ),

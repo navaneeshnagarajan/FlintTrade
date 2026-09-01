@@ -8,12 +8,12 @@
 
 | Service | Role | Minimum | Latest tested | Upstream |
 |---|---|---|---|---|
-| **OpenAlgo** | Optional broker gateway (32 brokers, REST + WebSocket) | v2.0.0 | `7e48b2e8` (v2.0.1.1, 2026-05-21) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
+| **OpenAlgo** | Optional broker gateway (REST + WebSocket) | v2.0.0 | `ef1f6b9c` (v2.0.2.2, 2026-08-29) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
 
-The tested pin remains **v2.0.1.1**. The latest observed upstream release is
-**v2.0.1.6** (2026-07-27), pending re-verification per the
-["Bumping these"](#bumping-these) procedure below — do not treat it as a
-tested version until that procedure has run green.
+The tested pin is **v2.0.2.2**, the latest published OpenAlgo release as of
+2026-08-29. FlintTrade's REST contract tests are grounded in the public
+[`openalgo-eventlet-stability-security`](https://github.com/marketcalls/openalgo/releases/tag/openalgo-eventlet-stability-security)
+tag at commit `ef1f6b9c2165607ae4c01edb9a3e189e26596d4d`.
 
 **OpenAlgo minimum (v2.0.0):** required only when you enable the optional
 OpenAlgo-compatible integration path. FlintTrade expects OpenAlgo's v2 API
@@ -80,6 +80,19 @@ For the OpenAlgo path, whatever broker version OpenAlgo supports is the
 compatibility boundary. The broker list lives in [`flint.toml`](../flint.toml)
 under `[packages]` / gateway metadata. The 2026-05 sync added
 **IIFL Capital** as a distinct entry alongside the existing **IIFL** adapter.
+
+### Surface verified at the v2.0.2.2 tested pin
+
+- REST request schemas now use `underlying` plus DDMMMYY `expiry_date` for
+  option-chain and synthetic-future calls, and required fields fail before any
+  network request.
+- Intervals, instruments, timings, ticker, and Telegram notification calls use
+  the v2.0.2.2 methods, paths, and API-key placement.
+- Modify-order requests carry `trigger_price` and `disclosed_quantity`; place
+  requests omit the undeclared `market_protection` field.
+- The upstream release also hardens its eventlet boundary and removes broker
+  credential leakage from logs. Those are OpenAlgo service fixes, not duplicate
+  FlintTrade implementations.
 
 ### Surface picked up at the v2.0.1.1 tested pin (added upstream between v2.0.0.8 and v2.0.1.1)
 
