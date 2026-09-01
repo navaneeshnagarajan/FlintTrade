@@ -2158,6 +2158,18 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["empty success placeholder", { status: "success", year: 2026, data: [] }],
+    ["empty holidays envelope", { status: "success", year: 2026, data: { holidays: [] } }],
+    ["invalid calendar date", { status: "success", year: 2026, data: ["2026-02-30"] }],
+    ["year mismatch", { status: "success", year: 2025, data: ["2026-01-26"] }],
+  ])("rejects an unusable OpenAlgo holiday %s instead of caching an all-open year", async (_name, payload) => {
+    mockConnectionState.apiKey = "test-key-123";
+    fetchSpy.mockResolvedValueOnce(jsonResponse(payload));
+
+    await expect(getHolidays(2026)).rejects.toThrow("OpenAlgo market calendar is not authoritative");
+  });
+
   it("posts OpenAlgo market/timings with the trading date", async () => {
     mockConnectionState.apiKey = "test-key-123";
     fetchSpy.mockResolvedValueOnce(

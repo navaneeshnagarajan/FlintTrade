@@ -732,6 +732,82 @@ function normaliseOpenAlgoOpenExchange(value: unknown): Holiday["open_exchanges"
   return { exchange, start_time: startTime, end_time: endTime };
 }
 
+const AUTHORITATIVE_HOLIDAY_TYPES = new Set([
+  "SETTLEMENT_HOLIDAY",
+  "SPECIAL_SESSION",
+  "TRADING_HOLIDAY",
+]);
+
+function isAuthoritativeOpenExchange(value: unknown): boolean {
+  return isRecord(value) && Boolean(stringParam(value.exchange).trim());
+}
+
+/** Port of Python `is_authoritative_market_calendar`. Empty success is a placeholder. */
+function isAuthoritativeMarketCalendar(payload: unknown, expectedYear?: number): boolean {
+  let data: unknown = payload;
+  for (let i = 0; i < 4; i += 1) {
+    if (!isRecord(data)) break;
+    if ("status" in data) {
+      const status = String(data.status).trim().toLowerCase();
+      if (status !== "ok" && status !== "success") return false;
+    }
+    if ("year" in data) {
+      const responseYear = toStrictNumber(data.year);
+      if (responseYear === null || !Number.isInteger(responseYear)) return false;
+      if (expectedYear !== undefined && responseYear !== expectedYear) return false;
+    }
+    if ("data" in data) {
+      data = data.data;
+      continue;
+    }
+    if ("holidays" in data) {
+      data = data.holidays;
+      continue;
+    }
+    break;
+  }
+
+  let candidates: unknown[];
+  if (Array.isArray(data)) {
+    candidates = data;
+  } else if (isRecord(data)) {
+    if (Object.keys(data).length === 0) return false;
+    candidates = [];
+    for (const values of Object.values(data)) {
+      if (!Array.isArray(values)) return false;
+      candidates.push(...values);
+    }
+  } else {
+    return false;
+  }
+
+  if (candidates.length === 0) return false;
+
+  for (const candidate of candidates) {
+    if (isRecord(candidate)) {
+      const rawDate = candidate.date ?? candidate.holiday_date ?? candidate.trading_date;
+      if (!normaliseCalendarDate(rawDate)) return false;
+      if ("holiday_type" in candidate) {
+        const holidayType = String(candidate.holiday_type || "").trim().toUpperCase();
+        if (!AUTHORITATIVE_HOLIDAY_TYPES.has(holidayType)) return false;
+      }
+      if ("closed_exchanges" in candidate) {
+        const rawClosed = candidate.closed_exchanges;
+        if (!Array.isArray(rawClosed)) return false;
+        if (rawClosed.some((value) => typeof value !== "string" || !value.trim())) return false;
+      }
+      if ("open_exchanges" in candidate) {
+        const rawOpen = candidate.open_exchanges;
+        if (!Array.isArray(rawOpen)) return false;
+        if (rawOpen.some((value) => !isAuthoritativeOpenExchange(value))) return false;
+      }
+    } else if (!normaliseCalendarDate(candidate)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Port of Python `normalise_market_calendar` for official OpenAlgo envelopes. */
 function normaliseMarketCalendar(payload: unknown): Holiday[] {
   let data: unknown = payload;
@@ -2547,6 +2623,10 @@ async function post<T>(
   if (endpoint === "optionchain") return normaliseOpenAlgoOptionChain(data) as T;
   if (endpoint === "expiry") return normaliseNativeExpiry(data) as T;
   if (endpoint === "market/holidays" || endpoint === "holidays") {
+    const requestedYear = toStrictNumber((openAlgoBody as Record<string, unknown>).year) ?? undefined;
+    if (!isAuthoritativeMarketCalendar(json, requestedYear)) {
+      throw new Error("OpenAlgo market calendar is not authoritative");
+    }
     return normaliseMarketCalendar(data) as T;
   }
   return data as T;
