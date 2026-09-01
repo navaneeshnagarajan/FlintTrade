@@ -219,6 +219,8 @@ class ModifyOrder(BaseModel):
     product: Product = Product.MIS
     quantity: str = "1"
     price: str = "0"
+    trigger_price: str = "0"
+    disclosed_quantity: str = "0"
     strategy: str = "Flint"
 
 

@@ -98,6 +98,20 @@ _OPTION_EXPIRY_FORMATS = (
     "%d-%b-%y",
     "%d-%b-%Y",
 )
+_OPTION_EXPIRY_MONTHS = (
+    "JAN",
+    "FEB",
+    "MAR",
+    "APR",
+    "MAY",
+    "JUN",
+    "JUL",
+    "AUG",
+    "SEP",
+    "OCT",
+    "NOV",
+    "DEC",
+)
 
 
 def _normalise_option_expiry_identity(value: Any) -> str | None:
@@ -110,6 +124,15 @@ def _normalise_option_expiry_identity(value: Any) -> str | None:
         except ValueError:
             continue
     return None
+
+
+def _openalgo_option_expiry_date(value: str) -> str:
+    """Format an expiry as OpenAlgo OptionChainSchema DDMMMYY (e.g. 26MAR26)."""
+    identity = _normalise_option_expiry_identity(value)
+    if identity is None:
+        return value.strip()
+    year, month, day = identity.split("-")
+    return f"{int(day):02d}{_OPTION_EXPIRY_MONTHS[int(month) - 1]}{year[2:]}"
 
 
 def _validated_openalgo_option_expiry_identity(
@@ -770,12 +793,7 @@ class OpenAlgoClient:
     # ==================================================================
 
     async def place_order(self, order: Order) -> OrderResponse:
-        """POST /api/v1/placeorder
-
-        Supports Market Price Protection (MPP): when ``order.market_protection``
-        is True and the broker supports it, MARKET orders are converted to
-        LIMIT orders with an exchange-regulated price buffer.
-        """
+        """POST /api/v1/placeorder"""
         extras: dict[str, Any] = {
             "strategy": order.strategy,
             "symbol": order.symbol,
@@ -788,17 +806,12 @@ class OpenAlgoClient:
             "trigger_price": order.trigger_price,
             "disclosed_quantity": order.disclosed_quantity,
         }
-        if order.market_protection is not None:
-            extras["market_protection"] = order.market_protection
         payload = self._body(extras)
         data = await self._post("placeorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
 
     async def place_smart_order(self, order: SmartOrder) -> OrderResponse:
-        """POST /api/v1/placesmartorder
-
-        Supports Market Price Protection (MPP) — see ``place_order``.
-        """
+        """POST /api/v1/placesmartorder"""
         extras: dict[str, Any] = {
             "strategy": order.strategy,
             "symbol": order.symbol,
@@ -812,8 +825,6 @@ class OpenAlgoClient:
             "disclosed_quantity": order.disclosed_quantity,
             "position_size": order.position_size,
         }
-        if order.market_protection is not None:
-            extras["market_protection"] = order.market_protection
         payload = self._body(extras)
         data = await self._post("placesmartorder", payload, limiter=self._smart_limiter)
         return OrderResponse(**data)
@@ -906,6 +917,8 @@ class OpenAlgoClient:
             "product": order.product.value,
             "quantity": order.quantity,
             "price": order.price,
+            "trigger_price": order.trigger_price,
+            "disclosed_quantity": order.disclosed_quantity,
         })
         data = await self._post("modifyorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
@@ -1026,17 +1039,16 @@ class OpenAlgoClient:
             return bars
         return []
 
-    async def intervals(self) -> list[str]:
-        """GET /api/v1/intervals"""
-        data = self._unwrap(await self._get("intervals"))
-        return data if isinstance(data, list) else []
+    async def intervals(self) -> dict[str, Any]:
+        """POST /api/v1/intervals"""
+        data = self._unwrap(await self._post("intervals", self._body()))
+        return data if isinstance(data, dict) else {}
 
     async def option_chain(self, symbol: str, exchange: str = "NFO", expiry: str = "") -> OptionChain:
         """POST /api/v1/optionchain"""
-        payload_data = {"symbol": symbol, "underlying": symbol, "exchange": exchange}
+        payload_data: dict[str, Any] = {"underlying": symbol, "exchange": exchange}
         if expiry:
-            payload_data["expiry"] = expiry
-            payload_data["expiry_date"] = expiry.replace("-", "")
+            payload_data["expiry_date"] = _openalgo_option_expiry_date(expiry)
         payload = self._body(payload_data)
         data = self._unwrap(await self._post("optionchain", payload))
         if isinstance(data, dict):
@@ -1186,7 +1198,7 @@ class OpenAlgoClient:
 
     async def synthetic_future(self, symbol: str, exchange: str = "NFO", expiry_date: str = "") -> dict[str, Any]:
         """POST /api/v1/syntheticfuture"""
-        payload = self._body({"symbol": symbol, "exchange": exchange, "expiry_date": expiry_date})
+        payload = self._body({"underlying": symbol, "exchange": exchange, "expiry_date": expiry_date})
         return await self._post("syntheticfuture", payload)
 
     async def expiry(self, symbol: str, exchange: str = "NFO") -> dict[str, Any]:
@@ -1220,14 +1232,16 @@ class OpenAlgoClient:
         return await self._post("search", self._body(body))
 
     async def ticker(self, exchange: str, symbol: str, interval: str = "5m", from_date: str = "", to_date: str = "") -> Any:
-        """GET /api/v1/ticker/{exchange}:{symbol} — uses X-API-KEY header."""
+        """GET /api/v1/ticker/{exchange}:{symbol}"""
         endpoint = f"ticker/{exchange}:{symbol}"
-        params: dict[str, str] = {"interval": interval}
+        with self._config_guard:
+            api_key = self._api_key
+        params: dict[str, str] = {"apikey": api_key, "interval": interval}
         if from_date:
             params["from"] = from_date
         if to_date:
             params["to"] = to_date
-        return await self._get(endpoint, params=params, headers={"X-API-KEY": self._api_key})
+        return await self._get(endpoint, params=params)
 
     # ==================================================================
     # Account APIs
@@ -1362,17 +1376,22 @@ class OpenAlgoClient:
             )
 
     async def timings(self, date: str = "") -> dict[str, Any]:
-        """GET /api/v1/timings"""
-        params: dict[str, str] = {"date": date} if date else {}
-        return await self._get("timings", params=params)
+        """POST /api/v1/market/timings"""
+        extra: dict[str, Any] = {"date": date} if date else {}
+        return await self._post("market/timings", self._body(extra))
 
-    async def telegram(self, message: str) -> dict[str, Any]:
-        """POST /api/v1/telegram"""
-        return await self._post("telegram", self._body({"message": message}))
+    async def telegram(self, message: str, username: str = "") -> dict[str, Any]:
+        """POST /api/v1/telegram/notify"""
+        return await self._post(
+            "telegram/notify",
+            self._body({"username": username, "message": message}),
+        )
 
     async def instruments(self, exchange: str = "NSE") -> dict[str, Any]:
-        """POST /api/v1/instruments"""
-        return await self._post("instruments", self._body({"exchange": exchange}))
+        """GET /api/v1/instruments"""
+        with self._config_guard:
+            api_key = self._api_key
+        return await self._get("instruments", params={"apikey": api_key, "exchange": exchange})
 
     async def analyzer_status(self) -> dict[str, Any]:
         """POST /api/v1/analyzer/status — check whether sandbox trading
