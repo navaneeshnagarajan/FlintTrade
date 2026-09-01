@@ -31,25 +31,27 @@ curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/
 
 The one-line installer above is the supported path on a Pi: it provisions
 its own Python 3.12 under `~/.flinttrade/tools` and does not use the
-system interpreter.
+system interpreter. `infra/install/install-native.sh` is the other supported
+Pi path when you want a bare-metal Ubuntu/Debian install with its own
+Python 3.12.
 
 ## Setup (ARM64 server — advanced)
 
-`setup-production.sh` is an Ubuntu 24.04 host provisioner. It installs to
-`/opt/flinttrade` (matching `infra/systemd/flinttrade.service`), creates a
-repo-local `.venv`, and chowns the tree to `www-data`. Override with
-`FLINTTRADE_DIR` only if you also rewrite the unit. `ProtectHome=true`
-means a home-directory prefix cannot start. See
+`setup-production.sh` is an Ubuntu 24.04 / Python >= 3.12 host provisioner
+only. It is not the Bookworm path. It provisions `/opt/flinttrade` to match
+`infra/systemd/flinttrade.service`, creates a repo-local `.venv`, and chowns
+only runtime workspace/data/log paths to `www-data`. The checkout stays
+root-owned. See
 [the systemd notes](../../infra/systemd/README.md).
 
-1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
-2. `cd FlintTrade`
-3. `bash infra/scripts/setup-production.sh`
-4. `sudo systemctl start flinttrade`
-5. Open the terminal URL and complete Setup in the app UI.
+```bash
+sudo bash infra/scripts/setup-production.sh
+sudoedit /opt/flinttrade/.env
+sudo systemctl start flinttrade
+```
 
-Broker/OpenAlgo configuration belongs in Setup or Settings. Edit
-`/opt/flinttrade/.env` only for server-only fallback values that cannot be
+Broker/OpenAlgo configuration belongs in Setup or Settings. Use `sudoedit`
+on `/opt/flinttrade/.env` only for server-only fallback values that cannot be
 supplied through the UI.
 
 Note: Backtest and AI packages may be slow on Pi 4. Prefer disabling optional

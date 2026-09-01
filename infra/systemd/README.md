@@ -3,15 +3,17 @@
 The shipped unit is `infra/systemd/flinttrade.service`. It is a **server**
 template for the production prefix, not a drop-in for a developer checkout.
 
-`infra/scripts/setup-production.sh` is the first-time Ubuntu installer: it
-clones to `/opt/flinttrade` by default, creates that tree's `.venv`, installs
-the hashed `requirements.lock` (including gunicorn and eventlet) into it,
-chowns the tree to `www-data`, and copies this unit unchanged. Operator
-walkthroughs are [docs/setup/linux.md](../../docs/setup/linux.md) and
-[docs/setup/raspberry-pi.md](../../docs/setup/raspberry-pi.md).
+`infra/scripts/setup-production.sh` is the first-time Ubuntu 24.04 installer
+(Python >= 3.12): it provisions `/opt/flinttrade`, creates that tree's
+`.venv`, installs the hashed `requirements.lock` into it, chowns only the
+runtime workspace/data/log paths to `www-data`, and copies this unit
+unchanged. Operator walkthroughs are [docs/setup/linux.md](../../docs/setup/linux.md)
+and [docs/setup/raspberry-pi.md](../../docs/setup/raspberry-pi.md).
 
 For ordinary desktop use, prefer the one-line web installer in
 [docs/setup/QUICKSTART.md](../../docs/setup/QUICKSTART.md) instead of systemd.
+Raspberry Pi OS Bookworm (system Python 3.11) should use that one-line
+installer or `infra/install/install-native.sh`, not `setup-production.sh`.
 
 ## What the unit actually assumes
 
@@ -22,33 +24,39 @@ Read the file before copying it. The checked-in unit is hardcoded to:
 | `User` / `Group` | `www-data` |
 | `WorkingDirectory` | `/opt/flinttrade` |
 | `FLINTTRADE_HOME` | `/opt/flinttrade` |
+| `FLINTTRADE_WORKSPACE_DIR` | `/opt/flinttrade/.flinttrade` (inside `ReadWritePaths`) |
 | `EnvironmentFile` | `/opt/flinttrade/.env` |
-| `ExecStart` | `/opt/flinttrade/.venv/bin/gunicorn … --worker-class eventlet … 'flinttrade_core.app:app'` |
+| `ExecStart` | `/opt/flinttrade/.venv/bin/python -m flinttrade_core.app` |
 | Bind | `127.0.0.1:5100` (Nginx is expected to reverse-proxy `/ft-api/`) |
 | `ReadWritePaths` | `/opt/flinttrade/data` and `/opt/flinttrade/.flinttrade` |
 | Port env | `FLINTTRADE_BACKEND_PORT=5100` — the name `flinttrade_core.app` reads. `FLINTTRADE_PORT` is a legacy alias only Docker's start helper honours. |
 
 There are no `REPLACE_USER` / `REPLACE_DIR` placeholders. `ProtectHome=true`
-means a home-directory prefix cannot start even if you rewrite the paths
-in the installer: the unit would still be denied that tree. Override the
-installer prefix with `FLINTTRADE_DIR` only if you also rewrite the unit
-paths to match.
+means a home-directory prefix cannot start. `FLINTTRADE_DIR` is not
+supported: the unit cannot be relocated without rewriting every hardcoded
+path.
+
+The git checkout and `.venv` stay root-owned and world-readable. `www-data`
+owns only the runtime workspace, data and log directories.
 
 ## Install
 
+A checkout of this repository is only the script source. The installer
+provisions `/opt/flinttrade` itself.
+
 ```bash
-git clone https://github.com/navaneeshnagarajan/FlintTrade.git
-cd FlintTrade
-bash infra/scripts/setup-production.sh
+sudo bash infra/scripts/setup-production.sh
+sudoedit /opt/flinttrade/.env
 sudo systemctl start flinttrade
 ```
 
-Edit `/opt/flinttrade/.env` only for server-only fallback values that cannot
-be supplied through the app UI. Then complete Setup in the app.
+Use `sudoedit` on `/opt/flinttrade/.env` only for server-only fallback values
+that cannot be supplied through the app UI. Then complete Setup in the app.
 
-`infra/scripts/deploy.sh` is the later deploy entry point. It defaults to the
-same `/opt/flinttrade` prefix, installs the hashed lock into the unit `.venv`,
-and refuses to run during NSE cash-session hours (9:15 AM – 3:30 PM IST).
+`infra/scripts/deploy.sh` is the later deploy entry point. It updates the
+same `/opt/flinttrade` prefix with `sudo git`, installs the hashed lock into
+the unit `.venv` without taking ownership, and refuses to run during NSE
+cash-session hours (9:15 AM – 3:30 PM IST).
 
 ## Usage
 

@@ -168,19 +168,26 @@ every OS; `make <target>` is the POSIX alias for the same targets.
 
 ## Server services (advanced)
 
-The production systemd installer installs to `/opt/flinttrade` so it matches
-`infra/systemd/flinttrade.service` (WorkingDirectory, ExecStart,
-`FLINTTRADE_HOME`, ReadWritePaths). That unit sets `ProtectHome=true`, so a
-home-directory prefix cannot start. Override the prefix with `FLINTTRADE_DIR`
-only if you also rewrite the unit paths.
+`infra/scripts/setup-production.sh` is the Ubuntu 24.04 production installer
+(Python >= 3.12). A checkout of this repository is only the *script* source;
+the installer provisions `/opt/flinttrade` itself. The unit is hardcoded to
+that prefix (`ProtectHome=true`). There is no directory override.
 
 The installer creates `/opt/flinttrade/.venv`, installs the hashed
-`requirements.lock` (including gunicorn and eventlet) into it, and chowns the
-tree to `www-data` — the user the unit runs as. See
+`requirements.lock` into it, and chowns only the runtime workspace, data and
+log paths to `www-data`. The git checkout and `.venv` stay root-owned so
+`infra/scripts/deploy.sh` can update them. See
 [the systemd notes](../../infra/systemd/README.md).
 
-1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
-2. `cd FlintTrade`
-3. `bash infra/scripts/setup-production.sh`
-4. Edit `/opt/flinttrade/.env` only for server-only fallback values that cannot be supplied through the app UI.
-5. `sudo systemctl start flinttrade`
+```bash
+sudo bash infra/scripts/setup-production.sh
+sudoedit /opt/flinttrade/.env
+sudo systemctl start flinttrade
+```
+
+Edit `/opt/flinttrade/.env` with `sudoedit` only for server-only fallback
+values that cannot be supplied through the app UI. Then complete Setup in
+the app.
+
+Raspberry Pi OS Bookworm (system Python 3.11) is not this path — use the
+one-line installer above, or `infra/install/install-native.sh`.

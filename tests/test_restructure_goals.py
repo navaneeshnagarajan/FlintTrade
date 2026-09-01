@@ -336,7 +336,7 @@ def test_server_installers_use_live_backend_entrypoint_and_optional_openalgo() -
 
     assert "-m flinttrade_core.app" in installer
     assert "packages.core.src.app" not in installer
-    assert "flinttrade_core.app:app" in systemd_unit
+    assert "-m flinttrade_core.app" in systemd_unit
     assert "packages.core.src.app:app" not in systemd_unit
     assert "Environment=FLINTTRADE_HOME=$INSTALL_DIR" in installer
     assert "Environment=FLINTTRADE_HOME=/opt/flinttrade" in systemd_unit

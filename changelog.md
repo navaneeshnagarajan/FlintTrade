@@ -19,14 +19,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
-- **Production systemd install.** `infra/scripts/setup-production.sh` now
-  defaults to `/opt/flinttrade` (the prefix `flinttrade.service` already uses),
-  creates `$INSTALL_DIR/.venv`, and installs the hashed lock into that venv.
-  The unit exports `FLINTTRADE_BACKEND_PORT` — the name the backend reads —
-  and the installer chowns the tree to `www-data`. gunicorn and eventlet are
-  workspace dependencies so the lock the unit ExecStarts actually contains
-  them. `infra/systemd/README.md` is retargeted to this contract (no
-  `REPLACE_*` placeholders, no "installer is broken" workaround).
+- **Production systemd install.** `infra/scripts/setup-production.sh` hardcodes
+  `/opt/flinttrade` (the prefix `flinttrade.service` already uses), refuses
+  `FLINTTRADE_DIR`, symlink targets and non-git trees, and requires Python
+  >= 3.12 before creating `$INSTALL_DIR/.venv`. The unit exports
+  `FLINTTRADE_WORKSPACE_DIR=/opt/flinttrade/.flinttrade` so Workspace writes
+  stay inside `ReadWritePaths`, `FLINTTRADE_BACKEND_PORT`, and starts
+  `python -m flinttrade_core.app` with every workspace package on
+  `PYTHONPATH`. Code and `.venv` stay root-owned; only runtime
+  workspace/data/log paths are `www-data`. `infra/scripts/deploy.sh` updates
+  that tree with `sudo git` and does not take ownership.
 
 
 

@@ -33,20 +33,13 @@ Environment=OPENBLAS_NUM_THREADS=2
 Environment=OMP_NUM_THREADS=2
 Environment=FLINTTRADE_DEV=0
 Environment=FLINTTRADE_HOME=/opt/flinttrade
+Environment=FLINTTRADE_WORKSPACE_DIR=/opt/flinttrade/.flinttrade
 Environment=FLINTTRADE_BACKEND_PORT=5100
-Environment=PYTHONPATH=/opt/flinttrade/packages/core/core/src
+Environment=PYTHONPATH=/opt/flinttrade/packages/core/core/src:/opt/flinttrade/packages/core/data/src:/opt/flinttrade/packages/core/historical/src:/opt/flinttrade/packages/core/indicators/src:/opt/flinttrade/packages/integrations/gateway/src:/opt/flinttrade/packages/integrations/webhooks/src:/opt/flinttrade/packages/services/ai/src:/opt/flinttrade/packages/services/automation/src:/opt/flinttrade/packages/services/backtest/src:/opt/flinttrade/packages/services/ditto/src:/opt/flinttrade/packages/services/engine/src:/opt/flinttrade/packages/services/journal/src:/opt/flinttrade/packages/services/screener/src
 EnvironmentFile=/opt/flinttrade/.env
 
-# Gunicorn with eventlet — single worker for WebSocket compatibility
-ExecStart=/opt/flinttrade/.venv/bin/gunicorn \
-    --worker-class eventlet \
-    -w 1 \
-    --bind 127.0.0.1:5100 \
-    --timeout 120 \
-    --graceful-timeout 30 \
-    --access-logfile - \
-    --error-logfile - \
-    'flinttrade_core.app:app'
+# Same module as scripts/ft.py and infra/install/install-native.sh.
+ExecStart=/opt/flinttrade/.venv/bin/python -m flinttrade_core.app
 
 # Restart policy — always restart with a brief cooldown
 Restart=always

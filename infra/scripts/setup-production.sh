@@ -5,13 +5,20 @@
 # Absorbed infra/scripts/setup-ubuntu.sh (host-provisioning steps) — this is
 # the single production installer; infra/scripts/setup.sh remains the dev setup.
 #
-# Default prefix is /opt/flinttrade so it matches infra/systemd/flinttrade.service
-# (WorkingDirectory, ExecStart, FLINTTRADE_HOME, ReadWritePaths). Override with
-# FLINTTRADE_DIR only if you also rewrite that unit — ProtectHome=true refuses a
-# home-directory working tree.
+# Default prefix is hardcoded /opt/flinttrade so it matches
+# infra/systemd/flinttrade.service (WorkingDirectory, ExecStart,
+# FLINTTRADE_HOME, FLINTTRADE_WORKSPACE_DIR, ReadWritePaths).
+# FLINTTRADE_DIR is not supported — the unit cannot be relocated without
+# rewriting it, and ProtectHome=true refuses a home-directory tree.
 set -euo pipefail
 
-INSTALL_DIR="${FLINTTRADE_DIR:-/opt/flinttrade}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=production-contract.sh
+source "$SCRIPT_DIR/production-contract.sh"
+
+flinttrade_assert_no_dir_override
+INSTALL_DIR="$(flinttrade_production_prefix)"
+flinttrade_assert_safe_install_dir "$INSTALL_DIR"
 REPO_URL="${FLINTTRADE_REPO:-https://github.com/navaneeshnagarajan/FlintTrade.git}"
 VENV_DIR="$INSTALL_DIR/.venv"
 # The shipped unit runs as www-data; nginx (installed below) provides that user.
@@ -42,8 +49,12 @@ fi
 
 cd "$INSTALL_DIR"
 
-# Python virtualenv — flinttrade.service ExecStart's $INSTALL_DIR/.venv/bin/gunicorn.
+# Python virtualenv — flinttrade.service ExecStart's $INSTALL_DIR/.venv/bin/python.
 # Apt-installing python3-venv is not enough; the unit path must exist.
+# Ubuntu 24.04 only: refuse Bookworm/Pi system Python 3.11 before creating .venv.
+echo "Checking Python >= 3.12..."
+flinttrade_assert_python_floor python3
+
 echo "Creating Python virtual environment at $VENV_DIR..."
 if [ ! -d "$VENV_DIR" ]; then
     sudo python3 -m venv "$VENV_DIR"
@@ -92,11 +103,12 @@ sudo mkdir -p \
     /data/flinttrade/{historical,ticks,audit,backups} \
     /var/log/flinttrade
 
-# The unit runs as www-data. A tree owned by the installing user is unreadable
-# or unwritable once ProtectSystem=strict / ProtectHome=true take effect.
-echo "Setting $SERVICE_USER ownership on $INSTALL_DIR and data directories..."
+# The unit runs as www-data. Keep the git checkout and .venv root-owned so
+# deploy.sh can update them; chown only the runtime workspace/data/log paths.
+echo "Setting $SERVICE_USER ownership on runtime data directories..."
 sudo chown -R "$SERVICE_USER:$SERVICE_USER" \
-    "$INSTALL_DIR" \
+    "$INSTALL_DIR/data" \
+    "$INSTALL_DIR/.flinttrade" \
     /data/flinttrade \
     /var/log/flinttrade
 

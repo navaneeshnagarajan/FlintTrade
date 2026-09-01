@@ -1,15 +1,20 @@
 #!/bin/bash
 # FlintTrade Production Deployment Script — canonical deploy entry point.
-# Merged union of the old deploy.sh (checkout main + .env sourcing) and
+# Merged union of the old deploy.sh (checkout main) and
 # deploy-production.sh (market-hours guard, hash-verified install, systemd
 # install-if-absent, post-restart verification).
 # DO NOT run during market hours (9:15 AM - 3:30 PM IST).
+# The unit is hardcoded to /opt/flinttrade. FLINTTRADE_DIR is not supported.
+# The checkout and .venv stay root-owned; only runtime data dirs are www-data.
 set -euo pipefail
 
-# Optional env-driven overrides (e.g. FLINTTRADE_DIR) from the repo-root .env.
-source "$(dirname "${BASH_SOURCE[0]}")/../../.env" 2>/dev/null || true
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=production-contract.sh
+source "$SCRIPT_DIR/production-contract.sh"
 
-REPO_DIR="${FLINTTRADE_DIR:-/opt/flinttrade}"
+flinttrade_assert_no_dir_override
+REPO_DIR="$(flinttrade_production_prefix)"
+flinttrade_assert_safe_install_dir "$REPO_DIR"
 SERVICE_NAME="flinttrade"
 VENV_PIP="$REPO_DIR/.venv/bin/pip"
 
@@ -31,20 +36,21 @@ if [ "$TIME_NOW" -ge "$MARKET_OPEN" ] && [ "$TIME_NOW" -le "$MARKET_CLOSE" ]; th
 fi
 
 # 2. Pull latest — the explicit checkout guarantees main is deployed even if
-#    the working copy was left on another branch.
+#    the working copy was left on another branch. sudo so a root-owned tree
+#    can be updated without chowning code to the deploying user.
 cd "$REPO_DIR"
 echo "Pulling latest from main..."
-git checkout main
-git pull origin main
+sudo git checkout main
+sudo git pull origin main
 
-# 3. Install Python deps into the unit venv — SC-07: hash-verified install only
+# 3. Install Python deps into the unit venv — SC-07: hash-verified install only.
+#    Keep .venv root-owned so the next deploy can write it.
 echo "Installing Python dependencies..."
 if [ ! -x "$VENV_PIP" ]; then
     echo "ERROR: $VENV_PIP is missing. Re-run infra/scripts/setup-production.sh so the unit venv exists."
     exit 1
 fi
 sudo "$VENV_PIP" install --require-hashes -r requirements.lock -q
-sudo chown -R www-data:www-data "$REPO_DIR/.venv"
 
 # 4. Install systemd service if not present
 if [ ! -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
