@@ -255,6 +255,18 @@ async def test_shutdown_drains_admitted_request_before_closing_dependencies() ->
 
 
 @pytest.mark.asyncio
+async def test_shutdown_closes_rag_vector_store() -> None:
+    """Persistent RAG WAL state is checkpointed before process shutdown completes."""
+    runtime = _runtime_app()
+    runtime.rag = MagicMock()
+
+    await runtime.stop()
+
+    runtime.rag.close.assert_called_once_with()
+    runtime.client.close.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
 async def test_shutdown_stops_uploaded_strategies_before_each_router_retirement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

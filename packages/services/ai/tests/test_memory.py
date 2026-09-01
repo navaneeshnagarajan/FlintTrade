@@ -12,6 +12,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from typing import get_type_hints
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -112,6 +113,16 @@ def make_memory(**kwargs) -> TradedMemory:
 def memory() -> TradedMemory:
     """Fresh isolated TradedMemory instance for each test."""
     return make_memory()
+
+
+def test_close_releases_owned_vector_client_once() -> None:
+    client = MagicMock()
+    memory = TradedMemory(persist_dir="", _chroma_client=client)
+
+    memory.close()
+    memory.close()
+
+    client.close.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------

@@ -342,6 +342,17 @@ class TestVectorStore:
         coll.upsert.assert_called_once()
         assert coll.upsert.call_args.kwargs["embeddings"] == [[0.1] * 384]
 
+    def test_close_releases_client_once_and_clears_cached_collection(self) -> None:
+        store, _ = self._make_store()
+        client = store._client
+
+        store.close()
+        store.close()
+
+        client.close.assert_called_once_with()
+        assert store._client is None
+        assert store._collection is None
+
     def test_upsert_falls_back_to_chroma_embeddings(self) -> None:
         coll = _make_mock_collection(embedding_mode=None)
         provider = MagicMock()
@@ -592,6 +603,24 @@ class TestRAGPipeline:
             llm_client=llm,
             vector_store=store,
         )
+
+    def test_close_releases_vector_store_once(self) -> None:
+        store = MagicMock()
+        pipeline = RAGPipeline(vector_store=store)
+
+        pipeline.close()
+        pipeline.close()
+
+        store.close.assert_called_once_with()
+
+    def test_close_releases_llm_client_once(self) -> None:
+        llm = MagicMock()
+        pipeline = RAGPipeline(llm_client=llm, vector_store=MagicMock())
+
+        pipeline.close()
+        pipeline.close()
+
+        llm.close.assert_called_once_with()
 
     def test_index_document_returns_chunk_count(self) -> None:
         pipeline = self._make_pipeline()

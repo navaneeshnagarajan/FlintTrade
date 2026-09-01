@@ -79,3 +79,22 @@ def test_runtime_constructs_when_chromadb_is_missing(monkeypatch, tmp_path) -> N
 
     assert type(rag) is RAGPipeline
     assert rag.config.persist_directory == str(tmp_path / "rag")
+
+
+def test_runtime_refuses_to_shadow_legacy_chroma_vectors(monkeypatch, tmp_path, caplog) -> None:
+    """Startup must surface preserved legacy vectors instead of treating RAG as empty."""
+    monkeypatch.setenv("FLINTTRADE_RAG_ENABLED", "true")
+    monkeypatch.delenv("FLINTTRADE_RAG_AUTO_INDEX", raising=False)
+    monkeypatch.setattr(LLMConfig, "from_env", classmethod(lambda cls: SimpleNamespace(provider="")))
+    rag_dir = tmp_path / "rag"
+    rag_dir.mkdir()
+    legacy_db = rag_dir / "chroma.sqlite3"
+    legacy_db.write_bytes(b"legacy-vector-data")
+    caplog.set_level(logging.WARNING)
+
+    rag = app_module._initialise_rag_runtime(tmp_path)
+
+    assert rag is None
+    assert "Legacy Chroma vector data detected" in caplog.text
+    assert legacy_db.read_bytes() == b"legacy-vector-data"
+    assert not (rag_dir / "flinttrade_vectors.sqlite").exists()

@@ -22,9 +22,26 @@ import numpy as np
 logger = logging.getLogger("flinttrade.ai.local_vector_store")
 
 _DB_NAME = "flinttrade_vectors.sqlite"
+_LEGACY_CHROMA_DB_NAME = "chroma.sqlite3"
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _DEFAULT_DIM = 64
 _VALID_SPACES = {"cosine", "l2", "ip", "inner_product"}
+
+
+class LegacyChromaStoreDetectedError(RuntimeError):
+    """Raised before a new store can shadow preserved legacy Chroma vectors."""
+
+
+def assert_no_legacy_chroma_store(path: str | Path) -> None:
+    """Refuse to create an empty local store beside unread legacy Chroma data."""
+    directory = Path(os.path.expanduser(str(path)))
+    if (directory / _LEGACY_CHROMA_DB_NAME).exists():
+        raise LegacyChromaStoreDetectedError(
+            "Legacy Chroma vector data detected. FlintTrade left it untouched and "
+            "refused to create a replacement store in the same directory. Export it "
+            "with the previous release, or move the complete legacy directory aside "
+            "after explicitly accepting an empty new store."
+        )
 
 
 class HashingEmbeddingFunction:
@@ -324,7 +341,7 @@ class Collection:
             scored.append((row["id"], row, _distance(self._space, query, embedding)))
         scored.sort(key=lambda item: (item[2], item[0]))
         limit = max(0, n_results)
-        return scored[:limit] if limit else scored
+        return scored[:limit]
 
     @staticmethod
     def _format_get(rows: list[dict[str, Any]], include: list[str] | None) -> dict[str, Any]:
@@ -345,8 +362,11 @@ class LocalVectorClient:
     def __init__(self, path: str | None = None) -> None:
         self._lock = threading.RLock()
         self._collections: dict[str, Collection] = {}
+        self._persistent = bool(path)
+        self._closed = False
         if path:
             directory = Path(os.path.expanduser(path))
+            assert_no_legacy_chroma_store(directory)
             directory.mkdir(parents=True, exist_ok=True)
             db_path = str(directory / _DB_NAME)
             self._conn = sqlite3.connect(
@@ -367,6 +387,25 @@ class LocalVectorClient:
             )
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
+
+    def close(self) -> None:
+        """Checkpoint persistent WAL state and close the SQLite connection once."""
+        with self._lock:
+            if self._closed:
+                return
+            try:
+                if self._persistent:
+                    self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                self._conn.close()
+                self._closed = True
+                self._collections.clear()
+
+    def __enter__(self) -> LocalVectorClient:
+        return self
+
+    def __exit__(self, _exc_type: Any, _exc: Any, _traceback: Any) -> None:
+        self.close()
 
     def get_or_create_collection(
         self,
@@ -471,34 +510,43 @@ class LocalVectorClient:
         replace: bool,
     ) -> None:
         with self._lock:
-            for item_id, document, metadata, embedding in zip(ids, documents, metadatas, embeddings):
-                payload = (
-                    name,
-                    item_id,
-                    document,
-                    _dump_metadata(metadata),
-                    _dump_embedding(embedding),
-                )
-                if replace:
-                    self._conn.execute(
-                        """
-                        INSERT INTO items (collection, id, document, metadata_json, embedding)
-                        VALUES (?, ?, ?, ?, ?)
-                        ON CONFLICT(collection, id) DO UPDATE SET
-                            document = excluded.document,
-                            metadata_json = excluded.metadata_json,
-                            embedding = excluded.embedding
-                        """,
-                        payload,
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                for item_id, document, metadata, embedding in zip(
+                    ids, documents, metadatas, embeddings, strict=True
+                ):
+                    payload = (
+                        name,
+                        item_id,
+                        document,
+                        _dump_metadata(metadata),
+                        _dump_embedding(embedding),
                     )
-                else:
-                    self._conn.execute(
-                        """
-                        INSERT INTO items (collection, id, document, metadata_json, embedding)
-                        VALUES (?, ?, ?, ?, ?)
-                        """,
-                        payload,
-                    )
+                    if replace:
+                        self._conn.execute(
+                            """
+                            INSERT INTO items (collection, id, document, metadata_json, embedding)
+                            VALUES (?, ?, ?, ?, ?)
+                            ON CONFLICT(collection, id) DO UPDATE SET
+                                document = excluded.document,
+                                metadata_json = excluded.metadata_json,
+                                embedding = excluded.embedding
+                            """,
+                            payload,
+                        )
+                    else:
+                        self._conn.execute(
+                            """
+                            INSERT INTO items (collection, id, document, metadata_json, embedding)
+                            VALUES (?, ?, ?, ?, ?)
+                            """,
+                            payload,
+                        )
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            else:
+                self._conn.execute("COMMIT")
 
     def _update(
         self,
@@ -510,25 +558,34 @@ class LocalVectorClient:
         embeddings: list[Any] | None,
     ) -> None:
         with self._lock:
-            for index, item_id in enumerate(ids):
-                row = self._conn.execute(
-                    "SELECT document, metadata_json, embedding FROM items WHERE collection = ? AND id = ?",
-                    (name, item_id),
-                ).fetchone()
-                if row is None:
-                    continue
-                document = documents[index] if documents is not None else row["document"]
-                metadata = metadatas[index] if metadatas is not None else _load_metadata(row["metadata_json"])
-                embedding = embeddings[index] if embeddings is not None else row["embedding"]
-                blob = embedding if isinstance(embedding, (bytes, bytearray)) else _dump_embedding(embedding)
-                self._conn.execute(
-                    """
-                    UPDATE items
-                    SET document = ?, metadata_json = ?, embedding = ?
-                    WHERE collection = ? AND id = ?
-                    """,
-                    (document, _dump_metadata(metadata), blob, name, item_id),
-                )
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                for index, item_id in enumerate(ids):
+                    row = self._conn.execute(
+                        "SELECT document, metadata_json, embedding FROM items WHERE collection = ? AND id = ?",
+                        (name, item_id),
+                    ).fetchone()
+                    if row is None:
+                        continue
+                    document = documents[index] if documents is not None else row["document"]
+                    metadata = (
+                        metadatas[index] if metadatas is not None else _load_metadata(row["metadata_json"])
+                    )
+                    embedding = embeddings[index] if embeddings is not None else row["embedding"]
+                    blob = embedding if isinstance(embedding, (bytes, bytearray)) else _dump_embedding(embedding)
+                    self._conn.execute(
+                        """
+                        UPDATE items
+                        SET document = ?, metadata_json = ?, embedding = ?
+                        WHERE collection = ? AND id = ?
+                        """,
+                        (document, _dump_metadata(metadata), blob, name, item_id),
+                    )
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            else:
+                self._conn.execute("COMMIT")
 
     def _delete(
         self,

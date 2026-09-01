@@ -193,6 +193,26 @@ def test_learning_memory_falls_back_to_hierarchical_when_persistent_fails(monkey
     assert isinstance(memory, HierarchicalMemoryManager)
 
 
+def test_learning_memory_falls_back_without_shadowing_legacy_chroma(monkeypatch, tmp_path) -> None:
+    """Legacy lessons stay untouched while the process uses explicit in-memory fallback."""
+    import flinttrade_core.workspace as workspace_mod
+    from flinttrade_ai.memory import HierarchicalMemoryManager
+
+    agent_memory = tmp_path / "agent_memory"
+    agent_memory.mkdir()
+    legacy_db = agent_memory / "chroma.sqlite3"
+    legacy_db.write_bytes(b"legacy-agent-lessons")
+    monkeypatch.setattr(workspace_mod, "workspace_dir", lambda: tmp_path)
+    monkeypatch.setattr(workspace_mod, "Workspace", _EnabledWorkspace)
+    mod._FALLBACK_LEARNING_MEMORY = None
+
+    memory = mod._build_learning_memory()
+
+    assert isinstance(memory, HierarchicalMemoryManager)
+    assert legacy_db.read_bytes() == b"legacy-agent-lessons"
+    assert not (agent_memory / "flinttrade_vectors.sqlite").exists()
+
+
 def test_learning_memory_disabled_returns_none(monkeypatch, tmp_path) -> None:
     import flinttrade_core.workspace as workspace_mod
 
@@ -506,6 +526,48 @@ def test_runtime_shutdown_requests_square_off_and_joins_agent(live_auth):
     with mod._RUNNER_LOCK:  # noqa: SLF001
         thread = mod._RUNNER.get("thread")  # noqa: SLF001
     assert thread is not None and not thread.is_alive()
+
+
+def test_runtime_shutdown_closes_learning_memory_after_agent_stops() -> None:
+    app = _make_app()
+    memory = MagicMock()
+
+    class _CompletedTrader:
+        shutdown_complete = True
+        stop_failure = ""
+
+        def __init__(self) -> None:
+            self.memory = memory
+
+    thread = threading.Thread(target=lambda: None)
+    thread.start()
+    thread.join()
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        mod._RUNNER.update({"trader": _CompletedTrader(), "thread": thread})  # noqa: SLF001
+
+    assert mod.shutdown_agent_runtime(app, timeout=1.0) is True
+    memory.close.assert_called_once_with()
+
+
+def test_runtime_shutdown_fails_closed_when_learning_memory_close_fails() -> None:
+    app = _make_app()
+    memory = MagicMock()
+    memory.close.side_effect = RuntimeError("disk unavailable")
+
+    class _CompletedTrader:
+        shutdown_complete = True
+        stop_failure = ""
+
+        def __init__(self) -> None:
+            self.memory = memory
+
+    thread = threading.Thread(target=lambda: None)
+    thread.start()
+    thread.join()
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        mod._RUNNER.update({"trader": _CompletedTrader(), "thread": thread})  # noqa: SLF001
+
+    assert mod.shutdown_agent_runtime(app, timeout=1.0) is False
 
 
 def test_runtime_shutdown_rejects_joined_incomplete_square_off() -> None:

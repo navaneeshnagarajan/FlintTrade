@@ -773,6 +773,10 @@ class VectorStore:
     ) -> None:
         self._collection_name = collection_name
         self._persist_dir = persist_directory
+        if persist_directory:
+            from .local_vector_store import assert_no_legacy_chroma_store
+
+            assert_no_legacy_chroma_store(persist_directory)
         self._embedding_provider = embedding_provider or EmbeddingProvider()
         self._client: Any = None
         self._collection: Any = None
@@ -925,6 +929,19 @@ class VectorStore:
         self._collection = None
         self._embedding_mode = None
 
+    def close(self) -> None:
+        """Close the owned local vector client and clear cached handles."""
+        client = self._client
+        if client is None:
+            return
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+        if self._client is client:
+            self._client = None
+            self._collection = None
+            self._embedding_mode = None
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
@@ -1059,6 +1076,7 @@ class RAGPipeline:
             persist_directory=self.config.persist_directory,
             embedding_provider=_embedding,
         )
+        self._closed = False
         # Domain filter — guards query() against off-topic questions.
         # Receives the same embedding provider for optional semantic check.
         self._domain_filter_enabled = enable_domain_filter
@@ -1067,6 +1085,18 @@ class RAGPipeline:
             self._domain_filter = DomainFilter(
                 embedding_provider=_embedding,
             )
+
+    def close(self) -> None:
+        """Close persistent vector resources once; a failed close remains retryable."""
+        if self._closed:
+            return
+        close_store = getattr(self._store, "close", None)
+        if callable(close_store):
+            close_store()
+        close_llm = getattr(self._llm, "close", None)
+        if callable(close_llm):
+            close_llm()
+        self._closed = True
 
     # ------------------------------------------------------------------
     # Indexing

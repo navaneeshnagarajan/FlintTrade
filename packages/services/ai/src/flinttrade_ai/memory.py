@@ -374,6 +374,10 @@ class TradedMemory:
         self._collection_prefix = collection_prefix
         self._embedding_model_name = embedding_model
         self._override_client = _chroma_client
+        if persist_dir and _chroma_client is None:
+            from .local_vector_store import assert_no_legacy_chroma_store
+
+            assert_no_legacy_chroma_store(persist_dir)
 
         # Lazy-initialised per layer
         self._chroma_client: Any | None = None
@@ -384,6 +388,22 @@ class TradedMemory:
         # Thread safety for lazy-init helpers (RLock because _get_collection
         # calls _get_client and _get_embedding_fn while already holding the lock)
         self._lock = threading.RLock()
+
+    def close(self) -> None:
+        """Close the owned vector client once and clear cached collection handles."""
+        with self._lock:
+            client = self._chroma_client
+            if client is None:
+                client = self._override_client
+            if client is None:
+                return
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
+            self._chroma_client = None
+            self._override_client = None
+            self._collections.clear()
+            self._distance_spaces.clear()
 
     # ------------------------------------------------------------------
     # Internal helpers

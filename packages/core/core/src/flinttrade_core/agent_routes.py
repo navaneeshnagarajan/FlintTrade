@@ -104,6 +104,15 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
         failure = str(getattr(trader, "stop_failure", "") or "incomplete square-off")
         logger.error("Autonomous agent shutdown incomplete: %s", failure[:256])
         return False
+
+    memory = getattr(trader, "memory", None)
+    close_memory = getattr(memory, "close", None)
+    if callable(close_memory):
+        try:
+            close_memory()
+        except Exception:  # noqa: BLE001 - persistence finalisation must fail closed
+            logger.exception("Autonomous agent learning-memory close failed")
+            return False
     return True
 
 

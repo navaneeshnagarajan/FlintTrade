@@ -7320,6 +7320,11 @@ class FlintTradeApp:
 
         await stop_managed_local_ai()
 
+        rag = getattr(self, "rag", None)
+        close_rag = getattr(rag, "close", None)
+        if callable(close_rag):
+            await stop_sync("rag-vector-store", "RAG vector store", close_rag)
+
         if errors:
             summary = ", ".join(f"{label} ({error_type})" for label, error_type in errors)
             logger.error("FlintTrade shutdown dependency finalisation failed: %s", summary)

@@ -18,6 +18,7 @@ _MANIFESTS = (
 _ACTIVE_ARCHITECTURE_SURFACES = (
     ROOT / "readme.md",
     ROOT / "CLAUDE.md",
+    ROOT / "packages" / "services" / "ai" / "README.md",
     ROOT / "packages" / "core" / "core" / "src" / "flinttrade_core" / "app.py",
 )
 
@@ -40,3 +41,13 @@ def test_active_architecture_docs_describe_the_local_vector_store() -> None:
             if "chromadb" in line.lower():
                 hits.append(f"{path.relative_to(ROOT)}:{line_number}")
     assert hits == [], "active architecture text still advertises chromadb: " + ", ".join(hits)
+
+
+def test_legacy_vector_upgrade_policy_is_documented() -> None:
+    """Operators must be warned that legacy vectors are preserved but not auto-migrated."""
+    changelog = (ROOT / "changelog.md").read_text(encoding="utf-8").lower()
+
+    assert "chroma.sqlite3" in changelog
+    assert "flinttrade_vectors.sqlite" in changelog
+    assert "left untouched" in changelog
+    assert "refuses" in changelog
