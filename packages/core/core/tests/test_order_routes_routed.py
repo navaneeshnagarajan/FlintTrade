@@ -894,6 +894,27 @@ def test_modify_happy_path_returns_200() -> None:
     assert "_requested_change_fields" not in kw["changes"]
 
 
+def test_modify_forwards_trigger_price_and_disclosed_quantity() -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    client = _app(broker_router=router).test_client()
+    resp = client.post(
+        "/api/v1/orders/modify",
+        json={
+            **_MODIFY_BODY,
+            "trigger_price": "1490",
+            "disclosed_quantity": "25",
+        },
+        headers=_live_headers(),
+    )
+    assert resp.status_code == 200
+    kw = router.modify_order.await_args.kwargs
+    assert kw["changes"]["trigger_price"] == "1490"
+    assert kw["changes"]["disclosed_quantity"] == "25"
+    assert "disclosed_quantity" in kw["order"]["_requested_change_fields"]
+    assert "trigger_price" in kw["order"]["_requested_change_fields"]
+
+
 def test_routed_modify_happy_path_targets_named_broker_account() -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)

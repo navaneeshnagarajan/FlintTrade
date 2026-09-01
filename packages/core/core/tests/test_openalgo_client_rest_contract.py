@@ -55,6 +55,23 @@ async def test_option_chain_posts_underlying_and_ddmmmyy_expiry_without_unknown_
 
 
 @pytest.mark.asyncio
+async def test_option_chain_refuses_empty_expiry_without_posting() -> None:
+    """OptionChainSchema requires nonempty expiry_date; do not emit a partial body."""
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success", "data": {}}
+    )
+
+    try:
+        with pytest.raises(ValueError, match="expiry_date is required"):
+            await client.option_chain("NIFTY", "NSE_INDEX", "")
+    finally:
+        await client.close()
+
+    client._post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_synthetic_future_posts_underlying_not_symbol() -> None:
     """SyntheticFutureSchema requires underlying, not symbol."""
     client = _client()
@@ -76,6 +93,23 @@ async def test_synthetic_future_posts_underlying_not_symbol() -> None:
 
 
 @pytest.mark.asyncio
+async def test_synthetic_future_refuses_empty_expiry_without_posting() -> None:
+    """SyntheticFutureSchema requires expiry_date; do not emit a partial body."""
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success", "synthetic_future_price": 26015.25}
+    )
+
+    try:
+        with pytest.raises(ValueError, match="expiry_date is required"):
+            await client.synthetic_future("NIFTY", "NSE_INDEX", "")
+    finally:
+        await client.close()
+
+    client._post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_modify_order_includes_required_disclosed_quantity_and_trigger_price() -> None:
     """ModifyOrderSchema requires disclosed_quantity and trigger_price."""
     from flinttrade_core.models import ModifyOrder
@@ -94,6 +128,41 @@ async def test_modify_order_includes_required_disclosed_quantity_and_trigger_pri
     assert endpoint == "modifyorder"
     assert "disclosed_quantity" in payload
     assert "trigger_price" in payload
+
+
+@pytest.mark.asyncio
+async def test_place_options_multi_order_puts_pricetype_product_on_legs() -> None:
+    """OptionsMultiOrderSchema rejects unknown top-level pricetype/product."""
+    from flinttrade_core.models import Action, OptionType, OptionsLeg, OptionsMultiOrder, PriceType, Product
+
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success", "orderid": "OID-1"}
+    )
+    order = OptionsMultiOrder(
+        underlying="NIFTY",
+        expiry_date="26MAR26",
+        pricetype=PriceType.MARKET,
+        product=Product.NRML,
+        legs=[
+            OptionsLeg(offset="ATM", option_type=OptionType.CE, action=Action.BUY, quantity="65"),
+            OptionsLeg(offset="ATM", option_type=OptionType.PE, action=Action.SELL, quantity="65"),
+        ],
+    )
+
+    try:
+        await client.place_options_multi_order(order)
+    finally:
+        await client.close()
+
+    endpoint, payload = client._post.await_args.args[:2]
+    assert endpoint == "optionsmultiorder"
+    assert "pricetype" not in payload
+    assert "product" not in payload
+    assert payload["legs"][0]["pricetype"] == "MARKET"
+    assert payload["legs"][0]["product"] == "NRML"
+    assert payload["legs"][1]["pricetype"] == "MARKET"
+    assert payload["legs"][1]["product"] == "NRML"
 
 
 @pytest.mark.asyncio
@@ -198,6 +267,23 @@ async def test_timings_posts_market_timings_with_date() -> None:
 
 
 @pytest.mark.asyncio
+async def test_timings_refuses_empty_date_without_posting() -> None:
+    """MarketTimingsSchema requires date; do not emit a partial body."""
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success", "data": {}}
+    )
+
+    try:
+        with pytest.raises(ValueError, match="date is required"):
+            await client.timings()
+    finally:
+        await client.close()
+
+    client._post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_ticker_uses_apikey_query_and_from_to_dates() -> None:
     """Ticker GET authenticates with apikey query and HistorySchema from/to dates."""
     client = _client()
@@ -227,6 +313,23 @@ async def test_ticker_uses_apikey_query_and_from_to_dates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ticker_refuses_missing_from_to_dates_without_getting() -> None:
+    """HistorySchema requires from/to; do not emit a partial ticker query."""
+    client = _client()
+    client._get = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success", "data": []}
+    )
+
+    try:
+        with pytest.raises(ValueError, match="from and to dates are required"):
+            await client.ticker("NSE", "RELIANCE", interval="5m")
+    finally:
+        await client.close()
+
+    client._get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_telegram_posts_notify_with_username_and_message() -> None:
     """Telegram notify is POST /api/v1/telegram/notify with username and message."""
     client = _client()
@@ -243,3 +346,124 @@ async def test_telegram_posts_notify_with_username_and_message() -> None:
     assert endpoint == "telegram/notify"
     assert payload["username"] == "trader1"
     assert payload["message"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_telegram_refuses_empty_username_without_posting() -> None:
+    """Official /telegram/notify rejects empty username; do not emit a partial body."""
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success"}
+    )
+
+    try:
+        with pytest.raises(ValueError, match="username is required"):
+            await client.telegram("hello")
+    finally:
+        await client.close()
+
+    client._post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_option_symbol_posts_underlying_not_symbol() -> None:
+    """OptionSymbolSchema requires underlying, not symbol."""
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success", "symbol": "NIFTY26MAR2624000CE"}
+    )
+
+    try:
+        await client.option_symbol(
+            "NIFTY",
+            exchange="NSE_INDEX",
+            expiry_date="26MAR26",
+            offset="ATM",
+            option_type="CE",
+        )
+    finally:
+        await client.close()
+
+    endpoint, payload = client._post.await_args.args[:2]
+    assert endpoint == "optionsymbol"
+    assert payload["underlying"] == "NIFTY"
+    assert payload["exchange"] == "NSE_INDEX"
+    assert payload["expiry_date"] == "26MAR26"
+    assert payload["offset"] == "ATM"
+    assert payload["option_type"] == "CE"
+    assert "symbol" not in payload
+
+
+@pytest.mark.asyncio
+async def test_option_symbol_refuses_empty_expiry_without_posting() -> None:
+    """OptionSymbolSchema cannot derive expiry_date from a bare underlying."""
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success"}
+    )
+
+    try:
+        with pytest.raises(ValueError, match="expiry_date is required"):
+            await client.option_symbol("NIFTY", exchange="NSE_INDEX", offset="ATM")
+    finally:
+        await client.close()
+
+    client._post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_option_symbol_refuses_numeric_offset_without_posting() -> None:
+    """Official offset is ATM/ITMn/OTMn, not a numeric strike offset."""
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success"}
+    )
+
+    try:
+        with pytest.raises(ValueError, match="offset"):
+            await client.option_symbol(
+                "NIFTY",
+                exchange="NSE_INDEX",
+                expiry_date="26MAR26",
+            )
+    finally:
+        await client.close()
+
+    client._post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_expiry_posts_required_instrumenttype() -> None:
+    """ExpirySchema requires instrumenttype futures|options."""
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success", "data": ["26-MAR-26"]}
+    )
+
+    try:
+        await client.expiry("NIFTY", "NFO", instrumenttype="options")
+    finally:
+        await client.close()
+
+    endpoint, payload = client._post.await_args.args[:2]
+    assert endpoint == "expiry"
+    assert payload["symbol"] == "NIFTY"
+    assert payload["exchange"] == "NFO"
+    assert payload["instrumenttype"] == "options"
+
+
+@pytest.mark.asyncio
+async def test_expiry_refuses_missing_instrumenttype_without_posting() -> None:
+    """Do not emit ExpirySchema without a derivable instrumenttype."""
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success", "data": []}
+    )
+
+    try:
+        with pytest.raises(ValueError, match="instrumenttype is required"):
+            await client.expiry("NIFTY", "NFO")
+    finally:
+        await client.close()
+
+    client._post.assert_not_awaited()

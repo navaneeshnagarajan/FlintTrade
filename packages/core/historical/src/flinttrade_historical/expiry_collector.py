@@ -114,7 +114,7 @@ class ExpiryDataCollector:
         Returns:
             List of expiry date strings (YYMMDD format) sorted chronologically.
         """
-        info = self._expiry_mgr.get_expiries(symbol, exchange)
+        info = self._expiry_mgr.get_expiries(symbol, exchange, instrumenttype="options")
         if not info.expiry_dates:
             logger.warning("No expiry dates found for %s:%s", exchange, symbol)
             return []

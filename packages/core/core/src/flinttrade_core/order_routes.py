@@ -1390,6 +1390,8 @@ def _modify_changes(body: dict[str, Any]) -> dict[str, Any]:
         "product": str(body.get("product", "MIS")).upper(),
         "quantity": str(body.get("quantity", "1")),
         "price": str(body.get("price", "0")),
+        "trigger_price": str(body.get("trigger_price", "0")),
+        "disclosed_quantity": str(body.get("disclosed_quantity", "0")),
         "strategy": str(body.get("strategy") or "Flint"),
     }
 
@@ -1404,6 +1406,8 @@ def _requested_modify_fields(body: Mapping[str, Any]) -> list[str]:
         "quantity": ("quantity",),
         "price": ("price",),
         "price_type": ("pricetype", "order_type"),
+        "trigger_price": ("trigger_price",),
+        "disclosed_quantity": ("disclosed_quantity",),
     }
     return sorted(
         field

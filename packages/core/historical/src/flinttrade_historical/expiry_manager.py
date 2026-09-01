@@ -114,7 +114,7 @@ class ExpiryManager:
     Usage::
 
         mgr = ExpiryManager(client)
-        info = mgr.get_expiries("NIFTY", "NFO")
+        info = mgr.get_expiries("NIFTY", "NFO", instrumenttype="options")
         nearest = info.nearest()
         monthly = info.monthly()
 
@@ -126,12 +126,18 @@ class ExpiryManager:
         self._client = client
         self._cache: dict[str, ExpiryInfo] = {}
 
-    def get_expiries(self, symbol: str, exchange: str = "NFO") -> ExpiryInfo:
+    def get_expiries(
+        self,
+        symbol: str,
+        exchange: str = "NFO",
+        *,
+        instrumenttype: str,
+    ) -> ExpiryInfo:
         """Fetch expiry dates from OpenAlgo /api/v1/expiry.
 
-        Results are cached per (symbol, exchange).
+        Results are cached per (symbol, exchange, instrumenttype).
         """
-        cache_key = f"{exchange}:{symbol}"
+        cache_key = f"{exchange}:{symbol}:{instrumenttype}"
         if cache_key in self._cache:
             return self._cache[cache_key]
 
@@ -139,12 +145,18 @@ class ExpiryManager:
 
         try:
             data = resolve_maybe_awaitable(
-                self._client.expiry(symbol, exchange),
+                self._client.expiry(symbol, exchange, instrumenttype=instrumenttype),
                 caller="ExpiryManager.get_expiries",
             )
             # OpenAlgo returns expiries in various formats depending on broker
             if isinstance(data, dict):
-                expiry_list = data.get("expiry", data.get("expiries", []))
+                nested = data.get("data")
+                if isinstance(nested, list):
+                    expiry_list = nested
+                elif isinstance(nested, dict):
+                    expiry_list = nested.get("expiry", nested.get("expiries", []))
+                else:
+                    expiry_list = data.get("expiry", data.get("expiries", []))
             elif isinstance(data, list):
                 expiry_list = data
             else:
@@ -165,10 +177,15 @@ class ExpiryManager:
         self._cache.clear()
 
     def nearest_expiry(
-        self, symbol: str, exchange: str = "NFO", reference_date: date | None = None,
+        self,
+        symbol: str,
+        exchange: str = "NFO",
+        reference_date: date | None = None,
+        *,
+        instrumenttype: str,
     ) -> str | None:
         """Get the nearest expiry date for a symbol."""
-        info = self.get_expiries(symbol, exchange)
+        info = self.get_expiries(symbol, exchange, instrumenttype=instrumenttype)
         return info.nearest(reference_date)
 
     def build_continuous_futures(
@@ -190,7 +207,7 @@ class ExpiryManager:
         The contract symbol format follows OpenAlgo conventions:
         e.g. "NIFTY26MARFUT", "BANKNIFTY26MARFUT"
         """
-        info = self.get_expiries(underlying, exchange)
+        info = self.get_expiries(underlying, exchange, instrumenttype="futures")
         if not info.expiry_dates:
             logger.warning("No expiries found for %s:%s", exchange, underlying)
             return []

@@ -135,6 +135,20 @@ def _openalgo_option_expiry_date(value: str) -> str:
     return f"{int(day):02d}{_OPTION_EXPIRY_MONTHS[int(month) - 1]}{year[2:]}"
 
 
+def _openalgo_option_offset(value: str) -> str:
+    """Return an official OptionSymbolSchema offset (ATM / ITM1-50 / OTM1-50)."""
+    offset = str(value or "").strip().upper()
+    if offset == "ATM":
+        return offset
+    if offset.startswith(("ITM", "OTM")):
+        suffix = offset[3:]
+        if suffix.isdigit():
+            number = int(suffix)
+            if 1 <= number <= 50:
+                return f"{offset[:3]}{number}"
+    raise ValueError("offset must be ATM, ITM1-ITM50, or OTM1-OTM50")
+
+
 def _validated_openalgo_option_expiry_identity(
     data: dict[str, Any],
     requested_expiry: str,
@@ -855,6 +869,8 @@ class OpenAlgoClient:
                 "option_type": leg.option_type.value,
                 "action": leg.action.value,
                 "quantity": leg.quantity,
+                "pricetype": order.pricetype.value,
+                "product": order.product.value,
             }
             for leg in order.legs
         ]
@@ -864,8 +880,6 @@ class OpenAlgoClient:
             "exchange": order.exchange.value,
             "expiry_date": order.expiry_date,
             "legs": legs,
-            "pricetype": order.pricetype.value,
-            "product": order.product.value,
         })
         data = await self._post("optionsmultiorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
@@ -1046,9 +1060,14 @@ class OpenAlgoClient:
 
     async def option_chain(self, symbol: str, exchange: str = "NFO", expiry: str = "") -> OptionChain:
         """POST /api/v1/optionchain"""
-        payload_data: dict[str, Any] = {"underlying": symbol, "exchange": exchange}
-        if expiry:
-            payload_data["expiry_date"] = _openalgo_option_expiry_date(expiry)
+        expiry_date = str(expiry or "").strip()
+        if not expiry_date:
+            raise ValueError("expiry_date is required")
+        payload_data: dict[str, Any] = {
+            "underlying": symbol,
+            "exchange": exchange,
+            "expiry_date": _openalgo_option_expiry_date(expiry_date),
+        }
         payload = self._body(payload_data)
         data = self._unwrap(await self._post("optionchain", payload))
         if isinstance(data, dict):
@@ -1187,23 +1206,36 @@ class OpenAlgoClient:
         option_type: str = "CE",
     ) -> dict[str, Any]:
         """POST /api/v1/optionsymbol"""
+        expiry = str(expiry_date or "").strip()
+        if not expiry:
+            raise ValueError("expiry_date is required")
         payload = self._body({
-            "symbol": symbol,
+            "underlying": symbol,
             "exchange": exchange,
-            "expiry_date": expiry_date,
-            "offset": offset,
+            "expiry_date": _openalgo_option_expiry_date(expiry),
+            "offset": _openalgo_option_offset(offset),
             "option_type": option_type,
         })
         return await self._post("optionsymbol", payload)
 
     async def synthetic_future(self, symbol: str, exchange: str = "NFO", expiry_date: str = "") -> dict[str, Any]:
         """POST /api/v1/syntheticfuture"""
-        payload = self._body({"underlying": symbol, "exchange": exchange, "expiry_date": expiry_date})
+        expiry = str(expiry_date or "").strip()
+        if not expiry:
+            raise ValueError("expiry_date is required")
+        payload = self._body({
+            "underlying": symbol,
+            "exchange": exchange,
+            "expiry_date": _openalgo_option_expiry_date(expiry),
+        })
         return await self._post("syntheticfuture", payload)
 
-    async def expiry(self, symbol: str, exchange: str = "NFO") -> dict[str, Any]:
+    async def expiry(self, symbol: str, exchange: str = "NFO", instrumenttype: str = "") -> dict[str, Any]:
         """POST /api/v1/expiry"""
-        payload = self._body({"symbol": symbol, "exchange": exchange})
+        kind = str(instrumenttype or "").strip().lower()
+        if kind not in {"futures", "options"}:
+            raise ValueError("instrumenttype is required")
+        payload = self._body({"symbol": symbol, "exchange": exchange, "instrumenttype": kind})
         return await self._post("expiry", payload)
 
     async def symbol(self, symbol: str, exchange: str = "NSE") -> dict[str, Any]:
@@ -1233,14 +1265,19 @@ class OpenAlgoClient:
 
     async def ticker(self, exchange: str, symbol: str, interval: str = "5m", from_date: str = "", to_date: str = "") -> Any:
         """GET /api/v1/ticker/{exchange}:{symbol}"""
+        start = str(from_date or "").strip()
+        end = str(to_date or "").strip()
+        if not start or not end:
+            raise ValueError("from and to dates are required")
         endpoint = f"ticker/{exchange}:{symbol}"
         with self._config_guard:
             api_key = self._api_key
-        params: dict[str, str] = {"apikey": api_key, "interval": interval}
-        if from_date:
-            params["from"] = from_date
-        if to_date:
-            params["to"] = to_date
+        params: dict[str, str] = {
+            "apikey": api_key,
+            "interval": interval,
+            "from": start,
+            "to": end,
+        }
         return await self._get(endpoint, params=params)
 
     # ==================================================================
@@ -1377,14 +1414,19 @@ class OpenAlgoClient:
 
     async def timings(self, date: str = "") -> dict[str, Any]:
         """POST /api/v1/market/timings"""
-        extra: dict[str, Any] = {"date": date} if date else {}
-        return await self._post("market/timings", self._body(extra))
+        timing_date = str(date or "").strip()
+        if not timing_date:
+            raise ValueError("date is required")
+        return await self._post("market/timings", self._body({"date": timing_date}))
 
     async def telegram(self, message: str, username: str = "") -> dict[str, Any]:
         """POST /api/v1/telegram/notify"""
+        name = str(username or "").strip()
+        if not name:
+            raise ValueError("username is required")
         return await self._post(
             "telegram/notify",
-            self._body({"username": username, "message": message}),
+            self._body({"username": name, "message": message}),
         )
 
     async def instruments(self, exchange: str = "NSE") -> dict[str, Any]:
