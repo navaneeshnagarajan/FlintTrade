@@ -304,25 +304,17 @@ def _backslash_continued_commands(text: str, token: str) -> list[str]:
 def test_production_installer_chowns_only_runtime_paths() -> None:
     """www-data may own workspace/data/log paths, never the code/.git/.venv tree."""
     installer = _INSTALLER.read_text(encoding="utf-8")
-    chowns = _backslash_continued_commands(installer, "chown")
-    assert chowns, "setup-production.sh must chown runtime paths for www-data"
-    prefix_reclaim = 'sudo chown -R "root:$SERVICE_USER" "$INSTALL_DIR"'
-    assert any(prefix_reclaim in block for block in chowns), (
-        "setup-production.sh must reclaim a legacy non-root checkout to root:www-data "
-        "before chmod/chgrp so sudo git deploys do not hit dubious ownership"
-    )
-    for block in chowns:
-        if prefix_reclaim in block:
-            continue
-        assert not re.search(r'"\$INSTALL_DIR"(?!/)', block), (
-            "do not chown -R the entire install prefix to the service user; keep code root-owned. "
-            f"found: {block}"
-        )
-        if "$INSTALL_DIR/.env" in block:
-            assert block == 'sudo chown "root:$SERVICE_USER" "$INSTALL_DIR/.env"'
-            continue
-        assert "$INSTALL_DIR/data" in block or '"$INSTALL_DIR/data"' in block
-        assert "$INSTALL_DIR/.flinttrade" in block or '"$INSTALL_DIR/.flinttrade"' in block
+    contract = _CONTRACT.read_text(encoding="utf-8")
+
+    assert "flinttrade_apply_checkout_modes" in contract
+    assert 'sudo chown -R "root:${service_user}" "$dir"' in contract
+    assert 'sudo chmod -R g+rX,go-w "$dir"' in contract
+    assert 'sudo chown -R "${service_user}:${service_user}" "${dir}/data"' in contract
+    assert 'sudo chown -R "${service_user}:${service_user}" "${dir}/.flinttrade"' in contract
+    assert 'flinttrade_apply_checkout_modes "$INSTALL_DIR" "$SERVICE_USER"' in installer
+    assert 'sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"' not in installer
+    host_chowns = _backslash_continued_commands(installer, "chown")
+    assert any("/data/flinttrade" in block and "/var/log/flinttrade" in block for block in host_chowns)
 
 
 @pytest.mark.unit
@@ -379,7 +371,7 @@ def test_safe_install_dir_allows_missing_or_git_trees(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_deploy_updates_root_owned_install_without_taking_ownership() -> None:
-    """deploy.sh must update a root-owned /opt/flinttrade and leave ownership alone."""
+    """deploy.sh must update /opt/flinttrade as root and re-apply checkout modes after pull."""
     deploy = _DEPLOY.read_text(encoding="utf-8")
     assert "production-contract.sh" in deploy
     assert "flinttrade_assert_no_dir_override" in deploy
@@ -390,6 +382,10 @@ def test_deploy_updates_root_owned_install_without_taking_ownership() -> None:
     assert 'safe.directory=$REPO_DIR' in deploy
     assert deploy.count('git -c "safe.directory=$REPO_DIR"') >= 2
     assert "chown -R www-data" not in deploy
+    assert "flinttrade_apply_checkout_modes" in deploy
+    apply_at = deploy.index("flinttrade_apply_checkout_modes")
+    assert apply_at > deploy.rindex("git -c")
+    assert apply_at > deploy.index("--require-hashes")
     assert "--require-hashes" in deploy
     env_sources = [
         line
@@ -539,10 +535,12 @@ def test_production_docs_do_not_duplicate_clone_or_chown_code_tree() -> None:
 def test_installer_makes_env_readable_only_to_root_and_service_group() -> None:
     """python-dotenv runs as www-data, so root:root 0600 makes first boot fail."""
     installer = _INSTALLER.read_text(encoding="utf-8")
+    contract = _CONTRACT.read_text(encoding="utf-8")
 
-    assert 'sudo chown "root:$SERVICE_USER" "$INSTALL_DIR/.env"' in installer
-    assert 'sudo chmod 640 "$INSTALL_DIR/.env"' in installer
-    assert 'sudo chmod 600 "$INSTALL_DIR/.env"' not in installer
+    assert 'sudo chown "root:${service_user}" "${dir}/.env"' in contract
+    assert 'sudo chmod 640 "${dir}/.env"' in contract
+    assert "chmod 600" not in contract
+    assert "chmod 600" not in installer
 
 
 @pytest.mark.unit
@@ -580,8 +578,19 @@ def test_optional_tooling_uses_the_resolved_executable_under_sudo() -> None:
 def test_root_owned_checkout_is_readable_but_not_writable_by_service_group() -> None:
     """A restrictive caller umask must not make root-owned code unreadable to www-data."""
     installer = _INSTALLER.read_text(encoding="utf-8")
+    contract = _CONTRACT.read_text(encoding="utf-8")
 
-    assert 'sudo chown -R "root:$SERVICE_USER" "$INSTALL_DIR"' in installer
-    assert 'sudo chgrp -R "$SERVICE_USER" "$INSTALL_DIR"' in installer
-    assert 'sudo chmod -R g+rX,go-w "$INSTALL_DIR"' in installer
+    assert 'sudo chown -R "root:${service_user}" "$dir"' in contract
+    assert 'sudo chmod -R g+rX,go-w "$dir"' in contract
+    assert 'flinttrade_apply_checkout_modes "$INSTALL_DIR" "$SERVICE_USER"' in installer
     assert 'sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"' not in installer
+
+
+@pytest.mark.unit
+def test_production_installer_does_not_upgrade_pip_unhashed() -> None:
+    """The venv must install only the hashed lock, not a floating pip/setuptools/wheel."""
+    installer = _INSTALLER.read_text(encoding="utf-8")
+
+    assert "pip install --upgrade" not in installer
+    assert "setuptools wheel" not in installer
+    assert '"$VENV_DIR/bin/pip" install --require-hashes -r "$INSTALL_DIR/requirements.lock"' in installer

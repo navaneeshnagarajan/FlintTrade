@@ -54,6 +54,11 @@ if [ ! -x "$VENV_PIP" ]; then
 fi
 sudo "$VENV_PIP" install --require-hashes -r requirements.lock -q
 
+# sudo git/pip under umask 077 create root:root 0700/0600 files that www-data
+# cannot read. Re-apply the same checkout contract as first-time setup.
+echo "Applying checkout ownership and modes..."
+flinttrade_apply_checkout_modes "$REPO_DIR"
+
 # 4. Refresh the systemd unit on every deploy. Existing hosts may still carry
 #    the pre-fix gunicorn/workspace contract even though the checkout is current.
 echo "Refreshing systemd service..."

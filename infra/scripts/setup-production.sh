@@ -64,7 +64,6 @@ fi
 # Python dependencies — SC-07: hash-verified install only, into the unit venv
 # (not the system interpreter).
 echo "Installing Python dependencies into $VENV_DIR..."
-sudo "$VENV_DIR/bin/pip" install --upgrade pip setuptools wheel -q
 sudo "$VENV_DIR/bin/pip" install --require-hashes -r "$INSTALL_DIR/requirements.lock"
 
 # Optional toolchain steps — pick up the broker-SDK pins (e.g. the Kotak Neo
@@ -82,15 +81,6 @@ if command -v pnpm >/dev/null 2>&1; then
     (cd "$INSTALL_DIR" && sudo "$PNPM_BIN" install --frozen-lockfile)
 fi
 
-# Keep the checkout root-owned, but guarantee the service group can traverse
-# and read it even when setup was launched under a restrictive umask. Never
-# grant group write access to code, .git, or .venv.
-# Reclaim a legacy www-data-owned tree (the first product-fix chowned the
-# whole prefix) so later `sudo git` deploys do not trip dubious ownership.
-sudo chown -R "root:$SERVICE_USER" "$INSTALL_DIR"
-sudo chgrp -R "$SERVICE_USER" "$INSTALL_DIR"
-sudo chmod -R g+rX,go-w "$INSTALL_DIR"
-
 # Create a minimal server fallback env file if not present. OpenAlgo and broker
 # settings should be completed in the app Setup/Settings UI.
 if [ ! -f "$INSTALL_DIR/.env" ]; then
@@ -103,11 +93,6 @@ EOF
     echo "Runtime configuration is completed from the app UI after startup."
     echo ""
 fi
-# systemd parses EnvironmentFile as root, but the application also loads the
-# same optional fallback through python-dotenv after dropping to www-data.
-# Keep secrets unavailable to other users while allowing that service group.
-sudo chown "root:$SERVICE_USER" "$INSTALL_DIR/.env"
-sudo chmod 640 "$INSTALL_DIR/.env"
 
 # Create the full data and log directory tree. The unit's ReadWritePaths are
 # $INSTALL_DIR/data and $INSTALL_DIR/.flinttrade; also keep the historical
@@ -119,12 +104,12 @@ sudo mkdir -p \
     /data/flinttrade/{historical,ticks,audit,backups} \
     /var/log/flinttrade
 
-# The unit runs as www-data. Keep the git checkout and .venv root-owned so
-# deploy.sh can update them; chown only the runtime workspace/data/log paths.
-echo "Setting $SERVICE_USER ownership on runtime data directories..."
+# Apply the shared checkout contract after every file that setup writes
+# (venv, lock install, optional uv/pnpm, .env, data dirs). Host /data and
+# /var/log trees are outside the checkout.
+echo "Applying checkout ownership and modes..."
+flinttrade_apply_checkout_modes "$INSTALL_DIR" "$SERVICE_USER"
 sudo chown -R "$SERVICE_USER:$SERVICE_USER" \
-    "$INSTALL_DIR/data" \
-    "$INSTALL_DIR/.flinttrade" \
     /data/flinttrade \
     /var/log/flinttrade
 

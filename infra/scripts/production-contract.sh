@@ -46,3 +46,27 @@ flinttrade_assert_safe_install_dir() {
     return 1
   fi
 }
+
+flinttrade_apply_checkout_modes() {
+  # Reclaim leftover service-user ownership and files created under a
+  # restrictive sudo umask (077) so www-data can read newly deployed code.
+  # Code/.git/.venv stay root-owned with group read/traverse, no group write.
+  local dir="${1:-}"
+  local service_user="${2:-www-data}"
+  if [ -z "$dir" ] || [ ! -d "$dir" ]; then
+    echo "ERROR: checkout dir is missing; expected /opt/flinttrade" >&2
+    return 1
+  fi
+  sudo chown -R "root:${service_user}" "$dir"
+  sudo chmod -R g+rX,go-w "$dir"
+  if [ -d "${dir}/data" ]; then
+    sudo chown -R "${service_user}:${service_user}" "${dir}/data"
+  fi
+  if [ -d "${dir}/.flinttrade" ]; then
+    sudo chown -R "${service_user}:${service_user}" "${dir}/.flinttrade"
+  fi
+  if [ -f "${dir}/.env" ]; then
+    sudo chown "root:${service_user}" "${dir}/.env"
+    sudo chmod 640 "${dir}/.env"
+  fi
+}
