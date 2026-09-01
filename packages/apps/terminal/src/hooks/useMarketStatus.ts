@@ -17,7 +17,7 @@ export function useHolidays(enabled = true) {
 export function useTimings(enabled = true) {
   return useQuery<MarketTiming[]>({
     queryKey: ["timings"],
-    queryFn: getTimings,
+    queryFn: () => getTimings(),
     staleTime: MARKET_TIMINGS_MAX_AGE_MS,
     refetchInterval: enabled ? MARKET_TIMINGS_REFRESH_INTERVAL_MS : false,
     refetchIntervalInBackground: true,

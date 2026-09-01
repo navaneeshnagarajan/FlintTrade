@@ -1502,7 +1502,7 @@ function normaliseNativeRead(endpoint: string, value: unknown): unknown {
   if (endpoint === "margin") return normaliseNativeMargin(value);
   if (endpoint === "orderstatus") return normaliseNativeOrderStatus(value);
   if (endpoint === "holidays") return normaliseNativeHolidays(value);
-  if (endpoint === "timings") return normaliseNativeTimings(value);
+  if (endpoint === "timings" || endpoint === "market/timings") return normaliseNativeTimings(value);
   if (endpoint === "multioptiongreeks") return normaliseNativeGreeks(value);
   if (endpoint === "optiongreeks") return normaliseNativeGreeks(value)[0] ?? nativeGreeksRow({});
   if (endpoint === "expiry") return normaliseNativeExpiry(value);
@@ -2325,13 +2325,14 @@ async function post<T>(
     requireApiKey(endpoint);
   }
 
+  const openAlgoBody = openAlgoRequestFields(endpoint, extra);
   let resp: Response;
   requireCurrentMarketDataScope(expectedDataScope);
   try {
     resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apikey: getApiKey(), ...openAlgoRequestFields(endpoint, extra) }),
+      body: JSON.stringify({ apikey: getApiKey(), ...openAlgoBody }),
       signal,
     });
   } catch {
