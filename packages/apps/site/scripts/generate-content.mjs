@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { repositoryBrowseUrl, rewriteMarkdownRepositoryLinks } from './rewrite-repository-links.mjs';
+
 // Use fileURLToPath (not URL.pathname): on Windows `.pathname` yields "/C:/…",
 // and path.resolve("/C:/…", "..") produces a doubled-drive "C:\C:\…" that breaks
 // every mkdir/read below. fileURLToPath converts file URLs correctly on all OSes.
@@ -16,7 +18,11 @@ const publicRoot = path.join(siteRoot, 'public', 'flinttrade');
 const generationLockDir = path.join(siteRoot, '.content-generation.lock');
 const repositoryOwner = 'navaneeshnagarajan';
 const repositoryName = 'FlintTrade';
-const repositoryRef = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_REF || 'main';
+const repositoryRef =
+  process.env.FLINTTRADE_SITE_SOURCE_SHA ||
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.VERCEL_GIT_COMMIT_REF ||
+  'main';
 
 const fallbackPackagePaths = [
   'apps/site',
@@ -109,20 +115,51 @@ const docRouteBySourcePath = new Map(
   docsToGenerate.map(([sourcePath, slug]) => [sourcePath, `/docs/${slug === 'index' ? '' : slug}`]),
 );
 
+function githubFallbackUrl(kind, repoPath) {
+  return repositoryBrowseUrl({
+    owner: repositoryOwner,
+    name: repositoryName,
+    ref: repositoryRef,
+    repoPath,
+    isDirectory: kind === 'tree',
+  });
+}
+
 const repositoryFileUrls = new Map([
-  ['changelog.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/changelog.md'],
-  ['contributing.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/contributing.md'],
-  ['docs/releases/', 'https://github.com/navaneeshnagarajan/FlintTrade/tree/main/docs/releases'],
-  ['docs/screenshots/', 'https://github.com/navaneeshnagarajan/FlintTrade/tree/main/docs/screenshots'],
-  ['docs/setup/', 'https://github.com/navaneeshnagarajan/FlintTrade/tree/main/docs/setup'],
-  ['docs/superpowers/specs/', 'https://github.com/navaneeshnagarajan/FlintTrade/tree/main/docs/superpowers/specs'],
-  ['docs/DESKTOP.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/docs/DESKTOP.md'],
-  ['disclaimer.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/disclaimer.md'],
-  ['flint.toml', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/flint.toml'],
-  ['LICENSE', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/LICENSE'],
-  ['readme.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/readme.md'],
-  ['security.md', 'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/security.md'],
+  ['changelog.md', githubFallbackUrl('blob', 'changelog.md')],
+  ['contributing.md', githubFallbackUrl('blob', 'contributing.md')],
+  ['docs/releases/', githubFallbackUrl('tree', 'docs/releases')],
+  ['docs/screenshots/', githubFallbackUrl('tree', 'docs/screenshots')],
+  ['docs/setup/', githubFallbackUrl('tree', 'docs/setup')],
+  ['docs/superpowers/specs/', githubFallbackUrl('tree', 'docs/superpowers/specs')],
+  ['docs/DESKTOP.md', githubFallbackUrl('blob', 'docs/DESKTOP.md')],
+  ['disclaimer.md', githubFallbackUrl('blob', 'disclaimer.md')],
+  ['flint.toml', githubFallbackUrl('blob', 'flint.toml')],
+  ['LICENSE', githubFallbackUrl('blob', 'LICENSE')],
+  ['readme.md', githubFallbackUrl('blob', 'readme.md')],
+  ['security.md', githubFallbackUrl('blob', 'security.md')],
 ]);
+
+/**
+ * Repo paths rewritten to GitHub during this generation pass (`path` → browse URL).
+ * The docs catch-all uses this so leftover `/docs/<repo-path>` requests redirect
+ * instead of 404ing as invented documentation routes.
+ */
+const repoSourceLinks = new Map();
+
+function linkRewriteOptions() {
+  return {
+    repoRoot,
+    owner: repositoryOwner,
+    name: repositoryName,
+    ref: repositoryRef,
+    docRouteBySourcePath,
+    repositoryFileUrls,
+    onRepoPath(repoPath, url) {
+      repoSourceLinks.set(repoPath, url);
+    },
+  };
+}
 
 function titleFromMarkdown(markdown, fallback) {
   const heading = markdown.match(/^#\s+(.+)$/m);
@@ -230,44 +267,6 @@ async function withGenerationLock(task) {
   }
 }
 
-function splitLinkTarget(target) {
-  const hashIndex = target.indexOf('#');
-  if (hashIndex === -1) return [target, ''];
-  return [target.slice(0, hashIndex), target.slice(hashIndex)];
-}
-
-function resolveRelativeTarget(targetPath, sourcePath) {
-  const normalisedTarget = targetPath.replace(/^\.\//, '');
-  const sourceDir = path.posix.dirname(sourcePath);
-  const candidates = [
-    path.posix.normalize(path.posix.join(sourceDir, normalisedTarget)),
-    path.posix.normalize(normalisedTarget),
-  ];
-
-  if (normalisedTarget.startsWith('docs/')) {
-    candidates.push(path.posix.normalize(normalisedTarget));
-  }
-
-  return [...new Set(candidates)];
-}
-
-function rewriteRepositoryLink(target, sourcePath) {
-  if (/^(?:https?:|mailto:|tel:|#|\/)/.test(target)) return null;
-
-  const [targetPath, anchor] = splitLinkTarget(target);
-  const candidates = resolveRelativeTarget(targetPath, sourcePath);
-
-  for (const candidate of candidates) {
-    const docRoute = docRouteBySourcePath.get(candidate);
-    if (docRoute) return `${docRoute}${anchor}`;
-
-    const repositoryUrl = repositoryFileUrls.get(candidate);
-    if (repositoryUrl) return `${repositoryUrl}${anchor}`;
-  }
-
-  return null;
-}
-
 function normaliseMarkdown(markdown, sourcePath) {
   let value = markdown.replace(/\r\n/g, '\n');
 
@@ -277,10 +276,7 @@ function normaliseMarkdown(markdown, sourcePath) {
   value = value.replace(/\]\(docs\/screenshots\/([^)]+)\)/g, '](/flinttrade/screenshots/$1)');
   value = value.replace(/\]\(assets\/logo\.svg\)/g, '](/flinttrade/logo.svg)');
   value = value.replace(/\]\(docs\/assets\/logo\.svg\)/g, '](/flinttrade/logo.svg)');
-  value = value.replace(/\]\(([^)\s]+)\)/g, (match, target) => {
-    const rewritten = rewriteRepositoryLink(target, sourcePath);
-    return rewritten ? `](${rewritten})` : match;
-  });
+  value = rewriteMarkdownRepositoryLinks(value, sourcePath, linkRewriteOptions());
 
   return value;
 }
@@ -665,6 +661,10 @@ async function main() {
   await writeFileAtomic(path.join(generatedRoot, 'docs-index.json'), JSON.stringify(docsIndex, null, 2));
   await writeFileAtomic(path.join(generatedRoot, 'packages-index.json'), JSON.stringify(packages, null, 2));
   await writeFileAtomic(path.join(generatedRoot, 'version.json'), JSON.stringify(versionInfo, null, 2));
+  await writeFileAtomic(
+    path.join(generatedRoot, 'repo-source-links.json'),
+    JSON.stringify(Object.fromEntries(repoSourceLinks), null, 2),
+  );
   await writeFileAtomic(
     path.join(generatedRoot, 'site-summary.json'),
     JSON.stringify({
