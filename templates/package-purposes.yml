@@ -17,7 +17,7 @@ apps/site:
     - "src/lib/mcp/capabilities.ts — docs MCP tools and prompts"
 apps/terminal:
   language: TypeScript + React 19
-  purpose: "Single-page terminal — Dockview workspace with home widgets, tools, routes, and workspace presets."
+  purpose: "Single-page terminal — FlexLayout workspace with home widgets, tools, routes, and workspace presets."
   entry_points:
     - "src/main.tsx — entry point and route registration"
     - "src/routes/HomeRoute.tsx — dashboard and home widget orchestration"
@@ -33,7 +33,7 @@ core/core:
     - "src/flinttrade_core/config.py / src/flinttrade_core/workspace.py — env + workspace.json loaders"
 core/data:
   language: Python
-  purpose: "Tick recorder, audit logger (SEBI 5-year retention), trade logger, DuckDB storage, QuestDB writer, and Excel bridge."
+  purpose: "Tick recorder, append-only hash-chained audit logger, trade logger, DuckDB storage, and a (dormant) QuestDB writer."
   entry_points:
     - "src/flinttrade_data/tick_recorder.py — real-time tick capture to DuckDB / QuestDB"
     - "src/flinttrade_data/audit_logger.py — append-only audit trail"
@@ -55,13 +55,12 @@ core/historical:
     - "src/flinttrade_historical/expiry_tracker.py — monthly + weekly expiry calendar for NSE F&O / MCX"
 core/indicators:
   language: Python + Numba
-  purpose: "43 indicator functions across 7 modules — TA-Lib batch indicators, Numba-accelerated streaming variants, and Pine Script conversion."
+  purpose: "Pure-NumPy batch indicators (110 exports; no TA-Lib) plus streaming classes (optional Numba on 3 kernels) and Pine Script conversion."
   entry_points:
-    - "src/flinttrade_indicators/trend.py — SMA, EMA, MACD, ADX"
+    - "src/flinttrade_indicators/__init__.py — 110 public exports (batch kernels, streaming classes, pipeline)"
+    - "src/flinttrade_indicators/trend.py — SMA, EMA, MACD, ADX, Supertrend"
     - "src/flinttrade_indicators/momentum.py — RSI, Stochastic, ROC, MFI"
-    - "src/flinttrade_indicators/oscillators.py — CCI, Williams %R, TRIX"
     - "src/flinttrade_indicators/volatility.py — ATR, Bollinger Bands, Keltner Channels"
-    - "src/flinttrade_indicators/volume.py — OBV, Chaikin, VWAP"
 core/ticks:
   language: Rust + PyO3
   purpose: "High-performance tick-processing engine — Rust core with Python bindings."
@@ -71,11 +70,11 @@ core/ticks:
     - "Cargo.toml — crate metadata and dependencies"
 integrations/gateway:
   language: Python
-  purpose: "FlintTrade's own native broker gateway — the BrokerAdapter Protocol, safety-gated BrokerRouter, per-broker adapters for 32 brokers, an encrypted credential vault, and the WebSocket bridge. OpenAlgo is one optional bridge adapter, not the primary path."
+  purpose: "FlintTrade's own native broker gateway — the BrokerAdapter Protocol, safety-gated BrokerRouter, BROKER_CATALOG (35 brokers), an encrypted credential vault, and the WebSocket bridge. OpenAlgo is one optional bridge adapter."
   entry_points:
     - "src/flinttrade_gateway/adapter.py — BrokerAdapter Protocol + BROKER_CATALOG"
     - "src/flinttrade_gateway/router.py — BrokerRouter: dispatches broker writes only after SafetyContext verification"
-    - "src/flinttrade_gateway/registry.py — BrokerRegistry over the 32-broker catalogue"
+    - "src/flinttrade_gateway/registry.py — BrokerRegistry over the 35-broker catalogue"
     - "src/flinttrade_gateway/brokers/ — native per-broker adapters (Dhan, OpenAlgo bridge, …) against the BrokerAdapter ABC"
     - "src/flinttrade_gateway/credentials.py — Fernet-encrypted credential vault"
     - "src/flinttrade_gateway/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients"
@@ -94,7 +93,7 @@ services/ai:
     - "src/flinttrade_ai/advisor.py — production advisor surface for the AI Centre route"
 services/automation:
   language: Python
-  purpose: "Cron scheduler, Telegram bot with kill switch, OpenClaw bridge, post-market analysis pipelines, voice-order intent extraction."
+  purpose: "Cron scheduler, Telegram bot with kill switch, post-market analysis pipelines, voice-order intent extraction."
   entry_points:
     - "src/flinttrade_automation/cron_manager.py — workspace.json-backed scheduled jobs"
     - "src/flinttrade_automation/telegram_bot.py — passive notifications + emergency kill switch"

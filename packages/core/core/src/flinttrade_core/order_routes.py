@@ -1951,7 +1951,7 @@ def _subscribe_pending_practice_order(
 
 
 @orders_bp.route("/place", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_order() -> tuple[Any, int]:
     """Place a regular order — maps to OpenAlgo ``placeorder``.
 
@@ -2023,7 +2023,7 @@ def _decode_routed_live_payload() -> tuple[dict[str, Any] | None, tuple[Any, int
 
 
 @orders_bp.route("/<broker>/place", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_order_routed(broker: str) -> tuple[Any, int]:
     """Place a LIVE order through the safety-gated, selector-bound router (G5).
 
@@ -2049,7 +2049,7 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/place-smart", methods=["POST"])
-@rate_limit("smart_orders", user_rate=2, global_rate=20)
+@rate_limit("smart_orders", user_rate=2, global_rate=20, identity="jwt")
 def place_smart_order() -> tuple[Any, int]:
     """Place a smart order — maps to OpenAlgo ``placesmartorder``.
 
@@ -2066,7 +2066,7 @@ def place_smart_order() -> tuple[Any, int]:
 
 
 @orders_bp.route("/modify", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def modify_order() -> tuple[Any, int]:
     """Modify an existing open order — maps to OpenAlgo ``modifyorder``.
 
@@ -2086,7 +2086,7 @@ def modify_order() -> tuple[Any, int]:
 
 
 @orders_bp.route("/<broker>/modify", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def modify_order_routed(broker: str) -> tuple[Any, int]:
     """Modify a LIVE order through the selector-bound broker router."""
     payload, error = _decode_routed_live_payload()
@@ -2098,7 +2098,7 @@ def modify_order_routed(broker: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/cancel", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def cancel_order() -> tuple[Any, int]:
     """Cancel an open order — maps to OpenAlgo ``cancelorder``.
 
@@ -2115,7 +2115,7 @@ def cancel_order() -> tuple[Any, int]:
 
 
 @orders_bp.route("/<broker>/cancel", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def cancel_order_routed(broker: str) -> tuple[Any, int]:
     """Cancel a LIVE order through the selector-bound broker router."""
     payload, error = _decode_routed_live_payload()
@@ -2127,7 +2127,7 @@ def cancel_order_routed(broker: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/cancel-all", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def cancel_all_orders() -> tuple[Any, int]:
     """Cancel all open orders — maps to OpenAlgo ``cancelallorder``.
 
@@ -2141,7 +2141,7 @@ def cancel_all_orders() -> tuple[Any, int]:
 
 
 @orders_bp.route("/close-position", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def close_position() -> tuple[Any, int]:
     """Close an open position — maps to OpenAlgo ``closeposition``.
 
@@ -2160,7 +2160,7 @@ def close_position() -> tuple[Any, int]:
 
 
 @orders_bp.route("/open-position", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def open_position() -> tuple[Any, int]:
     """Open a new position — maps to OpenAlgo ``openposition``.
 
@@ -2182,7 +2182,7 @@ def open_position() -> tuple[Any, int]:
 
 
 @orders_bp.route("/options", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def options_order() -> tuple[Any, int]:
     """Place a single-leg options order — maps to OpenAlgo ``optionsorder``.
 
@@ -2207,7 +2207,7 @@ def options_order() -> tuple[Any, int]:
 
 
 @orders_bp.route("/options-multi", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def options_multi_order() -> tuple[Any, int]:
     """Place a multi-leg options order — maps to OpenAlgo ``optionsmultiorder``.
 
@@ -2237,7 +2237,7 @@ def options_multi_order() -> tuple[Any, int]:
 
 
 @orders_bp.route("/gtt-place", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def gtt_place_order() -> tuple[Any, int]:
     """Place a GTT (Good Till Triggered) order — maps to ``placegttorder``.
 
@@ -2249,14 +2249,14 @@ def gtt_place_order() -> tuple[Any, int]:
 
 
 @orders_bp.route("/gtt-modify", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def gtt_modify_order() -> tuple[Any, int]:
     """Modify an active GTT — maps to ``modifygttorder``. Full replacement."""
     return _dispatch_order("gtt-modify")
 
 
 @orders_bp.route("/gtt-cancel", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def gtt_cancel_order() -> tuple[Any, int]:
     """Cancel an active GTT by ``trigger_id`` — maps to ``cancelgttorder``."""
     return _dispatch_order("gtt-cancel")
@@ -2820,7 +2820,7 @@ def _check_legs_through_safety(
 
 
 @orders_bp.route("/forever", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def forever_place() -> tuple[Any, int]:
     """Place a forever (GTT) order through the gated place path (live only).
 
@@ -2850,7 +2850,7 @@ def forever_place() -> tuple[Any, int]:
 
 
 @orders_bp.route("/forever/<order_id>", methods=["PUT"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def forever_modify(order_id: str) -> tuple[Any, int]:
     """Modify a resting forever (GTT) order — gated ``modify_forever`` verb.
 
@@ -2898,7 +2898,7 @@ def forever_modify(order_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/forever/<order_id>", methods=["DELETE"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def forever_cancel(order_id: str) -> tuple[Any, int]:
     """Cancel a resting forever (GTT) order — gated ``cancel_forever`` verb.
 
@@ -2947,7 +2947,7 @@ def super_order_list() -> tuple[Any, int]:
 
 
 @orders_bp.route("/super/<order_id>", methods=["PUT"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def super_order_modify(order_id: str) -> tuple[Any, int]:
     """Modify one leg of a pending super order — gated ``modify_super_order`` verb.
 
@@ -2992,7 +2992,7 @@ def super_order_modify(order_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/super/<order_id>", methods=["DELETE"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def super_order_cancel(order_id: str) -> tuple[Any, int]:
     """Cancel a super order or one leg — gated ``cancel_super_order`` verb.
 
@@ -3026,7 +3026,7 @@ def super_order_cancel(order_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/triggers", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def trigger_place() -> tuple[Any, int]:
     """Place a conditional trigger — gated ``place_conditional_trigger`` verb.
 
@@ -3081,7 +3081,7 @@ def trigger_list() -> tuple[Any, int]:
 
 
 @orders_bp.route("/triggers/<alert_id>", methods=["PUT"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def trigger_modify(alert_id: str) -> tuple[Any, int]:
     """Modify a conditional trigger — gated ``modify_conditional_trigger`` verb.
 
@@ -3126,7 +3126,7 @@ def trigger_modify(alert_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/triggers/<alert_id>", methods=["DELETE"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def trigger_cancel(alert_id: str) -> tuple[Any, int]:
     """Cancel a conditional trigger — gated ``cancel_conditional_trigger`` verb."""
     payload, err = _require_live_payload(require_unlock=True)
@@ -3146,7 +3146,7 @@ def trigger_cancel(alert_id: str) -> tuple[Any, int]:
 
 
 @orders_bp.route("/multi", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def multi_order_place() -> tuple[Any, int]:
     """Place multiple orders sequentially through individually gated writes.
 
@@ -3241,7 +3241,7 @@ def multi_order_place() -> tuple[Any, int]:
 
 
 @orders_bp.route("/smart/<order_id>", methods=["DELETE"])
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def smart_order_cancel(order_id: str) -> tuple[Any, int]:
     """Cancel a smart order — gated ``cancel_smart_order`` verb (IndMoney-native).
 
@@ -3341,7 +3341,7 @@ _ADVANCED_STRATEGY_NAMES = {
 
 @orders_bp.route("/basket", methods=["POST"])
 @_require_live_unlocked
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_basket() -> tuple[Any, int]:
     """Execute a basket of multi-leg orders atomically.
 
@@ -3434,7 +3434,7 @@ def place_basket() -> tuple[Any, int]:
 
 @orders_bp.route("/split", methods=["POST"])
 @_require_live_unlocked
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_split() -> tuple[Any, int]:
     """Break a large order into smaller chunks and place them with a delay.
 
@@ -3565,7 +3565,7 @@ def place_split() -> tuple[Any, int]:
 
 @orders_bp.route("/options-strategy", methods=["POST"])
 @_require_live_unlocked
-@rate_limit("smart_orders", user_rate=2, global_rate=20)
+@rate_limit("smart_orders", user_rate=2, global_rate=20, identity="jwt")
 def place_options_strategy() -> tuple[Any, int]:
     """Build and execute a named options strategy through the gated basket path.
 

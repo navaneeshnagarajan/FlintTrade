@@ -213,8 +213,8 @@ as the source of truth (the shard-coverage guard keeps it complete).
 ### Step 4 — fix and push
 
 Conventional commit, no `--no-verify`, no `dangerouslySkipPermissions`.
-If a pre-commit hook breaks because of your change, fix the hook in the
-same commit.
+There is no tracked pre-commit hook in this repository; run the local
+checks in layer 1 yourself before you push.
 
 ---
 

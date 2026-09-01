@@ -49,8 +49,9 @@ to fully-original implementations is ongoing. FlintTrade is licensed under
 | [REFERENCES.md](REFERENCES.md) | Everyone | Public attribution and project influence notes. |
 | [releases/](releases/) | Everyone | Per-version release notes (chronological). |
 | [setup/](setup/) | Contributor / Operator | Platform setup plus static IP, email, backup, and multi-user notes. |
+| [product-modes.mdx](product-modes.mdx) | User / Contributor | Explore / Practice / Live versus Sample / Unavailable / Live / Stale provenance, and Home versus Trade ownership. |
 | [screenshots/](screenshots/) | Documentation | UI screenshots referenced from user-facing docs. |
-| [superpowers/specs/](superpowers/specs/) | Contributor | Active design specs (brainstorming gate output) for in-flight work. |
+| [superpowers/specs/](superpowers/specs/) | Contributor | Historical design specs (brainstorming gate output). Treat as in-flight only when a current PR still implements them. |
 
 ## Two-column quick links
 
