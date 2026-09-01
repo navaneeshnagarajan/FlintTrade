@@ -857,7 +857,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       { exchange: "NSE", start_time: 1718595000000, end_time: 1718618400000 },
     ]);
     expect((fetchSpy.mock.calls[1] as [string, RequestInit | undefined])[0]).toContain(
-      "/api/v1/native/accounts/upstox/U1/holidays",
+      "/api/v1/native/accounts/upstox/U1/holidays?year=2026",
     );
     expect((fetchSpy.mock.calls[3] as [string, RequestInit | undefined])[0]).toContain(
       "/api/v1/native/accounts/upstox/U1/timings",
@@ -874,6 +874,65 @@ describe("OpenAlgo API client (api.ts)", () => {
       expect.stringContaining("/api/v1/timings"),
       expect.anything(),
     );
+  });
+
+  it("forwards each lookahead year on native holiday reads across 1 January", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-12-28T18:30:00.000Z")); // 29 Dec 2026 IST
+      mockConnectionState.apiKey = "";
+      const accounts = jsonResponse({
+        status: "success",
+        data: {
+          accounts: [
+            { adapter_id: "upstox", account_id: "U1", is_primary: true, has_session: true },
+          ],
+        },
+      });
+      fetchSpy.mockImplementation(async (url: string) => {
+        const path = String(url);
+        if (path.includes("/native/accounts/upstox/U1/holidays?year=2026")) {
+          return jsonResponse({
+            status: "success",
+            data: [{
+              date: "2026-12-31",
+              description: "New Year's Eve",
+              holiday_type: "TRADING_HOLIDAY",
+              closed_exchanges: ["NSE"],
+              open_exchanges: [],
+            }],
+          });
+        }
+        if (path.includes("/native/accounts/upstox/U1/holidays?year=2027")) {
+          return jsonResponse({
+            status: "success",
+            data: [{
+              date: "2027-01-01",
+              description: "New Year's Day",
+              holiday_type: "TRADING_HOLIDAY",
+              closed_exchanges: ["NSE"],
+              open_exchanges: [],
+            }],
+          });
+        }
+        if (path.includes("/api/v1/native/accounts")) {
+          return accounts;
+        }
+        throw new Error(`unexpected native holiday URL ${path}`);
+      });
+
+      await expect(getHolidays()).resolves.toEqual([
+        expect.objectContaining({ date: "2026-12-31" }),
+        expect.objectContaining({ date: "2027-01-01" }),
+      ]);
+      const holidayUrls = fetchSpy.mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.includes("/holidays?"));
+      expect(holidayUrls.some((url) => url.includes("year=2026"))).toBe(true);
+      expect(holidayUrls.some((url) => url.includes("year=2027"))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([

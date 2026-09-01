@@ -1571,6 +1571,48 @@ def test_native_account_reads_include_market_calendar(client, monkeypatch):
     assert holidays.get_json()["data"][0]["description"] == "Independence Day"
 
 
+def test_native_holiday_reads_accept_year_selector(client, monkeypatch):
+    """A year query must reach the adapter instead of always using the current calendar."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    seen: list[str | None] = []
+
+    async def _market_holidays(_self, _session, holiday_date=None):
+        seen.append(holiday_date)
+        return [{
+            "date": holiday_date or "2026-08-15",
+            "description": "Independence Day",
+            "holiday_type": "TRADING_HOLIDAY",
+            "closed_exchanges": ["NSE"],
+        }]
+
+    monkeypatch.setattr(UpstoxAdapter, "market_holidays", _market_holidays)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "upstox", "account_id": "UPXYEAR", "credentials": {"access_token": "tok"}},
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    current_year = datetime.now(ZoneInfo("Asia/Kolkata")).year
+    current = c.get(f"/api/v1/native/accounts/upstox/UPXYEAR/holidays?year={current_year}")
+    next_year = current_year + 1
+    adjacent = c.get(f"/api/v1/native/accounts/upstox/UPXYEAR/holidays?year={next_year}")
+    dated = c.get(
+        f"/api/v1/native/accounts/upstox/UPXYEAR/holidays?date=2026-08-15&year={next_year}"
+    )
+
+    assert current.status_code == 200, current.get_json()
+    assert adjacent.status_code == 200, adjacent.get_json()
+    assert dated.status_code == 200, dated.get_json()
+    assert seen == [None, f"{next_year:04d}-01-01", "2026-08-15"]
+
+
 def test_native_account_reads_include_option_greeks(client, monkeypatch):
     """Portfolio Greeks can batch native option-greek reads without OpenAlgo."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter

@@ -540,6 +540,18 @@ function buildNativeReadParams(endpoint: string, extra: object): NativeReadParam
       ...(exchange ? { exchange } : {}),
     };
   }
+  if (endpoint === "holidays" || endpoint === "market/holidays") {
+    const paramsOut: NativeReadParams = {};
+    const date = stringParam(params.date);
+    if (date) paramsOut.date = date;
+    if (typeof params.year === "number" && Number.isFinite(params.year)) {
+      paramsOut.year = params.year;
+    } else {
+      const yearText = stringParam(params.year);
+      if (yearText) paramsOut.year = yearText;
+    }
+    return Object.keys(paramsOut).length > 0 ? paramsOut : undefined;
+  }
   if (endpoint === "search_scrip") {
     const optional: NativeReadParams = {};
     const expiry = stringParam(params.expiry);
