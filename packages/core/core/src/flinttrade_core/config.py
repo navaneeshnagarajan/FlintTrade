@@ -45,18 +45,27 @@ def _workspace_openalgo_overrides_from_data(data: dict[str, Any]) -> dict[str, A
     ws_port_raw = openalgo.get("ws_port")
     ws_port = str(ws_port_raw or "").strip()
 
-    has_user_value = bool(api_key or telegram_username)
-    has_user_value = has_user_value or (bool(host) and host.rstrip("/") != DEFAULT_OPENALGO_HOST)
-    has_user_value = has_user_value or (bool(port) and port != str(DEFAULT_OPENALGO_PORT))
-    has_user_value = has_user_value or (bool(ws_port) and ws_port != str(DEFAULT_OPENALGO_WS_PORT))
-    if not has_user_value:
-        return {}
-
     overrides: dict[str, Any] = {}
+    if telegram_username:
+        # Telegram is independent of the bridge endpoint. A linked username must
+        # not activate the workspace host/port block, or the standard localhost
+        # defaults from workspace.json would overwrite OPENALGO_HOST / PORT /
+        # WS_PORT on every config hot reload.
+        overrides["openalgo_telegram_username"] = telegram_username
+
+    has_connection_value = bool(api_key)
+    has_connection_value = has_connection_value or (
+        bool(host) and host.rstrip("/") != DEFAULT_OPENALGO_HOST
+    )
+    has_connection_value = has_connection_value or (bool(port) and port != str(DEFAULT_OPENALGO_PORT))
+    has_connection_value = has_connection_value or (
+        bool(ws_port) and ws_port != str(DEFAULT_OPENALGO_WS_PORT)
+    )
+    if not has_connection_value:
+        return overrides
+
     if api_key:
         overrides["openalgo_api_key"] = api_key
-    if telegram_username:
-        overrides["openalgo_telegram_username"] = telegram_username
     if host:
         overrides["openalgo_host"] = host
     if port:
