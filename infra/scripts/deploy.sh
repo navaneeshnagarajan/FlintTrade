@@ -52,13 +52,12 @@ if [ ! -x "$VENV_PIP" ]; then
 fi
 sudo "$VENV_PIP" install --require-hashes -r requirements.lock -q
 
-# 4. Install systemd service if not present
-if [ ! -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
-    echo "Installing systemd service..."
-    sudo cp "infra/systemd/${SERVICE_NAME}.service" /etc/systemd/system/
-    sudo systemctl daemon-reload
-    sudo systemctl enable "$SERVICE_NAME"
-fi
+# 4. Refresh the systemd unit on every deploy. Existing hosts may still carry
+#    the pre-fix gunicorn/workspace contract even though the checkout is current.
+echo "Refreshing systemd service..."
+sudo cp "infra/systemd/${SERVICE_NAME}.service" /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable "$SERVICE_NAME"
 
 # 5. Restart service (literal service name — pinned by tests/test_restructure_goals.py)
 echo "Restarting FlintTrade service..."

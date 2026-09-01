@@ -36,8 +36,10 @@ means a home-directory prefix cannot start. `FLINTTRADE_DIR` is not
 supported: the unit cannot be relocated without rewriting every hardcoded
 path.
 
-The git checkout and `.venv` stay root-owned and world-readable. `www-data`
-owns only the runtime workspace, data and log directories.
+The git checkout and `.venv` stay root-owned and read-only to the `www-data`
+group. `www-data` owns only the runtime workspace, data and log directories.
+The optional `.env` is `root:www-data` mode `0640`: systemd injects it and
+python-dotenv can read the same fallback after the process drops privileges.
 
 ## Install
 
@@ -55,8 +57,9 @@ that cannot be supplied through the app UI. Then complete Setup in the app.
 
 `infra/scripts/deploy.sh` is the later deploy entry point. It updates the
 same `/opt/flinttrade` prefix with `sudo git`, installs the hashed lock into
-the unit `.venv` without taking ownership, and refuses to run during NSE
-cash-session hours (9:15 AM – 3:30 PM IST).
+the unit `.venv` without taking ownership, refreshes and reloads the installed
+unit on every deploy, and refuses to run during NSE cash-session hours
+(9:15 AM – 3:30 PM IST).
 
 ## Usage
 

@@ -37,7 +37,7 @@ _LOCK = _REPO_ROOT / "requirements.lock"
 _APP = _REPO_ROOT / "packages" / "core" / "core" / "src" / "flinttrade_core" / "app.py"
 _PRODUCTION_PREFIX = "/opt/flinttrade"
 
-_VENV_CREATE_RE = re.compile(r"python3(?:\.\d+)? -m venv")
+_VENV_CREATE_RE = re.compile(r'(?:python3(?:\.\d+)?|"?\$PYTHON_BIN"?) -m venv')
 _GUNICORN_LOCK_RE = re.compile(r"(?m)^gunicorn==")
 
 
@@ -311,6 +311,9 @@ def test_production_installer_chowns_only_runtime_paths() -> None:
             "do not chown -R the entire install prefix; keep code root-owned. "
             f"found: {block}"
         )
+        if "$INSTALL_DIR/.env" in block:
+            assert block == 'sudo chown "root:$SERVICE_USER" "$INSTALL_DIR/.env"'
+            continue
         assert "$INSTALL_DIR/data" in block or '"$INSTALL_DIR/data"' in block
         assert "$INSTALL_DIR/.flinttrade" in block or '"$INSTALL_DIR/.flinttrade"' in block
 
@@ -521,3 +524,54 @@ def test_production_docs_do_not_duplicate_clone_or_chown_code_tree() -> None:
     assert "${FLINTTRADE_DIR" not in readme
     assert "gunicorn" not in readme.lower()
     assert "sudoedit" in readme or "sudo -e" in readme
+
+
+@pytest.mark.unit
+def test_installer_makes_env_readable_only_to_root_and_service_group() -> None:
+    """python-dotenv runs as www-data, so root:root 0600 makes first boot fail."""
+    installer = _INSTALLER.read_text(encoding="utf-8")
+
+    assert 'sudo chown "root:$SERVICE_USER" "$INSTALL_DIR/.env"' in installer
+    assert 'sudo chmod 640 "$INSTALL_DIR/.env"' in installer
+    assert 'sudo chmod 600 "$INSTALL_DIR/.env"' not in installer
+
+
+@pytest.mark.unit
+def test_deploy_always_refreshes_systemd_unit_before_restart() -> None:
+    """Existing hosts must not retain the pre-fix gunicorn/workspace unit."""
+    deploy = _DEPLOY.read_text(encoding="utf-8")
+
+    assert 'if [ ! -f "/etc/systemd/system/${SERVICE_NAME}.service" ]' not in deploy
+    assert 'sudo cp "infra/systemd/${SERVICE_NAME}.service" /etc/systemd/system/' in deploy
+    assert 'sudo systemctl daemon-reload' in deploy
+
+
+@pytest.mark.unit
+def test_installer_validates_and_uses_the_same_system_python() -> None:
+    """The version check must cover the interpreter that actually creates .venv."""
+    installer = _INSTALLER.read_text(encoding="utf-8")
+
+    assert 'PYTHON_BIN="/usr/bin/python3"' in installer
+    assert 'flinttrade_assert_python_floor "$PYTHON_BIN"' in installer
+    assert 'sudo "$PYTHON_BIN" -m venv "$VENV_DIR"' in installer
+
+
+@pytest.mark.unit
+def test_optional_tooling_uses_the_resolved_executable_under_sudo() -> None:
+    """A user-local uv/pnpm discovery must not become a missing sudo PATH command."""
+    installer = _INSTALLER.read_text(encoding="utf-8")
+
+    assert 'UV_BIN="$(command -v uv)"' in installer
+    assert 'sudo "$UV_BIN" sync' in installer
+    assert 'PNPM_BIN="$(command -v pnpm)"' in installer
+    assert 'sudo "$PNPM_BIN" install' in installer
+
+
+@pytest.mark.unit
+def test_root_owned_checkout_is_readable_but_not_writable_by_service_group() -> None:
+    """A restrictive caller umask must not make root-owned code unreadable to www-data."""
+    installer = _INSTALLER.read_text(encoding="utf-8")
+
+    assert 'sudo chgrp -R "$SERVICE_USER" "$INSTALL_DIR"' in installer
+    assert 'sudo chmod -R g+rX,go-w "$INSTALL_DIR"' in installer
+    assert 'sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"' not in installer

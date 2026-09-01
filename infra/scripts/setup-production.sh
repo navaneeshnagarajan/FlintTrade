@@ -21,6 +21,7 @@ INSTALL_DIR="$(flinttrade_production_prefix)"
 flinttrade_assert_safe_install_dir "$INSTALL_DIR"
 REPO_URL="${FLINTTRADE_REPO:-https://github.com/navaneeshnagarajan/FlintTrade.git}"
 VENV_DIR="$INSTALL_DIR/.venv"
+PYTHON_BIN="/usr/bin/python3"
 # The shipped unit runs as www-data; nginx (installed below) provides that user.
 SERVICE_USER="www-data"
 
@@ -53,11 +54,11 @@ cd "$INSTALL_DIR"
 # Apt-installing python3-venv is not enough; the unit path must exist.
 # Ubuntu 24.04 only: refuse Bookworm/Pi system Python 3.11 before creating .venv.
 echo "Checking Python >= 3.12..."
-flinttrade_assert_python_floor python3
+flinttrade_assert_python_floor "$PYTHON_BIN"
 
 echo "Creating Python virtual environment at $VENV_DIR..."
 if [ ! -d "$VENV_DIR" ]; then
-    sudo python3 -m venv "$VENV_DIR"
+    sudo "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
 
 # Python dependencies — SC-07: hash-verified install only, into the unit venv
@@ -71,13 +72,21 @@ sudo "$VENV_DIR/bin/pip" install --require-hashes -r "$INSTALL_DIR/requirements.
 # available. The hash-verified requirements.lock install above stays the
 # baseline on a plain Ubuntu host.
 if command -v uv >/dev/null 2>&1; then
+    UV_BIN="$(command -v uv)"
     echo "Syncing uv workspace (broker-SDK pins)..."
-    (cd "$INSTALL_DIR" && sudo uv sync --frozen --all-packages --no-dev)
+    (cd "$INSTALL_DIR" && sudo "$UV_BIN" sync --frozen --all-packages --no-dev)
 fi
 if command -v pnpm >/dev/null 2>&1; then
+    PNPM_BIN="$(command -v pnpm)"
     echo "Installing node workspace dependencies..."
-    (cd "$INSTALL_DIR" && sudo pnpm install --frozen-lockfile)
+    (cd "$INSTALL_DIR" && sudo "$PNPM_BIN" install --frozen-lockfile)
 fi
+
+# Keep the checkout root-owned, but guarantee the service group can traverse
+# and read it even when setup was launched under a restrictive umask. Never
+# grant group write access to code, .git, or .venv.
+sudo chgrp -R "$SERVICE_USER" "$INSTALL_DIR"
+sudo chmod -R g+rX,go-w "$INSTALL_DIR"
 
 # Create a minimal server fallback env file if not present. OpenAlgo and broker
 # settings should be completed in the app Setup/Settings UI.
@@ -87,11 +96,15 @@ if [ ! -f "$INSTALL_DIR/.env" ]; then
 # FlintTrade server fallback environment.
 # Use Setup/Settings for OpenAlgo and broker configuration.
 EOF
-    sudo chmod 600 "$INSTALL_DIR/.env"
     echo ""
     echo "Runtime configuration is completed from the app UI after startup."
     echo ""
 fi
+# systemd parses EnvironmentFile as root, but the application also loads the
+# same optional fallback through python-dotenv after dropping to www-data.
+# Keep secrets unavailable to other users while allowing that service group.
+sudo chown "root:$SERVICE_USER" "$INSTALL_DIR/.env"
+sudo chmod 640 "$INSTALL_DIR/.env"
 
 # Create the full data and log directory tree. The unit's ReadWritePaths are
 # $INSTALL_DIR/data and $INSTALL_DIR/.flinttrade; also keep the historical
