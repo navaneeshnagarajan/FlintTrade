@@ -626,6 +626,19 @@ async def test_place_order_rejects_ambiguous_or_negative_write_acknowledgement(r
         await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("order_id_key", ["nOrdNo", "orderId"])
+async def test_place_order_accepts_explicit_success_with_nested_order_id(order_id_key):
+    mock = _PlaceAckNeo(
+        {"stat": "Ok", "stCode": 200, "data": {order_id_key: "250122000612876"}}
+    )
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS", quantity="1")
+
+    assert await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN) == "250122000612876"
+
+
 class _ModifyAckNeo(MockNeoFull):
     def __init__(self, response: Any) -> None:
         super().__init__()
@@ -664,6 +677,15 @@ async def test_modify_order_rejects_acknowledgement_for_a_different_order():
     session = await _session(adapter)
     with pytest.raises(KotakNeoMappingError, match="different order id"):
         await adapter.modify_order(session, "OID8", {"quantity": 1}, _router_token=_ROUTER_TOKEN)
+
+
+@pytest.mark.asyncio
+async def test_modify_order_accepts_explicit_success_with_nested_order_id():
+    mock = _ModifyAckNeo({"stat": "Ok", "stCode": 200, "data": {"nOrdNo": "OID8"}})
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+
+    await adapter.modify_order(session, "OID8", {"quantity": 1}, _router_token=_ROUTER_TOKEN)
 
 
 # ---------------------------------------------------------------------------

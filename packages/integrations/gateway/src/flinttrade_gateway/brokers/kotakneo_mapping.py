@@ -451,6 +451,10 @@ def require_write_success(resp: Any, *, expected_order_id: str | None = None) ->
     status = resp.get("stat")
     status_code = resp.get("stCode")
     order_id = resp.get("nOrdNo")
+    if not order_id:
+        data = resp.get("data")
+        if isinstance(data, dict):
+            order_id = data.get("nOrdNo") or data.get("orderId")
     if not isinstance(status, str) or status.strip().lower() != "ok":
         raise KotakNeoMappingError("Kotak Neo write response has no explicit success status")
     if isinstance(status_code, bool) or not isinstance(status_code, int) or status_code != 200:
