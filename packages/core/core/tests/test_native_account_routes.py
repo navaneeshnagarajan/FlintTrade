@@ -2787,40 +2787,49 @@ def test_connect_candidate_timeout_preserves_live_state_and_releases_lock(client
 
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
-    async def _slow_probe(_self, _session):
-        await asyncio.sleep(0.05)
-        return {"available_balance": 0.0}
+    release_probe = threading.Event()
 
-    monkeypatch.setattr(UpstoxAdapter, "funds", _slow_probe)
+    async def _blocking_probe(_self, _session):
+        def sdk_read() -> dict[str, float]:
+            if not release_probe.wait(5.0):
+                raise TimeoutError("test did not release the SDK read")
+            return {"available_balance": 0.0}
+
+        return await asyncio.to_thread(sdk_read)
+
+    monkeypatch.setattr(UpstoxAdapter, "funds", _blocking_probe)
 
     started = time.monotonic()
-    response = c.post(
-        "/api/v1/native/accounts",
-        headers=_h(),
-        json={
-            "adapter_id": "upstox",
-            "account_id": "TIMEOUTCONNECT",
-            "credentials": {"access_token": "candidate"},
-        },
-    )
-    elapsed = time.monotonic() - started
+    try:
+        response = c.post(
+            "/api/v1/native/accounts",
+            headers=_h(),
+            json={
+                "adapter_id": "upstox",
+                "account_id": "TIMEOUTCONNECT",
+                "credentials": {"access_token": "candidate"},
+            },
+        )
+        elapsed = time.monotonic() - started
 
-    assert response.status_code == 504
-    # Generous bound: the invariant is "the 504 comes from the 0.01s candidate
-    # timeout rather than a hang", not a latency target — loaded runners
-    # (parallel agents, busy CI) blow sub-second wall-clock windows.
-    assert elapsed < 5.0
-    assert app.config["BROKER_ROUTER"] is router
-    assert router.calls == 0
-    assert app.config["CREDENTIAL_STORE"].list_accounts() == []
-    assert _workspace_brokers(tmp_path) == workspace_before
-    assert app.config.get("NATIVE_SESSION_STATUS") == status_before
+        assert response.status_code == 504
+        # Generous bound: the invariant is "the 504 comes from the 0.01s candidate
+        # timeout rather than a hang", not a latency target — loaded runners
+        # (parallel agents, busy CI) blow sub-second wall-clock windows.
+        assert elapsed < 5.0
+        assert app.config["BROKER_ROUTER"] is router
+        assert router.calls == 0
+        assert app.config["CREDENTIAL_STORE"].list_accounts() == []
+        assert _workspace_brokers(tmp_path) == workspace_before
+        assert app.config.get("NATIVE_SESSION_STATUS") == status_before
 
-    import flinttrade_core.native_account_routes as routes
+        import flinttrade_core.native_account_routes as routes
 
-    assert routes._CONNECT_LOCK.acquire(blocking=False) is True
-    routes._CONNECT_LOCK.release()
-    _wait_for_candidate_attempt_to_finish()
+        assert routes._CONNECT_LOCK.acquire(blocking=False) is True
+        routes._CONNECT_LOCK.release()
+    finally:
+        release_probe.set()
+        _wait_for_candidate_attempt_to_finish()
 
 
 def test_candidate_timeout_does_not_accumulate_or_leave_non_daemon_sdk_work(
@@ -2959,35 +2968,44 @@ def test_relogin_candidate_timeout_preserves_live_state_and_releases_lock(client
 
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
-    async def _slow_probe(_self, _session):
-        await asyncio.sleep(0.05)
-        return {"available_balance": 0.0}
+    release_probe = threading.Event()
 
-    monkeypatch.setattr(UpstoxAdapter, "funds", _slow_probe)
+    async def _blocking_probe(_self, _session):
+        def sdk_read() -> dict[str, float]:
+            if not release_probe.wait(5.0):
+                raise TimeoutError("test did not release the SDK read")
+            return {"available_balance": 0.0}
+
+        return await asyncio.to_thread(sdk_read)
+
+    monkeypatch.setattr(UpstoxAdapter, "funds", _blocking_probe)
 
     started = time.monotonic()
-    response = c.post(
-        "/api/v1/native/accounts/upstox/TIMEOUTRELOGIN/login",
-        headers=_h(),
-        json={"credentials": {"access_token": "candidate"}},
-    )
-    elapsed = time.monotonic() - started
+    try:
+        response = c.post(
+            "/api/v1/native/accounts/upstox/TIMEOUTRELOGIN/login",
+            headers=_h(),
+            json={"credentials": {"access_token": "candidate"}},
+        )
+        elapsed = time.monotonic() - started
 
-    assert response.status_code == 504
-    # Generous bound: see the connect-timeout twin above — prompt-vs-hang is
-    # the invariant, not sub-second latency.
-    assert elapsed < 5.0
-    assert app.config["BROKER_ROUTER"] is router
-    assert router.calls == 0
-    assert store.retrieve_for("upstox", "TIMEOUTRELOGIN") == {"access_token": "prior"}
-    assert registry.get_session_for("upstox", "TIMEOUTRELOGIN") is prior_session
-    assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
+        assert response.status_code == 504
+        # Generous bound: see the connect-timeout twin above — prompt-vs-hang is
+        # the invariant, not sub-second latency.
+        assert elapsed < 5.0
+        assert app.config["BROKER_ROUTER"] is router
+        assert router.calls == 0
+        assert store.retrieve_for("upstox", "TIMEOUTRELOGIN") == {"access_token": "prior"}
+        assert registry.get_session_for("upstox", "TIMEOUTRELOGIN") is prior_session
+        assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
 
-    import flinttrade_core.native_account_routes as routes
+        import flinttrade_core.native_account_routes as routes
 
-    assert routes._CONNECT_LOCK.acquire(blocking=False) is True
-    routes._CONNECT_LOCK.release()
-    _wait_for_candidate_attempt_to_finish()
+        assert routes._CONNECT_LOCK.acquire(blocking=False) is True
+        routes._CONNECT_LOCK.release()
+    finally:
+        release_probe.set()
+        _wait_for_candidate_attempt_to_finish()
 
 
 def test_remove_rejects_without_mutation_when_router_cannot_drain(client):

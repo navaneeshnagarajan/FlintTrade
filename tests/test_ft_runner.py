@@ -395,6 +395,37 @@ def test_resolve_python_accepts_a_genuine_store_installed_python(
 
 
 @pytest.mark.unit
+def test_cmd_test_pins_rust_build_to_the_resolved_python(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PyO3 must not discover an older ambient ``python`` than the pytest interpreter."""
+    expected_python = "/repo/.venv/bin/python"
+    calls: list[tuple[list[str], dict[str, str] | None, bool]] = []
+
+    monkeypatch.setattr(ft, "_run_pytest", lambda _flags: 0)
+    monkeypatch.setattr(ft.shutil, "which", lambda name: "/usr/bin/cargo" if name == "cargo" else None)
+    monkeypatch.setattr(ft, "resolve_python", lambda: expected_python)
+
+    def _record(
+        argv: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        cwd: Path | None = None,
+        check: bool = True,
+        quiet: bool = False,
+    ) -> int:
+        del cwd, quiet
+        calls.append((list(argv), env, check))
+        return 0
+
+    monkeypatch.setattr(ft, "run", _record)
+
+    assert ft.cmd_test([]) == 0
+    assert calls[0][0] == ["/usr/bin/cargo", "test", "--manifest-path", "packages/core/ticks/Cargo.toml"]
+    assert calls[0][1] is not None
+    assert calls[0][1]["PYO3_PYTHON"] == expected_python
+    assert calls[0][2] is False
+
+
+@pytest.mark.unit
 def test_python_env_joins_pythonpath_with_os_pathsep(monkeypatch: pytest.MonkeyPatch) -> None:
     """Hardcoding ``:`` splits Windows drive letters and breaks every import."""
     monkeypatch.setenv("PYTHONPATH", "already-on-the-path")

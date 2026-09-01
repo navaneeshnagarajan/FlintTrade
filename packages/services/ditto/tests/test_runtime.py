@@ -1249,8 +1249,29 @@ def test_router_owner_cleanup_uses_one_deadline_and_retains_unclosed_clients(
     assert owner.router is None
 
 
-def test_router_owner_cleanup_returns_at_deadline_when_client_close_hangs() -> None:
+def test_router_owner_cleanup_returns_at_deadline_when_client_close_hangs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     release_close = threading.Event()
+    close_started = threading.Event()
+    observed_join_timeouts: list[float] = []
+    real_join = threading.Thread.join
+
+    def _record_bounded_join(
+        thread: threading.Thread,
+        timeout: float | None = None,
+    ) -> None:
+        if thread.name.startswith("ditto-client-close-"):
+            assert timeout is not None
+            observed_join_timeouts.append(timeout)
+            # Preserve the real hang/deadline behaviour without allowing a
+            # deliberately mutated oversized budget to slow this regression
+            # test down.
+            real_join(thread, timeout=min(timeout, 0.05))
+            return
+        real_join(thread, timeout=timeout)
+
+    monkeypatch.setattr(threading.Thread, "join", _record_bounded_join)
 
     class _Router:
         @staticmethod
@@ -1261,17 +1282,22 @@ def test_router_owner_cleanup_returns_at_deadline_when_client_close_hangs() -> N
     class _Client:
         def close_sync(self, *, timeout: float) -> None:
             del timeout
-            release_close.wait(timeout=1.0)
+            close_started.set()
+            release_close.wait()
 
     client = _Client()
     owner = object.__new__(DittoRouterOwner)
     owner.router = _Router()
     owner._clients = {"account": client}
-    started = time.monotonic()
 
     try:
         assert owner.close(timeout=0.05) is False
-        assert time.monotonic() - started < 0.2
+        assert len(observed_join_timeouts) == 1
+        assert 0.0 < observed_join_timeouts[0] <= 0.05
+        assert close_started.wait(1.0)
+        attempt_client, thread, _state = next(iter(owner._client_close_attempts.values()))
+        assert attempt_client is client
+        assert thread.is_alive()
         assert owner._clients == {"account": client}
         assert owner.router is not None
     finally:
