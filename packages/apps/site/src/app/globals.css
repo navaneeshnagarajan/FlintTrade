@@ -714,6 +714,24 @@ kbd {
 .hero-feature-grid div:nth-child(3) { animation-delay: 5.34s; }
 .hero-feature-grid div:nth-child(4) { animation-delay: 5.41s; }
 
+.hero-install {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 720px;
+  margin-top: 28px;
+  text-align: left;
+  opacity: 0;
+  animation: siteRiseInBlur 0.78s cubic-bezier(0.16, 1, 0.3, 1) 5.22s forwards;
+}
+
+.hero-install > p {
+  margin: 0;
+  color: var(--site-hero-copy);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
@@ -722,6 +740,21 @@ kbd {
   margin-top: 34px;
   opacity: 0;
   animation: siteRiseInBlur 0.78s cubic-bezier(0.16, 1, 0.3, 1) 5.22s forwards;
+}
+
+.hero-electron-note {
+  margin: 18px 0 0;
+  color: var(--site-muted);
+  font-size: 13px;
+  line-height: 1.55;
+  opacity: 0;
+  animation: siteRiseInBlur 0.62s cubic-bezier(0.16, 1, 0.3, 1) 5.3s forwards;
+}
+
+.hero-electron-note a {
+  color: var(--site-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .section-actions {
@@ -1114,7 +1147,9 @@ kbd {
   .hero-slogan span,
   .hero-feature-grid div,
   .hero-copy > p,
+  .hero-install,
   .hero-actions,
+  .hero-electron-note,
   .button.shimmer::before {
     animation: none;
   }
@@ -1136,7 +1171,9 @@ kbd {
   .hero-slogan span,
   .hero-feature-grid div,
   .hero-copy > p,
-  .hero-actions {
+  .hero-install,
+  .hero-actions,
+  .hero-electron-note {
     opacity: 1;
   }
 }

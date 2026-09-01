@@ -84,18 +84,24 @@ describe('docs index generation', () => {
     expect(pageSource).not.toContain('Native and OpenAlgo broker integrations documented');
   });
 
-  it('keeps the desktop app install path visible on the website', () => {
+  it('keeps the web-app install path and desktop guide reachable from the website', () => {
     const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
     const headerSource = readFileSync(resolve(process.cwd(), 'src/components/site-header.tsx'), 'utf8');
     const footerSource = readFileSync(resolve(process.cwd(), 'src/components/site-footer.tsx'), 'utf8');
     const downloadSource = readFileSync(resolve(process.cwd(), 'src/app/download/page.tsx'), 'utf8');
+    const webInstallSource = readFileSync(resolve(process.cwd(), 'src/lib/web-install-commands.ts'), 'utf8');
     const desktopDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/DESKTOP.md');
 
     // The download surface distinguishes the source-built web app from the
     // Electron shell and carries Electron commands only for a complete release.
     expect(headerSource).toContain("href: '/download'");
     expect(pageSource).toContain('href="/download"');
-    expect(pageSource).toContain('Download desktop app');
+    expect(pageSource).toContain('Install the web app');
+    expect(pageSource).toContain('WEB_INSTALL_COMMANDS');
+    expect(downloadSource).toContain('WEB_INSTALL_COMMANDS');
+    expect(webInstallSource).toContain('web-install.sh');
+    expect(webInstallSource).toContain('web-install.ps1');
+    expect(pageSource).not.toContain('Download desktop app');
     expect(downloadSource).toContain('install.sh | bash');
     expect(downloadSource).toContain('install.ps1 | iex');
     // The desktop guide stays reachable from the homepage, footer, and docs.
@@ -108,7 +114,7 @@ describe('docs index generation', () => {
     expect(desktopDoc?.content).not.toContain('desktop release manifest');
   });
 
-  it('hero has exactly one primary CTA to demo-app/welcome (new window), no retired sandbox/paper/demo-mode strings, MCP absent from hero', () => {
+  it('hero leads with the web-app install path, one explore-demo secondary, and no desktop-download CTA', () => {
     const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
     // Extract only the hero-actions block for href/target/MCP assertions
     const heroMatch = pageSource.match(/<div className="hero-actions">[\s\S]*?<\/div>/);
@@ -116,9 +122,15 @@ describe('docs index generation', () => {
     // exactly one primary on the FULL page (global hierarchy guard)
     const primaryMatches = pageSource.match(/className="button primary"/g) || [];
     expect(primaryMatches.length).toBe(1);
+    expect(heroActions).toContain('href="/download"');
+    expect(heroActions).toContain('Install the web app');
     expect(heroActions).toContain('href="/demo-app/welcome"');
     expect(heroActions).toContain('target="_blank"');
-    expect(heroActions).toContain('Start exploring — no install needed');
+    expect(heroActions).toContain('Explore demo');
+    expect((heroActions.match(/href="\/download"/g) || []).length).toBe(1);
+    expect(heroActions).not.toContain('Download desktop app');
+    expect(heroActions).not.toContain('Run the web app');
+    expect(heroActions).not.toContain('Check installer status');
     // no retired operating-mode strings in rendered copy (whole page OK)
     expect(pageSource).not.toMatch(/sandbox testing|Sandbox Demo|Demo Mode|paper trading|paper order|demo data/i);
     // MCP absent from hero-actions only

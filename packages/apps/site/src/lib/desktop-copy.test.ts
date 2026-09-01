@@ -17,13 +17,32 @@ describe('Electron source-bootstrap website copy', () => {
   const home = siteSource('src/app/page.tsx');
   const download = siteSource('src/app/download/page.tsx');
   const installRoutes = siteSource('src/lib/install-script-routes.ts');
+  const webInstallCommands = siteSource('src/lib/web-install-commands.ts');
 
   it('describes a small Electron shell and the verified first-run local source build', () => {
-    expect(home).toContain('small Electron shell');
     expect(download).toContain('small Electron shell');
-    expect(`${home}\n${download}`).toContain('first launch');
-    expect(`${home}\n${download}`).toContain('hash-verified');
-    expect(`${home}\n${download}`).toContain('integrity-locked local source');
+    expect(download).toContain('first launch');
+    expect(download).toContain('hash-verified');
+    expect(download).toContain('integrity-locked local source');
+  });
+
+  it('does not sell a downloadable desktop app on the homepage while Electron is pending', () => {
+    expect(home).not.toContain('Download desktop app');
+    expect(home).not.toContain('One native app for macOS, Windows, and Linux');
+    expect(home).not.toContain('Electron shell delivery');
+    expect(home).not.toContain('The install script downloads and verifies');
+    expect(home).not.toContain('Check installer status');
+    expect(home).toContain('Install the web app');
+    expect(home).toContain('WEB_INSTALL_COMMANDS');
+    expect(download).toContain('WEB_INSTALL_COMMANDS');
+    expect(webInstallCommands).toContain(
+      'curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash',
+    );
+    expect(webInstallCommands).toContain(
+      'irm https://flinttrade.vercel.app/web-install.ps1 | iex',
+    );
+    expect(home).toContain('Electron installer pending');
+    expect(home).toContain('href="/docs/desktop"');
   });
 
   it('removes retired bundled-runtime and pre-install source-build claims', () => {

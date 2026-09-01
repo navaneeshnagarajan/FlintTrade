@@ -16,6 +16,7 @@ import {
   selectDesktopRelease,
 } from '@/lib/desktop-release';
 import { siteSourceSha } from '@/lib/install-script-routes';
+import { WEB_INSTALL_COMMANDS } from '@/lib/web-install-commands';
 
 export const revalidate = 300;
 
@@ -25,22 +26,6 @@ export const metadata = {
     'Install the self-hosted FlintTrade web app in one line, and check Electron installer availability for macOS, Windows, and Linux.',
 };
 
-// The self-hosted web app is the primary path: it needs nothing pre-installed
-// and, unlike the desktop shell, it does not wait on a published release. These
-// commands are the canonical one-liners and must stay byte-for-byte identical
-// to the ones in the setup docs and the repository readme.
-const webInstallCommands = [
-  {
-    platform: 'macOS / Linux',
-    command: 'curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash',
-    needs: 'No prerequisites. Provisions a pinned, checksum-verified toolchain, builds the managed source checkout, and installs the flinttrade launcher.',
-  },
-  {
-    platform: 'Windows 10/11',
-    command: 'irm https://flinttrade.vercel.app/web-install.ps1 | iex',
-    needs: 'No prerequisites. Run in a normal (non-Administrator) PowerShell window; the same bootstrap installs a per-user launcher and Start Menu shortcut.',
-  },
-] as const;
 
 // The hosted one-liners are a redirect to these same scripts, so every route on
 // this site answers 503 when a deployment has no immutable source commit. These
@@ -248,7 +233,7 @@ export default async function DownloadPage() {
             <span className="font-mono">.env</span> file is required.
           </p>
           <div className="stack">
-            {webInstallCommands.map((entry) => (
+            {WEB_INSTALL_COMMANDS.map((entry) => (
               <div className="code-panel" key={entry.platform}>
                 <header>
                   <span>{entry.platform}</span>
