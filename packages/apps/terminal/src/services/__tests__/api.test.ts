@@ -1373,6 +1373,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     await expect(intervals).resolves.toEqual(["1m", "5m"]);
     expect(String(fetchSpy.mock.calls[1]?.[0])).toContain("/api/v1/intervals");
     expect(String(fetchSpy.mock.calls[1]?.[0])).not.toContain("/api/v1/broker/capabilities");
+    expect((fetchSpy.mock.calls[1] as [string, RequestInit])[1]?.method).toBe("POST");
   });
 
   it("combines native intraday and calendar interval metadata when the backend omits the prebuilt list", async () => {
@@ -2003,6 +2004,116 @@ describe("OpenAlgo API client (api.ts)", () => {
     );
 
     await expect(getExpiry("NIFTY", "NFO")).resolves.toEqual({ expiry: ["2026-07-30"] });
+  });
+
+  it("normalises an official OpenAlgo expiry array onto { expiry }", async () => {
+    mockConnectionState.apiKey = "test-key-123";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: ["26-MAR-26", " 02-APR-26 ", "", null],
+      }),
+    );
+
+    await expect(getExpiry("NIFTY", "NFO")).resolves.toEqual({
+      expiry: ["26-MAR-26", "02-APR-26"],
+    });
+  });
+
+  it("posts OpenAlgo optionchain with underlying and DDMMMYY expiry_date only", async () => {
+    mockConnectionState.apiKey = "test-key-123";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: { chain: [], calls: [], puts: [] },
+      }),
+    );
+
+    await getOptionChain("NIFTY", "NFO", "26-MAR-26");
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/optionchain");
+    expect(JSON.parse(init.body as string)).toEqual({
+      apikey: "test-key-123",
+      underlying: "NIFTY",
+      exchange: "NFO",
+      expiry_date: "26MAR26",
+    });
+  });
+
+  it("converts an ISO option-chain expiry to OpenAlgo DDMMMYY", async () => {
+    mockConnectionState.apiKey = "test-key-123";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: { chain: [], calls: [], puts: [] },
+      }),
+    );
+
+    await getOptionChain("NIFTY", "NSE_INDEX", "2026-07-30");
+
+    expect(JSON.parse((fetchSpy.mock.calls[0] as [string, RequestInit])[1].body as string)).toEqual({
+      apikey: "test-key-123",
+      underlying: "NIFTY",
+      exchange: "NSE_INDEX",
+      expiry_date: "30JUL26",
+    });
+  });
+
+  it("refuses an OpenAlgo option-chain request without expiry_date", async () => {
+    mockConnectionState.apiKey = "test-key-123";
+
+    await expect(getOptionChain("NIFTY", "NFO")).rejects.toThrow("expiry_date is required");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("posts OpenAlgo syntheticfuture with underlying and DDMMMYY expiry_date", async () => {
+    mockConnectionState.apiKey = "test-key-123";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: { synthetic_future_price: 26015.25 },
+      }),
+    );
+
+    await getSyntheticFuture("NIFTY", "NSE_INDEX", "2026-03-26");
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/syntheticfuture");
+    expect(JSON.parse(init.body as string)).toEqual({
+      apikey: "test-key-123",
+      underlying: "NIFTY",
+      exchange: "NSE_INDEX",
+      expiry_date: "26MAR26",
+    });
+  });
+
+  it("refuses an OpenAlgo synthetic-future request without expiry_date", async () => {
+    mockConnectionState.apiKey = "test-key-123";
+
+    await expect(getSyntheticFuture("NIFTY", "NSE_INDEX")).rejects.toThrow("expiry_date is required");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("posts OpenAlgo market/timings with the trading date", async () => {
+    mockConnectionState.apiKey = "test-key-123";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: [{ exchange: "NSE", start_time: 915, end_time: 1530 }],
+      }),
+    );
+
+    const timings = await getTimings("2026-08-29");
+
+    expect(timings).toEqual([{ exchange: "NSE", start_time: 915, end_time: 1530 }]);
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/market/timings");
+    expect(url).not.toContain("/api/v1/timings");
+    expect(JSON.parse(init.body as string)).toEqual({
+      apikey: "test-key-123",
+      date: "2026-08-29",
+    });
   });
 
   it("derives synthetic futures from native option-chain rows without an OpenAlgo key", async () => {
@@ -2783,16 +2894,38 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(JSON.parse(init.body as string)).toEqual({ message: "hello" });
   });
 
-  // ---- GET requests ----
-
-  it("GET request does not send a body or Content-Type", async () => {
+  it("POSTs intervals and flattens official OpenAlgo buckets", async () => {
     fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ status: "success", data: ["1m", "5m", "1h"] }),
+      jsonResponse({
+        status: "success",
+        data: {
+          seconds: ["1s"],
+          minutes: ["1m", "5m"],
+          hours: ["1h"],
+          days: ["D"],
+          weeks: ["W"],
+          months: ["M"],
+        },
+      }),
     );
 
     const result = await getIntervals();
 
-    expect(result).toEqual(["1m", "5m", "1h"]);
+    expect(result).toEqual(["1s", "1m", "5m", "1h", "D", "W", "M"]);
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/intervals");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ apikey: "test-key-123" });
+  });
+
+  it("GET request does not send a body or Content-Type", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "success", data: [] }),
+    );
+
+    const result = await getInstruments();
+
+    expect(result).toEqual([]);
     const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit | undefined];
     // GET calls use the single-arg form of fetch (no init or no method)
     expect(init).toBeUndefined();

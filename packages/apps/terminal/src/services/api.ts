@@ -43,7 +43,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
-import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
+import { buildCompactOptionSymbol, normaliseExpiryForOptionSymbol } from "@/lib/optionSymbols";
 import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import {
   requireCurrentBrokerCapabilityScope,
@@ -124,6 +124,7 @@ const NATIVE_READ_ENDPOINTS: Partial<Record<string, NativeReadKind>> = {
   scrip_master: "scrip_master",
   holidays: "holidays",
   timings: "timings",
+  "market/timings": "timings",
   optiongreeks: "optiongreeks",
   multioptiongreeks: "optiongreeks",
   history: "history",
@@ -296,6 +297,52 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringParam(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
+}
+
+/** Format an expiry as OpenAlgo OptionChainSchema DDMMMYY (e.g. 26MAR26). */
+function openAlgoOptionExpiryDate(value: string): string {
+  const expiry = value.trim();
+  return expiry ? normaliseExpiryForOptionSymbol(expiry) : expiry;
+}
+
+/**
+ * Fields OpenAlgo v2.0.2.2 accepts on the live POST body.
+ *
+ * Native reads keep the original `extra` (ISO expiry, symbol aliases). The
+ * broker schema rejects undeclared keys such as `expiry` on optionchain and
+ * `symbol` on syntheticfuture, so those are stripped here only.
+ */
+function openAlgoRequestFields(endpoint: string, extra: object): object {
+  if (endpoint !== "optionchain" && endpoint !== "syntheticfuture") return extra;
+  const params = extra as Record<string, unknown>;
+  const expiry = stringParam(params.expiry_date || params.expiry).trim();
+  if (!expiry) throw new Error("expiry_date is required");
+  return {
+    underlying: stringParam(params.underlying) || stringParam(params.symbol),
+    exchange: stringParam(params.exchange),
+    expiry_date: openAlgoOptionExpiryDate(expiry),
+  };
+}
+
+const OPENALGO_INTERVAL_BUCKETS = ["seconds", "minutes", "hours", "days", "weeks", "months"] as const;
+
+/** Flatten OpenAlgo interval buckets (or a legacy flat list) into Chart's array. */
+function flattenOpenAlgoIntervals(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => (typeof item === "string" && item.trim() ? [item.trim()] : []));
+  }
+  if (!isRecord(value)) return [];
+  if (Array.isArray(value.intervals)) return flattenOpenAlgoIntervals(value.intervals);
+  return OPENALGO_INTERVAL_BUCKETS.flatMap((key) => flattenOpenAlgoIntervals(value[key]));
+}
+
+function todayIstIsoDate(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 function nativeSymbolKey(symbol: unknown, exchange: unknown): string {
@@ -1945,7 +1992,10 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
       return { holdings: mockHoldings() } as T;
     case "holidays":
       return [] as T;
+    case "intervals":
+      return ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"] as T;
     case "timings":
+    case "market/timings":
       return [
         { exchange: "NSE", start_time: 915, end_time: 1530 },
         { exchange: "BSE", start_time: 915, end_time: 1530 },
@@ -2281,7 +2331,7 @@ async function post<T>(
     resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apikey: getApiKey(), ...extra }),
+      body: JSON.stringify({ apikey: getApiKey(), ...openAlgoRequestFields(endpoint, extra) }),
       signal,
     });
   } catch {
@@ -2750,26 +2800,30 @@ export const getOptionChain = (
   expiry?: string,
   signal?: AbortSignal,
   expectedDataScope?: string,
-) =>
-  post<OptionChainData>("optionchain", {
-    underlying: symbol, // OpenAlgo v2 uses 'underlying' not 'symbol'
+) => {
+  const expiryDate = String(expiry ?? "").trim();
+  return post<OptionChainData>("optionchain", {
+    underlying: symbol,
     exchange,
-    ...(expiry ? { expiry } : {}),
-    // OpenAlgo expiry format: "24MAR26" (no dashes). Expiry API returns "24-MAR-26".
-    ...(expiry ? { expiry_date: expiry.replace(/-/g, "") } : {}),
+    ...(expiryDate ? { expiry_date: expiryDate } : {}),
   }, signal, expectedDataScope);
-export const getExpiry = (
+};
+export async function getExpiry(
   symbol: string,
   exchange = "NFO",
   instrumenttype: "options" | "futures" = "options",
   signal?: AbortSignal,
   expectedDataScope?: string,
-) => post<{ expiry: string[] }>(
-  "expiry",
-  { symbol, exchange, instrumenttype },
-  signal,
-  expectedDataScope,
-);
+): Promise<{ expiry: string[] }> {
+  return normaliseNativeExpiry(
+    await post<unknown>(
+      "expiry",
+      { symbol, exchange, instrumenttype },
+      signal,
+      expectedDataScope,
+    ),
+  );
+}
 export function searchSymbol(
   query: string,
   exchange?: string,
@@ -2792,7 +2846,7 @@ export function searchSymbol(
 }
 export const getIntervals = async (signal?: AbortSignal, expectedDataScope?: string) =>
   (await getNativeIntervals(signal, expectedDataScope))
-    ?? get<string[]>("intervals", signal, expectedDataScope);
+    ?? flattenOpenAlgoIntervals(await post<unknown>("intervals", {}, signal, expectedDataScope));
 export async function getMultiOptionGreeks(
   symbols: Array<{ symbol: string; exchange: string }>,
 ): Promise<Greeks[]> {
@@ -2873,14 +2927,17 @@ export const getSyntheticFuture = async (
   expiry_date?: string,
   signal?: AbortSignal,
   expectedDataScope?: string,
-) =>
-  (await getNativeSyntheticFuture(symbol, exchange, expiry_date, signal, expectedDataScope))
-    ?? post<SyntheticFutureData>(
-      "syntheticfuture",
-      { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) },
-      signal,
-      expectedDataScope,
-    );
+) => {
+  const native = await getNativeSyntheticFuture(symbol, exchange, expiry_date, signal, expectedDataScope);
+  if (native !== undefined) return native;
+  const expiry = String(expiry_date ?? "").trim();
+  return post<SyntheticFutureData>(
+    "syntheticfuture",
+    { underlying: symbol, exchange, ...(expiry ? { expiry_date: expiry } : {}) },
+    signal,
+    expectedDataScope,
+  );
+};
 export const getTicker = (symbol: string, exchange: string) =>
   post<Quote>("ticker", { symbol, exchange });
 export const getInstruments = async (
@@ -3010,7 +3067,11 @@ export const getHoldings = async (
 // --- Utility ---
 export const ping = () => post<{ status: string }>("ping"); // OpenAlgo docs: POST /api/v1/ping
 export const getHolidays = () => post<Holiday[]>("holidays"); // POST with apikey, not GET
-export const getTimings = () => post<MarketTiming[]>("timings"); // POST with apikey, not GET
+export function getTimings(date?: string): Promise<MarketTiming[]> {
+  const timingDate = String(date ?? todayIstIsoDate()).trim();
+  if (!timingDate) throw new Error("date is required");
+  return post<MarketTiming[]>("market/timings", { date: timingDate });
+}
 export interface TelegramSendOptions {
   botToken?: string;
   chatId?: string;
