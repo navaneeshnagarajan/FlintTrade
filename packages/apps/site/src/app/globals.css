@@ -714,6 +714,24 @@ kbd {
 .hero-feature-grid div:nth-child(3) { animation-delay: 5.34s; }
 .hero-feature-grid div:nth-child(4) { animation-delay: 5.41s; }
 
+.hero-install {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 720px;
+  margin-top: 28px;
+  text-align: left;
+  opacity: 0;
+  animation: siteRiseInBlur 0.78s cubic-bezier(0.16, 1, 0.3, 1) 5.22s forwards;
+}
+
+.hero-install > p {
+  margin: 0;
+  color: var(--site-hero-copy);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
@@ -722,6 +740,21 @@ kbd {
   margin-top: 34px;
   opacity: 0;
   animation: siteRiseInBlur 0.78s cubic-bezier(0.16, 1, 0.3, 1) 5.22s forwards;
+}
+
+.hero-electron-note {
+  margin: 18px 0 0;
+  color: var(--site-muted);
+  font-size: 13px;
+  line-height: 1.55;
+  opacity: 0;
+  animation: siteRiseInBlur 0.62s cubic-bezier(0.16, 1, 0.3, 1) 5.3s forwards;
+}
+
+.hero-electron-note a {
+  color: var(--site-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .section-actions {
@@ -1114,7 +1147,9 @@ kbd {
   .hero-slogan span,
   .hero-feature-grid div,
   .hero-copy > p,
+  .hero-install,
   .hero-actions,
+  .hero-electron-note,
   .button.shimmer::before {
     animation: none;
   }
@@ -1136,7 +1171,9 @@ kbd {
   .hero-slogan span,
   .hero-feature-grid div,
   .hero-copy > p,
-  .hero-actions {
+  .hero-install,
+  .hero-actions,
+  .hero-electron-note {
     opacity: 1;
   }
 
@@ -1294,7 +1331,9 @@ kbd {
   .hero-slogan span,
   .hero-copy > p,
   .hero-actions,
-  .hero-disclaimer {
+  .hero-disclaimer,
+  .hero-install,
+  .hero-electron-note {
     opacity: 1 !important;
     animation: none !important;
     transition: none !important;
@@ -1341,6 +1380,8 @@ html.ft-scroll-world-on .hero-slogan > span,
 html.ft-scroll-world-on .hero-copy > p:not(.hero-disclaimer):not(.sr-only),
 html.ft-scroll-world-on .hero-copy p.hero-disclaimer,
 html.ft-scroll-world-on .hero-actions,
+html.ft-scroll-world-on .hero-install,
+html.ft-scroll-world-on .hero-electron-note,
 html.ft-scroll-world-on .hero-feature-grid > div {
   animation: none !important;
   opacity: 1 !important;
@@ -1358,6 +1399,8 @@ html.ft-scroll-world-fallback .hero-slogan > span,
 html.ft-scroll-world-fallback .hero-copy > p:not(.hero-disclaimer):not(.sr-only),
 html.ft-scroll-world-fallback .hero-copy p.hero-disclaimer,
 html.ft-scroll-world-fallback .hero-actions,
+html.ft-scroll-world-fallback .hero-install,
+html.ft-scroll-world-fallback .hero-electron-note,
 html.ft-scroll-world-fallback .hero-feature-grid > div {
   animation: none !important;
   opacity: 1 !important;

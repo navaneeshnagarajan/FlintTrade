@@ -10,6 +10,22 @@ import {
 describe('Spark Path chapter ledger', () => {
   it('defines every existing homepage chapter exactly once from 0 through 5', () => {
     expect(chapters.map((chapter) => chapter.id)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(chapters.map((chapter) => chapter.anchor)).toEqual([
+      'hero',
+      'source',
+      'docs',
+      'mcp',
+      'packages',
+      'footer',
+    ]);
+    expect(chapters.map((chapter) => chapter.label)).toEqual([
+      'Hero / Flint facet ignition',
+      'Source / built for people who read the source',
+      'Docs, API, and contribution paths',
+      'MCP for development, not trading',
+      'Package map at contributor speed',
+      'Close / spark recedes',
+    ]);
     expect(new Set(chapters.map((chapter) => chapter.anchor)).size).toBe(6);
   });
 

@@ -1,5 +1,5 @@
 import { BRAND_SLOGAN_SENTENCE, BRAND_SLOGAN_WORDS, BRAND_WORDMARK, LogoIcon } from '@flinttrade/design-system/brand';
-import { ArrowRight, Bot, Download, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
+import { ArrowRight, Bot, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 
@@ -10,6 +10,8 @@ import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
 import { listPackages } from '@/lib/mcp/capabilities';
 import { flinttradeAsset } from '@/lib/site-assets';
+import { hostedMcpUrl, resolveSiteOrigin } from '@/lib/site-origin';
+import { WEB_INSTALL_COMMANDS } from '@/lib/web-install-commands';
 
 const featureCards = [
   {
@@ -32,8 +34,8 @@ const featureCards = [
 const docsCards = [
   {
     href: '/download',
-    label: 'Download',
-    copy: 'Check verified Electron installer availability and the first-launch local source model.',
+    label: 'Install',
+    copy: 'Install the self-hosted web app in one line. Electron installers stay withheld until a checksummed release exists.',
   },
   { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, connect OpenAlgo or verified native brokers, explore Practice mode, and learn the workspace.' },
   { href: '/docs/developer-guide', label: 'Developer Guide', copy: 'Repo map, tests, coding style, widgets, strategies, and PR flow.' },
@@ -58,32 +60,12 @@ const welcomeFeatures = [
   'Strategy lab, SIP tracking, and AI context',
 ] as const;
 
-const desktopInstallOptions = [
-  {
-    platform: 'macOS',
-    artefacts: '.dmg (universal)',
-    instruction:
-      'The install script downloads and verifies the universal DMG, then installs the small Electron shell for Apple Silicon and Intel Macs.',
-  },
-  {
-    platform: 'Windows',
-    artefacts: '.exe (per-user)',
-    instruction:
-      'The install script downloads and verifies the x64 NSIS setup, which installs the Electron shell for the current user.',
-  },
-  {
-    platform: 'Linux',
-    artefacts: '.AppImage',
-    instruction:
-      'The install script selects and verifies the x64 or ARM64 AppImage, then installs the Electron shell without sudo.',
-  },
-] as const;
-
 // Eight debris particles; offsets/delays are nth-child CSS in globals.css.
 const impactDebris = Array.from({ length: 8 }, (_, i) => i);
 
-export default function HomePage() {
+export default async function HomePage() {
   const packages = listPackages().slice(0, 8);
+  const mcpUrl = hostedMcpUrl(await resolveSiteOrigin());
 
   return (
     <main className="site-shell">
@@ -126,45 +108,54 @@ export default function HomePage() {
           </div>
           <p>
             Open-source self-hosted trading software for local research, sample-data
-            testing, manual orders, automation, and AI-assisted workflows. One native
-            app for macOS, Windows, and Linux.
+            testing, manual orders, automation, and AI-assisted workflows. It runs in
+            the browser from your own machine. A desktop shell comes after a checksummed
+            Electron release.
           </p>
           <p className="hero-disclaimer">
             v0.0.1 is not production ready. Use Explore and Practice modes first; Live mode remains your own risk.
           </p>
-          <div className="hero-actions">
-            <Link
-              className="button primary"
-              href="/demo-app/welcome"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Start exploring the FlintTrade marketing demo in a new window"
-            >
-              Start exploring — no install needed <ExternalLink aria-hidden="true" size={17} />
-            </Link>
-            <Link
-              className="button secondary"
-              href="/download"
-              aria-label="Open the FlintTrade download page"
-            >
-              Download desktop app <Download aria-hidden="true" size={17} />
-            </Link>
-            <Link
-              className="button secondary"
-              href="/download"
-              aria-label="Open the one-line install commands for the self-hosted FlintTrade web app"
-            >
-              Run the web app <TerminalSquare aria-hidden="true" size={17} />
-            </Link>
-            <Link className="button secondary" href="/docs">
-              Read the docs <ArrowRight aria-hidden="true" size={17} />
-            </Link>
-          </div>
           <div className="hero-feature-grid">
             {welcomeFeatures.map((item) => (
               <div key={item}>{item}</div>
             ))}
           </div>
+          <div className="hero-install" aria-labelledby="hero-web-install">
+            <p id="hero-web-install">Install the self-hosted web app. Nothing else needs to be installed first.</p>
+            {WEB_INSTALL_COMMANDS.map((entry) => (
+              <div className="code-panel" key={entry.platform}>
+                <header>
+                  <span>{entry.platform}</span>
+                  <span>terminal</span>
+                </header>
+                <pre>
+                  <code>{entry.command}</code>
+                </pre>
+              </div>
+            ))}
+          </div>
+          <div className="hero-actions">
+            <Link
+              className="button primary"
+              href="/download"
+              aria-label="Open the FlintTrade web-app install page"
+            >
+              Install the web app <TerminalSquare aria-hidden="true" size={17} />
+            </Link>
+            <Link
+              className="button secondary"
+              href="/demo-app/welcome"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Start exploring the FlintTrade marketing demo in a new window"
+            >
+              Explore demo <ExternalLink aria-hidden="true" size={17} />
+            </Link>
+          </div>
+          <p className="hero-electron-note">
+            Electron installer pending.{' '}
+            <Link href="/docs/desktop">Desktop guide</Link>
+          </p>
         </div>
 
         <div className="hero-visual" aria-label="FlintTrade terminal screenshots">
@@ -205,12 +196,13 @@ export default function HomePage() {
 
       <section className="section section-enter" data-scroll-chapter="1">
         <div className="section-heading">
-          <h2>Self-hosted trading workspace</h2>
+          <h2>Built for people who read the source.</h2>
           <p>
-            A self-hosted workflow workspace. React, FlexLayout, Python services, Rust tick processing, the OpenAlgo-compatible bridge, and evidence-gated native broker contracts in one inspectable workspace. Safety before automation with Explore, Practice, and Live modes.
+            The public site stays close to the repository. Root docs, package READMEs, screenshots, and
+            contribution commands are generated into the site rather than rewritten in a second place.
           </p>
         </div>
-        <div className="feature-grid" data-scroll-chapter="2">
+        <div className="feature-grid">
           {featureCards.map((card) => {
             const Icon = card.icon;
             return (
@@ -224,78 +216,34 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="section section-enter" data-scroll-chapter="3">
+      <section className="section two-column section-enter" data-scroll-chapter="2">
         <div className="section-heading">
-          <h2>Evaluate and install</h2>
+          <h2>Docs, API, and contribution paths in one flow.</h2>
           <p>
-            Desktop releases use a small Electron shell that verifies pinned tools and builds
-            hash-verified, integrity-locked local source on first launch. The download page exposes
-            install commands only after a complete, checksummed Electron asset set is available.
+            Start with product usage, move into architecture and endpoint contracts, then use the MCP
+            tools to orient local development work.
           </p>
-          <div className="section-actions">
-            <Link className="button secondary" href="/download">
-              Check installer status <ArrowRight aria-hidden="true" size={17} />
-            </Link>
-            <Link className="button secondary" href="/docs/desktop">
-              Desktop guide <ArrowRight aria-hidden="true" size={17} />
-            </Link>
-            <Link
-              className="button secondary"
-              href="https://github.com/navaneeshnagarajan/FlintTrade/releases"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              GitHub releases <ExternalLink aria-hidden="true" size={17} />
-            </Link>
-          </div>
         </div>
-        <div className="install-grid">
-          {desktopInstallOptions.map((option) => (
-            <article className="install-card" key={option.platform}>
-              <strong>{option.platform}</strong>
-              <span>{option.artefacts}</span>
-              <p>{option.instruction}</p>
-            </article>
+        <div className="mcp-steps">
+          {docsCards.map((item) => (
+            <Link className="mcp-step" href={item.href} key={item.href}>
+              <h3>{item.label}</h3>
+              <p>{item.copy}</p>
+            </Link>
           ))}
         </div>
       </section>
 
-      {/* Contributor resources band — demoted with progressive disclosure (Graphite Continuity A1) */}
-      <section className="section section-enter" data-scroll-chapter="4">
-        <div className="section-heading">
-          <h2>Contributor resources</h2>
-          <p>
-            Polished docs, read-only MCP tools, and package maps for contributors. Start with product usage, then explore architecture at your own pace. Broker credentials, account state, funds, order IDs, and order placement stay outside this surface.
-          </p>
-          <div className="section-actions">
-            <Link className="button secondary" href="/docs">
-              Browse docs <ArrowRight aria-hidden="true" size={17} />
-            </Link>
-            <Link className="button secondary" href="/mcp">
-              MCP setup <ArrowRight aria-hidden="true" size={17} />
-            </Link>
-          </div>
-        </div>
-        {/* Progressive disclosure for MCP and package map to keep homepage calm and demoted */}
-        <details className="progressive-disclosure">
-          <summary>MCP tools for contributors (read-only)</summary>
-          <div className="mcp-steps">
-            {docsCards.map((item) => (
-              <Link className="mcp-step" href={item.href} key={item.href}>
-                <h3>{item.label}</h3>
-                <p>{item.copy}</p>
-              </Link>
-            ))}
-          </div>
-          <div className="code-panel">
-            <header>
-              <span>Contributor MCP</span>
-              <span>read-only</span>
-            </header>
-            <pre>{`{
+      <section className="section two-column section-enter" data-scroll-chapter="3">
+        <div className="code-panel">
+          <header>
+            <span>Contributor MCP</span>
+            <span>read-only</span>
+          </header>
+          <pre>{`{
   "mcpServers": {
     "flinttrade-docs": {
-      "url": "https://<your-site>/api/mcp"
+      "url": "${mcpUrl}"
     },
     "flinttrade-local": {
       "command": "npm",
@@ -304,24 +252,36 @@ export default function HomePage() {
     }
   }
 }`}</pre>
-          </div>
-        </details>
+        </div>
+        <div className="section-heading">
+          <h2>MCP for development, not trading.</h2>
+          <p>
+            The site exposes docs search, package maps, path explanations, test recommendations, and
+            contribution prompts. Broker credentials, account state, funds, order IDs, and order placement
+            stay outside this MCP surface.
+          </p>
+          <Link className="button secondary" href="/mcp">
+            MCP setup <ArrowRight aria-hidden="true" size={17} />
+          </Link>
+        </div>
+      </section>
 
-        <details className="progressive-disclosure">
-          <summary>Package map at contributor speed</summary>
+      <section className="section section-enter" data-scroll-chapter="4">
+        <div className="section-heading">
+          <h2>Package map at contributor speed.</h2>
           <p>
             Each package README becomes a docs page and MCP resource, so agent-assisted development starts
             from the same public source a human contributor reads.
           </p>
-          <div className="package-list">
-            {packages.map((pkg) => (
-              <Link className="package-row" href={pkg.url} key={pkg.name}>
-                <strong>{pkg.name}</strong>
-                <span>{pkg.description}</span>
-              </Link>
-            ))}
-          </div>
-        </details>
+        </div>
+        <div className="package-list">
+          {packages.map((pkg) => (
+            <Link className="package-row" href={pkg.url} key={pkg.name}>
+              <strong>{pkg.name}</strong>
+              <span>{pkg.description}</span>
+            </Link>
+          ))}
+        </div>
       </section>
 
       <div data-scroll-chapter="5">

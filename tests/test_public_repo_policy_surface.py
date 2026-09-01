@@ -143,7 +143,8 @@ def test_public_site_labels_demo_as_exploration_not_live() -> None:
     assert live_demo_phrase not in combined
     assert "Sandbox Demo" not in combined
     assert "Explore demo" in combined
-    assert "Start exploring — no install needed" in combined
+    assert "Install the web app" in combined
+    assert "Start exploring — no install needed" not in combined
 
 
 def test_public_descriptions_preserve_trading_software_identity() -> None:
