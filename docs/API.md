@@ -82,7 +82,7 @@ identically to regular orders.
 | `multiquotes` | Quote for a list of symbols in one request. |
 | `depth` | Level-2 market depth from brokers with a wired FlintTrade snapshot read; documented feed-only depth is not exposed here until the adapter bridge is wired. |
 | `history` | Historical OHLCV bars. |
-| `optionchain` | Full option chain. FlintTrade sends `underlying`, `exchange`, and `expiry_date` (OpenAlgo `DDMMMYY`, e.g. `26MAR26`). Missing expiry fails closed before any network request. |
+| `optionchain` | Full option chain. FlintTrade sends `underlying`, `exchange`, and `expiry_date` (OpenAlgo `DDMMMYY`, e.g. `26MAR26`). FlintTrade's Python and terminal helpers refuse a missing expiry before posting; a raw HTTP body without `expiry_date` still reaches OpenAlgo and is rejected there. |
 | `optiongreeks` | Greeks for a specific strike. |
 | `multioptiongreeks` | Greeks for a list of strikes in one request. |
 | `optionsymbol` | Resolve expiry / type / offset to a tradeable symbol. Remote calls use official offsets `ATM` / `ITM1`–`ITM50` / `OTM1`–`OTM50`. Explicit numeric strikes are built locally as compact symbols and are not posted. |
@@ -90,7 +90,7 @@ identically to regular orders.
 | `search` | Symbol search by name / partial match. |
 | `expiry` | List of available expiries for a symbol. |
 | `intervals` | Supported chart intervals. **POST** with `apikey` in the JSON body (not GET). The OpenAlgo response may be bucketed (`seconds` / `minutes` / `hours` / `days` / `weeks` / `months`); the terminal flattens those buckets to a string list. The Python client returns the bucketed object. |
-| `syntheticfuture` | Synthetic future from CE - PE + strike. Same required fields as `optionchain`: `underlying`, `exchange`, and `expiry_date` (`DDMMMYY`). Missing expiry fails closed before any network request. |
+| `syntheticfuture` | Synthetic future from CE - PE + strike. Same required fields as `optionchain`: `underlying`, `exchange`, and `expiry_date` (`DDMMMYY`). FlintTrade helpers refuse a missing expiry before posting; raw HTTP still reaches OpenAlgo. |
 | `ticker/{exchange}:{symbol}` (**GET**) | Dated historical helper on the Python client only (`apikey`, `interval`, `from`, `to` query params). Not the live polling path — polling uses POST `quotes`. Missing `from`/`to` fails closed. |
 | `instruments` (**GET**) | Instrument master for an exchange. Requires `apikey` and `exchange` query params. When no exchange is given, FlintTrade queries `NFO` / `BFO` / `MCX` / `CDS`. |
 | `gex` | Gamma Exposure curve. |
@@ -638,8 +638,9 @@ quantity, average price, last price, P&L.
 ### 7.4 Pull an option chain
 
 OpenAlgo v2.0.2.2 requires `underlying`, `exchange`, and `expiry_date`
-(`DDMMMYY`). A body without `expiry_date` fails closed before the request
-is sent.
+(`DDMMMYY`). FlintTrade's Python client and terminal helpers refuse a
+missing `expiry_date` before posting. The raw HTTP examples below still
+cross the network; OpenAlgo then rejects a body that omits `expiry_date`.
 
 ```bash
 curl -X POST http://127.0.0.1:5000/api/v1/optionchain \

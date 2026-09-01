@@ -47,3 +47,6 @@ def test_openalgo_option_chain_examples_put_apikey_in_json_body() -> None:
     assert 'X-API-KEY' not in section
     assert '\\"apikey\\": \\"$OPENALGO_API_KEY\\"' in section
     assert "apikey = $env:OPENALGO_API_KEY" in section
+    assert "fails closed before the request" not in section
+    assert "FlintTrade's Python client and terminal helpers" in section
+    assert "cross the network" in section
