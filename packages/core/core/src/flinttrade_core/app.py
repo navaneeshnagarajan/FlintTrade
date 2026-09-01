@@ -6111,6 +6111,25 @@ class FlintTradeApp:
         ):
             return False
 
+        # Construction may have started the optional RAG indexer before
+        # ``_start_owned`` claimed any ledger owner. Failed start must still
+        # join that daemon and close the store, matching normal shutdown.
+        rag = getattr(self, "rag", None)
+        if rag is not None:
+            if not await stop_sync(
+                "startup-rag-indexer",
+                "RAG indexer",
+                lambda: _join_rag_indexer(rag),
+            ):
+                return False
+            close_rag = getattr(rag, "close", None)
+            if callable(close_rag) and not await stop_sync(
+                "startup-rag-vector-store",
+                "RAG vector store",
+                close_rag,
+            ):
+                return False
+
         async def close_openalgo_client() -> None:
             if isinstance(self.client, OpenAlgoClient):
                 await self.client.shutdown()
