@@ -2265,6 +2265,59 @@ describe("OpenAlgo API client (api.ts)", () => {
     await expect(getHolidays(2026)).rejects.toThrow("OpenAlgo market calendar is not authoritative");
   });
 
+  it("accepts OpenAlgo clock-time special sessions and binds them to the holiday date", async () => {
+    mockConnectionState.apiKey = "test-key-123";
+    fetchSpy.mockResolvedValueOnce(jsonResponse({
+      status: "success",
+      year: 2026,
+      data: [{
+        date: "2026-11-08",
+        description: "Muhurat Trading",
+        holiday_type: "SPECIAL_SESSION",
+        closed_exchanges: ["NSE"],
+        open_exchanges: [{ exchange: "NSE", start_time: "18:00", end_time: "19:00" }],
+      }],
+    }));
+
+    await expect(getHolidays(2026)).resolves.toEqual([
+      expect.objectContaining({
+        date: "2026-11-08",
+        holiday_type: "SPECIAL_SESSION",
+        open_exchanges: [{
+          exchange: "NSE",
+          start_time: Date.UTC(2026, 10, 8, 12, 30, 0),
+          end_time: Date.UTC(2026, 10, 8, 13, 30, 0),
+        }],
+      }),
+    ]);
+  });
+
+  it("accepts an overnight OpenAlgo clock-time special session on the next IST morning", async () => {
+    mockConnectionState.apiKey = "test-key-123";
+    fetchSpy.mockResolvedValueOnce(jsonResponse({
+      status: "success",
+      year: 2026,
+      data: [{
+        date: "2026-04-17",
+        description: "MCX special session",
+        holiday_type: "SPECIAL_SESSION",
+        closed_exchanges: ["MCX"],
+        open_exchanges: [{ exchange: "MCX", start_time: "18:00", end_time: "00:15" }],
+      }],
+    }));
+
+    await expect(getHolidays(2026)).resolves.toEqual([
+      expect.objectContaining({
+        date: "2026-04-17",
+        open_exchanges: [{
+          exchange: "MCX",
+          start_time: Date.UTC(2026, 3, 17, 12, 30, 0),
+          end_time: Date.UTC(2026, 3, 17, 18, 45, 0),
+        }],
+      }),
+    ]);
+  });
+
   it("fetches the next holiday year when the IST lookahead crosses 1 January", async () => {
     vi.useFakeTimers();
     try {

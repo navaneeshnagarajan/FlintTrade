@@ -766,14 +766,84 @@ function normaliseCalendarDate(value: unknown): string | undefined {
   return isoCalendarDateSchema.safeParse(text).success ? text : undefined;
 }
 
-function normaliseOpenAlgoOpenExchange(value: unknown): Holiday["open_exchanges"][number] | undefined {
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+const CLOCK_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?$/;
+
+interface ClockBound {
+  hours: number;
+  minutes: number;
+  seconds: number;
+}
+
+type SessionBound =
+  | { kind: "numeric"; value: number }
+  | { kind: "clock"; seconds: number; clock: ClockBound };
+
+function parseClockBound(value: unknown): ClockBound | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!CLOCK_TIME_RE.test(text)) return null;
+  const [hoursText, minutesText, secondsText = "0"] = text.split(":");
+  const hours = Number(hoursText);
+  const minutes = Number(minutesText);
+  const seconds = Number(secondsText);
+  if (![hours, minutes, seconds].every(Number.isFinite)) return null;
+  return { hours, minutes, seconds };
+}
+
+function clockBoundSeconds(clock: ClockBound): number {
+  return clock.hours * 3600 + clock.minutes * 60 + clock.seconds;
+}
+
+function parseSessionBound(value: unknown): SessionBound | null {
+  const numeric = toStrictNumber(value);
+  if (numeric !== null) return { kind: "numeric", value: numeric };
+  const clock = parseClockBound(value);
+  if (clock === null) return null;
+  return { kind: "clock", seconds: clockBoundSeconds(clock), clock };
+}
+
+function istClockToEpochMs(isoDate: string, clock: ClockBound): number | null {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  if (![year, month, day].every(Number.isInteger)) return null;
+  return Date.UTC(
+    year,
+    month - 1,
+    day,
+    clock.hours,
+    clock.minutes,
+    Math.floor(clock.seconds),
+    Math.round((clock.seconds % 1) * 1000),
+  ) - IST_OFFSET_MS;
+}
+
+function usableSessionWindow(start: SessionBound, end: SessionBound): boolean {
+  if (start.kind !== end.kind) return false;
+  if (start.kind === "numeric" && end.kind === "numeric") return end.value > start.value;
+  return start.kind === "clock" && end.kind === "clock" && start.seconds !== end.seconds;
+}
+
+function normaliseOpenAlgoOpenExchange(
+  value: unknown,
+  holidayDate?: string,
+): Holiday["open_exchanges"][number] | undefined {
   if (!isRecord(value)) return undefined;
   const exchange = stringParam(value.exchange).trim().toUpperCase();
   if (!exchange) return undefined;
-  const startTime = toStrictNumber(value.start_time);
-  const endTime = toStrictNumber(value.end_time);
-  if (startTime === null || endTime === null) return undefined;
-  return { exchange, start_time: startTime, end_time: endTime };
+  const start = parseSessionBound(value.start_time);
+  const end = parseSessionBound(value.end_time);
+  if (start === null || end === null || !usableSessionWindow(start, end)) return undefined;
+  if (start.kind === "numeric" && end.kind === "numeric") {
+    return { exchange, start_time: start.value, end_time: end.value };
+  }
+  if (start.kind !== "clock" || end.kind !== "clock" || !holidayDate) return undefined;
+  const startMs = istClockToEpochMs(holidayDate, start.clock);
+  const endDate = start.seconds < end.seconds
+    ? holidayDate
+    : istCalendarDatePlusDays(holidayDate, 1);
+  const endMs = istClockToEpochMs(endDate, end.clock);
+  if (startMs === null || endMs === null || endMs <= startMs) return undefined;
+  return { exchange, start_time: startMs, end_time: endMs };
 }
 
 const AUTHORITATIVE_HOLIDAY_TYPES = new Set([
@@ -784,9 +854,9 @@ const AUTHORITATIVE_HOLIDAY_TYPES = new Set([
 
 function isAuthoritativeOpenExchange(value: unknown): boolean {
   if (!isRecord(value) || !stringParam(value.exchange).trim()) return false;
-  const startTime = toStrictNumber(value.start_time);
-  const endTime = toStrictNumber(value.end_time);
-  return startTime !== null && endTime !== null && endTime > startTime;
+  const start = parseSessionBound(value.start_time);
+  const end = parseSessionBound(value.end_time);
+  return start !== null && end !== null && usableSessionWindow(start, end);
 }
 
 /** Port of Python `is_authoritative_market_calendar`. Empty success is a placeholder. */
@@ -905,7 +975,7 @@ function normaliseMarketCalendar(payload: unknown): Holiday[] {
         : new Set();
       if (Array.isArray(entry.open_exchanges)) {
         for (const candidate of entry.open_exchanges) {
-          const session = normaliseOpenAlgoOpenExchange(candidate);
+          const session = normaliseOpenAlgoOpenExchange(candidate, holidayDate);
           if (
             session
             && !openExchanges.some((existing) => (
