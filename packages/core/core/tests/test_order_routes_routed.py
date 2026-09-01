@@ -348,6 +348,7 @@ def _app_with_native_state(
                 "price": "100",
                 "pricetype": "LIMIT",
                 "product": "MIS",
+                "disclosed_quantity": "0",
             }
         ]
     )
@@ -427,6 +428,7 @@ def _fake_client(
                 "price": "100",
                 "pricetype": "LIMIT",
                 "product": "MIS",
+                "disclosed_quantity": "0",
             }
         ]
     )
@@ -959,6 +961,7 @@ def test_modify_quantity_increase_runs_full_safety_before_router() -> None:
                 "price": "100",
                 "pricetype": "LIMIT",
                 "product": "MIS",
+                "disclosed_quantity": "0",
             }
         ]
     )
@@ -1006,6 +1009,7 @@ def test_modify_quantity_reduction_proves_no_increase_before_dispatch() -> None:
                 "price": "100",
                 "pricetype": "LIMIT",
                 "product": "MIS",
+                "disclosed_quantity": "0",
             }
         ]
     )
@@ -1066,6 +1070,42 @@ def test_modify_recovers_omitted_trigger_and_disclosed_from_orderbook() -> None:
     assert "disclosed_quantity" not in kw["order"]["_requested_change_fields"]
 
 
+def test_modify_without_recoverable_disclosed_quantity_fails_closed() -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    safety = _passing_safety()
+    safety.l5_kill.validate.return_value = MagicMock(passed=True)
+    openalgo = _fake_client([])
+    openalgo.orderbook = AsyncMock(
+        return_value=[
+            {
+                "orderid": "OA-1",
+                "status": "OPEN",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "action": "BUY",
+                "quantity": "1",
+                "filled_quantity": "0",
+                "price": "100",
+                "pricetype": "LIMIT",
+                "product": "MIS",
+            }
+        ]
+    )
+    openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
+    app = _app_with_client(router, safety, openalgo)
+
+    response = app.test_client().post(
+        "/api/v1/orders/modify",
+        json=_MODIFY_BODY,
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 409
+    assert "disclosed" in response.get_json()["message"].lower()
+    router.modify_order.assert_not_called()
+
+
 def test_modify_stop_loss_without_recoverable_trigger_fails_closed() -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
@@ -1085,6 +1125,7 @@ def test_modify_stop_loss_without_recoverable_trigger_fails_closed() -> None:
                 "price": "100",
                 "pricetype": "SL",
                 "product": "MIS",
+                "disclosed_quantity": "0",
             }
         ]
     )

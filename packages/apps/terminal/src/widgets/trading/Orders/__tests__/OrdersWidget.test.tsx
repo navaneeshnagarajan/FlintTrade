@@ -114,6 +114,7 @@ const OPEN_ORDER = {
   pricetype: "LIMIT",
   product: "MIS",
   order_status: "open",
+  disclosedQuantity: "0",
 };
 
 const COMPLETE_ORDER = {
@@ -317,6 +318,7 @@ describe("OrdersWidget", () => {
           orderType: "LIMIT",
           product: "MIS",
           price: 155.5,
+          disclosedQuantity: 0,
         }),
         {
           mode: "live",
@@ -326,7 +328,6 @@ describe("OrdersWidget", () => {
         },
       );
     });
-    expect(mockModifyOrder.mock.calls[0][0]).not.toHaveProperty("disclosedQuantity");
   });
 
   it("sends recovered trigger and disclosed quantity when modifying a stop-loss order", async () => {
@@ -359,19 +360,12 @@ describe("OrdersWidget", () => {
     });
   });
 
-  it("omits disclosed quantity when the orderbook never returned one and the field stays blank", async () => {
-    mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER] }));
+  it("disables modify when disclosed quantity is broker-unknown", () => {
+    const { disclosedQuantity: _omitted, ...unknownDisclosure } = OPEN_ORDER;
+    mockUseOrders.mockReturnValue(queryResult({ data: [unknownDisclosure] }));
     renderWidget();
 
-    fireEvent.click(screen.getByLabelText("Modify order ORD123"));
-    const dialog = screen.getByRole("dialog", { name: /modify order/i });
-    expect(within(dialog).getByLabelText("Disclosed Quantity")).toHaveValue(null);
-    fireEvent.click(within(dialog).getByText("Modify Order"));
-
-    await waitFor(() => {
-      expect(mockModifyOrder).toHaveBeenCalledTimes(1);
-    });
-    expect(mockModifyOrder.mock.calls[0][0]).not.toHaveProperty("disclosedQuantity");
+    expect(screen.getByLabelText("Modify order ORD123")).toBeDisabled();
   });
 
   it("forwards an explicit zero disclosed quantity instead of keeping the recovered value", async () => {
@@ -469,7 +463,8 @@ describe("toOrderRow", () => {
   });
 
   it("marks omitted disclosure as unknown instead of a synthesised zero", () => {
-    const row = toOrderRow({ ...OPEN_ORDER, pricetype: "LIMIT" });
+    const { disclosedQuantity: _omitted, ...unknownDisclosure } = OPEN_ORDER;
+    const row = toOrderRow({ ...unknownDisclosure, pricetype: "LIMIT" });
     expect(row.hasDisclosedQuantity).toBe(false);
   });
 });

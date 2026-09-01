@@ -771,7 +771,10 @@ const AUTHORITATIVE_HOLIDAY_TYPES = new Set([
 ]);
 
 function isAuthoritativeOpenExchange(value: unknown): boolean {
-  return isRecord(value) && Boolean(stringParam(value.exchange).trim());
+  if (!isRecord(value) || !stringParam(value.exchange).trim()) return false;
+  const startTime = toStrictNumber(value.start_time);
+  const endTime = toStrictNumber(value.end_time);
+  return startTime !== null && endTime !== null && endTime > startTime;
 }
 
 /** Port of Python `is_authoritative_market_calendar`. Empty success is a placeholder. */

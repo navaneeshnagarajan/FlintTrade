@@ -1190,8 +1190,7 @@ def _normalise_authoritative_order(row: Any, fallback: Any = None) -> dict[str, 
             "disclosedQuantity",
             "disclosedqty",
             "disclosed_qty",
-        )
-        or 0,
+        ),
     }
 
 
@@ -1443,9 +1442,11 @@ def _recover_omitted_modify_fields(
         if recovered and recovered != "0":
             changes["trigger_price"] = recovered
     if "disclosed_quantity" not in requested_fields:
-        recovered = _text(current.get("disclosed_quantity"))
-        if recovered and recovered != "0":
-            changes["disclosed_quantity"] = recovered
+        raw_disclosed = current.get("disclosed_quantity")
+        if raw_disclosed is None or str(getattr(raw_disclosed, "value", raw_disclosed)).strip() == "":
+            raise PortfolioSafetyStateError("Authoritative disclosed quantity is unavailable")
+        recovered = str(getattr(raw_disclosed, "value", raw_disclosed)).strip()
+        changes["disclosed_quantity"] = recovered
 
 
 async def classify_modify_intent(

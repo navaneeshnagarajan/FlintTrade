@@ -2169,6 +2169,36 @@ describe("OpenAlgo API client (api.ts)", () => {
       { status: "success", year: 2026, data: [{ date: "2025-01-26", holiday_type: "TRADING_HOLIDAY" }] },
     ],
     ["yearless envelope of another year", { status: "success", data: ["2025-01-26"] }],
+    [
+      "malformed special-session timestamps",
+      {
+        status: "success",
+        year: 2026,
+        data: [{
+          date: "2026-01-26",
+          holiday_type: "SPECIAL_SESSION",
+          closed_exchanges: [],
+          open_exchanges: [{ exchange: "NSE", start_time: "bad", end_time: 1772562300000 }],
+        }],
+      },
+    ],
+    [
+      "special-session end before start",
+      {
+        status: "success",
+        year: 2026,
+        data: [{
+          date: "2026-01-26",
+          holiday_type: "SPECIAL_SESSION",
+          closed_exchanges: [],
+          open_exchanges: [{
+            exchange: "NSE",
+            start_time: 1772562300000,
+            end_time: 1772537400000,
+          }],
+        }],
+      },
+    ],
   ])("rejects an unusable OpenAlgo holiday %s instead of caching an all-open year", async (_name, payload) => {
     mockConnectionState.apiKey = "test-key-123";
     fetchSpy.mockResolvedValueOnce(jsonResponse(payload));

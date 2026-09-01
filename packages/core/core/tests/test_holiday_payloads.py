@@ -81,6 +81,38 @@ def test_rejects_invalid_dates_and_unrelated_envelope_metadata() -> None:
             "data": [{"date": "2025-01-26", "holiday_type": "TRADING_HOLIDAY"}],
         },
         ["2025-01-26"],
+        {
+            "status": "success",
+            "year": 2026,
+            "data": [
+                {
+                    "date": "2026-01-26",
+                    "holiday_type": "SPECIAL_SESSION",
+                    "closed_exchanges": [],
+                    "open_exchanges": [
+                        {"exchange": "NSE", "start_time": "bad", "end_time": 1_772_562_300_000},
+                    ],
+                }
+            ],
+        },
+        {
+            "status": "success",
+            "year": 2026,
+            "data": [
+                {
+                    "date": "2026-01-26",
+                    "holiday_type": "SPECIAL_SESSION",
+                    "closed_exchanges": [],
+                    "open_exchanges": [
+                        {
+                            "exchange": "NSE",
+                            "start_time": 1_772_562_300_000,
+                            "end_time": 1_772_537_400_000,
+                        },
+                    ],
+                }
+            ],
+        },
     ],
 )
 def test_rejects_non_authoritative_market_calendar_envelopes(payload: Any) -> None:

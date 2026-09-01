@@ -168,6 +168,7 @@ function canModify(row: OrderRow): boolean {
     VALID_ACTIONS.has(row.action) &&
     VALID_ORDER_TYPES.has(row.orderType) &&
     VALID_PRODUCTS.has(row.product) &&
+    row.hasDisclosedQuantity &&
     (!(row.orderType === "SL" || row.orderType === "SL-M") || row.triggerPriceNum > 0)
   );
 }

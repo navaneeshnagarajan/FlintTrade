@@ -240,16 +240,33 @@ def _normalise_calendar_date(value: Any) -> str | None:
         return None
 
 
+def _finite_session_timestamp(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
 def _normalise_open_exchange(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     exchange = str(value.get("exchange") or "").strip().upper()
     if not exchange:
         return None
-    session: dict[str, Any] = {"exchange": exchange}
-    for field_name in ("start_time", "end_time"):
-        if field_name in value:
-            session[field_name] = value[field_name]
+    start_time = _finite_session_timestamp(value.get("start_time"))
+    end_time = _finite_session_timestamp(value.get("end_time"))
+    if start_time is None or end_time is None or end_time <= start_time:
+        return None
+    session: dict[str, Any] = {
+        "exchange": exchange,
+        "start_time": value["start_time"],
+        "end_time": value["end_time"],
+    }
     symbol = str(value.get("symbol") or "").strip().upper()
     if symbol:
         session["symbol"] = symbol
