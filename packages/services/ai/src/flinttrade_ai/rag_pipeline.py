@@ -1082,7 +1082,7 @@ class RAGPipeline:
             embedding_provider=_embedding,
         )
         self._closed = False
-        self._background_indexer: threading.Thread | None = None
+        self._indexer_thread: threading.Thread | None = None
         # Domain filter — guards query() against off-topic questions.
         # Receives the same embedding provider for optional semantic check.
         self._domain_filter_enabled = enable_domain_filter
@@ -1092,13 +1092,25 @@ class RAGPipeline:
                 embedding_provider=_embedding,
             )
 
+    def attach_indexer_thread(self, thread: threading.Thread) -> None:
+        """Register the background indexer so shutdown can quiesce it first."""
+        if self._closed:
+            raise RuntimeError("Cannot attach a RAG indexer after the pipeline is closed")
+        current = self._indexer_thread
+        if current is not None and current is not thread and current.is_alive():
+            raise RuntimeError("A RAG indexer is already running")
+        self._indexer_thread = thread
+
     def close(self) -> None:
-        """Close persistent vector resources once; a failed close remains retryable."""
+        """Quiesce indexing, then close persistent resources once."""
         if self._closed:
             return
-        indexer = self._background_indexer
-        if isinstance(indexer, threading.Thread):
+        indexer = self._indexer_thread
+        if indexer is threading.current_thread():
+            raise RuntimeError("RAG indexer cannot close its own pipeline")
+        if indexer is not None and indexer.is_alive():
             indexer.join()
+        self._indexer_thread = None
         close_store = getattr(self._store, "close", None)
         if callable(close_store):
             close_store()

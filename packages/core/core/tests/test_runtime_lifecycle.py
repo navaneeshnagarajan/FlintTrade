@@ -280,7 +280,7 @@ async def test_shutdown_joins_rag_indexer_before_closing_store() -> None:
 
     indexer = threading.Thread(target=indexer_body, name="rag-indexer", daemon=True)
     rag = MagicMock()
-    rag._background_indexer = indexer
+    rag._indexer_thread = indexer
 
     def close_store() -> None:
         close_while_alive.append(indexer.is_alive())

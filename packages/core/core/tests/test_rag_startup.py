@@ -82,6 +82,36 @@ def test_runtime_constructs_when_chromadb_is_missing(monkeypatch, tmp_path) -> N
     assert rag.config.persist_directory == str(tmp_path / "rag")
 
 
+def test_runtime_attaches_background_indexer_before_start(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("FLINTTRADE_RAG_ENABLED", "true")
+    monkeypatch.setenv("FLINTTRADE_RAG_AUTO_INDEX", "true")
+    monkeypatch.setattr(LLMConfig, "from_env", classmethod(lambda cls: SimpleNamespace(provider="")))
+    monkeypatch.setattr(RAGPipeline, "document_count", lambda self: 0)
+    attached: list[tuple[RAGPipeline, object]] = []
+    started: list[object] = []
+
+    class FakeThread:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def start(self) -> None:
+            started.append(self)
+
+    monkeypatch.setattr(app_module.threading, "Thread", FakeThread)
+    monkeypatch.setattr(
+        RAGPipeline,
+        "attach_indexer_thread",
+        lambda self, thread: attached.append((self, thread)),
+    )
+
+    rag = app_module._initialise_rag_runtime(tmp_path)
+
+    assert type(rag) is RAGPipeline
+    assert len(attached) == 1
+    assert attached[0][0] is rag
+    assert started == [attached[0][1]]
+
+
 def test_runtime_refuses_to_shadow_legacy_chroma_vectors(monkeypatch, tmp_path, caplog) -> None:
     """Startup must surface preserved legacy vectors instead of treating RAG as empty."""
     monkeypatch.setenv("FLINTTRADE_RAG_ENABLED", "true")
@@ -118,7 +148,7 @@ def test_runtime_retains_background_indexer_until_joined(monkeypatch, tmp_path) 
     monkeypatch.setattr(RAGPipeline, "index_directory", blocking_index)
 
     rag = app_module._initialise_rag_runtime(tmp_path)
-    indexer = getattr(rag, "_background_indexer", None)
+    indexer = getattr(rag, "_indexer_thread", None)
 
     try:
         assert type(rag) is RAGPipeline
@@ -145,7 +175,7 @@ def test_join_rag_indexer_waits_for_the_retained_worker() -> None:
         release.wait(timeout=2.0)
 
     indexer = threading.Thread(target=hold, name="rag-indexer", daemon=True)
-    rag = SimpleNamespace(_background_indexer=indexer)
+    rag = SimpleNamespace(_indexer_thread=indexer)
     indexer.start()
     assert started.wait(timeout=1.0)
 

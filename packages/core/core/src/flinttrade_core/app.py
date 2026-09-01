@@ -1387,7 +1387,7 @@ def _index_rag_docs_safely(rag: Any) -> None:
 
 def _join_rag_indexer(rag: Any) -> None:
     """Wait for the optional background RAG indexer before closing the store."""
-    indexer = getattr(rag, "_background_indexer", None)
+    indexer = getattr(rag, "_indexer_thread", None)
     if not isinstance(indexer, threading.Thread):
         return
     indexer.join()
@@ -1417,7 +1417,6 @@ def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:
             config=PipelineConfig(persist_directory=str(rag_dir)),
             llm_client=llm_client,
         )
-        rag._background_indexer = None
         if rag.document_count() == 0:
             if _rag_auto_index_enabled():
                 logger.info("RAG database empty — indexing docs/ directory in background...")
@@ -1427,7 +1426,7 @@ def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:
                     daemon=True,
                     name="rag-indexer",
                 )
-                rag._background_indexer = indexer
+                rag.attach_indexer_thread(indexer)
                 indexer.start()
             else:
                 logger.info(

@@ -622,37 +622,6 @@ class TestRAGPipeline:
 
         store.close.assert_called_once_with()
 
-    def test_close_joins_background_indexer_before_store(self) -> None:
-        started = threading.Event()
-        release = threading.Event()
-        closed_while_alive: list[bool] = []
-
-        def hold() -> None:
-            started.set()
-            release.wait(timeout=2.0)
-
-        store = MagicMock()
-        indexer = threading.Thread(target=hold, name="rag-indexer", daemon=True)
-
-        def close_store() -> None:
-            closed_while_alive.append(indexer.is_alive())
-
-        store.close.side_effect = close_store
-        pipeline = RAGPipeline(vector_store=store)
-        pipeline._background_indexer = indexer
-        indexer.start()
-        assert started.wait(timeout=1.0)
-
-        closer = threading.Thread(target=pipeline.close, name="rag-close", daemon=True)
-        closer.start()
-        closer.join(timeout=0.05)
-        assert store.close.call_count == 0
-        release.set()
-        closer.join(timeout=2.0)
-
-        assert closed_while_alive == [False]
-        store.close.assert_called_once_with()
-
     def test_close_releases_llm_client_once(self) -> None:
         llm = MagicMock()
         pipeline = RAGPipeline(llm_client=llm, vector_store=MagicMock())
@@ -661,6 +630,42 @@ class TestRAGPipeline:
         pipeline.close()
 
         llm.close.assert_called_once_with()
+
+    def test_close_waits_for_attached_indexer_before_releasing_resources(self) -> None:
+        release_indexer = threading.Event()
+        indexer_started = threading.Event()
+        join_called = threading.Event()
+        store_closed = threading.Event()
+        store = MagicMock()
+        store.close.side_effect = store_closed.set
+        pipeline = RAGPipeline(vector_store=store)
+
+        def index_docs() -> None:
+            indexer_started.set()
+            assert release_indexer.wait(timeout=2.0)
+
+        indexer = threading.Thread(target=index_docs, name="test-rag-indexer")
+        original_join = indexer.join
+
+        def tracked_join(timeout: float | None = None) -> None:
+            join_called.set()
+            original_join(timeout)
+
+        indexer.join = tracked_join  # type: ignore[method-assign]
+        pipeline.attach_indexer_thread(indexer)
+        indexer.start()
+        assert indexer_started.wait(timeout=1.0)
+
+        closer = threading.Thread(target=pipeline.close, name="test-rag-closer")
+        closer.start()
+        assert join_called.wait(timeout=1.0)
+        assert not store_closed.is_set()
+
+        release_indexer.set()
+        closer.join(timeout=2.0)
+        assert not closer.is_alive()
+        assert not indexer.is_alive()
+        store.close.assert_called_once_with()
 
     def test_index_document_returns_chunk_count(self) -> None:
         pipeline = self._make_pipeline()

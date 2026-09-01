@@ -160,6 +160,49 @@ def test_mixed_dimension_batch_is_rejected_as_one_transaction() -> None:
 
     assert collection.count() == 0
     assert client._known_embedding_dim("batch-dim") is None
+    collection.add(
+        ids=["valid"],
+        documents=["valid three-dimensional vector"],
+        embeddings=[[1.0, 0.0, 0.0]],
+    )
+    assert collection.count() == 1
+    assert client._known_embedding_dim("batch-dim") == 3
+    client.close()
+
+
+def test_persistent_client_migrates_pre_dimension_collection_schema(tmp_path) -> None:
+    """Existing local-store files gain the dimension column without losing collections."""
+    from flinttrade_ai.local_vector_store import PersistentClient
+
+    db_path = tmp_path / "flinttrade_vectors.sqlite"
+    connection = sqlite3.connect(db_path)
+    connection.execute(
+        """
+        CREATE TABLE collections (
+            name TEXT PRIMARY KEY,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            space TEXT NOT NULL DEFAULT 'l2'
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO collections(name, metadata_json, space) VALUES (?, ?, ?)",
+        ("existing", "{}", "l2"),
+    )
+    connection.commit()
+    connection.close()
+
+    client = PersistentClient(path=str(tmp_path))
+    try:
+        collection = client.get_or_create_collection(name="existing")
+        collection.add(
+            ids=["kept"],
+            documents=["kept after schema migration"],
+            embeddings=[[1.0, 0.0]],
+        )
+        assert collection.count() == 1
+    finally:
+        client.close()
 
 
 def test_legacy_schema_infers_and_persists_collection_dimension(tmp_path) -> None:
@@ -205,6 +248,25 @@ def test_legacy_schema_infers_and_persists_collection_dimension(tmp_path) -> Non
         assert client._known_embedding_dim("legacy") == 2
     finally:
         client.close()
+
+
+def test_empty_embedding_is_rejected_without_pinning_collection() -> None:
+    """Zero-dimensional vectors cannot establish a collection's schema."""
+    from flinttrade_ai.local_vector_store import EphemeralClient
+
+    client = EphemeralClient()
+    collection = client.get_or_create_collection(name="empty")
+
+    with pytest.raises(ValueError, match="must not be empty"):
+        collection.add(
+            ids=["empty"],
+            documents=["invalid"],
+            embeddings=[[]],
+        )
+
+    assert collection.count() == 0
+    assert client._known_embedding_dim("empty") is None
+    client.close()
 
 
 def test_inner_product_distance_does_not_normalise_operands() -> None:
