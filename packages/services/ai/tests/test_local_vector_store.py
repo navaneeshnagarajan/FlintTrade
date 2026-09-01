@@ -4,7 +4,71 @@ from __future__ import annotations
 
 import sqlite3
 
+import numpy as np
 import pytest
+
+
+def test_legacy_collection_with_mixed_embedding_widths_fails_closed(tmp_path) -> None:
+    """Legacy dimension inference must not pin one width and hide incompatible rows."""
+    from flinttrade_ai.local_vector_store import PersistentClient
+
+    client = PersistentClient(path=tmp_path)
+    collection = client.get_or_create_collection(name="mixed")
+    collection.add(ids=["two"], documents=["two"], embeddings=[[1.0, 0.0]])
+    with client._lock:  # noqa: SLF001 - construct a pre-dimension-schema fixture
+        client._conn.execute(  # noqa: SLF001
+            "UPDATE collections SET embedding_dim = NULL WHERE name = ?",
+            ("mixed",),
+        )
+        client._conn.execute(  # noqa: SLF001
+            """
+            INSERT INTO items (collection, id, document, metadata_json, embedding)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "mixed",
+                "four",
+                "four",
+                "{}",
+                np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float32).tobytes(),
+            ),
+        )
+    client.close()
+
+    reopened = PersistentClient(path=tmp_path)
+    with pytest.raises(ValueError, match="mixed embedding dimensions"):
+        reopened.get_or_create_collection(name="mixed")
+    reopened.close()
+
+
+def test_multi_item_delete_rolls_back_when_one_row_fails(tmp_path) -> None:
+    """Delete filters must be all-or-nothing like multi-item add and update."""
+    from flinttrade_ai.local_vector_store import PersistentClient
+
+    client = PersistentClient(path=tmp_path)
+    collection = client.get_or_create_collection(name="delete-atomic")
+    collection.add(
+        ids=["a", "b"],
+        documents=["a", "b"],
+        embeddings=[[1.0, 0.0], [0.0, 1.0]],
+    )
+    with client._lock:  # noqa: SLF001 - deterministic SQLite failure injection
+        client._conn.execute(  # noqa: SLF001
+            """
+            CREATE TRIGGER fail_second_delete
+            BEFORE DELETE ON items
+            WHEN OLD.collection = 'delete-atomic' AND OLD.id = 'b'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected delete failure');
+            END
+            """
+        )
+
+    with pytest.raises(sqlite3.IntegrityError, match="injected delete failure"):
+        collection.delete(ids=["a", "b"])
+
+    assert collection.get()["ids"] == ["a", "b"]
+    client.close()
 
 
 def test_hashing_embedder_does_not_emit_zero_vectors_on_sign_cancellation() -> None:

@@ -773,6 +773,26 @@ class TestVectorIndexWedgeFallback:
         # Assert — degrades to empty only when even metadata is unreadable
         assert result.items == []
 
+    def test_embedding_dimension_mismatch_fails_closed_instead_of_metadata_fallback(
+        self,
+        memory: TradedMemory,
+    ) -> None:
+        """A model-width configuration error must stay visible to the caller."""
+        memory.add_memory("NIFTY", "dimension-pinned memory", MemoryLayer.LONG)
+        real = memory._get_collection(MemoryLayer.LONG)
+
+        class _WrongQueryDimension(_WedgedCollection):
+            def query(self, **_kwargs):
+                raise ValueError(
+                    "collection 'trading_long' stores 64-dimensional embeddings; "
+                    "refusing a 384-dimensional query"
+                )
+
+        memory._collections[MemoryLayer.LONG] = _WrongQueryDimension(real)
+
+        with pytest.raises(ValueError, match="refusing a 384-dimensional query"):
+            memory.get_memories("NIFTY", "dimension mismatch", MemoryLayer.LONG, n=3)
+
 
 class TestUpdateOnOutcome:
     """Tests for TradedMemory.update_on_outcome."""

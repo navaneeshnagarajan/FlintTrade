@@ -1388,11 +1388,9 @@ def _index_rag_docs_safely(rag: Any) -> None:
 def _join_rag_indexer(rag: Any) -> None:
     """Wait for the optional background RAG indexer before closing the store."""
     indexer = getattr(rag, "_indexer_thread", None)
-    if not isinstance(indexer, threading.Thread):
+    if not isinstance(indexer, threading.Thread) or indexer.ident is None:
         return
     indexer.join()
-    if indexer.is_alive():
-        raise TimeoutError("RAG indexer did not finish before shutdown")
 
 
 def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:

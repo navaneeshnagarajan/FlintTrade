@@ -302,6 +302,16 @@ async def test_shutdown_joins_rag_indexer_before_closing_store() -> None:
     runtime.client.close.assert_awaited_once_with()
 
 
+def test_join_rag_indexer_ignores_unstarted_optional_thread() -> None:
+    """Startup rollback may see an attached indexer that never reached start()."""
+    import flinttrade_core.app as app_module
+
+    rag = MagicMock()
+    rag._indexer_thread = threading.Thread(target=lambda: None, name="rag-indexer")
+
+    app_module._join_rag_indexer(rag)
+
+
 @pytest.mark.asyncio
 async def test_shutdown_stops_uploaded_strategies_before_each_router_retirement(
     monkeypatch: pytest.MonkeyPatch,

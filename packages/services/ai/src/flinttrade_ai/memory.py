@@ -734,6 +734,12 @@ class TradedMemory:
             distances: list[float] = results.get("distances", [[]])[0]
             distance_space = self._distance_spaces.get(layer) or self._configured_distance_space(collection)
             similarities: list[float] = [self._distance_to_similarity(dist, space=distance_space) for dist in distances]
+        except ValueError:
+            # Local-store contract violations (notably embedding-dimension
+            # mismatches after a model/provider change) must remain visible.
+            # Metadata fallback would turn a configuration error into plausible
+            # but similarity-free results.
+            raise
         except Exception:
             # ChromaDB 1.5.9's Rust core can PERMANENTLY wedge a collection's
             # vector index (upstream chroma-core/chroma#7032, open): under

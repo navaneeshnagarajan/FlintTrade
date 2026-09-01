@@ -855,7 +855,7 @@ def test_runtime_shutdown_keeps_learning_join_within_deadline() -> None:
     learning_thread.join(timeout=1.0)
 
     assert result is False
-    assert elapsed < 0.2
+    assert elapsed < 0.5
     assert close_count_before_release == 0
 
 

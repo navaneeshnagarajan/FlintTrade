@@ -565,7 +565,10 @@ class LocalVectorClient:
             if resolved is None:
                 resolved = dim
             elif dim != resolved:
-                break
+                raise ValueError(
+                    f"collection '{name}' contains mixed embedding dimensions: "
+                    f"{resolved} and {dim}"
+                )
         return resolved
 
     def _known_embedding_dim(self, name: str) -> int | None:
@@ -718,14 +721,20 @@ class LocalVectorClient:
         ids: list[str] | None,
         where: dict[str, Any] | None,
     ) -> None:
-        rows = self._fetch(name, ids=ids, where=where)
-        if not rows:
-            return
         with self._lock:
-            self._conn.executemany(
-                "DELETE FROM items WHERE collection = ? AND id = ?",
-                [(name, row["id"]) for row in rows],
-            )
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                rows = self._fetch(name, ids=ids, where=where)
+                if rows:
+                    self._conn.executemany(
+                        "DELETE FROM items WHERE collection = ? AND id = ?",
+                        [(name, row["id"]) for row in rows],
+                    )
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            else:
+                self._conn.execute("COMMIT")
 
     def _fetch(
         self,
