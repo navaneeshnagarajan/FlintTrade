@@ -124,7 +124,7 @@ def _request_principal(body: Mapping[str, Any]) -> BracketPrincipal:
 
 @bracket_bp.route("/bracket", methods=["POST"])
 @require_live_unlocked
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_bracket() -> Response:
     """Place a bracket order — entry plus ONE protective exit leg.
 
@@ -321,7 +321,7 @@ def list_brackets() -> Response:
 
 @bracket_bp.route("/bracket/<bracket_id>", methods=["DELETE"])
 @require_live_unlocked
-@rate_limit("orders", user_rate=10, global_rate=100)
+@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def cancel_bracket(bracket_id: str) -> Response:
     """Cancel all resting legs of a bracket order — a live broker WRITE.
 

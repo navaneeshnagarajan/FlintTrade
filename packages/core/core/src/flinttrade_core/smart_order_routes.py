@@ -500,7 +500,7 @@ _VALID_ACTION = {"BUY", "SELL"}
 
 
 @smart_order_bp.route("/smart-route", methods=["POST"])
-@rate_limit("smart_orders", user_rate=2, global_rate=20)
+@rate_limit("smart_orders", user_rate=2, global_rate=20, identity="jwt")
 def start_smart_route() -> tuple[Any, int]:
     """Start a smart-routed order as a background job.
 
