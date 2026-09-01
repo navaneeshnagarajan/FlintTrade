@@ -537,11 +537,12 @@ interval.
 
 Retrieval-augmented question answering over local user-provided documents
 (for example notes, statements, or research PDFs). The runtime is off by
-default and the vector store/embedding libraries are loaded only when installed
-locally and enabled, so ordinary launches do not download models, embed
-documents, or carry optional AI dependencies. Set `FLINTTRADE_RAG_ENABLED=true`
-when you want the RAG runtime available, or `FLINTTRADE_RAG_AUTO_INDEX=true`
-when you intentionally want `docs/` indexed at startup.
+default. The local sqlite3/NumPy vector store is built in; embedding libraries
+are loaded only when installed locally and RAG is enabled, so ordinary launches
+do not download models, embed documents, or carry optional AI dependencies. Set
+`FLINTTRADE_RAG_ENABLED=true` when you want the RAG runtime available, or
+`FLINTTRADE_RAG_AUTO_INDEX=true` when you intentionally want `docs/` indexed at
+startup.
 
 ![AI](screenshots/08-ai.png)
 

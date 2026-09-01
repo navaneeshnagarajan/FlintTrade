@@ -20,6 +20,9 @@ _ACTIVE_ARCHITECTURE_SURFACES = (
     ROOT / "CLAUDE.md",
     ROOT / "packages" / "services" / "ai" / "README.md",
     ROOT / "packages" / "core" / "core" / "src" / "flinttrade_core" / "app.py",
+    ROOT / ".env.example",
+    ROOT / "templates" / "package-purposes.yml",
+    ROOT / "docs" / "USER_GUIDE.md",
 )
 
 
@@ -34,13 +37,18 @@ def test_chromadb_is_absent_from_python_dependency_surfaces() -> None:
 
 
 def test_active_architecture_docs_describe_the_local_vector_store() -> None:
-    """Current architecture surfaces must not advertise the removed backend."""
+    """Current architecture and env surfaces must not advertise the removed backend.
+
+    Migration notes in changelog.md may still name legacy ``chroma.sqlite3``;
+    that file is covered by ``test_legacy_vector_upgrade_policy_is_documented``
+    and is intentionally not listed here.
+    """
     hits: list[str] = []
     for path in _ACTIVE_ARCHITECTURE_SURFACES:
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            if "chromadb" in line.lower():
+            if "chroma" in line.lower():
                 hits.append(f"{path.relative_to(ROOT)}:{line_number}")
-    assert hits == [], "active architecture text still advertises chromadb: " + ", ".join(hits)
+    assert hits == [], "active architecture text still advertises chroma: " + ", ".join(hits)
 
 
 def test_legacy_vector_upgrade_policy_is_documented() -> None:
