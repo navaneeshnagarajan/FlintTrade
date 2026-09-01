@@ -62,6 +62,14 @@ def _close_learning_memory(memory: Any) -> None:
         close_memory()
 
 
+def _finalise_session_learning_memory(trader: Any) -> None:
+    """Join leftover post-session reflection, then close that session's memory."""
+    join_learning = getattr(trader, "join_background_learning", None)
+    if callable(join_learning):
+        join_learning()
+    _close_learning_memory(getattr(trader, "memory", None))
+
+
 def _shutdown_event(app: Any) -> threading.Event:
     """Return the process-owned agent shutdown event for one Flask app."""
     configured = app.config.get("AUTONOMOUS_AGENT_SHUTDOWN_EVENT")
@@ -112,9 +120,8 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
         logger.error("Autonomous agent shutdown incomplete: %s", failure[:256])
         return False
 
-    memory = getattr(trader, "memory", None)
     try:
-        _close_learning_memory(memory)
+        _finalise_session_learning_memory(trader)
     except Exception:  # noqa: BLE001 - persistence finalisation must fail closed
         logger.exception("Autonomous agent learning-memory close failed")
         return False
@@ -790,7 +797,7 @@ def start_agent() -> tuple[Any, int]:
                 except Exception:  # noqa: BLE001 - cleanup failure must not revive stale intents
                     logger.exception("Could not close stale autonomous-agent approval intents")
             try:
-                _close_learning_memory(getattr(trader, "memory", None))
+                _finalise_session_learning_memory(trader)
             except Exception:  # noqa: BLE001 - session teardown must still release the loop
                 logger.exception("Autonomous agent learning-memory close failed")
             with _RUNNER_LOCK:

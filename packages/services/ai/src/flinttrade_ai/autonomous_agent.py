@@ -399,6 +399,7 @@ class AutonomousTrader:
         self._stop_requested = False
         self._square_off_on_stop = False
         self._stop_failure = ""
+        self._learning_thread: threading.Thread | None = None
 
     # ------------------------------------------------------------------
     # Status
@@ -407,6 +408,14 @@ class AutonomousTrader:
     @property
     def status(self) -> AgentStatus:
         return self._status
+
+    def join_background_learning(self, timeout: float | None = None) -> bool:
+        """Wait for leftover post-session reflection before memory is closed."""
+        thread = self._learning_thread
+        if not isinstance(thread, threading.Thread):
+            return True
+        thread.join(timeout)
+        return not thread.is_alive()
 
     @property
     def shutdown_complete(self) -> bool:
@@ -1118,7 +1127,9 @@ class AutonomousTrader:
                 finally:
                     done.set()
 
-            threading.Thread(target=_runner, name="agent-learning", daemon=True).start()
+            worker = threading.Thread(target=_runner, name="agent-learning", daemon=True)
+            self._learning_thread = worker
+            worker.start()
             finished = await asyncio.to_thread(done.wait, _LEARNING_TIMEOUT_SECONDS)
             if not finished:
                 logger.warning(

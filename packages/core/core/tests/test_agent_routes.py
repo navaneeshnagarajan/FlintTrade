@@ -529,6 +529,50 @@ def test_runtime_shutdown_requests_square_off_and_joins_agent(live_auth):
     assert thread is not None and not thread.is_alive()
 
 
+def test_session_finalise_joins_learning_worker_before_closing_memory() -> None:
+    """A late agent-learning worker must finish before its store is checkpointed."""
+    started = threading.Event()
+    release = threading.Event()
+    closed_while_alive: list[bool] = []
+
+    def hold() -> None:
+        started.set()
+        release.wait(timeout=2.0)
+
+    worker = threading.Thread(target=hold, name="agent-learning", daemon=True)
+    memory = MagicMock()
+
+    def close_store() -> None:
+        closed_while_alive.append(worker.is_alive())
+
+    memory.close.side_effect = close_store
+
+    class _Trader:
+        def __init__(self) -> None:
+            self.memory = memory
+            self._learning_thread = worker
+
+        def join_background_learning(self, timeout: float | None = None) -> bool:
+            self._learning_thread.join(timeout)
+            return not self._learning_thread.is_alive()
+
+    worker.start()
+    assert started.wait(timeout=1.0)
+    closer = threading.Thread(
+        target=lambda: mod._finalise_session_learning_memory(_Trader()),
+        name="agent-learning-close",
+        daemon=True,
+    )
+    closer.start()
+    closer.join(timeout=0.05)
+    assert memory.close.call_count == 0
+    release.set()
+    closer.join(timeout=2.0)
+
+    assert closed_while_alive == [False]
+    memory.close.assert_called_once_with()
+
+
 def test_session_end_closes_learning_memory(live_auth, monkeypatch) -> None:
     """/stop must checkpoint WAL through the session thread finally, not only app shutdown."""
     memory = MagicMock()

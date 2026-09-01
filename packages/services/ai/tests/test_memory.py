@@ -123,6 +123,8 @@ def test_close_releases_owned_vector_client_once() -> None:
     memory.close()
 
     client.close.assert_called_once_with()
+    with pytest.raises(RuntimeError, match="learning memory is closed"):
+        memory._get_client()
 
 
 # ---------------------------------------------------------------------------

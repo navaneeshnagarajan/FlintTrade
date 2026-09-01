@@ -384,6 +384,7 @@ class TradedMemory:
         self._collections: dict[MemoryLayer, Any] = {}
         self._distance_spaces: dict[MemoryLayer, str] = {}
         self._embedding_fn: Any | None = _embedding_fn
+        self._closed = False
 
         # Thread safety for lazy-init helpers (RLock because _get_collection
         # calls _get_client and _get_embedding_fn while already holding the lock)
@@ -392,18 +393,20 @@ class TradedMemory:
     def close(self) -> None:
         """Close the owned vector client once and clear cached collection handles."""
         with self._lock:
+            if self._closed:
+                return
             client = self._chroma_client
             if client is None:
                 client = self._override_client
-            if client is None:
-                return
-            close = getattr(client, "close", None)
-            if callable(close):
-                close()
+            if client is not None:
+                close = getattr(client, "close", None)
+                if callable(close):
+                    close()
             self._chroma_client = None
             self._override_client = None
             self._collections.clear()
             self._distance_spaces.clear()
+            self._closed = True
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -412,6 +415,8 @@ class TradedMemory:
     def _get_client(self) -> Any:
         """Return (and lazily create) the local vector client."""
         with self._lock:
+            if self._closed:
+                raise RuntimeError("learning memory is closed")
             if self._chroma_client is not None:
                 return self._chroma_client
 

@@ -76,6 +76,11 @@ class HashingEmbeddingFunction:
         norm = float(np.linalg.norm(vec))
         if norm > 0.0:
             vec /= norm
+            return vec
+        # Opposite signs in the same buckets can cancel to zero. Keep a
+        # deterministic unit vector so an identical query still matches.
+        digest = hashlib.blake2b(text.encode("utf-8"), digest_size=8).digest()
+        vec[int.from_bytes(digest[:4], "little") % self._dim] = 1.0
         return vec
 
 

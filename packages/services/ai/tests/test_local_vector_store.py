@@ -7,6 +7,20 @@ import sqlite3
 import pytest
 
 
+def test_hashing_embedder_does_not_emit_zero_vectors_on_sign_cancellation() -> None:
+    """Cancelled hash buckets must still yield a unit vector so identical text matches."""
+    import numpy as np
+
+    from flinttrade_ai.local_vector_store import HashingEmbeddingFunction, _distance
+
+    embedder = HashingEmbeddingFunction()
+    stored = embedder("support momentum")[0]
+    query = embedder("support momentum")[0]
+
+    assert float(np.linalg.norm(stored)) == pytest.approx(1.0)
+    assert _distance("cosine", stored, query) == pytest.approx(0.0)
+
+
 def test_query_with_zero_results_returns_empty() -> None:
     """A zero result limit must not turn into an unbounded vector dump."""
     from flinttrade_ai.local_vector_store import EphemeralClient
