@@ -211,21 +211,18 @@ class ExpiryManager:
             logger.warning("No expiries found for %s:%s", exchange, underlying)
             return []
 
-        sorted_expiries = sorted(info.expiry_dates)
         start = date.fromisoformat(start_date)
         end = date.fromisoformat(end_date)
 
-        # Filter to expiries within our range (plus one before for overlap)
+        # Filter to expiries within our range (plus one before for overlap).
+        # Official dashed values such as 26-MAR-26 / 02-APR-26 sort April
+        # first when compared as strings, so use parsed calendar order.
         relevant: list[str] = []
-        for exp_str in sorted_expiries:
-            try:
-                exp_date = _parse_expiry_date(exp_str)
-                if exp_date >= start - timedelta(days=60):
-                    relevant.append(exp_str)
-                if exp_date > end:
-                    break
-            except ValueError:
-                continue
+        for exp_date, exp_str in _dated_expiries(info.expiry_dates):
+            if exp_date >= start - timedelta(days=60):
+                relevant.append(exp_str)
+            if exp_date > end:
+                break
 
         if not relevant:
             return []

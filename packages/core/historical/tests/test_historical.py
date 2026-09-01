@@ -502,6 +502,35 @@ class TestExpiryManager:
         assert bars[0].contract == "NIFTY26JANFUT"
         assert mock_client.history.await_count == 1
 
+    def test_build_continuous_futures_orders_official_dashed_expiries(self):
+        from flinttrade_core.models import OHLCV
+        from flinttrade_historical.expiry_manager import ExpiryManager
+
+        mock_client = MagicMock()
+        mock_client.expiry.return_value = {"data": ["26-MAR-26", "02-APR-26"]}
+
+        def _history(**kwargs):
+            return [
+                OHLCV(
+                    timestamp=f"{kwargs['start_date']}T09:15:00",
+                    open=100,
+                    high=101,
+                    low=99,
+                    close=100.5,
+                    volume=1000,
+                )
+            ]
+
+        mock_client.history.side_effect = lambda **kwargs: _history(**kwargs)
+
+        mgr = ExpiryManager(mock_client)
+        bars = mgr.build_continuous_futures("NIFTY", "NFO", "1d", "2026-03-01", "2026-04-30")
+
+        requested = [call.kwargs["symbol"] for call in mock_client.history.call_args_list]
+        assert requested[0] == "NIFTY26MARFUT"
+        assert "NIFTY26APRFUT" in requested
+        assert bars[0].contract == "NIFTY26MARFUT"
+
     def test_get_expiries_cached(self):
         from flinttrade_historical.expiry_manager import ExpiryManager
         mock_client = MagicMock()

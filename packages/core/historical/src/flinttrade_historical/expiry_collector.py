@@ -20,7 +20,7 @@ from typing import Any
 from flinttrade_core.openalgo_client import OpenAlgoClient
 
 from .downloader import HistoricalDownloader
-from .expiry_manager import ExpiryManager, _parse_expiry_date
+from .expiry_manager import ExpiryManager, _dated_expiries, _parse_expiry_date
 
 logger = logging.getLogger("flinttrade.historical.expiry_collector")
 
@@ -123,13 +123,9 @@ class ExpiryDataCollector:
         lookback = cutoff - timedelta(days=months * 30)
 
         past: list[str] = []
-        for exp_str in sorted(info.expiry_dates):
-            try:
-                exp_date = _parse_expiry_date(exp_str)
-                if lookback <= exp_date < cutoff:
-                    past.append(exp_str)
-            except ValueError:
-                continue
+        for exp_date, exp_str in _dated_expiries(info.expiry_dates):
+            if lookback <= exp_date < cutoff:
+                past.append(exp_str)
 
         logger.info(
             "Found %d past expiries for %s:%s within %d months",
