@@ -47,6 +47,7 @@ COMMON_READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "t
 ORDER_DETAIL_READ_CHOICES = ("orderstatus", "orderhistory", "ordertrades")
 COMMON_MARKET_READ_CHOICES = ("quotes", "depth", "margin", "history")
 DHAN_MARKET_READ_CHOICES = ("quotes", "ltp", "ohlc", "quote_details", "margin", "history")
+DHAN_QUOTE_PROJECTION_READS = frozenset({"ltp", "ohlc", "quote_details"})
 DHAN_SECURITY_RESOLVER_READ_CHOICES = frozenset(DHAN_MARKET_READ_CHOICES)
 GROWW_MARKET_READ_CHOICES = ("quotes", "ltp", "ohlc", "margin", "history", "expiry")
 INDMONEY_MARKET_READ_CHOICES = ("quotes", "ltp", "depth", "margin", "history")
@@ -92,8 +93,9 @@ READ_CHOICES_BY_BROKER: dict[str, tuple[str, ...]] = {
 }
 READ_CHOICES = tuple(dict.fromkeys(read for choices in READ_CHOICES_BY_BROKER.values() for read in choices))
 DEFAULT_READS: dict[str, tuple[str, ...]] = {
-    # One Dhan marketfeed call is enough for the default probe: ltp/ohlc and
-    # quote_details project the same quote response and remain explicitly selectable.
+    # One Dhan marketfeed call is enough for bundled probes (default and all):
+    # ltp/ohlc and quote_details project the same quote_data response and remain
+    # explicitly selectable so the 1 req/s quote limit is not hit by redundancy.
     "dhan": COMMON_READ_CHOICES + ("quotes", "margin", "history"),
     "groww": COMMON_READ_CHOICES + GROWW_MARKET_READ_CHOICES,
     "indmoney": COMMON_READ_CHOICES + INDMONEY_MARKET_READ_CHOICES,
@@ -349,18 +351,34 @@ def collect_credentials(broker: str, method: str, environment: str) -> dict[str,
     return credentials
 
 
+def _bundled_reads(broker: str, requested: str) -> list[str]:
+    """Expand ``default`` / ``all`` without repeating Dhan quote projections.
+
+    Dhan ``ltp``, ``ohlc``, and ``quote_details`` all dispatch through
+    ``quotes()`` to the same ``quote_data`` endpoint (1 req/s). Bundled
+    inventories keep one representative quotes read; the projections stay
+    individually selectable.
+    """
+    if requested == "default":
+        return list(DEFAULT_READS[broker])
+    reads = list(READ_CHOICES_BY_BROKER[broker])
+    if broker == "dhan":
+        return [read for read in reads if read not in DHAN_QUOTE_PROJECTION_READS]
+    return reads
+
+
 def _resolve_reads(broker: str, requested: list[str] | None) -> list[str]:
     allowed_reads = READ_CHOICES_BY_BROKER[broker]
     if not requested or requested == ["default"]:
-        return list(DEFAULT_READS[broker])
+        return _bundled_reads(broker, "default")
     if requested == ["all"]:
-        return list(allowed_reads)
+        return _bundled_reads(broker, "all")
     reads: list[str] = []
     for read in requested:
         if read == "default":
-            reads.extend(DEFAULT_READS[broker])
+            reads.extend(_bundled_reads(broker, "default"))
         elif read == "all":
-            reads.extend(allowed_reads)
+            reads.extend(_bundled_reads(broker, "all"))
         else:
             reads.append(read)
     deduped: list[str] = []
