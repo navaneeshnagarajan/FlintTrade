@@ -56,9 +56,9 @@ describe('docs index generation', () => {
     const claude = readFileSync(resolve(process.cwd(), '../../../CLAUDE.md'), 'utf8');
     const agents = readFileSync(resolve(process.cwd(), '../../../AGENTS.md'), 'utf8');
 
-    expect(claude).toContain('BROKER_CATALOG (37 brokers)');
+    expect(claude).toContain('BROKER_CATALOG` (37 brokers)');
     expect(agents).toContain('37 brokers');
-    expect(claude).not.toContain('BROKER_CATALOG (35 brokers)');
+    expect(claude).not.toContain('BROKER_CATALOG` (35 brokers)');
     expect(agents).not.toContain('35 brokers');
   });
 

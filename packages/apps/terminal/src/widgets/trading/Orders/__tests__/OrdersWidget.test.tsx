@@ -73,7 +73,7 @@ vi.mock("@/services/api", () => ({
 // Import component under test
 // ---------------------------------------------------------------------------
 
-import OrdersWidget, { isOpenOrderStatus } from "../OrdersWidget";
+import OrdersWidget, { isOpenOrderStatus, toOrderRow } from "../OrdersWidget";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -409,6 +409,20 @@ describe("OrdersWidget", () => {
     fireEvent.click(screen.getByText("Cancel Order"));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Order blocked in practice mode.");
+  });
+});
+
+describe("toOrderRow", () => {
+  it("preserves camelCase trigger and disclosed-quantity aliases", () => {
+    const row = toOrderRow({
+      ...OPEN_ORDER,
+      pricetype: "SL",
+      triggerPrice: "1490.5",
+      disclosedQuantity: "25",
+    });
+    expect(row.triggerPriceNum).toBe(1490.5);
+    expect(row.disclosedQuantityNum).toBe(25);
+    expect(row.hasDisclosedQuantity).toBe(true);
   });
 });
 

@@ -124,6 +124,36 @@ function firstPresentValue(
   return undefined;
 }
 
+/** Map a raw orderbook row, preserving trigger and disclosed-quantity aliases. */
+export function toOrderRow(o: RawOrderRecord): OrderRow {
+  const status = o.order_status ?? o.status ?? "—";
+  const orderType = String(o.pricetype ?? o.price_type ?? "").toUpperCase();
+  const disclosed = firstPresentValue(
+    o.disclosed_quantity,
+    o.disclosedQuantity,
+    o.disclosedqty,
+    o.disclosed_qty,
+  );
+  return {
+    orderId: extractOrderId(o),
+    symbol: o.symbol,
+    exchange: o.exchange ?? "",
+    action: (o.action ?? "—").toUpperCase(),
+    quantity: String(o.quantity ?? ""),
+    quantityNum: toNum(o.quantity),
+    price: o.price ? String(o.price) : "MKT",
+    priceNum: toNum(o.price),
+    triggerPriceNum: toNum(firstPresentValue(o.trigger_price, o.triggerPrice, o.triggerprice)),
+    disclosedQuantityNum: toNum(disclosed),
+    hasDisclosedQuantity: disclosed !== undefined,
+    orderType,
+    product: String(o.product ?? "").toUpperCase(),
+    strategy: typeof o.strategy === "string" && o.strategy !== "" ? o.strategy : "Flint",
+    orderStatus: status,
+    isOpen: isOpenOrderStatus(status),
+  };
+}
+
 /**
  * A row qualifies for Modify only when every field the gated modify route
  * requires is present and valid — otherwise the request would be rejected
@@ -382,38 +412,7 @@ function OrdersWidget(_props: WidgetProps) {
 
   const rows = useMemo<OrderRow[]>(() => {
     const raw = (ordersData ?? []) as RawOrderRecord[];
-    return raw.map((o) => {
-      const status = o.order_status ?? o.status ?? "—";
-      const orderType = String(o.pricetype ?? o.price_type ?? "").toUpperCase();
-      return {
-        orderId: extractOrderId(o),
-        symbol: o.symbol,
-        exchange: o.exchange ?? "",
-        action: (o.action ?? "—").toUpperCase(),
-        quantity: String(o.quantity ?? ""),
-        quantityNum: toNum(o.quantity),
-        price: o.price ? String(o.price) : "MKT",
-        priceNum: toNum(o.price),
-        triggerPriceNum: toNum(firstPresentValue(o.trigger_price, o.triggerPrice, o.triggerprice)),
-        disclosedQuantityNum: toNum(firstPresentValue(
-          o.disclosed_quantity,
-          o.disclosedQuantity,
-          o.disclosedqty,
-          o.disclosed_qty,
-        )),
-        hasDisclosedQuantity: firstPresentValue(
-          o.disclosed_quantity,
-          o.disclosedQuantity,
-          o.disclosedqty,
-          o.disclosed_qty,
-        ) !== undefined,
-        orderType,
-        product: String(o.product ?? "").toUpperCase(),
-        strategy: typeof o.strategy === "string" && o.strategy !== "" ? o.strategy : "Flint",
-        orderStatus: status,
-        isOpen: isOpenOrderStatus(status),
-      };
-    });
+    return raw.map(toOrderRow);
   }, [ordersData]);
 
   const queryUi = resolveAccountQueryUi({
@@ -537,9 +536,7 @@ function OrdersWidget(_props: WidgetProps) {
         product: row.product as "MIS" | "CNC" | "NRML",
         price,
         triggerPrice,
-        ...(row.hasDisclosedQuantity || disclosedQuantity > 0
-          ? { disclosedQuantity }
-          : {}),
+        disclosedQuantity: disclosedQuantity > 0 ? disclosedQuantity : row.disclosedQuantityNum,
         strategy: row.strategy,
       };
       try {
