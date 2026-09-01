@@ -889,8 +889,8 @@ describe("OpenAlgo API client (api.ts)", () => {
           ],
         },
       };
-      fetchSpy.mockImplementation(async (url: string) => {
-        const path = String(url);
+      fetchSpy.mockImplementation(async (input: string | URL | Request) => {
+        const path = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         if (path.includes("/native/accounts/upstox/U1/holidays?year=2026")) {
           return jsonResponse({
             status: "success",
