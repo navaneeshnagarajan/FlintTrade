@@ -11,6 +11,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=production-contract.sh
 source "$SCRIPT_DIR/production-contract.sh"
+FLINTTRADE_PRODUCTION_CONTRACT="$SCRIPT_DIR/production-contract.sh"
+export FLINTTRADE_PRODUCTION_CONTRACT
 
 flinttrade_assert_no_dir_override
 REPO_DIR="$(flinttrade_production_prefix)"
@@ -54,10 +56,16 @@ if [ ! -x "$VENV_PIP" ]; then
 fi
 sudo "$VENV_PIP" install --require-hashes -r requirements.lock -q
 
-# sudo git/pip under umask 077 create root:root 0700/0600 files that www-data
-# cannot read. Re-apply the same checkout contract as first-time setup.
+echo "Rebuilding the terminal..."
+flinttrade_build_terminal "$REPO_DIR"
+
+# sudo git/pip/pnpm under umask 077 create root:root 0700/0600 files that
+# www-data cannot read. Re-apply the checkout contract; never chmod -R the
+# workspace (owner-only secrets).
 echo "Applying checkout ownership and modes..."
 flinttrade_apply_checkout_modes "$REPO_DIR"
+echo "Ensuring the workspace master password exists..."
+flinttrade_provision_workspace "$REPO_DIR"
 
 # 4. Refresh the systemd unit on every deploy. Existing hosts may still carry
 #    the pre-fix gunicorn/workspace contract even though the checkout is current.

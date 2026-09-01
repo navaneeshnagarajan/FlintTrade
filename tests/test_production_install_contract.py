@@ -307,8 +307,10 @@ def test_production_installer_chowns_only_runtime_paths() -> None:
     contract = _CONTRACT.read_text(encoding="utf-8")
 
     assert "flinttrade_apply_checkout_modes" in contract
-    assert 'sudo chown -R "root:${service_user}" "$dir"' in contract
-    assert 'sudo chmod -R g+rX,go-w "$dir"' in contract
+    assert 'sudo chown "root:${service_user}" "$dir"' in contract
+    assert 'data|.flinttrade' in contract
+    assert "chmod -R g+rX,go-w" in contract
+    assert 'sudo chmod -R g+rX,go-w "$dir"' not in contract
     assert 'sudo chown -R "${service_user}:${service_user}" "${dir}/data"' in contract
     assert 'sudo chown -R "${service_user}:${service_user}" "${dir}/.flinttrade"' in contract
     assert 'flinttrade_apply_checkout_modes "$INSTALL_DIR" "$SERVICE_USER"' in installer
@@ -386,6 +388,8 @@ def test_deploy_updates_root_owned_install_without_taking_ownership() -> None:
     apply_at = deploy.index("flinttrade_apply_checkout_modes")
     assert apply_at > deploy.rindex("git -c")
     assert apply_at > deploy.index("--require-hashes")
+    assert apply_at > deploy.index("flinttrade_build_terminal")
+    assert "flinttrade_provision_workspace" in deploy
     assert "--require-hashes" in deploy
     env_sources = [
         line
@@ -570,8 +574,8 @@ def test_optional_tooling_uses_the_resolved_executable_under_sudo() -> None:
 
     assert 'UV_BIN="$(command -v uv)"' in installer
     assert 'sudo "$UV_BIN" sync' in installer
-    assert 'PNPM_BIN="$(command -v pnpm)"' in installer
-    assert 'sudo "$PNPM_BIN" install' in installer
+    assert "flinttrade_build_terminal" in installer
+    assert "flinttrade_pnpm_run" in _CONTRACT.read_text(encoding="utf-8")
 
 
 @pytest.mark.unit
@@ -580,10 +584,47 @@ def test_root_owned_checkout_is_readable_but_not_writable_by_service_group() -> 
     installer = _INSTALLER.read_text(encoding="utf-8")
     contract = _CONTRACT.read_text(encoding="utf-8")
 
-    assert 'sudo chown -R "root:${service_user}" "$dir"' in contract
-    assert 'sudo chmod -R g+rX,go-w "$dir"' in contract
+    assert 'sudo chown "root:${service_user}" "$dir"' in contract
+    assert 'sudo chmod -R g+rX,go-w "$path"' in contract
+    assert 'data|.flinttrade' in contract
     assert 'flinttrade_apply_checkout_modes "$INSTALL_DIR" "$SERVICE_USER"' in installer
     assert 'sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"' not in installer
+
+
+@pytest.mark.unit
+def test_checkout_modes_do_not_widen_workspace_secrets() -> None:
+    """Recursive g+rX must not walk .flinttrade (0600 master_password and peppers)."""
+    contract = _CONTRACT.read_text(encoding="utf-8")
+    helper = contract.split("flinttrade_apply_checkout_modes()", 1)[1]
+
+    assert "data|.flinttrade" in helper
+    assert 'sudo chmod -R g+rX,go-w "$dir"' not in helper
+    assert 'sudo chmod -R g+rX,go-w "$path"' in helper
+
+
+@pytest.mark.unit
+def test_setup_provisions_master_password_before_declaring_complete() -> None:
+    """systemd has no TTY; FlintTradeApp constructs CredentialStore via _get_master_password."""
+    installer = _INSTALLER.read_text(encoding="utf-8")
+    contract = _CONTRACT.read_text(encoding="utf-8")
+
+    assert "flinttrade_core.cli init --provision-master-password" in contract
+    assert "FLINTTRADE_WORKSPACE_DIR=" in contract
+    assert 'flinttrade_provision_workspace "$INSTALL_DIR" "$SERVICE_USER"' in installer
+    assert installer.index("flinttrade_provision_workspace") < installer.index("Setup complete")
+
+
+@pytest.mark.unit
+def test_production_scripts_build_the_terminal() -> None:
+    """Setup UI is the built SPA; API-only mode is not a completed production install."""
+    installer = _INSTALLER.read_text(encoding="utf-8")
+    deploy = _DEPLOY.read_text(encoding="utf-8")
+    contract = _CONTRACT.read_text(encoding="utf-8")
+
+    assert "packages/apps/terminal run build" in contract
+    assert "install --frozen-lockfile" in contract
+    assert 'flinttrade_build_terminal "$INSTALL_DIR"' in installer
+    assert 'flinttrade_build_terminal "$REPO_DIR"' in deploy
 
 
 @pytest.mark.unit

@@ -15,6 +15,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=production-contract.sh
 source "$SCRIPT_DIR/production-contract.sh"
+FLINTTRADE_PRODUCTION_CONTRACT="$SCRIPT_DIR/production-contract.sh"
+export FLINTTRADE_PRODUCTION_CONTRACT
 
 flinttrade_assert_no_dir_override
 INSTALL_DIR="$(flinttrade_production_prefix)"
@@ -66,20 +68,15 @@ fi
 echo "Installing Python dependencies into $VENV_DIR..."
 sudo "$VENV_DIR/bin/pip" install --require-hashes -r "$INSTALL_DIR/requirements.lock"
 
-# Optional toolchain steps — pick up the broker-SDK pins (e.g. the Kotak Neo
-# git SDK via uv sync) and the node workspace deps when the tooling is
-# available. The hash-verified requirements.lock install above stays the
-# baseline on a plain Ubuntu host.
+# Optional broker-SDK pins when uv is already on PATH. Terminal install+build
+# is required — the backend serves Setup only when dist/index.html exists.
 if command -v uv >/dev/null 2>&1; then
     UV_BIN="$(command -v uv)"
     echo "Syncing uv workspace (broker-SDK pins)..."
     (cd "$INSTALL_DIR" && sudo "$UV_BIN" sync --frozen --all-packages --no-dev)
 fi
-if command -v pnpm >/dev/null 2>&1; then
-    PNPM_BIN="$(command -v pnpm)"
-    echo "Installing node workspace dependencies..."
-    (cd "$INSTALL_DIR" && sudo "$PNPM_BIN" install --frozen-lockfile)
-fi
+echo "Installing node workspace and building the terminal..."
+flinttrade_build_terminal "$INSTALL_DIR"
 
 # Create a minimal server fallback env file if not present. OpenAlgo and broker
 # settings should be completed in the app Setup/Settings UI.
@@ -112,6 +109,9 @@ flinttrade_apply_checkout_modes "$INSTALL_DIR" "$SERVICE_USER"
 sudo chown -R "$SERVICE_USER:$SERVICE_USER" \
     /data/flinttrade \
     /var/log/flinttrade
+
+echo "Provisioning workspace master password for $SERVICE_USER..."
+flinttrade_provision_workspace "$INSTALL_DIR" "$SERVICE_USER" "$VENV_DIR/bin/python"
 
 # Install systemd service
 echo "Installing systemd service..."
