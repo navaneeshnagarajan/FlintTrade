@@ -180,7 +180,10 @@ guardrails keep runner usage bounded and predictable. Keep within them:
   adds only what it needs (e.g. `pull-requests: write` solely where it comments).
 - **`concurrency` with `cancel-in-progress: true`** on push/PR workflows so a
   follow-up push cancels the superseded run.
-- **`paths-ignore`** lets doc-only changes skip the heavy test matrix.
+- **`test.yml` does not skip on documentation edits.** `python-tests`,
+  `node-core-tests` and `secrets-check` always run (they include the guards
+  that police docs). The expensive lanes — widget shards, Rust ticks, Electron
+  desktop — gate on the `changed-surfaces` classifier. See [`docs/CI.md`](docs/CI.md).
 
 If you find yourself adding a daily cron or putting macOS/Windows on `push`,
 stop — that is the regression these guardrails prevent.
@@ -221,8 +224,9 @@ order IDs, API keys, or `.env`. FlintTrade is personal-use open-source: anything
 that points at *your* machine, network, or accounts stays out of the repo. Use
 placeholders (`<YOUR_HOSTNAME>`, `<YOUR_SERVER_IP>`) in examples, keep real
 values in your private, gitignored `.env` only for dev/server fallback paths, and store secrets as keyring/env
-`_ref` references — never plaintext. The `secrets-check` (gitleaks) CI job and a
-pre-commit hook are backstops, not a substitute for not staging the file.
+`_ref` references — never plaintext. The `secrets-check` CI job is an inline
+two-pattern grep (not gitleaks) plus a pre-commit hook — backstops, not a
+substitute for not staging the file.
 
 ## Pull request flow
 
@@ -246,7 +250,9 @@ Tiny doc fixes (typos, broken links) can skip the PR for now and go straight to 
   see [TypeScript and React](#typescript-and-react) below.
 - Type hints on every public function and class attribute.
 - Google-style docstrings (`Args:`, `Returns:`, `Raises:`).
-- Absolute imports only — no `from .foo import bar`.
+- Absolute imports for anything cross-package or top-level
+  (`flinttrade_<pkg>....`). Intra-package relative imports
+  (`from .sibling import x`) are fine.
 - The floor is Python 3.12 (`python_requires` in `flint.toml`); we develop and
   run CI against `python_target`, currently 3.14. Write to the floor — `StrEnum`
   and other 3.11+ features are used deliberately — but do not assume 3.12 is what
@@ -291,7 +297,9 @@ Look at the [`good first issue`](https://github.com/navaneeshnagarajan/FlintTrad
 - **Translations** — Hindi and Tamil first, then other Indian regional languages. The UI needs an i18n pass; we're looking for translators and engineers to set up the framework.
 - **Accessibility** — WCAG AA is in place; AAA is the target. Screen-reader testing, keyboard-only flows, contrast audits, focus management.
 - **Documentation** — user guides, walkthroughs, video scripts, API references. Every doc PR is a high-value PR.
-- **Mobile** — the React Native / Expo app is greenfield. If you build mobile, talk to us.
+
+There is no mobile or React Native surface in this repository. The retired
+Chrome extension and Tauri shell are gone; do not open work against them.
 
 ## Good first issue pointers
 

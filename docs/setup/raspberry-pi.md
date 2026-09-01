@@ -24,15 +24,26 @@ curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/
 
 ## Requirements
 - Raspberry Pi 4 or 5 (4GB RAM minimum, 8GB recommended)
-- Raspberry Pi OS 64-bit (Bookworm)
+- 64-bit OS whose **system** Python is `>=3.12` if you install from source
+  (Ubuntu 24.04 LTS on ARM, or Raspberry Pi OS Trixie). Raspberry Pi OS
+  Bookworm ships Python 3.11 and cannot meet the source-install floor.
 - 32GB+ SD card or USB SSD
 
-## Setup (ARM64 Server)
-1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
-2. `cd FlintTrade`
-3. `bash infra/scripts/setup-production.sh`
-4. `sudo systemctl start flinttrade`
-5. Open the terminal URL and complete Setup in the app UI.
+The one-line installer above is the supported path on a Pi: it provisions
+its own Python 3.12 under `~/.flinttrade/tools` and does not use the
+system interpreter.
+
+## Setup (ARM64 server — advanced)
+
+`infra/scripts/setup-production.sh` is an **Ubuntu 24.04** host provisioner.
+It clones to `$HOME/FlintTrade` by default (override `FLINTTRADE_DIR`) and
+copies `infra/systemd/flinttrade.service` unchanged. That unit is written for
+a tree at `/opt/flinttrade` running as `www-data` behind Gunicorn on
+`127.0.0.1:5100`. `sudo systemctl start flinttrade` will not find a
+`$HOME/FlintTrade` checkout unless you either install the tree at
+`/opt/flinttrade` (and create the `www-data` writable paths the unit lists)
+or edit `User`, `WorkingDirectory`, `EnvironmentFile`, `ExecStart`, and
+`ReadWritePaths` before enabling it. See [the systemd notes](../../infra/systemd/README.md).
 
 Broker/OpenAlgo configuration belongs in Setup or Settings. `.env` is only for
 server-only fallback values that cannot be supplied through the UI.

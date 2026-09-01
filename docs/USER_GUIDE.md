@@ -315,12 +315,13 @@ software safeguards, prompts, and recovery controls in a local setup.
 4. Return to **Practice** mode and repeat the order-path walkthrough in the
    sandbox before continuing development work.
 
-If anything looks wrong during live-capable testing, hit the **Kill Switch** in
-the top bar. It cancels open orders and asks the configured broker path to close
-positions via the supported close-position endpoint. The kill switch fires only
-when you explicitly activate it from the UI, API, or configured Telegram
-command. Layer 4 daily-loss thresholds block subsequent new orders but do not
-cancel orders or flatten positions.
+If anything looks wrong during live-capable testing, hit the **Kill Switch** on
+the `/trade` workspace (Live mode only). Activate and reset also live under
+`/automate` → Settings. It cancels open orders and asks the configured broker
+path to close positions via the supported close-position endpoint. The kill
+switch fires only when you explicitly activate it from the UI, API, or
+configured Telegram command. Layer 4 daily-loss thresholds block subsequent new
+orders but do not cancel orders or flatten positions.
 
 ---
 
@@ -340,22 +341,23 @@ platform-specific workspace directory and sync across sessions:
 
 See [Settings reference](#11-settings-reference) for what else lives there.
 
-### The 12 routes
+### The main routes
 
 | Route | Purpose |
 |---|---|
-| `/welcome` | First-time cinematic introduction (smart-redirects after first visit). |
+| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password + TOTP, or PIN). There is no `/login` URL. |
 | `/explore` | Demo mode with sample data — no broker connection needed. |
-| `/setup` | First-time wizard (Quick / Guided / Advanced paths). |
+| `/setup` | First-time wizard (Quick / Guided / Advanced paths). `/setup-account` is a compatibility alias. |
+| `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
-| `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets. |
+| `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
 | `/invest` | Portfolio-record workspace — holdings, net worth, SIPs, and mutual-fund tracker. |
 | `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise. |
-| `/automate` | Automation Hub — flows, cron, monitors, logs. |
+| `/automate` | Automation Hub — flows, cron, monitors, logs. Kill-switch activate/reset lives under Automate → Settings. |
 | `/ai` | AI Centre — chat, signals, sentiment, RAG. |
 | `/ditto` | Multi-account management — mirror, margin, risk. |
-| `/admin` | Admin panel (development builds only) — security, health, traffic. |
+| `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
 
 ### The widgets (71)
 
@@ -657,7 +659,7 @@ Stop-Process -Id <pid>
 ### "Token expired" when placing an order
 
 FlintTrade JWTs expire daily at 8 AM IST. Refresh the token by signing in
-again — the front-end will redirect you to the login screen automatically
+again — the front-end will redirect you to `/welcome` automatically
 when it detects the 401.
 
 ### Orders not arriving / silently dropped
@@ -674,14 +676,16 @@ when it detects the 401.
 The WebSocket on port 8765 has dropped. The top bar status indicator turns
 red when this happens. FlintTrade auto-reconnects with exponential
 back-off; if the indicator stays red for more than 30 seconds, restart the
-terminal (`Ctrl-C` then `npm run dev`).
+dev pair (`Ctrl-C`, then `python scripts/ft.py dev`) or, for a built UI,
+`python scripts/ft.py start`.
 
 ### "Cannot find module '@/...'"
 
 The path alias `@` → `packages/apps/terminal/src/` is configured in
 `tsconfig.json` and `vite.config.ts`. If your editor's TypeScript server
-disagrees, restart it. If `vitest` complains, ensure
-`packages/apps/terminal/vitest.config.ts` extends the same alias.
+disagrees, restart it. If `vitest` complains, the Vitest config lives
+inside `vite.config.ts` and inherits that alias — there is no separate
+`vitest.config.ts`.
 
 ### Settings page won't save
 

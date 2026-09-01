@@ -37,11 +37,16 @@ is not tracked or pulled.
 
 ## Runtime stack
 
-| Component | Minimum | Tested | Notes |
+Floors and targets are declared once in `flint.toml`'s `[requirements]` table.
+`tests/test_minimum_requirements_single_source.py` fails if a tracked manifest
+disagrees. Per-push CI runs the **floor**; nightly
+`nightly-cross-platform.yml` exercises the **target** (fail-soft).
+
+| Component | Floor (must work) | What actually runs | Notes |
 |---|---|---|---|
-| Python | 3.12 | 3.12.x | 3.13/3.14 partially supported (sklearn / lightgbm import issues on Windows 3.14) |
-| Node | 22 | 22.x | required for the terminal package, site package, and Playwright |
-| Operating system | Windows 11, macOS 14, Ubuntu 22.04 | same | tested matrix in CI |
+| Python | `>=3.12` | 3.12 on every per-push lane; 3.14 on the nightly target leg | The one-line installer provisions its own 3.12. sklearn / LightGBM extras can still fail to import on Windows 3.14 — those tests skip rather than define the floor. |
+| Node | `>=22.22.2` | 22.x on per-push lanes; 24 on the nightly target leg | Floor is jsdom 30's engine requirement. Required for the terminal, site, desktop, and Playwright. |
+| Operating system | Any platform that can provide Python `>=3.12` (Ubuntu 24.04 LTS is the Linux system-interpreter floor) | Per-push: Ubuntu (`ubuntu-latest` plus Electron on `ubuntu-24.04`). Nightly: macOS, Windows, and a fail-soft `ubuntu-26.04` preview. Desktop-release Linux build legs still use `ubuntu-22.04` images with a managed toolchain. | Ubuntu 22.04's *system* Python is 3.10 and cannot meet the source-install floor. The one-line installer sidesteps this by provisioning `~/.flinttrade/tools`. |
 
 ## Brokers
 
