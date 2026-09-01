@@ -874,7 +874,7 @@ class KotakNeoAdapter(BrokerAdapter):
         tag = session.algo_id or None
         params = M.to_place_order_params(order, trading_symbol, tag=tag)
         resp = await self._call(self._client(session).place_order, params)
-        return M.extract_order_id(resp)
+        return M.extract_order_id(M.require_write_success(resp))
 
     async def modify_order(
         self, session: Session, order_id: str, changes: dict, *, _router_token: object | None = None
@@ -886,7 +886,7 @@ class KotakNeoAdapter(BrokerAdapter):
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         params = M.to_modify_order_params(order_id, changes)
         resp = await self._call(self._client(session).modify_order, params)
-        M.ensure_ok(resp)
+        M.require_write_success(resp, expected_order_id=str(order_id))
 
     async def cancel_order(
         self,

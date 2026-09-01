@@ -442,7 +442,8 @@ def require_write_success(resp: Any, *, expected_order_id: str | None = None) ->
     ``ensure_ok`` remains deliberately tolerant for legacy read surfaces. Live
     mutations need the stronger contract documented by the place/cancel APIs:
     an object with ``stat=Ok``, integer ``stCode=200`` and a canonical order
-    number. When cancelling, that number must be the exact requested order.
+    number. When modifying or cancelling, that number must be the exact
+    requested order.
     """
     ensure_ok(resp)
     if not isinstance(resp, dict):
@@ -463,7 +464,7 @@ def require_write_success(resp: Any, *, expected_order_id: str | None = None) ->
     ):
         raise KotakNeoMappingError("Kotak Neo write response has no canonical order id")
     if expected_order_id is not None and order_id != expected_order_id:
-        raise KotakNeoMappingError("Kotak Neo cancellation acknowledged a different order id")
+        raise KotakNeoMappingError("Kotak Neo write acknowledged a different order id")
     return resp
 
 
