@@ -46,7 +46,7 @@ ADAPTER_FACTORIES: dict[str, AdapterFactory] = {
 COMMON_READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "trades")
 ORDER_DETAIL_READ_CHOICES = ("orderstatus", "orderhistory", "ordertrades")
 COMMON_MARKET_READ_CHOICES = ("quotes", "depth", "margin", "history")
-DHAN_MARKET_READ_CHOICES = ("quotes", "margin", "history")
+DHAN_MARKET_READ_CHOICES = ("quotes", "ltp", "ohlc", "quote_details", "margin", "history")
 DHAN_SECURITY_RESOLVER_READ_CHOICES = frozenset(DHAN_MARKET_READ_CHOICES)
 GROWW_MARKET_READ_CHOICES = ("quotes", "ltp", "ohlc", "margin", "history", "expiry")
 INDMONEY_MARKET_READ_CHOICES = ("quotes", "ltp", "depth", "margin", "history")
@@ -59,7 +59,6 @@ PROBE_INDEX_EXCHANGE = "NSE_INDEX"
 PROBE_OPTION_SYMBOL = "NFO:NIFTY25000CE"
 KOTAK_PROBE_EXCHANGE = PROBE_EXCHANGE
 KOTAK_PROBE_SYMBOL = PROBE_SYMBOL
-KOTAK_PROBE_QUOTE_SYMBOL = PROBE_QUOTE_SYMBOL
 KOTAK_READ_CHOICES = (
     "funds",
     "limits",
@@ -526,6 +525,13 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
             if callable(call)
             else None
         )
+    if name == "quote_details":
+        call = getattr(adapter, "quote_details", None)
+        return (
+            (lambda session: call(session, [PROBE_QUOTE_SYMBOL], "ltp"))
+            if callable(call)
+            else None
+        )
     if name in {"depth", "market_depth"}:
         return (
             (lambda session: adapter.market_depth(session, [PROBE_QUOTE_SYMBOL]))
@@ -585,8 +591,6 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
             return lambda session: adapter.scrip_master(session, KOTAK_PROBE_EXCHANGE)
         if name == "search_scrip":
             return lambda session: adapter.search_scrip(session, KOTAK_PROBE_SYMBOL, KOTAK_PROBE_EXCHANGE)
-        if name == "quote_details":
-            return lambda session: adapter.quote_details(session, [KOTAK_PROBE_QUOTE_SYMBOL], "ltp")
     return getattr(adapter, name, None)
 
 

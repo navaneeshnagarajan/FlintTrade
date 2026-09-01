@@ -246,6 +246,26 @@ def test_dhan_market_probe_bootstraps_security_resolver(monkeypatch, capsys) -> 
     assert "TOKEN1" not in out
 
 
+def test_dhan_probe_dispatches_quote_projections(monkeypatch, capsys) -> None:
+    """Dhan live-probe inventory can exercise ltp/ohlc/quote_details without a live broker."""
+    fake = _FakeAdapter()
+    values = iter(["CLIENT1", "TOKEN1"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "dhan", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("dhan", "access_token", ["ltp", "ohlc", "quote_details"]))
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert ("ltp", ("NSE:RELIANCE",)) in fake.calls
+    assert ("ohlc", ("NSE:RELIANCE",)) in fake.calls
+    assert ("quote_details", ("NSE:RELIANCE",), "ltp") in fake.calls
+    assert "ltp: ok object_keys=1" in out
+    assert "ohlc: ok rows=1" in out
+    assert "quote_details: ok rows=1" in out
+    assert "TOKEN1" not in out
+
+
 def test_dhan_account_only_probe_skips_security_resolver(monkeypatch, capsys) -> None:
     fake = _FakeDhanResolverAdapter()
     values = iter(["CLIENT1", "TOKEN1"])
@@ -366,6 +386,12 @@ def test_resolve_reads_is_broker_specific() -> None:
     assert "market_depth" not in probe._resolve_reads("dhan", ["all"])
     assert "depth" not in probe._resolve_reads("dhan", ["all"])
     assert "depth" not in probe._resolve_reads("dhan", ["default"])
+    assert "ltp" in probe._resolve_reads("dhan", ["all"])
+    assert "ohlc" in probe._resolve_reads("dhan", ["all"])
+    assert "quote_details" in probe._resolve_reads("dhan", ["all"])
+    assert "ltp" in probe._resolve_reads("dhan", ["default"])
+    assert "ohlc" in probe._resolve_reads("dhan", ["default"])
+    assert "quote_details" in probe._resolve_reads("dhan", ["default"])
     assert "quotes" in probe._resolve_reads("groww", ["default"])
     assert "ltp" in probe._resolve_reads("groww", ["default"])
     assert "ohlc" in probe._resolve_reads("groww", ["default"])

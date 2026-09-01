@@ -1456,6 +1456,73 @@ async def test_quote_details_rejects_unknown_type():
     assert mock.calls == []
 
 
+class _TwoEquityResolver:
+    def __call__(self, symbol: str, exchange: str) -> str:
+        mapping = {("RELIANCE", "NSE"): "11536", ("INFY", "NSE"): "1594"}
+        try:
+            return mapping[(symbol, exchange)]
+        except KeyError as exc:
+            raise ValueError(f"unknown {symbol}/{exchange}") from exc
+
+
+class _PartialQuoteDhan(MockDhan):
+    def quote_data(self, securities):
+        self.calls.append(("quote", securities))
+        return {
+            "status": "success",
+            "data": {
+                "NSE_EQ": {
+                    "11536": {
+                        "last_price": 2901.5,
+                        "ohlc": {"open": 2890, "high": 2910, "low": 2885, "close": 2888},
+                        "volume": 1_200_000,
+                    }
+                }
+            },
+        }
+
+
+@pytest.mark.asyncio
+async def test_quotes_omit_missing_feed_rows_without_fabricating_zeros():
+    """Multi-symbol Dhan quotes are explicitly partial: omit misses, never zero-fill.
+
+    The same omit-missing contract is used by INDmoney quotes and the native LTP
+    facade. Completeness is not required on this path, unlike Upstox option Greeks.
+    """
+    mock = _PartialQuoteDhan()
+    adapter = DhanAdapter(client_factory=lambda _s: mock, security_resolver=_TwoEquityResolver())
+    session = await _session(adapter)
+
+    quotes = await adapter.quotes(session, ["NSE:RELIANCE", "NSE:INFY"])
+
+    assert [q.symbol for q in quotes] == ["RELIANCE"]
+    assert quotes[0].ltp == 2901.5
+    assert mock.calls == [("quote", {"NSE_EQ": [11536, 1594]})]
+
+
+@pytest.mark.asyncio
+async def test_quote_projections_inherit_partial_feed_rows():
+    """LTP/OHLC/quote_details reuse quotes(), so missing feed rows stay omitted."""
+    mock = _PartialQuoteDhan()
+    adapter = DhanAdapter(client_factory=lambda _s: mock, security_resolver=_TwoEquityResolver())
+    session = await _session(adapter)
+    symbols = ["NSE:RELIANCE", "NSE:INFY"]
+
+    prices = await adapter.ltp(session, symbols)
+    ohlc = await adapter.ohlc(session, symbols)
+    details = await adapter.quote_details(session, symbols)
+
+    assert prices == {"NSE:RELIANCE": 2901.5}
+    assert [row["symbol"] for row in ohlc] == ["RELIANCE"]
+    assert [row["symbol"] for row in details] == ["RELIANCE"]
+    assert details[0]["ltp"] == 2901.5
+    assert mock.calls == [
+        ("quote", {"NSE_EQ": [11536, 1594]}),
+        ("quote", {"NSE_EQ": [11536, 1594]}),
+        ("quote", {"NSE_EQ": [11536, 1594]}),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_historical_intraday_and_daily():
     mock = MockDhan()

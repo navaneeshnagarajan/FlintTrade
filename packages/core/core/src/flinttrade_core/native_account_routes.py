@@ -3149,10 +3149,14 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
     except NotImplementedError:
         return jsonify({"status": "error", "message": f"{adapter_id} adapter does not support {kind} reads."}), 501
     except Exception as exc:  # noqa: BLE001 - classify before surfacing a public route error
+        from flinttrade_core.exceptions import UnsupportedCapabilityError  # noqa: PLC0415
         from flinttrade_gateway.native_login import (  # noqa: PLC0415
             should_drop_session_after_probe_error,
             should_keep_session_after_probe_error,
         )
+
+        if isinstance(exc, UnsupportedCapabilityError):
+            return jsonify({"status": "error", "message": str(exc)}), 400
 
         if should_keep_session_after_probe_error(exc):
             logger.info(

@@ -1751,6 +1751,73 @@ def test_native_account_reads_include_dhan_quote_details(client, monkeypatch):
     assert row["close"] == 1448
 
 
+def test_native_dhan_quote_details_rejects_unknown_type_without_broker_read(client, monkeypatch):
+    """Invalid Dhan quote_type is a client 4xx and must not call the broker."""
+    from flinttrade_gateway.brokers.dhan import DhanAdapter
+
+    async def _funds(_self, _session):
+        return {"available_balance": 0.0}
+
+    async def _quotes(_self, _session, _symbols):
+        raise AssertionError("invalid quote_type must not contact the broker")
+
+    monkeypatch.setattr(DhanAdapter, "funds", _funds)
+    monkeypatch.setattr(DhanAdapter, "quotes", _quotes)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "dhan",
+            "account_id": "DHANBADTYPE",
+            "credentials": {"client_id": "1100000000", "access_token": "tok"},
+        },
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    details = c.get(
+        "/api/v1/native/accounts/dhan/DHANBADTYPE/quote_details?symbol=INFY&exchange=NSE&quote_type=depth"
+    )
+    assert details.status_code == 400, details.get_json()
+    body = details.get_json()
+    assert body["status"] == "error"
+    assert "quote_type" in body["message"]
+
+
+def test_native_dhan_ltp_omits_missing_symbols_without_fabricating_zero(client, monkeypatch):
+    """Native Dhan LTP keeps quotes' omit-missing contract and never invents 0.0 rows."""
+    from flinttrade_core.models import Quote
+    from flinttrade_gateway.brokers.dhan import DhanAdapter
+
+    async def _funds(_self, _session):
+        return {"available_balance": 0.0}
+
+    async def _quotes(_self, _session, symbols):
+        assert symbols == ["NSE:INFY", "NSE:RELIANCE"]
+        return [Quote(symbol="INFY", exchange="NSE", ltp=1450.25, open=1440, high=1460, low=1430, close=1448)]
+
+    monkeypatch.setattr(DhanAdapter, "funds", _funds)
+    monkeypatch.setattr(DhanAdapter, "quotes", _quotes)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "dhan",
+            "account_id": "DHANPARTIAL",
+            "credentials": {"client_id": "1100000000", "access_token": "tok"},
+        },
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    ltp = c.get("/api/v1/native/accounts/dhan/DHANPARTIAL/ltp?symbols=NSE:INFY,NSE:RELIANCE")
+    assert ltp.status_code == 200, ltp.get_json()
+    rows = ltp.get_json()["data"]
+    assert rows == [{"symbol": "INFY", "exchange": "NSE", "ltp": 1450.25}]
+
+
 def test_native_account_reads_include_ohlc(client, monkeypatch):
     """Native account reads can expose broker OHLC snapshots when an adapter supports them."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter

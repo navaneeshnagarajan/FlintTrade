@@ -1692,7 +1692,10 @@ class DhanAdapter(BrokerAdapter):
         kind = str(quote_type or "all").strip().lower() or "all"
         allowed = {"all", "ltp", "ohlc"}
         if kind not in allowed:
-            raise BrokerError(f"Dhan quote_type must be one of {sorted(allowed)}, got {quote_type!r}")
+            raise UnsupportedCapabilityError(
+                f"Dhan quote_type must be one of {sorted(allowed)}, got {quote_type!r}",
+                broker_id="dhan",
+            )
         quotes = await self.quotes(session, symbols)
         return [
             {
