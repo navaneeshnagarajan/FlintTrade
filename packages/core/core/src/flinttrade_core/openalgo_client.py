@@ -8,7 +8,7 @@ import math
 import threading
 import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time as clock_time
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -241,15 +241,53 @@ def _normalise_calendar_date(value: Any) -> str | None:
 
 
 def _finite_session_timestamp(value: Any) -> float | None:
+    parsed = _parse_session_bound(value)
+    if parsed is None or parsed[0] != "numeric":
+        return None
+    return parsed[1]
+
+
+def _parse_session_bound(value: Any) -> tuple[str, float] | None:
+    """Parse a session bound as an epoch number or seconds past midnight."""
     if isinstance(value, bool) or value is None:
         return None
-    try:
+    if isinstance(value, int | float):
         number = float(value)
-    except (TypeError, ValueError):
+        if not math.isfinite(number):
+            return None
+        return ("numeric", number)
+    text = str(value).strip()
+    if not text:
         return None
-    if not math.isfinite(number):
+    if ":" not in text:
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+        if not math.isfinite(number):
+            return None
+        return ("numeric", number)
+    try:
+        parsed = clock_time.fromisoformat(text)
+    except ValueError:
         return None
-    return number
+    seconds = (
+        parsed.hour * 3600
+        + parsed.minute * 60
+        + parsed.second
+        + parsed.microsecond / 1_000_000
+    )
+    return ("clock", seconds)
+
+
+def _usable_session_window(start_value: Any, end_value: Any) -> bool:
+    start = _parse_session_bound(start_value)
+    end = _parse_session_bound(end_value)
+    if start is None or end is None or start[0] != end[0]:
+        return False
+    if start[0] == "numeric":
+        return end[1] > start[1]
+    return start[1] != end[1]
 
 
 def _normalise_open_exchange(value: Any) -> dict[str, Any] | None:
@@ -258,9 +296,7 @@ def _normalise_open_exchange(value: Any) -> dict[str, Any] | None:
     exchange = str(value.get("exchange") or "").strip().upper()
     if not exchange:
         return None
-    start_time = _finite_session_timestamp(value.get("start_time"))
-    end_time = _finite_session_timestamp(value.get("end_time"))
-    if start_time is None or end_time is None or end_time <= start_time:
+    if not _usable_session_window(value.get("start_time"), value.get("end_time")):
         return None
     session: dict[str, Any] = {
         "exchange": exchange,
@@ -417,11 +453,18 @@ def normalise_market_calendar(payload: Any) -> list[dict[str, Any]]:
             )
             raw_open = entry.get("open_exchanges", [])
             if isinstance(raw_open, list | tuple):
-                open_exchanges = [
-                    session
-                    for candidate in raw_open
-                    if (session := _normalise_open_exchange(candidate)) is not None
-                ]
+                for candidate in raw_open:
+                    session = _normalise_open_exchange(candidate)
+                    if session is not None:
+                        open_exchanges.append(session)
+                        continue
+                    declared_exchange = (
+                        str(candidate.get("exchange") or "").strip().upper()
+                        if isinstance(candidate, dict)
+                        else ""
+                    )
+                    if declared_exchange:
+                        closed_exchanges.add(declared_exchange)
             if holiday_type != "SETTLEMENT_HOLIDAY" and not closed_exchanges:
                 closed_exchanges = {"*"}
         else:
