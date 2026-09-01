@@ -3270,7 +3270,7 @@ export const getHoldings = async (
 
 // --- Utility ---
 export const ping = () => post<{ status: string }>("ping"); // OpenAlgo docs: POST /api/v1/ping
-export function getHolidays(year?: number | string): Promise<Holiday[]> {
+export async function getHolidays(year?: number | string): Promise<Holiday[]> {
   return post<Holiday[]>("market/holidays", { year: holidayYear(year) });
 }
 export function getTimings(date?: string): Promise<MarketTiming[]> {

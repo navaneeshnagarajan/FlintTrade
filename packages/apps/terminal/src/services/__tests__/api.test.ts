@@ -3005,7 +3005,7 @@ describe("OpenAlgo API client (api.ts)", () => {
   });
 
   it("authenticates OpenAlgo instruments GETs for each option-chain exchange", async () => {
-    fetchSpy.mockResolvedValue(jsonResponse({ status: "success", data: [] }));
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({ status: "success", data: [] })));
 
     await expect(getInstruments()).resolves.toEqual([]);
 
