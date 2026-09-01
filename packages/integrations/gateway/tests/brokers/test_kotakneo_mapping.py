@@ -619,7 +619,7 @@ def test_require_write_success_rejects_ambiguous_acknowledgement(response):
         require_write_success(response)
 
 
-def test_require_write_success_rejects_different_cancelled_order():
+def test_require_write_success_rejects_different_order_id():
     response = {"stat": "Ok", "nOrdNo": "250720000007588", "stCode": 200}
 
     with pytest.raises(KotakNeoMappingError, match="different order id"):

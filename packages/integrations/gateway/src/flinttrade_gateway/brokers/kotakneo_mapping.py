@@ -440,7 +440,7 @@ def require_write_success(resp: Any, *, expected_order_id: str | None = None) ->
     """Require Kotak's documented affirmative write acknowledgement.
 
     ``ensure_ok`` remains deliberately tolerant for legacy read surfaces. Live
-    mutations need the stronger contract documented by the place/cancel APIs:
+    mutations need the stronger contract documented by the place/modify/cancel APIs:
     an object with ``stat=Ok``, integer ``stCode=200`` and a canonical order
     number. When modifying or cancelling, that number must be the exact
     requested order.
