@@ -105,15 +105,19 @@ class _LearningCleanupOwner:
             self._thread.join(timeout)
             if self._thread.is_alive():
                 return
-            if self._error is not None:
-                raise self._error
-            self._finalised = True
-            return
+            if self._error is None:
+                self._finalised = True
+                return
+            # The closer already failed. Retry finalisation instead of
+            # re-raising that cached error on every later shutdown.
         try:
             self._finalised = _finalise_session_learning_memory(self._trader, timeout=timeout)
-        except BaseException:
+        except BaseException as exc:
+            self._error = exc
             self._finalised = False
             raise
+        if self._finalised:
+            self._error = None
 
     def is_alive(self) -> bool:
         return not self._finalised
