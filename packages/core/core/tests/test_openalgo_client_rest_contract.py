@@ -131,6 +131,62 @@ async def test_modify_order_includes_required_disclosed_quantity_and_trigger_pri
 
 
 @pytest.mark.asyncio
+async def test_modify_order_refuses_stop_loss_without_positive_trigger() -> None:
+    """SL/SL-M modify must not POST a manufactured zero trigger."""
+    from flinttrade_core.models import ModifyOrder, PriceType
+
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success", "orderid": "123"}
+    )
+
+    try:
+        with pytest.raises(ValueError, match="trigger_price"):
+            await client.modify_order(
+                ModifyOrder(
+                    orderid="123",
+                    symbol="RELIANCE",
+                    pricetype=PriceType.SL,
+                    trigger_price="0",
+                )
+            )
+    finally:
+        await client.close()
+
+    client._post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_orderbook_preserves_trigger_and_disclosed_aliases() -> None:
+    """Orderbook rows keep broker trigger/disclosure through camelCase aliases."""
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "status": "success",
+            "data": [
+                {
+                    "orderid": "OA-SL",
+                    "status": "open",
+                    "symbol": "RELIANCE",
+                    "pricetype": "SL",
+                    "triggerPrice": "1490.5",
+                    "disclosedQuantity": "25",
+                }
+            ],
+        }
+    )
+
+    try:
+        rows = await client.orderbook()
+    finally:
+        await client.close()
+
+    assert len(rows) == 1
+    assert rows[0].trigger_price == "1490.5"
+    assert rows[0].disclosed_quantity == "25"
+
+
+@pytest.mark.asyncio
 async def test_place_options_multi_order_puts_pricetype_product_on_legs() -> None:
     """OptionsMultiOrderSchema rejects unknown top-level pricetype/product."""
     from flinttrade_core.models import Action, OptionType, OptionsLeg, OptionsMultiOrder, PriceType, Product

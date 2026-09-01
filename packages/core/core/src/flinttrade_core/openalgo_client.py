@@ -37,6 +37,7 @@ from .models import (
     OrderResponse,
     OrderStatus,
     Position,
+    PriceType,
     Quote,
     SmartOrder,
     SplitOrder,
@@ -69,6 +70,52 @@ def _sum_fund_components(*values: Any) -> str:
     except (InvalidOperation, TypeError, ValueError):
         return "0"
     return format(total, "f") if total.is_finite() else "0"
+
+
+def _positive_decimal(value: Any) -> bool:
+    """Return True when ``value`` parses as a finite decimal greater than zero."""
+    try:
+        amount = Decimal(str(value).strip())
+    except (InvalidOperation, AttributeError, TypeError, ValueError):
+        return False
+    return amount.is_finite() and amount > 0
+
+
+def _order_row_text(row: dict[str, Any], *keys: str) -> str | None:
+    """Return the first non-empty alias from an orderbook/status row."""
+    for key in keys:
+        if key not in row:
+            continue
+        value = row[key]
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _order_status_from_row(row: dict[str, Any]) -> OrderStatus:
+    """Build ``OrderStatus`` while preserving trigger and disclosed-quantity aliases.
+
+    OpenAlgo and broker plugins emit ``triggerPrice`` / ``disclosedQuantity`` as
+    well as snake_case. Pydantic drops unknown extras, so those aliases must be
+    copied onto the model fields before construction.
+    """
+    mapped = dict(row)
+    trigger = _order_row_text(row, "trigger_price", "triggerPrice", "triggerprice")
+    if trigger is not None:
+        mapped["trigger_price"] = trigger
+    disclosed = _order_row_text(
+        row,
+        "disclosed_quantity",
+        "disclosedQuantity",
+        "disclosedqty",
+        "disclosed_qty",
+    )
+    if disclosed is not None:
+        mapped["disclosed_quantity"] = disclosed
+    return OrderStatus.model_validate(mapped)
 
 
 def _normalise_history_timestamp(value: Any) -> str:
@@ -783,6 +830,9 @@ class OpenAlgoClient:
         """Execute one GET with retry on the dedicated HTTP owner loop."""
         with self._config_guard:
             url = f"{self._base}/{endpoint}"
+            request_params = dict(params or {})
+            if "apikey" in request_params:
+                request_params["apikey"] = self._api_key
             request_headers = dict(headers or {})
             for name in tuple(request_headers):
                 if name.lower() in {"x-api-key", "x-api_key"}:
@@ -792,7 +842,7 @@ class OpenAlgoClient:
         last_exc: Exception | None = None
         for attempt in range(1, 4):
             try:
-                resp = await self._http.get(url, params=params, headers=request_headers)
+                resp = await self._http.get(url, params=request_params, headers=request_headers)
                 if resp.status_code >= 400:
                     raise APIError(resp.status_code, resp.text, endpoint)
                 return resp.json()
@@ -925,6 +975,8 @@ class OpenAlgoClient:
 
     async def modify_order(self, order: ModifyOrder) -> OrderResponse:
         """POST /api/v1/modifyorder"""
+        if order.pricetype in {PriceType.SL, PriceType.SL_M} and not _positive_decimal(order.trigger_price):
+            raise ValueError("trigger_price is required to modify a stop-loss order")
         payload = self._body({
             "strategy": order.strategy,
             "orderid": order.orderid,
@@ -963,7 +1015,7 @@ class OpenAlgoClient:
         """POST /api/v1/orderstatus"""
         payload = self._body({"strategy": strategy, "orderid": orderid})
         data = self._unwrap(await self._post("orderstatus", payload))
-        return OrderStatus(**data) if isinstance(data, dict) else OrderStatus()
+        return _order_status_from_row(data) if isinstance(data, dict) else OrderStatus()
 
     async def open_position(
         self, symbol: str, exchange: str = "NSE", product: str = "MIS", strategy: str = "Flint"
@@ -1336,7 +1388,7 @@ class OpenAlgoClient:
         """POST /api/v1/orderbook"""
         data = self._unwrap(await self._post("orderbook", self._body()))
         if isinstance(data, list):
-            return [OrderStatus(**o) for o in data]
+            return [_order_status_from_row(o) for o in data if isinstance(o, dict)]
         return []
 
     async def tradebook(self) -> list[Trade]:

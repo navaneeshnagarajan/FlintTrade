@@ -49,6 +49,12 @@ interface RawOrderRecord extends RawOrder {
   pricetype?: string;
   price_type?: string;
   trigger_price?: string | number;
+  triggerPrice?: string | number;
+  triggerprice?: string | number;
+  disclosed_quantity?: string | number;
+  disclosedQuantity?: string | number;
+  disclosedqty?: string | number;
+  disclosed_qty?: string | number;
   strategy?: string;
 }
 
@@ -63,6 +69,8 @@ interface OrderRow {
   price: string;
   priceNum: number;
   triggerPriceNum: number;
+  disclosedQuantityNum: number;
+  hasDisclosedQuantity: boolean;
   orderType: string;
   product: string;
   strategy: string;
@@ -105,6 +113,17 @@ function toNum(value: string | number | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function firstPresentValue(
+  ...values: Array<string | number | undefined>
+): string | number | undefined {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (String(value).trim() === "") continue;
+    return value;
+  }
+  return undefined;
+}
+
 /**
  * A row qualifies for Modify only when every field the gated modify route
  * requires is present and valid — otherwise the request would be rejected
@@ -118,7 +137,8 @@ function canModify(row: OrderRow): boolean {
     row.exchange !== "" &&
     VALID_ACTIONS.has(row.action) &&
     VALID_ORDER_TYPES.has(row.orderType) &&
-    VALID_PRODUCTS.has(row.product)
+    VALID_PRODUCTS.has(row.product) &&
+    (!(row.orderType === "SL" || row.orderType === "SL-M") || row.triggerPriceNum > 0)
   );
 }
 
@@ -184,7 +204,7 @@ interface ModifyOverlayProps {
   row: OrderRow;
   pending: boolean;
   canSubmit: boolean;
-  onSubmit: (qty: number, price: number, triggerPrice: number) => void;
+  onSubmit: (qty: number, price: number, triggerPrice: number, disclosedQuantity: number) => void;
   onClose: () => void;
 }
 
@@ -192,6 +212,9 @@ function ModifyOverlay({ row, pending, canSubmit, onSubmit, onClose }: ModifyOve
   const [qty, setQty] = useState(String(row.quantityNum > 0 ? row.quantityNum : 1));
   const [price, setPrice] = useState(row.priceNum > 0 ? String(row.priceNum) : "");
   const [trigger, setTrigger] = useState(row.triggerPriceNum > 0 ? String(row.triggerPriceNum) : "");
+  const [disclosed, setDisclosed] = useState(
+    row.hasDisclosedQuantity ? String(row.disclosedQuantityNum) : "",
+  );
   const [error, setError] = useState<string | null>(null);
 
   const priceRequired = row.orderType === "LIMIT" || row.orderType === "SL";
@@ -202,6 +225,7 @@ function ModifyOverlay({ row, pending, canSubmit, onSubmit, onClose }: ModifyOve
     const qtyNum = parseInt(qty, 10);
     const priceNum = parseFloat(price) || 0;
     const triggerNum = parseFloat(trigger) || 0;
+    const disclosedNum = disclosed.trim() === "" ? row.disclosedQuantityNum : parseFloat(disclosed);
     if (!Number.isFinite(qtyNum) || qtyNum < 1) {
       setError("Quantity must be at least 1");
       return;
@@ -214,8 +238,12 @@ function ModifyOverlay({ row, pending, canSubmit, onSubmit, onClose }: ModifyOve
       setError("A trigger price above 0 is required for this order type");
       return;
     }
+    if (disclosed.trim() !== "" && (!Number.isFinite(disclosedNum) || disclosedNum < 0)) {
+      setError("Disclosed quantity cannot be negative");
+      return;
+    }
     setError(null);
-    onSubmit(qtyNum, priceNum, triggerNum);
+    onSubmit(qtyNum, priceNum, triggerNum, Number.isFinite(disclosedNum) ? disclosedNum : 0);
   }
 
   return (
@@ -274,6 +302,20 @@ function ModifyOverlay({ row, pending, canSubmit, onSubmit, onClose }: ModifyOve
               onChange={(e) => setTrigger(e.target.value)}
               disabled={!triggerRequired}
               placeholder={triggerRequired ? "0.00" : "N/A"}
+              className="h-8 text-xs font-mono"
+            />
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <label htmlFor="orders-modify-disclosed" className="text-xxs text-text-muted uppercase tracking-wider">
+              Disclosed Quantity
+            </label>
+            <Input
+              id="orders-modify-disclosed"
+              type="number"
+              min={0}
+              value={disclosed}
+              onChange={(e) => setDisclosed(e.target.value)}
+              placeholder="0"
               className="h-8 text-xs font-mono"
             />
           </div>
@@ -352,7 +394,19 @@ function OrdersWidget(_props: WidgetProps) {
         quantityNum: toNum(o.quantity),
         price: o.price ? String(o.price) : "MKT",
         priceNum: toNum(o.price),
-        triggerPriceNum: toNum(o.trigger_price),
+        triggerPriceNum: toNum(firstPresentValue(o.trigger_price, o.triggerPrice, o.triggerprice)),
+        disclosedQuantityNum: toNum(firstPresentValue(
+          o.disclosed_quantity,
+          o.disclosedQuantity,
+          o.disclosedqty,
+          o.disclosed_qty,
+        )),
+        hasDisclosedQuantity: firstPresentValue(
+          o.disclosed_quantity,
+          o.disclosedQuantity,
+          o.disclosedqty,
+          o.disclosed_qty,
+        ) !== undefined,
         orderType,
         product: String(o.product ?? "").toUpperCase(),
         strategy: typeof o.strategy === "string" && o.strategy !== "" ? o.strategy : "Flint",
@@ -455,7 +509,7 @@ function OrdersWidget(_props: WidgetProps) {
   }, [cancelIntent, refreshOrders]);
 
   const handleModifySubmit = useCallback(
-    async (qty: number, price: number, triggerPrice: number) => {
+    async (qty: number, price: number, triggerPrice: number, disclosedQuantity: number) => {
       const intent = modifyIntent;
       if (
         !actionGateRef.current
@@ -483,6 +537,9 @@ function OrdersWidget(_props: WidgetProps) {
         product: row.product as "MIS" | "CNC" | "NRML",
         price,
         triggerPrice,
+        ...(row.hasDisclosedQuantity || disclosedQuantity > 0
+          ? { disclosedQuantity }
+          : {}),
         strategy: row.strategy,
       };
       try {

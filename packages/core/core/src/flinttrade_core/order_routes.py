@@ -33,7 +33,7 @@ import asyncio
 import logging
 import math
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import Any
@@ -552,6 +552,7 @@ def _admit_modify_intent(
     account_id: str,
     family: str = "regular",
     lease: Any,
+    requested_fields: Collection[str] | None = None,
 ) -> tuple[tuple[Any, int] | None, Any | None, list[Any]]:
     """Prove no-increase intent or run complete admission for a live modify."""
     from .l2_state import PortfolioSafetyStateError, classify_modify_intent  # noqa: PLC0415
@@ -565,6 +566,7 @@ def _admit_modify_intent(
                 changes,
                 account_id=account_id,
                 family=family,
+                requested_fields=requested_fields,
             )
         )
     except PortfolioSafetyStateError as refusal:
@@ -1451,6 +1453,7 @@ def _dispatch_live_modify(
         }), 403
 
     changes = _modify_changes(body)
+    requested_fields = _requested_modify_fields(body)
     try:
         ModifyOrder(orderid=order_id, **changes)  # validate up-front; no gate consumed on bad input
     except (ValueError, ValidationError) as exc:
@@ -1469,14 +1472,25 @@ def _dispatch_live_modify(
             adapter_id,
             account_id=account_id,
             lease=lease,
+            requested_fields=set(requested_fields),
         )
         if admission_block is not None:
             return admission_block
+        if str(changes.get("pricetype", "")).upper() in {"SL", "SL-M"}:
+            try:
+                trigger = float(str(changes.get("trigger_price", "0")).strip())
+            except (TypeError, ValueError):
+                trigger = 0.0
+            if not math.isfinite(trigger) or trigger <= 0:
+                return jsonify({
+                    "status": "error",
+                    "message": "A positive trigger price is required to modify a stop-loss order",
+                }), 400
 
         canonical = {
             "_op": "modify",
             "order_id": order_id,
-            "_requested_change_fields": _requested_modify_fields(body),
+            "_requested_change_fields": requested_fields,
             **changes,
         }
         hint = RoutingHint(adapter_id=adapter_id, account_id=account_id)

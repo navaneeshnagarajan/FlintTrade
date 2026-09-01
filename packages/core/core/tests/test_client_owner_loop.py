@@ -52,6 +52,39 @@ class TestRunSync:
         assert client._base == "https://openalgo.example:5443/api/v1"
         assert client._api_key == "rotated-key"
 
+    @pytest.mark.asyncio
+    async def test_get_on_owner_refreshes_query_apikey_with_endpoint(self):
+        client = _client()
+        captured: dict[str, object] = {}
+
+        class RecordingHttp:
+            async def get(self, url, **kwargs):
+                captured["url"] = url
+                captured["params"] = kwargs.get("params")
+                return httpx.Response(200, json={"status": "success"})
+
+            async def aclose(self) -> None:
+                return None
+
+        client._http = RecordingHttp()
+        stale = {"apikey": "test", "exchange": "NSE"}
+        client.reconfigure(
+            Settings(
+                openalgo_host="https://openalgo.example",
+                openalgo_port=5443,
+                openalgo_api_key="rotated-key",
+            )
+        )
+
+        try:
+            await client._get_on_owner("instruments", params=stale)
+        finally:
+            await client.shutdown()
+
+        assert captured["url"] == "https://openalgo.example:5443/api/v1/instruments"
+        assert captured["params"] == {"apikey": "rotated-key", "exchange": "NSE"}
+        assert stale["apikey"] == "test"
+
     def test_many_sequential_calls_one_owner_loop(self):
         client = _client()
 

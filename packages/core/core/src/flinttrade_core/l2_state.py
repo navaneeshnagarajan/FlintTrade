@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
@@ -1183,6 +1183,15 @@ def _normalise_authoritative_order(row: Any, fallback: Any = None) -> dict[str, 
         ).upper(),
         "price": _order_record_value(row, fallback, "price") or 0,
         "trigger_price": _order_record_value(row, fallback, "trigger_price", "triggerPrice") or 0,
+        "disclosed_quantity": _order_record_value(
+            row,
+            fallback,
+            "disclosed_quantity",
+            "disclosedQuantity",
+            "disclosedqty",
+            "disclosed_qty",
+        )
+        or 0,
     }
 
 
@@ -1421,6 +1430,24 @@ def _validated_order_quantities(current: Mapping[str, Any], proposed: Any) -> tu
     return current_quantity, proposed_quantity
 
 
+def _recover_omitted_modify_fields(
+    changes: Mapping[str, Any],
+    current: Mapping[str, Any],
+    requested_fields: Collection[str] | None,
+) -> None:
+    """Restore omitted full-replacement trigger/disclosure from the live order."""
+    if requested_fields is None or not isinstance(changes, MutableMapping):
+        return
+    if "trigger_price" not in requested_fields:
+        recovered = _text(current.get("trigger_price"))
+        if recovered and recovered != "0":
+            changes["trigger_price"] = recovered
+    if "disclosed_quantity" not in requested_fields:
+        recovered = _text(current.get("disclosed_quantity"))
+        if recovered and recovered != "0":
+            changes["disclosed_quantity"] = recovered
+
+
 async def classify_modify_intent(
     config: Mapping[str, Any],
     adapter_id: str,
@@ -1429,6 +1456,7 @@ async def classify_modify_intent(
     *,
     account_id: str = "default",
     family: str = "regular",
+    requested_fields: Collection[str] | None = None,
 ) -> ModifySafetyIntent:
     """Prove whether a replacement can increase exposure or reserved margin."""
     from flinttrade_core.models import Order  # noqa: PLC0415
@@ -1453,6 +1481,7 @@ async def classify_modify_intent(
     else:
         selected, fallback = matches[0], None
     current = _normalise_authoritative_order(selected, fallback)
+    _recover_omitted_modify_fields(changes, current, requested_fields)
     if current["status"] not in _ACTIVE_ORDER_STATUSES:
         raise PortfolioSafetyStateError("Authoritative order is not active and modifiable")
     if (

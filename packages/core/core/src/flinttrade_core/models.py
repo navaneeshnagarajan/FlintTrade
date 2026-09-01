@@ -366,6 +366,8 @@ class OrderStatus(BaseModel):
     filled_quantity: str = ""
     average_price: str = ""
     timestamp: str = ""
+    trigger_price: str = "0"
+    disclosed_quantity: str = "0"
 
 
 # ---------------------------------------------------------------------------

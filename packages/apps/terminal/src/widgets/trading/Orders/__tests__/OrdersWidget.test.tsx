@@ -328,6 +328,45 @@ describe("OrdersWidget", () => {
     });
   });
 
+  it("sends recovered trigger and disclosed quantity when modifying a stop-loss order", async () => {
+    mockUseOrders.mockReturnValue(queryResult({
+      data: [{
+        ...OPEN_ORDER,
+        pricetype: "SL",
+        triggerPrice: "1490.5",
+        disclosedQuantity: "25",
+      }],
+    }));
+    renderWidget();
+
+    fireEvent.click(screen.getByLabelText("Modify order ORD123"));
+    const dialog = screen.getByRole("dialog", { name: /modify order/i });
+    expect(within(dialog).getByLabelText("Trigger Price")).toHaveValue(1490.5);
+    expect(within(dialog).getByLabelText("Disclosed Quantity")).toHaveValue(25);
+    fireEvent.click(within(dialog).getByText("Modify Order"));
+
+    await waitFor(() => {
+      expect(mockModifyOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderId: "ORD123",
+          orderType: "SL",
+          triggerPrice: 1490.5,
+          disclosedQuantity: 25,
+        }),
+        expect.objectContaining({ mode: "live" }),
+      );
+    });
+  });
+
+  it("disables modify when a stop-loss order has no recoverable trigger", () => {
+    mockUseOrders.mockReturnValue(queryResult({
+      data: [{ ...OPEN_ORDER, pricetype: "SL" }],
+    }));
+    renderWidget();
+
+    expect(screen.getByLabelText("Modify order ORD123")).toBeDisabled();
+  });
+
   it("blocks a LIMIT modify with no price instead of sending ₹0", async () => {
     mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER] }));
     renderWidget();
