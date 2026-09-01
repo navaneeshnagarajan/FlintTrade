@@ -88,6 +88,7 @@ class _LearningCleanupOwner:
         self._thread: threading.Thread | None = None
         self._finalised = False
         self._error: BaseException | None = None
+        self._error_reported = False
 
     def attach_thread(self, thread: threading.Thread) -> None:
         self._thread = thread
@@ -98,6 +99,7 @@ class _LearningCleanupOwner:
             _finalise_session_learning_memory(self._trader, timeout=None)
         except BaseException as exc:
             self._error = exc
+            self._error_reported = False
             logger.exception("Deferred learning-memory close failed")
 
     def join(self, timeout: float | None = None) -> None:
@@ -108,16 +110,21 @@ class _LearningCleanupOwner:
             if self._error is None:
                 self._finalised = True
                 return
-            # The closer already failed. Retry finalisation instead of
-            # re-raising that cached error on every later shutdown.
+            if not self._error_reported:
+                # Fail this shutdown closed. A later shutdown can retry the
+                # finalisation rather than re-raising forever.
+                self._error_reported = True
+                raise self._error
         try:
             self._finalised = _finalise_session_learning_memory(self._trader, timeout=timeout)
         except BaseException as exc:
             self._error = exc
+            self._error_reported = True
             self._finalised = False
             raise
         if self._finalised:
             self._error = None
+            self._error_reported = False
 
     def is_alive(self) -> bool:
         return not self._finalised

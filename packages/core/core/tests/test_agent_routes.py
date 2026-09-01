@@ -865,6 +865,35 @@ def test_runtime_shutdown_fails_closed_when_deferred_closer_raises() -> None:
     assert mod.shutdown_agent_runtime(app, timeout=1.0) is False
 
 
+def test_runtime_shutdown_surfaces_closer_failure_before_retrying() -> None:
+    """The first shutdown reports the worker error; only a later shutdown retries."""
+    app = _make_app()
+    memory = MagicMock()
+    memory.close.side_effect = [RuntimeError("disk unavailable"), None]
+
+    class _Trader:
+        def __init__(self) -> None:
+            self.memory = memory
+
+        def join_background_learning(self, timeout: float | None = None) -> bool:
+            return True
+
+    cleanup = mod._defer_session_learning_memory_close(_Trader())
+    cleanup.join(timeout=2.0)
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        mod._RUNNER.clear()  # noqa: SLF001
+
+    assert mod.shutdown_agent_runtime(app, timeout=1.0) is False
+    assert memory.close.call_count == 1
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        assert any(owner.is_alive() for owner in mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
+
+    assert mod.shutdown_agent_runtime(app, timeout=1.0) is True
+    assert memory.close.call_count == 2
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        assert not any(owner.is_alive() for owner in mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
+
+
 def test_runtime_shutdown_retries_deferred_cleanup_after_closer_failure() -> None:
     """A later shutdown must retry finalisation instead of re-raising the closer error."""
     app = _make_app()
@@ -885,6 +914,11 @@ def test_runtime_shutdown_retries_deferred_cleanup_after_closer_failure() -> Non
         assert any(owner.is_alive() for owner in mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
 
     assert not cleanup.is_alive()
+    assert mod.shutdown_agent_runtime(app, timeout=1.0) is False
+    assert memory.close.call_count == 1
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        assert any(owner.is_alive() for owner in mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
+
     assert mod.shutdown_agent_runtime(app, timeout=1.0) is False
     assert memory.close.call_count == 2
     with mod._RUNNER_LOCK:  # noqa: SLF001
