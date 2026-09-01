@@ -21,6 +21,25 @@ def test_hashing_embedder_does_not_emit_zero_vectors_on_sign_cancellation() -> N
     assert _distance("cosine", stored, query) == pytest.approx(0.0)
 
 
+def test_hashing_collision_fallback_uses_canonical_tokens() -> None:
+    """Case, punctuation, and extra whitespace must share one fallback bucket."""
+    import numpy as np
+
+    from flinttrade_ai.local_vector_store import HashingEmbeddingFunction, _distance
+
+    embedder = HashingEmbeddingFunction()
+    canonical = embedder("support momentum")[0]
+    variants = [
+        embedder("Support momentum")[0],
+        embedder("support  momentum")[0],
+        embedder("support momentum!")[0],
+    ]
+
+    assert float(np.linalg.norm(canonical)) == pytest.approx(1.0)
+    for variant in variants:
+        assert _distance("cosine", canonical, variant) == pytest.approx(0.0)
+
+
 def test_query_with_zero_results_returns_empty() -> None:
     """A zero result limit must not turn into an unbounded vector dump."""
     from flinttrade_ai.local_vector_store import EphemeralClient
@@ -318,6 +337,35 @@ def test_empty_embedding_is_rejected_without_pinning_collection() -> None:
 
     assert collection.count() == 0
     assert client._known_embedding_dim("empty") is None
+    client.close()
+
+
+def test_l2_distance_is_squared_euclidean() -> None:
+    """Default/l2 ranking must match Chroma HNSW squared Euclidean, not the L2 norm."""
+    import numpy as np
+
+    from flinttrade_ai.local_vector_store import EphemeralClient, _distance
+
+    left = np.array([1.0, 0.0], dtype=np.float32)
+    right = np.array([0.0, 1.0], dtype=np.float32)
+    assert _distance("l2", left, right) == pytest.approx(2.0)
+    assert _distance("cosine", left, right) == pytest.approx(1.0)
+
+    unit_a = np.array([1.0, 0.0], dtype=np.float32)
+    unit_b = np.array([0.6, 0.8], dtype=np.float32)
+    squared = _distance("l2", unit_a, unit_b)
+    cosine_sim = 1.0 - _distance("cosine", unit_a, unit_b)
+    assert 1.0 - (squared / 2.0) == pytest.approx(cosine_sim)
+
+    client = EphemeralClient()
+    collection = client.get_or_create_collection(name="l2", metadata={"hnsw:space": "l2"})
+    collection.add(
+        ids=["orthogonal"],
+        documents=["unit orthogonal"],
+        embeddings=[[0.0, 1.0]],
+    )
+    hits = collection.query(query_embeddings=[[1.0, 0.0]], n_results=1)
+    assert hits["distances"][0][0] == pytest.approx(2.0)
     client.close()
 
 

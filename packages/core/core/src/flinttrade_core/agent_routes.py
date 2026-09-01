@@ -48,12 +48,16 @@ _AGENT_ACTOR_ID = "autonomous-trader"
 # Single-session runner state.
 _RUNNER: dict[str, Any] = {}
 _RUNNER_LOCK = threading.Lock()
+# Deferred learning-memory closers outlive the runner slot. A later /start
+# replaces ``_RUNNER`` wholesale; process shutdown must still join these.
+_LEARNING_CLEANUP_OWNERS: list[threading.Thread] = []
 
 
 def _reset_runner_for_tests() -> None:
     """Clear the runner state (test isolation helper)."""
     with _RUNNER_LOCK:
         _RUNNER.clear()
+        _LEARNING_CLEANUP_OWNERS.clear()
 
 
 def _close_learning_memory(memory: Any) -> None:
@@ -76,6 +80,26 @@ def _finalise_session_learning_memory(
     return True
 
 
+def _register_learning_cleanup_owner(thread: threading.Thread) -> None:
+    """Retain one deferred closer independently of the current runner slot."""
+    with _RUNNER_LOCK:
+        _LEARNING_CLEANUP_OWNERS[:] = [owner for owner in _LEARNING_CLEANUP_OWNERS if owner.is_alive()]
+        _LEARNING_CLEANUP_OWNERS.append(thread)
+
+
+def _join_learning_cleanup_owners(*, deadline: float) -> bool:
+    """Join leftover session closers. Returns False if any miss the deadline."""
+    with _RUNNER_LOCK:
+        owners = list(_LEARNING_CLEANUP_OWNERS)
+    for owner in owners:
+        owner.join(timeout=max(0.0, deadline - monotonic()))
+        if owner.is_alive():
+            return False
+    with _RUNNER_LOCK:
+        _LEARNING_CLEANUP_OWNERS[:] = [owner for owner in _LEARNING_CLEANUP_OWNERS if owner.is_alive()]
+    return True
+
+
 def _defer_session_learning_memory_close(trader: Any) -> threading.Thread:
     """Transfer a timed-out learner's memory cleanup off the session thread."""
     cleanup = threading.Thread(
@@ -84,6 +108,7 @@ def _defer_session_learning_memory_close(trader: Any) -> threading.Thread:
         daemon=True,
     )
     cleanup.start()
+    _register_learning_cleanup_owner(cleanup)
     return cleanup
 
 
@@ -112,6 +137,9 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
         thread = _RUNNER.get("thread")
 
     if trader is None and thread is None:
+        if not _join_learning_cleanup_owners(deadline=deadline):
+            logger.error("Autonomous agent learning cleanup did not stop within the shutdown deadline")
+            return False
         return True
     if trader is None or thread is None:
         logger.error("Autonomous agent ownership is incomplete during shutdown")
@@ -147,6 +175,9 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
             return False
     except Exception:  # noqa: BLE001 - persistence finalisation must fail closed
         logger.exception("Autonomous agent learning-memory close failed")
+        return False
+    if not _join_learning_cleanup_owners(deadline=deadline):
+        logger.error("Autonomous agent learning cleanup did not stop within the shutdown deadline")
         return False
     return True
 

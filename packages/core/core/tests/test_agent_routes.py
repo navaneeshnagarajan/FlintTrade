@@ -674,6 +674,126 @@ def test_session_thread_defers_timed_out_learning_memory_close(live_auth, monkey
     memory.close.assert_called_once_with()
 
 
+def test_runtime_shutdown_joins_orphaned_learning_cleanup_when_runner_empty() -> None:
+    """Process shutdown must still wait for leftover closers after the slot is cleared."""
+    app = _make_app()
+    started = threading.Event()
+    release = threading.Event()
+    memory = MagicMock()
+
+    def hold() -> None:
+        started.set()
+        release.wait(timeout=2.0)
+
+    worker = threading.Thread(target=hold, name="agent-learning", daemon=True)
+
+    class _Trader:
+        def __init__(self) -> None:
+            self.memory = memory
+            self._learning_thread = worker
+
+        def join_background_learning(self, timeout: float | None = None) -> bool:
+            self._learning_thread.join(timeout)
+            return not self._learning_thread.is_alive()
+
+    worker.start()
+    assert started.wait(timeout=1.0)
+    trader = _Trader()
+    assert mod._finalise_session_learning_memory(trader, timeout=0.0) is False
+    cleanup = mod._defer_session_learning_memory_close(trader)
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        mod._RUNNER.clear()  # noqa: SLF001
+        assert cleanup in mod._LEARNING_CLEANUP_OWNERS  # noqa: SLF001
+
+    started_at = time.monotonic()
+    result = mod.shutdown_agent_runtime(app, timeout=0.05)
+    elapsed = time.monotonic() - started_at
+    close_count_before_release = memory.close.call_count
+    release.set()
+    cleanup.join(timeout=2.0)
+
+    assert result is False
+    assert elapsed < 0.2
+    assert close_count_before_release == 0
+    memory.close.assert_called_once_with()
+
+
+def test_runtime_shutdown_joins_previous_session_learning_cleanup(live_auth, monkeypatch) -> None:
+    """A later /start must not drop the previous session's deferred closer."""
+    started = threading.Event()
+    release = threading.Event()
+    memory_a = MagicMock()
+    memory_b = MagicMock()
+    memories = iter((memory_a, memory_b))
+
+    class _LearningTrader(_FakeTrader):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            if self.memory is memory_a:
+                self._learning_thread = threading.Thread(
+                    target=self._hold_learning,
+                    name="agent-learning",
+                    daemon=True,
+                )
+                self._learning_thread.start()
+
+        def _hold_learning(self) -> None:
+            started.set()
+            release.wait(timeout=2.0)
+
+        def join_background_learning(self, timeout: float | None = None) -> bool:
+            thread = getattr(self, "_learning_thread", None)
+            if thread is None:
+                return True
+            thread.join(timeout)
+            return not thread.is_alive()
+
+    monkeypatch.setattr(mod, "_trader_factory", _LearningTrader)
+    monkeypatch.setattr(mod, "_build_learning_memory", lambda: next(memories))
+    app = _make_app()
+    client = app.test_client()
+
+    assert client.post("/api/v1/ai/agent/start", json=_start_body()).status_code == 202
+    assert started.wait(timeout=1.0)
+    assert client.post("/api/v1/ai/agent/stop", json={}).status_code == 200
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        session_a = mod._RUNNER.get("thread")  # noqa: SLF001
+    assert session_a is not None
+    session_a.join(timeout=2.0)
+    assert not session_a.is_alive()
+    assert memory_a.close.call_count == 0
+
+    assert client.post("/api/v1/ai/agent/start", json=_start_body()).status_code == 202
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        assert mod._RUNNER.get("learning_cleanup_thread") is None  # noqa: SLF001
+        assert any(owner.is_alive() for owner in mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
+
+    started_at = time.monotonic()
+    result = mod.shutdown_agent_runtime(app, timeout=0.05)
+    elapsed = time.monotonic() - started_at
+    close_count_before_release = memory_a.close.call_count
+    release.set()
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        leftover = list(mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
+    for owner in leftover:
+        owner.join(timeout=2.0)
+
+    assert result is False
+    assert elapsed < 0.2
+    assert close_count_before_release == 0
+    memory_a.close.assert_called_once_with()
+
+
+def test_reset_runner_for_tests_clears_learning_cleanup_owners() -> None:
+    """Test isolation must drop leftover closer ownership, not only the runner slot."""
+    dummy = threading.Thread(target=lambda: None)
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        mod._LEARNING_CLEANUP_OWNERS.append(dummy)  # noqa: SLF001
+    mod._reset_runner_for_tests()  # noqa: SLF001
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        assert mod._LEARNING_CLEANUP_OWNERS == []  # noqa: SLF001
+
+
 def test_runtime_shutdown_closes_learning_memory_after_agent_stops() -> None:
     app = _make_app()
     memory = MagicMock()

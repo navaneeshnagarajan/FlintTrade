@@ -79,7 +79,10 @@ class HashingEmbeddingFunction:
             return vec
         # Opposite signs in the same buckets can cancel to zero. Keep a
         # deterministic unit vector so an identical query still matches.
-        digest = hashlib.blake2b(text.encode("utf-8"), digest_size=8).digest()
+        # Hash the same token stream the buckets used, not the raw text —
+        # otherwise case, punctuation, or extra whitespace pick a different
+        # fallback bucket for the same tokens.
+        digest = hashlib.blake2b(" ".join(tokens).encode("utf-8"), digest_size=8).digest()
         vec[int.from_bytes(digest[:4], "little") % self._dim] = 1.0
         return vec
 
@@ -193,6 +196,13 @@ def _match_where(metadata: dict[str, Any], where: dict[str, Any] | None) -> bool
 
 
 def _distance(space: str, left: np.ndarray, right: np.ndarray) -> float:
+    """Return a Chroma-compatible distance for one stored metric.
+
+    Default and ``l2`` are *squared* Euclidean — the HNSW ``l2`` space the
+    replaced Chroma store used. RAG then maps that with ``1 - dist / 2``,
+    which recovers cosine similarity on unit vectors. Cosine alone
+    normalises; ``ip`` / ``inner_product`` keep magnitude.
+    """
     resolved = space.lower()
     if resolved in {"ip", "inner_product"}:
         return 1.0 - float(np.dot(left, right))
@@ -204,7 +214,8 @@ def _distance(space: str, left: np.ndarray, right: np.ndarray) -> float:
         else:
             similarity = float(np.dot(left, right) / (left_norm * right_norm))
         return 1.0 - similarity
-    return float(np.linalg.norm(left - right))
+    diff = left - right
+    return float(np.dot(diff, diff))
 
 
 class Collection:
