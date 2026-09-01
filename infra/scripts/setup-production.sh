@@ -102,7 +102,7 @@ sudo mkdir -p \
     /var/log/flinttrade
 
 # Apply the shared checkout contract after every file that setup writes
-# (venv, lock install, optional uv/pnpm, .env, data dirs). Host /data and
+# (venv, lock install, terminal dist, .env, data dirs). Host /data and
 # /var/log trees are outside the checkout.
 echo "Applying checkout ownership and modes..."
 flinttrade_apply_checkout_modes "$INSTALL_DIR" "$SERVICE_USER"

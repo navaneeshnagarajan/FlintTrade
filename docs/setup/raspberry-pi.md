@@ -39,9 +39,9 @@ Python 3.12.
 
 `setup-production.sh` is an Ubuntu 24.04 / Python >= 3.12 host provisioner
 only. It is not the Bookworm path. It provisions `/opt/flinttrade` to match
-`infra/systemd/flinttrade.service`, creates a repo-local `.venv`, and chowns
-only runtime workspace/data/log paths to `www-data`. The checkout stays
-root-owned. See
+`infra/systemd/flinttrade.service`, creates a repo-local `.venv`, builds the
+terminal, provisions the vault secret as `www-data`, and chowns only runtime
+workspace/data/log paths to `www-data`. The checkout stays root-owned. See
 [the systemd notes](../../infra/systemd/README.md).
 
 ```bash

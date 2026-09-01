@@ -17,6 +17,7 @@ broken installer or unit.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -623,8 +624,14 @@ def test_production_scripts_build_the_terminal() -> None:
 
     assert "packages/apps/terminal run build" in contract
     assert "install --frozen-lockfile" in contract
+    assert "packages/apps/terminal/dist/index.html" in contract
+    assert "flinttrade_pinned_pnpm_version" in contract
+    assert "packageManager" in contract
+    assert "10.34.5" not in contract
     assert 'flinttrade_build_terminal "$INSTALL_DIR"' in installer
     assert 'flinttrade_build_terminal "$REPO_DIR"' in deploy
+    server = _server_section(_LINUX_DOC.read_text(encoding="utf-8"))
+    assert "packages/apps/terminal/dist/index.html" in server
 
 
 @pytest.mark.unit
@@ -635,3 +642,73 @@ def test_production_installer_does_not_upgrade_pip_unhashed() -> None:
     assert "pip install --upgrade" not in installer
     assert "setuptools wheel" not in installer
     assert '"$VENV_DIR/bin/pip" install --require-hashes -r "$INSTALL_DIR/requirements.lock"' in installer
+
+
+@pytest.mark.unit
+def test_apply_checkout_modes_preserves_hardened_workspace_secrets(tmp_path: Path) -> None:
+    """Top-level skip of .flinttrade must leave owner-only secrets at 0600."""
+    checkout = tmp_path / "flinttrade"
+    checkout.mkdir()
+    (checkout / ".git").mkdir()
+    secret_dir = checkout / ".flinttrade"
+    secret_dir.mkdir()
+    secret = secret_dir / "master_password"
+    secret.write_text("vault-key\n", encoding="utf-8")
+    secret.chmod(0o600)
+    jwt = secret_dir / "jwt_secret"
+    jwt.write_text("jwt-key\n", encoding="utf-8")
+    jwt.chmod(0o600)
+    code = checkout / "app.py"
+    code.write_text("print('ok')\n", encoding="utf-8")
+    code.chmod(0o600)
+    (checkout / "data").mkdir()
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_executable(bin_dir / "chown", "#!/bin/bash\nexit 0\n")
+    _write_executable(
+        bin_dir / "sudo",
+        """#!/bin/bash
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -u|-g)
+      shift 2
+      ;;
+    -E|--|-n)
+      shift
+      ;;
+    -*)
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+exec "$@"
+""",
+    )
+
+    result = _bash(
+        f"source {_CONTRACT.as_posix()} && flinttrade_apply_checkout_modes {checkout.as_posix()} www-data",
+        env={**os.environ, "PATH": f"{bin_dir.as_posix()}{os.pathsep}{os.environ.get('PATH', '')}"},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stat.S_IMODE(secret.stat().st_mode) == 0o600
+    assert stat.S_IMODE(jwt.stat().st_mode) == 0o600
+    code_mode = stat.S_IMODE(code.stat().st_mode)
+    assert code_mode & stat.S_IRGRP, f"code should be group-readable, got {oct(code_mode)}"
+    assert not code_mode & stat.S_IWGRP
+    assert not code_mode & stat.S_IWOTH
+
+
+@pytest.mark.unit
+def test_pinned_pnpm_version_reads_package_manager_field() -> None:
+    """Production pnpm must track package.json, not a second hardcoded copy."""
+    result = _bash(
+        f"source {_CONTRACT.as_posix()} && flinttrade_pinned_pnpm_version {_REPO_ROOT.as_posix()}",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    package_manager = json.loads((_REPO_ROOT / "package.json").read_text(encoding="utf-8"))["packageManager"]
+    expected = package_manager.split("+", 1)[0].removeprefix("pnpm@")
+    assert result.stdout.strip() == expected

@@ -174,8 +174,11 @@ the installer provisions `/opt/flinttrade` itself. The unit is hardcoded to
 that prefix (`ProtectHome=true`). There is no directory override.
 
 The installer creates `/opt/flinttrade/.venv`, installs the hashed
-`requirements.lock` into it, and chowns only the runtime workspace, data and
-log paths to `www-data`. The git checkout and `.venv` stay root-owned so
+`requirements.lock` into it, builds `packages/apps/terminal/dist` with the
+pinned pnpm, and provisions the credential-vault `master_password` as
+`www-data` so a non-interactive `python -m flinttrade_core.app` can start
+and serve the UI. It chowns only the runtime workspace, data and log paths
+to `www-data`. The git checkout and `.venv` stay root-owned so
 `infra/scripts/deploy.sh` can update them. See
 [the systemd notes](../../infra/systemd/README.md).
 
@@ -187,7 +190,9 @@ sudo systemctl start flinttrade
 
 Edit `/opt/flinttrade/.env` with `sudoedit` only for server-only fallback
 values that cannot be supplied through the app UI. Then complete Setup in
-the app.
+the app at http://127.0.0.1:5100. The installer builds the terminal; the
+backend serves that UI only when `packages/apps/terminal/dist/index.html`
+exists.
 
 Raspberry Pi OS Bookworm (system Python 3.11) is not this path — use the
 one-line installer above, or `infra/install/install-native.sh`.

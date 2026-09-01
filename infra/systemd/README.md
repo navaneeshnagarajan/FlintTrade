@@ -5,10 +5,12 @@ template for the production prefix, not a drop-in for a developer checkout.
 
 `infra/scripts/setup-production.sh` is the first-time Ubuntu 24.04 installer
 (Python >= 3.12): it provisions `/opt/flinttrade`, creates that tree's
-`.venv`, installs the hashed `requirements.lock` into it, chowns only the
-runtime workspace/data/log paths to `www-data`, and copies this unit
-unchanged. Operator walkthroughs are [docs/setup/linux.md](../../docs/setup/linux.md)
-and [docs/setup/raspberry-pi.md](../../docs/setup/raspberry-pi.md).
+`.venv`, installs the hashed `requirements.lock` into it, builds the React
+terminal, provisions the credential-vault `master_password` as `www-data`,
+chowns only the runtime workspace/data/log paths to `www-data`, and copies
+this unit unchanged. Operator walkthroughs are
+[docs/setup/linux.md](../../docs/setup/linux.md) and
+[docs/setup/raspberry-pi.md](../../docs/setup/raspberry-pi.md).
 
 For ordinary desktop use, prefer the one-line web installer in
 [docs/setup/QUICKSTART.md](../../docs/setup/QUICKSTART.md) instead of systemd.
@@ -57,9 +59,11 @@ that cannot be supplied through the app UI. Then complete Setup in the app.
 
 `infra/scripts/deploy.sh` is the later deploy entry point. It updates the
 same `/opt/flinttrade` prefix with `sudo git`, installs the hashed lock into
-the unit `.venv` without taking ownership, refreshes and reloads the installed
-unit on every deploy, and refuses to run during NSE cash-session hours
-(9:15 AM – 3:30 PM IST).
+the unit `.venv` without taking ownership, rebuilds the terminal, refreshes
+and reloads the installed unit on every deploy, and refuses to run during
+NSE cash-session hours (9:15 AM – 3:30 PM IST). Checkout-mode
+normalisation skips `.flinttrade` and `data` so hardened `0600` secrets
+are not widened to group-readable.
 
 ## Usage
 
