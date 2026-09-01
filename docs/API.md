@@ -5,7 +5,7 @@ FlintTrade exposes two HTTP surfaces and one WebSocket channel.
 | Surface | Base URL (production) | Base URL (Vite dev proxy) | Purpose |
 |---|---|---|---|
 | OpenAlgo passthrough | `http://<openalgo-host>:5000/api/v1/` | `/api/v1/` | Broker-facing endpoints — orders, positions, quotes, history, etc. |
-| FlintTrade backend | `http://<flinttrade-host>:5100/v1/` | `/ft-api/v1/` | FlintTrade-specific endpoints — analysis, gateway management, auth, monitoring. |
+| FlintTrade backend | `http://<flinttrade-host>:5100/v1/` and `http://<flinttrade-host>:5100/api/v1/` | `/ft-api/v1/` and `/ft-api/api/v1/` | FlintTrade-specific endpoints. Blueprints mount at `/v1` *or* `/api/v1` — match the prefix the frontend uses. Operations, native brokers, and orders live under `/api/v1`. |
 | WebSocket | `ws://<openalgo-host>:8765` | `/ws` | Streaming market data (LTP, Quote, Depth). |
 
 > **WSGI prefix strip.** The FlintTrade backend mounts its blueprints at
@@ -300,6 +300,20 @@ documented in-memory `pnl-tracker` endpoints were unfed and were removed.)
 | Endpoint | Purpose |
 |---|---|
 | `trades/journal` (**GET**) | Recorded trades. No params → today; `start_date`+`end_date` → history window across all strategies; `+strategy` → that strategy only. Rows are keyed `timestamp` (ISO, IST), with `symbol`, `action`, `quantity`, `price`, `pnl`, `strategy`, `orderid`. |
+
+### Safety (`/api/v1/safety/*`)
+
+Source: `packages/core/core/src/flinttrade_core/operations_routes.py`.
+The operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
+`/ft-api/api/v1/safety/…` and a direct backend call is
+`http://<host>:5100/api/v1/safety/…`. These are not under `/v1/`.
+
+| Endpoint | Purpose |
+|---|---|
+| `safety/config` (**GET** / **POST**) | Read or update local safety parameters and the current kill-switch / Layer 4 pause state. |
+| `safety/l4` (**DELETE**) | Clear one account's latched Layer 4 daily-loss pause or hard stop. Requires both `broker` and `account_id` (query string or JSON body); the backend builds the exact selector `{broker}:{account_id}`. A PIN-unlocked Live JWT is required, and that selector must be in the operator's account ACL. Missing selector → 400 `"L4 reset requires an exact account selector"`; unauthorised selector → 403. Does not activate or reset Layer 5. |
+| `safety/kill-switch` (**POST**) | Latch Layer 5. Body `{ "reason": "…" }`. Cancels open orders and requests supported flatten. |
+| `safety/kill-switch` (**DELETE**) | Reset Layer 5 after emergency actions complete. Incomplete flatten keeps the latch. |
 
 ### Auth (`/ft-api/v1/auth/*`)
 
