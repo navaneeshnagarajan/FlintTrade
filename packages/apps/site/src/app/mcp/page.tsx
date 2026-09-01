@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
 import { DOCS_MCP_PROMPT_NAMES, DOCS_MCP_TOOL_NAMES } from '@/lib/mcp/capabilities';
+import { hostedMcpUrl, resolveSiteOrigin } from '@/lib/site-origin';
 
 const resources = [
   'flinttrade://docs/index',
@@ -19,7 +20,9 @@ export const metadata = {
   description: 'Read-only MCP server for FlintTrade docs, package orientation, and contribution workflows.',
 };
 
-export default function McpPage() {
+export default async function McpPage() {
+  const mcpUrl = hostedMcpUrl(await resolveSiteOrigin());
+
   return (
     <main className="site-shell">
       <SiteHeader />
@@ -57,7 +60,7 @@ export default function McpPage() {
             <pre>{`{
   "mcpServers": {
     "flinttrade-docs": {
-      "url": "https://<your-flinttrade-site>/api/mcp"
+      "url": "${mcpUrl}"
     }
   }
 }`}</pre>
