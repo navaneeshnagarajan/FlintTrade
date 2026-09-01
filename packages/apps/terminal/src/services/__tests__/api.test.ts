@@ -881,14 +881,14 @@ describe("OpenAlgo API client (api.ts)", () => {
     try {
       vi.setSystemTime(new Date("2026-12-28T18:30:00.000Z")); // 29 Dec 2026 IST
       mockConnectionState.apiKey = "";
-      const accounts = jsonResponse({
+      const accountsPayload = {
         status: "success",
         data: {
           accounts: [
             { adapter_id: "upstox", account_id: "U1", is_primary: true, has_session: true },
           ],
         },
-      });
+      };
       fetchSpy.mockImplementation(async (url: string) => {
         const path = String(url);
         if (path.includes("/native/accounts/upstox/U1/holidays?year=2026")) {
@@ -916,7 +916,7 @@ describe("OpenAlgo API client (api.ts)", () => {
           });
         }
         if (path.includes("/api/v1/native/accounts")) {
-          return accounts;
+          return jsonResponse(accountsPayload);
         }
         throw new Error(`unexpected native holiday URL ${path}`);
       });
