@@ -1268,7 +1268,7 @@ class RAGPipeline:
 
         try:
             chunks = self.retrieve(question, top_k, doc_type, similarity_threshold)
-        except RuntimeError as exc:
+        except (RuntimeError, ValueError) as exc:
             logger.error("RAG retrieval failed: %s", exc)
             return RAGResult(query=question, error="RAG retrieval failed")
         if not chunks:

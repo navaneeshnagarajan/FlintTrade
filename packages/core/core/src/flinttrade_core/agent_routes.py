@@ -55,6 +55,13 @@ def _reset_runner_for_tests() -> None:
         _RUNNER.clear()
 
 
+def _close_learning_memory(memory: Any) -> None:
+    """Close one learning-memory backend. Safe to call more than once."""
+    close_memory = getattr(memory, "close", None)
+    if callable(close_memory):
+        close_memory()
+
+
 def _shutdown_event(app: Any) -> threading.Event:
     """Return the process-owned agent shutdown event for one Flask app."""
     configured = app.config.get("AUTONOMOUS_AGENT_SHUTDOWN_EVENT")
@@ -106,13 +113,11 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
         return False
 
     memory = getattr(trader, "memory", None)
-    close_memory = getattr(memory, "close", None)
-    if callable(close_memory):
-        try:
-            close_memory()
-        except Exception:  # noqa: BLE001 - persistence finalisation must fail closed
-            logger.exception("Autonomous agent learning-memory close failed")
-            return False
+    try:
+        _close_learning_memory(memory)
+    except Exception:  # noqa: BLE001 - persistence finalisation must fail closed
+        logger.exception("Autonomous agent learning-memory close failed")
+        return False
     return True
 
 
@@ -784,6 +789,10 @@ def start_agent() -> tuple[Any, int]:
                     reject_pending(producer_ref, "Autonomous-agent session ended before approval")
                 except Exception:  # noqa: BLE001 - cleanup failure must not revive stale intents
                     logger.exception("Could not close stale autonomous-agent approval intents")
+            try:
+                _close_learning_memory(getattr(trader, "memory", None))
+            except Exception:  # noqa: BLE001 - session teardown must still release the loop
+                logger.exception("Autonomous agent learning-memory close failed")
             with _RUNNER_LOCK:
                 if _RUNNER.get("producer_ref") == producer_ref:
                     _RUNNER.pop("loop", None)

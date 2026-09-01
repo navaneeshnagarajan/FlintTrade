@@ -290,6 +290,7 @@ class Collection:
         include: list[str] | None = None,
     ) -> dict[str, Any]:
         vectors = self._query_vectors(query_texts, query_embeddings)
+        self._enforce_query_dim(vectors)
         rows = self._client._fetch(self._name, where=where)
         nested_ids: list[list[str]] = []
         nested_documents: list[list[str | None]] = []
@@ -352,6 +353,18 @@ class Collection:
         self._embedding_fn = embedding_fn
         raw = embedding_fn(texts)
         return [_as_float32(vector) for vector in raw]
+
+    def _enforce_query_dim(self, vectors: list[np.ndarray]) -> None:
+        expected_dim = self._client._known_embedding_dim(self._name)
+        if expected_dim is None:
+            return
+        for vector in vectors:
+            query_dim = int(vector.size)
+            if query_dim != expected_dim:
+                raise ValueError(
+                    f"collection '{self._name}' stores {expected_dim}-dimensional embeddings; "
+                    f"refusing a {query_dim}-dimensional query"
+                )
 
     def _query_vectors(
         self,

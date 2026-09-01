@@ -528,6 +528,23 @@ def test_runtime_shutdown_requests_square_off_and_joins_agent(live_auth):
     assert thread is not None and not thread.is_alive()
 
 
+def test_session_end_closes_learning_memory(live_auth, monkeypatch) -> None:
+    """/stop must checkpoint WAL through the session thread finally, not only app shutdown."""
+    memory = MagicMock()
+    monkeypatch.setattr(mod, "_build_learning_memory", lambda: memory)
+    client = _make_app().test_client()
+
+    assert client.post("/api/v1/ai/agent/start", json=_start_body()).status_code == 202
+    assert client.post("/api/v1/ai/agent/stop", json={}).status_code == 200
+
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        thread = mod._RUNNER.get("thread")  # noqa: SLF001
+    assert thread is not None
+    thread.join(timeout=2.0)
+    assert not thread.is_alive()
+    memory.close.assert_called_once_with()
+
+
 def test_runtime_shutdown_closes_learning_memory_after_agent_stops() -> None:
     app = _make_app()
     memory = MagicMock()

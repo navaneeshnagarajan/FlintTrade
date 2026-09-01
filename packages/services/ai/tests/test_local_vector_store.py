@@ -250,6 +250,44 @@ def test_legacy_schema_infers_and_persists_collection_dimension(tmp_path) -> Non
         client.close()
 
 
+def test_query_rejects_mismatched_embedding_dimension() -> None:
+    """A pinned collection must not silently skip every row on a width change."""
+    from flinttrade_ai.local_vector_store import EphemeralClient
+
+    client = EphemeralClient()
+    collection = client.get_or_create_collection(name="query-dim")
+    collection.add(ids=["kept"], documents=["narrow"], embeddings=[[1.0, 0.0]])
+
+    with pytest.raises(ValueError, match="2-dimensional"):
+        collection.query(query_embeddings=[[1.0, 0.0, 0.0, 0.0]], n_results=1)
+
+    result = collection.query(query_embeddings=[[1.0, 0.0]], n_results=1)
+    assert result["ids"] == [["kept"]]
+    client.close()
+
+
+def test_reopened_collection_rejects_mismatched_query_dimension(tmp_path) -> None:
+    """A persisted width must fail closed on query after the embedding model changes."""
+    from flinttrade_ai.local_vector_store import PersistentClient
+
+    original = PersistentClient(path=str(tmp_path))
+    try:
+        collection = original.get_or_create_collection(name="rag")
+        collection.add(ids=["a"], documents=["narrow"], embeddings=[[1.0, 0.0]])
+    finally:
+        original.close()
+
+    reopened = PersistentClient(path=str(tmp_path))
+    try:
+        collection = reopened.get_or_create_collection(name="rag")
+        with pytest.raises(ValueError, match="2-dimensional"):
+            collection.query(query_embeddings=[[0.0] * 8], n_results=1)
+        result = collection.query(query_embeddings=[[1.0, 0.0]], n_results=1)
+        assert result["ids"] == [["a"]]
+    finally:
+        reopened.close()
+
+
 def test_empty_embedding_is_rejected_without_pinning_collection() -> None:
     """Zero-dimensional vectors cannot establish a collection's schema."""
     from flinttrade_ai.local_vector_store import EphemeralClient
