@@ -33,7 +33,7 @@ Environment=OPENBLAS_NUM_THREADS=2
 Environment=OMP_NUM_THREADS=2
 Environment=FLINTTRADE_DEV=0
 Environment=FLINTTRADE_HOME=/opt/flinttrade
-Environment=FLINTTRADE_PORT=5100
+Environment=FLINTTRADE_BACKEND_PORT=5100
 Environment=PYTHONPATH=/opt/flinttrade/packages/core/core/src
 EnvironmentFile=/opt/flinttrade/.env
 

@@ -13,6 +13,10 @@ dependencies = [
     "flask-cors>=6.0.5",
     "flask-limiter>=3.5",
     "waitress>=3.0",
+    # Production systemd unit ExecStart's gunicorn with --worker-class eventlet.
+    # Both must land in the hashed lock the installer installs.
+    "gunicorn>=23.0",
+    "eventlet>=0.37",
     "argon2-cffi>=23.1.0",
     "PyJWT>=2.8.0",
     "cryptography>=50.0.0",

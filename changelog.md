@@ -19,6 +19,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Production systemd install.** `infra/scripts/setup-production.sh` now
+  defaults to `/opt/flinttrade` (the prefix `flinttrade.service` already uses),
+  creates `$INSTALL_DIR/.venv`, and installs the hashed lock into that venv.
+  The unit exports `FLINTTRADE_BACKEND_PORT` — the name the backend reads —
+  and the installer chowns the tree to `www-data`. gunicorn and eventlet are
+  workspace dependencies so the lock the unit ExecStarts actually contains
+  them.
+
+
+
 - **Workspace path unification.** Nineteen modules resolved their own storage as
   the literal `~/.flinttrade` instead of asking `flinttrade_core.workspace`. On
   Linux that happens to be the workspace, so it never failed in CI; on macOS

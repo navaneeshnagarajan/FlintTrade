@@ -9,8 +9,9 @@ set -euo pipefail
 # Optional env-driven overrides (e.g. FLINTTRADE_DIR) from the repo-root .env.
 source "$(dirname "${BASH_SOURCE[0]}")/../../.env" 2>/dev/null || true
 
-REPO_DIR="${FLINTTRADE_DIR:-$HOME/FlintTrade}"
+REPO_DIR="${FLINTTRADE_DIR:-/opt/flinttrade}"
 SERVICE_NAME="flinttrade"
+VENV_PIP="$REPO_DIR/.venv/bin/pip"
 
 echo "=== FlintTrade Production Deploy ==="
 echo "Time: $(date '+%Y-%m-%d %H:%M:%S IST')"
@@ -36,9 +37,14 @@ echo "Pulling latest from main..."
 git checkout main
 git pull origin main
 
-# 3. Install Python deps — SC-07: hash-verified install only
+# 3. Install Python deps into the unit venv — SC-07: hash-verified install only
 echo "Installing Python dependencies..."
-pip install --break-system-packages --require-hashes -r requirements.lock -q
+if [ ! -x "$VENV_PIP" ]; then
+    echo "ERROR: $VENV_PIP is missing. Re-run infra/scripts/setup-production.sh so the unit venv exists."
+    exit 1
+fi
+sudo "$VENV_PIP" install --require-hashes -r requirements.lock -q
+sudo chown -R www-data:www-data "$REPO_DIR/.venv"
 
 # 4. Install systemd service if not present
 if [ ! -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then

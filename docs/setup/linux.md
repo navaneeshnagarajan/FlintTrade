@@ -168,24 +168,19 @@ every OS; `make <target>` is the POSIX alias for the same targets.
 
 ## Server services (advanced)
 
-`infra/scripts/setup-production.sh` is an Ubuntu 24.04 host provisioner: it
-installs apt packages, clones to `$HOME/FlintTrade` by default, and copies
-`infra/systemd/flinttrade.service` unchanged. That unit is written for
-`/opt/flinttrade` as `www-data` (Gunicorn on `127.0.0.1:5100`). Starting
-the copied unit against a `$HOME/FlintTrade` tree will fail until you
-either place the install at `/opt/flinttrade` or edit the unit's `User`,
-`WorkingDirectory`, `EnvironmentFile`, `ExecStart`, and `ReadWritePaths`.
-Moving the tree to `/opt/flinttrade` still does not boot the unit: the
-script uses system `pip` and does not create `.venv`, while `ExecStart`
-requires `/opt/flinttrade/.venv/bin/gunicorn`. `gunicorn` is not in
-`requirements.lock`. Provision that venv (or point `ExecStart` at a real
-gunicorn) before starting the service. See
+The production systemd installer installs to `/opt/flinttrade` so it matches
+`infra/systemd/flinttrade.service` (WorkingDirectory, ExecStart,
+`FLINTTRADE_HOME`, ReadWritePaths). That unit sets `ProtectHome=true`, so a
+home-directory prefix cannot start. Override the prefix with `FLINTTRADE_DIR`
+only if you also rewrite the unit paths.
+
+The installer creates `/opt/flinttrade/.venv`, installs the hashed
+`requirements.lock` (including gunicorn and eventlet) into it, and chowns the
+tree to `www-data` — the user the unit runs as. See
 [the systemd notes](../../infra/systemd/README.md).
 
 1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
 2. `cd FlintTrade`
 3. `bash infra/scripts/setup-production.sh`
-4. Align the systemd unit with the install path (or install under `/opt/flinttrade`).
-5. Provision `/opt/flinttrade/.venv` with gunicorn, or edit `ExecStart` to the interpreter you installed.
-6. Edit `.env` only for server-only fallback values that cannot be supplied through the app UI.
-7. `sudo systemctl start flinttrade`
+4. Edit `/opt/flinttrade/.env` only for server-only fallback values that cannot be supplied through the app UI.
+5. `sudo systemctl start flinttrade`

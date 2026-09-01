@@ -35,23 +35,22 @@ system interpreter.
 
 ## Setup (ARM64 server — advanced)
 
-`infra/scripts/setup-production.sh` is an **Ubuntu 24.04** host provisioner.
-It clones to `$HOME/FlintTrade` by default (override `FLINTTRADE_DIR`) and
-copies `infra/systemd/flinttrade.service` unchanged. That unit is written for
-a tree at `/opt/flinttrade` running as `www-data` behind Gunicorn on
-`127.0.0.1:5100`. `sudo systemctl start flinttrade` will not find a
-`$HOME/FlintTrade` checkout unless you either install the tree at
-`/opt/flinttrade` (and create the `www-data` writable paths the unit lists)
-or edit `User`, `WorkingDirectory`, `EnvironmentFile`, `ExecStart`, and
-`ReadWritePaths` before enabling it. Relocating the tree is still not
-enough: the script uses system `pip` and does not create `.venv`, while
-`ExecStart` requires `/opt/flinttrade/.venv/bin/gunicorn`. `gunicorn` is
-not in `requirements.lock`. Provision that venv (or point `ExecStart` at a
-real gunicorn) before starting the service. See
+`setup-production.sh` is an Ubuntu 24.04 host provisioner. It installs to
+`/opt/flinttrade` (matching `infra/systemd/flinttrade.service`), creates a
+repo-local `.venv`, and chowns the tree to `www-data`. Override with
+`FLINTTRADE_DIR` only if you also rewrite the unit. `ProtectHome=true`
+means a home-directory prefix cannot start. See
 [the systemd notes](../../infra/systemd/README.md).
 
-Broker/OpenAlgo configuration belongs in Setup or Settings. `.env` is only for
-server-only fallback values that cannot be supplied through the UI.
+1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
+2. `cd FlintTrade`
+3. `bash infra/scripts/setup-production.sh`
+4. `sudo systemctl start flinttrade`
+5. Open the terminal URL and complete Setup in the app UI.
+
+Broker/OpenAlgo configuration belongs in Setup or Settings. Edit
+`/opt/flinttrade/.env` only for server-only fallback values that cannot be
+supplied through the UI.
 
 Note: Backtest and AI packages may be slow on Pi 4. Prefer disabling optional
 modules from the workspace settings for lightweight installations.
