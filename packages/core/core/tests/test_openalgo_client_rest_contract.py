@@ -166,8 +166,8 @@ async def test_place_options_multi_order_puts_pricetype_product_on_legs() -> Non
 
 
 @pytest.mark.asyncio
-async def test_place_order_omits_undeclared_market_protection() -> None:
-    """OrderSchema in v2.0.2.2 does not declare market_protection (unknown raises)."""
+async def test_place_order_refuses_unsupported_market_protection_without_posting() -> None:
+    """v2.0.2.2 removed market_protection; fail closed instead of downgrading."""
     from flinttrade_core.models import Action, Order
 
     client = _client()
@@ -176,15 +176,35 @@ async def test_place_order_omits_undeclared_market_protection() -> None:
     )
 
     try:
-        await client.place_order(
-            Order(symbol="RELIANCE", action=Action.BUY, market_protection=True)
-        )
+        with pytest.raises(ValueError, match="market_protection is not supported"):
+            await client.place_order(
+                Order(symbol="RELIANCE", action=Action.BUY, market_protection=True)
+            )
     finally:
         await client.close()
 
-    endpoint, payload = client._post.await_args.args[:2]
-    assert endpoint == "placeorder"
-    assert "market_protection" not in payload
+    client._post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_place_smart_order_refuses_unsupported_market_protection_without_posting() -> None:
+    """Smart orders must not silently discard requested market protection either."""
+    from flinttrade_core.models import Action, SmartOrder
+
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success", "orderid": "OID-1"}
+    )
+
+    try:
+        with pytest.raises(ValueError, match="market_protection is not supported"):
+            await client.place_smart_order(
+                SmartOrder(symbol="RELIANCE", action=Action.BUY, market_protection=True)
+            )
+    finally:
+        await client.close()
+
+    client._post.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -363,6 +383,30 @@ async def test_telegram_refuses_empty_username_without_posting() -> None:
         await client.close()
 
     client._post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_telegram_uses_configured_username_for_existing_one_argument_callers() -> None:
+    """Existing notification callers remain usable when the linked username is configured."""
+    settings = Settings(
+        openalgo_host="http://127.0.0.1",
+        openalgo_api_key="test-key",
+        openalgo_telegram_username="linked-trader",  # type: ignore[call-arg]
+    )
+    client = OpenAlgoClient(settings)
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={"status": "success"}
+    )
+
+    try:
+        await client.telegram("hello")
+    finally:
+        await client.close()
+
+    endpoint, payload = client._post.await_args.args[:2]
+    assert endpoint == "telegram/notify"
+    assert payload["username"] == "linked-trader"
+    assert payload["message"] == "hello"
 
 
 @pytest.mark.asyncio

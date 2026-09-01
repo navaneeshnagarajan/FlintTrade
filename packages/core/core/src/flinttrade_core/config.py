@@ -38,13 +38,14 @@ def _workspace_openalgo_overrides_from_data(data: dict[str, Any]) -> dict[str, A
         return {}
 
     api_key = str(openalgo.get("api_key", "") or "").strip()
+    telegram_username = str(openalgo.get("telegram_username", "") or "").strip()
     host = str(openalgo.get("host", "") or "").strip()
     port_raw = openalgo.get("port")
     port = str(port_raw or "").strip()
     ws_port_raw = openalgo.get("ws_port")
     ws_port = str(ws_port_raw or "").strip()
 
-    has_user_value = bool(api_key)
+    has_user_value = bool(api_key or telegram_username)
     has_user_value = has_user_value or (bool(host) and host.rstrip("/") != DEFAULT_OPENALGO_HOST)
     has_user_value = has_user_value or (bool(port) and port != str(DEFAULT_OPENALGO_PORT))
     has_user_value = has_user_value or (bool(ws_port) and ws_port != str(DEFAULT_OPENALGO_WS_PORT))
@@ -54,6 +55,8 @@ def _workspace_openalgo_overrides_from_data(data: dict[str, Any]) -> dict[str, A
     overrides: dict[str, Any] = {}
     if api_key:
         overrides["openalgo_api_key"] = api_key
+    if telegram_username:
+        overrides["openalgo_telegram_username"] = telegram_username
     if host:
         overrides["openalgo_host"] = host
     if port:
@@ -74,6 +77,7 @@ class Settings(BaseModel):
 
     openalgo_host: str = DEFAULT_OPENALGO_HOST
     openalgo_api_key: str = ""
+    openalgo_telegram_username: str = ""
     openalgo_port: int = DEFAULT_OPENALGO_PORT
     openalgo_ws_port: int = DEFAULT_OPENALGO_WS_PORT
     strategy: str = "Flint"

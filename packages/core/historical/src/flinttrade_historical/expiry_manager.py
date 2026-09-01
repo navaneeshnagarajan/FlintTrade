@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from flinttrade_core.openalgo_client import OpenAlgoClient
 
@@ -37,60 +37,59 @@ class ExpiryInfo:
     def nearest(self, reference_date: date | None = None) -> str | None:
         """Get the nearest future expiry from a reference date."""
         ref = reference_date or date.today()
-        for exp_str in sorted(self.expiry_dates):
-            try:
-                exp_date = _parse_expiry_date(exp_str)
-                if exp_date >= ref:
-                    return exp_str
-            except ValueError:
-                continue
+        for exp_date, exp_str in _dated_expiries(self.expiry_dates):
+            if exp_date >= ref:
+                return exp_str
         return None
 
     def weekly(self) -> list[str]:
         """Filter to weekly expiries (within 7 days of each other)."""
-        if len(self.expiry_dates) < 2:
-            return list(self.expiry_dates)
-        sorted_dates = sorted(self.expiry_dates)
-        weekly = [sorted_dates[0]]
-        for i in range(1, len(sorted_dates)):
-            try:
-                prev = _parse_expiry_date(sorted_dates[i - 1])
-                curr = _parse_expiry_date(sorted_dates[i])
-                if (curr - prev).days <= 8:
-                    weekly.append(sorted_dates[i])
-            except ValueError:
-                continue
+        dated = _dated_expiries(self.expiry_dates)
+        if len(dated) < 2:
+            return [exp_str for _, exp_str in dated]
+        weekly = [dated[0][1]]
+        for (previous, _), (current, exp_str) in zip(dated, dated[1:], strict=True):
+            if (current - previous).days <= 8:
+                weekly.append(exp_str)
         return weekly
 
     def monthly(self) -> list[str]:
         """Filter to monthly expiries (last Thursday of each month typically)."""
-        if not self.expiry_dates:
-            return []
-        sorted_dates = sorted(self.expiry_dates)
-        monthly: list[str] = []
-        seen_months: set[str] = set()
-        # Walk backwards — the last expiry each month is the monthly
-        for exp_str in reversed(sorted_dates):
-            try:
-                d = _parse_expiry_date(exp_str)
-                month_key = f"{d.year}-{d.month:02d}"
-                if month_key not in seen_months:
-                    seen_months.add(month_key)
-                    monthly.append(exp_str)
-            except ValueError:
-                continue
-        return sorted(monthly)
+        dated = _dated_expiries(self.expiry_dates)
+        monthly: list[tuple[date, str]] = []
+        seen_months: set[tuple[int, int]] = set()
+        # Walk backwards — the last expiry each month is the monthly.
+        for expiry_date, exp_str in reversed(dated):
+            month_key = (expiry_date.year, expiry_date.month)
+            if month_key not in seen_months:
+                seen_months.add(month_key)
+                monthly.append((expiry_date, exp_str))
+        return [exp_str for _, exp_str in reversed(monthly)]
 
 
 def _parse_expiry_date(exp_str: str) -> date:
-    """Parse a YYMMDD (or ISO-fallback) expiry string to a date object.
-
-    Thin wrapper over the canonical ``flinttrade_core.symbol_utils.parse_expiry``
-    (U15), restricted to this caller's historical formats.
-    """
+    """Parse historical and official OpenAlgo expiry strings to a date."""
     from flinttrade_core.symbol_utils import parse_expiry
 
-    return parse_expiry(exp_str, formats=("YYMMDD", "ISO"))
+    text = str(exp_str or "").strip()
+    try:
+        return parse_expiry(text, formats=("YYMMDD", "ISO"))
+    except ValueError:
+        try:
+            return datetime.strptime(text.upper(), "%d-%b-%y").date()
+        except ValueError as exc:
+            raise ValueError(f"Invalid expiry date: {exp_str!r}") from exc
+
+
+def _dated_expiries(expiry_dates: list[str]) -> list[tuple[date, str]]:
+    """Return valid expiry strings sorted by their parsed calendar date."""
+    dated: list[tuple[date, str]] = []
+    for exp_str in expiry_dates:
+        try:
+            dated.append((_parse_expiry_date(exp_str), exp_str))
+        except ValueError:
+            continue
+    return sorted(dated, key=lambda item: item[0])
 
 
 @dataclass

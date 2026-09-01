@@ -808,6 +808,8 @@ class OpenAlgoClient:
 
     async def place_order(self, order: Order) -> OrderResponse:
         """POST /api/v1/placeorder"""
+        if order.market_protection:
+            raise ValueError("market_protection is not supported by OpenAlgo v2.0.2.2")
         extras: dict[str, Any] = {
             "strategy": order.strategy,
             "symbol": order.symbol,
@@ -826,6 +828,8 @@ class OpenAlgoClient:
 
     async def place_smart_order(self, order: SmartOrder) -> OrderResponse:
         """POST /api/v1/placesmartorder"""
+        if order.market_protection:
+            raise ValueError("market_protection is not supported by OpenAlgo v2.0.2.2")
         extras: dict[str, Any] = {
             "strategy": order.strategy,
             "symbol": order.symbol,
@@ -1421,7 +1425,7 @@ class OpenAlgoClient:
 
     async def telegram(self, message: str, username: str = "") -> dict[str, Any]:
         """POST /api/v1/telegram/notify"""
-        name = str(username or "").strip()
+        name = str(username or self.settings.openalgo_telegram_username or "").strip()
         if not name:
             raise ValueError("username is required")
         return await self._post(

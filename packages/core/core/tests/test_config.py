@@ -43,6 +43,15 @@ def test_contributor_run_loads_dotenv_from_validated_source_root(
 
 
 @pytest.mark.unit
+def test_openalgo_telegram_username_loads_from_workspace() -> None:
+    settings = Settings.from_workspace_data(
+        {"openalgo": {"telegram_username": "linked-trader"}}
+    )
+
+    assert settings.openalgo_telegram_username == "linked-trader"
+
+
+@pytest.mark.unit
 def test_openalgo_ws_base_url_maps_https_to_wss_and_uses_workspace_port() -> None:
     settings = Settings(openalgo_host="https://openalgo.local", openalgo_ws_port=8770)
 

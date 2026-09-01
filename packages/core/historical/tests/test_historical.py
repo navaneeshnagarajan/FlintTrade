@@ -400,6 +400,17 @@ class TestExpiryInfo:
         nearest = info.nearest(date(2026, 3, 27))
         assert nearest == "260402"
 
+    def test_official_dashed_expiry_participates_in_selection(self):
+        from flinttrade_historical.expiry_manager import ExpiryInfo
+
+        info = ExpiryInfo(
+            symbol="NIFTY", exchange="NFO",
+            expiry_dates=["26-MAR-26", "02-APR-26"],
+        )
+
+        assert info.nearest(date(2026, 3, 20)) == "26-MAR-26"
+        assert info.monthly() == ["26-MAR-26", "02-APR-26"]
+
     def test_nearest_none_if_all_past(self):
         from flinttrade_historical.expiry_manager import ExpiryInfo
         info = ExpiryInfo(
