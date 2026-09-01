@@ -1106,6 +1106,7 @@ def test_groww_modify_without_disclosed_quantity_still_dispatches() -> None:
 
     assert response.status_code == 200
     router.modify_order.assert_awaited_once()
+    assert "disclosed_quantity" not in router.modify_order.await_args.kwargs["changes"]
 
 
 def test_modify_without_recoverable_disclosed_quantity_fails_closed() -> None:

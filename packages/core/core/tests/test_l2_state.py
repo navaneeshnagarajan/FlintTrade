@@ -2166,8 +2166,10 @@ def test_recover_omitted_disclosed_quantity_required_for_full_replacement() -> N
         _recover_omitted_modify_fields(changes, {}, {"quantity"}, "dhan")
 
 
-def test_recover_omitted_disclosed_quantity_skipped_for_partial_modify_brokers() -> None:
-    changes: dict[str, object] = {}
-    _recover_omitted_modify_fields(changes, {}, {"quantity"}, "groww")
-    _recover_omitted_modify_fields(changes, {}, {"quantity"}, "indmoney")
+@pytest.mark.parametrize("adapter_id", ["groww", "indmoney"])
+def test_recover_omitted_disclosed_quantity_skipped_for_partial_modify_brokers(
+    adapter_id: str,
+) -> None:
+    changes: dict[str, object] = {"disclosed_quantity": "0"}
+    _recover_omitted_modify_fields(changes, {}, {"quantity"}, adapter_id)
     assert "disclosed_quantity" not in changes

@@ -1448,6 +1448,7 @@ def _recover_omitted_modify_fields(
             changes["trigger_price"] = recovered
     if "disclosed_quantity" not in requested_fields:
         if str(adapter_id).lower() not in _FULL_REPLACEMENT_DISCLOSURE_ADAPTERS:
+            changes.pop("disclosed_quantity", None)
             return
         raw_disclosed = current.get("disclosed_quantity")
         if raw_disclosed is None or str(getattr(raw_disclosed, "value", raw_disclosed)).strip() == "":
