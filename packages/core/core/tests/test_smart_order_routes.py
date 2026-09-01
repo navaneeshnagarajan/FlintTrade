@@ -20,9 +20,11 @@ from flask import Flask
 
 import flinttrade_core.order_routes as order_routes_mod
 import flinttrade_core.smart_order_routes as mod
+import flinttrade_core.auth_routes as auth_routes_mod
 from flinttrade_core.exceptions import SafetyBypassError
 from flinttrade_core.l2_state import PortfolioSafetyStateError, ProspectiveSafetyInputs
 from flinttrade_core.models import Action, Exchange, Order, PriceType
+from flinttrade_core.rate_limiter import RateLimiter
 from flinttrade_engine.request_context import RequestContext
 from flinttrade_engine.safety import SafetyConfig, SafetySystem, set_safety_gate_secret
 from flinttrade_gateway.brokers._base import Session
@@ -230,6 +232,41 @@ def test_no_jwt_401(monkeypatch):
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10},
     )
     assert resp.status_code == 401
+
+
+def test_smart_route_rate_limit_uses_verified_jwt_subject(monkeypatch, tmp_path):
+    """Forged user-id headers cannot mint fresh smart-order buckets."""
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setattr(auth_routes_mod, "_JWT_SECRET_KEY", "smart-route-rate-limit-test-secret")
+    app, _ = _make_app(enabled=False)
+    app.config["RATE_LIMITER"] = RateLimiter(global_rate=100, per_user_rate=10)
+    with app.app_context():
+        token = auth_routes_mod._create_token("operator-a", mode="live")
+        other_token = auth_routes_mod._create_token("operator-b", mode="live")
+
+    client = app.test_client()
+    statuses = [
+        client.post(
+            "/api/v1/orders/smart-route",
+            json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 1},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-User-ID": f"forged-{index}",
+            },
+        ).status_code
+        for index in range(3)
+    ]
+    other_status = client.post(
+        "/api/v1/orders/smart-route",
+        json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 1},
+        headers={
+            "Authorization": f"Bearer {other_token}",
+            "X-User-ID": "forged-other",
+        },
+    ).status_code
+
+    assert statuses == [403, 403, 429]
+    assert other_status == 403
 
 
 def test_practice_mode_403(monkeypatch):
