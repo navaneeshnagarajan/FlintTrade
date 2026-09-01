@@ -311,7 +311,7 @@ The operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
 | Endpoint | Purpose |
 |---|---|
 | `safety/config` (**GET** / **POST**) | Read or update local safety parameters and the current kill-switch / Layer 4 pause state. |
-| `safety/l4` (**DELETE**) | Clear a latched Layer 4 daily-loss pause or hard stop. Does not activate or reset Layer 5. |
+| `safety/l4` (**DELETE**) | Clear one account's latched Layer 4 daily-loss pause or hard stop. Requires both `broker` and `account_id` (query string or JSON body); the backend builds the exact selector `{broker}:{account_id}`. A PIN-unlocked Live JWT is required, and that selector must be in the operator's account ACL. Missing selector → 400 `"L4 reset requires an exact account selector"`; unauthorised selector → 403. Does not activate or reset Layer 5. |
 | `safety/kill-switch` (**POST**) | Latch Layer 5. Body `{ "reason": "…" }`. Cancels open orders and requests supported flatten. |
 | `safety/kill-switch` (**DELETE**) | Reset Layer 5 after emergency actions complete. Incomplete flatten keeps the latch. |
 

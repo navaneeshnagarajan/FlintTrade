@@ -43,7 +43,12 @@ a tree at `/opt/flinttrade` running as `www-data` behind Gunicorn on
 `$HOME/FlintTrade` checkout unless you either install the tree at
 `/opt/flinttrade` (and create the `www-data` writable paths the unit lists)
 or edit `User`, `WorkingDirectory`, `EnvironmentFile`, `ExecStart`, and
-`ReadWritePaths` before enabling it. See [the systemd notes](../../infra/systemd/README.md).
+`ReadWritePaths` before enabling it. Relocating the tree is still not
+enough: the script uses system `pip` and does not create `.venv`, while
+`ExecStart` requires `/opt/flinttrade/.venv/bin/gunicorn`. `gunicorn` is
+not in `requirements.lock`. Provision that venv (or point `ExecStart` at a
+real gunicorn) before starting the service. See
+[the systemd notes](../../infra/systemd/README.md).
 
 Broker/OpenAlgo configuration belongs in Setup or Settings. `.env` is only for
 server-only fallback values that cannot be supplied through the UI.

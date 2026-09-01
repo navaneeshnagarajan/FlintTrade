@@ -21,9 +21,24 @@ There are no `REPLACE_USER` / `REPLACE_DIR` placeholders. A `sed` replace
 against those strings does nothing.
 
 `infra/scripts/setup-production.sh` (Ubuntu 24.04) clones to
-`$HOME/FlintTrade` by default and copies this unit unchanged. That pair
-does not boot until the tree lives at `/opt/flinttrade` as `www-data`, or
-you edit the unit to match the checkout you actually installed.
+`$HOME/FlintTrade` by default and copies this unit unchanged. Relocating
+the tree to `/opt/flinttrade` is not enough. The script installs Python
+packages with system `pip` (`--break-system-packages --require-hashes -r
+requirements.lock`). It does not create `.venv`, does not install `uv`,
+and `gunicorn` is not in `requirements.lock`. The unit's `ExecStart`
+still expects `/opt/flinttrade/.venv/bin/gunicorn`.
+
+Before `systemctl start flinttrade` can succeed you must either:
+
+1. Provision that interpreter — for example `python3 -m venv /opt/flinttrade/.venv`,
+   install the lockfile into it, then install `gunicorn` into the same venv
+   (it is not a locked runtime dependency); or
+2. Edit `ExecStart` (and the other hardcoded paths) to the gunicorn you
+   actually installed.
+
+The pair also does not boot until the tree lives at `/opt/flinttrade` as
+`www-data`, or you edit the unit to match the checkout you actually
+installed.
 
 ## Install (after the unit matches the tree)
 

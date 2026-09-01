@@ -175,11 +175,17 @@ installs apt packages, clones to `$HOME/FlintTrade` by default, and copies
 the copied unit against a `$HOME/FlintTrade` tree will fail until you
 either place the install at `/opt/flinttrade` or edit the unit's `User`,
 `WorkingDirectory`, `EnvironmentFile`, `ExecStart`, and `ReadWritePaths`.
-See [the systemd notes](../../infra/systemd/README.md).
+Moving the tree to `/opt/flinttrade` still does not boot the unit: the
+script uses system `pip` and does not create `.venv`, while `ExecStart`
+requires `/opt/flinttrade/.venv/bin/gunicorn`. `gunicorn` is not in
+`requirements.lock`. Provision that venv (or point `ExecStart` at a real
+gunicorn) before starting the service. See
+[the systemd notes](../../infra/systemd/README.md).
 
 1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
 2. `cd FlintTrade`
 3. `bash infra/scripts/setup-production.sh`
 4. Align the systemd unit with the install path (or install under `/opt/flinttrade`).
-5. Edit `.env` only for server-only fallback values that cannot be supplied through the app UI.
-6. `sudo systemctl start flinttrade`
+5. Provision `/opt/flinttrade/.venv` with gunicorn, or edit `ExecStart` to the interpreter you installed.
+6. Edit `.env` only for server-only fallback values that cannot be supplied through the app UI.
+7. `sudo systemctl start flinttrade`

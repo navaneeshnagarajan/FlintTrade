@@ -673,11 +673,16 @@ when it detects the 401.
 
 ### Front-end shows stale prices
 
-The WebSocket on port 8765 has dropped. The top bar status indicator turns
-red when this happens. FlintTrade auto-reconnects with exponential
-back-off; if the indicator stays red for more than 30 seconds, restart the
-dev pair (`Ctrl-C`, then `python scripts/ft.py dev`) or, for a built UI,
-`python scripts/ft.py start`.
+The OpenAlgo price WebSocket on port 8765 has dropped. The top bar status
+indicator turns red when this happens. FlintTrade auto-reconnects with
+exponential back-off; if the indicator stays red for more than 30 seconds,
+restart the optional OpenAlgo process — POSIX `make start-openalgo` for
+the local-dev clone, or OpenAlgo's own launcher (`python app.py` from that
+repo, or its systemd unit) if you installed it separately. See
+["Connection refused" on the OpenAlgo port](#connection-refused-on-the-openalgo-port).
+`python scripts/ft.py start` only starts the FlintTrade backend on port
+5100 and cannot restore that socket. `python scripts/ft.py dev` is the
+contributor Vite + backend pair, not an OpenAlgo restart.
 
 ### "Cannot find module '@/...'"
 

@@ -225,8 +225,8 @@ that points at *your* machine, network, or accounts stays out of the repo. Use
 placeholders (`<YOUR_HOSTNAME>`, `<YOUR_SERVER_IP>`) in examples, keep real
 values in your private, gitignored `.env` only for dev/server fallback paths, and store secrets as keyring/env
 `_ref` references — never plaintext. The `secrets-check` CI job is an inline
-two-pattern grep (not gitleaks) plus a pre-commit hook — backstops, not a
-substitute for not staging the file.
+two-pattern grep (not gitleaks) — a backstop, not a substitute for not
+staging the file. There is no tracked pre-commit secret hook.
 
 ## Pull request flow
 
