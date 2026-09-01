@@ -706,7 +706,9 @@ function OrdersWidget(_props: WidgetProps) {
           row={modifyIntent.row}
           pending={actionPending}
           canSubmit={modifyCanSubmit}
-          onSubmit={(qty, price, trigger) => void handleModifySubmit(qty, price, trigger)}
+          onSubmit={(qty, price, trigger, disclosed) => {
+            void handleModifySubmit(qty, price, trigger, disclosed);
+          }}
           onClose={() => setModifyIntent(null)}
         />
       )}
