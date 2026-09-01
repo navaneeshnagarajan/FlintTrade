@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from flinttrade_core.config import Settings
@@ -212,6 +213,32 @@ async def test_orderbook_leaves_omitted_trigger_and_disclosed_blank() -> None:
     assert len(rows) == 1
     assert rows[0].trigger_price == ""
     assert rows[0].disclosed_quantity == ""
+
+
+@pytest.mark.asyncio
+async def test_orderbook_rejects_malformed_row_instead_of_dropping_it() -> None:
+    """A non-object row must fail the whole book so safety admission cannot undercount."""
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "status": "success",
+            "data": [
+                {
+                    "orderid": "OA-LIMIT",
+                    "status": "open",
+                    "symbol": "RELIANCE",
+                    "pricetype": "LIMIT",
+                },
+                "not-an-order",
+            ],
+        }
+    )
+
+    try:
+        with pytest.raises(ValueError, match="orderbook row is not an object"):
+            await client.orderbook()
+    finally:
+        await client.close()
 
 
 @pytest.mark.asyncio
@@ -475,22 +502,33 @@ async def test_telegram_uses_configured_username_for_existing_one_argument_calle
     settings = Settings(
         openalgo_host="http://127.0.0.1",
         openalgo_api_key="test-key",
-        openalgo_telegram_username="linked-trader",  # type: ignore[call-arg]
+        openalgo_telegram_username="linked-trader",
     )
     client = OpenAlgoClient(settings)
-    client._post = AsyncMock(  # type: ignore[method-assign]
-        return_value={"status": "success"}
-    )
+    captured: dict[str, object] = {}
+
+    class RecordingHttp:
+        async def post(self, url: str, **kwargs: object) -> httpx.Response:
+            captured["url"] = url
+            captured["json"] = kwargs.get("json")
+            return httpx.Response(200, json={"status": "success"})
+
+        async def aclose(self) -> None:
+            return None
+
+    client._http = RecordingHttp()  # type: ignore[method-assign]
 
     try:
         await client.telegram("hello")
     finally:
         await client.close()
 
-    endpoint, payload = client._post.await_args.args[:2]
-    assert endpoint == "telegram/notify"
-    assert payload["username"] == "linked-trader"
-    assert payload["message"] == "hello"
+    assert captured["url"] == "http://127.0.0.1:5000/api/v1/telegram/notify"
+    assert captured["json"] == {
+        "apikey": "test-key",
+        "username": "linked-trader",
+        "message": "hello",
+    }
 
 
 @pytest.mark.asyncio

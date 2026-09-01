@@ -389,6 +389,38 @@ function holidayYear(value: unknown): number {
   return numericYear;
 }
 
+/** Daily Welcome looks three calendar days ahead of the current IST date. */
+const HOLIDAY_LOOKAHEAD_DAYS = 3;
+
+function istCalendarDatePlusDays(isoDate: string, days: number): string {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const next = new Date(Date.UTC(year, month - 1, day + days));
+  const yyyy = String(next.getUTCFullYear());
+  const mm = String(next.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(next.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function holidayYearsForLookahead(lookAheadDays = HOLIDAY_LOOKAHEAD_DAYS): number[] {
+  const year = currentIstYear();
+  const years = [year];
+  const aheadYear = Number(istCalendarDatePlusDays(todayIstIsoDate(), lookAheadDays).slice(0, 4));
+  if (aheadYear !== year && aheadYear >= 2020 && aheadYear <= 2050) {
+    years.push(aheadYear);
+  }
+  return years;
+}
+
+function mergeHolidayCalendars(calendars: Holiday[][]): Holiday[] {
+  const byDate = new Map<string, Holiday>();
+  for (const calendar of calendars) {
+    for (const holiday of calendar) {
+      if (!byDate.has(holiday.date)) byDate.set(holiday.date, holiday);
+    }
+  }
+  return [...byDate.values()];
+}
+
 function nativeSymbolKey(symbol: unknown, exchange: unknown): string {
   const raw = stringParam(symbol).trim();
   if (!raw) return "";
@@ -786,7 +818,9 @@ function isAuthoritativeMarketCalendar(payload: unknown, expectedYear?: number):
   for (const candidate of candidates) {
     if (isRecord(candidate)) {
       const rawDate = candidate.date ?? candidate.holiday_date ?? candidate.trading_date;
-      if (!normaliseCalendarDate(rawDate)) return false;
+      const holidayDate = normaliseCalendarDate(rawDate);
+      if (!holidayDate) return false;
+      if (expectedYear !== undefined && holidayDate.slice(0, 4) !== String(expectedYear)) return false;
       if ("holiday_type" in candidate) {
         const holidayType = String(candidate.holiday_type || "").trim().toUpperCase();
         if (!AUTHORITATIVE_HOLIDAY_TYPES.has(holidayType)) return false;
@@ -801,8 +835,10 @@ function isAuthoritativeMarketCalendar(payload: unknown, expectedYear?: number):
         if (!Array.isArray(rawOpen)) return false;
         if (rawOpen.some((value) => !isAuthoritativeOpenExchange(value))) return false;
       }
-    } else if (!normaliseCalendarDate(candidate)) {
-      return false;
+    } else {
+      const holidayDate = normaliseCalendarDate(candidate);
+      if (!holidayDate) return false;
+      if (expectedYear !== undefined && holidayDate.slice(0, 4) !== String(expectedYear)) return false;
     }
   }
   return true;
@@ -3351,7 +3387,14 @@ export const getHoldings = async (
 // --- Utility ---
 export const ping = () => post<{ status: string }>("ping"); // OpenAlgo docs: POST /api/v1/ping
 export async function getHolidays(year?: number | string): Promise<Holiday[]> {
-  return post<Holiday[]>("market/holidays", { year: holidayYear(year) });
+  if (year !== undefined && year !== "") {
+    return post<Holiday[]>("market/holidays", { year: holidayYear(year) });
+  }
+  const years = holidayYearsForLookahead();
+  const calendars = await Promise.all(
+    years.map((calendarYear) => post<Holiday[]>("market/holidays", { year: calendarYear })),
+  );
+  return mergeHolidayCalendars(calendars);
 }
 export function getTimings(date?: string): Promise<MarketTiming[]> {
   const timingDate = String(date ?? todayIstIsoDate()).trim();

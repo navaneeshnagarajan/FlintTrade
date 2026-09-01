@@ -320,7 +320,10 @@ def is_authoritative_market_calendar(
             raw_date = candidate.get("date") or candidate.get("holiday_date") or candidate.get(
                 "trading_date"
             )
-            if _normalise_calendar_date(raw_date) is None:
+            holiday_date = _normalise_calendar_date(raw_date)
+            if holiday_date is None:
+                return False
+            if expected_year is not None and holiday_date[:4] != f"{expected_year:04d}":
                 return False
             if "holiday_type" in candidate:
                 holiday_type = str(candidate["holiday_type"] or "").strip().upper()
@@ -342,8 +345,12 @@ def is_authoritative_market_calendar(
                 return False
             if any(_normalise_open_exchange(value) is None for value in raw_open):
                 return False
-        elif _normalise_calendar_date(candidate) is None:
-            return False
+        else:
+            holiday_date = _normalise_calendar_date(candidate)
+            if holiday_date is None:
+                return False
+            if expected_year is not None and holiday_date[:4] != f"{expected_year:04d}":
+                return False
     return True
 
 
@@ -769,6 +776,10 @@ class OpenAlgoClient:
             request_payload = dict(payload)
             if "apikey" in request_payload:
                 request_payload["apikey"] = self._api_key
+            if endpoint == "telegram/notify" and not str(request_payload.get("username") or "").strip():
+                request_payload["username"] = str(self.settings.openalgo_telegram_username or "").strip()
+        if endpoint == "telegram/notify" and not str(request_payload.get("username") or "").strip():
+            raise ValueError("username is required")
         rl = limiter or self._general_limiter
         await rl.acquire()
 
@@ -1387,9 +1398,14 @@ class OpenAlgoClient:
     async def orderbook(self) -> list[OrderStatus]:
         """POST /api/v1/orderbook"""
         data = self._unwrap(await self._post("orderbook", self._body()))
-        if isinstance(data, list):
-            return [_order_status_from_row(o) for o in data if isinstance(o, dict)]
-        return []
+        if not isinstance(data, list):
+            return []
+        orders: list[OrderStatus] = []
+        for row in data:
+            if not isinstance(row, dict):
+                raise ValueError("OpenAlgo orderbook row is not an object")
+            orders.append(_order_status_from_row(row))
+        return orders
 
     async def tradebook(self) -> list[Trade]:
         """POST /api/v1/tradebook"""
@@ -1477,12 +1493,15 @@ class OpenAlgoClient:
 
     async def telegram(self, message: str, username: str = "") -> dict[str, Any]:
         """POST /api/v1/telegram/notify"""
-        name = str(username or self.settings.openalgo_telegram_username or "").strip()
-        if not name:
-            raise ValueError("username is required")
+        explicit = str(username or "").strip()
+        if not explicit:
+            with self._config_guard:
+                configured = str(self.settings.openalgo_telegram_username or "").strip()
+            if not configured:
+                raise ValueError("username is required")
         return await self._post(
             "telegram/notify",
-            self._body({"username": name, "message": message}),
+            self._body({"username": explicit, "message": message}),
         )
 
     async def instruments(self, exchange: str = "NSE") -> dict[str, Any]:

@@ -234,7 +234,7 @@ interface ModifyOverlayProps {
   row: OrderRow;
   pending: boolean;
   canSubmit: boolean;
-  onSubmit: (qty: number, price: number, triggerPrice: number, disclosedQuantity: number) => void;
+  onSubmit: (qty: number, price: number, triggerPrice: number, disclosedQuantity?: number) => void;
   onClose: () => void;
 }
 
@@ -255,7 +255,18 @@ function ModifyOverlay({ row, pending, canSubmit, onSubmit, onClose }: ModifyOve
     const qtyNum = parseInt(qty, 10);
     const priceNum = parseFloat(price) || 0;
     const triggerNum = parseFloat(trigger) || 0;
-    const disclosedNum = disclosed.trim() === "" ? row.disclosedQuantityNum : parseFloat(disclosed);
+    const disclosedTrimmed = disclosed.trim();
+    let disclosedQuantity: number | undefined;
+    if (disclosedTrimmed !== "") {
+      const disclosedNum = parseFloat(disclosedTrimmed);
+      if (!Number.isFinite(disclosedNum) || disclosedNum < 0) {
+        setError("Disclosed quantity cannot be negative");
+        return;
+      }
+      disclosedQuantity = disclosedNum;
+    } else if (row.hasDisclosedQuantity) {
+      disclosedQuantity = row.disclosedQuantityNum;
+    }
     if (!Number.isFinite(qtyNum) || qtyNum < 1) {
       setError("Quantity must be at least 1");
       return;
@@ -268,12 +279,8 @@ function ModifyOverlay({ row, pending, canSubmit, onSubmit, onClose }: ModifyOve
       setError("A trigger price above 0 is required for this order type");
       return;
     }
-    if (disclosed.trim() !== "" && (!Number.isFinite(disclosedNum) || disclosedNum < 0)) {
-      setError("Disclosed quantity cannot be negative");
-      return;
-    }
     setError(null);
-    onSubmit(qtyNum, priceNum, triggerNum, Number.isFinite(disclosedNum) ? disclosedNum : 0);
+    onSubmit(qtyNum, priceNum, triggerNum, disclosedQuantity);
   }
 
   return (
@@ -508,7 +515,7 @@ function OrdersWidget(_props: WidgetProps) {
   }, [cancelIntent, refreshOrders]);
 
   const handleModifySubmit = useCallback(
-    async (qty: number, price: number, triggerPrice: number, disclosedQuantity: number) => {
+    async (qty: number, price: number, triggerPrice: number, disclosedQuantity?: number) => {
       const intent = modifyIntent;
       if (
         !actionGateRef.current
@@ -536,9 +543,11 @@ function OrdersWidget(_props: WidgetProps) {
         product: row.product as "MIS" | "CNC" | "NRML",
         price,
         triggerPrice,
-        disclosedQuantity,
         strategy: row.strategy,
       };
+      if (disclosedQuantity !== undefined) {
+        params.disclosedQuantity = disclosedQuantity;
+      }
       try {
         await modifyOrder(params, mutationIdentity);
         if (accountAuthorityMatches(mutationIdentity, currentIdentityRef.current)) {

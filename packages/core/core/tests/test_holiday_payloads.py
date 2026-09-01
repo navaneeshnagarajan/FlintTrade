@@ -74,6 +74,13 @@ def test_rejects_invalid_dates_and_unrelated_envelope_metadata() -> None:
         {"status": "success", "year": 2026, "data": []},
         {"status": "success", "year": 2026, "data": {}},
         {"holidays": []},
+        {"status": "success", "year": 2026, "data": ["2025-01-26"]},
+        {
+            "status": "success",
+            "year": 2026,
+            "data": [{"date": "2025-01-26", "holiday_type": "TRADING_HOLIDAY"}],
+        },
+        ["2025-01-26"],
     ],
 )
 def test_rejects_non_authoritative_market_calendar_envelopes(payload: Any) -> None:

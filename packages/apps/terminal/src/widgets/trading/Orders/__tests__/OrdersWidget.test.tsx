@@ -326,6 +326,7 @@ describe("OrdersWidget", () => {
         },
       );
     });
+    expect(mockModifyOrder.mock.calls[0][0]).not.toHaveProperty("disclosedQuantity");
   });
 
   it("sends recovered trigger and disclosed quantity when modifying a stop-loss order", async () => {
@@ -356,6 +357,21 @@ describe("OrdersWidget", () => {
         expect.objectContaining({ mode: "live" }),
       );
     });
+  });
+
+  it("omits disclosed quantity when the orderbook never returned one and the field stays blank", async () => {
+    mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER] }));
+    renderWidget();
+
+    fireEvent.click(screen.getByLabelText("Modify order ORD123"));
+    const dialog = screen.getByRole("dialog", { name: /modify order/i });
+    expect(within(dialog).getByLabelText("Disclosed Quantity")).toHaveValue(null);
+    fireEvent.click(within(dialog).getByText("Modify Order"));
+
+    await waitFor(() => {
+      expect(mockModifyOrder).toHaveBeenCalledTimes(1);
+    });
+    expect(mockModifyOrder.mock.calls[0][0]).not.toHaveProperty("disclosedQuantity");
   });
 
   it("forwards an explicit zero disclosed quantity instead of keeping the recovered value", async () => {
@@ -450,6 +466,11 @@ describe("toOrderRow", () => {
     expect(row.triggerPriceNum).toBe(1490.5);
     expect(row.disclosedQuantityNum).toBe(25);
     expect(row.hasDisclosedQuantity).toBe(true);
+  });
+
+  it("marks omitted disclosure as unknown instead of a synthesised zero", () => {
+    const row = toOrderRow({ ...OPEN_ORDER, pricetype: "LIMIT" });
+    expect(row.hasDisclosedQuantity).toBe(false);
   });
 });
 

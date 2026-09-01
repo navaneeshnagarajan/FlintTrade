@@ -839,7 +839,7 @@ describe("OpenAlgo API client (api.ts)", () => {
         }),
       );
 
-    const holidays = await getHolidays();
+    const holidays = await getHolidays(2026);
     const timings = await getTimings();
 
     expect(holidays).toEqual([{
@@ -905,7 +905,7 @@ describe("OpenAlgo API client (api.ts)", () => {
         }),
       );
 
-    await expect(getHolidays()).resolves.toEqual([
+    await expect(getHolidays(2026)).resolves.toEqual([
       {
         date: "2026-08-15",
         description: "Independence Day",
@@ -968,7 +968,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       )
       .mockResolvedValueOnce(jsonResponse({ status: "success", data: payload }));
 
-    await expect(getHolidays()).rejects.toThrow(/invalid native holiday response/i);
+    await expect(getHolidays(2026)).rejects.toThrow(/invalid native holiday response/i);
   });
 
   it("uses native option Greeks when a live native account is connected without an OpenAlgo key", async () => {
@@ -2163,11 +2163,94 @@ describe("OpenAlgo API client (api.ts)", () => {
     ["empty holidays envelope", { status: "success", year: 2026, data: { holidays: [] } }],
     ["invalid calendar date", { status: "success", year: 2026, data: ["2026-02-30"] }],
     ["year mismatch", { status: "success", year: 2025, data: ["2026-01-26"] }],
+    ["row year mismatch", { status: "success", year: 2026, data: ["2025-01-26"] }],
+    [
+      "object row year mismatch",
+      { status: "success", year: 2026, data: [{ date: "2025-01-26", holiday_type: "TRADING_HOLIDAY" }] },
+    ],
+    ["yearless envelope of another year", { status: "success", data: ["2025-01-26"] }],
   ])("rejects an unusable OpenAlgo holiday %s instead of caching an all-open year", async (_name, payload) => {
     mockConnectionState.apiKey = "test-key-123";
     fetchSpy.mockResolvedValueOnce(jsonResponse(payload));
 
     await expect(getHolidays(2026)).rejects.toThrow("OpenAlgo market calendar is not authoritative");
+  });
+
+  it("fetches the next holiday year when the IST lookahead crosses 1 January", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-12-28T18:30:00.000Z")); // 29 Dec 2026 IST
+      mockConnectionState.apiKey = "test-key-123";
+      fetchSpy
+        .mockResolvedValueOnce(jsonResponse({
+          status: "success",
+          year: 2026,
+          data: ["2026-12-31"],
+        }))
+        .mockResolvedValueOnce(jsonResponse({
+          status: "success",
+          year: 2027,
+          data: ["2027-01-01"],
+        }));
+
+      await expect(getHolidays()).resolves.toEqual([
+        expect.objectContaining({ date: "2026-12-31" }),
+        expect.objectContaining({ date: "2027-01-01" }),
+      ]);
+      const years = fetchSpy.mock.calls.map(([, init]) => (
+        JSON.parse((init as RequestInit).body as string) as { year: number }
+      ).year);
+      expect(years).toEqual([2026, 2027]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a single-year holiday fetch before the year-boundary lookahead", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-12-27T18:30:00.000Z")); // 28 Dec 2026 IST
+      mockConnectionState.apiKey = "test-key-123";
+      fetchSpy.mockResolvedValueOnce(jsonResponse({
+        status: "success",
+        year: 2026,
+        data: ["2026-12-31"],
+      }));
+
+      await expect(getHolidays()).resolves.toEqual([
+        expect.objectContaining({ date: "2026-12-31" }),
+      ]);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+        apikey: "test-key-123",
+        year: 2026,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails closed when the adjacent holiday year is not authoritative", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-12-28T18:30:00.000Z")); // 29 Dec 2026 IST
+      mockConnectionState.apiKey = "test-key-123";
+      fetchSpy
+        .mockResolvedValueOnce(jsonResponse({
+          status: "success",
+          year: 2026,
+          data: ["2026-12-31"],
+        }))
+        .mockResolvedValueOnce(jsonResponse({
+          status: "success",
+          year: 2027,
+          data: [],
+        }));
+
+      await expect(getHolidays()).rejects.toThrow("OpenAlgo market calendar is not authoritative");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("posts OpenAlgo market/timings with the trading date", async () => {
