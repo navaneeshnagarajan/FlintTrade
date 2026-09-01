@@ -31,7 +31,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | `webhooks` | Python | Generic HMAC-signed custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
 | `ai` | Python | LLM client (multi-provider), optional RAG/vector store, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
 | `automation` | Python | Cron manager, Telegram bot with kill-switch, post-market analysis, voice-order intent extraction | `packages/services/automation/tests/` |
-| `backtest` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 96 strategy templates | `packages/services/backtest/tests/` |
+| `backtest` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 94 strategy templates | `packages/services/backtest/tests/` |
 | `ditto` | Python | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager | `packages/services/ditto/tests/` |
 | `engine` | Python | 5-layer safety system, order router, scheduler, base strategy, strategy registry, mode guard | `packages/services/engine/tests/` |
 | `journal` | Python | Journal entries, trade logging, execution-quality analytics, and realised P&L tracking | `packages/services/journal/tests/` |
@@ -251,7 +251,8 @@ FlexLayout panel.
    the component with mocked atoms and assert the rendered output.
 5. **(Optional) add to a workspace preset.** Edit
    `packages/apps/terminal/src/layout/workspacePresets.ts` if your widget
-   belongs in one of the 14 default presets.
+   belongs in one of the 17 listed presets (`beginner-core` is an extra
+   unlisted layout resolved by id).
 6. **Update [USER_GUIDE.md](USER_GUIDE.md)** if the widget changes the
    user-visible workspace tour.
 
@@ -365,8 +366,10 @@ without presenting them as ready to connect.
   floor in `flint.toml` — currently 3.12 — so `list[int]` not `List[int]`,
   `X | None` not `Optional[X]`. CI runs `python_target` (3.14).
 - **Google-style docstrings** for every public function and class.
-- **Absolute imports**. Never use `from .foo import bar` inside
-  `packages/<pkg>/src/`.
+- **Absolute imports** for anything cross-package or top-level
+  (`flinttrade_<pkg>....`). Intra-package relative imports
+  (`from .sibling import x`) are widespread and safe under
+  `--import-mode=importlib`.
 - **British English** in docstrings, comments, and user-visible strings.
   Code identifiers stay in their natural form (`color`, `behavior` are
   fine inside a CSS shim; user-visible labels read `colour`, `behaviour`).
@@ -488,8 +491,8 @@ In `packages/apps/terminal/`, the dev server proxies:
 | `/ft-api` | `http://127.0.0.1:5100` (FlintTrade backend) |
 | `/ws` | `ws://127.0.0.1:8765` (OpenAlgo WebSocket) |
 
-In dev mode, `packages/apps/terminal/src/api.ts` uses *relative* paths (empty
-base URL). In production, it reads the full host from the
+In dev mode, `packages/apps/terminal/src/services/api.ts` uses *relative*
+paths (empty base URL). In production, it reads the full host from the
 `connectionStore`. Do not bypass the proxy in dev — your code will work
 locally but break on every other contributor's machine.
 
@@ -510,8 +513,9 @@ stores and you guarantee a bug.
    before testing.
 2. **`closeposition` ignores strategy.** Track positions per-strategy
    yourself.
-3. **WebSocket drops without heartbeat.** The client in
-   `packages/core/core/src/flinttrade_core/openalgo_client.py` implements ping/pong.
+3. **WebSocket drops without heartbeat.** The terminal client in
+   `packages/apps/terminal/src/services/websocket.ts` implements ping/pong.
+   The Python `OpenAlgoClient` is REST-only apart from `ping`.
 4. **PNL calculation incorrect for some brokers.** Compute it locally
    from `tradebook`.
 5. **MCX symbol format inconsistency.** Normalise in

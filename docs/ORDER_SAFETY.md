@@ -104,8 +104,12 @@ archive.
 Kill switch triggers:
 
 - Telegram bot: `/kill` command when the operator enables the integration.
-- Terminal UI: Kill switch button in the Risk Panel.
-- API: `POST /ft-api/safety/kill-switch/activate`.
+- Terminal UI: the Kill Switch control on the `/trade` workspace (Live mode
+  only), and Activate / Reset on `/automate` → Settings.
+- API: `POST /api/v1/safety/kill-switch` to latch Layer 5 (JSON body
+  `{ "reason": "…" }`). `DELETE /api/v1/safety/kill-switch` resets it after
+  emergency actions complete. From the Vite dev proxy the same routes are
+  `/ft-api/api/v1/safety/kill-switch`. There is no `/activate` suffix.
 
 The percentage-based Layer 4 daily-loss thresholds do not activate this kill
 switch. They latch new-order admission until manually reset. Automatic

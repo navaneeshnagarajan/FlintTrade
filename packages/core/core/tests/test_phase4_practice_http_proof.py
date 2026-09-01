@@ -20,6 +20,7 @@ Run with:
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -215,3 +216,105 @@ def test_frozen_clock_21_call_http_burst_uses_real_sandbox(tmp_path: Path) -> No
         assert app.config["BROKER_ROUTER"].accesses == []
         assert app.config["CLIENT"].accesses == []
         assert app.config["OPENALGO_CLIENT"].accesses == []
+
+
+def _frozen_place_burst(
+    tmp_path: Path,
+    headers_for_index: Callable[[int], dict[str, str]],
+) -> tuple[Flask, list[int]]:
+    """POST /place 21 times under a frozen clock; return (app, statuses).
+
+    Frozen time is an hour ahead so a newly created per-user bucket (whose
+    ``last_refill`` default_factory still hits the real clock) starts full
+    rather than computing a negative elapsed refill.
+    """
+    frozen = time.monotonic() + 3600.0
+    with patch("flinttrade_core.rate_limiter.time.monotonic", return_value=frozen):
+        app = _minimal_practice_app(tmp_path / "sandbox.sqlite3")
+        app.config["RATE_LIMITER"].reset()
+        client = app.test_client()
+        statuses: list[int] = []
+        for index in range(21):
+            payload = {
+                **_PRACTICE_BODY,
+                "price": 100.0 + index,
+            }
+            resp = client.post(
+                "/api/v1/orders/place",
+                json=payload,
+                headers=headers_for_index(index),
+            )
+            statuses.append(resp.status_code)
+        return app, statuses
+
+
+@pytest.mark.unit
+def test_practice_jwt_forged_x_user_id_cannot_rotate_order_buckets(tmp_path: Path) -> None:
+    """One Practice JWT cannot mint a new 10/s bucket by forging ``X-User-ID``.
+
+    ``rate_limit()`` historically keyed the per-user bucket on the client
+    ``X-User-ID`` header before API key or IP. An authenticated Practice
+    caller could rotate that header and keep filling while the signed
+    ``sub`` stayed the same. The order-route limiter must bind identity to
+    verified JWT authority so this 21-call frozen burst still yields the
+    10/11 split.
+    """
+    token = _practice_token()
+
+    def headers_for_index(index: int) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "X-User-ID": f"forged-operator-{index}",
+        }
+
+    app, statuses = _frozen_place_burst(tmp_path, headers_for_index)
+    assert statuses.count(200) == 10
+    assert statuses.count(429) == 11
+    assert set(statuses) <= {200, 429}
+    assert len(app.config["DATA_SANDBOX_ENGINE"].get_orders()) == 10
+    assert app.config["BROKER_ROUTER"].accesses == []
+    assert app.config["CLIENT"].accesses == []
+    assert app.config["OPENALGO_CLIENT"].accesses == []
+
+
+@pytest.mark.unit
+def test_invalid_jwt_forged_x_user_id_cannot_rotate_order_buckets(tmp_path: Path) -> None:
+    """Invalid bearer tokens still share one bucket; ``X-User-ID`` cannot rotate it.
+
+    ``@rate_limit`` is the only wrapper on ``/place`` besides the route, so
+    it runs before the view's JWT 401. Identity must not wait on an outer
+    auth decorator, and must not decode unverified claims.
+    """
+
+    def headers_for_index(index: int) -> dict[str, str]:
+        return {
+            "Authorization": "Bearer not-a-jwt",
+            "Content-Type": "application/json",
+            "X-User-ID": f"forged-operator-{index}",
+        }
+
+    app, statuses = _frozen_place_burst(tmp_path, headers_for_index)
+    assert statuses.count(401) == 10
+    assert statuses.count(429) == 11
+    assert set(statuses) <= {401, 429}
+    assert app.config["DATA_SANDBOX_ENGINE"].get_orders() == []
+    assert app.config["BROKER_ROUTER"].accesses == []
+
+
+@pytest.mark.unit
+def test_missing_jwt_forged_x_user_id_cannot_rotate_order_buckets(tmp_path: Path) -> None:
+    """Missing JWT falls back to IP/API-key identity, never ``X-User-ID``."""
+
+    def headers_for_index(index: int) -> dict[str, str]:
+        return {
+            "Content-Type": "application/json",
+            "X-User-ID": f"forged-operator-{index}",
+        }
+
+    app, statuses = _frozen_place_burst(tmp_path, headers_for_index)
+    assert statuses.count(401) == 10
+    assert statuses.count(429) == 11
+    assert set(statuses) <= {401, 429}
+    assert app.config["DATA_SANDBOX_ENGINE"].get_orders() == []
+    assert app.config["BROKER_ROUTER"].accesses == []
