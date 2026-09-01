@@ -26,9 +26,9 @@ POST unless explicitly marked **GET**.
 
 | Endpoint | Purpose |
 |---|---|
-| `placeorder` | Place a standard order (MARKET / LIMIT / SL / SL-M). |
-| `placesmartorder` | Conditional / multi-leg / target-position smart order. |
-| `modifyorder` | Modify price / quantity / order type of a pending order. |
+| `placeorder` | Place a standard order (MARKET / LIMIT / SL / SL-M). Omits undeclared `market_protection` — v2.0.2.2 dropped that field; FlintTrade refuses `market_protection=true` rather than silently dropping it. |
+| `placesmartorder` | Conditional / multi-leg / target-position smart order. Same `market_protection` rule as `placeorder`. |
+| `modifyorder` | Modify price / quantity / order type of a pending order. `trigger_price` stays explicit. Full-replacement brokers receive `disclosed_quantity` (recovered from the live order when omitted); partial-modify adapters omit the request model's default disclosure when the caller did not supply it. Stop-loss modify requires a positive `trigger_price`. |
 | `cancelorder` | Cancel a single pending order by ID. |
 | `cancelallorder` | Cancel every pending order for a strategy. |
 | `closeposition` | Square off every position for a strategy. |
@@ -78,21 +78,21 @@ identically to regular orders.
 
 | Endpoint | Purpose |
 |---|---|
-| `quotes` | Single-symbol quote (LTP, OHLC, OI). |
+| `quotes` | Single-symbol quote (LTP, OHLC, OI). Current ticker polling uses this POST — the terminal `getTicker` helper is an alias, not a separate route. |
 | `multiquotes` | Quote for a list of symbols in one request. |
 | `depth` | Level-2 market depth from brokers with a wired FlintTrade snapshot read; documented feed-only depth is not exposed here until the adapter bridge is wired. |
 | `history` | Historical OHLCV bars. |
-| `optionchain` | Full option chain for a symbol and expiry. |
+| `optionchain` | Full option chain. FlintTrade sends `underlying`, `exchange`, and `expiry_date` (OpenAlgo `DDMMMYY`, e.g. `26MAR26`). FlintTrade's Python and terminal helpers refuse a missing expiry before posting; a raw HTTP body without `expiry_date` still reaches OpenAlgo and is rejected there. |
 | `optiongreeks` | Greeks for a specific strike. |
 | `multioptiongreeks` | Greeks for a list of strikes in one request. |
-| `optionsymbol` | Resolve human-readable expiry / strike / type to a tradeable symbol. |
+| `optionsymbol` | Resolve expiry / type / offset to a tradeable symbol. Remote calls use official offsets `ATM` / `ITM1`–`ITM50` / `OTM1`–`OTM50`. Explicit numeric strikes are built locally as compact symbols and are not posted. |
 | `symbol` | Symbol metadata lookup. |
 | `search` | Symbol search by name / partial match. |
 | `expiry` | List of available expiries for a symbol. |
-| `intervals` (**GET**) | Supported chart intervals for the active broker. |
-| `syntheticfuture` | Synthetic future from CE - PE + strike. |
-| `ticker` (**GET**) | OHLCV ticker stream via header auth. |
-| `instruments` (**GET**) | Instrument master CSV for an exchange. |
+| `intervals` | Supported chart intervals. **POST** with `apikey` in the JSON body (not GET). The OpenAlgo response may be bucketed (`seconds` / `minutes` / `hours` / `days` / `weeks` / `months`); the terminal flattens those buckets to a string list. The Python client returns the bucketed object. |
+| `syntheticfuture` | Synthetic future from CE - PE + strike. Same required fields as `optionchain`: `underlying`, `exchange`, and `expiry_date` (`DDMMMYY`). FlintTrade helpers refuse a missing expiry before posting; raw HTTP still reaches OpenAlgo. |
+| `ticker/{exchange}:{symbol}` (**GET**) | Dated historical helper on the Python client only (`apikey`, `interval`, `from`, `to` query params). Not the live polling path — polling uses POST `quotes`. Missing `from`/`to` fails closed. |
+| `instruments` (**GET**) | Instrument master for an exchange. Requires `apikey` and `exchange` query params. When no exchange is given, FlintTrade queries `NFO` / `BFO` / `MCX` / `CDS`. |
 | `gex` | Gamma Exposure curve. |
 | `iv_smile` | Implied-volatility smile curve. |
 | `max_pain` | Max-pain strike calculation. |
@@ -103,9 +103,9 @@ identically to regular orders.
 
 | Endpoint | Purpose |
 |---|---|
-| `holidays` | Exchange holiday list. |
-| `timings` | Exchange-timing windows for a date. |
-| `telegram` | Send a Telegram message via the OpenAlgo bot. |
+| `market/holidays` | Holiday calendar. **POST** with `apikey` and `year` (2020–2050) in the JSON body. Do not call bare `holidays` as the current passthrough path. |
+| `market/timings` | Exchange-timing windows. **POST** with `apikey` and `date` in the JSON body. Missing date fails closed. Do not call bare `timings` as the current passthrough path. |
+| `telegram/notify` | Send a Telegram message via the OpenAlgo bot (`username` + `message`). If `username` is omitted, FlintTrade uses workspace `openalgo.telegram_username` when set; otherwise the call fails closed. That field is accepted and persisted by `GET`/`POST` `/v1/config/openalgo` or a `workspace.json` edit — not by the Setup/Settings connection form, which only writes `api_key`, `host`, `port`, and `ws_port`. |
 | `whatsapp/notify` | Upstream OpenAlgo endpoint. **Not wrapped by FlintTrade** — WhatsApp support was removed on 2026-07-26 (ruling D3); listed only so the OpenAlgo surface stays fully documented. |
 
 ### Broker management (session-authenticated, NOT under `/api/v1/`)
@@ -637,20 +637,28 @@ quantity, average price, last price, P&L.
 
 ### 7.4 Pull an option chain
 
+OpenAlgo v2.0.2.2 requires `underlying`, `exchange`, and `expiry_date`
+(`DDMMMYY`). FlintTrade's Python client and terminal helpers refuse a
+missing `expiry_date` before posting. The raw HTTP examples below still
+cross the network; OpenAlgo then rejects a body that omits `expiry_date`.
+
 ```bash
 curl -X POST http://127.0.0.1:5000/api/v1/optionchain \
-  -H "X-API-KEY: $OPENALGO_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{ "symbol": "NIFTY", "exchange": "NFO" }'
+  -d "{\"apikey\": \"$OPENALGO_API_KEY\", \"underlying\": \"NIFTY\", \"exchange\": \"NFO\", \"expiry_date\": \"26MAR26\"}"
 ```
 
 ```powershell
 $params = @{
   Method      = "Post"
   Uri         = "http://127.0.0.1:5000/api/v1/optionchain"
-  Headers     = @{ "X-API-KEY" = $env:OPENALGO_API_KEY }
   ContentType = "application/json"
-  Body        = '{ "symbol": "NIFTY", "exchange": "NFO" }'
+  Body        = (@{
+    apikey = $env:OPENALGO_API_KEY
+    underlying = "NIFTY"
+    exchange = "NFO"
+    expiry_date = "26MAR26"
+  } | ConvertTo-Json)
 }
 Invoke-RestMethod @params
 ```
