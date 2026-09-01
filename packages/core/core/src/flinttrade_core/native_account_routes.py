@@ -3156,7 +3156,12 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
         )
 
         if isinstance(exc, UnsupportedCapabilityError):
-            return jsonify({"status": "error", "message": str(exc)}), 400
+            public_message = (
+                "Unsupported quote_type for quote_details."
+                if kind == "quote_details"
+                else f"Unsupported {kind} request."
+            )
+            return jsonify({"status": "error", "message": public_message}), 400
 
         if should_keep_session_after_probe_error(exc):
             logger.info(

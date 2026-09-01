@@ -1782,7 +1782,7 @@ def test_native_dhan_quote_details_rejects_unknown_type_without_broker_read(clie
     assert details.status_code == 400, details.get_json()
     body = details.get_json()
     assert body["status"] == "error"
-    assert "quote_type" in body["message"]
+    assert body["message"] == "Unsupported quote_type for quote_details."
 
 
 def test_native_dhan_ltp_omits_missing_symbols_without_fabricating_zero(client, monkeypatch):

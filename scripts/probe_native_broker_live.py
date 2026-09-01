@@ -92,7 +92,9 @@ READ_CHOICES_BY_BROKER: dict[str, tuple[str, ...]] = {
 }
 READ_CHOICES = tuple(dict.fromkeys(read for choices in READ_CHOICES_BY_BROKER.values() for read in choices))
 DEFAULT_READS: dict[str, tuple[str, ...]] = {
-    "dhan": COMMON_READ_CHOICES + DHAN_MARKET_READ_CHOICES,
+    # One Dhan marketfeed call is enough for the default probe: ltp/ohlc and
+    # quote_details project the same quote response and remain explicitly selectable.
+    "dhan": COMMON_READ_CHOICES + ("quotes", "margin", "history"),
     "groww": COMMON_READ_CHOICES + GROWW_MARKET_READ_CHOICES,
     "indmoney": COMMON_READ_CHOICES + INDMONEY_MARKET_READ_CHOICES,
     "kotakneo": KOTAK_READ_CHOICES,
