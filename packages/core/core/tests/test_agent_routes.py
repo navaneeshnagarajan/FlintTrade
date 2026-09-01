@@ -703,7 +703,7 @@ def test_runtime_shutdown_joins_orphaned_learning_cleanup_when_runner_empty() ->
     cleanup = mod._defer_session_learning_memory_close(trader)
     with mod._RUNNER_LOCK:  # noqa: SLF001
         mod._RUNNER.clear()  # noqa: SLF001
-        assert cleanup in mod._LEARNING_CLEANUP_OWNERS  # noqa: SLF001
+        assert any(owner.is_alive() for owner in mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
 
     started_at = time.monotonic()
     result = mod.shutdown_agent_runtime(app, timeout=0.05)
@@ -782,6 +782,64 @@ def test_runtime_shutdown_joins_previous_session_learning_cleanup(live_auth, mon
     assert elapsed < 0.5
     assert close_count_before_release == 0
     memory_a.close.assert_called_once_with()
+
+
+def test_defer_learning_close_retains_owner_when_closer_cannot_start(monkeypatch) -> None:
+    """A failed closer start must still leave the leftover learner joinable after /start."""
+    app = _make_app()
+    started = threading.Event()
+    release = threading.Event()
+    memory = MagicMock()
+
+    def hold() -> None:
+        started.set()
+        release.wait(timeout=2.0)
+
+    worker = threading.Thread(target=hold, name="agent-learning", daemon=True)
+    real_thread = threading.Thread
+
+    class _ExplodingCloser(real_thread):
+        def start(self) -> None:
+            if self.name == "agent-learning-close":
+                raise RuntimeError("can't start new thread")
+            super().start()
+
+    class _Trader:
+        def __init__(self) -> None:
+            self.memory = memory
+            self._learning_thread = worker
+
+        def join_background_learning(self, timeout: float | None = None) -> bool:
+            self._learning_thread.join(timeout)
+            return not self._learning_thread.is_alive()
+
+    worker.start()
+    assert started.wait(timeout=1.0)
+    trader = _Trader()
+    assert mod._finalise_session_learning_memory(trader, timeout=0.0) is False
+    monkeypatch.setattr(mod.threading, "Thread", _ExplodingCloser)
+
+    with pytest.raises(RuntimeError, match="can't start new thread"):
+        mod._defer_session_learning_memory_close(trader)
+
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        mod._RUNNER.clear()  # noqa: SLF001
+        assert any(owner.is_alive() for owner in mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
+
+    started_at = time.monotonic()
+    result = mod.shutdown_agent_runtime(app, timeout=0.05)
+    elapsed = time.monotonic() - started_at
+    close_count_before_release = memory.close.call_count
+    release.set()
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        leftover = list(mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
+    for owner in leftover:
+        owner.join(timeout=2.0)
+
+    assert result is False
+    assert elapsed < 0.5
+    assert close_count_before_release == 0
+    memory.close.assert_called_once_with()
 
 
 def test_reset_runner_for_tests_clears_learning_cleanup_owners() -> None:

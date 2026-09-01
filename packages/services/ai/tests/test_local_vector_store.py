@@ -385,6 +385,38 @@ def test_reopened_collection_rejects_mismatched_query_dimension(tmp_path) -> Non
         reopened.close()
 
 
+def test_noop_update_does_not_pin_empty_collection_dimension() -> None:
+    """Updating missing IDs must not freeze an empty collection to that width."""
+    from flinttrade_ai.local_vector_store import EphemeralClient
+
+    client = EphemeralClient()
+    collection = client.get_or_create_collection(name="noop-update")
+    collection.update(ids=["missing"], embeddings=[[1.0, 0.0]])
+
+    assert collection.count() == 0
+    assert client._known_embedding_dim("noop-update") is None
+    collection.add(ids=["first"], documents=["seed"], embeddings=[[1.0, 0.0, 0.0]])
+    assert collection.count() == 1
+    assert client._known_embedding_dim("noop-update") == 3
+    client.close()
+
+
+def test_noop_update_does_not_reject_mismatched_width_when_no_rows_match() -> None:
+    """A missing-id update must not use its embedding width as a collection pin."""
+    from flinttrade_ai.local_vector_store import EphemeralClient
+
+    client = EphemeralClient()
+    collection = client.get_or_create_collection(name="noop-mismatch")
+    collection.add(ids=["kept"], documents=["narrow"], embeddings=[[1.0, 0.0]])
+    collection.update(ids=["missing"], embeddings=[[0.0] * 8])
+
+    assert collection.count() == 1
+    assert client._known_embedding_dim("noop-mismatch") == 2
+    result = collection.get(ids=["kept"], include=["embeddings"])
+    assert result["embeddings"] == [[1.0, 0.0]]
+    client.close()
+
+
 def test_empty_embedding_is_rejected_without_pinning_collection() -> None:
     """Zero-dimensional vectors cannot establish a collection's schema."""
     from flinttrade_ai.local_vector_store import EphemeralClient

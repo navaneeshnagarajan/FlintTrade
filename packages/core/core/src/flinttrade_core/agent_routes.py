@@ -50,7 +50,7 @@ _RUNNER: dict[str, Any] = {}
 _RUNNER_LOCK = threading.Lock()
 # Deferred learning-memory closers outlive the runner slot. A later /start
 # replaces ``_RUNNER`` wholesale; process shutdown must still join these.
-_LEARNING_CLEANUP_OWNERS: list[threading.Thread] = []
+_LEARNING_CLEANUP_OWNERS: list[Any] = []
 
 
 def _reset_runner_for_tests() -> None:
@@ -80,11 +80,38 @@ def _finalise_session_learning_memory(
     return True
 
 
-def _register_learning_cleanup_owner(thread: threading.Thread) -> None:
+class _LearningCleanupOwner:
+    """Retain a leftover learner even if the deferred closer never starts."""
+
+    def __init__(self, trader: Any) -> None:
+        self._trader = trader
+        self._thread: threading.Thread | None = None
+        self._finalised = False
+
+    def attach_thread(self, thread: threading.Thread) -> None:
+        self._thread = thread
+
+    def join(self, timeout: float | None = None) -> None:
+        if self._thread is not None and self._thread.ident is not None:
+            self._thread.join(timeout)
+            if not self._thread.is_alive():
+                self._finalised = True
+            return
+        self._finalised = _finalise_session_learning_memory(self._trader, timeout=timeout)
+
+    def is_alive(self) -> bool:
+        if self._finalised:
+            return False
+        if self._thread is not None and self._thread.ident is not None:
+            return self._thread.is_alive()
+        return True
+
+
+def _register_learning_cleanup_owner(owner: Any) -> None:
     """Retain one deferred closer independently of the current runner slot."""
     with _RUNNER_LOCK:
-        _LEARNING_CLEANUP_OWNERS[:] = [owner for owner in _LEARNING_CLEANUP_OWNERS if owner.is_alive()]
-        _LEARNING_CLEANUP_OWNERS.append(thread)
+        _LEARNING_CLEANUP_OWNERS[:] = [item for item in _LEARNING_CLEANUP_OWNERS if item.is_alive()]
+        _LEARNING_CLEANUP_OWNERS.append(owner)
 
 
 def _join_learning_cleanup_owners(*, deadline: float) -> bool:
@@ -96,19 +123,23 @@ def _join_learning_cleanup_owners(*, deadline: float) -> bool:
         if owner.is_alive():
             return False
     with _RUNNER_LOCK:
-        _LEARNING_CLEANUP_OWNERS[:] = [owner for owner in _LEARNING_CLEANUP_OWNERS if owner.is_alive()]
+        _LEARNING_CLEANUP_OWNERS[:] = [item for item in _LEARNING_CLEANUP_OWNERS if item.is_alive()]
     return True
 
 
 def _defer_session_learning_memory_close(trader: Any) -> threading.Thread:
     """Transfer a timed-out learner's memory cleanup off the session thread."""
+    owner = _LearningCleanupOwner(trader)
+    # Register before start() so a native-thread failure cannot drop the
+    # leftover learner when a later /start replaces ``_RUNNER``.
+    _register_learning_cleanup_owner(owner)
     cleanup = threading.Thread(
         target=lambda: _finalise_session_learning_memory(trader, timeout=None),
         name="agent-learning-close",
         daemon=True,
     )
     cleanup.start()
-    _register_learning_cleanup_owner(cleanup)
+    owner.attach_thread(cleanup)
     return cleanup
 
 

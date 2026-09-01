@@ -686,7 +686,8 @@ class LocalVectorClient:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
-                self._enforce_embedding_dim(name, embeddings)
+                applied: list[tuple[str, Any, Any, Any]] = []
+                applied_embeddings: list[Any] = []
                 for index, item_id in enumerate(ids):
                     row = self._conn.execute(
                         "SELECT document, metadata_json, embedding FROM items WHERE collection = ? AND id = ?",
@@ -699,6 +700,15 @@ class LocalVectorClient:
                         metadatas[index] if metadatas is not None else _load_metadata(row["metadata_json"])
                     )
                     embedding = embeddings[index] if embeddings is not None else row["embedding"]
+                    applied.append((item_id, document, metadata, embedding))
+                    if embeddings is not None:
+                        applied_embeddings.append(embeddings[index])
+                # Pin or reject width only for embeddings that will actually
+                # land on an existing row. A no-op update of missing IDs must
+                # not freeze an empty collection to the caller's dimension.
+                if applied_embeddings:
+                    self._enforce_embedding_dim(name, applied_embeddings)
+                for item_id, document, metadata, embedding in applied:
                     blob = embedding if isinstance(embedding, (bytes, bytearray)) else _dump_embedding(embedding)
                     self._conn.execute(
                         """
