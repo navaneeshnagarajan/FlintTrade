@@ -476,8 +476,10 @@ Lives in a platform-specific workspace directory:
 
 `workspace.json` contains:
 
-- **OpenAlgo bridge settings** — host, WebSocket port, and OpenAlgo API key
-  written by Setup/Settings when that optional bridge is enabled.
+- **OpenAlgo bridge settings** — host, WebSocket port, OpenAlgo API key, and
+  optional `telegram_username` (used by `telegram/notify`) written by
+  Setup/Settings when that optional bridge is enabled. `GET`/`POST`
+  `/v1/config/openalgo` accepts and persists that same field set.
 - **Storage paths** — `storage.fast` (SSD) and `storage.archive` (HDD).
 - **Enabled modules** — which packages are active.
 - **UI preferences** — theme, default exchange, time zone, density.
@@ -488,7 +490,8 @@ Lives in a platform-specific workspace directory:
 - **Order-safety settings** — rate limits, audit retention, kill-switch.
 
 Native broker credentials live in the encrypted gateway vault. OpenAlgo broker
-credentials remain inside OpenAlgo; FlintTrade stores only the OpenAlgo API key.
+credentials remain inside OpenAlgo; FlintTrade stores only the OpenAlgo API key
+and optional `telegram_username`.
 
 ### Tier 2: `.env` — advanced dev/server fallback
 
