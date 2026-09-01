@@ -442,8 +442,9 @@ class RateLimiter:
     def _get_user_bucket(self, user_id: str, endpoint: str, rate: int) -> _Bucket:
         """Return or create the per-user bucket.  Caller must hold ``_lock``."""
         key = (user_id, endpoint)
-        if key not in self._user_buckets:
-            capacity = float(rate * self._window_seconds)
+        capacity = float(rate * self._window_seconds)
+        bucket = self._user_buckets.get(key)
+        if bucket is None or bucket.capacity != capacity or bucket.rate != float(rate):
             self._user_buckets[key] = _Bucket(
                 capacity=capacity, rate=float(rate), tokens=capacity
             )

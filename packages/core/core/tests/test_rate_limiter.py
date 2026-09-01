@@ -517,6 +517,45 @@ class TestJwtIdentityRateLimit:
         assert first.status_code == 200
         assert second.status_code == 429
 
+    def test_setting_override_recreates_existing_namespaced_jwt_bucket(self):
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("alice", mode="practice")
+        app = self._app(user_rate=5)
+        limiter = app.config["RATE_LIMITER"]
+        with app.test_client() as client:
+            assert client.get("/test", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+            limiter.set_user_override("alice", "test_endpoint", 1)
+            first_after_override = client.get(
+                "/test",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            second_after_override = client.get(
+                "/test",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert first_after_override.status_code == 200
+        assert second_after_override.status_code == 429
+
+    def test_removing_override_recreates_existing_namespaced_jwt_bucket(self):
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("alice", mode="practice")
+        app = self._app(user_rate=5)
+        limiter = app.config["RATE_LIMITER"]
+        limiter.set_user_override("alice", "test_endpoint", 1)
+        with app.test_client() as client:
+            assert client.get("/test", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+            assert client.get("/test", headers={"Authorization": f"Bearer {token}"}).status_code == 429
+            assert limiter.remove_user_override("alice", "test_endpoint") is True
+            after_remove = client.get(
+                "/test",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert after_remove.status_code == 200
+
 
 def test_every_authenticated_rate_limited_route_uses_jwt_identity():
     """Keep sibling order/strategy route modules from reverting to header buckets."""
