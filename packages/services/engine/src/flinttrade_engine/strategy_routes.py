@@ -184,7 +184,7 @@ def list_strategies() -> Response:
 
 @strategy_bp.route("/<strategy_id>/start", methods=["POST"])
 @require_non_explore
-@rate_limit("smart_orders", user_rate=2, global_rate=20)
+@rate_limit("smart_orders", user_rate=2, global_rate=20, identity="jwt")
 def start_strategy(strategy_id: str) -> Response:
     """Start a strategy subprocess.
 

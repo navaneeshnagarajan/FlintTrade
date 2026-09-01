@@ -270,3 +270,237 @@ class TestRateLimitDecorator:
             client.get("/test", headers={"X-User-ID": "alice"})
             resp = client.get("/test", headers={"X-User-ID": "bob"})
         assert resp.status_code == 200
+
+    def test_header_identity_ignores_jwt_subject(self):
+        """Unauthenticated / header-keyed callers still bucket on X-User-ID."""
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("alice", mode="practice")
+        app = self._app(user_rate=1, global_rate=100)
+        with app.test_client() as client:
+            first = client.get(
+                "/test",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-User-ID": "alice",
+                },
+            )
+            second = client.get(
+                "/test",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-User-ID": "bob",
+                },
+            )
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+
+class TestJwtIdentityRateLimit:
+    """Authenticated identity is the verified JWT ``sub``, not ``X-User-ID``."""
+
+    def _app(self, user_rate=1, global_rate=100):
+        app = Flask(__name__)
+        limiter = RateLimiter(global_rate=global_rate, per_user_rate=user_rate)
+        app.config["RATE_LIMITER"] = limiter
+
+        @app.route("/test", methods=["GET"])
+        @rate_limit(
+            "test_endpoint",
+            user_rate=user_rate,
+            global_rate=global_rate,
+            identity="jwt",
+        )
+        def _view():
+            return "ok", 200
+
+        return app
+
+    def test_forged_x_user_id_shares_verified_subject_bucket(self):
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("alice", mode="practice")
+        app = self._app()
+        with app.test_client() as client:
+            first = client.get(
+                "/test",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-User-ID": "forged-1",
+                },
+            )
+            second = client.get(
+                "/test",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-User-ID": "forged-2",
+                },
+            )
+        assert first.status_code == 200
+        assert second.status_code == 429
+
+    def test_invalid_jwt_ignores_x_user_id(self):
+        app = self._app()
+        with app.test_client() as client:
+            first = client.get(
+                "/test",
+                headers={
+                    "Authorization": "Bearer not-a-jwt",
+                    "X-User-ID": "forged-1",
+                },
+            )
+            second = client.get(
+                "/test",
+                headers={
+                    "Authorization": "Bearer also-not-a-jwt",
+                    "X-User-ID": "forged-2",
+                },
+            )
+        assert first.status_code == 200
+        assert second.status_code == 429
+
+    def test_missing_jwt_ignores_x_user_id(self):
+        app = self._app()
+        with app.test_client() as client:
+            first = client.get("/test", headers={"X-User-ID": "forged-1"})
+            second = client.get("/test", headers={"X-User-ID": "forged-2"})
+        assert first.status_code == 200
+        assert second.status_code == 429
+
+    def test_invalid_jwt_cannot_rotate_api_key_fallback(self):
+        app = self._app()
+        with app.test_client() as client:
+            first = client.get(
+                "/test",
+                headers={
+                    "Authorization": "Bearer not-a-jwt",
+                    "X-API-Key": "forged-key-1",
+                },
+            )
+            second = client.get(
+                "/test",
+                headers={
+                    "Authorization": "Bearer still-not-a-jwt",
+                    "X-API-Key": "forged-key-2",
+                },
+            )
+        assert first.status_code == 200
+        assert second.status_code == 429
+
+    def test_invalid_jwt_api_key_cannot_collide_with_verified_subject(self):
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("alice", mode="practice")
+        app = self._app()
+        with app.test_client() as client:
+            verified = client.get(
+                "/test",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            unauthenticated = client.get(
+                "/test",
+                headers={
+                    "Authorization": "Bearer not-a-jwt",
+                    "X-API-Key": "alice",
+                },
+            )
+        assert verified.status_code == 200
+        assert unauthenticated.status_code == 200
+
+    def test_verified_subjects_have_independent_buckets(self):
+        from flinttrade_core.auth_routes import _create_token
+
+        alice = _create_token("alice", mode="practice")
+        bob = _create_token("bob", mode="practice")
+        app = self._app()
+        with app.test_client() as client:
+            alice_first = client.get("/test", headers={"Authorization": f"Bearer {alice}"})
+            alice_second = client.get("/test", headers={"Authorization": f"Bearer {alice}"})
+            bob_first = client.get("/test", headers={"Authorization": f"Bearer {bob}"})
+        assert alice_first.status_code == 200
+        assert alice_second.status_code == 429
+        assert bob_first.status_code == 200
+
+    def test_unverified_jwt_claims_do_not_share_subject_bucket(self):
+        """A forged token that *claims* ``sub=alice`` must not use alice's bucket."""
+        import jwt as pyjwt
+
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("alice", mode="practice")
+        forged = pyjwt.encode(
+            {"sub": "alice", "mode": "practice", "type": "session"},
+            "wrong-secret-not-the-app-jwt-key-32",
+            algorithm="HS256",
+        )
+        app = self._app()
+        with app.test_client() as client:
+            first = client.get(
+                "/test",
+                headers={"Authorization": f"Bearer {token}", "X-User-ID": "alice"},
+            )
+            second = client.get(
+                "/test",
+                headers={"Authorization": f"Bearer {forged}", "X-User-ID": "alice"},
+            )
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+    def test_jwt_identity_does_not_depend_on_outer_auth_decorator(self):
+        """Order-route layout: ``@rate_limit`` is the only wrapper besides the route."""
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("alice", mode="practice")
+        app = Flask(__name__)
+        app.config["RATE_LIMITER"] = RateLimiter(global_rate=100, per_user_rate=1)
+
+        @app.route("/test")
+        @rate_limit("test_endpoint", user_rate=1, global_rate=100, identity="jwt")
+        def _view():
+            return "ok", 200
+
+        with app.test_client() as client:
+            first = client.get("/test", headers={"Authorization": f"Bearer {token}"})
+            second = client.get(
+                "/test",
+                headers={"Authorization": f"Bearer {token}", "X-User-ID": "other"},
+            )
+        assert first.status_code == 200
+        assert second.status_code == 429
+
+
+def test_every_authenticated_rate_limited_route_uses_jwt_identity():
+    """Keep sibling order/strategy route modules from reverting to header buckets."""
+    import ast
+    import inspect
+    from pathlib import Path
+
+    import flinttrade_core.order_routes as order_routes
+    import flinttrade_core.smart_order_routes as smart_order_routes
+
+    root = Path(__file__).resolve().parents[4]
+    sources = (
+        Path(inspect.getsourcefile(order_routes) or ""),
+        Path(inspect.getsourcefile(smart_order_routes) or ""),
+        root / "packages/services/engine/src/flinttrade_engine/bracket_routes.py",
+        root / "packages/services/engine/src/flinttrade_engine/strategy_routes.py",
+    )
+    missing: list[str] = []
+    for source in sources:
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for decorator in node.decorator_list:
+                if not isinstance(decorator, ast.Call):
+                    continue
+                if not isinstance(decorator.func, ast.Name) or decorator.func.id != "rate_limit":
+                    continue
+                identity = next(
+                    (kw.value for kw in decorator.keywords if kw.arg == "identity"),
+                    None,
+                )
+                if not isinstance(identity, ast.Constant) or identity.value != "jwt":
+                    missing.append(f"{source.stem}.{node.name}")
+
+    assert missing == []

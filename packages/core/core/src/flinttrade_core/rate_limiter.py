@@ -22,7 +22,7 @@ Usage::
 
     # Or use the decorator (requires RateLimiter stored on app.config)
     @app.route("/v1/orders", methods=["POST"])
-    @rate_limit("orders", user_rate=10, global_rate=100)
+    @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
     def place_order():
         ...
 """
@@ -455,11 +455,60 @@ class RateLimiter:
 # ---------------------------------------------------------------------------
 
 
+def _header_rate_limit_user_id(user_id_header: str) -> str:
+    """Return the unauthenticated / header-keyed bucket identity."""
+    return (
+        request.headers.get(user_id_header)
+        or request.headers.get("X-API-Key")
+        or request.remote_addr
+        or "anonymous"
+    )
+
+
+def _verified_jwt_subject() -> str | None:
+    """Return the verified session ``sub``, or ``None`` if it cannot be trusted.
+
+    Uses :func:`flinttrade_core.auth_routes.decode_token` so expired, forged,
+    or revoked tokens never become a bucket key. Does not read ``X-User-ID``.
+    """
+    import jwt  # noqa: PLC0415
+
+    from .auth_routes import decode_token  # noqa: PLC0415
+
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip()
+    if not token:
+        token = request.headers.get("X-FlintTrade-Token", "").strip()
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
+    sub = payload.get("sub")
+    if isinstance(sub, str) and sub.strip():
+        return sub.strip()
+    return None
+
+
+def _jwt_rate_limit_user_id() -> str:
+    """Bucket identity for authenticated routes: JWT ``sub``, never ``X-User-ID``."""
+    subject = _verified_jwt_subject()
+    if subject is not None:
+        return f"jwt:{subject}"
+    # Invalid/missing JWTs are unauthenticated on these routes. Keep them in
+    # one IP-scoped namespace: client-provided API/user headers must not mint
+    # fresh buckets or collide with a legitimate JWT subject.
+    return f"unauthenticated:{request.remote_addr or 'anonymous'}"
+
+
 def rate_limit(
     endpoint: str,
     user_rate: int = 10,
     global_rate: int = 100,
     user_id_header: str = "X-User-ID",
+    *,
+    identity: str = "header",
 ) -> Callable[[F], F]:
     """Flask view decorator that enforces token-bucket rate limits.
 
@@ -469,17 +518,24 @@ def rate_limit(
     is intentional to avoid blocking requests in environments where the
     limiter is not set up).
 
-    The user identifier is taken from (in priority order):
+    Bucket identity depends on *identity*:
 
-    1. ``X-User-ID`` request header (or *user_id_header* if customised)
-    2. ``X-API-Key`` request header
-    3. The client IP address (``request.remote_addr``)
+    * ``"header"`` (default, unauthenticated / header-keyed callers) uses, in
+      order: ``X-User-ID`` (or *user_id_header*), ``X-API-Key``, then
+      ``request.remote_addr``.
+    * ``"jwt"`` binds the bucket to the verified JWT ``sub`` from
+      :func:`flinttrade_core.auth_routes.decode_token`. Client identity
+      headers are ignored. Missing or invalid tokens share an IP-scoped,
+      namespace-separated unauthenticated bucket. Identity is resolved inside
+      this wrapper so it does not depend on an outer auth decorator having run.
 
     Args:
         endpoint: Logical endpoint name used for bucket keying.
         user_rate: Per-user token refill rate (requests/second).
         global_rate: Global token refill rate (requests/second).
-        user_id_header: Header to read the user ID from.
+        user_id_header: Header to read the user ID from when *identity* is
+            ``"header"``.
+        identity: ``"header"`` or ``"jwt"``.
 
     Returns:
         Decorator that wraps Flask view functions.
@@ -487,10 +543,12 @@ def rate_limit(
     Example::
 
         @app.route("/v1/orders", methods=["POST"])
-        @rate_limit("orders", user_rate=10, global_rate=100)
+        @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
         def place_order():
             ...
     """
+    if identity not in {"header", "jwt"}:
+        raise ValueError(f"identity must be 'header' or 'jwt', got {identity!r}")
 
     def decorator(func: F) -> F:
         @wraps(func)
@@ -507,12 +565,10 @@ def rate_limit(
             if limits["user_rate"] != user_rate or limits["global_rate"] != global_rate:
                 limiter.set_limit(endpoint, user_rate, global_rate)
 
-            # Determine user identifier
             user_id = (
-                request.headers.get(user_id_header)
-                or request.headers.get("X-API-Key")
-                or request.remote_addr
-                or "anonymous"
+                _jwt_rate_limit_user_id()
+                if identity == "jwt"
+                else _header_rate_limit_user_id(user_id_header)
             )
 
             allowed, retry_ms = limiter.check(user_id, endpoint)
