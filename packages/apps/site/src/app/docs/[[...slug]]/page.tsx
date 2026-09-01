@@ -1,7 +1,9 @@
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from 'fumadocs-ui/page';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 
 import { getMDXComponents } from '@/components/mdx';
+import repoSourceLinks from '@/generated/repo-source-links.json';
+import { githubUrlForDocsSlug } from '@/lib/repo-source-links';
 import { source } from '@/lib/source';
 
 type PageProps = {
@@ -30,7 +32,11 @@ export default async function DocsSlugPage({ params }: PageProps) {
   const { slug } = await params;
   const page = source.getPage(slug);
 
-  if (!page) notFound();
+  if (!page) {
+    const githubUrl = githubUrlForDocsSlug(slug, repoSourceLinks);
+    if (githubUrl) redirect(githubUrl);
+    notFound();
+  }
 
   const MDXContent = page.data.body;
 
