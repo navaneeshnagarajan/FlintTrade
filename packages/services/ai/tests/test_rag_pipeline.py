@@ -11,6 +11,7 @@ Covers:
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -353,6 +354,14 @@ class TestVectorStore:
         assert store._client is None
         assert store._collection is None
 
+    def test_close_refuses_to_reopen_the_client(self) -> None:
+        store, _ = self._make_store()
+
+        store.close()
+
+        with pytest.raises(RuntimeError, match="vector store is closed"):
+            store._get_client()
+
     def test_upsert_falls_back_to_chroma_embeddings(self) -> None:
         coll = _make_mock_collection(embedding_mode=None)
         provider = MagicMock()
@@ -611,6 +620,37 @@ class TestRAGPipeline:
         pipeline.close()
         pipeline.close()
 
+        store.close.assert_called_once_with()
+
+    def test_close_joins_background_indexer_before_store(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        closed_while_alive: list[bool] = []
+
+        def hold() -> None:
+            started.set()
+            release.wait(timeout=2.0)
+
+        store = MagicMock()
+        indexer = threading.Thread(target=hold, name="rag-indexer", daemon=True)
+
+        def close_store() -> None:
+            closed_while_alive.append(indexer.is_alive())
+
+        store.close.side_effect = close_store
+        pipeline = RAGPipeline(vector_store=store)
+        pipeline._background_indexer = indexer
+        indexer.start()
+        assert started.wait(timeout=1.0)
+
+        closer = threading.Thread(target=pipeline.close, name="rag-close", daemon=True)
+        closer.start()
+        closer.join(timeout=0.05)
+        assert store.close.call_count == 0
+        release.set()
+        closer.join(timeout=2.0)
+
+        assert closed_while_alive == [False]
         store.close.assert_called_once_with()
 
     def test_close_releases_llm_client_once(self) -> None:

@@ -83,6 +83,41 @@ def _as_float32(vector: Any) -> np.ndarray:
     return np.asarray(vector, dtype=np.float32).reshape(-1)
 
 
+def _vector_dim(vector: Any | None) -> int | None:
+    """Return the float32 length of a stored or incoming embedding."""
+    if vector is None:
+        return None
+    if isinstance(vector, (bytes, bytearray)):
+        if len(vector) % 4 != 0:
+            raise ValueError("embedding blob is not float32-aligned")
+        dim = len(vector) // 4
+        if dim == 0:
+            raise ValueError("embedding must not be empty")
+        return dim
+    arr = _as_float32(vector)
+    if arr.size == 0:
+        raise ValueError("embedding must not be empty")
+    return int(arr.size)
+
+
+def _batch_embedding_dim(embeddings: list[Any] | None) -> int | None:
+    """Return the one dimension shared by a write batch, or None if none present."""
+    if not embeddings:
+        return None
+    resolved: int | None = None
+    for embedding in embeddings:
+        dim = _vector_dim(embedding)
+        if dim is None:
+            continue
+        if resolved is None:
+            resolved = dim
+        elif dim != resolved:
+            raise ValueError(
+                f"embeddings in one write must share one dimension; got {resolved} and {dim}"
+            )
+    return resolved
+
+
 def _dump_embedding(vector: Any | None) -> bytes | None:
     if vector is None:
         return None
@@ -154,7 +189,9 @@ def _match_where(metadata: dict[str, Any], where: dict[str, Any] | None) -> bool
 
 def _distance(space: str, left: np.ndarray, right: np.ndarray) -> float:
     resolved = space.lower()
-    if resolved in {"cosine", "ip", "inner_product"}:
+    if resolved in {"ip", "inner_product"}:
+        return 1.0 - float(np.dot(left, right))
+    if resolved == "cosine":
         left_norm = float(np.linalg.norm(left))
         right_norm = float(np.linalg.norm(right))
         if left_norm == 0.0 or right_norm == 0.0:
@@ -333,10 +370,11 @@ class Collection:
         query: np.ndarray,
         n_results: int,
     ) -> list[tuple[str, dict[str, Any], float]]:
+        query_dim = int(query.size)
         scored: list[tuple[str, dict[str, Any], float]] = []
         for row in rows:
             embedding = row["embedding"]
-            if embedding is None:
+            if embedding is None or int(embedding.size) != query_dim:
                 continue
             scored.append((row["id"], row, _distance(self._space, query, embedding)))
         scored.sort(key=lambda item: (item[2], item[0]))
@@ -417,7 +455,7 @@ class LocalVectorClient:
         with self._lock:
             existing = self._load_collection_row(name)
             if existing is not None:
-                stored_metadata, stored_space = existing
+                stored_metadata, stored_space, _stored_dim = existing
                 collection = Collection(
                     self,
                     name,
@@ -455,7 +493,8 @@ class LocalVectorClient:
                 CREATE TABLE IF NOT EXISTS collections (
                     name TEXT PRIMARY KEY,
                     metadata_json TEXT NOT NULL DEFAULT '{}',
-                    space TEXT NOT NULL DEFAULT 'l2'
+                    space TEXT NOT NULL DEFAULT 'l2',
+                    embedding_dim INTEGER
                 );
                 CREATE TABLE IF NOT EXISTS items (
                     collection TEXT NOT NULL,
@@ -468,22 +507,76 @@ class LocalVectorClient:
                 );
                 """
             )
+            columns = {
+                str(row["name"]) for row in self._conn.execute("PRAGMA table_info(collections)")
+            }
+            if "embedding_dim" not in columns:
+                self._conn.execute("ALTER TABLE collections ADD COLUMN embedding_dim INTEGER")
 
-    def _load_collection_row(self, name: str) -> tuple[dict[str, Any], str] | None:
+    def _load_collection_row(self, name: str) -> tuple[dict[str, Any], str, int | None] | None:
         row = self._conn.execute(
-            "SELECT metadata_json, space FROM collections WHERE name = ?",
+            "SELECT metadata_json, space, embedding_dim FROM collections WHERE name = ?",
             (name,),
         ).fetchone()
         if row is None:
             return None
-        return _load_metadata(row["metadata_json"]), str(row["space"]).lower()
+        dim = self._known_embedding_dim(name)
+        return _load_metadata(row["metadata_json"]), str(row["space"]).lower(), dim
+
+    def _infer_embedding_dim(self, name: str) -> int | None:
+        rows = self._conn.execute(
+            "SELECT embedding FROM items WHERE collection = ? AND embedding IS NOT NULL",
+            (name,),
+        ).fetchall()
+        resolved: int | None = None
+        for row in rows:
+            dim = _vector_dim(row["embedding"])
+            if dim is None:
+                continue
+            if resolved is None:
+                resolved = dim
+            elif dim != resolved:
+                break
+        return resolved
+
+    def _known_embedding_dim(self, name: str) -> int | None:
+        row = self._conn.execute(
+            "SELECT embedding_dim FROM collections WHERE name = ?",
+            (name,),
+        ).fetchone()
+        if row is not None and row["embedding_dim"] is not None:
+            return int(row["embedding_dim"])
+        inferred = self._infer_embedding_dim(name)
+        if inferred is not None:
+            self._conn.execute(
+                "UPDATE collections SET embedding_dim = ? WHERE name = ? AND embedding_dim IS NULL",
+                (inferred, name),
+            )
+        return inferred
+
+    def _set_embedding_dim(self, name: str, dim: int) -> None:
+        self._conn.execute(
+            "UPDATE collections SET embedding_dim = ? WHERE name = ?",
+            (dim, name),
+        )
+
+    def _enforce_embedding_dim(self, name: str, embeddings: list[Any] | None) -> None:
+        batch_dim = _batch_embedding_dim(embeddings)
+        expected_dim = self._known_embedding_dim(name)
+        if expected_dim is not None and batch_dim is not None and expected_dim != batch_dim:
+            raise ValueError(
+                f"collection '{name}' stores {expected_dim}-dimensional embeddings; "
+                f"refusing a {batch_dim}-dimensional write"
+            )
+        if expected_dim is None and batch_dim is not None:
+            self._set_embedding_dim(name, batch_dim)
 
     def _save_collection(self, name: str, metadata: dict[str, Any], space: str) -> None:
         with self._lock:
             self._conn.execute(
                 """
-                INSERT INTO collections (name, metadata_json, space)
-                VALUES (?, ?, ?)
+                INSERT INTO collections (name, metadata_json, space, embedding_dim)
+                VALUES (?, ?, ?, NULL)
                 ON CONFLICT(name) DO UPDATE SET
                     metadata_json = excluded.metadata_json,
                     space = excluded.space
@@ -512,6 +605,7 @@ class LocalVectorClient:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
+                self._enforce_embedding_dim(name, embeddings)
                 for item_id, document, metadata, embedding in zip(
                     ids, documents, metadatas, embeddings, strict=True
                 ):
@@ -560,6 +654,7 @@ class LocalVectorClient:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
+                self._enforce_embedding_dim(name, embeddings)
                 for index, item_id in enumerate(ids):
                     row = self._conn.execute(
                         "SELECT document, metadata_json, embedding FROM items WHERE collection = ? AND id = ?",

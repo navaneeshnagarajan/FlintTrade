@@ -1385,6 +1385,16 @@ def _index_rag_docs_safely(rag: Any) -> None:
         logger.warning("RAG background indexing failed: %s", exc)
 
 
+def _join_rag_indexer(rag: Any) -> None:
+    """Wait for the optional background RAG indexer before closing the store."""
+    indexer = getattr(rag, "_background_indexer", None)
+    if not isinstance(indexer, threading.Thread):
+        return
+    indexer.join()
+    if indexer.is_alive():
+        raise TimeoutError("RAG indexer did not finish before shutdown")
+
+
 def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:
     """Construct the canonical RAG runtime when enabled and installed."""
     if not _rag_runtime_enabled():
@@ -1407,14 +1417,18 @@ def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:
             config=PipelineConfig(persist_directory=str(rag_dir)),
             llm_client=llm_client,
         )
+        rag._background_indexer = None
         if rag.document_count() == 0:
             if _rag_auto_index_enabled():
                 logger.info("RAG database empty — indexing docs/ directory in background...")
-                threading.Thread(
-                    target=lambda: _index_rag_docs_safely(rag),
+                indexer = threading.Thread(
+                    target=_index_rag_docs_safely,
+                    args=(rag,),
                     daemon=True,
                     name="rag-indexer",
-                ).start()
+                )
+                rag._background_indexer = indexer
+                indexer.start()
             else:
                 logger.info(
                     "RAG database empty — automatic docs indexing disabled "
@@ -7321,8 +7335,15 @@ class FlintTradeApp:
         await stop_managed_local_ai()
 
         rag = getattr(self, "rag", None)
+        indexer_stopped = True
+        if rag is not None:
+            indexer_stopped = await stop_sync(
+                "rag-indexer",
+                "RAG indexer",
+                lambda: _join_rag_indexer(rag),
+            )
         close_rag = getattr(rag, "close", None)
-        if callable(close_rag):
+        if callable(close_rag) and indexer_stopped:
             await stop_sync("rag-vector-store", "RAG vector store", close_rag)
 
         if errors:

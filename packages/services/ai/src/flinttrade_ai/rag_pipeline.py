@@ -31,6 +31,7 @@ import hashlib
 import logging
 import math
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -781,6 +782,7 @@ class VectorStore:
         self._client: Any = None
         self._collection: Any = None
         self._embedding_mode: str | None = None
+        self._closed = False
 
     def upsert(self, chunks: list[TextChunk]) -> int:
         """Insert or update chunks in the vector store.
@@ -932,6 +934,7 @@ class VectorStore:
     def close(self) -> None:
         """Close the owned local vector client and clear cached handles."""
         client = self._client
+        self._closed = True
         if client is None:
             return
         close = getattr(client, "close", None)
@@ -947,6 +950,8 @@ class VectorStore:
     # ------------------------------------------------------------------
 
     def _get_client(self) -> Any:
+        if self._closed:
+            raise RuntimeError("vector store is closed")
         if self._client is None:
             from .local_vector_store import Client, PersistentClient
 
@@ -1077,6 +1082,7 @@ class RAGPipeline:
             embedding_provider=_embedding,
         )
         self._closed = False
+        self._background_indexer: threading.Thread | None = None
         # Domain filter — guards query() against off-topic questions.
         # Receives the same embedding provider for optional semantic check.
         self._domain_filter_enabled = enable_domain_filter
@@ -1090,6 +1096,9 @@ class RAGPipeline:
         """Close persistent vector resources once; a failed close remains retryable."""
         if self._closed:
             return
+        indexer = self._background_indexer
+        if isinstance(indexer, threading.Thread):
+            indexer.join()
         close_store = getattr(self._store, "close", None)
         if callable(close_store):
             close_store()
@@ -1295,6 +1304,8 @@ class RAGPipeline:
     # ------------------------------------------------------------------
 
     def _index_document(self, doc: LoadedDocument) -> int:
+        if self._closed:
+            raise RuntimeError("RAG pipeline is closed")
         chunks = self._chunker.chunk_document(doc)
         if not chunks:
             return 0
