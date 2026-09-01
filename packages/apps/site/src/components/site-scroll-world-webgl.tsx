@@ -6,7 +6,11 @@ import * as THREE from 'three';
 import type { ScrollWorldFailureReason } from './site-scroll-world';
 import { createScrollWorldLifecycle } from './site-scroll-world-lifecycle';
 import { chapters, interpolateChapterState, progressFromScroll } from '@/lib/site-scroll-world-chapters';
-import { chooseScrollWorldQuality, nextScrollWorldQuality } from '@/lib/site-scroll-world-quality';
+import {
+  chooseScrollWorldQuality,
+  nextScrollWorldQuality,
+  SCROLL_WORLD_FRAME_BUDGET_MS,
+} from '@/lib/site-scroll-world-quality';
 
 interface SiteScrollWorldWebGLProps {
   onReady: () => void;
@@ -253,6 +257,7 @@ export default function SiteScrollWorldWebGL({ onReady, onFallback }: SiteScroll
     let ready = false;
     let lastFrameTime: number | null = null;
     const frameTimes: number[] = [];
+    let slowFloorWindows = 0;
     let intersectionObserver: IntersectionObserver | null = null;
 
     const resize = () => {
@@ -306,11 +311,19 @@ export default function SiteScrollWorldWebGL({ onReady, onFallback }: SiteScroll
       const p95 = percentile95(frameTimes);
       frameTimes.length = 0;
       canvas.dataset.p95FrameMs = p95.toFixed(2);
-      const nextQuality = nextScrollWorldQuality(quality, p95);
+      const nextSlowFloorWindows = p95 > SCROLL_WORLD_FRAME_BUDGET_MS ? slowFloorWindows + 1 : 0;
+      const nextQuality = nextScrollWorldQuality(quality, p95, nextSlowFloorWindows);
+      if (nextQuality === null) {
+        fail('performance-budget');
+        return;
+      }
       if (nextQuality.dpr !== quality.dpr || nextQuality.emberCount !== quality.emberCount) {
         quality = nextQuality;
+        slowFloorWindows = 0;
         resize();
+        return;
       }
+      slowFloorWindows = nextSlowFloorWindows;
     };
 
     const draw = (time: number) => {
@@ -319,7 +332,10 @@ export default function SiteScrollWorldWebGL({ onReady, onFallback }: SiteScroll
 
       if (lastFrameTime !== null) {
         frameTimes.push(Math.min(100, time - lastFrameTime));
-        if (frameTimes.length >= FRAME_SAMPLE_SIZE) updateQuality();
+        if (frameTimes.length >= FRAME_SAMPLE_SIZE) {
+          updateQuality();
+          if (lifecycle.isDisposed()) return;
+        }
       }
       const deltaSeconds = Math.min(0.05, Math.max(0, (time - (lastFrameTime ?? time)) / 1_000));
       lastFrameTime = time;

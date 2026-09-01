@@ -17,4 +17,12 @@ describe('scroll-world quality governor', () => {
   it('keeps quality stable when the frame-time budget is met', () => {
     expect(nextScrollWorldQuality({ dpr: 1.5, emberCount: 180 }, 19.9)).toEqual({ dpr: 1.5, emberCount: 180 });
   });
+
+  it('fails open after two slow sample windows at minimum quality', () => {
+    const minimum = { dpr: 1, emberCount: 72 };
+
+    expect(nextScrollWorldQuality(minimum, 25, 1)).toEqual(minimum);
+    expect(nextScrollWorldQuality(minimum, 25, 2)).toBeNull();
+    expect(nextScrollWorldQuality(minimum, 19.9, 3)).toEqual(minimum);
+  });
 });

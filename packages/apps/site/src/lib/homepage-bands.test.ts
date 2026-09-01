@@ -222,6 +222,14 @@ describe('homepage Spark Path scroll-world (default-off decorative enhancement)'
     expect(sitePackage.devDependencies?.['@types/three']).toBe('0.185.1');
   });
 
+  it('re-evaluates live capability changes and fails open after sustained slow rendering', () => {
+    expect(wrapperSource).toContain("window.addEventListener('resize', onCapabilityChange)");
+    expect(wrapperSource).toContain("connection?.addEventListener?.('change', onCapabilityChange)");
+    expect(wrapperSource).toContain("connection?.removeEventListener?.('change', onCapabilityChange)");
+    expect(webglSource).toContain("fail('performance-budget')");
+    expect(webglSource).toContain('slowFloorWindows');
+  });
+
   it('preserves semantic CTA continuity and keeps the WebGL surface decorative', () => {
     const primaryMatches = pageSource.match(/className="button primary"/g) || [];
     expect(primaryMatches).toHaveLength(1);

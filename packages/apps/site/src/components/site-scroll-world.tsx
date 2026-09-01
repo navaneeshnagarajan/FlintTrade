@@ -15,6 +15,7 @@ export type ScrollWorldFailureReason =
   | 'renderer-error'
   | 'setup-error'
   | 'render-error'
+  | 'performance-budget'
   | 'context-lost'
   | 'missing-chapters';
 
@@ -25,6 +26,11 @@ interface SiteScrollWorldWebGLProps {
 
 interface ScrollWorldFailureDetail {
   reason?: ScrollWorldFailureReason;
+}
+
+interface NetworkConnectionChangeTarget {
+  addEventListener?: (type: 'change', listener: () => void) => void;
+  removeEventListener?: (type: 'change', listener: () => void) => void;
 }
 
 const REVEAL_DELAY_MS = 1_100;
@@ -48,7 +54,14 @@ const SiteScrollWorldWebGL = dynamic<SiteScrollWorldWebGLProps>(
 );
 
 function isPersistentFailure(reason: ScrollWorldFailureReason): boolean {
-  return ['chunk-error', 'renderer-error', 'setup-error', 'render-error', 'context-lost'].includes(reason);
+  return [
+    'chunk-error',
+    'renderer-error',
+    'setup-error',
+    'render-error',
+    'performance-budget',
+    'context-lost',
+  ].includes(reason);
 }
 
 function applyFallbackMarker(reason: ScrollWorldFailureReason): void {
@@ -89,6 +102,7 @@ function scheduleProgressiveMount(callback: () => void): () => void {
  */
 export default function SiteScrollWorld() {
   const [mounted, setMounted] = useState(false);
+  const mountedRef = useRef(false);
   const cancelScheduleRef = useRef<(() => void) | null>(null);
   const permanentlyFailedRef = useRef(false);
 
@@ -99,6 +113,7 @@ export default function SiteScrollWorld() {
 
   const handleFallback = useCallback((reason: ScrollWorldFailureReason) => {
     stopSchedule();
+    mountedRef.current = false;
     setMounted(false);
     if (isPersistentFailure(reason)) {
       permanentlyFailedRef.current = true;
@@ -120,7 +135,9 @@ export default function SiteScrollWorld() {
 
   useEffect(() => {
     let disposed = false;
+    let capabilityTimer: ReturnType<typeof setTimeout> | undefined;
     const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const connection = (navigator as Navigator & { connection?: NetworkConnectionChangeTarget }).connection;
 
     const evaluateAndSchedule = () => {
       stopSchedule();
@@ -131,6 +148,7 @@ export default function SiteScrollWorld() {
 
       const capability = readScrollWorldCapability();
       if (!capability.enabled) {
+        mountedRef.current = false;
         setMounted(false);
         if (capability.reason === 'flag-off') {
           clearScrollWorldMarkers();
@@ -140,10 +158,20 @@ export default function SiteScrollWorld() {
         return;
       }
 
+      if (mountedRef.current) return;
+
       clearScrollWorldMarkers();
       cancelScheduleRef.current = scheduleProgressiveMount(() => {
-        if (!disposed && !permanentlyFailedRef.current) setMounted(true);
+        if (!disposed && !permanentlyFailedRef.current) {
+          mountedRef.current = true;
+          setMounted(true);
+        }
       });
+    };
+
+    const onCapabilityChange = () => {
+      if (capabilityTimer !== undefined) clearTimeout(capabilityTimer);
+      capabilityTimer = setTimeout(evaluateAndSchedule, 150);
     };
 
     const onFailure = (event: Event) => {
@@ -152,13 +180,19 @@ export default function SiteScrollWorld() {
     };
 
     motionQuery.addEventListener('change', evaluateAndSchedule);
+    window.addEventListener('resize', onCapabilityChange);
+    connection?.addEventListener?.('change', onCapabilityChange);
     window.addEventListener('ft-scroll-world-failure', onFailure);
     evaluateAndSchedule();
 
     return () => {
       disposed = true;
       stopSchedule();
+      mountedRef.current = false;
+      if (capabilityTimer !== undefined) clearTimeout(capabilityTimer);
       motionQuery.removeEventListener('change', evaluateAndSchedule);
+      window.removeEventListener('resize', onCapabilityChange);
+      connection?.removeEventListener?.('change', onCapabilityChange);
       window.removeEventListener('ft-scroll-world-failure', onFailure);
       clearScrollWorldMarkers();
       window.dispatchEvent(new CustomEvent('ft-scroll-world-fallback'));
