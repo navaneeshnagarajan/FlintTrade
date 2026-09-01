@@ -8,19 +8,21 @@
 
 | Service | Role | Minimum | Latest tested | Upstream |
 |---|---|---|---|---|
-| **OpenAlgo** | Optional broker gateway (REST + WebSocket) | v2.0.0 | `ef1f6b9c` (v2.0.2.2, 2026-08-29) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
+| **OpenAlgo** | Optional broker gateway (REST + WebSocket) | v2.0.2.2 | `ef1f6b9c` (v2.0.2.2, 2026-08-29) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
 
 The tested pin is **v2.0.2.2**, the latest published OpenAlgo release as of
 2026-08-29. FlintTrade's REST contract tests are grounded in the public
 [`openalgo-eventlet-stability-security`](https://github.com/marketcalls/openalgo/releases/tag/openalgo-eventlet-stability-security)
 tag at commit `ef1f6b9c2165607ae4c01edb9a3e189e26596d4d`.
 
-**OpenAlgo minimum (v2.0.0):** required only when you enable the optional
-OpenAlgo-compatible integration path. FlintTrade expects OpenAlgo's v2 API
-surface there — depth mode 4 (50-level book), structured `closeposition`
-with strategy id, `optionchain` greeks endpoint, and rate-limit headers
-(`X-RateLimit-Remaining`). v1 deployments will fail the OpenAlgo integration
-sanity check.
+**OpenAlgo minimum (v2.0.2.2):** required only when you enable the optional
+OpenAlgo-compatible integration path. FlintTrade uses that release's REST
+contract unconditionally — POST `intervals`, revised option-chain / expiry /
+timings / ticker schemas, and the Telegram username snapshot. A v2.0.0
+deployment will fail those calls. Depth mode 4 (50-level book), structured
+`closeposition` with strategy id, `optionchain` greeks, and rate-limit
+headers (`X-RateLimit-Remaining`) remain part of that surface. v1
+deployments will fail the OpenAlgo integration sanity check.
 
 **AI-agent features are native.** FlintTrade drives agent backends in-process
 via the `flinttrade_ai.agent_backends` registry (Claude Code, Cerebras, Codex,

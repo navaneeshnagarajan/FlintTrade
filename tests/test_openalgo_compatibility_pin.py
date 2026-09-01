@@ -25,4 +25,6 @@ def test_openalgo_test_dependency_and_compatibility_registry_use_v2_0_2_2() -> N
         f"`{EXPECTED_OPENALGO_SHORT_SHA}` "
         f"({EXPECTED_OPENALGO_VERSION}, {EXPECTED_OPENALGO_DATE})"
     ) in compatibility
+    assert f"| {EXPECTED_OPENALGO_VERSION} |" in compatibility
+    assert f"**OpenAlgo minimum ({EXPECTED_OPENALGO_VERSION}):**" in compatibility
     assert f'"last_absorbed_commit": "{EXPECTED_OPENALGO_SHORT_SHA}"' in absorption
