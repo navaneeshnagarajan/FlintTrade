@@ -24,7 +24,7 @@ class MockNeo:
 
     def modify_order(self, params):
         self.calls.append(("modify", params))
-        return {"stat": "Ok", "nOrdNo": "250122000612876", "stCode": 200}
+        return {"stat": "Ok", "nOrdNo": params["order_id"], "stCode": 200}
 
     def cancel_order(self, order_id):
         self.calls.append(("cancel", order_id))
