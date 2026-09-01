@@ -82,6 +82,30 @@ def test_runtime_constructs_when_chromadb_is_missing(monkeypatch, tmp_path) -> N
     assert rag.config.persist_directory == str(tmp_path / "rag")
 
 
+def test_runtime_closes_rag_when_indexer_cannot_start(monkeypatch, tmp_path) -> None:
+    """A failed indexer start must close the already-opened pipeline, not leak it."""
+    closed: list[object] = []
+
+    class ExplodingThread:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def start(self) -> None:
+            raise RuntimeError("can't start new thread")
+
+    monkeypatch.setenv("FLINTTRADE_RAG_ENABLED", "true")
+    monkeypatch.setenv("FLINTTRADE_RAG_AUTO_INDEX", "true")
+    monkeypatch.setattr(LLMConfig, "from_env", classmethod(lambda cls: SimpleNamespace(provider="")))
+    monkeypatch.setattr(RAGPipeline, "document_count", lambda self: 0)
+    monkeypatch.setattr(RAGPipeline, "close", lambda self: closed.append(self))
+    monkeypatch.setattr(app_module.threading, "Thread", ExplodingThread)
+
+    rag = app_module._initialise_rag_runtime(tmp_path)
+
+    assert rag is None
+    assert len(closed) == 1
+
+
 def test_runtime_attaches_background_indexer_before_start(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("FLINTTRADE_RAG_ENABLED", "true")
     monkeypatch.setenv("FLINTTRADE_RAG_AUTO_INDEX", "true")

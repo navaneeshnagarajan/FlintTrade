@@ -1401,6 +1401,7 @@ def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:
 
     rag_dir = flinttrade_dir / "rag"
     rag_dir.mkdir(exist_ok=True)
+    rag: Any | None = None
     try:
         from flinttrade_ai.llm_client import LLMClient, LLMConfig  # noqa: PLC0415
         from flinttrade_ai.rag_pipeline import PipelineConfig, RAGPipeline  # noqa: PLC0415
@@ -1434,6 +1435,12 @@ def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:
         return rag
     except Exception as exc:
         logger.warning("RAG initialisation failed: %s", exc)
+        close_rag = getattr(rag, "close", None)
+        if callable(close_rag):
+            try:
+                close_rag()
+            except Exception:
+                logger.exception("RAG runtime close after initialisation failure failed")
         return None
 
 

@@ -842,6 +842,29 @@ def test_defer_learning_close_retains_owner_when_closer_cannot_start(monkeypatch
     memory.close.assert_called_once_with()
 
 
+def test_runtime_shutdown_fails_closed_when_deferred_closer_raises() -> None:
+    """A closer that dies after a close error must not make shutdown report success."""
+    app = _make_app()
+    memory = MagicMock()
+    memory.close.side_effect = RuntimeError("disk unavailable")
+
+    class _Trader:
+        def __init__(self) -> None:
+            self.memory = memory
+
+        def join_background_learning(self, timeout: float | None = None) -> bool:
+            return True
+
+    cleanup = mod._defer_session_learning_memory_close(_Trader())
+    cleanup.join(timeout=2.0)
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        mod._RUNNER.clear()  # noqa: SLF001
+
+    assert not cleanup.is_alive()
+    assert memory.close.call_count == 1
+    assert mod.shutdown_agent_runtime(app, timeout=1.0) is False
+
+
 def test_reset_runner_for_tests_clears_learning_cleanup_owners() -> None:
     """Test isolation must drop leftover closer ownership, not only the runner slot."""
     dummy = threading.Thread(target=lambda: None)

@@ -87,24 +87,36 @@ class _LearningCleanupOwner:
         self._trader = trader
         self._thread: threading.Thread | None = None
         self._finalised = False
+        self._error: BaseException | None = None
 
     def attach_thread(self, thread: threading.Thread) -> None:
         self._thread = thread
 
+    def run(self) -> None:
+        """Close the leftover learner on the deferred closer thread."""
+        try:
+            _finalise_session_learning_memory(self._trader, timeout=None)
+        except BaseException as exc:
+            self._error = exc
+            logger.exception("Deferred learning-memory close failed")
+
     def join(self, timeout: float | None = None) -> None:
         if self._thread is not None and self._thread.ident is not None:
             self._thread.join(timeout)
-            if not self._thread.is_alive():
-                self._finalised = True
+            if self._thread.is_alive():
+                return
+            if self._error is not None:
+                raise self._error
+            self._finalised = True
             return
-        self._finalised = _finalise_session_learning_memory(self._trader, timeout=timeout)
+        try:
+            self._finalised = _finalise_session_learning_memory(self._trader, timeout=timeout)
+        except BaseException:
+            self._finalised = False
+            raise
 
     def is_alive(self) -> bool:
-        if self._finalised:
-            return False
-        if self._thread is not None and self._thread.ident is not None:
-            return self._thread.is_alive()
-        return True
+        return not self._finalised
 
 
 def _register_learning_cleanup_owner(owner: Any) -> None:
@@ -119,7 +131,11 @@ def _join_learning_cleanup_owners(*, deadline: float) -> bool:
     with _RUNNER_LOCK:
         owners = list(_LEARNING_CLEANUP_OWNERS)
     for owner in owners:
-        owner.join(timeout=max(0.0, deadline - monotonic()))
+        try:
+            owner.join(timeout=max(0.0, deadline - monotonic()))
+        except Exception:
+            logger.exception("Autonomous agent learning cleanup failed")
+            return False
         if owner.is_alive():
             return False
     with _RUNNER_LOCK:
@@ -134,7 +150,7 @@ def _defer_session_learning_memory_close(trader: Any) -> threading.Thread:
     # leftover learner when a later /start replaces ``_RUNNER``.
     _register_learning_cleanup_owner(owner)
     cleanup = threading.Thread(
-        target=lambda: _finalise_session_learning_memory(trader, timeout=None),
+        target=owner.run,
         name="agent-learning-close",
         daemon=True,
     )
