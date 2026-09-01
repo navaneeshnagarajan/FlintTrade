@@ -115,6 +115,31 @@ describe('rewriteRepositoryLink', () => {
     ).toBe('https://github.com/navaneeshnagarajan/FlintTrade/blob/main/changelog.md');
   });
 
+  it('infers well-known repo roots when generation has no local checkout', () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), 'flinttrade-site-remote-'));
+    const options = rewriteOptions({ repoRoot: isolatedRoot });
+    expect(rewriteRepositoryLink('../scripts/install/', 'docs/DESKTOP.md', options)).toBe(
+      'https://github.com/navaneeshnagarajan/FlintTrade/tree/main/scripts/install',
+    );
+    expect(
+      rewriteRepositoryLink('../packaging/desktop_backend.py', 'docs/DESKTOP.md', options),
+    ).toBe(
+      'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/packaging/desktop_backend.py',
+    );
+    expect(
+      rewriteRepositoryLink(
+        '../.github/workflows/desktop-release.yml',
+        'docs/DESKTOP.md',
+        options,
+      ),
+    ).toBe(
+      'https://github.com/navaneeshnagarajan/FlintTrade/blob/main/.github/workflows/desktop-release.yml',
+    );
+    expect(rewriteRepositoryLink('../does-not-exist/anywhere.py', 'docs/DESKTOP.md', options)).toBe(
+      null,
+    );
+  });
+
   it('records rewritten repo paths for leftover /docs/<path> redirects', () => {
     const recorded = new Map();
     rewriteRepositoryLink('../scripts/install/', 'docs/DESKTOP.md', {

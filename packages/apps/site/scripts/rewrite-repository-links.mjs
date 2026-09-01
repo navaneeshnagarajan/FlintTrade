@@ -47,12 +47,66 @@ export function repositoryBrowseUrl({ owner, name, ref, repoPath, isDirectory })
   return `https://github.com/${owner}/${name}/${kind}/${ref}/${clean}`;
 }
 
-export function statRepositoryPath(repoRoot, relativePath) {
+const REPO_ROOT_DIRECTORIES = new Set([
+  '.github',
+  'docs',
+  'infra',
+  'packaging',
+  'packages',
+  'scripts',
+  'templates',
+  'tests',
+]);
+
+const REPO_ROOT_FILES = new Set([
+  'AGENTS.md',
+  'CLAUDE.md',
+  'LICENSE',
+  'Makefile',
+  'PLAN.md',
+  'VERSION',
+  'changelog.md',
+  'contributing.md',
+  'disclaimer.md',
+  'flint.toml',
+  'readme.md',
+  'security.md',
+]);
+
+function isSafeRepoRelativePath(relativePath) {
   const cleaned = relativePath.replace(/\/+$/, '');
   if (!cleaned || cleaned === '.' || cleaned.startsWith('..') || path.posix.isAbsolute(cleaned)) {
     return null;
   }
   if (/^[A-Za-z]:/.test(cleaned)) return null;
+  return cleaned;
+}
+
+/**
+ * When the working tree is missing (source-less / GitHub-fetch generation),
+ * still rewrite links that clearly point at repository roots rather than docs
+ * pages. Trailing slash or no extension means a directory (`tree/`); an
+ * extension means a file (`blob/`).
+ */
+export function inferRepoSourcePath(relativePath) {
+  const cleaned = isSafeRepoRelativePath(relativePath);
+  if (!cleaned) return null;
+
+  const first = cleaned.split('/')[0];
+  if (!REPO_ROOT_DIRECTORIES.has(first) && !REPO_ROOT_FILES.has(first) && !REPO_ROOT_FILES.has(cleaned)) {
+    return null;
+  }
+
+  const hasExtension = Boolean(path.posix.extname(cleaned));
+  return {
+    repoPath: cleaned,
+    isDirectory: relativePath.endsWith('/') || !hasExtension,
+  };
+}
+
+export function statRepositoryPath(repoRoot, relativePath) {
+  const cleaned = isSafeRepoRelativePath(relativePath);
+  if (!cleaned) return null;
 
   const absolute = path.resolve(repoRoot, cleaned);
   const relative = path.relative(repoRoot, absolute);
@@ -108,6 +162,21 @@ export function rewriteRepositoryLink(target, sourcePath, options) {
   for (const candidate of candidates) {
     const repositoryUrl = lookupMap(repositoryFileUrls, candidate);
     if (repositoryUrl) return `${repositoryUrl}${anchor}`;
+  }
+
+  for (const candidate of candidates) {
+    const inferred = inferRepoSourcePath(candidate);
+    if (!inferred) continue;
+
+    const url = repositoryBrowseUrl({
+      owner,
+      name,
+      ref,
+      repoPath: inferred.repoPath,
+      isDirectory: inferred.isDirectory,
+    });
+    onRepoPath?.(inferred.repoPath, url, inferred.isDirectory);
+    return `${url}${anchor}`;
   }
 
   return null;
