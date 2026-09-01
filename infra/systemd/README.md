@@ -1,7 +1,17 @@
 # FlintTrade systemd Services
 
 The shipped unit is `infra/systemd/flinttrade.service`. It is a **server**
-template, not a drop-in for a developer checkout.
+template for the production prefix, not a drop-in for a developer checkout.
+
+`infra/scripts/setup-production.sh` is the first-time Ubuntu installer: it
+clones to `/opt/flinttrade` by default, creates that tree's `.venv`, installs
+the hashed `requirements.lock` (including gunicorn and eventlet) into it,
+chowns the tree to `www-data`, and copies this unit unchanged. Operator
+walkthroughs are [docs/setup/linux.md](../../docs/setup/linux.md) and
+[docs/setup/raspberry-pi.md](../../docs/setup/raspberry-pi.md).
+
+For ordinary desktop use, prefer the one-line web installer in
+[docs/setup/QUICKSTART.md](../../docs/setup/QUICKSTART.md) instead of systemd.
 
 ## What the unit actually assumes
 
@@ -11,47 +21,34 @@ Read the file before copying it. The checked-in unit is hardcoded to:
 |---|---|
 | `User` / `Group` | `www-data` |
 | `WorkingDirectory` | `/opt/flinttrade` |
+| `FLINTTRADE_HOME` | `/opt/flinttrade` |
 | `EnvironmentFile` | `/opt/flinttrade/.env` |
-| `ExecStart` | `/opt/flinttrade/.venv/bin/gunicorn … 'flinttrade_core.app:app'` |
+| `ExecStart` | `/opt/flinttrade/.venv/bin/gunicorn … --worker-class eventlet … 'flinttrade_core.app:app'` |
 | Bind | `127.0.0.1:5100` (Nginx is expected to reverse-proxy `/ft-api/`) |
 | `ReadWritePaths` | `/opt/flinttrade/data` and `/opt/flinttrade/.flinttrade` |
-| Port env | `FLINTTRADE_PORT=5100` — the backend reads `FLINTTRADE_BACKEND_PORT`. Docker still accepts `FLINTTRADE_PORT` as a legacy fallback; this unit does not. Set `FLINTTRADE_BACKEND_PORT` in the unit or `.env` if you change the port. |
+| Port env | `FLINTTRADE_BACKEND_PORT=5100` — the name `flinttrade_core.app` reads. `FLINTTRADE_PORT` is a legacy alias only Docker's start helper honours. |
 
-There are no `REPLACE_USER` / `REPLACE_DIR` placeholders. A `sed` replace
-against those strings does nothing.
+There are no `REPLACE_USER` / `REPLACE_DIR` placeholders. `ProtectHome=true`
+means a home-directory prefix cannot start even if you rewrite the paths
+in the installer: the unit would still be denied that tree. Override the
+installer prefix with `FLINTTRADE_DIR` only if you also rewrite the unit
+paths to match.
 
-`infra/scripts/setup-production.sh` (Ubuntu 24.04) clones to
-`$HOME/FlintTrade` by default and copies this unit unchanged. Relocating
-the tree to `/opt/flinttrade` is not enough. The script installs Python
-packages with system `pip` (`--break-system-packages --require-hashes -r
-requirements.lock`). It does not create `.venv`, does not install `uv`,
-and `gunicorn` is not in `requirements.lock`. The unit's `ExecStart`
-still expects `/opt/flinttrade/.venv/bin/gunicorn`.
-
-Before `systemctl start flinttrade` can succeed you must either:
-
-1. Provision that interpreter — for example `python3 -m venv /opt/flinttrade/.venv`,
-   install the lockfile into it, then install `gunicorn` into the same venv
-   (it is not a locked runtime dependency); or
-2. Edit `ExecStart` (and the other hardcoded paths) to the gunicorn you
-   actually installed.
-
-The pair also does not boot until the tree lives at `/opt/flinttrade` as
-`www-data`, or you edit the unit to match the checkout you actually
-installed.
-
-## Install (after the unit matches the tree)
+## Install
 
 ```bash
-sudo cp infra/systemd/flinttrade.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable flinttrade
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
+cd FlintTrade
+bash infra/scripts/setup-production.sh
 sudo systemctl start flinttrade
 ```
 
-For ordinary use, prefer the one-line web installer in
-[docs/setup/QUICKSTART.md](../../docs/setup/QUICKSTART.md) instead of
-systemd.
+Edit `/opt/flinttrade/.env` only for server-only fallback values that cannot
+be supplied through the app UI. Then complete Setup in the app.
+
+`infra/scripts/deploy.sh` is the later deploy entry point. It defaults to the
+same `/opt/flinttrade` prefix, installs the hashed lock into the unit `.venv`,
+and refuses to run during NSE cash-session hours (9:15 AM – 3:30 PM IST).
 
 ## Usage
 
@@ -90,6 +87,7 @@ If something goes wrong during market hours:
 ## Service order
 
 1. `flinttrade.service` starts the FlintTrade backend on port 5100.
-2. OpenAlgo is optional; install and start it separately only when using
-   the OpenAlgo integration path.
+2. OpenAlgo is optional; install and start `openalgo.service` separately only
+   when using the OpenAlgo integration path. That unit is a template — edit
+   its paths to your OpenAlgo install before enabling it.
 3. If FlintTrade fails, the unit restarts after 5 seconds (`RestartSec=5`).

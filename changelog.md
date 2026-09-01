@@ -25,7 +25,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   The unit exports `FLINTTRADE_BACKEND_PORT` — the name the backend reads —
   and the installer chowns the tree to `www-data`. gunicorn and eventlet are
   workspace dependencies so the lock the unit ExecStarts actually contains
-  them.
+  them. `infra/systemd/README.md` is retargeted to this contract (no
+  `REPLACE_*` placeholders, no "installer is broken" workaround).
 
 
 
