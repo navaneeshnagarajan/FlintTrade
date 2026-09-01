@@ -1662,6 +1662,53 @@ class DhanAdapter(BrokerAdapter):
                 out.append(Quote(**M.from_dhan_quote(name, exchange, rec)))
         return out
 
+    async def ltp(self, session: Session, symbols: list[str]) -> dict[str, float]:
+        """Last traded prices from the existing quote snapshot, keyed by ``EXCHANGE:SYMBOL``."""
+        quotes = await self.quotes(session, symbols)
+        return {f"{q.exchange}:{q.symbol}": q.ltp for q in quotes}
+
+    async def ohlc(self, session: Session, symbols: list[str]) -> list[dict[str, Any]]:
+        """OHLC snapshot from the existing quote path."""
+        quotes = await self.quotes(session, symbols)
+        return [
+            {
+                "symbol": q.symbol,
+                "exchange": q.exchange,
+                "open": q.open,
+                "high": q.high,
+                "low": q.low,
+                "close": q.close,
+            }
+            for q in quotes
+        ]
+
+    async def quote_details(
+        self,
+        session: Session,
+        symbols: list[str],
+        quote_type: str = "all",
+    ) -> list[dict[str, Any]]:
+        """Quote snapshot from the existing quote path (Dhan has no typed quote REST verb)."""
+        kind = str(quote_type or "all").strip().lower() or "all"
+        allowed = {"all", "ltp", "ohlc"}
+        if kind not in allowed:
+            raise BrokerError(f"Dhan quote_type must be one of {sorted(allowed)}, got {quote_type!r}")
+        quotes = await self.quotes(session, symbols)
+        return [
+            {
+                "symbol": q.symbol,
+                "exchange": q.exchange,
+                "ltp": q.ltp,
+                "open": q.open,
+                "high": q.high,
+                "low": q.low,
+                "close": q.close,
+                "volume": q.volume,
+                "oi": q.oi,
+            }
+            for q in quotes
+        ]
+
     async def historical(self, session: Session, req: dict) -> Candles:
         from flinttrade_core.models import OHLCV, Candles  # noqa: PLC0415
 

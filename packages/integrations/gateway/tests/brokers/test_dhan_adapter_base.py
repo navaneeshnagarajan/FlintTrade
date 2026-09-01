@@ -1394,6 +1394,69 @@ async def test_quotes_map_to_models():
 
 
 @pytest.mark.asyncio
+async def test_ltp_projects_from_existing_quote_path():
+    """Native LTP reuses /marketfeed/quote rather than a second Dhan REST verb."""
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    prices = await adapter.ltp(session, ["NSE:RELIANCE"])
+    assert prices == {"NSE:RELIANCE": 2901.5}
+    assert mock.calls == [("quote", {"NSE_EQ": [11536]})]
+
+
+@pytest.mark.asyncio
+async def test_ohlc_projects_from_existing_quote_path():
+    """Native OHLC reuses /marketfeed/quote rather than a second Dhan REST verb."""
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    rows = await adapter.ohlc(session, ["NSE:RELIANCE"])
+    assert rows == [{
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "open": 2890.0,
+        "high": 2910.0,
+        "low": 2885.0,
+        "close": 2888.0,
+    }]
+    assert mock.calls == [("quote", {"NSE_EQ": [11536]})]
+
+
+@pytest.mark.asyncio
+async def test_quote_details_projects_from_existing_quote_path():
+    """Native quote_details reuses /marketfeed/quote rather than a typed Dhan REST verb."""
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    rows = await adapter.quote_details(session, ["NSE:RELIANCE"])
+    assert rows == [{
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "ltp": 2901.5,
+        "open": 2890.0,
+        "high": 2910.0,
+        "low": 2885.0,
+        "close": 2888.0,
+        "volume": 1_200_000,
+        "oi": 0,
+    }]
+    assert mock.calls == [("quote", {"NSE_EQ": [11536]})]
+
+
+@pytest.mark.asyncio
+async def test_quote_details_rejects_unknown_type():
+    """Dhan only projects quote_type values the existing quote snapshot can serve."""
+    from flinttrade_core.exceptions import BrokerError
+
+    mock = MockDhan()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    with pytest.raises(BrokerError, match="quote_type"):
+        await adapter.quote_details(session, ["NSE:RELIANCE"], quote_type="depth")
+    assert mock.calls == []
+
+
+@pytest.mark.asyncio
 async def test_historical_intraday_and_daily():
     mock = MockDhan()
     adapter = _adapter(mock)
