@@ -25,6 +25,14 @@ test.describe('Explore mode', () => {
     await expect(page.getByRole('main', { name: /welcome/i })).toBeVisible({ timeout: 10_000 });
   });
 
+  test('installed /explore query and hash cannot expose hosted public-demo markers', async ({ page }) => {
+    await page.goto('/explore?mode=live#modules');
+    await expect(page).toHaveURL(/\/welcome$/);
+    await expect(page.getByRole('main', { name: /welcome/i })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: /Explore Trade/i })).toHaveCount(0);
+    await expect(page.getByText('Brokers supported', { exact: false })).toHaveCount(0);
+  });
+
   test('TickerBar region is present on /trade', async ({ page }) => {
     await seedExploreDemoSession(page);
     await page.goto('/trade');
