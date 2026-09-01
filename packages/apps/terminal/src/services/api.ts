@@ -123,6 +123,7 @@ const NATIVE_READ_ENDPOINTS: Partial<Record<string, NativeReadKind>> = {
   margin: "margin",
   scrip_master: "scrip_master",
   holidays: "holidays",
+  "market/holidays": "holidays",
   timings: "timings",
   "market/timings": "timings",
   optiongreeks: "optiongreeks",
@@ -305,6 +306,20 @@ function openAlgoOptionExpiryDate(value: string): string {
   return expiry ? normaliseExpiryForOptionSymbol(expiry) : expiry;
 }
 
+/** Official OptionSymbolSchema offset (ATM / ITM1-50 / OTM1-50), or null for an explicit strike. */
+function openAlgoOptionOffset(value: string): string | null {
+  const offset = value.trim().toUpperCase();
+  if (offset === "ATM") return offset;
+  if (offset.startsWith("ITM") || offset.startsWith("OTM")) {
+    const suffix = offset.slice(3);
+    if (/^\d+$/.test(suffix)) {
+      const number = Number(suffix);
+      if (number >= 1 && number <= 50) return `${offset.slice(0, 3)}${number}`;
+    }
+  }
+  return null;
+}
+
 /**
  * Fields OpenAlgo v2.0.2.2 accepts on the live POST body.
  *
@@ -313,15 +328,26 @@ function openAlgoOptionExpiryDate(value: string): string {
  * `symbol` on syntheticfuture, so those are stripped here only.
  */
 function openAlgoRequestFields(endpoint: string, extra: object): object {
-  if (endpoint !== "optionchain" && endpoint !== "syntheticfuture") return extra;
+  if (endpoint !== "optionchain" && endpoint !== "syntheticfuture" && endpoint !== "optionsymbol") {
+    return extra;
+  }
   const params = extra as Record<string, unknown>;
   const expiry = stringParam(params.expiry_date || params.expiry).trim();
   if (!expiry) throw new Error("expiry_date is required");
-  return {
+  const fields: Record<string, string> = {
     underlying: stringParam(params.underlying) || stringParam(params.symbol),
     exchange: stringParam(params.exchange),
     expiry_date: openAlgoOptionExpiryDate(expiry),
   };
+  if (endpoint === "optionsymbol") {
+    const offset = openAlgoOptionOffset(stringParam(params.offset));
+    if (offset === null) {
+      throw new Error("offset must be ATM, ITM1-ITM50, or OTM1-OTM50");
+    }
+    fields.offset = offset;
+    fields.option_type = stringParam(params.option_type, "CE");
+  }
+  return fields;
 }
 
 const OPENALGO_INTERVAL_BUCKETS = ["seconds", "minutes", "hours", "days", "weeks", "months"] as const;
@@ -343,6 +369,24 @@ function todayIstIsoDate(): string {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+}
+
+function currentIstYear(): number {
+  return Number(new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+  }).format(new Date()));
+}
+
+function holidayYear(value: unknown): number {
+  if (value !== undefined && typeof value !== "number" && typeof value !== "string") {
+    throw new Error("holiday year must be between 2020 and 2050");
+  }
+  const numericYear = value === undefined || value === "" ? currentIstYear() : Number(value);
+  if (!Number.isInteger(numericYear) || numericYear < 2020 || numericYear > 2050) {
+    throw new Error("holiday year must be between 2020 and 2050");
+  }
+  return numericYear;
 }
 
 function nativeSymbolKey(symbol: unknown, exchange: unknown): string {
@@ -670,6 +714,138 @@ function normaliseNativeHolidays(value: unknown): Holiday[] {
     throw new Error(`Invalid native holiday response${path}: ${issue?.message ?? "schema mismatch"}`);
   }
   return parsed.data;
+}
+
+function normaliseCalendarDate(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const text = String(value).trim().slice(0, 10);
+  return isoCalendarDateSchema.safeParse(text).success ? text : undefined;
+}
+
+function normaliseOpenAlgoOpenExchange(value: unknown): Holiday["open_exchanges"][number] | undefined {
+  if (!isRecord(value)) return undefined;
+  const exchange = stringParam(value.exchange).trim().toUpperCase();
+  if (!exchange) return undefined;
+  const startTime = toStrictNumber(value.start_time);
+  const endTime = toStrictNumber(value.end_time);
+  if (startTime === null || endTime === null) return undefined;
+  return { exchange, start_time: startTime, end_time: endTime };
+}
+
+/** Port of Python `normalise_market_calendar` for official OpenAlgo envelopes. */
+function normaliseMarketCalendar(payload: unknown): Holiday[] {
+  let data: unknown = payload;
+  for (let i = 0; i < 3; i += 1) {
+    if (!isRecord(data) || !("data" in data)) break;
+    data = data.data;
+  }
+
+  type CalendarRecord = {
+    date: string;
+    description: string;
+    holiday_type: string;
+    closed_exchanges: Set<string>;
+    open_exchanges: Holiday["open_exchanges"];
+  };
+  const records = new Map<string, CalendarRecord>();
+
+  const addEntry = (entry: unknown, defaultExchange = "*"): void => {
+    const rawDate = isRecord(entry)
+      ? (entry.date ?? entry.holiday_date ?? entry.trading_date)
+      : entry;
+    const holidayDate = normaliseCalendarDate(rawDate);
+    if (!holidayDate) return;
+
+    const currentContract = isRecord(entry) && (
+      "holiday_type" in entry || "closed_exchanges" in entry || "open_exchanges" in entry
+    );
+    const description = isRecord(entry) ? String(entry.description ?? "") : "";
+    const holidayType = isRecord(entry)
+      ? String(entry.holiday_type || "TRADING_HOLIDAY").trim().toUpperCase()
+      : "TRADING_HOLIDAY";
+
+    let closedExchanges: Set<string>;
+    const openExchanges: Holiday["open_exchanges"] = [];
+    if (currentContract && isRecord(entry)) {
+      const rawClosed = entry.closed_exchanges;
+      closedExchanges = Array.isArray(rawClosed)
+        ? new Set(
+            rawClosed.flatMap((candidate) => {
+              const closed = String(candidate).trim().toUpperCase();
+              return closed ? [closed] : [];
+            }),
+          )
+        : new Set();
+      if (Array.isArray(entry.open_exchanges)) {
+        for (const candidate of entry.open_exchanges) {
+          const session = normaliseOpenAlgoOpenExchange(candidate);
+          if (
+            session
+            && !openExchanges.some((existing) => (
+              existing.exchange === session.exchange
+              && existing.start_time === session.start_time
+              && existing.end_time === session.end_time
+            ))
+          ) {
+            openExchanges.push(session);
+          }
+        }
+      }
+      if (holidayType !== "SETTLEMENT_HOLIDAY" && closedExchanges.size === 0) {
+        closedExchanges = new Set(["*"]);
+      }
+    } else {
+      closedExchanges = new Set([defaultExchange]);
+    }
+
+    const record = records.get(holidayDate) ?? {
+      date: holidayDate,
+      description: "",
+      holiday_type: holidayType,
+      closed_exchanges: new Set<string>(),
+      open_exchanges: [],
+    };
+    if (description && !record.description) record.description = description;
+    if (holidayType === "SPECIAL_SESSION" || record.holiday_type === "SETTLEMENT_HOLIDAY") {
+      record.holiday_type = holidayType;
+    }
+    closedExchanges.forEach((exchange) => record.closed_exchanges.add(exchange));
+    for (const session of openExchanges) {
+      if (!record.open_exchanges.some((existing) => (
+        existing.exchange === session.exchange
+        && existing.start_time === session.start_time
+        && existing.end_time === session.end_time
+      ))) {
+        record.open_exchanges.push(session);
+      }
+    }
+    records.set(holidayDate, record);
+  };
+
+  if (isRecord(data) && "holidays" in data) {
+    data = data.holidays;
+  }
+
+  if (Array.isArray(data)) {
+    for (const candidate of data) addEntry(candidate);
+  } else if (isRecord(data)) {
+    for (const [exchange, candidates] of Object.entries(data)) {
+      const exchangeKey = exchange.trim().toUpperCase();
+      if (!exchangeKey || !Array.isArray(candidates)) continue;
+      for (const candidate of candidates) addEntry(candidate, exchangeKey);
+    }
+  }
+
+  return [...records.keys()].sort().map((date) => {
+    const record = records.get(date)!;
+    return {
+      date: record.date,
+      description: record.description,
+      holiday_type: record.holiday_type,
+      closed_exchanges: [...record.closed_exchanges].sort(),
+      open_exchanges: record.open_exchanges,
+    };
+  });
 }
 
 function normaliseNativeTimings(value: unknown): MarketTiming[] {
@@ -1501,7 +1677,7 @@ function normaliseNativeRead(endpoint: string, value: unknown): unknown {
   if (endpoint === "depth") return normaliseNativeDepth(value);
   if (endpoint === "margin") return normaliseNativeMargin(value);
   if (endpoint === "orderstatus") return normaliseNativeOrderStatus(value);
-  if (endpoint === "holidays") return normaliseNativeHolidays(value);
+  if (endpoint === "holidays" || endpoint === "market/holidays") return normaliseNativeHolidays(value);
   if (endpoint === "timings" || endpoint === "market/timings") return normaliseNativeTimings(value);
   if (endpoint === "multioptiongreeks") return normaliseNativeGreeks(value);
   if (endpoint === "optiongreeks") return normaliseNativeGreeks(value)[0] ?? nativeGreeksRow({});
@@ -1741,6 +1917,7 @@ function normalisePracticeOrder(value: unknown): Order | undefined {
   const orderId = String(value.orderId ?? value.order_id ?? "");
   if (!orderId) return undefined;
   const action = String(value.action ?? "BUY").toUpperCase() === "SELL" ? "SELL" : "BUY";
+  const triggerPrice = toStrictNumber(value.trigger_price ?? value.triggerPrice);
   return {
     orderId,
     symbol: String(value.symbol ?? ""),
@@ -1753,6 +1930,7 @@ function normalisePracticeOrder(value: unknown): Order | undefined {
     product: String(value.product ?? "MIS"),
     strategy: String(value.strategy ?? "Practice"),
     timestamp: String(value.timestamp ?? value.created_at ?? ""),
+    ...(triggerPrice !== null ? { triggerPrice } : {}),
   };
 }
 
@@ -1991,6 +2169,7 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
     case "holdings":
       return { holdings: mockHoldings() } as T;
     case "holidays":
+    case "market/holidays":
       return [] as T;
     case "intervals":
       return ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"] as T;
@@ -2367,6 +2546,9 @@ async function post<T>(
   const data = json.data ?? json;
   if (endpoint === "optionchain") return normaliseOpenAlgoOptionChain(data) as T;
   if (endpoint === "expiry") return normaliseNativeExpiry(data) as T;
+  if (endpoint === "market/holidays" || endpoint === "holidays") {
+    return normaliseMarketCalendar(data) as T;
+  }
   return data as T;
 }
 
@@ -2374,6 +2556,7 @@ async function get<T>(
   endpoint: string,
   signal?: AbortSignal,
   expectedDataScope?: string,
+  query?: Record<string, string>,
 ): Promise<T> {
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
@@ -2389,11 +2572,21 @@ async function get<T>(
     requireApiKey(endpoint);
   }
 
+  const search = new URLSearchParams();
+  if (query) {
+    for (const [key, value] of Object.entries(query)) {
+      const trimmed = value.trim();
+      if (trimmed) search.set(key, trimmed);
+    }
+  }
+  const suffix = search.toString();
+  const url = `${getBase()}/api/v1/${endpoint}${suffix ? `?${suffix}` : ""}`;
+
   let resp: Response;
   requireCurrentMarketDataScope(expectedDataScope);
   try {
     resp = await fetch(
-      `${getBase()}/api/v1/${endpoint}`,
+      url,
       signal ? { signal } : undefined,
     );
   } catch {
@@ -2900,12 +3093,13 @@ export const getOptionSymbol = (
 ) => {
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
-  if (isExploreMode() || getApiKey().trim().length === 0) {
+  const officialOffset = openAlgoOptionOffset(offset);
+  if (isExploreMode() || getApiKey().trim().length === 0 || officialOffset === null) {
     return Promise.resolve(compactOptionSymbolResult(underlying, exchange, expiry_date, option_type, offset));
   }
   return post<{ symbol: string; exchange: string }>(
     "optionsymbol",
-    { underlying, exchange, expiry_date, option_type, offset },
+    { underlying, exchange, expiry_date, option_type, offset: officialOffset },
     signal,
     expectedDataScope,
   );
@@ -2940,19 +3134,28 @@ export const getSyntheticFuture = async (
   );
 };
 export const getTicker = (symbol: string, exchange: string) =>
-  post<Quote>("ticker", { symbol, exchange });
+  getQuotes(symbol, exchange);
+/** Option-chain exchanges OpenAlgo must be queried for when no exchange is given. */
+const OPENALGO_INSTRUMENT_EXCHANGES = ["NFO", "BFO", "MCX", "CDS"] as const;
 export const getInstruments = async (
   signal?: AbortSignal,
   expectedDataScope?: string,
+  exchange?: string,
 ): Promise<InstrumentRow[]> => {
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
   if (isExploreMode() || getApiKey().trim().length === 0) return [];
-  return normaliseInstrumentList(await get<InstrumentRow[] | { data?: InstrumentRow[]; instruments?: InstrumentRow[] }>(
-    "instruments",
-    signal,
-    expectedDataScope,
-  ));
+  const requested = String(exchange ?? "").trim().toUpperCase();
+  const exchanges = requested ? [requested] : [...OPENALGO_INSTRUMENT_EXCHANGES];
+  const batches = await Promise.all(exchanges.map((item) => (
+    get<InstrumentRow[] | { data?: InstrumentRow[]; instruments?: InstrumentRow[] }>(
+      "instruments",
+      signal,
+      expectedDataScope,
+      { apikey: getApiKey(), exchange: item },
+    ).then(normaliseInstrumentList)
+  )));
+  return batches.flat();
 };
 export const getGex = (symbol: string, exchange: string, expiry_date?: string, signal?: AbortSignal) =>
   postFtApi<BackendGexData | Array<BackendGexEntry | GexEntry>>("gex", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
@@ -3067,7 +3270,9 @@ export const getHoldings = async (
 
 // --- Utility ---
 export const ping = () => post<{ status: string }>("ping"); // OpenAlgo docs: POST /api/v1/ping
-export const getHolidays = () => post<Holiday[]>("holidays"); // POST with apikey, not GET
+export function getHolidays(year?: number | string): Promise<Holiday[]> {
+  return post<Holiday[]>("market/holidays", { year: holidayYear(year) });
+}
 export function getTimings(date?: string): Promise<MarketTiming[]> {
   const timingDate = String(date ?? todayIstIsoDate()).trim();
   if (!timingDate) throw new Error("date is required");

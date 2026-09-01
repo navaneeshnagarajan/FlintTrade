@@ -867,6 +867,10 @@ describe("OpenAlgo API client (api.ts)", () => {
       expect.anything(),
     );
     expect(fetchSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/market/holidays"),
+      expect.anything(),
+    );
+    expect(fetchSpy).not.toHaveBeenCalledWith(
       expect.stringContaining("/api/v1/timings"),
       expect.anything(),
     );
@@ -1441,12 +1445,16 @@ describe("OpenAlgo API client (api.ts)", () => {
       }),
     );
 
-    const result = await getInstruments();
+    const result = await getInstruments(undefined, undefined, "NFO");
 
     expect(result).toEqual([
       expect.objectContaining({ symbol: "NIFTY", exchange: "NFO", lotsize: 75 }),
     ]);
-    expect((fetchSpy.mock.calls[0] as [string, RequestInit | undefined])[0]).toContain("/api/v1/instruments");
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit | undefined];
+    expect(url).toContain("/api/v1/instruments");
+    expect(url).toContain("apikey=test-key-123");
+    expect(url).toContain("exchange=NFO");
+    expect(init).toBeUndefined();
   });
 
   it("keeps the optional instruments cache empty in native-only mode without an OpenAlgo key", async () => {
@@ -2095,6 +2103,61 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("posts OpenAlgo market/holidays with the calendar year and normalises envelopes", async () => {
+    mockConnectionState.apiKey = "test-key-123";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        year: 2026,
+        data: {
+          holidays: [
+            "2026-01-26",
+            {
+              date: "2026-03-03",
+              description: "Holi",
+              holiday_type: "TRADING_HOLIDAY",
+              closed_exchanges: ["NSE", "BSE"],
+              open_exchanges: [],
+            },
+          ],
+        },
+      }),
+    );
+
+    const holidays = await getHolidays(2026);
+
+    expect(holidays).toEqual([
+      {
+        date: "2026-01-26",
+        description: "",
+        holiday_type: "TRADING_HOLIDAY",
+        closed_exchanges: ["*"],
+        open_exchanges: [],
+      },
+      {
+        date: "2026-03-03",
+        description: "Holi",
+        holiday_type: "TRADING_HOLIDAY",
+        closed_exchanges: ["BSE", "NSE"],
+        open_exchanges: [],
+      },
+    ]);
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/market/holidays");
+    expect(url).not.toContain("/api/v1/holidays");
+    expect(JSON.parse(init.body as string)).toEqual({
+      apikey: "test-key-123",
+      year: 2026,
+    });
+  });
+
+  it("refuses an OpenAlgo holidays request with a year outside 2020-2050", async () => {
+    mockConnectionState.apiKey = "test-key-123";
+
+    await expect(getHolidays(1999)).rejects.toThrow("holiday year must be between 2020 and 2050");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("posts OpenAlgo market/timings with the trading date", async () => {
     mockConnectionState.apiKey = "test-key-123";
     fetchSpy.mockResolvedValueOnce(
@@ -2172,7 +2235,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       jsonResponse({ status: "success", data: { symbol: "BROKER-NIFTY-CE", exchange: "NFO" } }),
     );
 
-    const result = await getOptionSymbol("NIFTY", "NFO", "2026-07-30", "CE", "25000");
+    const result = await getOptionSymbol("NIFTY", "NFO", "2026-07-30", "CE", "ATM");
 
     expect(result).toEqual({ symbol: "BROKER-NIFTY-CE", exchange: "NFO" });
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -2181,10 +2244,17 @@ describe("OpenAlgo API client (api.ts)", () => {
       apikey: "test-key-123",
       underlying: "NIFTY",
       exchange: "NFO",
-      expiry_date: "2026-07-30",
+      expiry_date: "30JUL26",
       option_type: "CE",
-      offset: "25000",
+      offset: "ATM",
     });
+  });
+
+  it("bypasses OpenAlgo option-symbol for an explicit strike and builds the compact contract locally", async () => {
+    const result = await getOptionSymbol("NIFTY", "NFO", "2026-07-30", "CE", "25000");
+
+    expect(result).toEqual({ symbol: "NIFTY30JUL2625000CE", exchange: "NFO" });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("preserves an authority-change refusal while an OpenAlgo error body is parsed", async () => {
@@ -2201,7 +2271,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       "NFO",
       "2026-07-30",
       "CE",
-      "25000",
+      "ATM",
       undefined,
       expectedScope,
     );
@@ -2228,7 +2298,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       "NFO",
       "2026-07-30",
       "CE",
-      "25000",
+      "ATM",
       undefined,
       expectedScope,
     );
@@ -2923,12 +2993,104 @@ describe("OpenAlgo API client (api.ts)", () => {
       jsonResponse({ status: "success", data: [] }),
     );
 
-    const result = await getInstruments();
+    const result = await getInstruments(undefined, undefined, "NFO");
 
     expect(result).toEqual([]);
-    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit | undefined];
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit | undefined];
     // GET calls use the single-arg form of fetch (no init or no method)
     expect(init).toBeUndefined();
+    expect(url).toContain("/api/v1/instruments?");
+    expect(url).toContain("apikey=test-key-123");
+    expect(url).toContain("exchange=NFO");
+  });
+
+  it("authenticates OpenAlgo instruments GETs for each option-chain exchange", async () => {
+    fetchSpy.mockResolvedValue(jsonResponse({ status: "success", data: [] }));
+
+    await expect(getInstruments()).resolves.toEqual([]);
+
+    const urls = fetchSpy.mock.calls.map(([url]) => String(url));
+    expect(urls).toEqual([
+      expect.stringContaining("/api/v1/instruments?"),
+      expect.stringContaining("/api/v1/instruments?"),
+      expect.stringContaining("/api/v1/instruments?"),
+      expect.stringContaining("/api/v1/instruments?"),
+    ]);
+    expect(urls.every((url) => url.includes("apikey=test-key-123"))).toBe(true);
+    expect(urls.map((url) => new URL(url, "http://localhost").searchParams.get("exchange")).sort())
+      .toEqual(["BFO", "CDS", "MCX", "NFO"]);
+    expect(fetchSpy.mock.calls.every(([, init]) => init === undefined)).toBe(true);
+  });
+
+  it("polls the current ticker through quotes instead of the historical ticker route", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: {
+          symbol: "RELIANCE",
+          exchange: "NSE",
+          ltp: 3010.75,
+          open: 3000,
+          high: 3020,
+          low: 2990,
+          close: 3005,
+          volume: 1000,
+        },
+      }),
+    );
+
+    const result = await getTicker("RELIANCE", "NSE");
+
+    expect(result).toMatchObject({ symbol: "RELIANCE", exchange: "NSE", ltp: 3010.75 });
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/quotes");
+    expect(url).not.toContain("/api/v1/ticker");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      apikey: "test-key-123",
+      symbol: "RELIANCE",
+      exchange: "NSE",
+    });
+  });
+
+  it("keeps Practice sandbox trigger_price on stop orders", async () => {
+    mockConnectionState.apiKey = "configured-live-key";
+    mockModeState.mode = "practice";
+    fetchSpy.mockResolvedValueOnce(jsonResponse({
+      status: "success",
+      data: {
+        orders: [{
+          order_id: "SB-SL-1",
+          symbol: "INFY",
+          exchange: "NSE",
+          action: "SELL",
+          quantity: 10,
+          price: 1490,
+          trigger_price: 1490.5,
+          order_type: "SL",
+          product: "MIS",
+          strategy: "Practice",
+          status: "open",
+          created_at: "2026-09-01T10:00:00+00:00",
+        }],
+      },
+    }));
+
+    await expect(getOrderbook(PRACTICE_READ_CONTEXT)).resolves.toEqual([{
+      orderId: "SB-SL-1",
+      symbol: "INFY",
+      exchange: "NSE",
+      action: "SELL",
+      quantity: 10,
+      price: 1490,
+      orderType: "SL",
+      status: "open",
+      product: "MIS",
+      strategy: "Practice",
+      timestamp: "2026-09-01T10:00:00+00:00",
+      triggerPrice: 1490.5,
+    }]);
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/v1/sandbox/orders");
   });
 
   // ---- postOrder — mode header ----

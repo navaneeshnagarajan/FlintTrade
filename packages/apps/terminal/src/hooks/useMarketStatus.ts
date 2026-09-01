@@ -8,7 +8,7 @@ export const MARKET_TIMINGS_REFRESH_INTERVAL_MS = 45 * 60_000;
 export function useHolidays(enabled = true) {
   return useQuery<Holiday[]>({
     queryKey: ["holidays"],
-    queryFn: getHolidays,
+    queryFn: () => getHolidays(),
     staleTime: 24 * 60 * 60_000, // 24h — holidays don't change often
     enabled,
   });
