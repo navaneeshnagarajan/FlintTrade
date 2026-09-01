@@ -4,6 +4,8 @@ import Image from 'next/image';
 import Link from 'next/link';
 
 import { HeroCinematic } from '@/components/hero-cinematic';
+import SectionEnterController from '@/components/section-enter-controller';
+import SiteScrollWorld from '@/components/site-scroll-world';
 import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
 import { listPackages } from '@/lib/mcp/capabilities';
@@ -87,10 +89,12 @@ export default function HomePage() {
     <main className="site-shell">
       <div className="site-cinematic-backdrop" aria-hidden="true">
         <HeroCinematic />
+        <SiteScrollWorld />
       </div>
       <SiteHeader />
+      <SectionEnterController />
 
-      <section className="section hero">
+      <section className="section hero" data-scroll-chapter="0">
         <div className="hero-copy">
           <div className="hero-logo-stage" aria-hidden="true">
             <span className="site-hero-fireball" />
@@ -128,11 +132,6 @@ export default function HomePage() {
           <p className="hero-disclaimer">
             v0.0.1 is not production ready. Use Explore and Practice modes first; Live mode remains your own risk.
           </p>
-          <div className="hero-feature-grid">
-            {welcomeFeatures.map((item) => (
-              <div key={item}>{item}</div>
-            ))}
-          </div>
           <div className="hero-actions">
             <Link
               className="button primary"
@@ -160,6 +159,11 @@ export default function HomePage() {
             <Link className="button secondary" href="/docs">
               Read the docs <ArrowRight aria-hidden="true" size={17} />
             </Link>
+          </div>
+          <div className="hero-feature-grid">
+            {welcomeFeatures.map((item) => (
+              <div key={item}>{item}</div>
+            ))}
           </div>
         </div>
 
@@ -199,9 +203,30 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="section">
+      <section className="section section-enter" data-scroll-chapter="1">
         <div className="section-heading">
-          <h2>Electron shell delivery.</h2>
+          <h2>Self-hosted trading workspace</h2>
+          <p>
+            A self-hosted workflow workspace. React, FlexLayout, Python services, Rust tick processing, the OpenAlgo-compatible bridge, and evidence-gated native broker contracts in one inspectable workspace. Safety before automation with Explore, Practice, and Live modes.
+          </p>
+        </div>
+        <div className="feature-grid" data-scroll-chapter="2">
+          {featureCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <article className="feature-card" key={card.title}>
+                <Icon aria-hidden="true" />
+                <h3>{card.title}</h3>
+                <p>{card.copy}</p>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="section section-enter" data-scroll-chapter="3">
+        <div className="section-heading">
+          <h2>Evaluate and install</h2>
           <p>
             Desktop releases use a small Electron shell that verifies pinned tools and builds
             hash-verified, integrity-locked local source on first launch. The download page exposes
@@ -235,53 +260,39 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="section">
+      {/* Contributor resources band — demoted with progressive disclosure (Graphite Continuity A1) */}
+      <section className="section section-enter" data-scroll-chapter="4">
         <div className="section-heading">
-          <h2>Built for people who read the source.</h2>
+          <h2>Contributor resources</h2>
           <p>
-            The public site stays close to the repository. Root docs, package READMEs, screenshots, and
-            contribution commands are generated into the site rather than rewritten in a second place.
+            Polished docs, read-only MCP tools, and package maps for contributors. Start with product usage, then explore architecture at your own pace. Broker credentials, account state, funds, order IDs, and order placement stay outside this surface.
           </p>
-        </div>
-        <div className="feature-grid">
-          {featureCards.map((card) => {
-            const Icon = card.icon;
-            return (
-              <article className="feature-card" key={card.title}>
-                <Icon aria-hidden="true" />
-                <h3>{card.title}</h3>
-                <p>{card.copy}</p>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="section two-column">
-        <div className="section-heading">
-          <h2>Docs, API, and contribution paths in one flow.</h2>
-          <p>
-            Start with product usage, move into architecture and endpoint contracts, then use the MCP
-            tools to orient local development work.
-          </p>
-        </div>
-        <div className="mcp-steps">
-          {docsCards.map((item) => (
-            <Link className="mcp-step" href={item.href} key={item.href}>
-              <h3>{item.label}</h3>
-              <p>{item.copy}</p>
+          <div className="section-actions">
+            <Link className="button secondary" href="/docs">
+              Browse docs <ArrowRight aria-hidden="true" size={17} />
             </Link>
-          ))}
+            <Link className="button secondary" href="/mcp">
+              MCP setup <ArrowRight aria-hidden="true" size={17} />
+            </Link>
+          </div>
         </div>
-      </section>
-
-      <section className="section two-column">
-        <div className="code-panel">
-          <header>
-            <span>Contributor MCP</span>
-            <span>read-only</span>
-          </header>
-          <pre>{`{
+        {/* Progressive disclosure for MCP and package map to keep homepage calm and demoted */}
+        <details className="progressive-disclosure">
+          <summary>MCP tools for contributors (read-only)</summary>
+          <div className="mcp-steps">
+            {docsCards.map((item) => (
+              <Link className="mcp-step" href={item.href} key={item.href}>
+                <h3>{item.label}</h3>
+                <p>{item.copy}</p>
+              </Link>
+            ))}
+          </div>
+          <div className="code-panel">
+            <header>
+              <span>Contributor MCP</span>
+              <span>read-only</span>
+            </header>
+            <pre>{`{
   "mcpServers": {
     "flinttrade-docs": {
       "url": "https://<your-site>/api/mcp"
@@ -293,39 +304,29 @@ export default function HomePage() {
     }
   }
 }`}</pre>
-        </div>
-        <div className="section-heading">
-          <h2>MCP for development, not trading.</h2>
-          <p>
-            The site exposes docs search, package maps, path explanations, test recommendations, and
-            contribution prompts. Broker credentials, account state, funds, order IDs, and order placement
-            stay outside this MCP surface.
-          </p>
-          <Link className="button secondary" href="/mcp">
-            MCP setup <ArrowRight aria-hidden="true" size={17} />
-          </Link>
-        </div>
-      </section>
+          </div>
+        </details>
 
-      <section className="section">
-        <div className="section-heading">
-          <h2>Package map at contributor speed.</h2>
+        <details className="progressive-disclosure">
+          <summary>Package map at contributor speed</summary>
           <p>
             Each package README becomes a docs page and MCP resource, so agent-assisted development starts
             from the same public source a human contributor reads.
           </p>
-        </div>
-        <div className="package-list">
-          {packages.map((pkg) => (
-            <Link className="package-row" href={pkg.url} key={pkg.name}>
-              <strong>{pkg.name}</strong>
-              <span>{pkg.description}</span>
-            </Link>
-          ))}
-        </div>
+          <div className="package-list">
+            {packages.map((pkg) => (
+              <Link className="package-row" href={pkg.url} key={pkg.name}>
+                <strong>{pkg.name}</strong>
+                <span>{pkg.description}</span>
+              </Link>
+            ))}
+          </div>
+        </details>
       </section>
 
-      <SiteFooter />
+      <div data-scroll-chapter="5">
+        <SiteFooter />
+      </div>
     </main>
   );
 }

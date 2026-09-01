@@ -118,6 +118,9 @@ importers:
       react-dom:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
+      three:
+        specifier: 0.185.1
+        version: 0.185.1
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -140,6 +143,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.4
         version: 19.2.4(@types/react@19.2.18)
+      '@types/three':
+        specifier: 0.185.1
+        version: 0.185.1
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
