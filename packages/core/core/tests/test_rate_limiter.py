@@ -468,6 +468,55 @@ class TestJwtIdentityRateLimit:
         assert first.status_code == 200
         assert second.status_code == 429
 
+    def test_password_reset_jwt_cannot_consume_session_subject_bucket(self):
+        """Only session tokens may share the authenticated trading bucket."""
+        from datetime import UTC, datetime, timedelta
+        import uuid
+
+        import jwt as pyjwt
+
+        import flinttrade_core.auth_routes as auth_routes
+
+        session = auth_routes._create_token("alice", mode="practice")
+        reset = pyjwt.encode(
+            {
+                "sub": "alice",
+                "type": "reset",
+                "jti": str(uuid.uuid4()),
+                "exp": datetime.now(UTC) + timedelta(minutes=5),
+            },
+            auth_routes._get_jwt_secret(),
+            algorithm="HS256",
+        )
+        app = self._app()
+        with app.test_client() as client:
+            session_response = client.get(
+                "/test",
+                headers={"Authorization": f"Bearer {session}"},
+            )
+            reset_response = client.get(
+                "/test",
+                headers={"Authorization": f"Bearer {reset}"},
+            )
+        assert session_response.status_code == 200
+        assert reset_response.status_code == 200
+
+    def test_plain_username_override_applies_to_verified_jwt_bucket(self):
+        """Admin overrides keep their public username key, not the internal namespace."""
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("alice", mode="practice")
+        app = self._app(user_rate=5)
+        limiter = app.config["RATE_LIMITER"]
+        limiter.set_user_override("alice", "test_endpoint", 1)
+
+        with app.test_client() as client:
+            first = client.get("/test", headers={"Authorization": f"Bearer {token}"})
+            second = client.get("/test", headers={"Authorization": f"Bearer {token}"})
+
+        assert first.status_code == 200
+        assert second.status_code == 429
+
 
 def test_every_authenticated_rate_limited_route_uses_jwt_identity():
     """Keep sibling order/strategy route modules from reverting to header buckets."""

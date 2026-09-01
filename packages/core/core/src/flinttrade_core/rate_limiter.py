@@ -304,7 +304,13 @@ class RateLimiter:
                 )
             ]
 
-    def check(self, user_id: str, endpoint: str) -> tuple[bool, int]:
+    def check(
+        self,
+        user_id: str,
+        endpoint: str,
+        *,
+        override_user_id: str | None = None,
+    ) -> tuple[bool, int]:
         """Check whether a request is within rate limits.
 
         Consumes one token from both the per-user and global buckets.
@@ -313,6 +319,8 @@ class RateLimiter:
         Args:
             user_id: Identifier for the requesting user.
             endpoint: Logical endpoint name (e.g. ``"orders"``).
+            override_user_id: Public operator-facing identity used only for
+                override lookup when the bucket key is namespaced internally.
 
         Returns:
             Tuple ``(allowed, retry_after_ms)``.  When ``allowed`` is
@@ -324,7 +332,8 @@ class RateLimiter:
         global_rate = cfg.global_rate if cfg else self._default_global_rate
 
         # Apply per-user override if one is registered.
-        user_rate = self._user_overrides.get((user_id, endpoint), user_rate)
+        override_key = override_user_id if override_user_id is not None else user_id
+        user_rate = self._user_overrides.get((override_key, endpoint), user_rate)
 
         with self._lock:
             user_bucket = self._get_user_bucket(user_id, endpoint, user_rate)
@@ -485,21 +494,28 @@ def _verified_jwt_subject() -> str | None:
         payload = decode_token(token)
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         return None
+    if payload.get("type") != "session":
+        return None
     sub = payload.get("sub")
     if isinstance(sub, str) and sub.strip():
         return sub.strip()
     return None
 
 
-def _jwt_rate_limit_user_id() -> str:
-    """Bucket identity for authenticated routes: JWT ``sub``, never ``X-User-ID``."""
+def _jwt_rate_limit_identity() -> tuple[str, str | None]:
+    """Return internal bucket key plus public override identity for JWT routes."""
     subject = _verified_jwt_subject()
     if subject is not None:
-        return f"jwt:{subject}"
+        return f"jwt:{subject}", subject
     # Invalid/missing JWTs are unauthenticated on these routes. Keep them in
     # one IP-scoped namespace: client-provided API/user headers must not mint
     # fresh buckets or collide with a legitimate JWT subject.
-    return f"unauthenticated:{request.remote_addr or 'anonymous'}"
+    return f"unauthenticated:{request.remote_addr or 'anonymous'}", None
+
+
+def _jwt_rate_limit_user_id() -> str:
+    """Compatibility helper returning only the internal JWT bucket key."""
+    return _jwt_rate_limit_identity()[0]
 
 
 def rate_limit(
@@ -565,13 +581,17 @@ def rate_limit(
             if limits["user_rate"] != user_rate or limits["global_rate"] != global_rate:
                 limiter.set_limit(endpoint, user_rate, global_rate)
 
-            user_id = (
-                _jwt_rate_limit_user_id()
-                if identity == "jwt"
-                else _header_rate_limit_user_id(user_id_header)
-            )
+            if identity == "jwt":
+                user_id, override_user_id = _jwt_rate_limit_identity()
+            else:
+                user_id = _header_rate_limit_user_id(user_id_header)
+                override_user_id = None
 
-            allowed, retry_ms = limiter.check(user_id, endpoint)
+            allowed, retry_ms = limiter.check(
+                user_id,
+                endpoint,
+                override_user_id=override_user_id,
+            )
             if not allowed:
                 response = jsonify(
                     {
