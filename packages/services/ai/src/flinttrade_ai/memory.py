@@ -329,8 +329,7 @@ class TradedMemory:
     Adapts FinMem patterns: compound scoring, layer-differentiated importance,
     access-count reinforcement on correct predictions.
 
-    One ChromaDB collection is created per layer, named
-    ``{collection_prefix}_{layer}``.
+    One collection is created per layer, named ``{collection_prefix}_{layer}``.
 
     Usage::
 
@@ -362,13 +361,13 @@ class TradedMemory:
         """Initialise TradedMemory.
 
         Args:
-            persist_dir: Directory for ChromaDB persistence. Tilde is expanded.
+            persist_dir: Directory for sqlite vector persistence. Tilde is expanded.
                 Pass ``None`` to use an ephemeral in-memory client (testing only).
-            collection_prefix: Prefix for ChromaDB collection names.
-            embedding_model: sentence-transformers model name for embeddings.
-            _chroma_client: Override ChromaDB client (used in tests to inject
-                an ``EphemeralClient``).
-            _embedding_fn: Override ChromaDB embedding function (used in tests
+            collection_prefix: Prefix for per-layer collection names.
+            embedding_model: Unused model name retained for API compatibility.
+            _chroma_client: Override vector client (used in tests to inject
+                an in-memory client).
+            _embedding_fn: Override embedding function (used in tests
                 to keep unit tests independent from transformer runtimes).
         """
         self._persist_dir = persist_dir
@@ -391,7 +390,7 @@ class TradedMemory:
     # ------------------------------------------------------------------
 
     def _get_client(self) -> Any:
-        """Return (and lazily create) the ChromaDB client."""
+        """Return (and lazily create) the local vector client."""
         with self._lock:
             if self._chroma_client is not None:
                 return self._chroma_client
@@ -458,7 +457,7 @@ class TradedMemory:
         return 1.0 / (1.0 + max(0.0, distance))
 
     def _get_collection(self, layer: MemoryLayer) -> Any:
-        """Return (and lazily create) the ChromaDB collection for a layer."""
+        """Return (and lazily create) the collection for a layer."""
         with self._lock:
             if layer in self._collections:
                 collection = self._collections[layer]

@@ -60,7 +60,7 @@ separately, or clone a local-dev copy into `.local/external/openalgo/` with
 Bash), only when you want the OpenAlgo-compatible integration path.
 
 For the FULL Python stack — every workspace member plus the ML/AI extras
-(vectorbt+numba backtesting, lightgbm/optuna ensemble tuning, ChromaDB RAG,
+(vectorbt+numba backtesting, lightgbm/optuna ensemble tuning, local sqlite RAG,
 reportlab PDF export, openpyxl Excel bridge) — sync all packages and extras
 (the never-consumed `talib` extra was removed; the indicators are pure NumPy):
 

@@ -26,9 +26,8 @@ ml = [
     # (hyperopt_strategy.py, ensemble_selector.py).
     "optuna>=3.6",
 ]
-# ChromaDB-backed canonical RAG pipeline + agent memory.
+# PDF support for the canonical RAG pipeline.
 rag = [
-    "chromadb>=0.5",
     "pypdf>=6.15.0",
 ]
 

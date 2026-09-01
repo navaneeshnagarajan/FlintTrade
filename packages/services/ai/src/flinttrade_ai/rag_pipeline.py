@@ -5,7 +5,7 @@ Provides a self-contained, configurable RAG chain:
     DocumentLoader  → load .md / .txt / .py / .pdf files from a directory.
     TextChunker     → split documents into overlapping chunks.
     EmbeddingProvider → sentence-transformers or OpenAI-compatible embeddings.
-    VectorStore     → ChromaDB-backed similarity search.
+    VectorStore     → local sqlite similarity search.
     RAGPipeline     → orchestrates the full query → retrieve → generate chain.
 
 Design:
@@ -13,7 +13,7 @@ Design:
   subclassing.
 - Embedding provider is pluggable: sentence-transformers (default, offline)
   or any callable that maps List[str] → List[List[float]].
-- ChromaDB is lazily initialised so tests can run without installing it.
+- The vector store is lazily initialised from sqlite3 + numpy.
 - The LLM generation step is optional; callers can use the pipeline in
   retrieval-only mode by calling ``retrieve()`` instead of ``query()``.
 
@@ -69,8 +69,8 @@ class PipelineConfig(BaseModel):
         embedding_provider:   ``"sentence_transformers"`` or ``"openai"``.
         openai_api_base:      Base URL for OpenAI-compatible embedding endpoint.
         openai_api_key:       API key for the embedding endpoint.
-        collection_name:      ChromaDB collection name.
-        persist_directory:    Persist ChromaDB to disk at this path. Empty = in-memory.
+        collection_name:      Vector collection name.
+        persist_directory:    Persist the vector store to disk at this path. Empty = in-memory.
         top_k:                Default number of chunks to retrieve.
         similarity_threshold: Minimum cosine similarity score (0–1) for results.
     """
@@ -754,9 +754,9 @@ class EmbeddingProvider:
 
 
 class VectorStore:
-    """ChromaDB-backed vector store for semantic search.
+    """Local sqlite vector store for semantic search.
 
-    Lazily initialises the ChromaDB client on first use.
+    Lazily initialises the client on first use.
 
     Example::
 
@@ -950,7 +950,7 @@ class VectorStore:
                 },
             )
             logger.info(
-                "ChromaDB collection '%s' ready (%d chunks)",
+                "Vector collection '%s' ready (%d chunks)",
                 self._collection_name,
                 self._collection.count(),
             )
