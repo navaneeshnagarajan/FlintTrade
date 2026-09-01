@@ -104,7 +104,7 @@ from flinttrade_data.audit_logger import AuditLogger  # noqa: E402
 # engine imports are deferred into FlintTradeApp.__init__() to break the
 # core↔engine circular import.  See PLC0415 comments throughout this file.
 # Heavy optional modules are imported lazily inside FlintTradeApp.__init__()
-# to avoid a 2-5 s startup penalty when ChromaDB / LLM / Telegram deps load.
+# to avoid a 2-5 s startup penalty when embedding, LLM, or Telegram deps load.
 # CronManager, TelegramBot, LLMClient, LLMConfig, RAGPipeline
 
 # Ensure the gateway src directory is on sys.path so bare gateway imports resolve.
@@ -5746,9 +5746,8 @@ class FlintTradeApp:
 
         # RAG — knowledge base (persistent).
         # LLMClient and RAGPipeline are imported lazily here to avoid loading
-        # ChromaDB, sentence-transformers, and the LLM HTTP client at module
-        # level, which would add 2-5 s to startup time even when the AI
-        # features are not yet used.
+        # sentence-transformers and the LLM HTTP client at module level, which
+        # would add 2-5 s to startup time even when the AI features are unused.
         self.rag = _initialise_rag_runtime(flinttrade_dir)
 
         # Live tick capture (opt-in via FLINTTRADE_TICK_CAPTURE) — wired in start().
