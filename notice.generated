@@ -4,8 +4,8 @@ flinttrade is licensed under AGPL-3.0-or-later. The dependencies tracked by the
 lockfiles below carry their own licences; see the NOTICE/notices bundle and
 supply-chain/licence-allowlist.yml for the compatibility policy.
 
-- uv.lock: present (sha256: e194dfd8b961280b8905a0a9ec356873cc993329ec7879a84d3baaece7feaea4)
-- requirements.lock: present (sha256: f2cf7dd9880663dcb2adbeb4a17c704f08d93d4b9c8f4be2f02dbcafe882eac8)
+- uv.lock: present (sha256: 70dcd675ef6053592bbd093275cf33325b85f82c8849fde0a474c3fff538b0d6)
+- requirements.lock: present (sha256: 1cbe0fb22ba395df734614a3801a779cf3b58e30daf83a3d2e15ab47b5cc7638)
 - pnpm-lock.yaml: present (sha256: 0a80a0927230783891dffefab06c19c71c190ec8bb37af5aba0efadb1222dba9)
 - brokers.lock: present (sha256: f1613b988c866ae23bd4bbb504408f72fd7ee2745dc5adc4908ab23d0039791a)
 - supply-chain/audit-tooling.lock: present (sha256: 9d01182598dd12f07df16712cde76b95bada4b8639973e25cb2cbfac66afc42a)
