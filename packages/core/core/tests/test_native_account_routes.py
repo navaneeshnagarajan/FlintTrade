@@ -1571,6 +1571,48 @@ def test_native_account_reads_include_market_calendar(client, monkeypatch):
     assert holidays.get_json()["data"][0]["description"] == "Independence Day"
 
 
+def test_native_holiday_reads_accept_year_selector(client, monkeypatch):
+    """A year query must reach the adapter instead of always using the current calendar."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    seen: list[str | None] = []
+
+    async def _market_holidays(_self, _session, holiday_date=None):
+        seen.append(holiday_date)
+        return [{
+            "date": holiday_date or "2026-08-15",
+            "description": "Independence Day",
+            "holiday_type": "TRADING_HOLIDAY",
+            "closed_exchanges": ["NSE"],
+        }]
+
+    monkeypatch.setattr(UpstoxAdapter, "market_holidays", _market_holidays)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "upstox", "account_id": "UPXYEAR", "credentials": {"access_token": "tok"}},
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    current_year = datetime.now(ZoneInfo("Asia/Kolkata")).year
+    current = c.get(f"/api/v1/native/accounts/upstox/UPXYEAR/holidays?year={current_year}")
+    next_year = current_year + 1
+    adjacent = c.get(f"/api/v1/native/accounts/upstox/UPXYEAR/holidays?year={next_year}")
+    dated = c.get(
+        f"/api/v1/native/accounts/upstox/UPXYEAR/holidays?date=2026-08-15&year={next_year}"
+    )
+
+    assert current.status_code == 200, current.get_json()
+    assert adjacent.status_code == 200, adjacent.get_json()
+    assert dated.status_code == 200, dated.get_json()
+    assert seen == [None, f"{next_year:04d}-01-01", "2026-08-15"]
+
+
 def test_native_account_reads_include_option_greeks(client, monkeypatch):
     """Portfolio Greeks can batch native option-greek reads without OpenAlgo."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
@@ -1636,6 +1678,186 @@ def test_native_account_reads_include_dhan_display_alias_greeks(client, monkeypa
     assert resp.status_code == 200, resp.get_json()
     assert resp.get_json()["data"][0]["delta"] == 0.52
     assert resp.get_json()["data"][0]["iv"] == 18.4
+
+
+def test_native_account_reads_include_dhan_ltp(client, monkeypatch):
+    """Dhan native LTP is served from the existing quotes implementation."""
+    from flinttrade_core.models import Quote
+    from flinttrade_gateway.brokers.dhan import DhanAdapter
+
+    async def _funds(_self, _session):
+        return {"available_balance": 0.0}
+
+    async def _quotes(_self, _session, symbols):
+        assert symbols == ["NSE:INFY"]
+        return [Quote(symbol="INFY", exchange="NSE", ltp=1450.25, open=1440, high=1460, low=1430, close=1448)]
+
+    monkeypatch.setattr(DhanAdapter, "funds", _funds)
+    monkeypatch.setattr(DhanAdapter, "quotes", _quotes)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "dhan",
+            "account_id": "DHANLTP",
+            "credentials": {"client_id": "1100000000", "access_token": "tok"},
+        },
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    ltp = c.get("/api/v1/native/accounts/dhan/DHANLTP/ltp?symbol=INFY&exchange=NSE")
+    assert ltp.status_code == 200, ltp.get_json()
+    row = ltp.get_json()["data"][0]
+    assert row["symbol"] == "INFY"
+    assert row["exchange"] == "NSE"
+    assert row["ltp"] == 1450.25
+
+
+def test_native_account_reads_include_dhan_ohlc(client, monkeypatch):
+    """Dhan native OHLC is served from the existing quotes implementation."""
+    from flinttrade_core.models import Quote
+    from flinttrade_gateway.brokers.dhan import DhanAdapter
+
+    async def _funds(_self, _session):
+        return {"available_balance": 0.0}
+
+    async def _quotes(_self, _session, symbols):
+        assert symbols == ["NSE:RELIANCE"]
+        return [Quote(symbol="RELIANCE", exchange="NSE", ltp=11.0, open=10.0, high=12.0, low=9.0, close=11.0)]
+
+    monkeypatch.setattr(DhanAdapter, "funds", _funds)
+    monkeypatch.setattr(DhanAdapter, "quotes", _quotes)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "dhan",
+            "account_id": "DHANOHLC",
+            "credentials": {"client_id": "1100000000", "access_token": "tok"},
+        },
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    resp = c.get("/api/v1/native/accounts/dhan/DHANOHLC/ohlc?symbol=RELIANCE&exchange=NSE")
+    assert resp.status_code == 200, resp.get_json()
+    row = resp.get_json()["data"][0]
+    assert row["symbol"] == "RELIANCE"
+    assert row["open"] == 10.0
+    assert row["high"] == 12.0
+    assert row["low"] == 9.0
+    assert row["close"] == 11.0
+
+
+def test_native_account_reads_include_dhan_quote_details(client, monkeypatch):
+    """Dhan native quote_details is served from the existing quotes implementation."""
+    from flinttrade_core.models import Quote
+    from flinttrade_gateway.brokers.dhan import DhanAdapter
+
+    async def _funds(_self, _session):
+        return {"available_balance": 0.0}
+
+    async def _quotes(_self, _session, symbols):
+        assert symbols == ["NSE:INFY"]
+        return [Quote(symbol="INFY", exchange="NSE", ltp=1450.25, open=1440, high=1460, low=1430, close=1448)]
+
+    monkeypatch.setattr(DhanAdapter, "funds", _funds)
+    monkeypatch.setattr(DhanAdapter, "quotes", _quotes)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "dhan",
+            "account_id": "DHANQUOTE",
+            "credentials": {"client_id": "1100000000", "access_token": "tok"},
+        },
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    details = c.get(
+        "/api/v1/native/accounts/dhan/DHANQUOTE/quote_details?symbol=INFY&exchange=NSE&quote_type=ltp"
+    )
+    assert details.status_code == 200, details.get_json()
+    row = details.get_json()["data"][0]
+    assert row["symbol"] == "INFY"
+    assert row["exchange"] == "NSE"
+    assert row["ltp"] == 1450.25
+    assert row["open"] == 1440
+    assert row["high"] == 1460
+    assert row["low"] == 1430
+    assert row["close"] == 1448
+
+
+def test_native_dhan_quote_details_rejects_unknown_type_without_broker_read(client, monkeypatch):
+    """Invalid Dhan quote_type is a client 4xx and must not call the broker."""
+    from flinttrade_gateway.brokers.dhan import DhanAdapter
+
+    async def _funds(_self, _session):
+        return {"available_balance": 0.0}
+
+    async def _quotes(_self, _session, _symbols):
+        raise AssertionError("invalid quote_type must not contact the broker")
+
+    monkeypatch.setattr(DhanAdapter, "funds", _funds)
+    monkeypatch.setattr(DhanAdapter, "quotes", _quotes)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "dhan",
+            "account_id": "DHANBADTYPE",
+            "credentials": {"client_id": "1100000000", "access_token": "tok"},
+        },
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    details = c.get(
+        "/api/v1/native/accounts/dhan/DHANBADTYPE/quote_details?symbol=INFY&exchange=NSE&quote_type=depth"
+    )
+    assert details.status_code == 400, details.get_json()
+    body = details.get_json()
+    assert body["status"] == "error"
+    assert body["message"] == "Unsupported quote_type for quote_details."
+
+
+def test_native_dhan_ltp_omits_missing_symbols_without_fabricating_zero(client, monkeypatch):
+    """Native Dhan LTP keeps quotes' omit-missing contract and never invents 0.0 rows."""
+    from flinttrade_core.models import Quote
+    from flinttrade_gateway.brokers.dhan import DhanAdapter
+
+    async def _funds(_self, _session):
+        return {"available_balance": 0.0}
+
+    async def _quotes(_self, _session, symbols):
+        assert symbols == ["NSE:INFY", "NSE:RELIANCE"]
+        return [Quote(symbol="INFY", exchange="NSE", ltp=1450.25, open=1440, high=1460, low=1430, close=1448)]
+
+    monkeypatch.setattr(DhanAdapter, "funds", _funds)
+    monkeypatch.setattr(DhanAdapter, "quotes", _quotes)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "dhan",
+            "account_id": "DHANPARTIAL",
+            "credentials": {"client_id": "1100000000", "access_token": "tok"},
+        },
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    ltp = c.get("/api/v1/native/accounts/dhan/DHANPARTIAL/ltp?symbols=NSE:INFY,NSE:RELIANCE")
+    assert ltp.status_code == 200, ltp.get_json()
+    rows = ltp.get_json()["data"]
+    assert rows == [{"symbol": "INFY", "exchange": "NSE", "ltp": 1450.25}]
 
 
 def test_native_account_reads_include_ohlc(client, monkeypatch):
@@ -2787,40 +3009,49 @@ def test_connect_candidate_timeout_preserves_live_state_and_releases_lock(client
 
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
-    async def _slow_probe(_self, _session):
-        await asyncio.sleep(0.05)
-        return {"available_balance": 0.0}
+    release_probe = threading.Event()
 
-    monkeypatch.setattr(UpstoxAdapter, "funds", _slow_probe)
+    async def _blocking_probe(_self, _session):
+        def sdk_read() -> dict[str, float]:
+            if not release_probe.wait(5.0):
+                raise TimeoutError("test did not release the SDK read")
+            return {"available_balance": 0.0}
+
+        return await asyncio.to_thread(sdk_read)
+
+    monkeypatch.setattr(UpstoxAdapter, "funds", _blocking_probe)
 
     started = time.monotonic()
-    response = c.post(
-        "/api/v1/native/accounts",
-        headers=_h(),
-        json={
-            "adapter_id": "upstox",
-            "account_id": "TIMEOUTCONNECT",
-            "credentials": {"access_token": "candidate"},
-        },
-    )
-    elapsed = time.monotonic() - started
+    try:
+        response = c.post(
+            "/api/v1/native/accounts",
+            headers=_h(),
+            json={
+                "adapter_id": "upstox",
+                "account_id": "TIMEOUTCONNECT",
+                "credentials": {"access_token": "candidate"},
+            },
+        )
+        elapsed = time.monotonic() - started
 
-    assert response.status_code == 504
-    # Generous bound: the invariant is "the 504 comes from the 0.01s candidate
-    # timeout rather than a hang", not a latency target — loaded runners
-    # (parallel agents, busy CI) blow sub-second wall-clock windows.
-    assert elapsed < 5.0
-    assert app.config["BROKER_ROUTER"] is router
-    assert router.calls == 0
-    assert app.config["CREDENTIAL_STORE"].list_accounts() == []
-    assert _workspace_brokers(tmp_path) == workspace_before
-    assert app.config.get("NATIVE_SESSION_STATUS") == status_before
+        assert response.status_code == 504
+        # Generous bound: the invariant is "the 504 comes from the 0.01s candidate
+        # timeout rather than a hang", not a latency target — loaded runners
+        # (parallel agents, busy CI) blow sub-second wall-clock windows.
+        assert elapsed < 5.0
+        assert app.config["BROKER_ROUTER"] is router
+        assert router.calls == 0
+        assert app.config["CREDENTIAL_STORE"].list_accounts() == []
+        assert _workspace_brokers(tmp_path) == workspace_before
+        assert app.config.get("NATIVE_SESSION_STATUS") == status_before
 
-    import flinttrade_core.native_account_routes as routes
+        import flinttrade_core.native_account_routes as routes
 
-    assert routes._CONNECT_LOCK.acquire(blocking=False) is True
-    routes._CONNECT_LOCK.release()
-    _wait_for_candidate_attempt_to_finish()
+        assert routes._CONNECT_LOCK.acquire(blocking=False) is True
+        routes._CONNECT_LOCK.release()
+    finally:
+        release_probe.set()
+        _wait_for_candidate_attempt_to_finish()
 
 
 def test_candidate_timeout_does_not_accumulate_or_leave_non_daemon_sdk_work(
@@ -2959,35 +3190,44 @@ def test_relogin_candidate_timeout_preserves_live_state_and_releases_lock(client
 
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
-    async def _slow_probe(_self, _session):
-        await asyncio.sleep(0.05)
-        return {"available_balance": 0.0}
+    release_probe = threading.Event()
 
-    monkeypatch.setattr(UpstoxAdapter, "funds", _slow_probe)
+    async def _blocking_probe(_self, _session):
+        def sdk_read() -> dict[str, float]:
+            if not release_probe.wait(5.0):
+                raise TimeoutError("test did not release the SDK read")
+            return {"available_balance": 0.0}
+
+        return await asyncio.to_thread(sdk_read)
+
+    monkeypatch.setattr(UpstoxAdapter, "funds", _blocking_probe)
 
     started = time.monotonic()
-    response = c.post(
-        "/api/v1/native/accounts/upstox/TIMEOUTRELOGIN/login",
-        headers=_h(),
-        json={"credentials": {"access_token": "candidate"}},
-    )
-    elapsed = time.monotonic() - started
+    try:
+        response = c.post(
+            "/api/v1/native/accounts/upstox/TIMEOUTRELOGIN/login",
+            headers=_h(),
+            json={"credentials": {"access_token": "candidate"}},
+        )
+        elapsed = time.monotonic() - started
 
-    assert response.status_code == 504
-    # Generous bound: see the connect-timeout twin above — prompt-vs-hang is
-    # the invariant, not sub-second latency.
-    assert elapsed < 5.0
-    assert app.config["BROKER_ROUTER"] is router
-    assert router.calls == 0
-    assert store.retrieve_for("upstox", "TIMEOUTRELOGIN") == {"access_token": "prior"}
-    assert registry.get_session_for("upstox", "TIMEOUTRELOGIN") is prior_session
-    assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
+        assert response.status_code == 504
+        # Generous bound: see the connect-timeout twin above — prompt-vs-hang is
+        # the invariant, not sub-second latency.
+        assert elapsed < 5.0
+        assert app.config["BROKER_ROUTER"] is router
+        assert router.calls == 0
+        assert store.retrieve_for("upstox", "TIMEOUTRELOGIN") == {"access_token": "prior"}
+        assert registry.get_session_for("upstox", "TIMEOUTRELOGIN") is prior_session
+        assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
 
-    import flinttrade_core.native_account_routes as routes
+        import flinttrade_core.native_account_routes as routes
 
-    assert routes._CONNECT_LOCK.acquire(blocking=False) is True
-    routes._CONNECT_LOCK.release()
-    _wait_for_candidate_attempt_to_finish()
+        assert routes._CONNECT_LOCK.acquire(blocking=False) is True
+        routes._CONNECT_LOCK.release()
+    finally:
+        release_probe.set()
+        _wait_for_candidate_attempt_to_finish()
 
 
 def test_remove_rejects_without_mutation_when_router_cannot_drain(client):

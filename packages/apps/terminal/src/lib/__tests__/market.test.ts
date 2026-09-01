@@ -224,6 +224,26 @@ describe("exchange holidays", () => {
     )).toBe(false);
   });
 
+  it("closes every Indian exchange when the calendar uses the all-exchange wildcard", () => {
+    vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 11, 0));
+    const holidays: Holiday[] = [{
+      date: "2026-03-24",
+      description: "Republic Day",
+      holiday_type: "TRADING_HOLIDAY",
+      closed_exchanges: ["*"],
+      open_exchanges: [],
+    }];
+
+    expect(isMarketHoursWithHolidays(
+      { exchange: "NSE", symbol: "RELIANCE" },
+      holidays,
+    )).toBe(false);
+    expect(isMarketHoursWithHolidays(
+      { exchange: "NSE_INDEX", symbol: "NIFTY" },
+      holidays,
+    )).toBe(false);
+  });
+
   it("does not close DELTA for an Indian exchange holiday", () => {
     vi.setSystemTime(istToUtc(TUE.y, TUE.m, TUE.d, 11, 0));
     const holidays: Holiday[] = [{

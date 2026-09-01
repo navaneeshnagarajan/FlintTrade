@@ -1129,8 +1129,15 @@ def cmd_test(_args: list[str]) -> int:
     if cargo is None:
         info("cargo not found - skipping Rust ticks tests")
         return 0
+    # PyO3 searches the ambient PATH when PYO3_PYTHON is unset. The task runner
+    # can itself be launched from another tool's older virtualenv, so that search
+    # may select a different (and unsupported) Python than the repository venv
+    # which just ran pytest. Pin the Rust extension build to the same resolved
+    # interpreter instead of allowing PATH order to choose it implicitly.
+    python = resolve_python()
     return run(
         [cargo, "test", "--manifest-path", "packages/core/ticks/Cargo.toml"],
+        env=python_env({"PYO3_PYTHON": python}),
         check=False,
     )
 

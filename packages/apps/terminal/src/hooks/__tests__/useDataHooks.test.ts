@@ -342,10 +342,17 @@ describe("useOptionChain", () => {
   it("defaults exchange to NFO when not provided", async () => {
     mockGetOptionChain.mockResolvedValue({ symbol: "NIFTY", strikes: [] });
 
-    renderHook(() => useOptionChain("NIFTY"), { wrapper: createWrapper() });
+    renderHook(() => useOptionChain("NIFTY", undefined, "26-MAR-26"), { wrapper: createWrapper() });
 
     await waitFor(() => expect(mockGetOptionChain).toHaveBeenCalled());
-    expect(mockGetOptionChain).toHaveBeenCalledWith("NIFTY", "NFO", undefined);
+    expect(mockGetOptionChain).toHaveBeenCalledWith("NIFTY", "NFO", "26-MAR-26");
+  });
+
+  it("stays idle when expiry is omitted", () => {
+    const { result } = renderHook(() => useOptionChain("NIFTY"), { wrapper: createWrapper() });
+
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(mockGetOptionChain).not.toHaveBeenCalled();
   });
 });
 

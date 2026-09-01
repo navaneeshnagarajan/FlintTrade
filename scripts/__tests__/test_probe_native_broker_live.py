@@ -246,6 +246,46 @@ def test_dhan_market_probe_bootstraps_security_resolver(monkeypatch, capsys) -> 
     assert "TOKEN1" not in out
 
 
+def test_dhan_probe_dispatches_quote_projections(monkeypatch, capsys) -> None:
+    """Dhan live-probe inventory can exercise ltp/ohlc/quote_details without a live broker."""
+    fake = _FakeAdapter()
+    values = iter(["CLIENT1", "TOKEN1"])
+    monkeypatch.setitem(probe.ADAPTER_FACTORIES, "dhan", lambda: fake)
+    monkeypatch.setattr("scripts.probe_native_broker_live.getpass.getpass", lambda _prompt: next(values))
+
+    code = asyncio.run(probe.run_probe("dhan", "access_token", ["ltp", "ohlc", "quote_details"]))
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert ("ltp", ("NSE:RELIANCE",)) in fake.calls
+    assert ("ohlc", ("NSE:RELIANCE",)) in fake.calls
+    assert ("quote_details", ("NSE:RELIANCE",), "ltp") in fake.calls
+    assert "ltp: ok object_keys=1" in out
+    assert "ohlc: ok rows=1" in out
+    assert "quote_details: ok rows=1" in out
+    assert "TOKEN1" not in out
+
+
+def test_dhan_bundled_probes_avoid_repeating_the_same_marketfeed_quote_call() -> None:
+    """Bundled default/all keep one Dhan quote read; projections stay opt-in."""
+    projections = {"ltp", "ohlc", "quote_details"}
+    all_reads = probe._resolve_reads("dhan", ["all"])
+    default_reads = probe._resolve_reads("dhan", ["default"])
+    assert projections.issubset(probe.READ_CHOICES_BY_BROKER["dhan"])
+    assert projections.isdisjoint(probe.DEFAULT_READS["dhan"])
+    assert projections.isdisjoint(all_reads)
+    assert projections.isdisjoint(default_reads)
+    assert {"quotes", "margin", "history"}.issubset(default_reads)
+    assert {"quotes", "margin", "history", "expiry", "optionchain"}.issubset(all_reads)
+    assert "ltp" in probe._resolve_reads("dhan", ["all", "ltp"])
+    assert "ohlc" not in probe._resolve_reads("dhan", ["all", "ltp"])
+    assert probe._resolve_reads("dhan", ["ltp", "ohlc", "quote_details"]) == [
+        "ltp",
+        "ohlc",
+        "quote_details",
+    ]
+
+
 def test_dhan_account_only_probe_skips_security_resolver(monkeypatch, capsys) -> None:
     fake = _FakeDhanResolverAdapter()
     values = iter(["CLIENT1", "TOKEN1"])
@@ -366,6 +406,13 @@ def test_resolve_reads_is_broker_specific() -> None:
     assert "market_depth" not in probe._resolve_reads("dhan", ["all"])
     assert "depth" not in probe._resolve_reads("dhan", ["all"])
     assert "depth" not in probe._resolve_reads("dhan", ["default"])
+    assert "ltp" not in probe._resolve_reads("dhan", ["all"])
+    assert "ohlc" not in probe._resolve_reads("dhan", ["all"])
+    assert "quote_details" not in probe._resolve_reads("dhan", ["all"])
+    assert "quotes" in probe._resolve_reads("dhan", ["default"])
+    assert "ltp" not in probe._resolve_reads("dhan", ["default"])
+    assert "ohlc" not in probe._resolve_reads("dhan", ["default"])
+    assert "quote_details" not in probe._resolve_reads("dhan", ["default"])
     assert "quotes" in probe._resolve_reads("groww", ["default"])
     assert "ltp" in probe._resolve_reads("groww", ["default"])
     assert "ohlc" in probe._resolve_reads("groww", ["default"])

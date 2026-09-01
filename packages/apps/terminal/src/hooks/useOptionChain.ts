@@ -7,7 +7,7 @@ export function useOptionChain(symbol: string, exchange = "NFO", expiry?: string
   return useQuery<OptionChainData>({
     queryKey: ["optionchain", symbol, exchange, expiry],
     queryFn: () => getOptionChain(symbol, exchange, expiry),
-    enabled: !!symbol,
+    enabled: Boolean(symbol && expiry),
     refetchInterval: () => (isMarketHours() ? 30_000 : false),
   });
 }

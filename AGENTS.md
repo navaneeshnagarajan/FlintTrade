@@ -81,7 +81,7 @@ together. Local
 macOS output is ad-hoc sealed with no Team ID; Apple distribution
 signing/notarisation, Windows/Linux native runtime evidence and the accepted
 RF3 Windows job-supervisor digest pin remain maintainer/native-runner work.
-Count pins remain 71 widgets, 35 brokers and 18 packages. `PLAN.md` is the
+Count pins remain 71 widgets, 37 brokers and 18 packages. `PLAN.md` is the
 curated public roadmap; the detailed working plan of record lives at
 `.local/agent-context/PLAN.md` — resume from its ordered delivery/status/current
 work queue, verify branch/PR state live, and never push without explicit

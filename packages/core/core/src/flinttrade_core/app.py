@@ -4615,8 +4615,8 @@ def create_flask_app(
 
     # ------------------------------------------------------------------
     # Config persistence endpoint — /ft-api/v1/config/openalgo
-    # Accepts {api_key, host, port, ws_port} from the Setup wizard, persists
-    # them to workspace.json, and hot-reloads app.config["CLIENT"] so no
+    # Accepts {api_key, host, port, ws_port, telegram_username} from the Setup
+    # wizard, persists them to workspace.json, and hot-reloads app.config["CLIENT"] so no
     # process restart is needed.
     # ------------------------------------------------------------------
     # Registered at /v1/... (not /ft-api/v1/...) because the WSGI prefix
@@ -4710,6 +4710,7 @@ def create_flask_app(
                     "api_key_configured": bool(api_key),
                     "api_key_last4": api_key[-4:] if api_key else "",
                     "host": str(openalgo.get("host", "") or ""),
+                    "telegram_username": str(openalgo.get("telegram_username", "") or ""),
                     "port": openalgo.get("port", DEFAULT_OPENALGO_PORT),
                     "ws_port": openalgo.get("ws_port", DEFAULT_OPENALGO_WS_PORT),
                 }
@@ -4743,10 +4744,12 @@ def create_flask_app(
                 }
             ), 400
         has_api_key = "api_key" in payload
+        has_telegram_username = "telegram_username" in payload
         has_host = "host" in payload
         has_port = "port" in payload
         has_ws_port = "ws_port" in payload
         api_key = str(payload.get("api_key", "")).strip()
+        telegram_username = str(payload.get("telegram_username", "")).strip()
         host = str(payload.get("host", "")).strip()
         port = payload.get("port")
         ws_port = payload.get("ws_port")
@@ -4759,11 +4762,14 @@ def create_flask_app(
                 }
             ), 401
 
-        if not has_api_key and not has_host and not has_port and not has_ws_port:
+        if not any((has_api_key, has_telegram_username, has_host, has_port, has_ws_port)):
             return jsonify(
                 {
                     "status": "error",
-                    "message": "At least one of api_key, host, port, ws_port is required",
+                    "message": (
+                        "At least one of api_key, telegram_username, host, port, "
+                        "or ws_port is required"
+                    ),
                 }
             ), 400
 
@@ -4792,6 +4798,8 @@ def create_flask_app(
                 openalgo = dict(current_openalgo) if isinstance(current_openalgo, dict) else {}
                 if has_api_key:
                     openalgo["api_key"] = api_key
+                if has_telegram_username:
+                    openalgo["telegram_username"] = telegram_username
                 if has_host:
                     openalgo["host"] = host
                 if has_port:

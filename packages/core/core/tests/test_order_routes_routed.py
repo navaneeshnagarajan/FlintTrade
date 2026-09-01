@@ -348,6 +348,7 @@ def _app_with_native_state(
                 "price": "100",
                 "pricetype": "LIMIT",
                 "product": "MIS",
+                "disclosed_quantity": "0",
             }
         ]
     )
@@ -427,6 +428,7 @@ def _fake_client(
                 "price": "100",
                 "pricetype": "LIMIT",
                 "product": "MIS",
+                "disclosed_quantity": "0",
             }
         ]
     )
@@ -894,6 +896,27 @@ def test_modify_happy_path_returns_200() -> None:
     assert "_requested_change_fields" not in kw["changes"]
 
 
+def test_modify_forwards_trigger_price_and_disclosed_quantity() -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    client = _app(broker_router=router).test_client()
+    resp = client.post(
+        "/api/v1/orders/modify",
+        json={
+            **_MODIFY_BODY,
+            "trigger_price": "1490",
+            "disclosed_quantity": "25",
+        },
+        headers=_live_headers(),
+    )
+    assert resp.status_code == 200
+    kw = router.modify_order.await_args.kwargs
+    assert kw["changes"]["trigger_price"] == "1490"
+    assert kw["changes"]["disclosed_quantity"] == "25"
+    assert "disclosed_quantity" in kw["order"]["_requested_change_fields"]
+    assert "trigger_price" in kw["order"]["_requested_change_fields"]
+
+
 def test_routed_modify_happy_path_targets_named_broker_account() -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
@@ -938,6 +961,7 @@ def test_modify_quantity_increase_runs_full_safety_before_router() -> None:
                 "price": "100",
                 "pricetype": "LIMIT",
                 "product": "MIS",
+                "disclosed_quantity": "0",
             }
         ]
     )
@@ -985,6 +1009,7 @@ def test_modify_quantity_reduction_proves_no_increase_before_dispatch() -> None:
                 "price": "100",
                 "pricetype": "LIMIT",
                 "product": "MIS",
+                "disclosed_quantity": "0",
             }
         ]
     )
@@ -1002,6 +1027,159 @@ def test_modify_quantity_reduction_proves_no_increase_before_dispatch() -> None:
     assert openalgo.margin.await_count == 2
     safety.check_order.assert_not_called()
     router.modify_order.assert_awaited_once()
+
+
+def test_modify_recovers_omitted_trigger_and_disclosed_from_orderbook() -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    safety = _passing_safety()
+    safety.l5_kill.validate.return_value = MagicMock(passed=True)
+    openalgo = _fake_client([])
+    openalgo.orderbook = AsyncMock(
+        return_value=[
+            {
+                "orderid": "OA-1",
+                "status": "OPEN",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "action": "BUY",
+                "quantity": "1",
+                "filled_quantity": "0",
+                "price": "100",
+                "pricetype": "SL",
+                "product": "MIS",
+                "triggerPrice": "1490",
+                "disclosedQuantity": "25",
+            }
+        ]
+    )
+    openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
+    app = _app_with_client(router, safety, openalgo)
+
+    response = app.test_client().post(
+        "/api/v1/orders/modify",
+        json={**_MODIFY_BODY, "order_type": "SL"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    kw = router.modify_order.await_args.kwargs
+    assert kw["changes"]["trigger_price"] == "1490"
+    assert kw["changes"]["disclosed_quantity"] == "25"
+    assert "trigger_price" not in kw["order"]["_requested_change_fields"]
+    assert "disclosed_quantity" not in kw["order"]["_requested_change_fields"]
+
+
+def test_groww_modify_without_disclosed_quantity_still_dispatches() -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    safety = _passing_safety()
+    safety.l5_kill.validate.return_value = MagicMock(passed=True)
+    app, adapter, _registry = _app_with_native_state(
+        router,
+        safety,
+        adapter_id="groww",
+        account_id="G1",
+    )
+    adapter.order_book = AsyncMock(
+        return_value=[
+            {
+                "orderid": "OA-1",
+                "status": "OPEN",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "action": "BUY",
+                "quantity": "1",
+                "filled_quantity": "0",
+                "price": "100",
+                "pricetype": "LIMIT",
+                "product": "MIS",
+            }
+        ]
+    )
+
+    response = app.test_client().post(
+        "/api/v1/orders/groww/modify",
+        json={**_MODIFY_BODY, "account_id": "G1"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    router.modify_order.assert_awaited_once()
+    assert "disclosed_quantity" not in router.modify_order.await_args.kwargs["changes"]
+
+
+def test_modify_without_recoverable_disclosed_quantity_fails_closed() -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    safety = _passing_safety()
+    safety.l5_kill.validate.return_value = MagicMock(passed=True)
+    openalgo = _fake_client([])
+    openalgo.orderbook = AsyncMock(
+        return_value=[
+            {
+                "orderid": "OA-1",
+                "status": "OPEN",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "action": "BUY",
+                "quantity": "1",
+                "filled_quantity": "0",
+                "price": "100",
+                "pricetype": "LIMIT",
+                "product": "MIS",
+            }
+        ]
+    )
+    openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
+    app = _app_with_client(router, safety, openalgo)
+
+    response = app.test_client().post(
+        "/api/v1/orders/modify",
+        json=_MODIFY_BODY,
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 409
+    assert "disclosed" in response.get_json()["message"].lower()
+    router.modify_order.assert_not_called()
+
+
+def test_modify_stop_loss_without_recoverable_trigger_fails_closed() -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    safety = _passing_safety()
+    safety.l5_kill.validate.return_value = MagicMock(passed=True)
+    openalgo = _fake_client([])
+    openalgo.orderbook = AsyncMock(
+        return_value=[
+            {
+                "orderid": "OA-1",
+                "status": "OPEN",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "action": "BUY",
+                "quantity": "1",
+                "filled_quantity": "0",
+                "price": "100",
+                "pricetype": "SL",
+                "product": "MIS",
+                "disclosed_quantity": "0",
+            }
+        ]
+    )
+    openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
+    app = _app_with_client(router, safety, openalgo)
+
+    response = app.test_client().post(
+        "/api/v1/orders/modify",
+        json={**_MODIFY_BODY, "order_type": "SL"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 400
+    assert "trigger price" in response.get_json()["message"].lower()
+    router.modify_order.assert_not_called()
 
 
 def test_modify_unknown_current_order_fails_closed_before_router() -> None:

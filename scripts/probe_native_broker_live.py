@@ -46,7 +46,8 @@ ADAPTER_FACTORIES: dict[str, AdapterFactory] = {
 COMMON_READ_CHOICES = ("profile", "funds", "positions", "holdings", "orders", "trades")
 ORDER_DETAIL_READ_CHOICES = ("orderstatus", "orderhistory", "ordertrades")
 COMMON_MARKET_READ_CHOICES = ("quotes", "depth", "margin", "history")
-DHAN_MARKET_READ_CHOICES = ("quotes", "margin", "history")
+DHAN_MARKET_READ_CHOICES = ("quotes", "ltp", "ohlc", "quote_details", "margin", "history")
+DHAN_QUOTE_PROJECTION_READS = frozenset({"ltp", "ohlc", "quote_details"})
 DHAN_SECURITY_RESOLVER_READ_CHOICES = frozenset(DHAN_MARKET_READ_CHOICES)
 GROWW_MARKET_READ_CHOICES = ("quotes", "ltp", "ohlc", "margin", "history", "expiry")
 INDMONEY_MARKET_READ_CHOICES = ("quotes", "ltp", "depth", "margin", "history")
@@ -59,7 +60,6 @@ PROBE_INDEX_EXCHANGE = "NSE_INDEX"
 PROBE_OPTION_SYMBOL = "NFO:NIFTY25000CE"
 KOTAK_PROBE_EXCHANGE = PROBE_EXCHANGE
 KOTAK_PROBE_SYMBOL = PROBE_SYMBOL
-KOTAK_PROBE_QUOTE_SYMBOL = PROBE_QUOTE_SYMBOL
 KOTAK_READ_CHOICES = (
     "funds",
     "limits",
@@ -93,7 +93,10 @@ READ_CHOICES_BY_BROKER: dict[str, tuple[str, ...]] = {
 }
 READ_CHOICES = tuple(dict.fromkeys(read for choices in READ_CHOICES_BY_BROKER.values() for read in choices))
 DEFAULT_READS: dict[str, tuple[str, ...]] = {
-    "dhan": COMMON_READ_CHOICES + DHAN_MARKET_READ_CHOICES,
+    # One Dhan marketfeed call is enough for bundled probes (default and all):
+    # ltp/ohlc and quote_details project the same quote_data response and remain
+    # explicitly selectable so the 1 req/s quote limit is not hit by redundancy.
+    "dhan": COMMON_READ_CHOICES + ("quotes", "margin", "history"),
     "groww": COMMON_READ_CHOICES + GROWW_MARKET_READ_CHOICES,
     "indmoney": COMMON_READ_CHOICES + INDMONEY_MARKET_READ_CHOICES,
     "kotakneo": KOTAK_READ_CHOICES,
@@ -348,18 +351,34 @@ def collect_credentials(broker: str, method: str, environment: str) -> dict[str,
     return credentials
 
 
+def _bundled_reads(broker: str, requested: str) -> list[str]:
+    """Expand ``default`` / ``all`` without repeating Dhan quote projections.
+
+    Dhan ``ltp``, ``ohlc``, and ``quote_details`` all dispatch through
+    ``quotes()`` to the same ``quote_data`` endpoint (1 req/s). Bundled
+    inventories keep one representative quotes read; the projections stay
+    individually selectable.
+    """
+    if requested == "default":
+        return list(DEFAULT_READS[broker])
+    reads = list(READ_CHOICES_BY_BROKER[broker])
+    if broker == "dhan":
+        return [read for read in reads if read not in DHAN_QUOTE_PROJECTION_READS]
+    return reads
+
+
 def _resolve_reads(broker: str, requested: list[str] | None) -> list[str]:
     allowed_reads = READ_CHOICES_BY_BROKER[broker]
     if not requested or requested == ["default"]:
-        return list(DEFAULT_READS[broker])
+        return _bundled_reads(broker, "default")
     if requested == ["all"]:
-        return list(allowed_reads)
+        return _bundled_reads(broker, "all")
     reads: list[str] = []
     for read in requested:
         if read == "default":
-            reads.extend(DEFAULT_READS[broker])
+            reads.extend(_bundled_reads(broker, "default"))
         elif read == "all":
-            reads.extend(allowed_reads)
+            reads.extend(_bundled_reads(broker, "all"))
         else:
             reads.append(read)
     deduped: list[str] = []
@@ -526,6 +545,13 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
             if callable(call)
             else None
         )
+    if name == "quote_details":
+        call = getattr(adapter, "quote_details", None)
+        return (
+            (lambda session: call(session, [PROBE_QUOTE_SYMBOL], "ltp"))
+            if callable(call)
+            else None
+        )
     if name in {"depth", "market_depth"}:
         return (
             (lambda session: adapter.market_depth(session, [PROBE_QUOTE_SYMBOL]))
@@ -585,8 +611,6 @@ def _read_call(adapter: Any, broker: str, name: str) -> ReadCall | None:
             return lambda session: adapter.scrip_master(session, KOTAK_PROBE_EXCHANGE)
         if name == "search_scrip":
             return lambda session: adapter.search_scrip(session, KOTAK_PROBE_SYMBOL, KOTAK_PROBE_EXCHANGE)
-        if name == "quote_details":
-            return lambda session: adapter.quote_details(session, [KOTAK_PROBE_QUOTE_SYMBOL], "ltp")
     return getattr(adapter, name, None)
 
 

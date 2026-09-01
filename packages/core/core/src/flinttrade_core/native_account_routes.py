@@ -2872,7 +2872,21 @@ def _native_scrip_master_read_args() -> tuple[tuple[Any, ...] | None, str | None
 
 def _native_holidays_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
     holiday_date = str(request.args.get("date") or "").strip()
-    return ((holiday_date,) if holiday_date else ()), None
+    if holiday_date:
+        return (holiday_date,), None
+    year_raw = str(request.args.get("year") or "").strip()
+    if not year_raw:
+        return (), None
+    try:
+        year = int(year_raw)
+    except ValueError:
+        return None, "year must be an integer between 2020 and 2050"
+    if year < 2020 or year > 2050:
+        return None, "year must be an integer between 2020 and 2050"
+    current_year = datetime.now(ZoneInfo("Asia/Kolkata")).year
+    if year == current_year:
+        return (), None
+    return (f"{year:04d}-01-01",), None
 
 
 def _native_timings_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
@@ -3149,10 +3163,19 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
     except NotImplementedError:
         return jsonify({"status": "error", "message": f"{adapter_id} adapter does not support {kind} reads."}), 501
     except Exception as exc:  # noqa: BLE001 - classify before surfacing a public route error
+        from flinttrade_core.exceptions import UnsupportedCapabilityError  # noqa: PLC0415
         from flinttrade_gateway.native_login import (  # noqa: PLC0415
             should_drop_session_after_probe_error,
             should_keep_session_after_probe_error,
         )
+
+        if isinstance(exc, UnsupportedCapabilityError):
+            public_message = (
+                "Unsupported quote_type for quote_details."
+                if kind == "quote_details"
+                else f"Unsupported {kind} request."
+            )
+            return jsonify({"status": "error", "message": public_message}), 400
 
         if should_keep_session_after_probe_error(exc):
             logger.info(

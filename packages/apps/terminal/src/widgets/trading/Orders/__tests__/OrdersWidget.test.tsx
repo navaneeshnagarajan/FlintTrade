@@ -19,6 +19,7 @@ import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 const mockUseOrders = vi.fn();
 const mockUseBrokerConnected = vi.fn();
 const mockMode = vi.hoisted(() => ({ value: "live" }));
+const mockBrokerType = vi.hoisted(() => ({ value: "" }));
 const mockCancelOrder = vi.hoisted(() => vi.fn());
 const mockModifyOrder = vi.hoisted(() => vi.fn());
 
@@ -32,7 +33,15 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
 
 vi.mock("@/hooks/useAccountReadsEnabled", () => ({
   useAccountReadsEnabled: () => mockUseBrokerConnected(),
-  useAccountReadContext: () => ({
+  useAccountReadContext: () => {
+    const brokerType = mockBrokerType.value || (
+      mockMode.value === "explore"
+        ? "mock"
+        : mockMode.value === "practice"
+          ? "sandbox"
+          : "openalgo"
+    );
+    return {
     identity: {
       mode: mockMode.value,
       scopeKey:
@@ -40,19 +49,15 @@ vi.mock("@/hooks/useAccountReadsEnabled", () => ({
           ? "explore:mock:default"
           : mockMode.value === "practice"
             ? "practice:sandbox:default"
-            : "live:openalgo:test",
-      brokerType:
-        mockMode.value === "explore"
-          ? "mock"
-          : mockMode.value === "practice"
-            ? "sandbox"
-            : "openalgo",
+            : `live:${brokerType}:test`,
+      brokerType,
       accountId: "default",
     },
     enabled: mockUseBrokerConnected(),
     host: "",
     apiKey: "",
-  }),
+    };
+  },
 }));
 
 vi.mock("@/hooks/useTrackBehavior", () => ({
@@ -73,7 +78,7 @@ vi.mock("@/services/api", () => ({
 // Import component under test
 // ---------------------------------------------------------------------------
 
-import OrdersWidget, { isOpenOrderStatus } from "../OrdersWidget";
+import OrdersWidget, { isOpenOrderStatus, toOrderRow } from "../OrdersWidget";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -114,6 +119,7 @@ const OPEN_ORDER = {
   pricetype: "LIMIT",
   product: "MIS",
   order_status: "open",
+  disclosedQuantity: "0",
 };
 
 const COMPLETE_ORDER = {
@@ -136,6 +142,7 @@ describe("OrdersWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockMode.value = "live";
+    mockBrokerType.value = "";
     mockCancelOrder.mockReset();
     mockCancelOrder.mockResolvedValue(undefined);
     mockModifyOrder.mockReset();
@@ -317,6 +324,7 @@ describe("OrdersWidget", () => {
           orderType: "LIMIT",
           product: "MIS",
           price: 155.5,
+          disclosedQuantity: 0,
         }),
         {
           mode: "live",
@@ -326,6 +334,98 @@ describe("OrdersWidget", () => {
         },
       );
     });
+  });
+
+  it("sends recovered trigger and disclosed quantity when modifying a stop-loss order", async () => {
+    mockUseOrders.mockReturnValue(queryResult({
+      data: [{
+        ...OPEN_ORDER,
+        pricetype: "SL",
+        triggerPrice: "1490.5",
+        disclosedQuantity: "25",
+      }],
+    }));
+    renderWidget();
+
+    fireEvent.click(screen.getByLabelText("Modify order ORD123"));
+    const dialog = screen.getByRole("dialog", { name: /modify order/i });
+    expect(within(dialog).getByLabelText("Trigger Price")).toHaveValue(1490.5);
+    expect(within(dialog).getByLabelText("Disclosed Quantity")).toHaveValue(25);
+    fireEvent.click(within(dialog).getByText("Modify Order"));
+
+    await waitFor(() => {
+      expect(mockModifyOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderId: "ORD123",
+          orderType: "SL",
+          triggerPrice: 1490.5,
+          disclosedQuantity: 25,
+        }),
+        expect.objectContaining({ mode: "live" }),
+      );
+    });
+  });
+
+  it("disables modify when disclosed quantity is broker-unknown", () => {
+    const { disclosedQuantity: _omitted, ...unknownDisclosure } = OPEN_ORDER;
+    mockUseOrders.mockReturnValue(queryResult({ data: [unknownDisclosure] }));
+    renderWidget();
+
+    expect(screen.getByLabelText("Modify order ORD123")).toBeDisabled();
+  });
+
+  it("keeps Modify enabled on Groww when disclosed quantity is omitted", () => {
+    mockBrokerType.value = "groww";
+    const { disclosedQuantity: _omitted, ...unknownDisclosure } = OPEN_ORDER;
+    mockUseOrders.mockReturnValue(queryResult({ data: [unknownDisclosure] }));
+    renderWidget();
+
+    expect(screen.getByLabelText("Modify order ORD123")).toBeEnabled();
+  });
+
+  it("keeps Modify enabled in Practice when disclosed quantity is omitted", () => {
+    mockMode.value = "practice";
+    const { disclosedQuantity: _omitted, ...unknownDisclosure } = OPEN_ORDER;
+    mockUseOrders.mockReturnValue(queryResult({ data: [unknownDisclosure] }));
+    renderWidget();
+
+    expect(screen.getByLabelText("Modify order ORD123")).toBeEnabled();
+  });
+
+  it("forwards an explicit zero disclosed quantity instead of keeping the recovered value", async () => {
+    mockUseOrders.mockReturnValue(queryResult({
+      data: [{
+        ...OPEN_ORDER,
+        pricetype: "SL",
+        triggerPrice: "1490.5",
+        disclosedQuantity: "25",
+      }],
+    }));
+    renderWidget();
+
+    fireEvent.click(screen.getByLabelText("Modify order ORD123"));
+    const dialog = screen.getByRole("dialog", { name: /modify order/i });
+    fireEvent.change(within(dialog).getByLabelText("Disclosed Quantity"), { target: { value: "0" } });
+    fireEvent.click(within(dialog).getByText("Modify Order"));
+
+    await waitFor(() => {
+      expect(mockModifyOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderId: "ORD123",
+          disclosedQuantity: 0,
+        }),
+        expect.objectContaining({ mode: "live" }),
+      );
+    });
+  });
+
+  it("disables modify when a stop-loss order has no recoverable trigger", () => {
+    mockUseOrders.mockReturnValue(queryResult({
+      data: [{ ...OPEN_ORDER, pricetype: "SL" }],
+    }));
+    renderWidget();
+
+    expect(screen.getByLabelText("Modify order ORD123")).toBeDisabled();
   });
 
   it("blocks a LIMIT modify with no price instead of sending ₹0", async () => {
@@ -370,6 +470,26 @@ describe("OrdersWidget", () => {
     fireEvent.click(screen.getByText("Cancel Order"));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Order blocked in practice mode.");
+  });
+});
+
+describe("toOrderRow", () => {
+  it("preserves camelCase trigger and disclosed-quantity aliases", () => {
+    const row = toOrderRow({
+      ...OPEN_ORDER,
+      pricetype: "SL",
+      triggerPrice: "1490.5",
+      disclosedQuantity: "25",
+    });
+    expect(row.triggerPriceNum).toBe(1490.5);
+    expect(row.disclosedQuantityNum).toBe(25);
+    expect(row.hasDisclosedQuantity).toBe(true);
+  });
+
+  it("marks omitted disclosure as unknown instead of a synthesised zero", () => {
+    const { disclosedQuantity: _omitted, ...unknownDisclosure } = OPEN_ORDER;
+    const row = toOrderRow({ ...unknownDisclosure, pricetype: "LIMIT" });
+    expect(row.hasDisclosedQuantity).toBe(false);
   });
 });
 

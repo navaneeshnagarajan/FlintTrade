@@ -436,7 +436,9 @@ class WheelStrategy(BaseStrategy):
         if self._client is None:
             return ""
         try:
-            data = await self._client.expiry(symbol=self.symbol, exchange=self.exchange)
+            data = await self._client.expiry(
+                symbol=self.symbol, exchange=self.exchange, instrumenttype="options"
+            )
             expiries: list[str] = (
                 data.get("data", {}).get("expiry", [])
                 if isinstance(data.get("data"), dict)
