@@ -395,24 +395,28 @@ class TestVectorStore:
         coll.query.assert_called_once_with(query_texts=["second leg"], n_results=1, where=None)
 
     def test_reopens_existing_persistent_collection_without_reindexing(self, tmp_path: Path) -> None:
-        chromadb = pytest.importorskip("chromadb")
-        persist_directory = str(tmp_path / "chroma")
-        old_client = chromadb.PersistentClient(path=persist_directory)
-        old_collection = old_client.get_or_create_collection(
-            "flinttrade_docs",
-            metadata={"hnsw:space": "cosine", "flinttrade_embedding_mode": "external"},
+        persist_directory = str(tmp_path / "vectors")
+        provider = EmbeddingProvider(custom_fn=lambda _texts: [[1.0, 0.0]])
+        old_store = VectorStore(
+            collection_name="flinttrade_docs",
+            persist_directory=persist_directory,
+            embedding_provider=provider,
         )
-        old_collection.upsert(
-            ids=["legacy_0"],
-            documents=["Theta measures time decay."],
-            embeddings=[[1.0, 0.0]],
-            metadatas=[{"source": "legacy.md", "doc_type": "strategy"}],
+        old_store.upsert(
+            [
+                TextChunk(
+                    content="Theta measures time decay.",
+                    chunk_id="legacy_0",
+                    source="legacy.md",
+                    doc_type="strategy",
+                )
+            ]
         )
 
         store = VectorStore(
             collection_name="flinttrade_docs",
             persist_directory=persist_directory,
-            embedding_provider=EmbeddingProvider(custom_fn=lambda _texts: [[1.0, 0.0]]),
+            embedding_provider=provider,
         )
 
         results = store.search("theta", top_k=1, similarity_threshold=0.0)
@@ -422,20 +426,19 @@ class TestVectorStore:
         assert results[0].source == "legacy.md"
 
     def test_unmarked_populated_collection_fails_closed_without_relabelling(self, tmp_path: Path) -> None:
-        chromadb = pytest.importorskip("chromadb")
-        persist_directory = str(tmp_path / "chroma")
-        client = chromadb.PersistentClient(path=persist_directory)
-        collection = client.get_or_create_collection("legacy_docs")
-        collection.upsert(
-            ids=["legacy_0"],
-            documents=["Unknown embedding space"],
-            embeddings=[[1.0, 0.0]],
-        )
+        persist_directory = str(tmp_path / "vectors")
         store = VectorStore(
             collection_name="legacy_docs",
             persist_directory=persist_directory,
             embedding_provider=EmbeddingProvider(custom_fn=lambda _texts: [[1.0, 0.0]]),
         )
+        collection = store._get_collection()
+        collection.upsert(
+            ids=["legacy_0"],
+            documents=["Unknown embedding space"],
+            embeddings=[[1.0, 0.0]],
+        )
+        store._embedding_mode = None
 
         with pytest.raises(RuntimeError, match="embedding mode is unknown"):
             store.search("query")
@@ -443,8 +446,7 @@ class TestVectorStore:
         assert "flinttrade_embedding_mode" not in (store._get_collection().metadata or {})
 
     def test_fresh_persistent_collection_applies_cosine_threshold(self, tmp_path: Path) -> None:
-        pytest.importorskip("chromadb")
-        persist_directory = str(tmp_path / "chroma")
+        persist_directory = str(tmp_path / "vectors")
 
         def _embed(texts: list[str]) -> list[list[float]]:
             return [[0.8, 0.6] if text == "adjust the leg" else [1.0, 0.0] for text in texts]

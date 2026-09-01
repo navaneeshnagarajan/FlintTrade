@@ -931,15 +931,12 @@ class VectorStore:
 
     def _get_client(self) -> Any:
         if self._client is None:
-            try:
-                import chromadb  # type: ignore[import]
-            except ImportError:
-                raise ImportError("chromadb required — pip install chromadb")
+            from .local_vector_store import Client, PersistentClient
 
             if self._persist_dir:
-                self._client = chromadb.PersistentClient(path=self._persist_dir)
+                self._client = PersistentClient(path=self._persist_dir)
             else:
-                self._client = chromadb.Client()
+                self._client = Client()
         return self._client
 
     def _get_collection(self) -> Any:

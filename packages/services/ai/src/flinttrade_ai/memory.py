@@ -400,21 +400,18 @@ class TradedMemory:
                 self._chroma_client = self._override_client
                 return self._chroma_client
 
-            try:
-                import chromadb
-            except ImportError:
-                raise ImportError("chromadb required — pip install chromadb")
+            from .local_vector_store import EphemeralClient, PersistentClient
 
             if self._persist_dir:
                 import os
 
                 path = os.path.expanduser(self._persist_dir)
                 os.makedirs(path, exist_ok=True)
-                self._chroma_client = chromadb.PersistentClient(path=path)
+                self._chroma_client = PersistentClient(path=path)
             else:
-                self._chroma_client = chromadb.EphemeralClient()
+                self._chroma_client = EphemeralClient()
 
-            logger.debug("ChromaDB client initialised (persist_dir=%s)", self._persist_dir)
+            logger.debug("Local vector client initialised (persist_dir=%s)", self._persist_dir)
             return self._chroma_client
 
     def _get_embedding_fn(self) -> Any:
@@ -423,18 +420,13 @@ class TradedMemory:
             if self._embedding_fn is not None:
                 return self._embedding_fn
 
-            try:
-                from chromadb.utils import embedding_functions
+            from .local_vector_store import HashingEmbeddingFunction
 
-                self._embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-                    model_name=self._embedding_model_name,
-                )
-            except Exception:
-                from chromadb.utils import embedding_functions
-
-                self._embedding_fn = embedding_functions.DefaultEmbeddingFunction()
-                logger.warning("sentence-transformers not available, using default embeddings")
-
+            self._embedding_fn = HashingEmbeddingFunction()
+            logger.debug(
+                "Using deterministic local hashing embeddings (model=%s unused)",
+                self._embedding_model_name,
+            )
             return self._embedding_fn
 
     def _collection_name(self, layer: MemoryLayer) -> str:

@@ -141,6 +141,68 @@ def test_build_vault_uses_configured_path(monkeypatch, tmp_path):
     assert vault.root == tmp_path
 
 
+class _EnabledWorkspace:
+    def get(self, _key: str, default: Any = None) -> Any:
+        return True
+
+
+class _DisabledWorkspace:
+    def get(self, _key: str, default: Any = None) -> Any:
+        return False
+
+
+def test_learning_memory_uses_persistent_backend_without_chromadb(monkeypatch, tmp_path) -> None:
+    """Lessons persist on disk even when chromadb is not installed."""
+    import sys
+
+    import flinttrade_core.workspace as workspace_mod
+    from flinttrade_ai.memory import TradedMemory
+
+    monkeypatch.setitem(sys.modules, "chromadb", None)
+    monkeypatch.setattr(workspace_mod, "workspace_dir", lambda: tmp_path)
+    monkeypatch.setattr(workspace_mod, "Workspace", _EnabledWorkspace)
+    mod._FALLBACK_LEARNING_MEMORY = None
+
+    memory = mod._build_learning_memory()
+
+    assert isinstance(memory, TradedMemory)
+
+
+def test_learning_memory_falls_back_to_hierarchical_when_persistent_fails(monkeypatch, tmp_path) -> None:
+    """In-process hierarchical memory remains the construction-time fallback."""
+    import importlib.util
+
+    import flinttrade_core.workspace as workspace_mod
+    from flinttrade_ai.memory import HierarchicalMemoryManager, MemoryBackendConfig, MemoryBackendKind
+
+    monkeypatch.setattr(workspace_mod, "workspace_dir", lambda: tmp_path)
+    monkeypatch.setattr(workspace_mod, "Workspace", _EnabledWorkspace)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: object())
+    mod._FALLBACK_LEARNING_MEMORY = None
+
+    def _create(config: MemoryBackendConfig | None = None) -> Any:
+        resolved = config or MemoryBackendConfig()
+        if MemoryBackendKind(resolved.backend) is MemoryBackendKind.PERSISTENT:
+            raise RuntimeError("persistent store unavailable")
+        return HierarchicalMemoryManager()
+
+    monkeypatch.setattr("flinttrade_ai.memory.create_memory_backend", _create)
+
+    memory = mod._build_learning_memory()
+
+    assert isinstance(memory, HierarchicalMemoryManager)
+
+
+def test_learning_memory_disabled_returns_none(monkeypatch, tmp_path) -> None:
+    import flinttrade_core.workspace as workspace_mod
+
+    monkeypatch.setattr(workspace_mod, "workspace_dir", lambda: tmp_path)
+    monkeypatch.setattr(workspace_mod, "Workspace", _DisabledWorkspace)
+    mod._FALLBACK_LEARNING_MEMORY = None
+
+    assert mod._build_learning_memory() is None
+
+
 # ---------------------------------------------------------------------------
 # Fail-closed preconditions
 # ---------------------------------------------------------------------------

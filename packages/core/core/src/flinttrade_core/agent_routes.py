@@ -167,41 +167,40 @@ _FALLBACK_LEARNING_MEMORY: Any | None = None
 def _build_learning_memory() -> Any | None:
     """Construct the agent's learning-memory backend (best-effort).
 
-    Persistent ChromaDB under ``<workspace_dir>/agent_memory`` when the
-    dependency imports, in-process hierarchical fallback otherwise — the
-    loop still runs, it just does not survive a restart (logged honestly).
-    Disabled entirely via workspace ``ai.autonomous_agent.learning.enabled``
-    (default true). Never order-critical: any failure returns ``None`` and
-    the agent trades exactly as before, with no learning tier.
+    Persistent local vector memory under ``<workspace_dir>/agent_memory`` is
+    the default. If that store cannot be constructed, an in-process
+    hierarchical fallback is used for the process lifetime — the loop still
+    runs, it just does not survive a restart (logged honestly). Disabled
+    entirely via workspace ``ai.autonomous_agent.learning.enabled`` (default
+    true). Never order-critical: any failure returns ``None`` and the agent
+    trades exactly as before, with no learning tier.
     """
     try:
         from .workspace import Workspace, workspace_dir  # noqa: PLC0415
 
         if not bool(Workspace().get("ai.autonomous_agent.learning.enabled", True)):
             return None
-        from importlib.util import find_spec  # noqa: PLC0415
-
         from flinttrade_ai.memory import MemoryBackendConfig, create_memory_backend  # noqa: PLC0415
 
-        # TradedMemory imports chromadb lazily (at first use), so probe the
-        # dependency here to fail over at construction time, not mid-session.
-        if find_spec("chromadb") is not None:
+        try:
             return create_memory_backend(
                 MemoryBackendConfig(persist_dir=str(workspace_dir() / "agent_memory"))
             )
-        logger.warning(
-            "chromadb unavailable — agent lessons persist only for this backend "
-            "process (in-process memory), not across restarts"
-        )
-        # Module-level singleton: a per-session instance would make the
-        # fallback write-only — lessons stored at session end would die with
-        # the trader before the next session could ever read them.
-        global _FALLBACK_LEARNING_MEMORY
-        if _FALLBACK_LEARNING_MEMORY is None:
-            _FALLBACK_LEARNING_MEMORY = create_memory_backend(
-                MemoryBackendConfig(backend="hierarchical")
+        except Exception:
+            logger.warning(
+                "Persistent agent memory unavailable — lessons persist only for this "
+                "backend process (in-process memory), not across restarts",
+                exc_info=True,
             )
-        return _FALLBACK_LEARNING_MEMORY
+            # Module-level singleton: a per-session instance would make the
+            # fallback write-only — lessons stored at session end would die with
+            # the trader before the next session could ever read them.
+            global _FALLBACK_LEARNING_MEMORY
+            if _FALLBACK_LEARNING_MEMORY is None:
+                _FALLBACK_LEARNING_MEMORY = create_memory_backend(
+                    MemoryBackendConfig(backend="hierarchical")
+                )
+            return _FALLBACK_LEARNING_MEMORY
     except Exception:  # pragma: no cover — learning is never order-critical
         logger.warning("Agent learning memory unavailable", exc_info=True)
         return None

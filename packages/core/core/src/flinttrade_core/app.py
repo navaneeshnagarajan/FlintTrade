@@ -1394,8 +1394,6 @@ def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:
     rag_dir = flinttrade_dir / "rag"
     rag_dir.mkdir(exist_ok=True)
     try:
-        import chromadb  # noqa: F401, PLC0415
-
         from flinttrade_ai.llm_client import LLMClient, LLMConfig  # noqa: PLC0415
         from flinttrade_ai.rag_pipeline import PipelineConfig, RAGPipeline  # noqa: PLC0415
 
