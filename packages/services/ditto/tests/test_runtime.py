@@ -1251,6 +1251,7 @@ def test_router_owner_cleanup_uses_one_deadline_and_retains_unclosed_clients(
 
 def test_router_owner_cleanup_returns_at_deadline_when_client_close_hangs() -> None:
     release_close = threading.Event()
+    close_started = threading.Event()
 
     class _Router:
         @staticmethod
@@ -1261,17 +1262,20 @@ def test_router_owner_cleanup_returns_at_deadline_when_client_close_hangs() -> N
     class _Client:
         def close_sync(self, *, timeout: float) -> None:
             del timeout
-            release_close.wait(timeout=1.0)
+            close_started.set()
+            release_close.wait()
 
     client = _Client()
     owner = object.__new__(DittoRouterOwner)
     owner.router = _Router()
     owner._clients = {"account": client}
-    started = time.monotonic()
 
     try:
         assert owner.close(timeout=0.05) is False
-        assert time.monotonic() - started < 0.2
+        assert close_started.wait(1.0)
+        attempt_client, thread, _state = next(iter(owner._client_close_attempts.values()))
+        assert attempt_client is client
+        assert thread.is_alive()
         assert owner._clients == {"account": client}
         assert owner.router is not None
     finally:
