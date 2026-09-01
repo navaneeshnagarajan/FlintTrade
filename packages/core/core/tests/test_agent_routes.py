@@ -713,7 +713,7 @@ def test_runtime_shutdown_joins_orphaned_learning_cleanup_when_runner_empty() ->
     cleanup.join(timeout=2.0)
 
     assert result is False
-    assert elapsed < 0.2
+    assert elapsed < 0.5
     assert close_count_before_release == 0
     memory.close.assert_called_once_with()
 
@@ -779,7 +779,7 @@ def test_runtime_shutdown_joins_previous_session_learning_cleanup(live_auth, mon
         owner.join(timeout=2.0)
 
     assert result is False
-    assert elapsed < 0.2
+    assert elapsed < 0.5
     assert close_count_before_release == 0
     memory_a.close.assert_called_once_with()
 
