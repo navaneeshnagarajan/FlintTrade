@@ -536,7 +536,7 @@ function OrdersWidget(_props: WidgetProps) {
         product: row.product as "MIS" | "CNC" | "NRML",
         price,
         triggerPrice,
-        disclosedQuantity: disclosedQuantity > 0 ? disclosedQuantity : row.disclosedQuantityNum,
+        disclosedQuantity,
         strategy: row.strategy,
       };
       try {

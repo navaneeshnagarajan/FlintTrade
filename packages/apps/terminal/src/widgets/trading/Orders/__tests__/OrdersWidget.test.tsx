@@ -358,6 +358,33 @@ describe("OrdersWidget", () => {
     });
   });
 
+  it("forwards an explicit zero disclosed quantity instead of keeping the recovered value", async () => {
+    mockUseOrders.mockReturnValue(queryResult({
+      data: [{
+        ...OPEN_ORDER,
+        pricetype: "SL",
+        triggerPrice: "1490.5",
+        disclosedQuantity: "25",
+      }],
+    }));
+    renderWidget();
+
+    fireEvent.click(screen.getByLabelText("Modify order ORD123"));
+    const dialog = screen.getByRole("dialog", { name: /modify order/i });
+    fireEvent.change(within(dialog).getByLabelText("Disclosed Quantity"), { target: { value: "0" } });
+    fireEvent.click(within(dialog).getByText("Modify Order"));
+
+    await waitFor(() => {
+      expect(mockModifyOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderId: "ORD123",
+          disclosedQuantity: 0,
+        }),
+        expect.objectContaining({ mode: "live" }),
+      );
+    });
+  });
+
   it("disables modify when a stop-loss order has no recoverable trigger", () => {
     mockUseOrders.mockReturnValue(queryResult({
       data: [{ ...OPEN_ORDER, pricetype: "SL" }],
