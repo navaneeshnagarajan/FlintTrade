@@ -105,7 +105,7 @@ identically to regular orders.
 |---|---|
 | `market/holidays` | Holiday calendar. **POST** with `apikey` and `year` (2020–2050) in the JSON body. Do not call bare `holidays` as the current passthrough path. |
 | `market/timings` | Exchange-timing windows. **POST** with `apikey` and `date` in the JSON body. Missing date fails closed. Do not call bare `timings` as the current passthrough path. |
-| `telegram/notify` | Send a Telegram message via the OpenAlgo bot (`username` + `message`). If `username` is omitted, FlintTrade uses workspace `openalgo.telegram_username` when set; otherwise the call fails closed. That field is accepted and persisted by `GET`/`POST` `/v1/config/openalgo` alongside `api_key`, `host`, `port`, and `ws_port`. |
+| `telegram/notify` | Send a Telegram message via the OpenAlgo bot (`username` + `message`). If `username` is omitted, FlintTrade uses workspace `openalgo.telegram_username` when set; otherwise the call fails closed. That field is accepted and persisted by `GET`/`POST` `/v1/config/openalgo` or a `workspace.json` edit — not by the Setup/Settings connection form, which only writes `api_key`, `host`, `port`, and `ws_port`. |
 | `whatsapp/notify` | Upstream OpenAlgo endpoint. **Not wrapped by FlintTrade** — WhatsApp support was removed on 2026-07-26 (ruling D3); listed only so the OpenAlgo surface stays fully documented. |
 
 ### Broker management (session-authenticated, NOT under `/api/v1/`)
