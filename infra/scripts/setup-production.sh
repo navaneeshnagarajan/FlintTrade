@@ -85,6 +85,9 @@ fi
 # Keep the checkout root-owned, but guarantee the service group can traverse
 # and read it even when setup was launched under a restrictive umask. Never
 # grant group write access to code, .git, or .venv.
+# Reclaim a legacy www-data-owned tree (the first product-fix chowned the
+# whole prefix) so later `sudo git` deploys do not trip dubious ownership.
+sudo chown -R "root:$SERVICE_USER" "$INSTALL_DIR"
 sudo chgrp -R "$SERVICE_USER" "$INSTALL_DIR"
 sudo chmod -R g+rX,go-w "$INSTALL_DIR"
 

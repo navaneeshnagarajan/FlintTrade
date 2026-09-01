@@ -40,8 +40,10 @@ fi
 #    can be updated without chowning code to the deploying user.
 cd "$REPO_DIR"
 echo "Pulling latest from main..."
-sudo git checkout main
-sudo git pull origin main
+# Narrow safe.directory so root git can refresh a reused checkout that is
+# still owned by www-data (or another non-root account) from an earlier layout.
+sudo git -c "safe.directory=$REPO_DIR" checkout main
+sudo git -c "safe.directory=$REPO_DIR" pull origin main
 
 # 3. Install Python deps into the unit venv — SC-07: hash-verified install only.
 #    Keep .venv root-owned so the next deploy can write it.

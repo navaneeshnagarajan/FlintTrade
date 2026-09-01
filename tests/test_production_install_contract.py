@@ -306,9 +306,16 @@ def test_production_installer_chowns_only_runtime_paths() -> None:
     installer = _INSTALLER.read_text(encoding="utf-8")
     chowns = _backslash_continued_commands(installer, "chown")
     assert chowns, "setup-production.sh must chown runtime paths for www-data"
+    prefix_reclaim = 'sudo chown -R "root:$SERVICE_USER" "$INSTALL_DIR"'
+    assert any(prefix_reclaim in block for block in chowns), (
+        "setup-production.sh must reclaim a legacy non-root checkout to root:www-data "
+        "before chmod/chgrp so sudo git deploys do not hit dubious ownership"
+    )
     for block in chowns:
+        if prefix_reclaim in block:
+            continue
         assert not re.search(r'"\$INSTALL_DIR"(?!/)', block), (
-            "do not chown -R the entire install prefix; keep code root-owned. "
+            "do not chown -R the entire install prefix to the service user; keep code root-owned. "
             f"found: {block}"
         )
         if "$INSTALL_DIR/.env" in block:
@@ -380,6 +387,8 @@ def test_deploy_updates_root_owned_install_without_taking_ownership() -> None:
     assert "flinttrade_production_prefix" in deploy
     assert "FLINTTRADE_DIR:-" not in deploy
     assert "sudo git" in deploy
+    assert 'safe.directory=$REPO_DIR' in deploy
+    assert deploy.count('git -c "safe.directory=$REPO_DIR"') >= 2
     assert "chown -R www-data" not in deploy
     assert "--require-hashes" in deploy
     env_sources = [
@@ -572,6 +581,7 @@ def test_root_owned_checkout_is_readable_but_not_writable_by_service_group() -> 
     """A restrictive caller umask must not make root-owned code unreadable to www-data."""
     installer = _INSTALLER.read_text(encoding="utf-8")
 
+    assert 'sudo chown -R "root:$SERVICE_USER" "$INSTALL_DIR"' in installer
     assert 'sudo chgrp -R "$SERVICE_USER" "$INSTALL_DIR"' in installer
     assert 'sudo chmod -R g+rX,go-w "$INSTALL_DIR"' in installer
     assert 'sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"' not in installer
