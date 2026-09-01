@@ -341,6 +341,11 @@ def from_upstox_order(d: dict[str, Any]) -> dict[str, Any]:
         value = _present_order_number(d, field)
         if value is not None:
             order[field] = value
+    disclosed_quantity = _present_order_number(d, "disclosed_quantity")
+    if disclosed_quantity is None:
+        disclosed_quantity = _present_order_number(d, "disclosedQuantity")
+    if disclosed_quantity is not None:
+        order["disclosed_quantity"] = disclosed_quantity
     return order
 
 

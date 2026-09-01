@@ -306,6 +306,15 @@ def test_to_modify_order_payload_accepts_canonical_keys() -> None:
     assert payload["segment"] == "EQUITY" and payload["qty"] == 5 and payload["limit_price"] == 100.5
 
 
+def test_to_modify_order_payload_ignores_disclosed_quantity() -> None:
+    payload = m.to_modify_order_payload(
+        "EQ-1",
+        {"quantity": "5", "price": "100.5", "disclosed_quantity": "25"},
+    )
+    assert payload == {"order_id": "EQ-1", "segment": "EQUITY", "qty": 5, "limit_price": 100.5}
+    assert "disclosed_quantity" not in payload
+
+
 def test_to_modify_order_payload_validation() -> None:
     with pytest.raises(m.IndMoneyMappingError, match="segment"):
         m.to_modify_order_payload("GTT-1", {"qty": 5, "limit_price": 10})

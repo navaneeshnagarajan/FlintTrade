@@ -133,6 +133,12 @@ def test_extract_order_id_list_and_singular():
         extract_order_id({"data": {}})
 
 
+def test_from_upstox_order_preserves_disclosed_quantity_alias():
+    order = from_upstox_order({"disclosed_quantity": 10})
+    assert order["disclosed_quantity"] == "10"
+    assert "disclosed_quantity" not in from_upstox_order({"order_id": "9"})
+
+
 def test_from_upstox_order_position_funds():
     order = from_upstox_order({
         "order_id": "9", "status": "open", "trading_symbol": "TCS", "instrument_token": "NSE_EQ|INE467B01029",

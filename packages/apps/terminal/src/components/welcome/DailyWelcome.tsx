@@ -5,6 +5,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
 import { useTradingStore } from "@/stores/tradingStore";
 import { useHolidays } from "@/hooks/useMarketStatus";
+import { holidayClosesExchange } from "@/lib/market";
 import type { Holiday } from "@/types/api";
 import type { ToolId } from "@/types/widgets";
 
@@ -125,9 +126,9 @@ function getHolidayContext(holidays: Holiday[] | undefined): HolidayContext {
     return { todayHoliday: null, tomorrowHoliday: null, upcomingHoliday: null };
   }
 
-  /** Returns true when NSE is listed as a closed exchange on the holiday. */
+  /** Returns true when NSE is listed as a closed exchange, including the all-exchange `*` wildcard. */
   const affectsNse = (h: Holiday): boolean =>
-    h.closed_exchanges.some((ex) => ex === "NSE" || ex === "NSE_INDEX");
+    holidayClosesExchange(h, "NSE") || holidayClosesExchange(h, "NSE_INDEX");
 
   const nseHolidays = holidays.filter(affectsNse);
 

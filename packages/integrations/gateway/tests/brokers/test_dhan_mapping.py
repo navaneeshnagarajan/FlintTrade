@@ -168,6 +168,12 @@ def test_order_mappers_preserve_unknown_filled_quantity() -> None:
     assert m.from_dhan_super_order({})["filled_quantity"] == ""
 
 
+def test_from_dhan_order_preserves_disclosed_quantity_alias() -> None:
+    order = m.from_dhan_order({"disclosedQuantity": 25})
+    assert order["disclosed_quantity"] == "25"
+    assert "disclosed_quantity" not in m.from_dhan_order({})
+
+
 def test_dhan_holding_has_delivery_ledger_identity() -> None:
     holding = m.from_dhan_holding(
         {

@@ -107,6 +107,10 @@ overrides:
   'brace-expansion@>=3.0.0 <3.0.6': 3.0.6
   'brace-expansion@>=4.0.0 <5.0.0': 3.0.6
   'brace-expansion@>=5.0.0 <5.0.9': 5.0.9
+  # GHSA-c83g-rgw3-j3cx / GHSA-73wf-gq98-2v4g (CVE-2026-73089 / CVE-2026-73088):
+  # unbounded query-cache growth and normalizeStats prototype writes, patched in 4.28.7.
+  # Pin the current 4.28.8 line so Babel's helper-compilation-targets cannot keep 4.28.2.
+  browserslist: 4.28.8
   esbuild: 0.28.1
   fast-uri: 4.1.2
   hono: 4.12.27

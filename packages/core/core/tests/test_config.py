@@ -43,6 +43,63 @@ def test_contributor_run_loads_dotenv_from_validated_source_root(
 
 
 @pytest.mark.unit
+def test_openalgo_telegram_username_loads_from_workspace() -> None:
+    settings = Settings.from_workspace_data(
+        {"openalgo": {"telegram_username": "linked-trader"}}
+    )
+
+    assert settings.openalgo_telegram_username == "linked-trader"
+
+
+@pytest.mark.unit
+def test_telegram_username_does_not_override_env_bridge_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENALGO_HOST", "http://bridge.example:5000")
+    monkeypatch.setenv("OPENALGO_PORT", "5000")
+    monkeypatch.setenv("OPENALGO_WS_PORT", "8765")
+    monkeypatch.setenv("OPENALGO_API_KEY", "env-bridge-key")
+
+    settings = Settings.from_workspace_data(
+        {
+            "openalgo": {
+                "telegram_username": "linked-trader",
+                "host": "http://127.0.0.1:5000",
+                "port": 5000,
+                "ws_port": 8765,
+            }
+        }
+    )
+
+    assert settings.openalgo_telegram_username == "linked-trader"
+    assert settings.openalgo_host == "http://bridge.example:5000"
+    assert settings.openalgo_port == 5000
+    assert settings.openalgo_ws_port == 8765
+    assert settings.openalgo_api_key == "env-bridge-key"
+
+
+@pytest.mark.unit
+def test_custom_workspace_host_still_overrides_env_bridge_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENALGO_HOST", "http://bridge.example:5000")
+
+    settings = Settings.from_workspace_data(
+        {
+            "openalgo": {
+                "telegram_username": "linked-trader",
+                "host": "http://custom.local:5001",
+                "port": 5001,
+            }
+        }
+    )
+
+    assert settings.openalgo_telegram_username == "linked-trader"
+    assert settings.openalgo_host == "http://custom.local:5001"
+    assert settings.openalgo_port == 5001
+
+
+@pytest.mark.unit
 def test_openalgo_ws_base_url_maps_https_to_wss_and_uses_workspace_port() -> None:
     settings = Settings(openalgo_host="https://openalgo.local", openalgo_ws_port=8770)
 

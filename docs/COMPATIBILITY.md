@@ -8,19 +8,21 @@
 
 | Service | Role | Minimum | Latest tested | Upstream |
 |---|---|---|---|---|
-| **OpenAlgo** | Optional broker gateway (32 brokers, REST + WebSocket) | v2.0.0 | `7e48b2e8` (v2.0.1.1, 2026-05-21) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
+| **OpenAlgo** | Optional broker gateway (REST + WebSocket) | v2.0.2.2 | `ef1f6b9c` (v2.0.2.2, 2026-08-29) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
 
-The tested pin remains **v2.0.1.1**. The latest observed upstream release is
-**v2.0.1.6** (2026-07-27), pending re-verification per the
-["Bumping these"](#bumping-these) procedure below — do not treat it as a
-tested version until that procedure has run green.
+The tested pin is **v2.0.2.2**, the latest published OpenAlgo release as of
+2026-08-29. FlintTrade's REST contract tests are grounded in the public
+[`openalgo-eventlet-stability-security`](https://github.com/marketcalls/openalgo/releases/tag/openalgo-eventlet-stability-security)
+tag at commit `ef1f6b9c2165607ae4c01edb9a3e189e26596d4d`.
 
-**OpenAlgo minimum (v2.0.0):** required only when you enable the optional
-OpenAlgo-compatible integration path. FlintTrade expects OpenAlgo's v2 API
-surface there — depth mode 4 (50-level book), structured `closeposition`
-with strategy id, `optionchain` greeks endpoint, and rate-limit headers
-(`X-RateLimit-Remaining`). v1 deployments will fail the OpenAlgo integration
-sanity check.
+**OpenAlgo minimum (v2.0.2.2):** required only when you enable the optional
+OpenAlgo-compatible integration path. FlintTrade uses that release's REST
+contract unconditionally — POST `intervals`, revised option-chain / expiry /
+timings / ticker schemas, and the Telegram username snapshot. A v2.0.0
+deployment will fail those calls. Depth mode 4 (50-level book), structured
+`closeposition` with strategy id, `optionchain` greeks, and rate-limit
+headers (`X-RateLimit-Remaining`) remain part of that surface. v1
+deployments will fail the OpenAlgo integration sanity check.
 
 **AI-agent features are native.** FlintTrade drives agent backends in-process
 via the `flinttrade_ai.agent_backends` registry (Claude Code, Cerebras, Codex,
@@ -35,11 +37,16 @@ is not tracked or pulled.
 
 ## Runtime stack
 
-| Component | Minimum | Tested | Notes |
+Floors and targets are declared once in `flint.toml`'s `[requirements]` table.
+`tests/test_minimum_requirements_single_source.py` fails if a tracked manifest
+disagrees. Per-push CI runs the **floor**; nightly
+`nightly-cross-platform.yml` exercises the **target** (fail-soft).
+
+| Component | Floor (must work) | What actually runs | Notes |
 |---|---|---|---|
-| Python | 3.12 | 3.12.x | 3.13/3.14 partially supported (sklearn / lightgbm import issues on Windows 3.14) |
-| Node | 22 | 22.x | required for the terminal package, site package, and Playwright |
-| Operating system | Windows 11, macOS 14, Ubuntu 22.04 | same | tested matrix in CI |
+| Python | `>=3.12` | 3.12 on every per-push lane; 3.14 on the nightly target leg | The one-line installer provisions its own 3.12. sklearn / LightGBM extras can still fail to import on Windows 3.14 — those tests skip rather than define the floor. |
+| Node | `>=22.22.2` | 22.x on per-push lanes; 24 on the nightly target leg | Floor is jsdom 30's engine requirement. Required for the terminal, site, desktop, and Playwright. |
+| Operating system | Any platform that can provide Python `>=3.12` (Ubuntu 24.04 LTS is the Linux system-interpreter floor) | Per-push: Ubuntu (`ubuntu-latest` plus Electron on `ubuntu-24.04`). Nightly: macOS, Windows, and a fail-soft `ubuntu-26.04` preview. Desktop-release Linux build legs still use `ubuntu-22.04` images with a managed toolchain. | Ubuntu 22.04's *system* Python is 3.10 and cannot meet the source-install floor. The one-line installer sidesteps this by provisioning `~/.flinttrade/tools`. |
 
 ## Brokers
 
@@ -80,6 +87,19 @@ For the OpenAlgo path, whatever broker version OpenAlgo supports is the
 compatibility boundary. The broker list lives in [`flint.toml`](../flint.toml)
 under `[packages]` / gateway metadata. The 2026-05 sync added
 **IIFL Capital** as a distinct entry alongside the existing **IIFL** adapter.
+
+### Surface verified at the v2.0.2.2 tested pin
+
+- REST request schemas now use `underlying` plus DDMMMYY `expiry_date` for
+  option-chain and synthetic-future calls, and required fields fail before any
+  network request.
+- Intervals, instruments, timings, ticker, and Telegram notification calls use
+  the v2.0.2.2 methods, paths, and API-key placement.
+- Modify-order requests carry `trigger_price` and `disclosed_quantity`; place
+  requests omit the undeclared `market_protection` field.
+- The upstream release also hardens its eventlet boundary and removes broker
+  credential leakage from logs. Those are OpenAlgo service fixes, not duplicate
+  FlintTrade implementations.
 
 ### Surface picked up at the v2.0.1.1 tested pin (added upstream between v2.0.0.8 and v2.0.1.1)
 

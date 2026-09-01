@@ -72,13 +72,13 @@ screener = { path = "packages/services/screener", lang = "python", description =
 backtest = { path = "packages/services/backtest", lang = "python", description = "Event-driven simulation, vectorbt/raptorbt strategies, metrics" }
 ai = { path = "packages/services/ai", lang = "python", description = "LLM chat, RAG, ML signals, autonomous trading, news sentiment" }
 ditto = { path = "packages/services/ditto", lang = "python", description = "Multi-broker, multi-account orchestration, in-process mirroring, sizing rules, and risk manager" }
-automation = { path = "packages/services/automation", lang = "python", description = "ML pipeline, cron, Telegram, OpenClaw bridge, post-market analysis" }
+automation = { path = "packages/services/automation", lang = "python", description = "Cron jobs, Telegram bot (kill switch), post-market analysis, voice-order intent extraction" }
 journal = { path = "packages/services/journal", lang = "python", description = "Trade journal, trade logging, execution analytics, and P&L tracking" }
 gateway = { path = "packages/integrations/gateway", lang = "python", description = "Direct broker connections, adapter pattern, encrypted credentials, WebSocket bridge" }
 webhooks = { path = "packages/integrations/webhooks", lang = "python", description = "Generic HMAC-signed custom webhooks and flow builder" }
 terminal = { path = "packages/apps/terminal", lang = "react", description = "Trading UI — manual orders, automation, option-chain views, OI analysis, DOM, charts" }
 site = { path = "packages/apps/site", lang = "nextjs", description = "Documentation and MCP reference site" }
-desktop = { path = "packages/apps/desktop", lang = "typescript", description = "Electron 40 shell — verified local-source bootstrap, guardian supervision, close-to-tray runtime and four-installer delivery" }
+desktop = { path = "packages/apps/desktop", lang = "typescript", description = "Electron 43 shell — verified local-source bootstrap, guardian supervision, close-to-tray runtime and four-installer delivery" }
 
 [groups]
 core = ["core", "data", "historical", "indicators", "ticks", "design-system"]

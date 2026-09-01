@@ -539,7 +539,9 @@ class OpenAlgoAdapter(BrokerAdapter):
     async def option_chain(self, session: Session, req: dict) -> OptionChain:
         symbol = str(req.get("symbol", ""))
         exchange = str(req.get("exchange", "NFO"))
-        expiry = str(req.get("expiry") or req.get("expiry_date") or "")
+        expiry = str(req.get("expiry") or req.get("expiry_date") or "").strip()
+        if not expiry:
+            raise ValueError("expiry_date is required")
         with self._mapped("option_chain"):
             return await self._client(session).option_chain(symbol, exchange, expiry)
 

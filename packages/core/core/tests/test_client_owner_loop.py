@@ -52,6 +52,81 @@ class TestRunSync:
         assert client._base == "https://openalgo.example:5443/api/v1"
         assert client._api_key == "rotated-key"
 
+    @pytest.mark.asyncio
+    async def test_get_on_owner_refreshes_query_apikey_with_endpoint(self):
+        client = _client()
+        captured: dict[str, object] = {}
+
+        class RecordingHttp:
+            async def get(self, url, **kwargs):
+                captured["url"] = url
+                captured["params"] = kwargs.get("params")
+                return httpx.Response(200, json={"status": "success"})
+
+            async def aclose(self) -> None:
+                return None
+
+        client._http = RecordingHttp()
+        stale = {"apikey": "test", "exchange": "NSE"}
+        client.reconfigure(
+            Settings(
+                openalgo_host="https://openalgo.example",
+                openalgo_port=5443,
+                openalgo_api_key="rotated-key",
+            )
+        )
+
+        try:
+            await client._get_on_owner("instruments", params=stale)
+        finally:
+            await client.shutdown()
+
+        assert captured["url"] == "https://openalgo.example:5443/api/v1/instruments"
+        assert captured["params"] == {"apikey": "rotated-key", "exchange": "NSE"}
+        assert stale["apikey"] == "test"
+
+    @pytest.mark.asyncio
+    async def test_telegram_snapshots_username_with_endpoint(self):
+        client = OpenAlgoClient(
+            Settings(
+                openalgo_host="http://127.0.0.1",
+                openalgo_api_key="test",
+                openalgo_telegram_username="old-trader",
+            )
+        )
+        captured: dict[str, object] = {}
+
+        class RecordingHttp:
+            async def post(self, url, **kwargs):
+                captured["url"] = url
+                captured["json"] = kwargs.get("json")
+                return httpx.Response(200, json={"status": "success"})
+
+            async def aclose(self) -> None:
+                return None
+
+        client._http = RecordingHttp()
+        client.reconfigure(
+            Settings(
+                openalgo_host="https://openalgo.example",
+                openalgo_port=5443,
+                openalgo_api_key="rotated-key",
+                openalgo_telegram_username="new-trader",
+            )
+        )
+
+        try:
+            await client.telegram("hello")
+        finally:
+            await client.shutdown()
+
+        assert captured["url"] == "https://openalgo.example:5443/api/v1/telegram/notify"
+        assert captured["json"] == {
+            "apikey": "rotated-key",
+            "username": "new-trader",
+            "message": "hello",
+        }
+
     def test_many_sequential_calls_one_owner_loop(self):
         client = _client()
 

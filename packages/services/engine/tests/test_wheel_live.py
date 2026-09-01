@@ -43,7 +43,7 @@ def _mock_client(
     # expiry → returns a dict with {"data": {"expiry": [...]}}
     dates = expiry_dates or ["27-Apr-2025", "08-May-2025"]
 
-    async def mock_expiry(symbol: str, exchange: str = "NFO") -> dict:
+    async def mock_expiry(symbol: str, exchange: str = "NFO", instrumenttype: str = "options") -> dict:
         return {"data": {"expiry": dates}}
 
     client.expiry = mock_expiry

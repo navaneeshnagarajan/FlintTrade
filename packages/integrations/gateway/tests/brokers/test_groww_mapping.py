@@ -47,3 +47,18 @@ def test_cancellation_requested_stays_non_terminal() -> None:
     )
 
     assert mapped["status"] == "CANCEL_PENDING"
+
+
+def test_to_modify_payload_ignores_disclosed_quantity() -> None:
+    payload = mapping.to_modify_payload(
+        "G1",
+        {"quantity": 5, "price": 100, "disclosed_quantity": 25},
+        segment="CASH",
+    )
+    assert payload == {
+        "groww_order_id": "G1",
+        "segment": "CASH",
+        "quantity": 5,
+        "price": 100.0,
+    }
+    assert "disclosed_quantity" not in payload

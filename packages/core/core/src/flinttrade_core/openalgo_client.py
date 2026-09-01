@@ -8,7 +8,7 @@ import math
 import threading
 import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time as clock_time
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -37,6 +37,7 @@ from .models import (
     OrderResponse,
     OrderStatus,
     Position,
+    PriceType,
     Quote,
     SmartOrder,
     SplitOrder,
@@ -71,6 +72,52 @@ def _sum_fund_components(*values: Any) -> str:
     return format(total, "f") if total.is_finite() else "0"
 
 
+def _positive_decimal(value: Any) -> bool:
+    """Return True when ``value`` parses as a finite decimal greater than zero."""
+    try:
+        amount = Decimal(str(value).strip())
+    except (InvalidOperation, AttributeError, TypeError, ValueError):
+        return False
+    return amount.is_finite() and amount > 0
+
+
+def _order_row_text(row: dict[str, Any], *keys: str) -> str | None:
+    """Return the first non-empty alias from an orderbook/status row."""
+    for key in keys:
+        if key not in row:
+            continue
+        value = row[key]
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _order_status_from_row(row: dict[str, Any]) -> OrderStatus:
+    """Build ``OrderStatus`` while preserving trigger and disclosed-quantity aliases.
+
+    OpenAlgo and broker plugins emit ``triggerPrice`` / ``disclosedQuantity`` as
+    well as snake_case. Pydantic drops unknown extras, so those aliases must be
+    copied onto the model fields before construction.
+    """
+    mapped = dict(row)
+    trigger = _order_row_text(row, "trigger_price", "triggerPrice", "triggerprice")
+    if trigger is not None:
+        mapped["trigger_price"] = trigger
+    disclosed = _order_row_text(
+        row,
+        "disclosed_quantity",
+        "disclosedQuantity",
+        "disclosedqty",
+        "disclosed_qty",
+    )
+    if disclosed is not None:
+        mapped["disclosed_quantity"] = disclosed
+    return OrderStatus.model_validate(mapped)
+
+
 def _normalise_history_timestamp(value: Any) -> str:
     """Convert OpenAlgo epoch seconds/milliseconds to an aware UTC ISO value."""
     if isinstance(value, bool):
@@ -98,6 +145,20 @@ _OPTION_EXPIRY_FORMATS = (
     "%d-%b-%y",
     "%d-%b-%Y",
 )
+_OPTION_EXPIRY_MONTHS = (
+    "JAN",
+    "FEB",
+    "MAR",
+    "APR",
+    "MAY",
+    "JUN",
+    "JUL",
+    "AUG",
+    "SEP",
+    "OCT",
+    "NOV",
+    "DEC",
+)
 
 
 def _normalise_option_expiry_identity(value: Any) -> str | None:
@@ -110,6 +171,29 @@ def _normalise_option_expiry_identity(value: Any) -> str | None:
         except ValueError:
             continue
     return None
+
+
+def _openalgo_option_expiry_date(value: str) -> str:
+    """Format an expiry as OpenAlgo OptionChainSchema DDMMMYY (e.g. 26MAR26)."""
+    identity = _normalise_option_expiry_identity(value)
+    if identity is None:
+        return value.strip()
+    year, month, day = identity.split("-")
+    return f"{int(day):02d}{_OPTION_EXPIRY_MONTHS[int(month) - 1]}{year[2:]}"
+
+
+def _openalgo_option_offset(value: str) -> str:
+    """Return an official OptionSymbolSchema offset (ATM / ITM1-50 / OTM1-50)."""
+    offset = str(value or "").strip().upper()
+    if offset == "ATM":
+        return offset
+    if offset.startswith(("ITM", "OTM")):
+        suffix = offset[3:]
+        if suffix.isdigit():
+            number = int(suffix)
+            if 1 <= number <= 50:
+                return f"{offset[:3]}{number}"
+    raise ValueError("offset must be ATM, ITM1-ITM50, or OTM1-OTM50")
 
 
 def _validated_openalgo_option_expiry_identity(
@@ -156,16 +240,69 @@ def _normalise_calendar_date(value: Any) -> str | None:
         return None
 
 
+def _finite_session_timestamp(value: Any) -> float | None:
+    parsed = _parse_session_bound(value)
+    if parsed is None or parsed[0] != "numeric":
+        return None
+    return parsed[1]
+
+
+def _parse_session_bound(value: Any) -> tuple[str, float] | None:
+    """Parse a session bound as an epoch number or seconds past midnight."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int | float):
+        number = float(value)
+        if not math.isfinite(number):
+            return None
+        return ("numeric", number)
+    text = str(value).strip()
+    if not text:
+        return None
+    if ":" not in text:
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+        if not math.isfinite(number):
+            return None
+        return ("numeric", number)
+    try:
+        parsed = clock_time.fromisoformat(text)
+    except ValueError:
+        return None
+    seconds = (
+        parsed.hour * 3600
+        + parsed.minute * 60
+        + parsed.second
+        + parsed.microsecond / 1_000_000
+    )
+    return ("clock", seconds)
+
+
+def _usable_session_window(start_value: Any, end_value: Any) -> bool:
+    start = _parse_session_bound(start_value)
+    end = _parse_session_bound(end_value)
+    if start is None or end is None or start[0] != end[0]:
+        return False
+    if start[0] == "numeric":
+        return end[1] > start[1]
+    return start[1] != end[1]
+
+
 def _normalise_open_exchange(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     exchange = str(value.get("exchange") or "").strip().upper()
     if not exchange:
         return None
-    session: dict[str, Any] = {"exchange": exchange}
-    for field_name in ("start_time", "end_time"):
-        if field_name in value:
-            session[field_name] = value[field_name]
+    if not _usable_session_window(value.get("start_time"), value.get("end_time")):
+        return None
+    session: dict[str, Any] = {
+        "exchange": exchange,
+        "start_time": value["start_time"],
+        "end_time": value["end_time"],
+    }
     symbol = str(value.get("symbol") or "").strip().upper()
     if symbol:
         session["symbol"] = symbol
@@ -236,7 +373,10 @@ def is_authoritative_market_calendar(
             raw_date = candidate.get("date") or candidate.get("holiday_date") or candidate.get(
                 "trading_date"
             )
-            if _normalise_calendar_date(raw_date) is None:
+            holiday_date = _normalise_calendar_date(raw_date)
+            if holiday_date is None:
+                return False
+            if expected_year is not None and holiday_date[:4] != f"{expected_year:04d}":
                 return False
             if "holiday_type" in candidate:
                 holiday_type = str(candidate["holiday_type"] or "").strip().upper()
@@ -258,8 +398,12 @@ def is_authoritative_market_calendar(
                 return False
             if any(_normalise_open_exchange(value) is None for value in raw_open):
                 return False
-        elif _normalise_calendar_date(candidate) is None:
-            return False
+        else:
+            holiday_date = _normalise_calendar_date(candidate)
+            if holiday_date is None:
+                return False
+            if expected_year is not None and holiday_date[:4] != f"{expected_year:04d}":
+                return False
     return True
 
 
@@ -309,11 +453,18 @@ def normalise_market_calendar(payload: Any) -> list[dict[str, Any]]:
             )
             raw_open = entry.get("open_exchanges", [])
             if isinstance(raw_open, list | tuple):
-                open_exchanges = [
-                    session
-                    for candidate in raw_open
-                    if (session := _normalise_open_exchange(candidate)) is not None
-                ]
+                for candidate in raw_open:
+                    session = _normalise_open_exchange(candidate)
+                    if session is not None:
+                        open_exchanges.append(session)
+                        continue
+                    declared_exchange = (
+                        str(candidate.get("exchange") or "").strip().upper()
+                        if isinstance(candidate, dict)
+                        else ""
+                    )
+                    if declared_exchange:
+                        closed_exchanges.add(declared_exchange)
             if holiday_type != "SETTLEMENT_HOLIDAY" and not closed_exchanges:
                 closed_exchanges = {"*"}
         else:
@@ -685,6 +836,10 @@ class OpenAlgoClient:
             request_payload = dict(payload)
             if "apikey" in request_payload:
                 request_payload["apikey"] = self._api_key
+            if endpoint == "telegram/notify" and not str(request_payload.get("username") or "").strip():
+                request_payload["username"] = str(self.settings.openalgo_telegram_username or "").strip()
+        if endpoint == "telegram/notify" and not str(request_payload.get("username") or "").strip():
+            raise ValueError("username is required")
         rl = limiter or self._general_limiter
         await rl.acquire()
 
@@ -746,6 +901,9 @@ class OpenAlgoClient:
         """Execute one GET with retry on the dedicated HTTP owner loop."""
         with self._config_guard:
             url = f"{self._base}/{endpoint}"
+            request_params = dict(params or {})
+            if "apikey" in request_params:
+                request_params["apikey"] = self._api_key
             request_headers = dict(headers or {})
             for name in tuple(request_headers):
                 if name.lower() in {"x-api-key", "x-api_key"}:
@@ -755,7 +913,7 @@ class OpenAlgoClient:
         last_exc: Exception | None = None
         for attempt in range(1, 4):
             try:
-                resp = await self._http.get(url, params=params, headers=request_headers)
+                resp = await self._http.get(url, params=request_params, headers=request_headers)
                 if resp.status_code >= 400:
                     raise APIError(resp.status_code, resp.text, endpoint)
                 return resp.json()
@@ -770,12 +928,9 @@ class OpenAlgoClient:
     # ==================================================================
 
     async def place_order(self, order: Order) -> OrderResponse:
-        """POST /api/v1/placeorder
-
-        Supports Market Price Protection (MPP): when ``order.market_protection``
-        is True and the broker supports it, MARKET orders are converted to
-        LIMIT orders with an exchange-regulated price buffer.
-        """
+        """POST /api/v1/placeorder"""
+        if order.market_protection:
+            raise ValueError("market_protection is not supported by OpenAlgo v2.0.2.2")
         extras: dict[str, Any] = {
             "strategy": order.strategy,
             "symbol": order.symbol,
@@ -788,17 +943,14 @@ class OpenAlgoClient:
             "trigger_price": order.trigger_price,
             "disclosed_quantity": order.disclosed_quantity,
         }
-        if order.market_protection is not None:
-            extras["market_protection"] = order.market_protection
         payload = self._body(extras)
         data = await self._post("placeorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
 
     async def place_smart_order(self, order: SmartOrder) -> OrderResponse:
-        """POST /api/v1/placesmartorder
-
-        Supports Market Price Protection (MPP) — see ``place_order``.
-        """
+        """POST /api/v1/placesmartorder"""
+        if order.market_protection:
+            raise ValueError("market_protection is not supported by OpenAlgo v2.0.2.2")
         extras: dict[str, Any] = {
             "strategy": order.strategy,
             "symbol": order.symbol,
@@ -812,8 +964,6 @@ class OpenAlgoClient:
             "disclosed_quantity": order.disclosed_quantity,
             "position_size": order.position_size,
         }
-        if order.market_protection is not None:
-            extras["market_protection"] = order.market_protection
         payload = self._body(extras)
         data = await self._post("placesmartorder", payload, limiter=self._smart_limiter)
         return OrderResponse(**data)
@@ -844,6 +994,8 @@ class OpenAlgoClient:
                 "option_type": leg.option_type.value,
                 "action": leg.action.value,
                 "quantity": leg.quantity,
+                "pricetype": order.pricetype.value,
+                "product": order.product.value,
             }
             for leg in order.legs
         ]
@@ -853,8 +1005,6 @@ class OpenAlgoClient:
             "exchange": order.exchange.value,
             "expiry_date": order.expiry_date,
             "legs": legs,
-            "pricetype": order.pricetype.value,
-            "product": order.product.value,
         })
         data = await self._post("optionsmultiorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
@@ -896,6 +1046,8 @@ class OpenAlgoClient:
 
     async def modify_order(self, order: ModifyOrder) -> OrderResponse:
         """POST /api/v1/modifyorder"""
+        if order.pricetype in {PriceType.SL, PriceType.SL_M} and not _positive_decimal(order.trigger_price):
+            raise ValueError("trigger_price is required to modify a stop-loss order")
         payload = self._body({
             "strategy": order.strategy,
             "orderid": order.orderid,
@@ -906,6 +1058,8 @@ class OpenAlgoClient:
             "product": order.product.value,
             "quantity": order.quantity,
             "price": order.price,
+            "trigger_price": order.trigger_price,
+            "disclosed_quantity": order.disclosed_quantity,
         })
         data = await self._post("modifyorder", payload, limiter=self._order_limiter)
         return OrderResponse(**data)
@@ -932,7 +1086,7 @@ class OpenAlgoClient:
         """POST /api/v1/orderstatus"""
         payload = self._body({"strategy": strategy, "orderid": orderid})
         data = self._unwrap(await self._post("orderstatus", payload))
-        return OrderStatus(**data) if isinstance(data, dict) else OrderStatus()
+        return _order_status_from_row(data) if isinstance(data, dict) else OrderStatus()
 
     async def open_position(
         self, symbol: str, exchange: str = "NSE", product: str = "MIS", strategy: str = "Flint"
@@ -1026,17 +1180,21 @@ class OpenAlgoClient:
             return bars
         return []
 
-    async def intervals(self) -> list[str]:
-        """GET /api/v1/intervals"""
-        data = self._unwrap(await self._get("intervals"))
-        return data if isinstance(data, list) else []
+    async def intervals(self) -> dict[str, Any]:
+        """POST /api/v1/intervals"""
+        data = self._unwrap(await self._post("intervals", self._body()))
+        return data if isinstance(data, dict) else {}
 
     async def option_chain(self, symbol: str, exchange: str = "NFO", expiry: str = "") -> OptionChain:
         """POST /api/v1/optionchain"""
-        payload_data = {"symbol": symbol, "underlying": symbol, "exchange": exchange}
-        if expiry:
-            payload_data["expiry"] = expiry
-            payload_data["expiry_date"] = expiry.replace("-", "")
+        expiry_date = str(expiry or "").strip()
+        if not expiry_date:
+            raise ValueError("expiry_date is required")
+        payload_data: dict[str, Any] = {
+            "underlying": symbol,
+            "exchange": exchange,
+            "expiry_date": _openalgo_option_expiry_date(expiry_date),
+        }
         payload = self._body(payload_data)
         data = self._unwrap(await self._post("optionchain", payload))
         if isinstance(data, dict):
@@ -1175,23 +1333,36 @@ class OpenAlgoClient:
         option_type: str = "CE",
     ) -> dict[str, Any]:
         """POST /api/v1/optionsymbol"""
+        expiry = str(expiry_date or "").strip()
+        if not expiry:
+            raise ValueError("expiry_date is required")
         payload = self._body({
-            "symbol": symbol,
+            "underlying": symbol,
             "exchange": exchange,
-            "expiry_date": expiry_date,
-            "offset": offset,
+            "expiry_date": _openalgo_option_expiry_date(expiry),
+            "offset": _openalgo_option_offset(offset),
             "option_type": option_type,
         })
         return await self._post("optionsymbol", payload)
 
     async def synthetic_future(self, symbol: str, exchange: str = "NFO", expiry_date: str = "") -> dict[str, Any]:
         """POST /api/v1/syntheticfuture"""
-        payload = self._body({"symbol": symbol, "exchange": exchange, "expiry_date": expiry_date})
+        expiry = str(expiry_date or "").strip()
+        if not expiry:
+            raise ValueError("expiry_date is required")
+        payload = self._body({
+            "underlying": symbol,
+            "exchange": exchange,
+            "expiry_date": _openalgo_option_expiry_date(expiry),
+        })
         return await self._post("syntheticfuture", payload)
 
-    async def expiry(self, symbol: str, exchange: str = "NFO") -> dict[str, Any]:
+    async def expiry(self, symbol: str, exchange: str = "NFO", instrumenttype: str = "") -> dict[str, Any]:
         """POST /api/v1/expiry"""
-        payload = self._body({"symbol": symbol, "exchange": exchange})
+        kind = str(instrumenttype or "").strip().lower()
+        if kind not in {"futures", "options"}:
+            raise ValueError("instrumenttype is required")
+        payload = self._body({"symbol": symbol, "exchange": exchange, "instrumenttype": kind})
         return await self._post("expiry", payload)
 
     async def symbol(self, symbol: str, exchange: str = "NSE") -> dict[str, Any]:
@@ -1220,14 +1391,21 @@ class OpenAlgoClient:
         return await self._post("search", self._body(body))
 
     async def ticker(self, exchange: str, symbol: str, interval: str = "5m", from_date: str = "", to_date: str = "") -> Any:
-        """GET /api/v1/ticker/{exchange}:{symbol} — uses X-API-KEY header."""
+        """GET /api/v1/ticker/{exchange}:{symbol}"""
+        start = str(from_date or "").strip()
+        end = str(to_date or "").strip()
+        if not start or not end:
+            raise ValueError("from and to dates are required")
         endpoint = f"ticker/{exchange}:{symbol}"
-        params: dict[str, str] = {"interval": interval}
-        if from_date:
-            params["from"] = from_date
-        if to_date:
-            params["to"] = to_date
-        return await self._get(endpoint, params=params, headers={"X-API-KEY": self._api_key})
+        with self._config_guard:
+            api_key = self._api_key
+        params: dict[str, str] = {
+            "apikey": api_key,
+            "interval": interval,
+            "from": start,
+            "to": end,
+        }
+        return await self._get(endpoint, params=params)
 
     # ==================================================================
     # Account APIs
@@ -1280,9 +1458,14 @@ class OpenAlgoClient:
     async def orderbook(self) -> list[OrderStatus]:
         """POST /api/v1/orderbook"""
         data = self._unwrap(await self._post("orderbook", self._body()))
-        if isinstance(data, list):
-            return [OrderStatus(**o) for o in data]
-        return []
+        if not isinstance(data, list):
+            return []
+        orders: list[OrderStatus] = []
+        for row in data:
+            if not isinstance(row, dict):
+                raise ValueError("OpenAlgo orderbook row is not an object")
+            orders.append(_order_status_from_row(row))
+        return orders
 
     async def tradebook(self) -> list[Trade]:
         """POST /api/v1/tradebook"""
@@ -1362,17 +1545,30 @@ class OpenAlgoClient:
             )
 
     async def timings(self, date: str = "") -> dict[str, Any]:
-        """GET /api/v1/timings"""
-        params: dict[str, str] = {"date": date} if date else {}
-        return await self._get("timings", params=params)
+        """POST /api/v1/market/timings"""
+        timing_date = str(date or "").strip()
+        if not timing_date:
+            raise ValueError("date is required")
+        return await self._post("market/timings", self._body({"date": timing_date}))
 
-    async def telegram(self, message: str) -> dict[str, Any]:
-        """POST /api/v1/telegram"""
-        return await self._post("telegram", self._body({"message": message}))
+    async def telegram(self, message: str, username: str = "") -> dict[str, Any]:
+        """POST /api/v1/telegram/notify"""
+        explicit = str(username or "").strip()
+        if not explicit:
+            with self._config_guard:
+                configured = str(self.settings.openalgo_telegram_username or "").strip()
+            if not configured:
+                raise ValueError("username is required")
+        return await self._post(
+            "telegram/notify",
+            self._body({"username": explicit, "message": message}),
+        )
 
     async def instruments(self, exchange: str = "NSE") -> dict[str, Any]:
-        """POST /api/v1/instruments"""
-        return await self._post("instruments", self._body({"exchange": exchange}))
+        """GET /api/v1/instruments"""
+        with self._config_guard:
+            api_key = self._api_key
+        return await self._get("instruments", params={"apikey": api_key, "exchange": exchange})
 
     async def analyzer_status(self) -> dict[str, Any]:
         """POST /api/v1/analyzer/status — check whether sandbox trading

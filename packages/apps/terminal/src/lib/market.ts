@@ -129,16 +129,22 @@ function specialSessionState(
   });
 }
 
+/** Return whether a calendar row closes this exchange, including the all-exchange `*` wildcard. */
+export function holidayClosesExchange(holiday: Holiday, exchange: string): boolean {
+  const aliases = exchangeHolidayAliases(exchange);
+  return holiday.closed_exchanges.some((closedExchange) => {
+    const closed = closedExchange.trim().toUpperCase();
+    return closed === "*" || aliases.includes(closed);
+  });
+}
+
 function isClosedByHoliday(exchange: string, holidays: readonly Holiday[], date: Date): boolean {
   if (holidays.length === 0) return false;
 
-  const aliases = exchangeHolidayAliases(exchange);
   const holiday = holidayForDate(holidays, date);
   if (!holiday) return false;
 
-  return holiday.closed_exchanges.some((closedExchange) => (
-    aliases.includes(closedExchange.trim().toUpperCase())
-  ));
+  return holidayClosesExchange(holiday, exchange);
 }
 
 // ---------------------------------------------------------------------------

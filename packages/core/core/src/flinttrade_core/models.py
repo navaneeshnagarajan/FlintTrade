@@ -219,6 +219,8 @@ class ModifyOrder(BaseModel):
     product: Product = Product.MIS
     quantity: str = "1"
     price: str = "0"
+    trigger_price: str = "0"
+    disclosed_quantity: str = "0"
     strategy: str = "Flint"
 
 
@@ -364,6 +366,10 @@ class OrderStatus(BaseModel):
     filled_quantity: str = ""
     average_price: str = ""
     timestamp: str = ""
+    # Blank means the broker omitted the field. Do not invent ``"0"`` here —
+    # reconciliation treats a missing trigger as critical omitted evidence.
+    trigger_price: str = ""
+    disclosed_quantity: str = ""
 
 
 # ---------------------------------------------------------------------------

@@ -2872,7 +2872,21 @@ def _native_scrip_master_read_args() -> tuple[tuple[Any, ...] | None, str | None
 
 def _native_holidays_read_args() -> tuple[tuple[Any, ...] | None, str | None]:
     holiday_date = str(request.args.get("date") or "").strip()
-    return ((holiday_date,) if holiday_date else ()), None
+    if holiday_date:
+        return (holiday_date,), None
+    year_raw = str(request.args.get("year") or "").strip()
+    if not year_raw:
+        return (), None
+    try:
+        year = int(year_raw)
+    except ValueError:
+        return None, "year must be an integer between 2020 and 2050"
+    if year < 2020 or year > 2050:
+        return None, "year must be an integer between 2020 and 2050"
+    current_year = datetime.now(ZoneInfo("Asia/Kolkata")).year
+    if year == current_year:
+        return (), None
+    return (f"{year:04d}-01-01",), None
 
 
 def _native_timings_read_args() -> tuple[tuple[Any, ...] | None, str | None]:

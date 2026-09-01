@@ -132,7 +132,9 @@ same two targets. Generated packages live under
 
 Requires Python `>=3.12`, Node.js `>=22.22.2`, `uv`, pnpm 10.34.5, Git, and
 optionally Rust for `core/ticks`. Those floors come from `[requirements]` in
-`flint.toml`, which is the single source of truth for them.
+`flint.toml`, which is the single source of truth for them. Ubuntu 22.04's
+system Python is 3.10 — use 24.04+, a user-space 3.12+, or the one-line
+installer, which provisions its own interpreter.
 
 pnpm is pinned in the root `package.json` `packageManager` field, so install it
 directly (`npm install -g pnpm@10.34.5`) — Corepack still works if your Node
@@ -165,8 +167,25 @@ Then open http://localhost:5173. `python scripts/ft.py <target>` works on
 every OS; `make <target>` is the POSIX alias for the same targets.
 
 ## Server services (advanced)
+
+`infra/scripts/setup-production.sh` is an Ubuntu 24.04 host provisioner: it
+installs apt packages, clones to `$HOME/FlintTrade` by default, and copies
+`infra/systemd/flinttrade.service` unchanged. That unit is written for
+`/opt/flinttrade` as `www-data` (Gunicorn on `127.0.0.1:5100`). Starting
+the copied unit against a `$HOME/FlintTrade` tree will fail until you
+either place the install at `/opt/flinttrade` or edit the unit's `User`,
+`WorkingDirectory`, `EnvironmentFile`, `ExecStart`, and `ReadWritePaths`.
+Moving the tree to `/opt/flinttrade` still does not boot the unit: the
+script uses system `pip` and does not create `.venv`, while `ExecStart`
+requires `/opt/flinttrade/.venv/bin/gunicorn`. `gunicorn` is not in
+`requirements.lock`. Provision that venv (or point `ExecStart` at a real
+gunicorn) before starting the service. See
+[the systemd notes](../../infra/systemd/README.md).
+
 1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
 2. `cd FlintTrade`
 3. `bash infra/scripts/setup-production.sh`
-4. Edit `.env` only for server-only fallback values that cannot be supplied through the app UI.
-5. `sudo systemctl start flinttrade`
+4. Align the systemd unit with the install path (or install under `/opt/flinttrade`).
+5. Provision `/opt/flinttrade/.venv` with gunicorn, or edit `ExecStart` to the interpreter you installed.
+6. Edit `.env` only for server-only fallback values that cannot be supplied through the app UI.
+7. `sudo systemctl start flinttrade`
