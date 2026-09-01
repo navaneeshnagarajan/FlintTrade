@@ -1110,13 +1110,11 @@ class AutonomousTrader:
         if not trades:
             return
         try:
-            # A dedicated DAEMON thread, never joined: asyncio.wait_for over
-            # to_thread would cancel only the coroutine while the blocking
-            # LLM/ChromaDB worker kept running in the DEFAULT executor — which
-            # asyncio.run's teardown joins, so a hung reflection could still
-            # blow the runtime's 30s shutdown join. The daemon thread runs its
-            # own event loop; if it hangs, nothing ever joins it and it dies
-            # with the process.
+            # A dedicated daemon thread stays outside asyncio's default
+            # executor, so asyncio.run teardown never inherits an unbounded
+            # blocking LLM join. If the bounded wait below expires, the
+            # control plane transfers memory cleanup to a separate daemon
+            # waiter; the session thread remains free for operator actions.
             done = threading.Event()
 
             def _runner() -> None:

@@ -33,6 +33,7 @@ import logging
 import threading
 import uuid
 from datetime import UTC, datetime
+from time import monotonic
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -62,12 +63,28 @@ def _close_learning_memory(memory: Any) -> None:
         close_memory()
 
 
-def _finalise_session_learning_memory(trader: Any) -> None:
-    """Join leftover post-session reflection, then close that session's memory."""
+def _finalise_session_learning_memory(
+    trader: Any,
+    *,
+    timeout: float | None = None,
+) -> bool:
+    """Wait for post-session reflection, then close that session's memory."""
     join_learning = getattr(trader, "join_background_learning", None)
-    if callable(join_learning):
-        join_learning()
+    if callable(join_learning) and not bool(join_learning(timeout)):
+        return False
     _close_learning_memory(getattr(trader, "memory", None))
+    return True
+
+
+def _defer_session_learning_memory_close(trader: Any) -> threading.Thread:
+    """Transfer a timed-out learner's memory cleanup off the session thread."""
+    cleanup = threading.Thread(
+        target=lambda: _finalise_session_learning_memory(trader, timeout=None),
+        name="agent-learning-close",
+        daemon=True,
+    )
+    cleanup.start()
+    return cleanup
 
 
 def _shutdown_event(app: Any) -> threading.Event:
@@ -88,6 +105,7 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
     existing ``GatedChildExecutor``. The shutdown event blocks new sessions but
     deliberately does not short-circuit that reduce-only cleanup path.
     """
+    deadline = monotonic() + max(0.0, float(timeout))
     _shutdown_event(app).set()
     with _RUNNER_LOCK:
         trader = _RUNNER.get("trader")
@@ -105,7 +123,7 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
         except Exception:  # noqa: BLE001 - shutdown must fail closed without leaking details
             logger.exception("Autonomous agent stop request failed")
             return False
-        thread.join(timeout=max(0.0, float(timeout)))
+        thread.join(timeout=max(0.0, deadline - monotonic()))
         if thread.is_alive():
             logger.error("Autonomous agent did not stop within the shutdown deadline")
             return False
@@ -121,7 +139,12 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
         return False
 
     try:
-        _finalise_session_learning_memory(trader)
+        if not _finalise_session_learning_memory(
+            trader,
+            timeout=max(0.0, deadline - monotonic()),
+        ):
+            logger.error("Autonomous agent learning did not stop within the shutdown deadline")
+            return False
     except Exception:  # noqa: BLE001 - persistence finalisation must fail closed
         logger.exception("Autonomous agent learning-memory close failed")
         return False
@@ -785,6 +808,7 @@ def start_agent() -> tuple[Any, int]:
         await trader.run_session()
 
     def _run() -> None:
+        learning_cleanup_thread: threading.Thread | None = None
         try:
             asyncio.run(_run_session())
         except Exception:  # pragma: no cover — session errors land in status
@@ -797,11 +821,14 @@ def start_agent() -> tuple[Any, int]:
                 except Exception:  # noqa: BLE001 - cleanup failure must not revive stale intents
                     logger.exception("Could not close stale autonomous-agent approval intents")
             try:
-                _finalise_session_learning_memory(trader)
+                if not _finalise_session_learning_memory(trader, timeout=0.0):
+                    learning_cleanup_thread = _defer_session_learning_memory_close(trader)
             except Exception:  # noqa: BLE001 - session teardown must still release the loop
                 logger.exception("Autonomous agent learning-memory close failed")
             with _RUNNER_LOCK:
                 if _RUNNER.get("producer_ref") == producer_ref:
+                    if learning_cleanup_thread is not None:
+                        _RUNNER["learning_cleanup_thread"] = learning_cleanup_thread
                     _RUNNER.pop("loop", None)
 
     session_thread = threading.Thread(target=_run, name="autonomous-agent", daemon=True)
