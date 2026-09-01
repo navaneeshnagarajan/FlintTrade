@@ -56,13 +56,16 @@ def test_test_workflow_pull_request_trigger_has_no_paths_ignore():
 
     assert isinstance(pr_config, dict), "pull_request config must be a mapping"
 
-    # The critical invariant: no top-level paths-ignore on the PR trigger.
-    # (push may keep its own; job-level if: conditions remain for cost control.)
-    assert "paths-ignore" not in pr_config, (
-        "pull_request trigger must not contain paths-ignore; "
-        "otherwise PRs that touch only ignored paths (e.g. .github/workflows/claude*.yml) "
-        "skip the whole Test workflow and omit the required check contexts on main/dev."
-    )
+    # The critical invariant: no top-level path filter on the PR trigger.
+    # Either `paths-ignore` or a positive `paths:` list would omit the whole
+    # Test workflow (and therefore every required check context) for PRs
+    # outside that filter. push may keep its own; job-level if: remains for cost.
+    for forbidden in ("paths-ignore", "paths"):
+        assert forbidden not in pr_config, (
+            f"pull_request trigger must not contain {forbidden}; "
+            "otherwise PRs outside that filter skip the whole Test workflow "
+            "and omit the required check contexts on main/dev."
+        )
 
     # Sanity: still targets the protected branches
     branches = pr_config.get("branches", [])
