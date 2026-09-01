@@ -88,7 +88,11 @@ class HashingEmbeddingFunction:
 
 
 def _as_float32(vector: Any) -> np.ndarray:
-    return np.asarray(vector, dtype=np.float32).reshape(-1)
+    with np.errstate(over="ignore", invalid="ignore"):
+        arr = np.asarray(vector, dtype=np.float32).reshape(-1)
+    if not bool(np.isfinite(arr).all()):
+        raise ValueError("embedding values must be finite")
+    return arr
 
 
 def _vector_dim(vector: Any | None) -> int | None:
@@ -404,6 +408,8 @@ class Collection:
         for row in rows:
             embedding = row["embedding"]
             if embedding is None or int(embedding.size) != query_dim:
+                continue
+            if not bool(np.isfinite(embedding).all()):
                 continue
             scored.append((row["id"], row, _distance(self._space, query, embedding)))
         scored.sort(key=lambda item: (item[2], item[0]))

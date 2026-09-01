@@ -623,6 +623,52 @@ def test_session_end_closes_learning_memory(live_auth, monkeypatch) -> None:
     memory.close.assert_called_once_with()
 
 
+def test_session_end_retains_failed_immediate_close_after_next_start(
+    live_auth,
+    monkeypatch,
+) -> None:
+    """A failed immediate close must remain joinable after the next /start."""
+    memory_a = MagicMock()
+    memory_a.close.side_effect = RuntimeError("disk unavailable")
+    memory_b = MagicMock()
+    memories = iter((memory_a, memory_b))
+
+    monkeypatch.setattr(mod, "_build_learning_memory", lambda: next(memories))
+    app = _make_app()
+    client = app.test_client()
+
+    assert client.post("/api/v1/ai/agent/start", json=_start_body()).status_code == 202
+    assert client.post("/api/v1/ai/agent/stop", json={}).status_code == 200
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        session_a = mod._RUNNER.get("thread")  # noqa: SLF001
+    assert session_a is not None
+    session_a.join(timeout=2.0)
+    assert not session_a.is_alive()
+
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        with mod._RUNNER_LOCK:  # noqa: SLF001
+            leftover = list(mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
+        if leftover and memory_a.close.call_count >= 2:
+            break
+        time.sleep(0.01)
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        assert any(owner.is_alive() for owner in mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
+
+    assert client.post("/api/v1/ai/agent/start", json=_start_body()).status_code == 202
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        assert any(owner.is_alive() for owner in mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
+
+    assert mod.shutdown_agent_runtime(app, timeout=1.0) is False
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        assert any(owner.is_alive() for owner in mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
+
+    memory_a.close.side_effect = None
+    assert mod.shutdown_agent_runtime(app, timeout=1.0) is True
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        assert not any(owner.is_alive() for owner in mod._LEARNING_CLEANUP_OWNERS)  # noqa: SLF001
+
+
 def test_session_thread_defers_timed_out_learning_memory_close(live_auth, monkeypatch) -> None:
     """A timed-out learner transfers cleanup ownership without trapping /stop teardown."""
     started = threading.Event()

@@ -914,6 +914,13 @@ def start_agent() -> tuple[Any, int]:
                     learning_cleanup_thread = _defer_session_learning_memory_close(trader)
             except Exception:  # noqa: BLE001 - session teardown must still release the loop
                 logger.exception("Autonomous agent learning-memory close failed")
+                # Immediate close already raised, so no closer was registered.
+                # Keep the leftover trader joinable after the next /start
+                # replaces ``_RUNNER``.
+                try:
+                    learning_cleanup_thread = _defer_session_learning_memory_close(trader)
+                except Exception:  # noqa: BLE001 - register-before-start still retains the owner
+                    logger.exception("Could not start deferred learning-memory closer")
             with _RUNNER_LOCK:
                 if _RUNNER.get("producer_ref") == producer_ref:
                     if learning_cleanup_thread is not None:

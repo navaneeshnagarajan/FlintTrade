@@ -363,6 +363,58 @@ def test_query_rejects_mismatched_embedding_dimension() -> None:
     client.close()
 
 
+def test_write_and_query_reject_non_finite_embeddings() -> None:
+    """NaN, infinity, and float32 overflow must not persist or rank."""
+    from flinttrade_ai.local_vector_store import EphemeralClient
+
+    client = EphemeralClient()
+    collection = client.get_or_create_collection(name="finite")
+    collection.add(ids=["kept"], documents=["valid"], embeddings=[[1.0, 0.0]])
+
+    with pytest.raises(ValueError, match="finite"):
+        collection.add(ids=["nan"], documents=["nan"], embeddings=[[1.0, float("nan")]])
+    with pytest.raises(ValueError, match="finite"):
+        collection.add(ids=["inf"], documents=["inf"], embeddings=[[1.0, float("inf")]])
+    with pytest.raises(ValueError, match="finite"):
+        collection.add(ids=["overflow"], documents=["overflow"], embeddings=[[1.0, 1e40]])
+    with pytest.raises(ValueError, match="finite"):
+        collection.query(query_embeddings=[[float("nan"), 0.0]], n_results=1)
+    with pytest.raises(ValueError, match="finite"):
+        collection.update(ids=["kept"], embeddings=[[0.0, float("inf")]])
+
+    assert collection.get()["ids"] == ["kept"]
+    result = collection.query(query_embeddings=[[1.0, 0.0]], n_results=1)
+    assert result["ids"] == [["kept"]]
+    client.close()
+
+
+def test_rank_skips_legacy_non_finite_rows() -> None:
+    """A stored NaN vector must not consume top_k ahead of a valid neighbour."""
+    from flinttrade_ai.local_vector_store import EphemeralClient
+
+    client = EphemeralClient()
+    collection = client.get_or_create_collection(name="legacy-nan")
+    collection.add(ids=["kept"], documents=["valid"], embeddings=[[1.0, 0.0]])
+    with client._lock:  # noqa: SLF001 - inject a pre-validation corrupt row
+        client._conn.execute(  # noqa: SLF001
+            """
+            INSERT INTO items (collection, id, document, metadata_json, embedding)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-nan",
+                "corrupt",
+                "corrupt",
+                "{}",
+                np.asarray([float("nan"), 0.0], dtype=np.float32).tobytes(),
+            ),
+        )
+
+    result = collection.query(query_embeddings=[[1.0, 0.0]], n_results=1)
+    assert result["ids"] == [["kept"]]
+    client.close()
+
+
 def test_reopened_collection_rejects_mismatched_query_dimension(tmp_path) -> None:
     """A persisted width must fail closed on query after the embedding model changes."""
     from flinttrade_ai.local_vector_store import PersistentClient
