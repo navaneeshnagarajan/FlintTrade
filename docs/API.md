@@ -28,7 +28,7 @@ POST unless explicitly marked **GET**.
 |---|---|
 | `placeorder` | Place a standard order (MARKET / LIMIT / SL / SL-M). Omits undeclared `market_protection` — v2.0.2.2 dropped that field; FlintTrade refuses `market_protection=true` rather than silently dropping it. |
 | `placesmartorder` | Conditional / multi-leg / target-position smart order. Same `market_protection` rule as `placeorder`. |
-| `modifyorder` | Modify price / quantity / order type of a pending order. Always forwards `trigger_price` and `disclosed_quantity` so full-replacement brokers do not clear disclosure. Stop-loss modify requires a positive `trigger_price`. |
+| `modifyorder` | Modify price / quantity / order type of a pending order. `trigger_price` stays explicit. Full-replacement brokers receive `disclosed_quantity` (recovered from the live order when omitted); partial-modify adapters omit the request model's default disclosure when the caller did not supply it. Stop-loss modify requires a positive `trigger_price`. |
 | `cancelorder` | Cancel a single pending order by ID. |
 | `cancelallorder` | Cancel every pending order for a strategy. |
 | `closeposition` | Square off every position for a strategy. |
@@ -643,18 +643,21 @@ is sent.
 
 ```bash
 curl -X POST http://127.0.0.1:5000/api/v1/optionchain \
-  -H "X-API-KEY: $OPENALGO_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{ "underlying": "NIFTY", "exchange": "NFO", "expiry_date": "26MAR26" }'
+  -d "{\"apikey\": \"$OPENALGO_API_KEY\", \"underlying\": \"NIFTY\", \"exchange\": \"NFO\", \"expiry_date\": \"26MAR26\"}"
 ```
 
 ```powershell
 $params = @{
   Method      = "Post"
   Uri         = "http://127.0.0.1:5000/api/v1/optionchain"
-  Headers     = @{ "X-API-KEY" = $env:OPENALGO_API_KEY }
   ContentType = "application/json"
-  Body        = '{ "underlying": "NIFTY", "exchange": "NFO", "expiry_date": "26MAR26" }'
+  Body        = (@{
+    apikey = $env:OPENALGO_API_KEY
+    underlying = "NIFTY"
+    exchange = "NFO"
+    expiry_date = "26MAR26"
+  } | ConvertTo-Json)
 }
 Invoke-RestMethod @params
 ```
