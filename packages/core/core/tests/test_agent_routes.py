@@ -39,6 +39,7 @@ class _FakeTrader:
         from flinttrade_ai.autonomous_agent import AgentState, AgentStatus
 
         self.kwargs = kwargs
+        self.memory = kwargs.get("memory")
         self.state = AgentState()
         self.status = AgentStatus.RUNNING
         self.stop_calls: list[bool] = []
