@@ -49,6 +49,12 @@ interface RawOrderRecord extends RawOrder {
   pricetype?: string;
   price_type?: string;
   trigger_price?: string | number;
+  triggerPrice?: string | number;
+  triggerprice?: string | number;
+  disclosed_quantity?: string | number;
+  disclosedQuantity?: string | number;
+  disclosedqty?: string | number;
+  disclosed_qty?: string | number;
   strategy?: string;
 }
 
@@ -63,6 +69,8 @@ interface OrderRow {
   price: string;
   priceNum: number;
   triggerPriceNum: number;
+  disclosedQuantityNum: number;
+  hasDisclosedQuantity: boolean;
   orderType: string;
   product: string;
   strategy: string;
@@ -105,12 +113,71 @@ function toNum(value: string | number | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function firstPresentValue(
+  ...values: Array<string | number | undefined>
+): string | number | undefined {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (String(value).trim() === "") continue;
+    return value;
+  }
+  return undefined;
+}
+
+/** Map a raw orderbook row, preserving trigger and disclosed-quantity aliases. */
+export function toOrderRow(o: RawOrderRecord): OrderRow {
+  const status = o.order_status ?? o.status ?? "—";
+  const orderType = String(o.pricetype ?? o.price_type ?? "").toUpperCase();
+  const disclosed = firstPresentValue(
+    o.disclosed_quantity,
+    o.disclosedQuantity,
+    o.disclosedqty,
+    o.disclosed_qty,
+  );
+  return {
+    orderId: extractOrderId(o),
+    symbol: o.symbol,
+    exchange: o.exchange ?? "",
+    action: (o.action ?? "—").toUpperCase(),
+    quantity: String(o.quantity ?? ""),
+    quantityNum: toNum(o.quantity),
+    price: o.price ? String(o.price) : "MKT",
+    priceNum: toNum(o.price),
+    triggerPriceNum: toNum(firstPresentValue(o.trigger_price, o.triggerPrice, o.triggerprice)),
+    disclosedQuantityNum: toNum(disclosed),
+    hasDisclosedQuantity: disclosed !== undefined,
+    orderType,
+    product: String(o.product ?? "").toUpperCase(),
+    strategy: typeof o.strategy === "string" && o.strategy !== "" ? o.strategy : "Flint",
+    orderStatus: status,
+    isOpen: isOpenOrderStatus(status),
+  };
+}
+
+/** Brokers whose modify contract is a full replacement and needs disclosure. */
+const FULL_REPLACEMENT_DISCLOSURE_BROKERS = new Set([
+  "openalgo",
+  "dhan",
+  "upstox",
+  "kotakneo",
+]);
+
+function requiresAuthoritativeDisclosure(
+  identity: Pick<AccountAuthorityIdentity, "brokerType" | "mode">,
+): boolean {
+  if (identity.mode === "explore" || identity.mode === "practice") return false;
+  return FULL_REPLACEMENT_DISCLOSURE_BROKERS.has(identity.brokerType.toLowerCase());
+}
+
 /**
  * A row qualifies for Modify only when every field the gated modify route
  * requires is present and valid — otherwise the request would be rejected
  * (or worse, mis-normalised). Fail closed.
  */
-function canModify(row: OrderRow): boolean {
+function canModify(
+  row: OrderRow,
+  identity: Pick<AccountAuthorityIdentity, "brokerType" | "mode">,
+): boolean {
   return (
     row.orderId != null &&
     row.isOpen &&
@@ -118,7 +185,9 @@ function canModify(row: OrderRow): boolean {
     row.exchange !== "" &&
     VALID_ACTIONS.has(row.action) &&
     VALID_ORDER_TYPES.has(row.orderType) &&
-    VALID_PRODUCTS.has(row.product)
+    VALID_PRODUCTS.has(row.product) &&
+    (!requiresAuthoritativeDisclosure(identity) || row.hasDisclosedQuantity) &&
+    (!(row.orderType === "SL" || row.orderType === "SL-M") || row.triggerPriceNum > 0)
   );
 }
 
@@ -184,7 +253,7 @@ interface ModifyOverlayProps {
   row: OrderRow;
   pending: boolean;
   canSubmit: boolean;
-  onSubmit: (qty: number, price: number, triggerPrice: number) => void;
+  onSubmit: (qty: number, price: number, triggerPrice: number, disclosedQuantity?: number) => void;
   onClose: () => void;
 }
 
@@ -192,6 +261,9 @@ function ModifyOverlay({ row, pending, canSubmit, onSubmit, onClose }: ModifyOve
   const [qty, setQty] = useState(String(row.quantityNum > 0 ? row.quantityNum : 1));
   const [price, setPrice] = useState(row.priceNum > 0 ? String(row.priceNum) : "");
   const [trigger, setTrigger] = useState(row.triggerPriceNum > 0 ? String(row.triggerPriceNum) : "");
+  const [disclosed, setDisclosed] = useState(
+    row.hasDisclosedQuantity ? String(row.disclosedQuantityNum) : "",
+  );
   const [error, setError] = useState<string | null>(null);
 
   const priceRequired = row.orderType === "LIMIT" || row.orderType === "SL";
@@ -202,6 +274,18 @@ function ModifyOverlay({ row, pending, canSubmit, onSubmit, onClose }: ModifyOve
     const qtyNum = parseInt(qty, 10);
     const priceNum = parseFloat(price) || 0;
     const triggerNum = parseFloat(trigger) || 0;
+    const disclosedTrimmed = disclosed.trim();
+    let disclosedQuantity: number | undefined;
+    if (disclosedTrimmed !== "") {
+      const disclosedNum = parseFloat(disclosedTrimmed);
+      if (!Number.isFinite(disclosedNum) || disclosedNum < 0) {
+        setError("Disclosed quantity cannot be negative");
+        return;
+      }
+      disclosedQuantity = disclosedNum;
+    } else if (row.hasDisclosedQuantity) {
+      disclosedQuantity = row.disclosedQuantityNum;
+    }
     if (!Number.isFinite(qtyNum) || qtyNum < 1) {
       setError("Quantity must be at least 1");
       return;
@@ -215,7 +299,7 @@ function ModifyOverlay({ row, pending, canSubmit, onSubmit, onClose }: ModifyOve
       return;
     }
     setError(null);
-    onSubmit(qtyNum, priceNum, triggerNum);
+    onSubmit(qtyNum, priceNum, triggerNum, disclosedQuantity);
   }
 
   return (
@@ -274,6 +358,20 @@ function ModifyOverlay({ row, pending, canSubmit, onSubmit, onClose }: ModifyOve
               onChange={(e) => setTrigger(e.target.value)}
               disabled={!triggerRequired}
               placeholder={triggerRequired ? "0.00" : "N/A"}
+              className="h-8 text-xs font-mono"
+            />
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <label htmlFor="orders-modify-disclosed" className="text-xxs text-text-muted uppercase tracking-wider">
+              Disclosed Quantity
+            </label>
+            <Input
+              id="orders-modify-disclosed"
+              type="number"
+              min={0}
+              value={disclosed}
+              onChange={(e) => setDisclosed(e.target.value)}
+              placeholder="0"
               className="h-8 text-xs font-mono"
             />
           </div>
@@ -340,26 +438,7 @@ function OrdersWidget(_props: WidgetProps) {
 
   const rows = useMemo<OrderRow[]>(() => {
     const raw = (ordersData ?? []) as RawOrderRecord[];
-    return raw.map((o) => {
-      const status = o.order_status ?? o.status ?? "—";
-      const orderType = String(o.pricetype ?? o.price_type ?? "").toUpperCase();
-      return {
-        orderId: extractOrderId(o),
-        symbol: o.symbol,
-        exchange: o.exchange ?? "",
-        action: (o.action ?? "—").toUpperCase(),
-        quantity: String(o.quantity ?? ""),
-        quantityNum: toNum(o.quantity),
-        price: o.price ? String(o.price) : "MKT",
-        priceNum: toNum(o.price),
-        triggerPriceNum: toNum(o.trigger_price),
-        orderType,
-        product: String(o.product ?? "").toUpperCase(),
-        strategy: typeof o.strategy === "string" && o.strategy !== "" ? o.strategy : "Flint",
-        orderStatus: status,
-        isOpen: isOpenOrderStatus(status),
-      };
-    });
+    return raw.map(toOrderRow);
   }, [ordersData]);
 
   const queryUi = resolveAccountQueryUi({
@@ -455,13 +534,13 @@ function OrdersWidget(_props: WidgetProps) {
   }, [cancelIntent, refreshOrders]);
 
   const handleModifySubmit = useCallback(
-    async (qty: number, price: number, triggerPrice: number) => {
+    async (qty: number, price: number, triggerPrice: number, disclosedQuantity?: number) => {
       const intent = modifyIntent;
       if (
         !actionGateRef.current
         || !intent
         || intent.row.orderId == null
-        || !canModify(intent.row)
+        || !canModify(intent.row, intent.identity)
       ) return;
       const mutationIdentity = runWithMatchingAccountAuthority(
         intent.identity,
@@ -485,6 +564,9 @@ function OrdersWidget(_props: WidgetProps) {
         triggerPrice,
         strategy: row.strategy,
       };
+      if (disclosedQuantity !== undefined) {
+        params.disclosedQuantity = disclosedQuantity;
+      }
       try {
         await modifyOrder(params, mutationIdentity);
         if (accountAuthorityMatches(mutationIdentity, currentIdentityRef.current)) {
@@ -587,10 +669,10 @@ function OrdersWidget(_props: WidgetProps) {
                     identity: captureAccountAuthority(currentIdentity),
                   });
                 }}
-                disabled={!canManageOrders || actionPending || !canModify(r)}
+                disabled={!canManageOrders || actionPending || !canModify(r, currentIdentity)}
                 title={
                   disabledReason ??
-                  (!canModify(r) ? "Order details incomplete — modify from your broker app" : `Modify order ${r.orderId}`)
+                  (!canModify(r, currentIdentity) ? "Order details incomplete — modify from your broker app" : `Modify order ${r.orderId}`)
                 }
                 aria-label={`Modify order ${r.orderId ?? r.symbol}`}
                 className="h-auto w-auto p-0.5 text-text-muted hover:text-accent disabled:opacity-40"
@@ -652,7 +734,9 @@ function OrdersWidget(_props: WidgetProps) {
           row={modifyIntent.row}
           pending={actionPending}
           canSubmit={modifyCanSubmit}
-          onSubmit={(qty, price, trigger) => void handleModifySubmit(qty, price, trigger)}
+          onSubmit={(qty, price, trigger, disclosed) => {
+            void handleModifySubmit(qty, price, trigger, disclosed);
+          }}
           onClose={() => setModifyIntent(null)}
         />
       )}

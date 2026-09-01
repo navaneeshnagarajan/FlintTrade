@@ -528,11 +528,11 @@ class TestClientInit:
 
         endpoint, payload = client._post.await_args.args[:2]
         assert endpoint == "optionchain"
-        assert payload["symbol"] == "NIFTY"
         assert payload["underlying"] == "NIFTY"
         assert payload["exchange"] == "NFO"
-        assert payload["expiry"] == "2026-03-26"
-        assert payload["expiry_date"] == "20260326"
+        assert payload["expiry_date"] == "26MAR26"
+        assert "symbol" not in payload
+        assert "expiry" not in payload
         assert chain.underlying == "NIFTY"
         assert chain.expiry_date == "26MAR26"
         assert chain.spot_price == 24050.0

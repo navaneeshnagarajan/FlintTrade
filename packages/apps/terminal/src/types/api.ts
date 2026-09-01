@@ -65,6 +65,8 @@ export interface Order {
   product: string;
   strategy: string;
   timestamp: string;
+  /** Present when the sandbox or broker row carries a stop trigger. Omitted, never invented as 0. */
+  triggerPrice?: number;
 }
 
 export interface Trade {
@@ -198,6 +200,12 @@ export interface ModifyOrderParams {
   product: "MIS" | "CNC" | "NRML";
   price?: number;
   triggerPrice?: number;
+  /**
+   * Quantity shown publicly on the exchange order book. Carried through to
+   * the backend as `disclosed_quantity` so a modify does not clear an
+   * existing disclosure by sending an implicit zero.
+   */
+  disclosedQuantity?: number;
   strategy?: string;
 }
 

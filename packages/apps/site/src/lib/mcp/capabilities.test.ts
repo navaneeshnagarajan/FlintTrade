@@ -52,6 +52,16 @@ describe('docs index generation', () => {
     expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`29 ${'analysis'}`);
   });
 
+  it('keeps broker catalogue count pins aligned at 37', () => {
+    const claude = readFileSync(resolve(process.cwd(), '../../../CLAUDE.md'), 'utf8');
+    const agents = readFileSync(resolve(process.cwd(), '../../../AGENTS.md'), 'utf8');
+
+    expect(claude).toContain('`BROKER_CATALOG` (37 brokers)');
+    expect(agents).toContain('37 brokers');
+    expect(claude).not.toContain('`BROKER_CATALOG` (35 brokers)');
+    expect(agents).not.toContain('35 brokers');
+  });
+
   it('publishes the current INDstocks reset semantics through generated broker docs', () => {
     const userGuideDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/USER_GUIDE.md');
     const compatibilityDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/COMPATIBILITY.md');

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
@@ -1049,6 +1049,10 @@ async def _read(source: _AccountSource, openalgo_name: str, native_name: str, *a
     return await _maybe_await(reader(*call_args))
 
 
+# Brokers whose modify contract is a full replacement and therefore needs an
+# authoritative disclosed quantity. Groww and INDmoney omit the field entirely.
+_FULL_REPLACEMENT_DISCLOSURE_ADAPTERS = frozenset({"openalgo", "dhan", "upstox", "kotakneo"})
+
 _ACTIVE_ORDER_STATUSES = frozenset({
     "ACTIVE",
     "AFTER MARKET ORDER REQ RECEIVED",
@@ -1183,6 +1187,14 @@ def _normalise_authoritative_order(row: Any, fallback: Any = None) -> dict[str, 
         ).upper(),
         "price": _order_record_value(row, fallback, "price") or 0,
         "trigger_price": _order_record_value(row, fallback, "trigger_price", "triggerPrice") or 0,
+        "disclosed_quantity": _order_record_value(
+            row,
+            fallback,
+            "disclosed_quantity",
+            "disclosedQuantity",
+            "disclosedqty",
+            "disclosed_qty",
+        ),
     }
 
 
@@ -1421,6 +1433,30 @@ def _validated_order_quantities(current: Mapping[str, Any], proposed: Any) -> tu
     return current_quantity, proposed_quantity
 
 
+def _recover_omitted_modify_fields(
+    changes: Mapping[str, Any],
+    current: Mapping[str, Any],
+    requested_fields: Collection[str] | None,
+    adapter_id: str,
+) -> None:
+    """Restore omitted full-replacement trigger/disclosure from the live order."""
+    if requested_fields is None or not isinstance(changes, MutableMapping):
+        return
+    if "trigger_price" not in requested_fields:
+        recovered = _text(current.get("trigger_price"))
+        if recovered and recovered != "0":
+            changes["trigger_price"] = recovered
+    if "disclosed_quantity" not in requested_fields:
+        if str(adapter_id).lower() not in _FULL_REPLACEMENT_DISCLOSURE_ADAPTERS:
+            changes.pop("disclosed_quantity", None)
+            return
+        raw_disclosed = current.get("disclosed_quantity")
+        if raw_disclosed is None or str(getattr(raw_disclosed, "value", raw_disclosed)).strip() == "":
+            raise PortfolioSafetyStateError("Authoritative disclosed quantity is unavailable")
+        recovered = str(getattr(raw_disclosed, "value", raw_disclosed)).strip()
+        changes["disclosed_quantity"] = recovered
+
+
 async def classify_modify_intent(
     config: Mapping[str, Any],
     adapter_id: str,
@@ -1429,6 +1465,7 @@ async def classify_modify_intent(
     *,
     account_id: str = "default",
     family: str = "regular",
+    requested_fields: Collection[str] | None = None,
 ) -> ModifySafetyIntent:
     """Prove whether a replacement can increase exposure or reserved margin."""
     from flinttrade_core.models import Order  # noqa: PLC0415
@@ -1453,6 +1490,7 @@ async def classify_modify_intent(
     else:
         selected, fallback = matches[0], None
     current = _normalise_authoritative_order(selected, fallback)
+    _recover_omitted_modify_fields(changes, current, requested_fields, adapter_id)
     if current["status"] not in _ACTIVE_ORDER_STATUSES:
         raise PortfolioSafetyStateError("Authoritative order is not active and modifiable")
     if (

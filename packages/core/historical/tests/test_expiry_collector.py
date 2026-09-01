@@ -140,6 +140,14 @@ class TestGetPastExpiries:
             result = collector.get_past_expiries("NIFTY", months=3)
         assert "240101" not in result
 
+    def test_official_dashed_expiries_are_chronological(self):
+        collector = self._make_collector(["02-APR-25", "26-MAR-25"])
+        with patch("flinttrade_historical.expiry_collector.date") as mock_date:
+            mock_date.today.return_value = date(2026, 3, 31)
+            mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
+            result = collector.get_past_expiries("NIFTY", months=24)
+        assert result == ["26-MAR-25", "02-APR-25"]
+
 
 # ======================================================================
 # download_expiry_data — mock download

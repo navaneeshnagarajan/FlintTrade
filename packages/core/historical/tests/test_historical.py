@@ -400,6 +400,17 @@ class TestExpiryInfo:
         nearest = info.nearest(date(2026, 3, 27))
         assert nearest == "260402"
 
+    def test_official_dashed_expiry_participates_in_selection(self):
+        from flinttrade_historical.expiry_manager import ExpiryInfo
+
+        info = ExpiryInfo(
+            symbol="NIFTY", exchange="NFO",
+            expiry_dates=["26-MAR-26", "02-APR-26"],
+        )
+
+        assert info.nearest(date(2026, 3, 20)) == "26-MAR-26"
+        assert info.monthly() == ["26-MAR-26", "02-APR-26"]
+
     def test_nearest_none_if_all_past(self):
         from flinttrade_historical.expiry_manager import ExpiryInfo
         info = ExpiryInfo(
@@ -446,9 +457,21 @@ class TestExpiryManager:
         mock_client.expiry.return_value = {"expiry": ["260326", "260402", "260409"]}
 
         mgr = ExpiryManager(mock_client)
-        info = mgr.get_expiries("NIFTY", "NFO")
+        info = mgr.get_expiries("NIFTY", "NFO", instrumenttype="options")
         assert info.count == 3
-        mock_client.expiry.assert_called_once_with("NIFTY", "NFO")
+        mock_client.expiry.assert_called_once_with("NIFTY", "NFO", instrumenttype="options")
+
+    def test_get_expiries_reads_official_data_list(self):
+        from flinttrade_historical.expiry_manager import ExpiryManager
+        mock_client = MagicMock()
+        mock_client.expiry.return_value = {
+            "status": "success",
+            "data": ["26-MAR-26", "02-APR-26"],
+        }
+
+        mgr = ExpiryManager(mock_client)
+        info = mgr.get_expiries("NIFTY", "NFO", instrumenttype="options")
+        assert info.expiry_dates == ["26-MAR-26", "02-APR-26"]
 
     def test_get_expiries_resolves_async_client(self):
         from flinttrade_historical.expiry_manager import ExpiryManager
@@ -457,7 +480,7 @@ class TestExpiryManager:
         mock_client.expiry = AsyncMock(return_value={"expiry": ["260326", "260402"]})
 
         mgr = ExpiryManager(mock_client)
-        info = mgr.get_expiries("NIFTY", "NFO")
+        info = mgr.get_expiries("NIFTY", "NFO", instrumenttype="options")
 
         assert info.expiry_dates == ["260326", "260402"]
         assert mock_client.expiry.await_count == 1
@@ -479,14 +502,43 @@ class TestExpiryManager:
         assert bars[0].contract == "NIFTY26JANFUT"
         assert mock_client.history.await_count == 1
 
+    def test_build_continuous_futures_orders_official_dashed_expiries(self):
+        from flinttrade_core.models import OHLCV
+        from flinttrade_historical.expiry_manager import ExpiryManager
+
+        mock_client = MagicMock()
+        mock_client.expiry.return_value = {"data": ["26-MAR-26", "02-APR-26"]}
+
+        def _history(**kwargs):
+            return [
+                OHLCV(
+                    timestamp=f"{kwargs['start_date']}T09:15:00",
+                    open=100,
+                    high=101,
+                    low=99,
+                    close=100.5,
+                    volume=1000,
+                )
+            ]
+
+        mock_client.history.side_effect = lambda **kwargs: _history(**kwargs)
+
+        mgr = ExpiryManager(mock_client)
+        bars = mgr.build_continuous_futures("NIFTY", "NFO", "1d", "2026-03-01", "2026-04-30")
+
+        requested = [call.kwargs["symbol"] for call in mock_client.history.call_args_list]
+        assert requested[0] == "NIFTY26MARFUT"
+        assert "NIFTY26APRFUT" in requested
+        assert bars[0].contract == "NIFTY26MARFUT"
+
     def test_get_expiries_cached(self):
         from flinttrade_historical.expiry_manager import ExpiryManager
         mock_client = MagicMock()
         mock_client.expiry.return_value = {"expiry": ["260326"]}
 
         mgr = ExpiryManager(mock_client)
-        mgr.get_expiries("NIFTY", "NFO")
-        mgr.get_expiries("NIFTY", "NFO")
+        mgr.get_expiries("NIFTY", "NFO", instrumenttype="options")
+        mgr.get_expiries("NIFTY", "NFO", instrumenttype="options")
         # Only called once due to cache
         assert mock_client.expiry.call_count == 1
 
@@ -496,9 +548,9 @@ class TestExpiryManager:
         mock_client.expiry.return_value = {"expiry": ["260326"]}
 
         mgr = ExpiryManager(mock_client)
-        mgr.get_expiries("NIFTY", "NFO")
+        mgr.get_expiries("NIFTY", "NFO", instrumenttype="options")
         mgr.clear_cache()
-        mgr.get_expiries("NIFTY", "NFO")
+        mgr.get_expiries("NIFTY", "NFO", instrumenttype="options")
         assert mock_client.expiry.call_count == 2
 
     def test_build_futures_symbol(self):
@@ -518,7 +570,7 @@ class TestExpiryManager:
         mock_client.expiry.return_value = {"expiry": ["260326", "260402"]}
 
         mgr = ExpiryManager(mock_client)
-        nearest = mgr.nearest_expiry("NIFTY", "NFO", date(2026, 3, 27))
+        nearest = mgr.nearest_expiry("NIFTY", "NFO", date(2026, 3, 27), instrumenttype="options")
         assert nearest == "260402"
 
 

@@ -93,6 +93,10 @@ class _FakeClient:
         self.calls.append(("multi_quotes", payload))
         return [{"symbol": p["symbol"], "ltp": 100.0} for p in payload]
 
+    async def option_chain(self, symbol, exchange="NFO", expiry=""):
+        self.calls.append(("option_chain", symbol, exchange, expiry))
+        return {}
+
 
 def _adapter(client: _FakeClient) -> OpenAlgoAdapter:
     return OpenAlgoAdapter(default_client=client)
@@ -221,6 +225,16 @@ async def test_reads_forward() -> None:
     pos = await a.positions(_session())
     assert pos == [{"symbol": "RELIANCE", "qty": 10}]
     assert await a.funds(_session()) == {"available": 50000.0}
+
+
+async def test_option_chain_refuses_empty_expiry_without_calling_client() -> None:
+    client = _FakeClient()
+    adapter = _adapter(client)
+
+    with pytest.raises(ValueError, match="expiry_date is required"):
+        await adapter.option_chain(_session(), {"symbol": "NIFTY", "exchange": "NSE_INDEX"})
+
+    assert client.calls == []
 
 
 async def test_quotes_split_symbols() -> None:

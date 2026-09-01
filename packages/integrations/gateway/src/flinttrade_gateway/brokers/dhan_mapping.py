@@ -1085,6 +1085,7 @@ def from_dhan_order(d: dict[str, Any]) -> dict[str, Any]:
         "price": ("price",),
         "trigger_price": ("triggerPrice",),
         "average_price": ("averageTradedPrice",),
+        "disclosed_quantity": ("disclosedQuantity", "disclosed_quantity"),
     }.items():
         value = _present_order_number(d, *source_fields)
         if value is not None:

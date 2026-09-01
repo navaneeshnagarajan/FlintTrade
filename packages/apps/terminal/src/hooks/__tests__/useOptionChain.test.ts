@@ -86,6 +86,16 @@ describe("useOptionChain", () => {
     expect(mockGetOptionChain).not.toHaveBeenCalled();
   });
 
+  it("returns empty/idle when expiry is omitted", () => {
+    const { result } = renderHook(
+      () => useOptionChain("NIFTY", "NFO"),
+      { wrapper: createWrapper() },
+    );
+
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(mockGetOptionChain).not.toHaveBeenCalled();
+  });
+
   it("handles error state", async () => {
     mockGetOptionChain.mockRejectedValue(new Error("Network failure"));
 

@@ -84,6 +84,67 @@ def test_openalgo_config_operator_session_can_rehydrate_raw_key(monkeypatch, tmp
     assert response.get_json()["data"]["api_key"] == "operator-session-secret"
 
 
+def test_openalgo_config_endpoint_persists_telegram_username(monkeypatch, tmp_path):
+    """The UI config surface can provide the username required by /telegram/notify."""
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+
+    app = create_flask_app()
+    app.config["TESTING"] = True
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json={"telegram_username": "linked-trader"},
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    assert response.status_code == 200
+    workspace = json.loads((tmp_path / "workspace.json").read_text(encoding="utf-8"))
+    assert workspace["openalgo"]["telegram_username"] == "linked-trader"
+    assert app.config["CLIENT"].settings.openalgo_telegram_username == "linked-trader"
+
+    get_response = app.test_client().get(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+    assert get_response.status_code == 200
+    assert get_response.get_json()["data"]["telegram_username"] == "linked-trader"
+
+
+def test_openalgo_config_telegram_save_keeps_env_bridge_endpoint(monkeypatch, tmp_path):
+    """A Telegram-only save must not redirect OpenAlgo traffic onto localhost defaults."""
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    monkeypatch.setenv("OPENALGO_HOST", "http://bridge.example:5000")
+    monkeypatch.setenv("OPENALGO_PORT", "5000")
+    monkeypatch.setenv("OPENALGO_WS_PORT", "8765")
+    monkeypatch.setenv("OPENALGO_API_KEY", "env-bridge-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+
+    app = create_flask_app()
+    app.config["TESTING"] = True
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json={"telegram_username": "linked-trader"},
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    assert response.status_code == 200
+    assert app.config["CLIENT"].settings.openalgo_telegram_username == "linked-trader"
+    assert app.config["CLIENT"].settings.openalgo_host == "http://bridge.example:5000"
+    assert app.config["CLIENT"].settings.openalgo_api_key == "env-bridge-key"
+    assert app.config["CLIENT"]._base == "http://bridge.example:5000/api/v1"
+
+
 def test_openalgo_config_endpoint_initialises_fresh_workspace(monkeypatch, tmp_path):
     """A native first run can save OpenAlgo settings without a pre-existing workspace.json."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
@@ -139,6 +200,7 @@ def test_openalgo_config_endpoint_initialises_fresh_workspace(monkeypatch, tmp_p
         "api_key_configured": True,
         "api_key_last4": "-key",
         "host": "http://127.0.0.1",
+        "telegram_username": "",
         "port": 5001,
         "ws_port": 8766,
     }

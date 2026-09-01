@@ -38,9 +38,9 @@ mkdir -p "$EXTERNAL_DIR"
 # ---------------------------------------------------------------------------
 # Associative arrays (declare -A) require bash 4+, but macOS ships bash 3.2,
 # so the pin/repo tables are resolved by a case function instead.
-# OpenAlgo v2.0.1.1 — synced 2026-05-21. Brings GTT orders,
-# NCO/MCX_INDEX/GLOBAL_INDEX exchanges, WhatsApp bot, IIFL Capital,
-# FERNET_SALT rotation, and ProxyFix-style forwarded-IP gating.
+# OpenAlgo v2.0.2.2 — verified 2026-08-29. Includes the v2.0.2.2 REST
+# contracts used by FlintTrade plus upstream eventlet-boundary stability and
+# broker-log credential redaction hardening.
 dep_repo() {
     case "$1" in
         openalgo) echo "https://github.com/marketcalls/openalgo.git" ;;
@@ -49,7 +49,7 @@ dep_repo() {
 }
 dep_pin() {
     case "$1" in
-        openalgo) echo "7e48b2e8b9b682347c2985f6d7339541bcee70c7" ;;
+        openalgo) echo "ef1f6b9c2165607ae4c01edb9a3e189e26596d4d" ;;
         *) return 1 ;;
     esac
 }

@@ -685,9 +685,10 @@ class TestLoadHolidays:
         import asyncio
         from flinttrade_automation.cron_manager import CronManager
 
+        year = datetime.now(IST).year
         payloads = [
-            {"holidays": ["2026-01-26"]},
-            {"holidays": ["2027-01-26"]},
+            {"holidays": [f"{year}-01-26"]},
+            {"holidays": [f"{year}-08-15"]},
         ]
 
         async def holidays(**_kwargs):
@@ -700,7 +701,7 @@ class TestLoadHolidays:
         asyncio.run(cron.load_holidays())
 
         assert cron.holidays is retained_reference
-        assert retained_reference == {"2027-01-26"}
+        assert retained_reference == {f"{year}-08-15"}
 
     def test_failed_refresh_retains_the_last_authoritative_calendar(self):
         import asyncio

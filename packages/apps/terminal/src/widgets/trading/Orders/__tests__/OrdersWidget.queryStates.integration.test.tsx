@@ -55,6 +55,7 @@ const ORDER = {
   pricetype: "LIMIT",
   product: "MIS",
   order_status: "open",
+  disclosedQuantity: "0",
 };
 
 function renderWidget() {

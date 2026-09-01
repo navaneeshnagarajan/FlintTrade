@@ -74,6 +74,45 @@ def test_rejects_invalid_dates_and_unrelated_envelope_metadata() -> None:
         {"status": "success", "year": 2026, "data": []},
         {"status": "success", "year": 2026, "data": {}},
         {"holidays": []},
+        {"status": "success", "year": 2026, "data": ["2025-01-26"]},
+        {
+            "status": "success",
+            "year": 2026,
+            "data": [{"date": "2025-01-26", "holiday_type": "TRADING_HOLIDAY"}],
+        },
+        ["2025-01-26"],
+        {
+            "status": "success",
+            "year": 2026,
+            "data": [
+                {
+                    "date": "2026-01-26",
+                    "holiday_type": "SPECIAL_SESSION",
+                    "closed_exchanges": [],
+                    "open_exchanges": [
+                        {"exchange": "NSE", "start_time": "bad", "end_time": 1_772_562_300_000},
+                    ],
+                }
+            ],
+        },
+        {
+            "status": "success",
+            "year": 2026,
+            "data": [
+                {
+                    "date": "2026-01-26",
+                    "holiday_type": "SPECIAL_SESSION",
+                    "closed_exchanges": [],
+                    "open_exchanges": [
+                        {
+                            "exchange": "NSE",
+                            "start_time": 1_772_562_300_000,
+                            "end_time": 1_772_537_400_000,
+                        },
+                    ],
+                }
+            ],
+        },
     ],
 )
 def test_rejects_non_authoritative_market_calendar_envelopes(payload: Any) -> None:
@@ -89,6 +128,75 @@ def test_rejects_non_authoritative_market_calendar_envelopes(payload: Any) -> No
 )
 def test_accepts_supported_authoritative_market_calendar_envelopes(payload: Any) -> None:
     assert is_authoritative_market_calendar(payload, expected_year=2026)
+
+
+def test_clock_time_special_session_is_authoritative() -> None:
+    payload = {
+        "status": "success",
+        "year": 2026,
+        "data": [
+            {
+                "date": "2026-11-08",
+                "holiday_type": "SPECIAL_SESSION",
+                "closed_exchanges": ["NSE"],
+                "open_exchanges": [
+                    {"exchange": "NSE", "start_time": "18:00", "end_time": "19:00"},
+                ],
+            }
+        ],
+    }
+
+    assert is_authoritative_market_calendar(payload, expected_year=2026)
+    rows = normalise_market_calendar(payload)
+    assert rows[0]["open_exchanges"] == [
+        {"exchange": "NSE", "start_time": "18:00", "end_time": "19:00"},
+    ]
+
+
+def test_cross_midnight_clock_session_is_authoritative() -> None:
+    payload = {
+        "status": "success",
+        "year": 2026,
+        "data": [
+            {
+                "date": "2026-04-17",
+                "holiday_type": "SPECIAL_SESSION",
+                "closed_exchanges": ["MCX"],
+                "open_exchanges": [
+                    {"exchange": "MCX", "start_time": "18:00", "end_time": "00:15"},
+                ],
+            }
+        ],
+    }
+
+    assert is_authoritative_market_calendar(payload, expected_year=2026)
+    assert normalise_market_calendar(payload)[0]["open_exchanges"][0]["end_time"] == "00:15"
+
+
+def test_malformed_declared_session_closes_that_exchange() -> None:
+    rows = normalise_market_calendar(
+        {
+            "status": "success",
+            "year": 2026,
+            "data": [
+                {
+                    "date": "2026-03-03",
+                    "holiday_type": "TRADING_HOLIDAY",
+                    "closed_exchanges": ["NSE"],
+                    "open_exchanges": [
+                        {
+                            "exchange": "MCX",
+                            "start_time": "not-a-time",
+                            "end_time": "23:55",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert rows[0]["closed_exchanges"] == ["MCX", "NSE"]
+    assert rows[0]["open_exchanges"] == []
 
 
 def test_incomplete_trading_holiday_row_fails_closed_for_all_exchanges() -> None:
