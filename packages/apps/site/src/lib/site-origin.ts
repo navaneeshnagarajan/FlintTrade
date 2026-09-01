@@ -67,7 +67,7 @@ function vercelEnvHost(env?: SiteOriginEnvHints): ParsedHost | null {
   if (!raw) {
     return null;
   }
-  return parseRequestHost(firstHop(raw.replace(/^https?:\/\//i, '')));
+  return parseRequestHost(raw.replace(/^https?:\/\//i, ''));
 }
 
 function isLoopback(hostname: string): boolean {
@@ -103,16 +103,20 @@ export function siteOriginFrom(
   request?: SiteOriginRequestHints,
   env?: SiteOriginEnvHints,
 ): string {
-  for (const raw of [request?.forwardedHost, request?.host]) {
-    const hop = firstHop(raw);
-    if (!hop) {
-      continue;
-    }
-    const parsed = parseRequestHost(hop);
-    if (!parsed || !isAllowedHost(parsed.hostname, env)) {
-      continue;
-    }
-    return originFromParsed(parsed, request?.forwardedProto);
+  const directHop = firstHop(request?.host);
+  const directHost = directHop ? parseRequestHost(directHop) : null;
+  const forwardedHop = firstHop(request?.forwardedHost);
+  const forwardedHost = forwardedHop ? parseRequestHost(forwardedHop) : null;
+
+  if (
+    forwardedHost &&
+    isAllowedHost(forwardedHost.hostname, env) &&
+    (!isLoopback(forwardedHost.hostname) || (directHost !== null && isLoopback(directHost.hostname)))
+  ) {
+    return originFromParsed(forwardedHost, request?.forwardedProto);
+  }
+  if (directHost && isAllowedHost(directHost.hostname, env)) {
+    return originFromParsed(directHost, request?.forwardedProto);
   }
 
   const vercelHost = vercelEnvHost(env);

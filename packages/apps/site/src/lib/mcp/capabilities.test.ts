@@ -89,6 +89,7 @@ describe('docs index generation', () => {
     const headerSource = readFileSync(resolve(process.cwd(), 'src/components/site-header.tsx'), 'utf8');
     const footerSource = readFileSync(resolve(process.cwd(), 'src/components/site-footer.tsx'), 'utf8');
     const downloadSource = readFileSync(resolve(process.cwd(), 'src/app/download/page.tsx'), 'utf8');
+    const webInstallSource = readFileSync(resolve(process.cwd(), 'src/lib/web-install-commands.ts'), 'utf8');
     const desktopDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/DESKTOP.md');
 
     // The download surface distinguishes the source-built web app from the
@@ -96,8 +97,10 @@ describe('docs index generation', () => {
     expect(headerSource).toContain("href: '/download'");
     expect(pageSource).toContain('href="/download"');
     expect(pageSource).toContain('Install the web app');
-    expect(pageSource).toContain('web-install.sh');
-    expect(pageSource).toContain('web-install.ps1');
+    expect(pageSource).toContain('WEB_INSTALL_COMMANDS');
+    expect(downloadSource).toContain('WEB_INSTALL_COMMANDS');
+    expect(webInstallSource).toContain('web-install.sh');
+    expect(webInstallSource).toContain('web-install.ps1');
     expect(pageSource).not.toContain('Download desktop app');
     expect(downloadSource).toContain('install.sh | bash');
     expect(downloadSource).toContain('install.ps1 | iex');

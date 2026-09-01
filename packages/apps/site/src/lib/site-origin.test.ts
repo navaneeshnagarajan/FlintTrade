@@ -82,6 +82,22 @@ describe('site origin', () => {
     expect(siteOriginFrom({ host: '[::1]:3000' })).toBe('http://[::1]:3000');
   });
 
+  it('ignores a forwarded loopback host when the direct Host is public', () => {
+    expect(
+      siteOriginFrom({
+        host: 'flinttrade.vercel.app',
+        forwardedHost: 'localhost:9999',
+        forwardedProto: 'http',
+      }),
+    ).toBe(CANONICAL_SITE_ORIGIN);
+  });
+
+  it('does not parse VERCEL_URL as a forwarded-host list', () => {
+    expect(
+      siteOriginFrom(undefined, { VERCEL_URL: 'evil.example, preview-abc.vercel.app' }),
+    ).toBe(CANONICAL_SITE_ORIGIN);
+  });
+
   it('does not trust an arbitrary third-party vercel.app deployment', () => {
     expect(siteOriginFrom({ host: 'attacker-project.vercel.app' })).toBe(CANONICAL_SITE_ORIGIN);
   });

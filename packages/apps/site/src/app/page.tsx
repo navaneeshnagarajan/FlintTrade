@@ -9,6 +9,7 @@ import { SiteHeader } from '@/components/site-header';
 import { listPackages } from '@/lib/mcp/capabilities';
 import { flinttradeAsset } from '@/lib/site-assets';
 import { hostedMcpUrl, resolveSiteOrigin } from '@/lib/site-origin';
+import { WEB_INSTALL_COMMANDS } from '@/lib/web-install-commands';
 
 const featureCards = [
   {
@@ -55,19 +56,6 @@ const welcomeFeatures = [
   'Explore, Practice, and Live safety modes',
   'Option chain, Greeks, order flow, and depth',
   'Strategy lab, SIP tracking, and AI context',
-] as const;
-
-// Byte-identical to the primary commands on /download. Do not point these at
-// /install.sh or /install.ps1 — those are the gated Electron shell scripts.
-const webInstallCommands = [
-  {
-    platform: 'macOS / Linux',
-    command: 'curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash',
-  },
-  {
-    platform: 'Windows 10/11',
-    command: 'irm https://flinttrade.vercel.app/web-install.ps1 | iex',
-  },
 ] as const;
 
 // Eight debris particles; offsets/delays are nth-child CSS in globals.css.
@@ -130,7 +118,7 @@ export default async function HomePage() {
           </div>
           <div className="hero-install" aria-labelledby="hero-web-install">
             <p id="hero-web-install">Install the self-hosted web app. Nothing else needs to be installed first.</p>
-            {webInstallCommands.map((entry) => (
+            {WEB_INSTALL_COMMANDS.map((entry) => (
               <div className="code-panel" key={entry.platform}>
                 <header>
                   <span>{entry.platform}</span>
