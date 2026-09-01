@@ -18,6 +18,7 @@ from flinttrade_core.l2_state import (
     _greek_contributions,
     _portfolio_greeks,
     _project_unresolved_reservations,
+    _recover_omitted_modify_fields,
     compute_local_daily_pnl,
     gather_safety_state,
 )
@@ -2155,3 +2156,18 @@ async def test_gather_safety_state_refuses_non_default_openalgo_selector() -> No
             "openalgo",
             account_id="second-account",
         )
+
+
+def test_recover_omitted_disclosed_quantity_required_for_full_replacement() -> None:
+    changes: dict[str, object] = {}
+    with pytest.raises(PortfolioSafetyStateError, match="disclosed quantity"):
+        _recover_omitted_modify_fields(changes, {}, {"quantity"}, "openalgo")
+    with pytest.raises(PortfolioSafetyStateError, match="disclosed quantity"):
+        _recover_omitted_modify_fields(changes, {}, {"quantity"}, "dhan")
+
+
+def test_recover_omitted_disclosed_quantity_skipped_for_partial_modify_brokers() -> None:
+    changes: dict[str, object] = {}
+    _recover_omitted_modify_fields(changes, {}, {"quantity"}, "groww")
+    _recover_omitted_modify_fields(changes, {}, {"quantity"}, "indmoney")
+    assert "disclosed_quantity" not in changes

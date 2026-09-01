@@ -19,6 +19,7 @@ import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 const mockUseOrders = vi.fn();
 const mockUseBrokerConnected = vi.fn();
 const mockMode = vi.hoisted(() => ({ value: "live" }));
+const mockBrokerType = vi.hoisted(() => ({ value: "" }));
 const mockCancelOrder = vi.hoisted(() => vi.fn());
 const mockModifyOrder = vi.hoisted(() => vi.fn());
 
@@ -32,7 +33,15 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
 
 vi.mock("@/hooks/useAccountReadsEnabled", () => ({
   useAccountReadsEnabled: () => mockUseBrokerConnected(),
-  useAccountReadContext: () => ({
+  useAccountReadContext: () => {
+    const brokerType = mockBrokerType.value || (
+      mockMode.value === "explore"
+        ? "mock"
+        : mockMode.value === "practice"
+          ? "sandbox"
+          : "openalgo"
+    );
+    return {
     identity: {
       mode: mockMode.value,
       scopeKey:
@@ -40,19 +49,15 @@ vi.mock("@/hooks/useAccountReadsEnabled", () => ({
           ? "explore:mock:default"
           : mockMode.value === "practice"
             ? "practice:sandbox:default"
-            : "live:openalgo:test",
-      brokerType:
-        mockMode.value === "explore"
-          ? "mock"
-          : mockMode.value === "practice"
-            ? "sandbox"
-            : "openalgo",
+            : `live:${brokerType}:test`,
+      brokerType,
       accountId: "default",
     },
     enabled: mockUseBrokerConnected(),
     host: "",
     apiKey: "",
-  }),
+    };
+  },
 }));
 
 vi.mock("@/hooks/useTrackBehavior", () => ({
@@ -137,6 +142,7 @@ describe("OrdersWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockMode.value = "live";
+    mockBrokerType.value = "";
     mockCancelOrder.mockReset();
     mockCancelOrder.mockResolvedValue(undefined);
     mockModifyOrder.mockReset();
@@ -366,6 +372,24 @@ describe("OrdersWidget", () => {
     renderWidget();
 
     expect(screen.getByLabelText("Modify order ORD123")).toBeDisabled();
+  });
+
+  it("keeps Modify enabled on Groww when disclosed quantity is omitted", () => {
+    mockBrokerType.value = "groww";
+    const { disclosedQuantity: _omitted, ...unknownDisclosure } = OPEN_ORDER;
+    mockUseOrders.mockReturnValue(queryResult({ data: [unknownDisclosure] }));
+    renderWidget();
+
+    expect(screen.getByLabelText("Modify order ORD123")).toBeEnabled();
+  });
+
+  it("keeps Modify enabled in Practice when disclosed quantity is omitted", () => {
+    mockMode.value = "practice";
+    const { disclosedQuantity: _omitted, ...unknownDisclosure } = OPEN_ORDER;
+    mockUseOrders.mockReturnValue(queryResult({ data: [unknownDisclosure] }));
+    renderWidget();
+
+    expect(screen.getByLabelText("Modify order ORD123")).toBeEnabled();
   });
 
   it("forwards an explicit zero disclosed quantity instead of keeping the recovered value", async () => {

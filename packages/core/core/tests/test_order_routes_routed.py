@@ -1070,6 +1070,45 @@ def test_modify_recovers_omitted_trigger_and_disclosed_from_orderbook() -> None:
     assert "disclosed_quantity" not in kw["order"]["_requested_change_fields"]
 
 
+def test_groww_modify_without_disclosed_quantity_still_dispatches() -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    safety = _passing_safety()
+    safety.l5_kill.validate.return_value = MagicMock(passed=True)
+    app, adapter, _registry = _app_with_native_state(
+        router,
+        safety,
+        adapter_id="groww",
+        account_id="G1",
+    )
+    adapter.order_book = AsyncMock(
+        return_value=[
+            {
+                "orderid": "OA-1",
+                "status": "OPEN",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "action": "BUY",
+                "quantity": "1",
+                "filled_quantity": "0",
+                "price": "100",
+                "pricetype": "LIMIT",
+                "product": "MIS",
+            }
+        ]
+    )
+
+    response = app.test_client().post(
+        "/api/v1/orders/groww/modify",
+        json={**_MODIFY_BODY, "account_id": "G1"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    kw = router.modify_order.await_args.kwargs
+    assert "disclosed_quantity" not in kw["changes"]
+
+
 def test_modify_without_recoverable_disclosed_quantity_fails_closed() -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)

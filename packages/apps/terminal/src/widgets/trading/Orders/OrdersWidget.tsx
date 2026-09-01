@@ -154,12 +154,30 @@ export function toOrderRow(o: RawOrderRecord): OrderRow {
   };
 }
 
+/** Brokers whose modify contract is a full replacement and needs disclosure. */
+const FULL_REPLACEMENT_DISCLOSURE_BROKERS = new Set([
+  "openalgo",
+  "dhan",
+  "upstox",
+  "kotakneo",
+]);
+
+function requiresAuthoritativeDisclosure(
+  identity: Pick<AccountAuthorityIdentity, "brokerType" | "mode">,
+): boolean {
+  if (identity.mode === "explore" || identity.mode === "practice") return false;
+  return FULL_REPLACEMENT_DISCLOSURE_BROKERS.has(identity.brokerType.toLowerCase());
+}
+
 /**
  * A row qualifies for Modify only when every field the gated modify route
  * requires is present and valid — otherwise the request would be rejected
  * (or worse, mis-normalised). Fail closed.
  */
-function canModify(row: OrderRow): boolean {
+function canModify(
+  row: OrderRow,
+  identity: Pick<AccountAuthorityIdentity, "brokerType" | "mode">,
+): boolean {
   return (
     row.orderId != null &&
     row.isOpen &&
@@ -168,7 +186,7 @@ function canModify(row: OrderRow): boolean {
     VALID_ACTIONS.has(row.action) &&
     VALID_ORDER_TYPES.has(row.orderType) &&
     VALID_PRODUCTS.has(row.product) &&
-    row.hasDisclosedQuantity &&
+    (!requiresAuthoritativeDisclosure(identity) || row.hasDisclosedQuantity) &&
     (!(row.orderType === "SL" || row.orderType === "SL-M") || row.triggerPriceNum > 0)
   );
 }
@@ -522,7 +540,7 @@ function OrdersWidget(_props: WidgetProps) {
         !actionGateRef.current
         || !intent
         || intent.row.orderId == null
-        || !canModify(intent.row)
+        || !canModify(intent.row, intent.identity)
       ) return;
       const mutationIdentity = runWithMatchingAccountAuthority(
         intent.identity,
@@ -651,10 +669,10 @@ function OrdersWidget(_props: WidgetProps) {
                     identity: captureAccountAuthority(currentIdentity),
                   });
                 }}
-                disabled={!canManageOrders || actionPending || !canModify(r)}
+                disabled={!canManageOrders || actionPending || !canModify(r, currentIdentity)}
                 title={
                   disabledReason ??
-                  (!canModify(r) ? "Order details incomplete — modify from your broker app" : `Modify order ${r.orderId}`)
+                  (!canModify(r, currentIdentity) ? "Order details incomplete — modify from your broker app" : `Modify order ${r.orderId}`)
                 }
                 aria-label={`Modify order ${r.orderId ?? r.symbol}`}
                 className="h-auto w-auto p-0.5 text-text-muted hover:text-accent disabled:opacity-40"
