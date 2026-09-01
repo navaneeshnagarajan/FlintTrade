@@ -3,29 +3,6 @@ on:
   pull_request:
     branches: [main, dev]
     types: [opened, synchronize, ready_for_review, reopened]
-    paths-ignore:
-      # NOTE: '**.md', 'docs/**' and 'packages/apps/site/**' are deliberately NOT
-      # ignored. python-tests is the only job that runs
-      # tests/test_windows_command_docs.py — the guard that stops a Windows setup
-      # page from telling the reader to run `make`, or a shell fence from chaining
-      # with '&&'. Ignoring documentation skipped precisely the job that polices
-      # documentation, so a docs-only PR reintroducing the defect merged green.
-      # The heavy lanes stay off doc/site edits via the `changed-surfaces`
-      # classifier below rather than via paths-ignore.
-      #
-      # NOTE: flinttrade-design/ is NOT ignored — its tracked content is the
-      # baselines/ artefacts that this workflow's baseline-verification job +
-      # test_baseline_artifacts.py consume, so a baseline change MUST trigger
-      # the matrix (ignoring it silently skipped the very job that guards it).
-      - '.local/**'
-      - 'notice'
-      - 'LICENSE'
-      - '.gitignore'
-      - '.gitattributes'
-      - '.editorconfig'
-      - '.github/workflows/claude*.yml'
-      - '.github/workflows/status-report.yml'
-      - '.github/ISSUE_TEMPLATE/**'
   push:
     branches: [main, dev]
     paths-ignore:
@@ -137,12 +114,16 @@ jobs:
           changed=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")
           echo "Changed files:"
           echo "$changed"
-          # Anything that is not a Markdown file, not under docs/ and not under
-          # the Next.js site is code, so the expensive lanes must run.
-          if printf '%s\n' "$changed" | grep -qvE '(\.md$|^docs/|^packages/apps/site/)'; then
+          # Anything that is not Markdown/docs/site or one of the former ignored
+          # surfaces (LICENSE, .local/**, notice, .git*, .editorconfig, claude*
+          # workflows, status-report, ISSUE_TEMPLATE) is code. Former ignored
+          # surfaces alone now classify non-code so they do not run the
+          # widget/Rust/Electron lanes. Mixed with ordinary code -> code=true.
+          # Unresolvable ranges already fail open above.
+          if printf '%s\n' "$changed" | grep -qvE '(\.md$|^docs/|^packages/apps/site/|^\.local/|^notice$|^LICENSE$|^\.gitignore$|^\.gitattributes$|^\.editorconfig$|^\.github/workflows/claude.*\.yml$|^\.github/workflows/status-report\.yml$|^\.github/ISSUE_TEMPLATE/)'; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Documentation/site-only change — expensive lanes skipped."
+            echo "Documentation/site-only or former-ignored-only change — expensive lanes skipped."
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
 
