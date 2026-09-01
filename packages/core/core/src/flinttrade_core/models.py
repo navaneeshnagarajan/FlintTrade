@@ -366,8 +366,10 @@ class OrderStatus(BaseModel):
     filled_quantity: str = ""
     average_price: str = ""
     timestamp: str = ""
-    trigger_price: str = "0"
-    disclosed_quantity: str = "0"
+    # Blank means the broker omitted the field. Do not invent ``"0"`` here —
+    # reconciliation treats a missing trigger as critical omitted evidence.
+    trigger_price: str = ""
+    disclosed_quantity: str = ""
 
 
 # ---------------------------------------------------------------------------

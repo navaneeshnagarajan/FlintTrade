@@ -187,6 +187,34 @@ async def test_orderbook_preserves_trigger_and_disclosed_aliases() -> None:
 
 
 @pytest.mark.asyncio
+async def test_orderbook_leaves_omitted_trigger_and_disclosed_blank() -> None:
+    """Omitted broker trigger/disclosure must stay blank, not a synthesised zero."""
+    client = _client()
+    client._post = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "status": "success",
+            "data": [
+                {
+                    "orderid": "OA-LIMIT",
+                    "status": "open",
+                    "symbol": "RELIANCE",
+                    "pricetype": "LIMIT",
+                }
+            ],
+        }
+    )
+
+    try:
+        rows = await client.orderbook()
+    finally:
+        await client.close()
+
+    assert len(rows) == 1
+    assert rows[0].trigger_price == ""
+    assert rows[0].disclosed_quantity == ""
+
+
+@pytest.mark.asyncio
 async def test_place_options_multi_order_puts_pricetype_product_on_legs() -> None:
     """OptionsMultiOrderSchema rejects unknown top-level pricetype/product."""
     from flinttrade_core.models import Action, OptionType, OptionsLeg, OptionsMultiOrder, PriceType, Product
