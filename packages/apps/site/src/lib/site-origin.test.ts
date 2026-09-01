@@ -67,14 +67,23 @@ describe('site origin', () => {
     ).toBe('http://localhost:3000');
   });
 
-  it('allows canonical, VERCEL_URL, vercel.app aliases, and loopback hosts', () => {
+  it('allows only the canonical host, the exact VERCEL_URL, and loopback hosts', () => {
     expect(siteOriginFrom({ host: 'flinttrade.vercel.app' })).toBe('https://flinttrade.vercel.app');
     expect(
       siteOriginFrom({ host: 'custom.example' }, { VERCEL_URL: 'https://custom.example' }),
     ).toBe('https://custom.example');
-    expect(siteOriginFrom({ host: 'preview-abc.vercel.app' })).toBe('https://preview-abc.vercel.app');
+    expect(
+      siteOriginFrom(
+        { host: 'preview-abc.vercel.app' },
+        { VERCEL_URL: 'preview-abc.vercel.app' },
+      ),
+    ).toBe('https://preview-abc.vercel.app');
     expect(siteOriginFrom({ host: '127.0.0.1:3000' })).toBe('http://127.0.0.1:3000');
     expect(siteOriginFrom({ host: '[::1]:3000' })).toBe('http://[::1]:3000');
+  });
+
+  it('does not trust an arbitrary third-party vercel.app deployment', () => {
+    expect(siteOriginFrom({ host: 'attacker-project.vercel.app' })).toBe(CANONICAL_SITE_ORIGIN);
   });
 
   it('rejects malformed and injected host values', () => {

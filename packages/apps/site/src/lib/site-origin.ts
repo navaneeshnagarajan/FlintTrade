@@ -75,24 +75,6 @@ function isLoopback(hostname: string): boolean {
   return host === 'localhost' || host === '127.0.0.1' || host === '::1';
 }
 
-function isVercelAppAlias(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (!host.endsWith('.vercel.app')) {
-    return false;
-  }
-  const labels = host.split('.');
-  if (labels.length < 3) {
-    return false;
-  }
-  return labels.every(
-    (label) =>
-      label.length > 0 &&
-      /^[a-z0-9-]+$/.test(label) &&
-      !label.startsWith('-') &&
-      !label.endsWith('-'),
-  );
-}
-
 function isAllowedHost(hostname: string, env?: SiteOriginEnvHints): boolean {
   const host = hostname.toLowerCase();
   if (isLoopback(host)) {
@@ -105,7 +87,7 @@ function isAllowedHost(hostname: string, env?: SiteOriginEnvHints): boolean {
   if (vercelHost && host === vercelHost) {
     return true;
   }
-  return isVercelAppAlias(host);
+  return false;
 }
 
 function originFromParsed(parsed: ParsedHost, protoHint?: string | null): string {
