@@ -609,7 +609,7 @@ function KnowledgeSection() {
         </h3>
         <p className="text-xs text-text-secondary leading-relaxed">
           Query RAG-indexed project docs, order-safety notes, strategy guides, and custom notes.
-          Ranked by relevance using ChromaDB vector search.
+          Ranked by relevance using the local sqlite3/NumPy vector store.
         </p>
       </Card>
 
@@ -655,7 +655,7 @@ function KnowledgeSection() {
               mutation.error.message.toLowerCase().includes("rag runtime disabled")
                 ? "Knowledge service is disabled. Enable FLINTTRADE_RAG_ENABLED and restart."
                 : mutation.error instanceof Error &&
-                    /rag engine not available|chroma/i.test(mutation.error.message)
+                    /rag engine not available/i.test(mutation.error.message)
                   ? "Knowledge service unavailable. Install the FlintTrade RAG dependencies and restart."
                 : mutation.error instanceof Error
                   ? mutation.error.message
@@ -823,7 +823,7 @@ function AISettingsSection() {
             },
             {
               title: "RAG Settings",
-              desc: "ChromaDB collection path, embedding model, chunk size, retrieval top-k. Controls knowledge base indexing.",
+              desc: "Local vector-store path, embedding model, chunk size, retrieval top-k. Controls knowledge base indexing.",
             },
           ].map((item) => (
             <div
@@ -841,7 +841,7 @@ function AISettingsSection() {
         <Badge className="bg-atm-bg text-warning text-xs">Coming soon</Badge>
         <p className="text-xs text-text-muted mt-2">
           Settings form controls will be available in the next release. Use workspace.json
-          directly to configure provider, model, and ChromaDB paths in the meantime.
+          directly to configure provider, model, and local vector-store paths in the meantime.
         </p>
       </Card>
     </div>

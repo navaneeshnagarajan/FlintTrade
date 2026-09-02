@@ -1,6 +1,6 @@
 """Zero-I/O memory backends for the canonical FlintTrade memory subsystem.
 
-Complements the ChromaDB-backed TradedMemory (memory.py) by providing a fast,
+Complements the persistent TradedMemory (memory.py) by providing a fast,
 embedding-free, in-memory store suitable for short-lived agent sessions,
 strategy contexts, and intraday state where full vector search is not required.
 
@@ -59,7 +59,7 @@ class MemoryManager:
     """Lightweight in-process memory manager for FlintTrade AI agents.
 
     Stores entries in a plain Python list. Scoring is fully in-process --
-    no ChromaDB or network I/O. Relevance is computed via keyword overlap
+    no vector store or network I/O. Relevance is computed via keyword overlap
     unless the caller supplies embeddings and a similarity function.
 
     Args:

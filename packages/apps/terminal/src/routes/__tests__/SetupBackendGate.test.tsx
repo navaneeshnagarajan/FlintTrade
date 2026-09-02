@@ -40,7 +40,7 @@ describe("SetupBackendGate", () => {
     expect(alert).toHaveTextContent(/start or restart the local FlintTrade backend/i);
     expect(alert).toHaveTextContent(/setup has not advanced/i);
     expect(alert).toHaveAttribute("aria-live", "assertive");
-    expect(alert).toHaveFocus();
+    await waitFor(() => expect(alert).toHaveFocus());
     expect(screen.getByRole("button", { name: "Retry connection" })).toBeEnabled();
     expect(screen.getByRole("link", { name: "Return to welcome" })).toHaveAttribute("href", "/welcome");
 

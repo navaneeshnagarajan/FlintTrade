@@ -11,6 +11,7 @@ Covers:
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -342,6 +343,25 @@ class TestVectorStore:
         coll.upsert.assert_called_once()
         assert coll.upsert.call_args.kwargs["embeddings"] == [[0.1] * 384]
 
+    def test_close_releases_client_once_and_clears_cached_collection(self) -> None:
+        store, _ = self._make_store()
+        client = store._client
+
+        store.close()
+        store.close()
+
+        client.close.assert_called_once_with()
+        assert store._client is None
+        assert store._collection is None
+
+    def test_close_refuses_to_reopen_the_client(self) -> None:
+        store, _ = self._make_store()
+
+        store.close()
+
+        with pytest.raises(RuntimeError, match="vector store is closed"):
+            store._get_client()
+
     def test_upsert_falls_back_to_chroma_embeddings(self) -> None:
         coll = _make_mock_collection(embedding_mode=None)
         provider = MagicMock()
@@ -395,24 +415,28 @@ class TestVectorStore:
         coll.query.assert_called_once_with(query_texts=["second leg"], n_results=1, where=None)
 
     def test_reopens_existing_persistent_collection_without_reindexing(self, tmp_path: Path) -> None:
-        chromadb = pytest.importorskip("chromadb")
-        persist_directory = str(tmp_path / "chroma")
-        old_client = chromadb.PersistentClient(path=persist_directory)
-        old_collection = old_client.get_or_create_collection(
-            "flinttrade_docs",
-            metadata={"hnsw:space": "cosine", "flinttrade_embedding_mode": "external"},
+        persist_directory = str(tmp_path / "vectors")
+        provider = EmbeddingProvider(custom_fn=lambda _texts: [[1.0, 0.0]])
+        old_store = VectorStore(
+            collection_name="flinttrade_docs",
+            persist_directory=persist_directory,
+            embedding_provider=provider,
         )
-        old_collection.upsert(
-            ids=["legacy_0"],
-            documents=["Theta measures time decay."],
-            embeddings=[[1.0, 0.0]],
-            metadatas=[{"source": "legacy.md", "doc_type": "strategy"}],
+        old_store.upsert(
+            [
+                TextChunk(
+                    content="Theta measures time decay.",
+                    chunk_id="legacy_0",
+                    source="legacy.md",
+                    doc_type="strategy",
+                )
+            ]
         )
 
         store = VectorStore(
             collection_name="flinttrade_docs",
             persist_directory=persist_directory,
-            embedding_provider=EmbeddingProvider(custom_fn=lambda _texts: [[1.0, 0.0]]),
+            embedding_provider=provider,
         )
 
         results = store.search("theta", top_k=1, similarity_threshold=0.0)
@@ -422,20 +446,19 @@ class TestVectorStore:
         assert results[0].source == "legacy.md"
 
     def test_unmarked_populated_collection_fails_closed_without_relabelling(self, tmp_path: Path) -> None:
-        chromadb = pytest.importorskip("chromadb")
-        persist_directory = str(tmp_path / "chroma")
-        client = chromadb.PersistentClient(path=persist_directory)
-        collection = client.get_or_create_collection("legacy_docs")
-        collection.upsert(
-            ids=["legacy_0"],
-            documents=["Unknown embedding space"],
-            embeddings=[[1.0, 0.0]],
-        )
+        persist_directory = str(tmp_path / "vectors")
         store = VectorStore(
             collection_name="legacy_docs",
             persist_directory=persist_directory,
             embedding_provider=EmbeddingProvider(custom_fn=lambda _texts: [[1.0, 0.0]]),
         )
+        collection = store._get_collection()
+        collection.upsert(
+            ids=["legacy_0"],
+            documents=["Unknown embedding space"],
+            embeddings=[[1.0, 0.0]],
+        )
+        store._embedding_mode = None
 
         with pytest.raises(RuntimeError, match="embedding mode is unknown"):
             store.search("query")
@@ -443,8 +466,7 @@ class TestVectorStore:
         assert "flinttrade_embedding_mode" not in (store._get_collection().metadata or {})
 
     def test_fresh_persistent_collection_applies_cosine_threshold(self, tmp_path: Path) -> None:
-        pytest.importorskip("chromadb")
-        persist_directory = str(tmp_path / "chroma")
+        persist_directory = str(tmp_path / "vectors")
 
         def _embed(texts: list[str]) -> list[list[float]]:
             return [[0.8, 0.6] if text == "adjust the leg" else [1.0, 0.0] for text in texts]
@@ -590,6 +612,60 @@ class TestRAGPipeline:
             llm_client=llm,
             vector_store=store,
         )
+
+    def test_close_releases_vector_store_once(self) -> None:
+        store = MagicMock()
+        pipeline = RAGPipeline(vector_store=store)
+
+        pipeline.close()
+        pipeline.close()
+
+        store.close.assert_called_once_with()
+
+    def test_close_releases_llm_client_once(self) -> None:
+        llm = MagicMock()
+        pipeline = RAGPipeline(llm_client=llm, vector_store=MagicMock())
+
+        pipeline.close()
+        pipeline.close()
+
+        llm.close.assert_called_once_with()
+
+    def test_close_waits_for_attached_indexer_before_releasing_resources(self) -> None:
+        release_indexer = threading.Event()
+        indexer_started = threading.Event()
+        join_called = threading.Event()
+        store_closed = threading.Event()
+        store = MagicMock()
+        store.close.side_effect = store_closed.set
+        pipeline = RAGPipeline(vector_store=store)
+
+        def index_docs() -> None:
+            indexer_started.set()
+            assert release_indexer.wait(timeout=2.0)
+
+        indexer = threading.Thread(target=index_docs, name="test-rag-indexer")
+        original_join = indexer.join
+
+        def tracked_join(timeout: float | None = None) -> None:
+            join_called.set()
+            original_join(timeout)
+
+        indexer.join = tracked_join  # type: ignore[method-assign]
+        pipeline.attach_indexer_thread(indexer)
+        indexer.start()
+        assert indexer_started.wait(timeout=1.0)
+
+        closer = threading.Thread(target=pipeline.close, name="test-rag-closer")
+        closer.start()
+        assert join_called.wait(timeout=1.0)
+        assert not store_closed.is_set()
+
+        release_indexer.set()
+        closer.join(timeout=2.0)
+        assert not closer.is_alive()
+        assert not indexer.is_alive()
+        store.close.assert_called_once_with()
 
     def test_index_document_returns_chunk_count(self) -> None:
         pipeline = self._make_pipeline()

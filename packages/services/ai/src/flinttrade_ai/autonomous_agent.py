@@ -399,6 +399,7 @@ class AutonomousTrader:
         self._stop_requested = False
         self._square_off_on_stop = False
         self._stop_failure = ""
+        self._learning_thread: threading.Thread | None = None
 
     # ------------------------------------------------------------------
     # Status
@@ -407,6 +408,14 @@ class AutonomousTrader:
     @property
     def status(self) -> AgentStatus:
         return self._status
+
+    def join_background_learning(self, timeout: float | None = None) -> bool:
+        """Wait for leftover post-session reflection before memory is closed."""
+        thread = self._learning_thread
+        if not isinstance(thread, threading.Thread) or thread.ident is None:
+            return True
+        thread.join(timeout)
+        return not thread.is_alive()
 
     @property
     def shutdown_complete(self) -> bool:
@@ -1101,13 +1110,11 @@ class AutonomousTrader:
         if not trades:
             return
         try:
-            # A dedicated DAEMON thread, never joined: asyncio.wait_for over
-            # to_thread would cancel only the coroutine while the blocking
-            # LLM/ChromaDB worker kept running in the DEFAULT executor — which
-            # asyncio.run's teardown joins, so a hung reflection could still
-            # blow the runtime's 30s shutdown join. The daemon thread runs its
-            # own event loop; if it hangs, nothing ever joins it and it dies
-            # with the process.
+            # A dedicated daemon thread stays outside asyncio's default
+            # executor, so asyncio.run teardown never inherits an unbounded
+            # blocking LLM join. If the bounded wait below expires, the
+            # control plane transfers memory cleanup to a separate daemon
+            # waiter; the session thread remains free for operator actions.
             done = threading.Event()
 
             def _runner() -> None:
@@ -1118,7 +1125,9 @@ class AutonomousTrader:
                 finally:
                     done.set()
 
-            threading.Thread(target=_runner, name="agent-learning", daemon=True).start()
+            worker = threading.Thread(target=_runner, name="agent-learning", daemon=True)
+            worker.start()
+            self._learning_thread = worker
             finished = await asyncio.to_thread(done.wait, _LEARNING_TIMEOUT_SECONDS)
             if not finished:
                 logger.warning(
