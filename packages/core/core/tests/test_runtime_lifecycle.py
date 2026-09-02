@@ -255,6 +255,106 @@ async def test_shutdown_drains_admitted_request_before_closing_dependencies() ->
 
 
 @pytest.mark.asyncio
+async def test_shutdown_closes_rag_vector_store() -> None:
+    """Persistent RAG WAL state is checkpointed before process shutdown completes."""
+    runtime = _runtime_app()
+    runtime.rag = MagicMock()
+
+    await runtime.stop()
+
+    runtime.rag.close.assert_called_once_with()
+    runtime.client.close.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_joins_rag_indexer_before_closing_store() -> None:
+    """The auto-index daemon must finish before the vector store handle is closed."""
+    runtime = _runtime_app()
+    started = threading.Event()
+    release = threading.Event()
+    close_while_alive: list[bool] = []
+
+    def indexer_body() -> None:
+        started.set()
+        release.wait(timeout=2.0)
+
+    indexer = threading.Thread(target=indexer_body, name="rag-indexer", daemon=True)
+    rag = MagicMock()
+    rag._indexer_thread = indexer
+
+    def close_store() -> None:
+        close_while_alive.append(indexer.is_alive())
+
+    rag.close.side_effect = close_store
+    runtime.rag = rag
+    indexer.start()
+    assert started.wait(timeout=1.0)
+
+    async def finish_indexer() -> None:
+        await asyncio.sleep(0.05)
+        assert rag.close.call_count == 0
+        release.set()
+
+    await asyncio.gather(runtime.stop(), finish_indexer())
+
+    assert close_while_alive == [False]
+    rag.close.assert_called_once_with()
+    runtime.client.close.assert_awaited_once_with()
+
+
+def test_join_rag_indexer_ignores_unstarted_optional_thread() -> None:
+    """Startup rollback may see an attached indexer that never reached start()."""
+    import flinttrade_core.app as app_module
+
+    rag = MagicMock()
+    rag._indexer_thread = threading.Thread(target=lambda: None, name="rag-indexer")
+
+    app_module._join_rag_indexer(rag)
+
+
+@pytest.mark.asyncio
+async def test_startup_rollback_joins_rag_indexer_before_closing_store() -> None:
+    """A failed start must quiesce the auto-index daemon, not only normal stop()."""
+    from flinttrade_core.app import _LifecycleDeadline
+
+    runtime = _runtime_app()
+    started = threading.Event()
+    release = threading.Event()
+    close_while_alive: list[bool] = []
+
+    def indexer_body() -> None:
+        started.set()
+        release.wait(timeout=2.0)
+
+    indexer = threading.Thread(target=indexer_body, name="rag-indexer", daemon=True)
+    rag = MagicMock()
+    rag._indexer_thread = indexer
+
+    def close_store() -> None:
+        close_while_alive.append(indexer.is_alive())
+
+    rag.close.side_effect = close_store
+    runtime.rag = rag
+    indexer.start()
+    assert started.wait(timeout=1.0)
+
+    async def finish_indexer() -> None:
+        await asyncio.sleep(0.05)
+        assert rag.close.call_count == 0
+        release.set()
+
+    complete, _ = await asyncio.gather(
+        runtime._rollback_startup_dependencies(_LifecycleDeadline.after(2.0)),
+        finish_indexer(),
+    )
+
+    assert complete is True
+    assert close_while_alive == [False]
+    rag.close.assert_called_once_with()
+    runtime.client.close.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
 async def test_shutdown_stops_uploaded_strategies_before_each_router_retirement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

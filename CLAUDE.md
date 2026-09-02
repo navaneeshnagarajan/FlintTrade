@@ -82,7 +82,7 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `engine` | services | Py | 5-layer `SafetySystem`, `gate_order`, order router, scheduler, mode guard, sandbox executor, strategies |
 | `screener` | services | Py | Option chain, OI/PCR/max-pain, IV smile, futures quadrant, portfolio Greeks, RRG, FII/DII |
 | `backtest` | services | Py | Event-driven simulator, 94 template files (132 registered strategy classes), walk-forward, Monte Carlo (library-only), VectorBT (optional extra, not installed by default) |
-| `ai` | services | Py | Multi-provider LLM client (incl. Cerebras + Claude Code OAuth), ChromaDB RAG, ML signals, multi-agent team, sentiment, `agent_backends` registry (Codex streaming; Hermes ACP + Antigravity catalogued) |
+| `ai` | services | Py | Multi-provider LLM client (incl. Cerebras + Claude Code OAuth), local SQLite/NumPy RAG, ML signals, multi-agent team, sentiment, `agent_backends` registry (Codex streaming; Hermes ACP + Antigravity catalogued) |
 | `ditto` | services | Py | Multi-account mirror, margin calc, trailing SL, risk manager (AlgoMirror patterns reimplemented natively) |
 | `automation` | services | Py | Cron, Telegram bot (kill switch), post-market analysis, voice orders |
 | `journal` | services | Py | Trade journal, trade logging, execution analytics, realised P&L |

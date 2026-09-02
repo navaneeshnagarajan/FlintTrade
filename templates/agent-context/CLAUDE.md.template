@@ -119,7 +119,7 @@ Each route lazy-loads its own module. No cross-route code in the initial bundle.
 | HTTP Client | httpx (async) |
 | Models | pydantic |
 | Storage | DuckDB (analytics), QuestDB (ticks, future) |
-| AI/ML | Managed Ollama + ChromaDB + LightGBM |
+| AI/ML | Managed Ollama + local sqlite3/NumPy vector store + LightGBM |
 | Indicators | TA-Lib (batch) + Numba (streaming) — `indicators` package |
 | Backtesting | VectorBT (exploration) + Rust/PyO3 (tick-level, future) |
 | Linting | ruff |
@@ -195,7 +195,7 @@ Two-tier config. No exceptions.
 | `services/engine` | 5-layer safety system, order router, scheduler, base strategy, strategy registry, mode guard |
 | `services/screener` | Option chain, OI analysis, PCR, max pain, futures quadrant, portfolio Greeks, IV |
 | `services/backtest` | Simulator, metrics (Sharpe/Sortino/DD), walk-forward, Monte Carlo, 94 strategy templates |
-| `services/ai` | LLM client (multi-provider), RAG (ChromaDB), signals, sentiment, MCP bridge, advisor |
+| `services/ai` | LLM client (multi-provider), RAG (local sqlite3/NumPy vector store), signals, sentiment, MCP bridge, advisor |
 | `services/automation` | Cron manager, Telegram bot with kill switch, OpenClaw bridge, post-market analysis |
 | `services/ditto` | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager |
 | `services/journal` | Trade journal, execution-quality analytics, and realised P&L tracking |

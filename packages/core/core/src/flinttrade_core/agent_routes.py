@@ -33,6 +33,7 @@ import logging
 import threading
 import uuid
 from datetime import UTC, datetime
+from time import monotonic
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -47,12 +48,126 @@ _AGENT_ACTOR_ID = "autonomous-trader"
 # Single-session runner state.
 _RUNNER: dict[str, Any] = {}
 _RUNNER_LOCK = threading.Lock()
+# Deferred learning-memory closers outlive the runner slot. A later /start
+# replaces ``_RUNNER`` wholesale; process shutdown must still join these.
+_LEARNING_CLEANUP_OWNERS: list[Any] = []
 
 
 def _reset_runner_for_tests() -> None:
     """Clear the runner state (test isolation helper)."""
     with _RUNNER_LOCK:
         _RUNNER.clear()
+        _LEARNING_CLEANUP_OWNERS.clear()
+
+
+def _close_learning_memory(memory: Any) -> None:
+    """Close one learning-memory backend. Safe to call more than once."""
+    close_memory = getattr(memory, "close", None)
+    if callable(close_memory):
+        close_memory()
+
+
+def _finalise_session_learning_memory(
+    trader: Any,
+    *,
+    timeout: float | None = None,
+) -> bool:
+    """Wait for post-session reflection, then close that session's memory."""
+    join_learning = getattr(trader, "join_background_learning", None)
+    if callable(join_learning) and not bool(join_learning(timeout)):
+        return False
+    _close_learning_memory(getattr(trader, "memory", None))
+    return True
+
+
+class _LearningCleanupOwner:
+    """Retain a leftover learner even if the deferred closer never starts."""
+
+    def __init__(self, trader: Any) -> None:
+        self._trader = trader
+        self._thread: threading.Thread | None = None
+        self._finalised = False
+        self._error: BaseException | None = None
+        self._error_reported = False
+
+    def attach_thread(self, thread: threading.Thread) -> None:
+        self._thread = thread
+
+    def run(self) -> None:
+        """Close the leftover learner on the deferred closer thread."""
+        try:
+            _finalise_session_learning_memory(self._trader, timeout=None)
+        except BaseException as exc:
+            self._error = exc
+            self._error_reported = False
+            logger.exception("Deferred learning-memory close failed")
+
+    def join(self, timeout: float | None = None) -> None:
+        if self._thread is not None and self._thread.ident is not None:
+            self._thread.join(timeout)
+            if self._thread.is_alive():
+                return
+            if self._error is None:
+                self._finalised = True
+                return
+            if not self._error_reported:
+                # Fail this shutdown closed. A later shutdown can retry the
+                # finalisation rather than re-raising forever.
+                self._error_reported = True
+                raise self._error
+        try:
+            self._finalised = _finalise_session_learning_memory(self._trader, timeout=timeout)
+        except BaseException as exc:
+            self._error = exc
+            self._error_reported = True
+            self._finalised = False
+            raise
+        if self._finalised:
+            self._error = None
+            self._error_reported = False
+
+    def is_alive(self) -> bool:
+        return not self._finalised
+
+
+def _register_learning_cleanup_owner(owner: Any) -> None:
+    """Retain one deferred closer independently of the current runner slot."""
+    with _RUNNER_LOCK:
+        _LEARNING_CLEANUP_OWNERS[:] = [item for item in _LEARNING_CLEANUP_OWNERS if item.is_alive()]
+        _LEARNING_CLEANUP_OWNERS.append(owner)
+
+
+def _join_learning_cleanup_owners(*, deadline: float) -> bool:
+    """Join leftover session closers. Returns False if any miss the deadline."""
+    with _RUNNER_LOCK:
+        owners = list(_LEARNING_CLEANUP_OWNERS)
+    for owner in owners:
+        try:
+            owner.join(timeout=max(0.0, deadline - monotonic()))
+        except Exception:
+            logger.exception("Autonomous agent learning cleanup failed")
+            return False
+        if owner.is_alive():
+            return False
+    with _RUNNER_LOCK:
+        _LEARNING_CLEANUP_OWNERS[:] = [item for item in _LEARNING_CLEANUP_OWNERS if item.is_alive()]
+    return True
+
+
+def _defer_session_learning_memory_close(trader: Any) -> threading.Thread:
+    """Transfer a timed-out learner's memory cleanup off the session thread."""
+    owner = _LearningCleanupOwner(trader)
+    # Register before start() so a native-thread failure cannot drop the
+    # leftover learner when a later /start replaces ``_RUNNER``.
+    _register_learning_cleanup_owner(owner)
+    cleanup = threading.Thread(
+        target=owner.run,
+        name="agent-learning-close",
+        daemon=True,
+    )
+    cleanup.start()
+    owner.attach_thread(cleanup)
+    return cleanup
 
 
 def _shutdown_event(app: Any) -> threading.Event:
@@ -73,12 +188,16 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
     existing ``GatedChildExecutor``. The shutdown event blocks new sessions but
     deliberately does not short-circuit that reduce-only cleanup path.
     """
+    deadline = monotonic() + max(0.0, float(timeout))
     _shutdown_event(app).set()
     with _RUNNER_LOCK:
         trader = _RUNNER.get("trader")
         thread = _RUNNER.get("thread")
 
     if trader is None and thread is None:
+        if not _join_learning_cleanup_owners(deadline=deadline):
+            logger.error("Autonomous agent learning cleanup did not stop within the shutdown deadline")
+            return False
         return True
     if trader is None or thread is None:
         logger.error("Autonomous agent ownership is incomplete during shutdown")
@@ -90,7 +209,7 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
         except Exception:  # noqa: BLE001 - shutdown must fail closed without leaking details
             logger.exception("Autonomous agent stop request failed")
             return False
-        thread.join(timeout=max(0.0, float(timeout)))
+        thread.join(timeout=max(0.0, deadline - monotonic()))
         if thread.is_alive():
             logger.error("Autonomous agent did not stop within the shutdown deadline")
             return False
@@ -103,6 +222,20 @@ def shutdown_agent_runtime(app: Any, *, timeout: float = 30.0) -> bool:
     if not shutdown_complete:
         failure = str(getattr(trader, "stop_failure", "") or "incomplete square-off")
         logger.error("Autonomous agent shutdown incomplete: %s", failure[:256])
+        return False
+
+    try:
+        if not _finalise_session_learning_memory(
+            trader,
+            timeout=max(0.0, deadline - monotonic()),
+        ):
+            logger.error("Autonomous agent learning did not stop within the shutdown deadline")
+            return False
+    except Exception:  # noqa: BLE001 - persistence finalisation must fail closed
+        logger.exception("Autonomous agent learning-memory close failed")
+        return False
+    if not _join_learning_cleanup_owners(deadline=deadline):
+        logger.error("Autonomous agent learning cleanup did not stop within the shutdown deadline")
         return False
     return True
 
@@ -167,41 +300,40 @@ _FALLBACK_LEARNING_MEMORY: Any | None = None
 def _build_learning_memory() -> Any | None:
     """Construct the agent's learning-memory backend (best-effort).
 
-    Persistent ChromaDB under ``<workspace_dir>/agent_memory`` when the
-    dependency imports, in-process hierarchical fallback otherwise — the
-    loop still runs, it just does not survive a restart (logged honestly).
-    Disabled entirely via workspace ``ai.autonomous_agent.learning.enabled``
-    (default true). Never order-critical: any failure returns ``None`` and
-    the agent trades exactly as before, with no learning tier.
+    Persistent local vector memory under ``<workspace_dir>/agent_memory`` is
+    the default. If that store cannot be constructed, an in-process
+    hierarchical fallback is used for the process lifetime — the loop still
+    runs, it just does not survive a restart (logged honestly). Disabled
+    entirely via workspace ``ai.autonomous_agent.learning.enabled`` (default
+    true). Never order-critical: any failure returns ``None`` and the agent
+    trades exactly as before, with no learning tier.
     """
     try:
         from .workspace import Workspace, workspace_dir  # noqa: PLC0415
 
         if not bool(Workspace().get("ai.autonomous_agent.learning.enabled", True)):
             return None
-        from importlib.util import find_spec  # noqa: PLC0415
-
         from flinttrade_ai.memory import MemoryBackendConfig, create_memory_backend  # noqa: PLC0415
 
-        # TradedMemory imports chromadb lazily (at first use), so probe the
-        # dependency here to fail over at construction time, not mid-session.
-        if find_spec("chromadb") is not None:
+        try:
             return create_memory_backend(
                 MemoryBackendConfig(persist_dir=str(workspace_dir() / "agent_memory"))
             )
-        logger.warning(
-            "chromadb unavailable — agent lessons persist only for this backend "
-            "process (in-process memory), not across restarts"
-        )
-        # Module-level singleton: a per-session instance would make the
-        # fallback write-only — lessons stored at session end would die with
-        # the trader before the next session could ever read them.
-        global _FALLBACK_LEARNING_MEMORY
-        if _FALLBACK_LEARNING_MEMORY is None:
-            _FALLBACK_LEARNING_MEMORY = create_memory_backend(
-                MemoryBackendConfig(backend="hierarchical")
+        except Exception:
+            logger.warning(
+                "Persistent agent memory unavailable — lessons persist only for this "
+                "backend process (in-process memory), not across restarts",
+                exc_info=True,
             )
-        return _FALLBACK_LEARNING_MEMORY
+            # Module-level singleton: a per-session instance would make the
+            # fallback write-only — lessons stored at session end would die with
+            # the trader before the next session could ever read them.
+            global _FALLBACK_LEARNING_MEMORY
+            if _FALLBACK_LEARNING_MEMORY is None:
+                _FALLBACK_LEARNING_MEMORY = create_memory_backend(
+                    MemoryBackendConfig(backend="hierarchical")
+                )
+            return _FALLBACK_LEARNING_MEMORY
     except Exception:  # pragma: no cover — learning is never order-critical
         logger.warning("Agent learning memory unavailable", exc_info=True)
         return None
@@ -765,6 +897,7 @@ def start_agent() -> tuple[Any, int]:
         await trader.run_session()
 
     def _run() -> None:
+        learning_cleanup_thread: threading.Thread | None = None
         try:
             asyncio.run(_run_session())
         except Exception:  # pragma: no cover — session errors land in status
@@ -776,8 +909,22 @@ def start_agent() -> tuple[Any, int]:
                     reject_pending(producer_ref, "Autonomous-agent session ended before approval")
                 except Exception:  # noqa: BLE001 - cleanup failure must not revive stale intents
                     logger.exception("Could not close stale autonomous-agent approval intents")
+            try:
+                if not _finalise_session_learning_memory(trader, timeout=0.0):
+                    learning_cleanup_thread = _defer_session_learning_memory_close(trader)
+            except Exception:  # noqa: BLE001 - session teardown must still release the loop
+                logger.exception("Autonomous agent learning-memory close failed")
+                # Immediate close already raised, so no closer was registered.
+                # Keep the leftover trader joinable after the next /start
+                # replaces ``_RUNNER``.
+                try:
+                    learning_cleanup_thread = _defer_session_learning_memory_close(trader)
+                except Exception:  # noqa: BLE001 - register-before-start still retains the owner
+                    logger.exception("Could not start deferred learning-memory closer")
             with _RUNNER_LOCK:
                 if _RUNNER.get("producer_ref") == producer_ref:
+                    if learning_cleanup_thread is not None:
+                        _RUNNER["learning_cleanup_thread"] = learning_cleanup_thread
                     _RUNNER.pop("loop", None)
 
     session_thread = threading.Thread(target=_run, name="autonomous-agent", daemon=True)

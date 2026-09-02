@@ -1,8 +1,8 @@
-"""Tests for TradedMemory — 4-layer ChromaDB-backed trading memory system.
+"""Tests for TradedMemory — 4-layer persistent trading memory system.
 
-All tests use an in-memory ChromaDB EphemeralClient so no disk I/O occurs.
-Each test gets a unique collection_prefix (via uuid4) so that the shared
-EphemeralClient's in-memory state does not bleed between tests.
+Each test gets a unique collection_prefix (via uuid4) so in-memory state
+does not bleed between tests. Persistence tests reopen a second instance
+against the same directory and must not import chromadb.
 """
 
 from __future__ import annotations
@@ -12,13 +12,12 @@ import os
 import uuid
 from datetime import datetime, timezone
 from typing import get_type_hints
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
-chromadb = pytest.importorskip("chromadb", reason="chromadb not installed")
-
-from flinttrade_ai.memory import (  # noqa: E402 — must follow chromadb importorskip
+from flinttrade_ai.memory import (
     CATEGORY_IMPORTANCE,
     HierarchicalMemoryManager,
     MemoryBackend,
@@ -34,10 +33,6 @@ from flinttrade_ai.memory import (  # noqa: E402 — must follow chromadb import
     exponential_decay,
     initial_importance,
 )
-
-# One EphemeralClient shared across the process (ChromaDB requirement).
-# Test isolation is achieved via unique collection_prefix per test.
-_EPHEMERAL_CLIENT = chromadb.EphemeralClient()
 
 
 class _DeterministicEmbeddingFunction:
@@ -108,7 +103,6 @@ def make_memory(**kwargs) -> TradedMemory:
     defaults = dict(
         persist_dir="",
         collection_prefix=prefix,
-        _chroma_client=_EPHEMERAL_CLIENT,
         _embedding_fn=_TEST_EMBEDDING_FN,
     )
     defaults.update(kwargs)
@@ -119,6 +113,18 @@ def make_memory(**kwargs) -> TradedMemory:
 def memory() -> TradedMemory:
     """Fresh isolated TradedMemory instance for each test."""
     return make_memory()
+
+
+def test_close_releases_owned_vector_client_once() -> None:
+    client = MagicMock()
+    memory = TradedMemory(persist_dir="", _chroma_client=client)
+
+    memory.close()
+    memory.close()
+
+    client.close.assert_called_once_with()
+    with pytest.raises(RuntimeError, match="learning memory is closed"):
+        memory._get_client()
 
 
 # ---------------------------------------------------------------------------
@@ -630,15 +636,22 @@ class TestGetMemories:
         assert memory._distance_to_similarity(0.0) == pytest.approx(1.0)
         assert memory._distance_to_similarity(3.0) == pytest.approx(0.25)
 
-    def test_reopened_collection_uses_its_configured_metric(self) -> None:
+    def test_reopened_collection_uses_its_configured_metric(self, tmp_path) -> None:
+        persist_dir = str(tmp_path / "metric")
         prefix = f"metric_{uuid.uuid4().hex[:8]}"
-        _EPHEMERAL_CLIENT.get_or_create_collection(
-            name=f"{prefix}_{MemoryLayer.SHORT.value}",
-            embedding_function=_TEST_EMBEDDING_FN,
-            configuration={"hnsw": {"space": "cosine"}},
+        first = TradedMemory(
+            persist_dir=persist_dir,
+            collection_prefix=prefix,
+            _embedding_fn=_TEST_EMBEDDING_FN,
         )
-        memory = make_memory(collection_prefix=prefix)
+        collection = first._get_collection(MemoryLayer.SHORT)
+        collection.modify(metadata={"hnsw:space": "cosine"})
 
+        memory = TradedMemory(
+            persist_dir=persist_dir,
+            collection_prefix=prefix,
+            _embedding_fn=_TEST_EMBEDDING_FN,
+        )
         memory._get_collection(MemoryLayer.SHORT)
         space = memory._distance_spaces[MemoryLayer.SHORT]
 
@@ -759,6 +772,26 @@ class TestVectorIndexWedgeFallback:
 
         # Assert — degrades to empty only when even metadata is unreadable
         assert result.items == []
+
+    def test_embedding_dimension_mismatch_fails_closed_instead_of_metadata_fallback(
+        self,
+        memory: TradedMemory,
+    ) -> None:
+        """A model-width configuration error must stay visible to the caller."""
+        memory.add_memory("NIFTY", "dimension-pinned memory", MemoryLayer.LONG)
+        real = memory._get_collection(MemoryLayer.LONG)
+
+        class _WrongQueryDimension(_WedgedCollection):
+            def query(self, **_kwargs):
+                raise ValueError(
+                    "collection 'trading_long' stores 64-dimensional embeddings; "
+                    "refusing a 384-dimensional query"
+                )
+
+        memory._collections[MemoryLayer.LONG] = _WrongQueryDimension(real)
+
+        with pytest.raises(ValueError, match="refusing a 384-dimensional query"):
+            memory.get_memories("NIFTY", "dimension mismatch", MemoryLayer.LONG, n=3)
 
 
 class TestUpdateOnOutcome:
@@ -936,12 +969,11 @@ class TestMemoryBackendFactory:
 
 
 class TestPersistence:
-    """Tests for PersistentClient across instances."""
+    """Tests for disk persistence across close/reopen without chromadb."""
 
     def test_memory_persists_across_instances(self, tmp_path) -> None:
-        """Memories written to a PersistentClient persist across new instances."""
-        # Arrange — write to a real PersistentClient in a temp directory
-        persist_dir = str(tmp_path / "chroma_test")
+        """Memories written to disk persist across new instances."""
+        persist_dir = str(tmp_path / "memory_test")
         os.makedirs(persist_dir, exist_ok=True)
 
         mem1 = TradedMemory(
@@ -950,15 +982,14 @@ class TestPersistence:
             _embedding_fn=_TEST_EMBEDDING_FN,
         )
         mem_id = mem1.add_memory("NIFTY", "persistent NIFTY memory", MemoryLayer.REFLECTION)
+        mem1.add_memory("TCS", "other symbol must not leak", MemoryLayer.REFLECTION)
 
-        # Act — create a second instance pointing at the same directory
         mem2 = TradedMemory(
             persist_dir=persist_dir,
             collection_prefix="persist_test",
             _embedding_fn=_TEST_EMBEDDING_FN,
         )
-        # Force the collection to re-open (lazy init)
         result = mem2.get_memories("NIFTY", "persistent NIFTY", MemoryLayer.REFLECTION, n=5)
 
-        # Assert — memory created in mem1 is visible in mem2
         assert any(item.id == mem_id for item in result.items)
+        assert all(item.symbol == "NIFTY" for item in result.items)

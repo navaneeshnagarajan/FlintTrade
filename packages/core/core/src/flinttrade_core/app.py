@@ -104,7 +104,7 @@ from flinttrade_data.audit_logger import AuditLogger  # noqa: E402
 # engine imports are deferred into FlintTradeApp.__init__() to break the
 # core↔engine circular import.  See PLC0415 comments throughout this file.
 # Heavy optional modules are imported lazily inside FlintTradeApp.__init__()
-# to avoid a 2-5 s startup penalty when ChromaDB / LLM / Telegram deps load.
+# to avoid a 2-5 s startup penalty when embedding, LLM, or Telegram deps load.
 # CronManager, TelegramBot, LLMClient, LLMConfig, RAGPipeline
 
 # Ensure the gateway src directory is on sys.path so bare gateway imports resolve.
@@ -1385,6 +1385,14 @@ def _index_rag_docs_safely(rag: Any) -> None:
         logger.warning("RAG background indexing failed: %s", exc)
 
 
+def _join_rag_indexer(rag: Any) -> None:
+    """Wait for the optional background RAG indexer before closing the store."""
+    indexer = getattr(rag, "_indexer_thread", None)
+    if not isinstance(indexer, threading.Thread) or indexer.ident is None:
+        return
+    indexer.join()
+
+
 def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:
     """Construct the canonical RAG runtime when enabled and installed."""
     if not _rag_runtime_enabled():
@@ -1393,9 +1401,8 @@ def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:
 
     rag_dir = flinttrade_dir / "rag"
     rag_dir.mkdir(exist_ok=True)
+    rag: Any | None = None
     try:
-        import chromadb  # noqa: F401, PLC0415
-
         from flinttrade_ai.llm_client import LLMClient, LLMConfig  # noqa: PLC0415
         from flinttrade_ai.rag_pipeline import PipelineConfig, RAGPipeline  # noqa: PLC0415
 
@@ -1412,11 +1419,14 @@ def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:
         if rag.document_count() == 0:
             if _rag_auto_index_enabled():
                 logger.info("RAG database empty — indexing docs/ directory in background...")
-                threading.Thread(
-                    target=lambda: _index_rag_docs_safely(rag),
+                indexer = threading.Thread(
+                    target=_index_rag_docs_safely,
+                    args=(rag,),
                     daemon=True,
                     name="rag-indexer",
-                ).start()
+                )
+                rag.attach_indexer_thread(indexer)
+                indexer.start()
             else:
                 logger.info(
                     "RAG database empty — automatic docs indexing disabled "
@@ -1425,6 +1435,12 @@ def _initialise_rag_runtime(flinttrade_dir: Path) -> Any | None:
         return rag
     except Exception as exc:
         logger.warning("RAG initialisation failed: %s", exc)
+        close_rag = getattr(rag, "close", None)
+        if callable(close_rag):
+            try:
+                close_rag()
+            except Exception:
+                logger.exception("RAG runtime close after initialisation failure failed")
         return None
 
 
@@ -5756,9 +5772,8 @@ class FlintTradeApp:
 
         # RAG — knowledge base (persistent).
         # LLMClient and RAGPipeline are imported lazily here to avoid loading
-        # ChromaDB, sentence-transformers, and the LLM HTTP client at module
-        # level, which would add 2-5 s to startup time even when the AI
-        # features are not yet used.
+        # sentence-transformers and the LLM HTTP client at module level, which
+        # would add 2-5 s to startup time even when the AI features are unused.
         self.rag = _initialise_rag_runtime(flinttrade_dir)
 
         # Live tick capture (opt-in via FLINTTRADE_TICK_CAPTURE) — wired in start().
@@ -6102,6 +6117,25 @@ class FlintTradeApp:
             self.scheduler.stop_all,
         ):
             return False
+
+        # Construction may have started the optional RAG indexer before
+        # ``_start_owned`` claimed any ledger owner. Failed start must still
+        # join that daemon and close the store, matching normal shutdown.
+        rag = getattr(self, "rag", None)
+        if rag is not None:
+            if not await stop_sync(
+                "startup-rag-indexer",
+                "RAG indexer",
+                lambda: _join_rag_indexer(rag),
+            ):
+                return False
+            close_rag = getattr(rag, "close", None)
+            if callable(close_rag) and not await stop_sync(
+                "startup-rag-vector-store",
+                "RAG vector store",
+                close_rag,
+            ):
+                return False
 
         async def close_openalgo_client() -> None:
             if isinstance(self.client, OpenAlgoClient):
@@ -7330,6 +7364,18 @@ class FlintTradeApp:
             raise RuntimeError(f"shutdown encountered errors: {summary}")
 
         await stop_managed_local_ai()
+
+        rag = getattr(self, "rag", None)
+        indexer_stopped = True
+        if rag is not None:
+            indexer_stopped = await stop_sync(
+                "rag-indexer",
+                "RAG indexer",
+                lambda: _join_rag_indexer(rag),
+            )
+        close_rag = getattr(rag, "close", None)
+        if callable(close_rag) and indexer_stopped:
+            await stop_sync("rag-vector-store", "RAG vector store", close_rag)
 
         if errors:
             summary = ", ".join(f"{label} ({error_type})" for label, error_type in errors)
