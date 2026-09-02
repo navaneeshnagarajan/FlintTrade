@@ -19,6 +19,24 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Production systemd install.** `infra/scripts/setup-production.sh` hardcodes
+  `/opt/flinttrade` (the prefix `flinttrade.service` already uses), refuses
+  `FLINTTRADE_DIR`, symlink targets and non-git trees, and requires Python
+  >= 3.12 before creating `$INSTALL_DIR/.venv`. The unit exports
+  `FLINTTRADE_WORKSPACE_DIR=/opt/flinttrade/.flinttrade` so Workspace writes
+  stay inside `ReadWritePaths`, `FLINTTRADE_BACKEND_PORT`, and starts
+  `python -m flinttrade_core.app` with every workspace package on
+  `PYTHONPATH`. First-time setup (and later deploys) build
+  `packages/apps/terminal/dist` with the pinned pnpm and run
+  `python -m flinttrade_core.cli init --provision-master-password` as
+  `www-data`, so the non-interactive backend can start and serve the UI.
+  Checkout-mode normalisation skips `.flinttrade` and `data` so hardened
+  `0600` secrets stay owner-only. Code and `.venv` stay root-owned; only
+  runtime workspace/data/log paths are `www-data`. `infra/scripts/deploy.sh`
+  updates that tree with `sudo git` and does not take ownership.
+
+
+
 - **Workspace path unification.** Nineteen modules resolved their own storage as
   the literal `~/.flinttrade` instead of asking `flinttrade_core.workspace`. On
   Linux that happens to be the workspace, so it never failed in CI; on macOS

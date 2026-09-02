@@ -1,16 +1,24 @@
 #!/bin/bash
 # FlintTrade Production Deployment Script — canonical deploy entry point.
-# Merged union of the old deploy.sh (checkout main + .env sourcing) and
+# Merged union of the old deploy.sh (checkout main) and
 # deploy-production.sh (market-hours guard, hash-verified install, systemd
 # install-if-absent, post-restart verification).
 # DO NOT run during market hours (9:15 AM - 3:30 PM IST).
+# The unit is hardcoded to /opt/flinttrade. FLINTTRADE_DIR is not supported.
+# The checkout and .venv stay root-owned; only runtime data dirs are www-data.
 set -euo pipefail
 
-# Optional env-driven overrides (e.g. FLINTTRADE_DIR) from the repo-root .env.
-source "$(dirname "${BASH_SOURCE[0]}")/../../.env" 2>/dev/null || true
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=production-contract.sh
+source "$SCRIPT_DIR/production-contract.sh"
+FLINTTRADE_PRODUCTION_CONTRACT="$SCRIPT_DIR/production-contract.sh"
+export FLINTTRADE_PRODUCTION_CONTRACT
 
-REPO_DIR="${FLINTTRADE_DIR:-$HOME/FlintTrade}"
+flinttrade_assert_no_dir_override
+REPO_DIR="$(flinttrade_production_prefix)"
+flinttrade_assert_safe_install_dir "$REPO_DIR"
 SERVICE_NAME="flinttrade"
+VENV_PIP="$REPO_DIR/.venv/bin/pip"
 
 echo "=== FlintTrade Production Deploy ==="
 echo "Time: $(date '+%Y-%m-%d %H:%M:%S IST')"
@@ -30,23 +38,41 @@ if [ "$TIME_NOW" -ge "$MARKET_OPEN" ] && [ "$TIME_NOW" -le "$MARKET_CLOSE" ]; th
 fi
 
 # 2. Pull latest — the explicit checkout guarantees main is deployed even if
-#    the working copy was left on another branch.
+#    the working copy was left on another branch. sudo so a root-owned tree
+#    can be updated without chowning code to the deploying user.
 cd "$REPO_DIR"
 echo "Pulling latest from main..."
-git checkout main
-git pull origin main
+# Narrow safe.directory so root git can refresh a reused checkout that is
+# still owned by www-data (or another non-root account) from an earlier layout.
+sudo git -c "safe.directory=$REPO_DIR" checkout main
+sudo git -c "safe.directory=$REPO_DIR" pull origin main
 
-# 3. Install Python deps — SC-07: hash-verified install only
+# 3. Install Python deps into the unit venv — SC-07: hash-verified install only.
+#    Keep .venv root-owned so the next deploy can write it.
 echo "Installing Python dependencies..."
-pip install --break-system-packages --require-hashes -r requirements.lock -q
-
-# 4. Install systemd service if not present
-if [ ! -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
-    echo "Installing systemd service..."
-    sudo cp "infra/systemd/${SERVICE_NAME}.service" /etc/systemd/system/
-    sudo systemctl daemon-reload
-    sudo systemctl enable "$SERVICE_NAME"
+if [ ! -x "$VENV_PIP" ]; then
+    echo "ERROR: $VENV_PIP is missing. Re-run infra/scripts/setup-production.sh so the unit venv exists."
+    exit 1
 fi
+sudo "$VENV_PIP" install --require-hashes -r requirements.lock -q
+
+echo "Rebuilding the terminal..."
+flinttrade_build_terminal "$REPO_DIR"
+
+# sudo git/pip/pnpm under umask 077 create root:root 0700/0600 files that
+# www-data cannot read. Re-apply the checkout contract; never chmod -R the
+# workspace (owner-only secrets).
+echo "Applying checkout ownership and modes..."
+flinttrade_apply_checkout_modes "$REPO_DIR"
+echo "Ensuring the workspace master password exists..."
+flinttrade_provision_workspace "$REPO_DIR"
+
+# 4. Refresh the systemd unit on every deploy. Existing hosts may still carry
+#    the pre-fix gunicorn/workspace contract even though the checkout is current.
+echo "Refreshing systemd service..."
+sudo cp "infra/systemd/${SERVICE_NAME}.service" /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable "$SERVICE_NAME"
 
 # 5. Restart service (literal service name — pinned by tests/test_restructure_goals.py)
 echo "Restarting FlintTrade service..."

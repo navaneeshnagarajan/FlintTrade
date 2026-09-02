@@ -66,12 +66,7 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
   const tokenStored = configQuery.data?.data?.bot_token_set === true;
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      persistTelegramConfig({
-        enabled: settings.enabled,
-        chatId: settings.chatId,
-        botToken: settings.botToken,
-      }),
+    mutationFn: (payload: TelegramSettings) => persistTelegramConfig(payload),
     onSuccess: (response) => {
       setSaveStatus("success");
       setSaveError("");
@@ -187,7 +182,13 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
         <Button
           variant="default"
           size="sm"
-          onClick={() => saveMutation.mutate()}
+          onClick={() =>
+            saveMutation.mutate({
+              enabled: settings.enabled,
+              chatId: settings.chatId,
+              botToken: settings.botToken,
+            })
+          }
           disabled={!canSave}
           className="flex items-center gap-1.5 text-xs h-7"
         >
