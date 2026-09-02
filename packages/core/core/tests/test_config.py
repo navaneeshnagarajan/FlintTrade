@@ -43,6 +43,24 @@ def test_contributor_run_loads_dotenv_from_validated_source_root(
 
 
 @pytest.mark.unit
+def test_contributor_env_permission_error_is_optional_not_boot_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """A mis-moded optional .env must not crash a service with injected env."""
+    source_root = tmp_path / "FlintTrade"
+    monkeypatch.setattr(config, "discover_source_root", lambda: source_root)
+    monkeypatch.setattr(
+        config,
+        "load_dotenv",
+        MagicMock(side_effect=PermissionError("denied")),
+    )
+    monkeypatch.delenv("FLINTTRADE_DESKTOP", raising=False)
+
+    config._load_dev_env()
+
+
+@pytest.mark.unit
 def test_openalgo_telegram_username_loads_from_workspace() -> None:
     settings = Settings.from_workspace_data(
         {"openalgo": {"telegram_username": "linked-trader"}}

@@ -168,24 +168,31 @@ every OS; `make <target>` is the POSIX alias for the same targets.
 
 ## Server services (advanced)
 
-`infra/scripts/setup-production.sh` is an Ubuntu 24.04 host provisioner: it
-installs apt packages, clones to `$HOME/FlintTrade` by default, and copies
-`infra/systemd/flinttrade.service` unchanged. That unit is written for
-`/opt/flinttrade` as `www-data` (Gunicorn on `127.0.0.1:5100`). Starting
-the copied unit against a `$HOME/FlintTrade` tree will fail until you
-either place the install at `/opt/flinttrade` or edit the unit's `User`,
-`WorkingDirectory`, `EnvironmentFile`, `ExecStart`, and `ReadWritePaths`.
-Moving the tree to `/opt/flinttrade` still does not boot the unit: the
-script uses system `pip` and does not create `.venv`, while `ExecStart`
-requires `/opt/flinttrade/.venv/bin/gunicorn`. `gunicorn` is not in
-`requirements.lock`. Provision that venv (or point `ExecStart` at a real
-gunicorn) before starting the service. See
+`infra/scripts/setup-production.sh` is the Ubuntu 24.04 production installer
+(Python >= 3.12). A checkout of this repository is only the *script* source;
+the installer provisions `/opt/flinttrade` itself. The unit is hardcoded to
+that prefix (`ProtectHome=true`). There is no directory override.
+
+The installer creates `/opt/flinttrade/.venv`, installs the hashed
+`requirements.lock` into it, builds `packages/apps/terminal/dist` with the
+pinned pnpm, and provisions the credential-vault `master_password` as
+`www-data` so a non-interactive `python -m flinttrade_core.app` can start
+and serve the UI. It chowns only the runtime workspace, data and log paths
+to `www-data`. The git checkout and `.venv` stay root-owned so
+`infra/scripts/deploy.sh` can update them. See
 [the systemd notes](../../infra/systemd/README.md).
 
-1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
-2. `cd FlintTrade`
-3. `bash infra/scripts/setup-production.sh`
-4. Align the systemd unit with the install path (or install under `/opt/flinttrade`).
-5. Provision `/opt/flinttrade/.venv` with gunicorn, or edit `ExecStart` to the interpreter you installed.
-6. Edit `.env` only for server-only fallback values that cannot be supplied through the app UI.
-7. `sudo systemctl start flinttrade`
+```bash
+sudo bash infra/scripts/setup-production.sh
+sudoedit /opt/flinttrade/.env
+sudo systemctl start flinttrade
+```
+
+Edit `/opt/flinttrade/.env` with `sudoedit` only for server-only fallback
+values that cannot be supplied through the app UI. Then complete Setup in
+the app at http://127.0.0.1:5100. The installer builds the terminal; the
+backend serves that UI only when `packages/apps/terminal/dist/index.html`
+exists.
+
+Raspberry Pi OS Bookworm (system Python 3.11) is not this path — use the
+one-line installer above, or `infra/install/install-native.sh`.

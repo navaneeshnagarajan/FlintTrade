@@ -28,7 +28,11 @@ def _load_dev_env() -> None:
     """Load repo-root .env for contributor/server runs, never for desktop."""
     if os.environ.get("FLINTTRADE_DESKTOP") == "1":
         return
-    load_dotenv(discover_source_root() / ".env", override=False)
+    env_path = discover_source_root() / ".env"
+    try:
+        load_dotenv(env_path, override=False)
+    except OSError as exc:
+        logger.warning("Could not read optional server fallback %s: %s", env_path, exc)
 
 
 def _workspace_openalgo_overrides_from_data(data: dict[str, Any]) -> dict[str, Any]:

@@ -164,9 +164,15 @@ describe("TelegramSection", () => {
       status: "ok",
       data: { enabled: true, chat_id: "77", bot_token_set: true },
     });
-    renderSection();
+    renderSection({ enabled: true, chatId: "77" });
     await waitFor(() =>
       expect(screen.getByLabelText("Telegram chat ID")).toHaveValue("77"),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Telegram bot token")).toHaveAttribute(
+        "placeholder",
+        expect.stringContaining("saved"),
+      ),
     );
     const save = screen.getByRole("button", { name: /save/i });
     expect(save).toBeEnabled();
