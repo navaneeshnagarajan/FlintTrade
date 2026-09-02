@@ -218,6 +218,7 @@ def test_rewrite_target_list_covers_every_documented_surface(checker: ModuleType
         "docs/setup/linux.md",
         "packages/apps/site/src/app/layout.tsx",
         "packages/apps/site/src/app/download/page.tsx",
+        "packages/apps/site/src/lib/web-install-commands.ts",
         "scripts/install/flinttrade-web-install.sh",
         "scripts/install/flinttrade-web-install.ps1",
         "tests/test_windows_command_docs.py",
