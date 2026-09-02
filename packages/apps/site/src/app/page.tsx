@@ -4,6 +4,8 @@ import Image from 'next/image';
 import Link from 'next/link';
 
 import { HeroCinematic } from '@/components/hero-cinematic';
+import SectionEnterController from '@/components/section-enter-controller';
+import SiteScrollWorld from '@/components/site-scroll-world';
 import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
 import { listPackages } from '@/lib/mcp/capabilities';
@@ -69,10 +71,12 @@ export default async function HomePage() {
     <main className="site-shell">
       <div className="site-cinematic-backdrop" aria-hidden="true">
         <HeroCinematic />
+        <SiteScrollWorld />
       </div>
       <SiteHeader />
+      <SectionEnterController />
 
-      <section className="section hero">
+      <section className="section hero" data-scroll-chapter="0">
         <div className="hero-copy">
           <div className="hero-logo-stage" aria-hidden="true">
             <span className="site-hero-fireball" />
@@ -190,7 +194,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="section">
+      <section className="section section-enter" data-scroll-chapter="1">
         <div className="section-heading">
           <h2>Built for people who read the source.</h2>
           <p>
@@ -212,7 +216,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="section two-column">
+      <section className="section two-column section-enter" data-scroll-chapter="2">
         <div className="section-heading">
           <h2>Docs, API, and contribution paths in one flow.</h2>
           <p>
@@ -230,7 +234,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="section two-column">
+      <section className="section two-column section-enter" data-scroll-chapter="3">
         <div className="code-panel">
           <header>
             <span>Contributor MCP</span>
@@ -262,7 +266,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="section">
+      <section className="section section-enter" data-scroll-chapter="4">
         <div className="section-heading">
           <h2>Package map at contributor speed.</h2>
           <p>
@@ -280,7 +284,9 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <SiteFooter />
+      <div data-scroll-chapter="5">
+        <SiteFooter />
+      </div>
     </main>
   );
 }

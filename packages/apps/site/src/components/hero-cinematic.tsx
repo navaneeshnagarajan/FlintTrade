@@ -71,8 +71,10 @@ function ParticleLayer({ quantity, colors, sizeRange, behavior, seed, opacity }:
     const actualQuantity = isLowEnd ? Math.ceil(quantity * 0.5) : quantity;
 
     let animationId: number | null = null;
-    let isVisible = true;
-    const dpr = window.devicePixelRatio || 1;
+    let isIntersecting = true;
+    let isDocumentVisible = !document.hidden;
+    let isWebGLActive = document.documentElement.classList.contains('ft-scroll-world-on');
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const random = createSeededRandom(seed);
 
     function resize() {
@@ -141,7 +143,7 @@ function ParticleLayer({ quantity, colors, sizeRange, behavior, seed, opacity }:
 
       ctx.globalAlpha = 1;
       animationId = null;
-      if (isVisible) startAnimation();
+      syncAnimation();
     }
 
     function startAnimation() {
@@ -150,35 +152,60 @@ function ParticleLayer({ quantity, colors, sizeRange, behavior, seed, opacity }:
     }
 
     function stopAnimation() {
-      if (animationId === null) return;
-      cancelAnimationFrame(animationId);
+      if (animationId !== null) cancelAnimationFrame(animationId);
       animationId = null;
     }
 
-    startAnimation();
+    function syncAnimation() {
+      if (!canvas) return;
+      const shouldRun = isIntersecting && isDocumentVisible && !isWebGLActive;
+      canvas.dataset.animationState = shouldRun ? 'running' : 'paused';
+      if (shouldRun) {
+        lastTime = performance.now();
+        startAnimation();
+      } else {
+        stopAnimation();
+      }
+    }
+
+    syncAnimation();
 
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (!entry) return;
-        isVisible = entry.isIntersecting;
-        if (isVisible) {
-          lastTime = performance.now();
-          startAnimation();
-        } else {
-          stopAnimation();
-        }
+        isIntersecting = entry.isIntersecting;
+        syncAnimation();
       },
       { threshold: 0 },
     );
     observer.observe(canvas);
 
     const handleResize = () => resize();
+    const handleVisibility = () => {
+      isDocumentVisible = !document.hidden;
+      syncAnimation();
+    };
+    const handleWebGLReady = () => {
+      isWebGLActive = true;
+      syncAnimation();
+    };
+    const handleWebGLFallback = () => {
+      isWebGLActive = false;
+      syncAnimation();
+    };
+
     window.addEventListener('resize', handleResize);
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('ft-scroll-world-ready', handleWebGLReady);
+    window.addEventListener('ft-scroll-world-fallback', handleWebGLFallback);
 
     return () => {
       stopAnimation();
       observer.disconnect();
       window.removeEventListener('resize', handleResize);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('ft-scroll-world-ready', handleWebGLReady);
+      window.removeEventListener('ft-scroll-world-fallback', handleWebGLFallback);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quantity, colors.join(','), sizeRange[0], sizeRange[1], behavior, seed]);
