@@ -5,7 +5,7 @@ export interface DisposableResource {
 }
 
 export interface DisposableRenderer extends DisposableResource {
-  forceContextLoss: () => void;
+  forceContextLoss?: () => void;
 }
 
 export interface ScrollWorldLifecycle {
@@ -45,7 +45,6 @@ export function createScrollWorldLifecycle(
     resources.clear();
     if (renderer) {
       safely(() => renderer?.dispose());
-      safely(() => renderer?.forceContextLoss());
       renderer = null;
     }
   };
@@ -61,7 +60,6 @@ export function createScrollWorldLifecycle(
     setRenderer(nextRenderer) {
       if (disposed) {
         safely(() => nextRenderer.dispose());
-        safely(() => nextRenderer.forceContextLoss());
         return;
       }
       renderer = nextRenderer;

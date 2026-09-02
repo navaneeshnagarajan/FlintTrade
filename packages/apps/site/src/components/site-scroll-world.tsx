@@ -127,6 +127,7 @@ export default function SiteScrollWorld() {
   }, [stopSchedule]);
 
   const handleReady = useCallback(() => {
+    if (!mountedRef.current) return;
     const root = document.documentElement;
     root.classList.remove('ft-scroll-world-fallback', 'no-webgl');
     root.classList.add('ft-scroll-world-on');
@@ -150,10 +151,10 @@ export default function SiteScrollWorld() {
       if (!capability.enabled) {
         mountedRef.current = false;
         setMounted(false);
-        if (capability.reason === 'flag-off') {
-          clearScrollWorldMarkers();
-        } else {
+        if (capability.reason === 'reduced-motion') {
           applyFallbackMarker(capability.reason);
+        } else {
+          clearScrollWorldMarkers();
         }
         return;
       }

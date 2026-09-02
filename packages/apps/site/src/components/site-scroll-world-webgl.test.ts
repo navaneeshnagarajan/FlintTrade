@@ -139,10 +139,10 @@ describe('SiteScrollWorldWebGL child integration lifecycle', () => {
     expect(onFallback).toHaveBeenCalledTimes(1);
     expect(onFallback).toHaveBeenCalledWith('context-lost');
     expect(renderer.dispose).toHaveBeenCalledTimes(1);
-    expect(renderer.forceContextLoss).toHaveBeenCalledTimes(1);
+    expect(renderer.forceContextLoss).not.toHaveBeenCalled();
   });
 
-  it('fails closed and forces context loss when scene setup throws after renderer creation', async () => {
+  it('fails closed without poisoning the canvas when scene setup throws after renderer creation', async () => {
     rendererState.throwOnSetSize = true;
     const onReady = vi.fn();
     const onFallback = vi.fn();
@@ -154,6 +154,6 @@ describe('SiteScrollWorldWebGL child integration lifecycle', () => {
     expect(onFallback).toHaveBeenCalledTimes(1);
     expect(onFallback).toHaveBeenCalledWith('setup-error');
     expect(renderer.dispose).toHaveBeenCalledTimes(1);
-    expect(renderer.forceContextLoss).toHaveBeenCalledTimes(1);
+    expect(renderer.forceContextLoss).not.toHaveBeenCalled();
   });
 });

@@ -147,4 +147,15 @@ describe('SiteScrollWorld progressive wrapper', () => {
     expect(container.querySelector('.site-scroll-world-host')).toBeNull();
     expect(document.documentElement.classList.contains('ft-scroll-world-fallback')).toBe(true);
   });
+
+  it('does not apply post-activation fallback when preflight rejects before WebGL mounts', async () => {
+    capability.read.mockReturnValue({ enabled: false, reason: 'mobile' });
+    await renderWrapper();
+    await act(async () => vi.runAllTimers());
+
+    expect(container.querySelector('.site-scroll-world-host')).toBeNull();
+    expect(dynamicState.renders).toBe(0);
+    expect(document.documentElement.classList.contains('ft-scroll-world-fallback')).toBe(false);
+    expect(document.documentElement.classList.contains('ft-scroll-world-on')).toBe(false);
+  });
 });

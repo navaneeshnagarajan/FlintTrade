@@ -31,8 +31,21 @@ describe('scroll-world child lifecycle', () => {
     expect(geometry.dispose).toHaveBeenCalledTimes(1);
     expect(material.dispose).toHaveBeenCalledTimes(1);
     expect(renderer.dispose).toHaveBeenCalledTimes(1);
-    expect(renderer.forceContextLoss).toHaveBeenCalledTimes(1);
+    expect(renderer.forceContextLoss).toHaveBeenCalledTimes(0);
     expect(lifecycle.isDisposed()).toBe(true);
+  });
+
+  it('does not force context loss on dispose so StrictMode can reuse the canvas', () => {
+    const onFallback = vi.fn();
+    const renderer = { dispose: vi.fn(), forceContextLoss: vi.fn() };
+    const lifecycle = createScrollWorldLifecycle(onFallback);
+
+    lifecycle.setRenderer(renderer);
+    lifecycle.dispose();
+    lifecycle.setRenderer({ dispose: vi.fn(), forceContextLoss: vi.fn() });
+
+    expect(renderer.dispose).toHaveBeenCalledTimes(1);
+    expect(renderer.forceContextLoss).not.toHaveBeenCalled();
   });
 
   it('supports fail-closed try/finally setup errors without duplicate disposal or callbacks', () => {
@@ -56,7 +69,7 @@ describe('scroll-world child lifecycle', () => {
     expect(onFallback).toHaveBeenCalledWith('setup-error');
     expect(resource.dispose).toHaveBeenCalledOnce();
     expect(renderer.dispose).toHaveBeenCalledOnce();
-    expect(renderer.forceContextLoss).toHaveBeenCalledOnce();
+    expect(renderer.forceContextLoss).not.toHaveBeenCalled();
     expect(setupComplete).toBe(false);
   });
 
@@ -73,6 +86,6 @@ describe('scroll-world child lifecycle', () => {
     expect(childSource).toContain('finally {');
     expect(childSource).toContain('if (!setupComplete) lifecycle.dispose()');
     expect(childSource).toContain('const onContextLost = lifecycle.onContextLost');
-    expect(lifecycleSource).toContain('renderer?.forceContextLoss()');
+    expect(lifecycleSource).not.toContain('forceContextLoss()');
   });
 });
