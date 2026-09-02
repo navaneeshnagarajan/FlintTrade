@@ -329,8 +329,7 @@ class TradedMemory:
     Adapts FinMem patterns: compound scoring, layer-differentiated importance,
     access-count reinforcement on correct predictions.
 
-    One ChromaDB collection is created per layer, named
-    ``{collection_prefix}_{layer}``.
+    One collection is created per layer, named ``{collection_prefix}_{layer}``.
 
     Usage::
 
@@ -362,37 +361,62 @@ class TradedMemory:
         """Initialise TradedMemory.
 
         Args:
-            persist_dir: Directory for ChromaDB persistence. Tilde is expanded.
+            persist_dir: Directory for sqlite vector persistence. Tilde is expanded.
                 Pass ``None`` to use an ephemeral in-memory client (testing only).
-            collection_prefix: Prefix for ChromaDB collection names.
-            embedding_model: sentence-transformers model name for embeddings.
-            _chroma_client: Override ChromaDB client (used in tests to inject
-                an ``EphemeralClient``).
-            _embedding_fn: Override ChromaDB embedding function (used in tests
+            collection_prefix: Prefix for per-layer collection names.
+            embedding_model: Unused model name retained for API compatibility.
+            _chroma_client: Override vector client (used in tests to inject
+                an in-memory client).
+            _embedding_fn: Override embedding function (used in tests
                 to keep unit tests independent from transformer runtimes).
         """
         self._persist_dir = persist_dir
         self._collection_prefix = collection_prefix
         self._embedding_model_name = embedding_model
         self._override_client = _chroma_client
+        if persist_dir and _chroma_client is None:
+            from .local_vector_store import assert_no_legacy_chroma_store
+
+            assert_no_legacy_chroma_store(persist_dir)
 
         # Lazy-initialised per layer
         self._chroma_client: Any | None = None
         self._collections: dict[MemoryLayer, Any] = {}
         self._distance_spaces: dict[MemoryLayer, str] = {}
         self._embedding_fn: Any | None = _embedding_fn
+        self._closed = False
 
         # Thread safety for lazy-init helpers (RLock because _get_collection
         # calls _get_client and _get_embedding_fn while already holding the lock)
         self._lock = threading.RLock()
+
+    def close(self) -> None:
+        """Close the owned vector client once and clear cached collection handles."""
+        with self._lock:
+            if self._closed:
+                return
+            client = self._chroma_client
+            if client is None:
+                client = self._override_client
+            if client is not None:
+                close = getattr(client, "close", None)
+                if callable(close):
+                    close()
+            self._chroma_client = None
+            self._override_client = None
+            self._collections.clear()
+            self._distance_spaces.clear()
+            self._closed = True
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     def _get_client(self) -> Any:
-        """Return (and lazily create) the ChromaDB client."""
+        """Return (and lazily create) the local vector client."""
         with self._lock:
+            if self._closed:
+                raise RuntimeError("learning memory is closed")
             if self._chroma_client is not None:
                 return self._chroma_client
 
@@ -400,21 +424,18 @@ class TradedMemory:
                 self._chroma_client = self._override_client
                 return self._chroma_client
 
-            try:
-                import chromadb
-            except ImportError:
-                raise ImportError("chromadb required — pip install chromadb")
+            from .local_vector_store import EphemeralClient, PersistentClient
 
             if self._persist_dir:
                 import os
 
                 path = os.path.expanduser(self._persist_dir)
                 os.makedirs(path, exist_ok=True)
-                self._chroma_client = chromadb.PersistentClient(path=path)
+                self._chroma_client = PersistentClient(path=path)
             else:
-                self._chroma_client = chromadb.EphemeralClient()
+                self._chroma_client = EphemeralClient()
 
-            logger.debug("ChromaDB client initialised (persist_dir=%s)", self._persist_dir)
+            logger.debug("Local vector client initialised (persist_dir=%s)", self._persist_dir)
             return self._chroma_client
 
     def _get_embedding_fn(self) -> Any:
@@ -423,18 +444,13 @@ class TradedMemory:
             if self._embedding_fn is not None:
                 return self._embedding_fn
 
-            try:
-                from chromadb.utils import embedding_functions
+            from .local_vector_store import HashingEmbeddingFunction
 
-                self._embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-                    model_name=self._embedding_model_name,
-                )
-            except Exception:
-                from chromadb.utils import embedding_functions
-
-                self._embedding_fn = embedding_functions.DefaultEmbeddingFunction()
-                logger.warning("sentence-transformers not available, using default embeddings")
-
+            self._embedding_fn = HashingEmbeddingFunction()
+            logger.debug(
+                "Using deterministic local hashing embeddings (model=%s unused)",
+                self._embedding_model_name,
+            )
             return self._embedding_fn
 
     def _collection_name(self, layer: MemoryLayer) -> str:
@@ -466,7 +482,7 @@ class TradedMemory:
         return 1.0 / (1.0 + max(0.0, distance))
 
     def _get_collection(self, layer: MemoryLayer) -> Any:
-        """Return (and lazily create) the ChromaDB collection for a layer."""
+        """Return (and lazily create) the collection for a layer."""
         with self._lock:
             if layer in self._collections:
                 collection = self._collections[layer]
@@ -718,6 +734,12 @@ class TradedMemory:
             distances: list[float] = results.get("distances", [[]])[0]
             distance_space = self._distance_spaces.get(layer) or self._configured_distance_space(collection)
             similarities: list[float] = [self._distance_to_similarity(dist, space=distance_space) for dist in distances]
+        except ValueError:
+            # Local-store contract violations (notably embedding-dimension
+            # mismatches after a model/provider change) must remain visible.
+            # Metadata fallback would turn a configuration error into plausible
+            # but similarity-free results.
+            raise
         except Exception:
             # ChromaDB 1.5.9's Rust core can PERMANENTLY wedge a collection's
             # vector index (upstream chroma-core/chroma#7032, open): under

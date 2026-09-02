@@ -55,6 +55,20 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
+- Vulnerable ChromaDB persistence is replaced by FlintTrade's local
+  SQLite/NumPy vector store. Existing vector directories are deliberately not
+  auto-migrated because Chroma's on-disk index and embedding space are not
+  compatible with the replacement. If `chroma.sqlite3` is present, FlintTrade
+  refuses to create `flinttrade_vectors.sqlite` beside it: the database and
+  vector-segment files are left untouched, RAG stays disabled, and agent
+  learning uses its logged in-process fallback. To recover existing lessons or
+  custom documents, export them with the previous release. To intentionally
+  start empty, move the complete legacy directory aside as a backup before
+  restarting; do not delete individual segment files. Each collection now
+  persists one embedding dimension and refuses mixed-width writes after the
+  first vector, inner-product distance stays unnormalised, and shutdown joins
+  the optional background RAG indexer before closing the store.
+
 - The traffic and latency observability logs (`traffic_log.duckdb`,
   `latency_log.duckdb`) are not migrated: they are disposable, and both were
   already workspace-routed in production. On macOS and Windows their history

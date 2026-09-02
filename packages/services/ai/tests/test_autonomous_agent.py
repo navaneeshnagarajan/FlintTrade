@@ -7,6 +7,7 @@ LLM and broker are mocked to test the agent's logic in isolation.
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
+import threading
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -1298,6 +1299,34 @@ async def test_post_session_learning_never_raises() -> None:
 
     # Must not raise — learning can never disrupt session shutdown.
     await agent._run_post_session_learning()
+
+
+def test_join_background_learning_treats_unstarted_worker_as_quiesced() -> None:
+    """A Thread.start() failure must not make later teardown raise on join()."""
+    agent = make_agent(memory=StubMemory())
+    agent._learning_thread = threading.Thread(target=lambda: None, name="agent-learning")
+
+    assert agent.join_background_learning(timeout=0.0) is True
+
+
+@pytest.mark.asyncio
+async def test_post_session_learning_does_not_retain_unstarted_worker(monkeypatch) -> None:
+    """If the learner never starts, teardown must still close memory without join errors."""
+    import flinttrade_ai.autonomous_agent as agent_mod
+
+    class ExplodingThread(threading.Thread):
+        def start(self) -> None:
+            raise RuntimeError("can't start new thread")
+
+    agent = make_agent(memory=StubMemory())
+    agent.llm = None
+    agent.state.closed_trades = [{"symbol": "X", "pnl": 1.0}]
+    monkeypatch.setattr(agent_mod.threading, "Thread", ExplodingThread)
+
+    await agent._run_post_session_learning()
+
+    assert agent._learning_thread is None
+    assert agent.join_background_learning(timeout=0.0) is True
 
 
 @pytest.mark.asyncio

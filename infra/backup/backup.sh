@@ -48,7 +48,7 @@ fi
 # ── Paths to back up ──────────────────────────────────────────────────
 BACKUP_PATHS=()
 
-# User data directory (auth.db, credentials.db, DuckDB, chroma, jwt_secret, workspace.json)
+# User data directory (auth.db, credentials.db, DuckDB, vectors, jwt_secret, workspace.json)
 if [ -d "$WORKSPACE_DIR" ]; then
     BACKUP_PATHS+=("$WORKSPACE_DIR")
 fi

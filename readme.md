@@ -369,7 +369,7 @@ and 1 Rust/PyO3 tick engine.
 | Frontend | React 19, TypeScript 5 (strict), Tailwind CSS v4, FlexLayout (with FDC3 interop), shadcn/ui, Lightweight Charts v5, Glide Data Grid, Zustand 5, Jotai, TanStack Query 5 |
 | Backend | Python 3.12, Flask, httpx (async), pydantic, DuckDB, structlog |
 | Data | NumPy (batch indicators; optional Numba on 3 kernels), Rust/PyO3 (tick engine), QuestDB (future) |
-| AI | Managed Ollama sidecar, optional ChromaDB vector store, LightGBM (signals), MCP bridge |
+| AI | Managed Ollama sidecar, local SQLite/NumPy vector store, LightGBM (signals), MCP bridge |
 
 ### Three ways in
 

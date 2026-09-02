@@ -5,7 +5,7 @@ Provides a self-contained, configurable RAG chain:
     DocumentLoader  → load .md / .txt / .py / .pdf files from a directory.
     TextChunker     → split documents into overlapping chunks.
     EmbeddingProvider → sentence-transformers or OpenAI-compatible embeddings.
-    VectorStore     → ChromaDB-backed similarity search.
+    VectorStore     → local sqlite similarity search.
     RAGPipeline     → orchestrates the full query → retrieve → generate chain.
 
 Design:
@@ -13,7 +13,7 @@ Design:
   subclassing.
 - Embedding provider is pluggable: sentence-transformers (default, offline)
   or any callable that maps List[str] → List[List[float]].
-- ChromaDB is lazily initialised so tests can run without installing it.
+- The vector store is lazily initialised from sqlite3 + numpy.
 - The LLM generation step is optional; callers can use the pipeline in
   retrieval-only mode by calling ``retrieve()`` instead of ``query()``.
 
@@ -31,6 +31,7 @@ import hashlib
 import logging
 import math
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -69,8 +70,8 @@ class PipelineConfig(BaseModel):
         embedding_provider:   ``"sentence_transformers"`` or ``"openai"``.
         openai_api_base:      Base URL for OpenAI-compatible embedding endpoint.
         openai_api_key:       API key for the embedding endpoint.
-        collection_name:      ChromaDB collection name.
-        persist_directory:    Persist ChromaDB to disk at this path. Empty = in-memory.
+        collection_name:      Vector collection name.
+        persist_directory:    Persist the vector store to disk at this path. Empty = in-memory.
         top_k:                Default number of chunks to retrieve.
         similarity_threshold: Minimum cosine similarity score (0–1) for results.
     """
@@ -754,9 +755,9 @@ class EmbeddingProvider:
 
 
 class VectorStore:
-    """ChromaDB-backed vector store for semantic search.
+    """Local sqlite vector store for semantic search.
 
-    Lazily initialises the ChromaDB client on first use.
+    Lazily initialises the client on first use.
 
     Example::
 
@@ -773,10 +774,15 @@ class VectorStore:
     ) -> None:
         self._collection_name = collection_name
         self._persist_dir = persist_directory
+        if persist_directory:
+            from .local_vector_store import assert_no_legacy_chroma_store
+
+            assert_no_legacy_chroma_store(persist_directory)
         self._embedding_provider = embedding_provider or EmbeddingProvider()
         self._client: Any = None
         self._collection: Any = None
         self._embedding_mode: str | None = None
+        self._closed = False
 
     def upsert(self, chunks: list[TextChunk]) -> int:
         """Insert or update chunks in the vector store.
@@ -925,21 +931,34 @@ class VectorStore:
         self._collection = None
         self._embedding_mode = None
 
+    def close(self) -> None:
+        """Close the owned local vector client and clear cached handles."""
+        client = self._client
+        self._closed = True
+        if client is None:
+            return
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+        if self._client is client:
+            self._client = None
+            self._collection = None
+            self._embedding_mode = None
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
     def _get_client(self) -> Any:
+        if self._closed:
+            raise RuntimeError("vector store is closed")
         if self._client is None:
-            try:
-                import chromadb  # type: ignore[import]
-            except ImportError:
-                raise ImportError("chromadb required — pip install chromadb")
+            from .local_vector_store import Client, PersistentClient
 
             if self._persist_dir:
-                self._client = chromadb.PersistentClient(path=self._persist_dir)
+                self._client = PersistentClient(path=self._persist_dir)
             else:
-                self._client = chromadb.Client()
+                self._client = Client()
         return self._client
 
     def _get_collection(self) -> Any:
@@ -953,7 +972,7 @@ class VectorStore:
                 },
             )
             logger.info(
-                "ChromaDB collection '%s' ready (%d chunks)",
+                "Vector collection '%s' ready (%d chunks)",
                 self._collection_name,
                 self._collection.count(),
             )
@@ -1062,6 +1081,8 @@ class RAGPipeline:
             persist_directory=self.config.persist_directory,
             embedding_provider=_embedding,
         )
+        self._closed = False
+        self._indexer_thread: threading.Thread | None = None
         # Domain filter — guards query() against off-topic questions.
         # Receives the same embedding provider for optional semantic check.
         self._domain_filter_enabled = enable_domain_filter
@@ -1070,6 +1091,33 @@ class RAGPipeline:
             self._domain_filter = DomainFilter(
                 embedding_provider=_embedding,
             )
+
+    def attach_indexer_thread(self, thread: threading.Thread) -> None:
+        """Register the background indexer so shutdown can quiesce it first."""
+        if self._closed:
+            raise RuntimeError("Cannot attach a RAG indexer after the pipeline is closed")
+        current = self._indexer_thread
+        if current is not None and current is not thread and current.is_alive():
+            raise RuntimeError("A RAG indexer is already running")
+        self._indexer_thread = thread
+
+    def close(self) -> None:
+        """Quiesce indexing, then close persistent resources once."""
+        if self._closed:
+            return
+        indexer = self._indexer_thread
+        if indexer is threading.current_thread():
+            raise RuntimeError("RAG indexer cannot close its own pipeline")
+        if indexer is not None and indexer.is_alive():
+            indexer.join()
+        self._indexer_thread = None
+        close_store = getattr(self._store, "close", None)
+        if callable(close_store):
+            close_store()
+        close_llm = getattr(self._llm, "close", None)
+        if callable(close_llm):
+            close_llm()
+        self._closed = True
 
     # ------------------------------------------------------------------
     # Indexing
@@ -1220,7 +1268,7 @@ class RAGPipeline:
 
         try:
             chunks = self.retrieve(question, top_k, doc_type, similarity_threshold)
-        except RuntimeError as exc:
+        except (RuntimeError, ValueError) as exc:
             logger.error("RAG retrieval failed: %s", exc)
             return RAGResult(query=question, error="RAG retrieval failed")
         if not chunks:
@@ -1268,6 +1316,8 @@ class RAGPipeline:
     # ------------------------------------------------------------------
 
     def _index_document(self, doc: LoadedDocument) -> int:
+        if self._closed:
+            raise RuntimeError("RAG pipeline is closed")
         chunks = self._chunker.chunk_document(doc)
         if not chunks:
             return 0
