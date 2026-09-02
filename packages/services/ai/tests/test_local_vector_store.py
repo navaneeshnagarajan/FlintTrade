@@ -488,6 +488,60 @@ def test_empty_embedding_is_rejected_without_pinning_collection() -> None:
     client.close()
 
 
+def test_distance_uses_float64_for_large_finite_float32_vectors() -> None:
+    """Large but finite float32 values must not overflow ranking to -inf or NaN."""
+    import math
+
+    from flinttrade_ai.local_vector_store import EphemeralClient, _distance
+
+    large = np.array([3e38, 3e38], dtype=np.float32)
+    unit = np.array([1.0, 0.0], dtype=np.float32)
+
+    cosine = _distance("cosine", large, large)
+    inner = _distance("ip", large, large)
+    squared = _distance("l2", large, unit)
+    assert math.isfinite(cosine)
+    assert math.isfinite(inner)
+    assert math.isfinite(squared)
+    assert cosine == pytest.approx(0.0)
+
+    client = EphemeralClient()
+    collection = client.get_or_create_collection(name="large", metadata={"hnsw:space": "cosine"})
+    collection.add(
+        ids=["unit", "large"],
+        documents=["unit", "large"],
+        embeddings=[unit.tolist(), large.tolist()],
+    )
+    hits = collection.query(query_embeddings=[large.tolist()], n_results=1)
+    assert hits["ids"] == [["large"]]
+    client.close()
+
+
+def test_rank_skips_non_finite_computed_distances(monkeypatch) -> None:
+    """A distance that is still non-finite after float64 math must not consume top_k."""
+    import flinttrade_ai.local_vector_store as store
+
+    client = store.EphemeralClient()
+    collection = client.get_or_create_collection(name="nan-dist")
+    collection.add(
+        ids=["kept", "poison"],
+        documents=["kept", "poison"],
+        embeddings=[[1.0, 0.0], [0.0, 1.0]],
+    )
+
+    real_distance = store._distance
+
+    def exploding(space: str, left: np.ndarray, right: np.ndarray) -> float:
+        if float(right[1]) == 1.0:
+            return float("nan")
+        return real_distance(space, left, right)
+
+    monkeypatch.setattr(store, "_distance", exploding)
+    hits = collection.query(query_embeddings=[[1.0, 0.0]], n_results=1)
+    assert hits["ids"] == [["kept"]]
+    client.close()
+
+
 def test_l2_distance_is_squared_euclidean() -> None:
     """Default/l2 ranking must match Chroma HNSW squared Euclidean, not the L2 norm."""
     import numpy as np

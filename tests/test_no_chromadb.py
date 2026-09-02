@@ -23,6 +23,8 @@ _ACTIVE_ARCHITECTURE_SURFACES = (
     ROOT / ".env.example",
     ROOT / "templates" / "package-purposes.yml",
     ROOT / "docs" / "USER_GUIDE.md",
+    ROOT / "packages" / "apps" / "terminal" / "src" / "routes" / "AIRoute.tsx",
+    ROOT / "templates" / "agent-context" / "CLAUDE.md.template",
 )
 
 

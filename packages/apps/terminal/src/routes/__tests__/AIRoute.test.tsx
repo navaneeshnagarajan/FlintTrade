@@ -456,6 +456,23 @@ describe("AIRoute", () => {
     expect(screen.queryByText(/Install the FlintTrade RAG dependencies/)).not.toBeInTheDocument();
   });
 
+  it("describes the local vector store instead of the removed backend", async () => {
+    vi.mocked(useSkillLevel).mockReturnValue("advanced");
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByLabelText("KB"));
+    expect(
+      screen.getByText(/Ranked by relevance using the local sqlite3\/NumPy vector store/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/ChromaDB/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Settings"));
+    expect(screen.getByText(/Local vector-store path, embedding model/)).toBeInTheDocument();
+    expect(screen.getByText(/local vector-store paths/)).toBeInTheDocument();
+    expect(screen.queryByText(/ChromaDB/i)).not.toBeInTheDocument();
+  });
+
   it("accepts the older response envelope when answer is absent", async () => {
     vi.mocked(useSkillLevel).mockReturnValue("advanced");
     vi.mocked(queryKnowledge).mockResolvedValue({

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import sqlite3
@@ -206,19 +207,24 @@ def _distance(space: str, left: np.ndarray, right: np.ndarray) -> float:
     replaced Chroma store used. RAG then maps that with ``1 - dist / 2``,
     which recovers cosine similarity on unit vectors. Cosine alone
     normalises; ``ip`` / ``inner_product`` keep magnitude.
+
+    Arithmetic uses float64 so large but finite float32 values do not
+    overflow the dot product or norms to ``inf`` / ``NaN``.
     """
+    left64 = np.asarray(left, dtype=np.float64)
+    right64 = np.asarray(right, dtype=np.float64)
     resolved = space.lower()
     if resolved in {"ip", "inner_product"}:
-        return 1.0 - float(np.dot(left, right))
+        return 1.0 - float(np.dot(left64, right64))
     if resolved == "cosine":
-        left_norm = float(np.linalg.norm(left))
-        right_norm = float(np.linalg.norm(right))
+        left_norm = float(np.linalg.norm(left64))
+        right_norm = float(np.linalg.norm(right64))
         if left_norm == 0.0 or right_norm == 0.0:
             similarity = 0.0
         else:
-            similarity = float(np.dot(left, right) / (left_norm * right_norm))
+            similarity = float(np.dot(left64, right64) / (left_norm * right_norm))
         return 1.0 - similarity
-    diff = left - right
+    diff = left64 - right64
     return float(np.dot(diff, diff))
 
 
@@ -411,7 +417,10 @@ class Collection:
                 continue
             if not bool(np.isfinite(embedding).all()):
                 continue
-            scored.append((row["id"], row, _distance(self._space, query, embedding)))
+            dist = _distance(self._space, query, embedding)
+            if not math.isfinite(dist):
+                continue
+            scored.append((row["id"], row, dist))
         scored.sort(key=lambda item: (item[2], item[0]))
         limit = max(0, n_results)
         return scored[:limit]
