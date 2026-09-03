@@ -24,22 +24,12 @@ import httpx
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .llm_client import LLMClient, LLMMessage
+from .service_profiles import DEFAULT_FEEDS, RSS_SOURCES
 
 logger = logging.getLogger("flinttrade.ai.sentiment")
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-# Default financial RSS feeds, keyed for NewsScraper callers.
-RSS_SOURCES: dict[str, str] = {
-    "moneycontrol": "https://www.moneycontrol.com/rss/marketreports.xml",
-    "economictimes": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
-    "livemint": "https://www.livemint.com/rss/markets",
-}
-DEFAULT_FEEDS: list[str] = [
-    RSS_SOURCES["economictimes"],
-    RSS_SOURCES["moneycontrol"],
-    RSS_SOURCES["livemint"],
-]
 _CACHE_TTL_SECS = 900.0
 
 # Common NSE symbols for entity extraction
@@ -391,12 +381,22 @@ class NewsScraper:
         return unique
 
 
-_DEFAULT_NEWS_SCRAPER = NewsScraper()
+_DEFAULT_NEWS_SCRAPER: NewsScraper | None = None
+_DEFAULT_NEWS_SCRAPER_LOCK = threading.Lock()
+
+
+def _default_news_scraper() -> NewsScraper:
+    """Construct the shared scraper only when a caller fetches a feed."""
+    global _DEFAULT_NEWS_SCRAPER
+    with _DEFAULT_NEWS_SCRAPER_LOCK:
+        if _DEFAULT_NEWS_SCRAPER is None:
+            _DEFAULT_NEWS_SCRAPER = NewsScraper()
+        return _DEFAULT_NEWS_SCRAPER
 
 
 def parse_feed(feed_url: str) -> list[NewsArticle]:
     """Fetch and parse an RSS/Atom feed through the shared cached stdlib engine."""
-    return _DEFAULT_NEWS_SCRAPER.fetch_headlines(feed_url, limit=None)
+    return _default_news_scraper().fetch_headlines(feed_url, limit=None)
 
 
 def extract_symbols(text: str) -> list[str]:

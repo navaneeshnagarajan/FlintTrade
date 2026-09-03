@@ -243,6 +243,22 @@ class TestDocumentLoader:
 
 
 class TestEmbeddingProvider:
+    def test_explicit_aliases_normalise_to_legacy_runtime_names(self) -> None:
+        sentence_transformers = EmbeddingProvider(provider="sentence-transformers")
+        openai_compatible = EmbeddingProvider(provider="openai-compatible")
+        with (
+            patch.object(sentence_transformers, "_embed_sentence_transformers", return_value=[[1.0]]) as local_embed,
+            patch.object(openai_compatible, "_embed_openai", return_value=[[2.0]]) as remote_embed,
+        ):
+            assert sentence_transformers.embed(["local"]) == [[1.0]]
+            assert openai_compatible.embed(["remote"]) == [[2.0]]
+        local_embed.assert_called_once_with(["local"])
+        remote_embed.assert_called_once_with(["remote"])
+
+    def test_unknown_string_provider_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Unknown embedding provider"):
+            EmbeddingProvider(provider="unexpected-provider")
+
     def test_empty_input_returns_empty(self) -> None:
         provider = EmbeddingProvider(custom_fn=lambda texts: [[0.1] * 384 for _ in texts])
         assert provider.embed([]) == []

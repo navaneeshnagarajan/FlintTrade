@@ -54,6 +54,12 @@ _EMBEDDING_MODE_METADATA_KEY = "flinttrade_embedding_mode"
 _DISTANCE_SPACE_METADATA_KEY = "flinttrade_distance_space"
 _EMBEDDING_MODE_EXTERNAL = "external"
 _EMBEDDING_MODE_CHROMA = "chroma"
+_EMBEDDING_PROVIDER_RUNTIME_NAMES = {
+    "sentence_transformers": "sentence_transformers",
+    "sentence-transformers": "sentence_transformers",
+    "openai": "openai",
+    "openai-compatible": "openai",
+}
 
 # ---------------------------------------------------------------------------
 # Data models
@@ -694,7 +700,10 @@ class EmbeddingProvider:
         custom_fn: Callable[[list[str]], list[list[float]]] | None = None,
     ) -> None:
         self._model = model
-        self._provider = provider
+        try:
+            self._provider = _EMBEDDING_PROVIDER_RUNTIME_NAMES[provider]
+        except KeyError as exc:
+            raise ValueError(f"Unknown embedding provider: {provider!r}") from exc
         self._api_base = api_base
         self._api_key = api_key
         self._custom_fn = custom_fn

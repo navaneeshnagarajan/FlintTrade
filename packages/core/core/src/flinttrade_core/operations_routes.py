@@ -30,6 +30,7 @@ from flask import Blueprint, Response, current_app, jsonify, request
 from werkzeug.utils import safe_join
 
 from .auth_scopes import require_scope
+from .news_provider_profiles import OPERATIONS_NEWS_FEEDS
 
 logger = logging.getLogger("flinttrade")
 
@@ -1551,14 +1552,8 @@ def api_security_settings_update() -> tuple[Any, int]:
 @operations_bp.route("/news", methods=["GET"])
 def api_news() -> tuple[Any, int]:
     """Fetch news from Indian financial RSS feeds server-side."""
-    feeds = [
-        ("MoneyControl", "https://www.moneycontrol.com/rss/latestnews.xml"),
-        ("ET Markets", "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"),
-        ("LiveMint", "https://www.livemint.com/rss/markets"),
-    ]
-
     articles: list[dict[str, str]] = []
-    for source_name, url in feeds:
+    for source_name, url in OPERATIONS_NEWS_FEEDS:
         try:
             import httpx  # noqa: PLC0415
 

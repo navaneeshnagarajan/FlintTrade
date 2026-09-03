@@ -3549,3 +3549,55 @@ class TestWebhooksManagement:
         assert payload["status"] == "error"
         assert "not armed" in payload["message"].lower()
         getattr(router, router_method).assert_not_called()
+
+
+def test_news_route_uses_canonical_profiles_and_preserves_its_payload(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    requested_urls: list[str] = []
+    published_by_url = {
+        "https://www.moneycontrol.com/rss/latestnews.xml": "2026-09-01T09:00:00Z",
+        "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms": "2026-09-02T09:00:00Z",
+        "https://www.livemint.com/rss/markets": "2026-09-03T09:00:00Z",
+    }
+
+    def _get(url: str, **_kwargs: object) -> MagicMock:
+        requested_urls.append(url)
+        response = MagicMock()
+        response.status_code = 200
+        response.text = (
+            "<rss><channel><item><title>Headline</title><link>https://example.com/article</link>"
+            f"<pubDate>{published_by_url[url]}</pubDate></item></channel></rss>"
+        )
+        return response
+
+    monkeypatch.setattr(httpx, "get", _get)
+
+    response = client.get("/api/v1/news", headers=_auth_headers())
+
+    assert requested_urls == list(published_by_url)
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "success"
+    assert payload["data"]["articles"] == [
+        {
+            "title": "Headline",
+            "link": "https://example.com/article",
+            "pub_date": published_by_url["https://www.livemint.com/rss/markets"],
+            "source": "LiveMint",
+        },
+        {
+            "title": "Headline",
+            "link": "https://example.com/article",
+            "pub_date": published_by_url[
+                "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"
+            ],
+            "source": "ET Markets",
+        },
+        {
+            "title": "Headline",
+            "link": "https://example.com/article",
+            "pub_date": published_by_url["https://www.moneycontrol.com/rss/latestnews.xml"],
+            "source": "MoneyControl",
+        },
+    ]
