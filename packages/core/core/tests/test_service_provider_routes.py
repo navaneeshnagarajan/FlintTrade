@@ -56,11 +56,9 @@ def test_catalogue_route_is_authenticated_read_only_and_generic_forecast_only(mo
         "embedding:sentence-transformers",
         "forecast:external-json",
     } <= ids
-    restricted_family = "times" + "fm"
-    assert not any(
-        f"{restricted_family}3" in provider_id or f"{restricted_family}-3" in provider_id
-        for provider_id in ids
-    )
+    assert {provider_id for provider_id in ids if provider_id.startswith("forecast:")} == {
+        "forecast:external-json"
+    }
     assert mutation.status_code == 405
 
 

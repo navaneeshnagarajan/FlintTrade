@@ -22,15 +22,9 @@ def test_ai_contribution_exactly_covers_current_surfaces() -> None:
     assert {f"agent-runtime:{item.id}" for item in AGENT_BACKEND_CATALOGUE if item.requires_binary} <= ids
     assert {"embedding:sentence-transformers", "embedding:openai-compatible"} <= ids
     assert {"news:rss.moneycontrol", "news:rss.economictimes", "news:rss.livemint"} <= ids
-    assert "forecast:external-json" in ids
-
-
-def test_tracked_ai_catalogue_excludes_restricted_model_identifiers() -> None:
-    payload = repr([item.to_public_dict() for item in ai_service_descriptors()]).lower()
-    restricted_family = "times" + "fm"
-
-    assert f"{restricted_family}-3" not in payload
-    assert f"{restricted_family}3" not in payload
+    assert {provider_id for provider_id in ids if provider_id.startswith("forecast:")} == {
+        "forecast:external-json"
+    }
 
 
 def test_generic_forecast_protocol_is_declared_but_not_invokable() -> None:

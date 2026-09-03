@@ -1,10 +1,12 @@
 import ast
 from pathlib import Path
+import re
 import subprocess
 
 from flinttrade_core.model_rights_policies import TIMESFM_3_RESTRICTION_POLICY
 from flinttrade_core.service_providers import (
     EvidenceUseScope,
+    LicenceFact,
     ModelIdentity,
     PermissionState,
     RightsBasis,
@@ -12,6 +14,57 @@ from flinttrade_core.service_providers import (
     UsageRights,
     intersect_rights,
 )
+
+
+def _fact(basis: RightsBasis, *, identifier: str, subject_kind: str = "service") -> LicenceFact:
+    return LicenceFact(
+        fact_id=f"{basis.value}:{identifier}",
+        subject_kind=subject_kind,
+        identifier=identifier,
+        source_uri="https://evidence.example.invalid/v1",
+        revision="revision-1",
+        sha256="f" * 64,
+        reviewed_at="2026-09-04T00:00:00Z",
+        basis=basis,
+    )
+
+
+def _contains_restricted_identifier(line: str) -> bool:
+    if re.search(r"times(?:[_\-\s]?fm)\b", line, flags=re.IGNORECASE):
+        return True
+    literal_fragments = re.findall(r'"([^"]*)"|\'([^\']*)\'|`([^`]*)`', line)
+    literal_value = "".join(fragment for match in literal_fragments for fragment in match)
+    return "timesfm" in re.sub(r"[^a-z0-9]+", "", literal_value.lower())
+
+
+def _python_static_strings(node: ast.AST) -> tuple[str, ...]:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return (node.value,)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return tuple(left + right for left in _python_static_strings(node.left) for right in _python_static_strings(node.right))
+    return ()
+
+
+def _python_source_contains_restricted_identifier(source: str) -> bool:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    return any(
+        "timesfm" in re.sub(r"[^a-z0-9]+", "", value.lower())
+        for node in ast.walk(tree)
+        for value in _python_static_strings(node)
+    )
+
+
+def test_timesfm_guard_detects_static_concatenated_identifier() -> None:
+    assert _contains_restricted_identifier('const restricted = "times" + "fm";')
+    assert _contains_restricted_identifier('restricted = "times" "fm"')
+    assert _contains_restricted_identifier('const restricted = "times-fm";')
+    assert _contains_restricted_identifier('const restricted = "times_fm";')
+    assert _contains_restricted_identifier('const restricted = "times fm";')
+    assert not _contains_restricted_identifier("datetime.strptime(s, fmt).timestamp()")
+    assert _python_source_contains_restricted_identifier('restricted = ("times" +\n"fm")')
 
 
 def test_timesfm_policy_preserves_licence_and_conservative_policy_attribution() -> None:
@@ -48,6 +101,19 @@ def test_timesfm_policy_cannot_be_widened_by_a_caller_claim() -> None:
             production_use=PermissionState.ALLOWED,
             max_evidence_use_scope=EvidenceUseScope.LIVE_DECISION,
         ),
+        evidence=(
+            _fact(
+                RightsBasis.ENTITLEMENT,
+                identifier="google/timesfm-3.0-pytorch",
+                subject_kind="model_entitlement",
+            ),
+        ),
+        model_identity=ModelIdentity(
+            provider_id="forecast:google-timesfm",
+            model_id="google/timesfm-3.0-pytorch",
+            revision="43046b85ec22d584a13f8098c2ed39c889e129c2",
+            sha256="a7592b0a8432baee54483254e5647856911ce69e09d09a9bb65904b2d98f17da",
+        ),
     )
 
     effective = intersect_rights(TIMESFM_3_RESTRICTION_POLICY, caller_claim)
@@ -69,6 +135,13 @@ def test_timesfm_identity_mismatch_remains_isolated_research() -> None:
             commercial_use=PermissionState.ALLOWED,
             production_use=PermissionState.ALLOWED,
             max_evidence_use_scope=EvidenceUseScope.LIVE_DECISION,
+        ),
+        evidence=(
+            _fact(
+                RightsBasis.PROVIDER_TERMS,
+                identifier="fixture/model",
+                subject_kind="model_terms",
+            ),
         ),
         model_identity=ModelIdentity(
             provider_id="forecast:fixture",
@@ -97,35 +170,41 @@ def test_timesfm_has_no_runtime_artifact_or_dependency() -> None:
         capture_output=True,
         encoding="utf-8",
     ).stdout.splitlines()
-    content_search = subprocess.run(
-        ("git", "grep", "-Iil", "timesfm", "--"),
-        cwd=repository_root,
-        check=False,
-        capture_output=True,
-        encoding="utf-8",
-    )
-    assert content_search.returncode in (0, 1)
     allowed_timesfm_files = {
         "packages/core/core/src/flinttrade_core/model_rights_policies.py",
         "packages/core/core/tests/test_timesfm_distribution_boundary.py",
     }
-    path_matches = {path for path in tracked_files if "timesfm" in path.lower()}
-    content_matches = set(content_search.stdout.splitlines())
+    path_matches = {
+        path for path in tracked_files if "timesfm" in re.sub(r"[^a-z0-9]+", "", path.lower())
+    }
+    content_matches: set[str] = set()
+    for path in tracked_files:
+        content = (repository_root / path).read_bytes()
+        lines = content.decode("utf-8", errors="ignore").splitlines()
+        if (
+            b"timesfm" in content.lower()
+            or any(_contains_restricted_identifier(line) for line in lines)
+            or (path.endswith(".py") and _python_source_contains_restricted_identifier(content.decode("utf-8", errors="ignore")))
+        ):
+            content_matches.add(path)
 
     assert path_matches <= allowed_timesfm_files
     assert content_matches == allowed_timesfm_files
-    blocked_weight_suffixes = {
+    blocked_artifact_suffixes = {
         ".adapter",
         ".bin",
         ".ckpt",
         ".diff",
+        ".dat",
         ".gguf",
+        ".ggml",
         ".h5",
         ".hdf5",
         ".joblib",
         ".keras",
         ".lora",
         ".mlmodel",
+        ".model",
         ".npy",
         ".npz",
         ".onnx",
@@ -135,11 +214,27 @@ def test_timesfm_has_no_runtime_artifact_or_dependency() -> None:
         ".pt",
         ".pth",
         ".safetensors",
+        ".safetensors.index.json",
+        ".tar",
+        ".tar.bz2",
+        ".tar.gz",
+        ".tar.xz",
         ".tflite",
         ".torchscript",
         ".weights",
+        ".fp16",
+        ".fp32",
+        ".q4_0",
+        ".q4_1",
+        ".q4_k_m",
+        ".q5_k_m",
+        ".q8_0",
     }
-    assert not {path for path in tracked_files if Path(path).suffix.lower() in blocked_weight_suffixes}
+    assert not {
+        path
+        for path in tracked_files
+        if any(path.lower().endswith(suffix) for suffix in blocked_artifact_suffixes)
+    }
 
 
 def test_neutral_catalogue_modules_import_no_provider_runtime_packages() -> None:

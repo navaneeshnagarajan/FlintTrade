@@ -6,6 +6,7 @@ from flinttrade_core.service_providers import (
     DuplicateProviderIdError,
     EvidenceUseScope,
     LicenceFact,
+    ModelIdentity,
     PermissionState,
     ProviderDescriptor,
     RightsBasis,
@@ -24,6 +25,19 @@ def _provider(provider_id: str) -> ProviderDescriptor:
         display_name="Fixture",
         service_kinds=frozenset({ServiceKind.FORECAST}),
         capabilities=("forecast.run",),
+    )
+
+
+def _fact(basis: RightsBasis, *, subject_kind: str = "service", identifier: str = "fixture") -> LicenceFact:
+    return LicenceFact(
+        fact_id=f"{basis.value}:{identifier}",
+        subject_kind=subject_kind,
+        identifier=identifier,
+        source_uri="https://evidence.example.invalid/v1",
+        revision="revision-1",
+        sha256="d" * 64,
+        reviewed_at="2026-09-04T00:00:00Z",
+        basis=basis,
     )
 
 
@@ -50,6 +64,7 @@ def test_rights_intersection_never_widens_scope_or_permissions() -> None:
             max_evidence_use_scope=EvidenceUseScope.LIVE_DECISION,
             restrictions=("retain-provenance",),
         ),
+        evidence=(_fact(RightsBasis.ENTITLEMENT),),
     )
     research_only = RightsGrant(
         grant_id="grant:research",
@@ -81,11 +96,13 @@ def test_rights_intersection_is_a_fail_closed_semilattice() -> None:
             production_use=PermissionState.ALLOWED,
             max_evidence_use_scope=EvidenceUseScope.LIVE_DECISION,
         ),
+        evidence=(_fact(RightsBasis.ENTITLEMENT),),
     )
     unknown = RightsGrant(
         grant_id="grant:unknown",
         basis=RightsBasis.PROVIDER_TERMS,
         rights=UsageRights(),
+        evidence=(_fact(RightsBasis.PROVIDER_TERMS),),
     )
     denied = RightsGrant(
         grant_id="grant:denied",
@@ -94,6 +111,7 @@ def test_rights_intersection_is_a_fail_closed_semilattice() -> None:
             commercial_use=PermissionState.DENIED,
             production_use=PermissionState.DENIED,
         ),
+        evidence=(_fact(RightsBasis.LICENCE),),
     )
 
     assert intersect_rights().rights == UsageRights()
@@ -116,6 +134,99 @@ def test_licence_facts_bind_subject_identity_and_basis() -> None:
         basis=RightsBasis.LICENCE,
     )
     assert fact.to_public_dict()["identifier"] == "provider/model"
+
+
+@pytest.mark.parametrize(
+    "basis",
+    (RightsBasis.LICENCE, RightsBasis.PROVIDER_TERMS, RightsBasis.ENTITLEMENT),
+)
+def test_non_policy_rights_grants_require_evidence(basis: RightsBasis) -> None:
+    with pytest.raises(ValueError, match="non-policy rights grants require evidence"):
+        RightsGrant(grant_id=f"grant:{basis.value}", basis=basis, rights=UsageRights())
+
+
+@pytest.mark.parametrize(
+    "rights",
+    (
+        UsageRights(commercial_use=PermissionState.ALLOWED),
+        UsageRights(max_evidence_use_scope=EvidenceUseScope.OFFLINE_QUALIFICATION),
+    ),
+)
+def test_evidence_free_policy_grants_cannot_widen_rights(rights: UsageRights) -> None:
+    with pytest.raises(ValueError, match="expansive rights grants require evidence"):
+        RightsGrant(grant_id="policy:unproven", basis=RightsBasis.FLINTTRADE_POLICY, rights=rights)
+
+
+def test_model_evidence_requires_matching_exact_model_identity() -> None:
+    fact = _fact(RightsBasis.LICENCE, subject_kind="model_licence", identifier="provider/model")
+
+    with pytest.raises(ValueError, match="model evidence requires an exact model identity"):
+        RightsGrant(
+            grant_id="grant:model-without-identity",
+            basis=RightsBasis.LICENCE,
+            rights=UsageRights(),
+            evidence=(fact,),
+        )
+    with pytest.raises(ValueError, match="model evidence identifier must match model identity"):
+        RightsGrant(
+            grant_id="grant:model-mismatch",
+            basis=RightsBasis.LICENCE,
+            rights=UsageRights(),
+            evidence=(fact,),
+            model_identity=ModelIdentity(
+                provider_id="forecast:fixture",
+                model_id="provider/other-model",
+                revision="revision-1",
+                sha256="e" * 64,
+            ),
+        )
+
+    grant = RightsGrant(
+        grant_id="grant:model-exact",
+        basis=RightsBasis.LICENCE,
+        rights=UsageRights(),
+        evidence=(fact,),
+        model_identity=ModelIdentity(
+            provider_id="forecast:fixture",
+            model_id="provider/model",
+            revision="revision-1",
+            sha256="e" * 64,
+        ),
+    )
+    assert grant.model_identity is not None
+
+
+def test_model_identity_requires_matching_canonical_model_evidence() -> None:
+    identity = ModelIdentity(
+        provider_id="forecast:fixture",
+        model_id="provider/model",
+        revision="revision-1",
+        sha256="e" * 64,
+    )
+
+    with pytest.raises(ValueError, match="model identity requires matching model evidence"):
+        RightsGrant(
+            grant_id="grant:generic-evidence",
+            basis=RightsBasis.ENTITLEMENT,
+            rights=UsageRights(),
+            evidence=(_fact(RightsBasis.ENTITLEMENT),),
+            model_identity=identity,
+        )
+
+    grant = RightsGrant(
+        grant_id="grant:canonical-model-evidence",
+        basis=RightsBasis.PROVIDER_TERMS,
+        rights=UsageRights(),
+        evidence=(
+            _fact(
+                RightsBasis.PROVIDER_TERMS,
+                subject_kind=" Model-Licence ",
+                identifier="provider/model",
+            ),
+        ),
+        model_identity=identity,
+    )
+    assert grant.model_identity == identity
 
 
 def test_public_payload_is_deterministic_and_contains_no_mutable_mapping() -> None:
@@ -164,6 +275,7 @@ def test_rights_resolution_rejects_manual_rights_that_do_not_match_its_grants() 
         grant_id="grant:allowed",
         basis=RightsBasis.ENTITLEMENT,
         rights=UsageRights(production_use=PermissionState.ALLOWED),
+        evidence=(_fact(RightsBasis.ENTITLEMENT),),
     )
 
     with pytest.raises(ValueError, match="rights must equal the effective grants"):
@@ -205,6 +317,12 @@ def test_grant_copies_mutable_evidence_and_rejects_conflicting_duplicate_ids() -
         basis=RightsBasis.LICENCE,
         rights=UsageRights(),
         evidence=evidence,
+        model_identity=ModelIdentity(
+            provider_id="forecast:fixture",
+            model_id="provider/model",
+            revision="revision-1",
+            sha256="b" * 64,
+        ),
     )
     evidence.clear()
 
@@ -212,5 +330,10 @@ def test_grant_copies_mutable_evidence_and_rejects_conflicting_duplicate_ids() -
     with pytest.raises(ValueError, match="conflicting rights grant"):
         intersect_rights(
             grant,
-            RightsGrant("grant:licence", RightsBasis.LICENCE, UsageRights(commercial_use=PermissionState.DENIED)),
+            RightsGrant(
+                "grant:licence",
+                RightsBasis.LICENCE,
+                UsageRights(commercial_use=PermissionState.DENIED),
+                evidence=(_fact(RightsBasis.LICENCE),),
+            ),
         )

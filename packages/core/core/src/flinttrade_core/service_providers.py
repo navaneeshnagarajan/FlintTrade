@@ -53,6 +53,16 @@ _SCOPE_RANK = {
     EvidenceUseScope.PRACTICE_QUALIFICATION: 2,
     EvidenceUseScope.LIVE_DECISION: 3,
 }
+_PERMISSION_NAMES = (
+    "model_distribution",
+    "derivative_distribution",
+    "commercial_use",
+    "production_use",
+    "output_use",
+    "output_distribution",
+    "retention",
+    "training_distillation",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +181,28 @@ class RightsGrant:
             raise ValueError("evidence fact IDs must be unique")
         if any(fact.basis is not self.basis for fact in evidence):
             raise ValueError("every evidence fact must match the grant basis")
+        if self.basis is not RightsBasis.FLINTTRADE_POLICY and not evidence:
+            raise ValueError("non-policy rights grants require evidence")
+        is_expansive = any(
+            getattr(self.rights, name) is PermissionState.ALLOWED for name in _PERMISSION_NAMES
+        ) or self.rights.max_evidence_use_scope is not EvidenceUseScope.ISOLATED_RESEARCH
+        if is_expansive and not evidence:
+            raise ValueError("expansive rights grants require evidence")
+        model_evidence = tuple(
+            fact
+            for fact in evidence
+            if re.sub(r"[^a-z0-9]+", "", fact.subject_kind.casefold()).startswith("model")
+        )
+        if model_evidence and self.model_identity is None:
+            raise ValueError("model evidence requires an exact model identity")
+        if self.model_identity is not None and any(
+            fact.identifier != self.model_identity.model_id for fact in model_evidence
+        ):
+            raise ValueError("model evidence identifier must match model identity")
+        if self.model_identity is not None and (self.basis is not RightsBasis.FLINTTRADE_POLICY or is_expansive) and not any(
+            fact.identifier == self.model_identity.model_id for fact in model_evidence
+        ):
+            raise ValueError("model identity requires matching model evidence")
         object.__setattr__(self, "evidence", evidence)
 
     def to_public_dict(self) -> dict[str, object]:
@@ -223,19 +255,9 @@ def _canonical_grants(grants: tuple[RightsGrant, ...]) -> tuple[RightsGrant, ...
 def _intersect_grant_rights(grants: tuple[RightsGrant, ...]) -> UsageRights:
     if not grants:
         return UsageRights()
-    permission_names = (
-        "model_distribution",
-        "derivative_distribution",
-        "commercial_use",
-        "production_use",
-        "output_use",
-        "output_distribution",
-        "retention",
-        "training_distillation",
-    )
     permissions = {
         name: min((getattr(grant.rights, name) for grant in grants), key=_PERMISSION_RANK.__getitem__)
-        for name in permission_names
+        for name in _PERMISSION_NAMES
     }
     return UsageRights(
         **permissions,
