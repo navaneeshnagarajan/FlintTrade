@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from flinttrade_core.llm_provider_profiles import (
     LLM_PROVIDER_PROFILES,
@@ -14,7 +16,7 @@ from flinttrade_core.service_providers import ProviderDescriptor, RightsResoluti
 
 from .agent_backends.profiles import AGENT_BACKEND_CATALOGUE, AgentBackendProfile
 
-RSS_SOURCES: dict[str, str] = dict(SENTIMENT_NEWS_CHANNELS)
+RSS_SOURCES: Mapping[str, str] = MappingProxyType(dict(SENTIMENT_NEWS_CHANNELS))
 DEFAULT_FEEDS: tuple[str, ...] = tuple(RSS_SOURCES.values())
 
 
@@ -67,9 +69,9 @@ def _agent_runtime_descriptor(profile: AgentBackendProfile) -> ProviderDescripto
         provider_id=f"agent-runtime:{profile.id}",
         display_name=profile.display_name,
         service_kinds=frozenset({ServiceKind.AGENT_RUNTIME}),
-        capabilities=(profile.kind.value,),
+        capabilities=("agent.runtime",),
         auth_models=(profile.auth_mode.value,),
-        pricing_class="local_compute",
+        pricing_class="unknown",
         resource_requirements=tuple(f"binary:{binary}" for binary in profile.detect_binaries),
         activation_blockers=("operator-managed runtime binary required",),
         implemented=True,
@@ -94,7 +96,7 @@ def _embedding_descriptor(profile: EmbeddingServiceProfile) -> ProviderDescripto
         provider_id=profile.provider_id,
         display_name=profile.display_name,
         service_kinds=frozenset({ServiceKind.EMBEDDING}),
-        capabilities=("embedding.embed",),
+        capabilities=("embedding.create",),
         pricing_class=profile.pricing_class,
         implemented=True,
         default_rights=_unknown_rights(),

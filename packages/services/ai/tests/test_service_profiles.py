@@ -6,6 +6,7 @@ import subprocess
 from unittest.mock import patch
 
 import httpx
+import pytest
 from flinttrade_ai.agent_backends.profiles import AGENT_BACKEND_CATALOGUE
 from flinttrade_ai.agent_backends import registry
 from flinttrade_ai import llm_client, rag_pipeline, sentiment
@@ -47,6 +48,29 @@ def test_rss_sources_have_one_canonical_market_feed_each() -> None:
         "livemint": "https://www.livemint.com/rss/markets",
     }
     assert DEFAULT_FEEDS == tuple(RSS_SOURCES.values())
+
+
+def test_rss_sources_are_read_only_compatibility_data() -> None:
+    original = RSS_SOURCES["moneycontrol"]
+    try:
+        with pytest.raises(TypeError):
+            RSS_SOURCES["moneycontrol"] = "https://example.invalid/rss"
+    finally:
+        if RSS_SOURCES["moneycontrol"] != original:
+            RSS_SOURCES["moneycontrol"] = original
+
+
+def test_agent_and_embedding_descriptors_have_exact_static_metadata() -> None:
+    descriptors = {item.provider_id: item for item in ai_service_descriptors()}
+
+    for profile in AGENT_BACKEND_CATALOGUE:
+        if profile.requires_binary:
+            descriptor = descriptors[f"agent-runtime:{profile.id}"]
+            assert descriptor.capabilities == ("agent.runtime",)
+            assert descriptor.pricing_class == "unknown"
+
+    assert descriptors["embedding:sentence-transformers"].capabilities == ("embedding.create",)
+    assert descriptors["embedding:openai-compatible"].capabilities == ("embedding.create",)
 
 
 def test_static_contribution_construction_has_no_provider_io() -> None:

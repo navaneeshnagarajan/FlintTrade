@@ -54,12 +54,14 @@ _EMBEDDING_MODE_METADATA_KEY = "flinttrade_embedding_mode"
 _DISTANCE_SPACE_METADATA_KEY = "flinttrade_distance_space"
 _EMBEDDING_MODE_EXTERNAL = "external"
 _EMBEDDING_MODE_CHROMA = "chroma"
-_EMBEDDING_PROVIDER_RUNTIME_NAMES = {
-    "sentence_transformers": "sentence_transformers",
-    "sentence-transformers": "sentence_transformers",
-    "openai": "openai",
-    "openai-compatible": "openai",
+_BUILT_IN_EMBEDDING_PROVIDERS = {
+    "sentence_transformers": ("sentence_transformers", "embedding:sentence-transformers"),
+    "sentence-transformers": ("sentence_transformers", "embedding:sentence-transformers"),
+    "openai": ("openai", "embedding:openai-compatible"),
+    "openai-compatible": ("openai", "embedding:openai-compatible"),
 }
+_CUSTOM_EMBEDDING_PROVIDER_ID = re.compile(r"^embedding:[a-z0-9][a-z0-9._-]*$")
+_RESERVED_EMBEDDING_PROVIDER_IDS = frozenset(provider_id for _runtime_name, provider_id in _BUILT_IN_EMBEDDING_PROVIDERS.values())
 
 # ---------------------------------------------------------------------------
 # Data models
@@ -683,7 +685,7 @@ class EmbeddingProvider:
     Supports:
     - ``"sentence_transformers"`` — local, offline, default.
     - ``"openai"`` — any OpenAI-compatible REST endpoint.
-    - Any callable accepting ``List[str]`` and returning ``List[List[float]]``.
+    - A caller-supplied callable with an explicit ``embedding:<id>`` lineage.
 
     Example::
 
@@ -700,14 +702,25 @@ class EmbeddingProvider:
         custom_fn: Callable[[list[str]], list[list[float]]] | None = None,
     ) -> None:
         self._model = model
-        try:
-            self._provider = _EMBEDDING_PROVIDER_RUNTIME_NAMES[provider]
-        except KeyError as exc:
-            raise ValueError(f"Unknown embedding provider: {provider!r}") from exc
+        if custom_fn is not None:
+            if not _CUSTOM_EMBEDDING_PROVIDER_ID.fullmatch(provider) or provider in _RESERVED_EMBEDDING_PROVIDER_IDS:
+                raise ValueError("Custom embedding provider must use an explicit non-reserved embedding:<id> lineage")
+            self._provider = "custom"
+            self._provider_id = provider
+        else:
+            try:
+                self._provider, self._provider_id = _BUILT_IN_EMBEDDING_PROVIDERS[provider]
+            except KeyError as exc:
+                raise ValueError(f"Unknown embedding provider: {provider!r}") from exc
         self._api_base = api_base
         self._api_key = api_key
         self._custom_fn = custom_fn
         self._st_model: Any = None  # lazy-loaded SentenceTransformer
+
+    @property
+    def provider_id(self) -> str:
+        """Return the canonical built-in ID or caller-supplied custom lineage."""
+        return self._provider_id
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed a list of texts.
