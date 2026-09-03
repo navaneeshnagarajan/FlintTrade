@@ -26,6 +26,14 @@ def test_ai_contribution_exactly_covers_current_surfaces() -> None:
         "forecast:external-json"
     }
 
+    llm_descriptors = [item for item in descriptors if item.provider_id.startswith("llm:")]
+    assert len(llm_descriptors) == len(LLMProvider)
+    assert all(item.default_rights.rights.output_use.value == "unknown" for item in llm_descriptors)
+    assert all(
+        item.default_rights.rights.max_evidence_use_scope.value == "isolated_research"
+        for item in llm_descriptors
+    )
+
 
 def test_generic_forecast_protocol_is_declared_but_not_invokable() -> None:
     forecast = next(item for item in ai_service_descriptors() if item.provider_id == "forecast:external-json")

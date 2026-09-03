@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from flinttrade_core import llm_provider_profiles as profile_module
 from flinttrade_core.llm_provider_profiles import (
     LLM_PROVIDER_BY_ID,
     LLM_PROVIDER_PROFILES,
     LLMProvider,
-    llm_provider_descriptors,
 )
 
 
@@ -23,13 +23,5 @@ def test_nvidia_is_present_and_claude_oauth_is_an_auth_mode() -> None:
     assert "claude-code-oauth" not in LLM_PROVIDER_BY_ID
 
 
-def test_service_projection_is_namespaced_and_unknown_rights_fail_closed() -> None:
-    descriptors = llm_provider_descriptors()
-    assert {item.provider_id for item in descriptors} == {
-        f"llm:{provider.value}" for provider in LLMProvider
-    }
-    assert all(item.default_rights.rights.output_use.value == "unknown" for item in descriptors)
-    assert all(
-        item.default_rights.rights.max_evidence_use_scope.value == "isolated_research"
-        for item in descriptors
-    )
+def test_core_profiles_do_not_publish_a_shadow_service_descriptor_authority() -> None:
+    assert not hasattr(profile_module, "llm_provider_descriptors")

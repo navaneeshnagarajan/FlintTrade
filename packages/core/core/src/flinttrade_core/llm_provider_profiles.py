@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
 
-from .service_providers import ProviderDescriptor, RightsResolution, ServiceKind, UsageRights
-
 
 class LLMProvider(StrEnum):
     """Supported LLM provider identifiers."""
@@ -180,20 +178,3 @@ def _connection_requirements(profile: LLMProviderProfile) -> tuple[str, ...]:
     if profile.provider_id == LLMProvider.ANTHROPIC:
         return ("api_key_or_oauth",)
     return ("api_key",) if "api_key" in profile.auth_modes else ()
-
-
-def llm_provider_descriptors() -> tuple[ProviderDescriptor, ...]:
-    """Project static LLM facts into the neutral service-provider catalogue."""
-    return tuple(
-        ProviderDescriptor(
-            provider_id=f"llm:{profile.provider_id}",
-            display_name=profile.display_name,
-            service_kinds=frozenset({ServiceKind.LLM}),
-            capabilities=("llm.chat",),
-            auth_models=profile.auth_modes,
-            connection_requirements=_connection_requirements(profile),
-            implemented=True,
-            default_rights=RightsResolution(rights=UsageRights()),
-        )
-        for profile in LLM_PROVIDER_PROFILES
-    )
