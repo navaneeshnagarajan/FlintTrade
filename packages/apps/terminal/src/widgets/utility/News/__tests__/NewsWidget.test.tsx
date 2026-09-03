@@ -17,9 +17,6 @@ vi.mock("@/services/ftApi", () => ({
   getNews: vi.fn().mockRejectedValue(new Error("No backend")),
 }));
 
-// Mock global fetch to avoid real RSS calls in the CORS proxy fallback
-vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No network"));
-
 // ---------------------------------------------------------------------------
 // Import component under test (after mocks)
 // ---------------------------------------------------------------------------
@@ -33,8 +30,6 @@ import NewsWidget from "../NewsWidget";
 describe("NewsWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    // Re-apply fetch mock after restoreAllMocks
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No network"));
   });
 
   it("renders without crashing", () => {
@@ -57,25 +52,17 @@ describe("NewsWidget", () => {
     ).toBeInTheDocument();
   });
 
-  // The widget falls back to corsproxy.io when the operator's own backend is
-  // unreachable. That is a reasonable degraded path, but the proxy sees their
-  // IP and which feeds they read, so it must not happen silently.
-  it("discloses when headlines came through the third-party proxy", async () => {
-    const rss = `<rss><channel><item>
-      <title>NIFTY ends higher</title>
-      <link>https://example.test/a</link>
-      <pubDate>Fri, 24 Jul 2026 10:00:00 +0530</pubDate>
-    </item></channel></rss>`;
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(rss, { status: 200 }),
-    );
+  it("reports backend unavailability without browser fetching a feed", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
 
     render(<NewsWidget />);
 
-    expect(await screen.findByText("Via proxy")).toBeInTheDocument();
+    expect(await screen.findByText("News is unavailable from the FlintTrade backend.")).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText("Via proxy")).not.toBeInTheDocument();
   });
 
-  it("shows no proxy badge when the backend serves the headlines", async () => {
+  it("shows backend headlines without a proxy attribution", async () => {
     const { getNews } = await import("@/services/ftApi");
     vi.mocked(getNews).mockResolvedValue({
       articles: [

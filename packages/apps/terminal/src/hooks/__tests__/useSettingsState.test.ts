@@ -10,6 +10,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { isAcceptedOpenAlgoConfigStatus, useSettingsState } from "../useSettingsState";
+import type { LlmProviderId } from "@/generated/serviceProviders";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import type { OpenAlgoConfigData } from "@/services/ftApi.openalgo";
@@ -387,6 +388,22 @@ describe("useSettingsState", () => {
     expect(result.current.llm.provider).toBe("ollama");
     expect(result.current.llm.host).toBe("");
     expect(result.current.llm.model).toBe("qwen3:9b");
+  });
+
+  it("accepts NVIDIA as a generated backend provider ID", async () => {
+    const provider: LlmProviderId = "nvidia";
+    mockFetchWithOpenAlgoConfig(undefined, {
+      provider,
+      host: "",
+      model: "operator-selected-model",
+      api_key_configured: true,
+      api_key_last4: "idia",
+    });
+
+    const { result } = renderHook(() => useSettingsState());
+
+    await waitFor(() => expect(result.current.llm.provider).toBe("nvidia"));
+    expect(result.current.llm.model).toBe("operator-selected-model");
   });
 
   it("hydrates LLM config from the backend workspace endpoint without exposing the API key", async () => {
