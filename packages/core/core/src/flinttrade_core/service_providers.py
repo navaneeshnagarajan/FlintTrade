@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 
 _PROVIDER_ID = re.compile(r"^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$")
 
@@ -188,7 +189,10 @@ class RightsResolution:
     grants: tuple[RightsGrant, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "grants", _canonical_grants(tuple(self.grants)))
+        grants = _canonical_grants(tuple(self.grants))
+        if self.rights != _intersect_grant_rights(grants):
+            raise ValueError("rights must equal the effective grants")
+        object.__setattr__(self, "grants", grants)
 
     def to_public_dict(self) -> dict[str, object]:
         return {
@@ -216,15 +220,9 @@ def _canonical_grants(grants: tuple[RightsGrant, ...]) -> tuple[RightsGrant, ...
     return tuple(by_id[grant_id] for grant_id in sorted(by_id))
 
 
-def intersect_rights(*items: RightsGrant | RightsResolution) -> RightsResolution:
-    grants = tuple(
-        grant
-        for item in items
-        for grant in (item.grants if isinstance(item, RightsResolution) else (item,))
-    )
+def _intersect_grant_rights(grants: tuple[RightsGrant, ...]) -> UsageRights:
     if not grants:
-        return RightsResolution()
-    grants = _canonical_grants(grants)
+        return UsageRights()
     permission_names = (
         "model_distribution",
         "derivative_distribution",
@@ -239,17 +237,24 @@ def intersect_rights(*items: RightsGrant | RightsResolution) -> RightsResolution
         name: min((getattr(grant.rights, name) for grant in grants), key=_PERMISSION_RANK.__getitem__)
         for name in permission_names
     }
-    return RightsResolution(
-        rights=UsageRights(
-            **permissions,
-            max_evidence_use_scope=min(
-                (grant.rights.max_evidence_use_scope for grant in grants),
-                key=_SCOPE_RANK.__getitem__,
-            ),
-            restrictions=tuple(sorted({item for grant in grants for item in grant.rights.restrictions})),
+    return UsageRights(
+        **permissions,
+        max_evidence_use_scope=min(
+            (grant.rights.max_evidence_use_scope for grant in grants),
+            key=_SCOPE_RANK.__getitem__,
         ),
-        grants=grants,
+        restrictions=tuple(sorted({item for grant in grants for item in grant.rights.restrictions})),
     )
+
+
+def intersect_rights(*items: RightsGrant | RightsResolution) -> RightsResolution:
+    grants = tuple(
+        grant
+        for item in items
+        for grant in (item.grants if isinstance(item, RightsResolution) else (item,))
+    )
+    grants = _canonical_grants(grants)
+    return RightsResolution(rights=_intersect_grant_rights(grants), grants=grants)
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,7 +335,11 @@ class DuplicateProviderIdError(ValueError):
     """Two domain contributors claimed the same provider ID."""
 
 
+@dataclass(frozen=True, slots=True, init=False, eq=False)
 class ServiceProviderCatalogue:
+    _ordered: tuple[ProviderDescriptor, ...]
+    _by_id: Mapping[str, ProviderDescriptor]
+
     def __init__(self, providers: Iterable[ProviderDescriptor]) -> None:
         ordered = tuple(providers)
         by_id: dict[str, ProviderDescriptor] = {}
@@ -338,8 +347,8 @@ class ServiceProviderCatalogue:
             if provider.provider_id in by_id:
                 raise DuplicateProviderIdError(provider.provider_id)
             by_id[provider.provider_id] = provider
-        self._ordered = ordered
-        self._by_id = by_id
+        object.__setattr__(self, "_ordered", ordered)
+        object.__setattr__(self, "_by_id", MappingProxyType(by_id))
 
     def get(self, provider_id: str) -> ProviderDescriptor:
         return self._by_id[provider_id]

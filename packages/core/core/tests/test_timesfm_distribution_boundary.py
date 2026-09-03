@@ -1,5 +1,6 @@
 import ast
 from pathlib import Path
+import subprocess
 
 from flinttrade_core.model_rights_policies import TIMESFM_3_RESTRICTION_POLICY
 from flinttrade_core.service_providers import (
@@ -89,25 +90,80 @@ def test_timesfm_identity_mismatch_remains_isolated_research() -> None:
 
 def test_timesfm_has_no_runtime_artifact_or_dependency() -> None:
     repository_root = Path(__file__).resolve().parents[4]
-    package_root = repository_root / "packages"
-    path_matches = sorted(
-        path.relative_to(repository_root).as_posix()
-        for path in package_root.rglob("*timesfm*")
-        if path.is_file() and path.suffix == ".py"
+    tracked_files = subprocess.run(
+        ("git", "ls-files"),
+        cwd=repository_root,
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+    ).stdout.splitlines()
+    relevant_suffixes = {
+        ".bat",
+        ".bin",
+        ".cjs",
+        ".ckpt",
+        ".cmd",
+        ".conf",
+        ".config",
+        ".gguf",
+        ".h5",
+        ".ini",
+        ".js",
+        ".json",
+        ".jsonc",
+        ".lock",
+        ".mjs",
+        ".onnx",
+        ".ps1",
+        ".pt",
+        ".pth",
+        ".pkl",
+        ".pickle",
+        ".py",
+        ".pyi",
+        ".rs",
+        ".safetensors",
+        ".sh",
+        ".toml",
+        ".ts",
+        ".tsx",
+        ".yml",
+        ".yaml",
+        ".zip",
+    }
+    relevant_names = {"Dockerfile", "Makefile", "Pipfile", "poetry.lock", "requirements.txt", "uv.lock"}
+    relevant_files = [
+        path
+        for path in tracked_files
+        if Path(path).suffix in relevant_suffixes
+        or Path(path).name in relevant_names
+        or path.startswith(("scripts/", "presets/", "config/", "configs/"))
+    ]
+    path_matches = sorted(path for path in relevant_files if "timesfm" in path.lower())
+    content_matches = sorted(
+        path
+        for path in relevant_files
+        if "timesfm" in (repository_root / path).read_text(encoding="utf-8", errors="ignore").lower()
     )
 
     assert path_matches == ["packages/core/core/tests/test_timesfm_distribution_boundary.py"]
-    content_matches = sorted(
-        path.relative_to(repository_root).as_posix()
-        for path in package_root.rglob("*.py")
-        if "timesfm" in path.read_text(encoding="utf-8").lower()
-    )
     assert content_matches == [
         "packages/core/core/src/flinttrade_core/model_rights_policies.py",
         "packages/core/core/tests/test_timesfm_distribution_boundary.py",
     ]
-    manifests = (repository_root / "pyproject.toml", repository_root / "pnpm-workspace.yaml")
-    assert all("timesfm" not in manifest.read_text(encoding="utf-8").lower() for manifest in manifests)
+    blocked_weight_suffixes = {
+        ".bin",
+        ".ckpt",
+        ".gguf",
+        ".h5",
+        ".onnx",
+        ".pkl",
+        ".pickle",
+        ".pt",
+        ".pth",
+        ".safetensors",
+    }
+    assert all(Path(path).suffix not in blocked_weight_suffixes for path in path_matches)
 
 
 def test_neutral_catalogue_modules_import_no_provider_runtime_packages() -> None:

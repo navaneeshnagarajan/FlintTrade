@@ -159,6 +159,35 @@ def test_rights_resolution_does_not_retain_a_mutable_grant_list() -> None:
     assert resolution.grants == (grant,)
 
 
+def test_rights_resolution_rejects_manual_rights_that_do_not_match_its_grants() -> None:
+    allowed = RightsGrant(
+        grant_id="grant:allowed",
+        basis=RightsBasis.ENTITLEMENT,
+        rights=UsageRights(production_use=PermissionState.ALLOWED),
+    )
+
+    with pytest.raises(ValueError, match="rights must equal the effective grants"):
+        RightsResolution(rights=UsageRights(production_use=PermissionState.DENIED))
+    with pytest.raises(ValueError, match="rights must equal the effective grants"):
+        RightsResolution(rights=UsageRights(), grants=(allowed,))
+
+    resolution = RightsResolution(rights=allowed.rights, grants=(allowed,))
+    assert intersect_rights(resolution).rights.production_use is PermissionState.ALLOWED
+
+
+def test_catalogue_internal_storage_cannot_be_mutated_or_reassigned() -> None:
+    catalogue = ServiceProviderCatalogue((_provider("forecast:fixture"),))
+
+    with pytest.raises(FrozenInstanceError):
+        catalogue._ordered = ()  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        catalogue._by_id.clear()  # type: ignore[attr-defined]
+    with pytest.raises(TypeError):
+        catalogue._by_id["forecast:other"] = _provider("forecast:other")  # type: ignore[index]
+
+    assert catalogue.list() == (_provider("forecast:fixture"),)
+
+
 def test_grant_copies_mutable_evidence_and_rejects_conflicting_duplicate_ids() -> None:
     fact = LicenceFact(
         fact_id="licence:fixture",
