@@ -258,10 +258,10 @@ def resolve_endpoint(provider: str, host: str) -> str:
 
     Hermes and custom endpoints interpolate the operator-supplied ``host``;
     managed Ollama is resolved only through runtime admission. Cloud providers
-    return their fixed URL. An
-    unknown provider falls back to a generic ``{host}/v1/chat/completions`` so any
-    OpenAI-compatible endpoint still works. This is the single resolution point
-    used by both the blocking and streaming request paths.
+    return their fixed URL. Unknown providers fail closed; arbitrary
+    OpenAI-compatible endpoints require explicit ``custom`` selection. This is
+    the single resolution point used by both the blocking and streaming request
+    paths.
     """
     provider_name = (provider or "").lower()
     _reject_retired_provider(provider_name)
