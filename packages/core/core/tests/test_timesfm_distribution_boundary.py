@@ -40,7 +40,7 @@ def _contains_restricted_identifier(line: str) -> bool:
 
 
 _STATIC_LITERAL_PATTERN = r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`'
-_GUARD_STRUCTURE_DIGEST = "dd08638a070cc95080324190996a5abb3933d5185e5c00767fcc1c99a31195d6"
+_GUARD_STRUCTURE_DIGEST = "3cc7a4d293f7f3d3010234ba9d853063a534145f8dd7f5b227c184303fa5c1df"
 _IDENTIFIER_CHAIN_PATTERN = re.compile(r"[a-z0-9]+(?:[._-]+[a-z0-9]+)*", flags=re.IGNORECASE)
 _TIMESFM_PHRASE_PATTERN = re.compile(
     r"(?<![a-z0-9])times(?:[ _.-]+)fm",
@@ -364,15 +364,10 @@ def test_neutral_catalogue_modules_import_no_provider_runtime_packages() -> None
 def test_timesfm_allowlisted_policy_module_is_structurally_inert() -> None:
     source_root = Path(__file__).resolve().parents[1] / "src" / "flinttrade_core"
     policy_tree = ast.parse((source_root / "model_rights_policies.py").read_text(encoding="utf-8"))
-    policy_imports = [
-        node.module
-        for node in ast.walk(policy_tree)
-        if isinstance(node, ast.ImportFrom) and node.module is not None
-    ]
     policy_direct_imports = [
         alias.name for node in ast.walk(policy_tree) if isinstance(node, ast.Import) for alias in node.names
     ]
-    assert policy_imports == ["flinttrade_core.service_providers"]
+    assert _has_only_policy_contract_import(policy_tree)
     assert policy_direct_imports == []
     assert [alias.name for alias in policy_tree.body[1].names] == [
         "EvidenceUseScope",
@@ -433,6 +428,40 @@ def test_timesfm_allowlisted_policy_module_is_structurally_inert() -> None:
     assert {type(node) for node in ast.walk(policy_tree)} <= allowed_node_types
 
 
+def test_timesfm_policy_guard_rejects_relative_runtime_import_mutation() -> None:
+    source_root = Path(__file__).resolve().parents[1] / "src" / "flinttrade_core"
+    policy_source = (source_root / "model_rights_policies.py").read_text(encoding="utf-8")
+    mutated_source = re.sub(
+        r"from flinttrade_core\.service_providers import \(\n(?:    .+\n)+\)\n",
+        "from . import ollama_runtime\n",
+        policy_source,
+    )
+    mutated_tree = ast.parse(mutated_source)
+
+    assert not _has_only_policy_contract_import(mutated_tree)
+
+
+def _has_only_policy_contract_import(tree: ast.AST) -> bool:
+    imports = [node for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
+    expected_names = (
+        "EvidenceUseScope",
+        "LicenceFact",
+        "ModelIdentity",
+        "PermissionState",
+        "RightsBasis",
+        "RightsGrant",
+        "RightsResolution",
+        "UsageRights",
+        "intersect_rights",
+    )
+    return (
+        len(imports) == 1
+        and imports[0].level == 0
+        and imports[0].module == "flinttrade_core.service_providers"
+        and tuple((alias.name, alias.asname) for alias in imports[0].names) == tuple((name, None) for name in expected_names)
+    )
+
+
 def _assignment_targets(node: ast.stmt) -> tuple[ast.Name, ...]:
     if isinstance(node, ast.Assign):
         return tuple(target for target in node.targets if isinstance(target, ast.Name))
@@ -489,6 +518,8 @@ def test_timesfm_guard_file_has_only_its_scanning_exception() -> None:
         "test_timesfm_has_no_runtime_artifact_or_dependency",
         "test_neutral_catalogue_modules_import_no_provider_runtime_packages",
         "test_timesfm_allowlisted_policy_module_is_structurally_inert",
+        "test_timesfm_policy_guard_rejects_relative_runtime_import_mutation",
+        "_has_only_policy_contract_import",
         "_assignment_targets",
         "test_timesfm_guard_file_has_only_its_scanning_exception",
         "test_timesfm_guard_structure_rejects_runtime_mutations",
