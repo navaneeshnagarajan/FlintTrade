@@ -97,73 +97,49 @@ def test_timesfm_has_no_runtime_artifact_or_dependency() -> None:
         capture_output=True,
         encoding="utf-8",
     ).stdout.splitlines()
-    relevant_suffixes = {
-        ".bat",
-        ".bin",
-        ".cjs",
-        ".ckpt",
-        ".cmd",
-        ".conf",
-        ".config",
-        ".gguf",
-        ".h5",
-        ".ini",
-        ".js",
-        ".json",
-        ".jsonc",
-        ".lock",
-        ".mjs",
-        ".onnx",
-        ".ps1",
-        ".pt",
-        ".pth",
-        ".pkl",
-        ".pickle",
-        ".py",
-        ".pyi",
-        ".rs",
-        ".safetensors",
-        ".sh",
-        ".toml",
-        ".ts",
-        ".tsx",
-        ".yml",
-        ".yaml",
-        ".zip",
-    }
-    relevant_names = {"Dockerfile", "Makefile", "Pipfile", "poetry.lock", "requirements.txt", "uv.lock"}
-    relevant_files = [
-        path
-        for path in tracked_files
-        if Path(path).suffix in relevant_suffixes
-        or Path(path).name in relevant_names
-        or path.startswith(("scripts/", "presets/", "config/", "configs/"))
-    ]
-    path_matches = sorted(path for path in relevant_files if "timesfm" in path.lower())
-    content_matches = sorted(
-        path
-        for path in relevant_files
-        if "timesfm" in (repository_root / path).read_text(encoding="utf-8", errors="ignore").lower()
+    content_search = subprocess.run(
+        ("git", "grep", "-Iil", "timesfm", "--"),
+        cwd=repository_root,
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
     )
-
-    assert path_matches == ["packages/core/core/tests/test_timesfm_distribution_boundary.py"]
-    assert content_matches == [
+    assert content_search.returncode in (0, 1)
+    allowed_timesfm_files = {
         "packages/core/core/src/flinttrade_core/model_rights_policies.py",
         "packages/core/core/tests/test_timesfm_distribution_boundary.py",
-    ]
+    }
+    path_matches = {path for path in tracked_files if "timesfm" in path.lower()}
+    content_matches = set(content_search.stdout.splitlines())
+
+    assert path_matches <= allowed_timesfm_files
+    assert content_matches == allowed_timesfm_files
     blocked_weight_suffixes = {
+        ".adapter",
         ".bin",
         ".ckpt",
+        ".diff",
         ".gguf",
         ".h5",
+        ".hdf5",
+        ".joblib",
+        ".keras",
+        ".lora",
+        ".mlmodel",
+        ".npy",
+        ".npz",
         ".onnx",
+        ".pb",
         ".pkl",
         ".pickle",
         ".pt",
         ".pth",
         ".safetensors",
+        ".tflite",
+        ".torchscript",
+        ".weights",
     }
-    assert all(Path(path).suffix not in blocked_weight_suffixes for path in path_matches)
+    assert not {path for path in tracked_files if Path(path).suffix.lower() in blocked_weight_suffixes}
 
 
 def test_neutral_catalogue_modules_import_no_provider_runtime_packages() -> None:
