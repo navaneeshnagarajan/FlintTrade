@@ -1,4 +1,5 @@
 import ast
+import hashlib
 from pathlib import Path
 import re
 import subprocess
@@ -30,16 +31,19 @@ def _fact(basis: RightsBasis, *, identifier: str, subject_kind: str = "service")
 
 
 def _contains_restricted_identifier(line: str) -> bool:
-    if _TIMESFM_IDENTIFIER_PATTERN.search(line):
-        return True
-    literal_fragments = re.findall(_STATIC_LITERAL_PATTERN, line)
-    literal_value = "".join(_decode_static_literal(fragment) for fragment in literal_fragments)
-    return "timesfm" in re.sub(r"[^a-z0-9]+", "", literal_value.lower())
+    return (
+        any(_is_restricted_identifier_chain(chain) for chain in _IDENTIFIER_CHAIN_PATTERN.findall(line))
+        or _TIMESFM_PHRASE_PATTERN.search(line) is not None
+        or _static_literal_chain_contains_restricted_identifier(line)
+        or _static_literal_contains_restricted_identifier(line)
+    )
 
 
 _STATIC_LITERAL_PATTERN = r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`'
-_TIMESFM_IDENTIFIER_PATTERN = re.compile(
-    r"(?<![a-z0-9])times(?:[^a-z0-9]*?)fm",
+_GUARD_STRUCTURE_DIGEST = "dd08638a070cc95080324190996a5abb3933d5185e5c00767fcc1c99a31195d6"
+_IDENTIFIER_CHAIN_PATTERN = re.compile(r"[a-z0-9]+(?:[._-]+[a-z0-9]+)*", flags=re.IGNORECASE)
+_TIMESFM_PHRASE_PATTERN = re.compile(
+    r"(?<![a-z0-9])times(?:[ _.-]+)fm",
     flags=re.IGNORECASE,
 )
 _STATIC_ESCAPE_PATTERN = re.compile(r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\\\"'nrtbfv])")
@@ -56,6 +60,20 @@ _STATIC_ESCAPE_REPLACEMENTS = {
 }
 
 
+def _is_restricted_identifier_chain(chain: str) -> bool:
+    return "timesfm" in re.sub(r"[^a-z0-9]+", "", chain.casefold())
+
+
+def _guard_file_structure_digest(source: str) -> str:
+    normalised = re.sub(
+        r'_GUARD_STRUCTURE_DIGEST = "[0-9a-f]*"',
+        '_GUARD_STRUCTURE_DIGEST = "<guard-structure>"',
+        source,
+    )
+    tree = ast.parse(normalised)
+    return hashlib.sha256(ast.dump(tree, annotate_fields=True, include_attributes=False).encode("utf-8")).hexdigest()
+
+
 def _decode_static_literal(literal: str) -> str:
     value = literal[1:-1]
 
@@ -70,7 +88,7 @@ def _decode_static_literal(literal: str) -> str:
 
 def _static_literal_contains_restricted_identifier(source: str) -> bool:
     return any(
-        "timesfm" in re.sub(r"[^a-z0-9]+", "", _decode_static_literal(literal).lower())
+        _is_restricted_identifier_chain(_decode_static_literal(literal))
         for literal in re.findall(_STATIC_LITERAL_PATTERN, source)
     )
 
@@ -96,7 +114,7 @@ def _python_source_contains_restricted_identifier(source: str) -> bool:
     except SyntaxError:
         return False
     return any(
-        "timesfm" in re.sub(r"[^a-z0-9]+", "", value.lower())
+        _is_restricted_identifier_chain(value)
         for node in ast.walk(tree)
         for value in _python_static_strings(node)
     )
@@ -104,16 +122,13 @@ def _python_source_contains_restricted_identifier(source: str) -> bool:
 
 def _static_literal_chain_contains_restricted_identifier(source: str) -> bool:
     chains = re.finditer(
-        rf"(?:{_STATIC_LITERAL_PATTERN})(?:\s*\+\s*(?:{_STATIC_LITERAL_PATTERN}))+",
+        rf"(?:{_STATIC_LITERAL_PATTERN})(?:(?:\s*\+\s*|\s+)(?:{_STATIC_LITERAL_PATTERN}))+",
         source,
         flags=re.DOTALL,
     )
     return any(
-        "timesfm"
-        in re.sub(
-            r"[^a-z0-9]+",
-            "",
-            "".join(_decode_static_literal(literal) for literal in re.findall(_STATIC_LITERAL_PATTERN, chain.group(0))).lower(),
+        _is_restricted_identifier_chain(
+            "".join(_decode_static_literal(literal) for literal in re.findall(_STATIC_LITERAL_PATTERN, chain.group(0)))
         )
         for chain in chains
     )
@@ -137,6 +152,13 @@ def test_timesfm_guard_detects_static_concatenated_identifier() -> None:
     assert _contains_restricted_identifier("class Times_FM3Forecaster:")
     assert _contains_restricted_identifier("from times.fm3 import Forecaster")
     assert _contains_restricted_identifier("times___fm3_worker = object()")
+    assert _contains_restricted_identifier("class GoogleTimesFM3Forecaster:")
+    assert _contains_restricted_identifier("googleTimes_FM3Worker = object()")
+    assert _contains_restricted_identifier("from googleTimes.FM3 import Forecaster")
+    assert _contains_restricted_identifier('restricted = "times" + "fm"')
+    assert _contains_restricted_identifier('restricted = "times" "fm"')
+    assert not _contains_restricted_identifier("for times, fm in measurements:")
+    assert not _contains_restricted_identifier('("times", "fm")')
     assert not _contains_restricted_identifier("time_series_timestamp = object()")
 
 
@@ -420,7 +442,8 @@ def _assignment_targets(node: ast.stmt) -> tuple[ast.Name, ...]:
 
 
 def test_timesfm_guard_file_has_only_its_scanning_exception() -> None:
-    guard_tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    guard_source = Path(__file__).read_text(encoding="utf-8")
+    guard_tree = ast.parse(guard_source)
     guard_direct_imports = [alias.name for node in ast.walk(guard_tree) if isinstance(node, ast.Import) for alias in node.names]
     guard_from_imports = [
         node.module
@@ -443,7 +466,7 @@ def test_timesfm_guard_file_has_only_its_scanning_exception() -> None:
     ]
     guard_top_level_functions = [node.name for node in guard_tree.body if isinstance(node, ast.FunctionDef)]
 
-    assert guard_direct_imports == ["ast", "re", "subprocess"]
+    assert guard_direct_imports == ["ast", "hashlib", "re", "subprocess"]
     assert set(guard_from_imports) == {"pathlib", "flinttrade_core.model_rights_policies", "flinttrade_core.service_providers"}
     assert all(node.attr == "run" for node in subprocess_attributes)
     assert len(subprocess_calls) == 1
@@ -452,6 +475,8 @@ def test_timesfm_guard_file_has_only_its_scanning_exception() -> None:
     assert guard_top_level_functions == [
         "_fact",
         "_contains_restricted_identifier",
+        "_is_restricted_identifier_chain",
+        "_guard_file_structure_digest",
         "_decode_static_literal",
         "_static_literal_contains_restricted_identifier",
         "_python_static_strings",
@@ -466,7 +491,39 @@ def test_timesfm_guard_file_has_only_its_scanning_exception() -> None:
         "test_timesfm_allowlisted_policy_module_is_structurally_inert",
         "_assignment_targets",
         "test_timesfm_guard_file_has_only_its_scanning_exception",
+        "test_timesfm_guard_structure_rejects_runtime_mutations",
     ]
     assert not [
-        node for node in ast.walk(guard_tree) if isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef))
+        node for node in ast.walk(guard_tree) if isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda))
     ]
+    assert not [
+        node
+        for node in ast.walk(guard_tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"__import__", "compile", "eval", "exec"}
+    ]
+    assert _guard_file_structure_digest(guard_source) == _GUARD_STRUCTURE_DIGEST
+
+
+def test_timesfm_guard_structure_rejects_runtime_mutations() -> None:
+    guard_source = Path(__file__).read_text(encoding="utf-8")
+    mutation_suffixes = (
+        "\nrunner = subprocess.run\nrunner((\"git\", \"status\"))\n",
+        "\nsubprocess.Popen((\"curl\", \"https://example.invalid\"))\n",
+        "\nclass DownloadWorker:\n    pass\n",
+        "\nrunner = lambda: None\nrunner()\n",
+        "\n__import__(\"socket\")\n",
+        "\neval(\"1 + 1\")\n",
+        "\nexec(\"import socket\")\n",
+        "\ncompile(\"pass\", \"<guard>\", \"exec\")\n",
+    )
+    mutated_sources = tuple(guard_source + suffix for suffix in mutation_suffixes) + (
+        guard_source.replace(
+            "    return LicenceFact(\n",
+            "    subprocess.Popen((\"curl\", \"https://example.invalid\"))\n    return LicenceFact(\n",
+            1,
+        ),
+    )
+
+    assert all(_guard_file_structure_digest(source) != _GUARD_STRUCTURE_DIGEST for source in mutated_sources)
