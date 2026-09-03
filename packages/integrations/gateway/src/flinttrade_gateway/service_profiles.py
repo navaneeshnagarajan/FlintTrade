@@ -16,10 +16,8 @@ _COMMON_BROKER_CAPABILITIES = (
 )
 
 
-def _broker_capabilities(*, native: bool, connectable: bool, sandbox: bool, supports_streaming: bool) -> tuple[str, ...]:
+def _broker_capabilities(*, native: bool, connectable: bool, sandbox: bool) -> tuple[str, ...]:
     capabilities = list(_COMMON_BROKER_CAPABILITIES)
-    if supports_streaming:
-        capabilities.append("market.ticks")
     if native:
         capabilities.append("native")
     if native and connectable:
@@ -42,7 +40,6 @@ def broker_service_descriptors() -> tuple[ProviderDescriptor, ...]:
                     native=info.native,
                     connectable=info.connectable,
                     sandbox=info.is_sandbox,
-                    supports_streaming=info.supports_streaming,
                 ),
                 exchanges=tuple(info.exchanges),
                 auth_models=(info.auth_flow.value, *(f"method:{method.id}" for method in info.auth_methods)),

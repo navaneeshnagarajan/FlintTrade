@@ -43,11 +43,13 @@ def test_broker_projection_classifies_native_connectability_without_health_claim
     assert all("verified" not in item.capabilities for item in by_id.values())
 
 
-def test_broker_projection_adds_streaming_and_sandbox_capabilities_only_when_catalogued() -> None:
-    """Capability classification follows explicit catalogue booleans only."""
+def test_broker_projection_withholds_ticks_until_a_runtime_path_is_routable() -> None:
+    """Upstream stream support alone must not advertise a FlintTrade tick role."""
     by_id = {item.provider_id: item for item in broker_service_descriptors()}
 
-    assert "market.ticks" in by_id["broker:dhan"].capabilities
+    assert all("market.ticks" not in item.capabilities for item in by_id.values())
+    assert "market.ticks" not in by_id["broker:zerodha"].capabilities
+    assert "market.ticks" not in by_id["broker-bridge:openalgo"].capabilities
     assert "practice_execution" in by_id["broker:dhan_sandbox"].capabilities
     assert "practice_execution" not in by_id["broker:dhan"].capabilities
 
