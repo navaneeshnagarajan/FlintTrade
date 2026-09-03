@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -60,14 +61,16 @@ def render() -> str:
     )
 
 
-def _atomic_write(content: str) -> None:
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{OUTPUT.name}.", dir=OUTPUT.parent)
+def _atomic_write(content: str, output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(output.stat().st_mode) if output.exists() else 0o644
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{output.name}.", dir=output.parent)
     temporary_path = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            os.fchmod(stream.fileno(), mode)
             stream.write(content)
-        os.replace(temporary_path, OUTPUT)
+        os.replace(temporary_path, output)
     except BaseException:
         temporary_path.unlink(missing_ok=True)
         raise
@@ -76,14 +79,16 @@ def _atomic_write(content: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail when the checked-in output is stale")
+    parser.add_argument("--output", type=Path, default=OUTPUT, help="write or check a specific output path")
     arguments = parser.parse_args()
     rendered = render()
+    output = arguments.output
     if arguments.check:
-        if not OUTPUT.is_file() or OUTPUT.read_text(encoding="utf-8") != rendered:
-            print(f"Generated terminal service profiles are stale: {OUTPUT.relative_to(ROOT)}", file=sys.stderr)
+        if not output.is_file() or output.read_text(encoding="utf-8") != rendered:
+            print(f"Generated terminal service profiles are stale: {output}", file=sys.stderr)
             return 1
         return 0
-    _atomic_write(rendered)
+    _atomic_write(rendered, output)
     return 0
 
 

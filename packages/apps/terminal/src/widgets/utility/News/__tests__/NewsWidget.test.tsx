@@ -28,8 +28,10 @@ import NewsWidget from "../NewsWidget";
 // ---------------------------------------------------------------------------
 
 describe("NewsWidget", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.restoreAllMocks();
+    const { getNews } = await import("@/services/ftApi");
+    vi.mocked(getNews).mockReset().mockRejectedValue(new Error("No backend"));
   });
 
   it("renders without crashing", () => {
@@ -62,6 +64,18 @@ describe("NewsWidget", () => {
     expect(screen.queryByText("Via proxy")).not.toBeInTheDocument();
   });
 
+  it("reports an empty backend response as unavailable without browser fetching", async () => {
+    const { getNews } = await import("@/services/ftApi");
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    vi.mocked(getNews).mockResolvedValue({ articles: [] });
+
+    render(<NewsWidget />);
+
+    expect(await screen.findByText("News is unavailable from the FlintTrade backend.")).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText("Via proxy")).not.toBeInTheDocument();
+  });
+
   it("shows backend headlines without a proxy attribution", async () => {
     const { getNews } = await import("@/services/ftApi");
     vi.mocked(getNews).mockResolvedValue({
@@ -78,6 +92,33 @@ describe("NewsWidget", () => {
     render(<NewsWidget />);
 
     expect(await screen.findByText("NIFTY ends higher")).toBeInTheDocument();
+    expect(screen.queryByText("Via proxy")).not.toBeInTheDocument();
+  });
+
+  it("clears a successful backend result when a manual refresh fails", async () => {
+    const { getNews } = await import("@/services/ftApi");
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    vi.mocked(getNews)
+      .mockResolvedValueOnce({
+        articles: [{
+          title: "NIFTY ends higher",
+          link: "https://example.test/a",
+          source: "MoneyControl",
+          pub_date: "Fri, 24 Jul 2026 10:00:00 +0530",
+        }],
+      })
+      .mockRejectedValueOnce(new Error("Backend unavailable"));
+
+    render(<NewsWidget />);
+
+    expect(await screen.findByText("NIFTY ends higher")).toBeInTheDocument();
+    expect(screen.getByText("0s ago")).toBeInTheDocument();
+    screen.getByTitle("Refresh news").click();
+
+    expect(await screen.findByText("News is unavailable from the FlintTrade backend.")).toBeInTheDocument();
+    expect(screen.queryByText("NIFTY ends higher")).not.toBeInTheDocument();
+    expect(screen.queryByText("0s ago")).not.toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(screen.queryByText("Via proxy")).not.toBeInTheDocument();
   });
 });
