@@ -141,6 +141,11 @@ class UsageRights:
     restrictions: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        for name in _PERMISSION_NAMES:
+            if not isinstance(getattr(self, name), PermissionState):
+                raise ValueError(f"{name} must be a declared enum member")
+        if not isinstance(self.max_evidence_use_scope, EvidenceUseScope):
+            raise ValueError("max_evidence_use_scope must be a declared enum member")
         values = tuple(str(value).strip() for value in self.restrictions)
         if any(not value for value in values) or len(values) != len(set(values)):
             raise ValueError("restrictions must contain unique non-blank values")
@@ -188,11 +193,7 @@ class RightsGrant:
         ) or self.rights.max_evidence_use_scope is not EvidenceUseScope.ISOLATED_RESEARCH
         if is_expansive and not evidence:
             raise ValueError("expansive rights grants require evidence")
-        model_evidence = tuple(
-            fact
-            for fact in evidence
-            if re.sub(r"[^a-z0-9]+", "", fact.subject_kind.casefold()).startswith("model")
-        )
+        model_evidence = tuple(fact for fact in evidence if _is_model_specific_subject_kind(fact.subject_kind))
         if model_evidence and self.model_identity is None:
             raise ValueError("model evidence requires an exact model identity")
         if self.model_identity is not None and any(
@@ -240,6 +241,10 @@ class RightsResolution:
 def _digest(payload: object) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _is_model_specific_subject_kind(subject_kind: str) -> bool:
+    return any(term.startswith("model") for term in re.findall(r"[a-z0-9]+", subject_kind.casefold()))
 
 
 def _canonical_grants(grants: tuple[RightsGrant, ...]) -> tuple[RightsGrant, ...]:

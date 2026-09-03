@@ -137,6 +137,25 @@ def test_licence_facts_bind_subject_identity_and_basis() -> None:
 
 
 @pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("model_distribution", "allowed"),
+        ("derivative_distribution", "allowed"),
+        ("commercial_use", "allowed"),
+        ("production_use", "allowed"),
+        ("output_use", "allowed"),
+        ("output_distribution", "allowed"),
+        ("retention", "allowed"),
+        ("training_distillation", "allowed"),
+        ("max_evidence_use_scope", "live_decision"),
+    ),
+)
+def test_usage_rights_rejects_raw_enum_values(field: str, value: str) -> None:
+    with pytest.raises(ValueError, match="must be a declared enum"):
+        UsageRights(**{field: value})  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
     "basis",
     (RightsBasis.LICENCE, RightsBasis.PROVIDER_TERMS, RightsBasis.ENTITLEMENT),
 )
@@ -227,6 +246,23 @@ def test_model_identity_requires_matching_canonical_model_evidence() -> None:
         model_identity=identity,
     )
     assert grant.model_identity == identity
+
+
+@pytest.mark.parametrize("subject_kind", ("service:model", "foo model"))
+def test_model_evidence_labels_require_exact_model_identity(subject_kind: str) -> None:
+    with pytest.raises(ValueError, match="model evidence requires an exact model identity"):
+        RightsGrant(
+            grant_id="grant:ordinary-model-label",
+            basis=RightsBasis.LICENCE,
+            rights=UsageRights(),
+            evidence=(
+                _fact(
+                    RightsBasis.LICENCE,
+                    subject_kind=subject_kind,
+                    identifier="provider/model",
+                ),
+            ),
+        )
 
 
 def test_public_payload_is_deterministic_and_contains_no_mutable_mapping() -> None:

@@ -32,16 +32,57 @@ def _fact(basis: RightsBasis, *, identifier: str, subject_kind: str = "service")
 def _contains_restricted_identifier(line: str) -> bool:
     if re.search(r"times(?:[_\-\s]?fm)\b", line, flags=re.IGNORECASE):
         return True
-    literal_fragments = re.findall(r'"([^"]*)"|\'([^\']*)\'|`([^`]*)`', line)
-    literal_value = "".join(fragment for match in literal_fragments for fragment in match)
+    literal_fragments = re.findall(_STATIC_LITERAL_PATTERN, line)
+    literal_value = "".join(_decode_static_literal(fragment) for fragment in literal_fragments)
     return "timesfm" in re.sub(r"[^a-z0-9]+", "", literal_value.lower())
+
+
+_STATIC_LITERAL_PATTERN = r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`'
+_STATIC_ESCAPE_PATTERN = re.compile(r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\\\"'nrtbfv])")
+_STATIC_ESCAPE_REPLACEMENTS = {
+    r"\\": "\\",
+    r'\"': '"',
+    r"\'": "'",
+    r"\n": "\n",
+    r"\r": "\r",
+    r"\t": "\t",
+    r"\b": "\b",
+    r"\f": "\f",
+    r"\v": "\v",
+}
+
+
+def _decode_static_literal(literal: str) -> str:
+    value = literal[1:-1]
+
+    def replace_escape(match: re.Match[str]) -> str:
+        escape = match.group(0)
+        if escape[1] in {"x", "u", "U"}:
+            return chr(int(f"0x{escape[2:]}", 0))
+        return _STATIC_ESCAPE_REPLACEMENTS[escape]
+
+    return _STATIC_ESCAPE_PATTERN.sub(replace_escape, value)
+
+
+def _static_literal_contains_restricted_identifier(source: str) -> bool:
+    return any(
+        "timesfm" in re.sub(r"[^a-z0-9]+", "", _decode_static_literal(literal).lower())
+        for literal in re.findall(_STATIC_LITERAL_PATTERN, source)
+    )
 
 
 def _python_static_strings(node: ast.AST) -> tuple[str, ...]:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return (node.value,)
+    if isinstance(node, ast.Constant) and isinstance(node.value, bytes):
+        return (node.value.decode("utf-8", errors="ignore"),)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         return tuple(left + right for left in _python_static_strings(node.left) for right in _python_static_strings(node.right))
+    if isinstance(node, ast.JoinedStr):
+        parts = [_python_static_strings(value) for value in node.values]
+        if any(len(part) != 1 for part in parts):
+            return ()
+        return ("".join(part[0] for part in parts),)
     return ()
 
 
@@ -57,6 +98,23 @@ def _python_source_contains_restricted_identifier(source: str) -> bool:
     )
 
 
+def _static_literal_chain_contains_restricted_identifier(source: str) -> bool:
+    chains = re.finditer(
+        rf"(?:{_STATIC_LITERAL_PATTERN})(?:\s*\+\s*(?:{_STATIC_LITERAL_PATTERN}))+",
+        source,
+        flags=re.DOTALL,
+    )
+    return any(
+        "timesfm"
+        in re.sub(
+            r"[^a-z0-9]+",
+            "",
+            "".join(_decode_static_literal(literal) for literal in re.findall(_STATIC_LITERAL_PATTERN, chain.group(0))).lower(),
+        )
+        for chain in chains
+    )
+
+
 def test_timesfm_guard_detects_static_concatenated_identifier() -> None:
     assert _contains_restricted_identifier('const restricted = "times" + "fm";')
     assert _contains_restricted_identifier('restricted = "times" "fm"')
@@ -65,6 +123,10 @@ def test_timesfm_guard_detects_static_concatenated_identifier() -> None:
     assert _contains_restricted_identifier('const restricted = "times fm";')
     assert not _contains_restricted_identifier("datetime.strptime(s, fmt).timestamp()")
     assert _python_source_contains_restricted_identifier('restricted = ("times" +\n"fm")')
+    assert _python_source_contains_restricted_identifier('restricted = f"times\\x66m"')
+    assert _python_source_contains_restricted_identifier('restricted = b"times\\x66m"')
+    assert _static_literal_chain_contains_restricted_identifier('const restricted = "times" +\n "fm";')
+    assert _static_literal_contains_restricted_identifier(r'const restricted = "\x74imes\x66m";')
 
 
 def test_timesfm_policy_preserves_licence_and_conservative_policy_attribution() -> None:
@@ -185,6 +247,8 @@ def test_timesfm_has_no_runtime_artifact_or_dependency() -> None:
             b"timesfm" in content.lower()
             or any(_contains_restricted_identifier(line) for line in lines)
             or (path.endswith(".py") and _python_source_contains_restricted_identifier(content.decode("utf-8", errors="ignore")))
+            or _static_literal_chain_contains_restricted_identifier(content.decode("utf-8", errors="ignore"))
+            or _static_literal_contains_restricted_identifier(content.decode("utf-8", errors="ignore"))
         ):
             content_matches.add(path)
 
@@ -193,6 +257,7 @@ def test_timesfm_has_no_runtime_artifact_or_dependency() -> None:
     blocked_artifact_suffixes = {
         ".adapter",
         ".bin",
+        ".bin.index.json",
         ".ckpt",
         ".diff",
         ".dat",
@@ -227,8 +292,17 @@ def test_timesfm_has_no_runtime_artifact_or_dependency() -> None:
         ".q4_0",
         ".q4_1",
         ".q4_k_m",
+        ".q4_k_s",
         ".q5_k_m",
+        ".q5_k_s",
+        ".q6_k",
         ".q8_0",
+        ".q8_1",
+        ".q3_k_s",
+        ".q2_k",
+        ".tar.zst",
+        ".tgz",
+        ".zip",
     }
     assert not {
         path
