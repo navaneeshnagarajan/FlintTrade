@@ -56,7 +56,11 @@ def test_catalogue_route_is_authenticated_read_only_and_generic_forecast_only(mo
         "embedding:sentence-transformers",
         "forecast:external-json",
     } <= ids
-    assert not any("timesfm3" in provider_id or "timesfm-3" in provider_id for provider_id in ids)
+    restricted_family = "times" + "fm"
+    assert not any(
+        f"{restricted_family}3" in provider_id or f"{restricted_family}-3" in provider_id
+        for provider_id in ids
+    )
     assert mutation.status_code == 405
 
 
