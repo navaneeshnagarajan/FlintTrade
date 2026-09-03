@@ -172,6 +172,58 @@ def test_gateway_contribution_reads_catalogue_without_broker_or_credential_io() 
     assert descriptors[-1].provider_id == "broker-bridge:openalgo"
 
 
+def test_gateway_static_profile_import_performs_no_filesystem_probe() -> None:
+    """A fresh metadata import must not discover an OpenAlgo checkout."""
+    script = r"""
+import sys
+from pathlib import Path
+
+# Load package initialisers before instrumenting Path: they perform unrelated
+# version and installed-package discovery. Re-import the adapter itself so this
+# still exercises its module body from a clean state.
+import flinttrade_core.service_providers
+import flinttrade_gateway
+sys.modules.pop("flinttrade_gateway.service_profiles", None)
+sys.modules.pop("flinttrade_gateway.adapter", None)
+
+calls = []
+for method_name in (
+    "exists",
+    "glob",
+    "is_dir",
+    "is_file",
+    "iterdir",
+    "lstat",
+    "read_bytes",
+    "read_text",
+    "resolve",
+    "rglob",
+    "stat",
+):
+    original = getattr(Path, method_name)
+
+    def record(self, *args, _method_name=method_name, _original=original, **kwargs):
+        calls.append((_method_name, str(self)))
+        return _original(self, *args, **kwargs)
+
+    setattr(Path, method_name, record)
+
+from flinttrade_gateway.service_profiles import broker_service_descriptors
+
+assert broker_service_descriptors()
+if calls:
+    raise AssertionError(f"filesystem probes during static gateway profile import: {calls!r}")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 def test_injected_catalogue_identity_is_preserved(monkeypatch, tmp_path) -> None:
     """An embedding host can supply the immutable catalogue it already owns."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
