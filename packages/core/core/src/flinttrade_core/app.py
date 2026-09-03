@@ -3032,6 +3032,7 @@ def create_flask_app(
     time_scheduler: Any | None = None,
     safety_config_ready: bool | None = None,
     telegram: Any | None = None,
+    service_provider_catalogue: Any | None = None,
 ) -> Flask:
     """Create the Flask app with FlintTrade API routes.
 
@@ -3048,6 +3049,7 @@ def create_flask_app(
         rag: RAGPipeline instance for knowledge base queries.
         cron_strategy_scheduler: Shared market-aware strategy cron scheduler.
         time_scheduler: Shared effective-session calendar owner.
+        service_provider_catalogue: Optional immutable static provider catalogue.
 
     Returns:
         Flask application with all FlintTrade API endpoints registered.
@@ -3166,6 +3168,24 @@ def create_flask_app(
     # through CSP nonce injection. A second Flask static route could expose the
     # raw document with a nonce-bearing CSP header that blocks its scripts.
     app = Flask(__name__, static_folder=None)
+    if service_provider_catalogue is None:
+        from flinttrade_ai.service_profiles import ai_service_descriptors  # noqa: PLC0415
+        from flinttrade_gateway.service_profiles import broker_service_descriptors  # noqa: PLC0415
+        from flinttrade_historical.service_profiles import historical_service_descriptors  # noqa: PLC0415
+        from .service_providers import ServiceProviderCatalogue  # noqa: PLC0415
+
+        service_provider_catalogue = ServiceProviderCatalogue(
+            (
+                *ai_service_descriptors(),
+                *historical_service_descriptors(),
+                *broker_service_descriptors(),
+            )
+        )
+    app.config["SERVICE_PROVIDER_CATALOGUE"] = service_provider_catalogue
+
+    from .service_provider_routes import service_provider_bp  # noqa: PLC0415
+
+    app.register_blueprint(service_provider_bp)
     if _frontend_path_invalid:
         logger.warning("Frontend build path is invalid; backend will serve API only.")
     elif not _frontend_available:

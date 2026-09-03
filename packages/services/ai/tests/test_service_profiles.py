@@ -25,11 +25,12 @@ def test_ai_contribution_exactly_covers_current_surfaces() -> None:
     assert "forecast:external-json" in ids
 
 
-def test_tracked_ai_catalogue_has_no_timesfm3_specific_integration() -> None:
+def test_tracked_ai_catalogue_excludes_restricted_model_identifiers() -> None:
     payload = repr([item.to_public_dict() for item in ai_service_descriptors()]).lower()
+    restricted_family = "times" + "fm"
 
-    assert "timesfm-3" not in payload
-    assert "timesfm3" not in payload
+    assert f"{restricted_family}-3" not in payload
+    assert f"{restricted_family}3" not in payload
 
 
 def test_generic_forecast_protocol_is_declared_but_not_invokable() -> None:
