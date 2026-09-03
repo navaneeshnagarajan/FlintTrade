@@ -115,6 +115,8 @@ class ModelIdentity:
     def __post_init__(self) -> None:
         if any(not value.strip() for value in (self.provider_id, self.model_id, self.revision)):
             raise ValueError("model identity fields must be non-blank")
+        if not _PROVIDER_ID.fullmatch(self.provider_id):
+            raise ValueError("model identity provider_id must be a namespaced lower-case identifier")
         if not re.fullmatch(r"[0-9a-f]{64}", self.sha256):
             raise ValueError("model sha256 must be 64 lower-case hex characters")
 
@@ -194,6 +196,12 @@ class RightsGrant:
         if is_expansive and not evidence:
             raise ValueError("expansive rights grants require evidence")
         model_evidence = tuple(fact for fact in evidence if _is_model_specific_subject_kind(fact.subject_kind))
+        has_model_scoped_permission = _has_model_scoped_permission(self.rights)
+        if has_model_scoped_permission and (
+            self.model_identity is None
+            or not any(fact.identifier == self.model_identity.model_id for fact in model_evidence)
+        ):
+            raise ValueError("model-scoped allowed rights require exact model evidence")
         if model_evidence and self.model_identity is None:
             raise ValueError("model evidence requires an exact model identity")
         if self.model_identity is not None and any(
@@ -245,6 +253,13 @@ def _digest(payload: object) -> str:
 
 def _is_model_specific_subject_kind(subject_kind: str) -> bool:
     return any(term.startswith("model") for term in re.findall(r"[a-z0-9]+", subject_kind.casefold()))
+
+
+def _has_model_scoped_permission(rights: UsageRights) -> bool:
+    return any(
+        getattr(rights, name) is PermissionState.ALLOWED
+        for name in ("model_distribution", "derivative_distribution")
+    )
 
 
 def _canonical_grants(grants: tuple[RightsGrant, ...]) -> tuple[RightsGrant, ...]:
@@ -333,6 +348,11 @@ class ProviderDescriptor:
         if len({fact.fact_id for fact in licence_facts}) != len(licence_facts):
             raise ValueError("licence fact IDs must be unique")
         object.__setattr__(self, "licence_facts", licence_facts)
+        if any(
+            grant.model_identity is not None and grant.model_identity.provider_id != self.provider_id
+            for grant in self.default_rights.grants
+        ):
+            raise ValueError("default rights model identity must match provider_id")
 
     def to_public_dict(self) -> dict[str, object]:
         return {

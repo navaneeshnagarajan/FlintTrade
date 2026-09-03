@@ -30,7 +30,7 @@ def _fact(basis: RightsBasis, *, identifier: str, subject_kind: str = "service")
 
 
 def _contains_restricted_identifier(line: str) -> bool:
-    if re.search(r"times(?:[_\-\s]?fm)\b", line, flags=re.IGNORECASE):
+    if _TIMESFM_IDENTIFIER_PATTERN.search(line):
         return True
     literal_fragments = re.findall(_STATIC_LITERAL_PATTERN, line)
     literal_value = "".join(_decode_static_literal(fragment) for fragment in literal_fragments)
@@ -38,6 +38,10 @@ def _contains_restricted_identifier(line: str) -> bool:
 
 
 _STATIC_LITERAL_PATTERN = r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`'
+_TIMESFM_IDENTIFIER_PATTERN = re.compile(
+    r"(?<![a-z0-9])times(?:[^a-z0-9]*?)fm",
+    flags=re.IGNORECASE,
+)
 _STATIC_ESCAPE_PATTERN = re.compile(r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\\\"'nrtbfv])")
 _STATIC_ESCAPE_REPLACEMENTS = {
     r"\\": "\\",
@@ -127,6 +131,13 @@ def test_timesfm_guard_detects_static_concatenated_identifier() -> None:
     assert _python_source_contains_restricted_identifier('restricted = b"times\\x66m"')
     assert _static_literal_chain_contains_restricted_identifier('const restricted = "times" +\n "fm";')
     assert _static_literal_contains_restricted_identifier(r'const restricted = "\x74imes\x66m";')
+    assert _contains_restricted_identifier("from times_fm3 import Times_FM3_Forecaster")
+    assert _contains_restricted_identifier("class Times_FM3_Adapter:")
+    assert _contains_restricted_identifier("times_fm3_worker = object()")
+    assert _contains_restricted_identifier("class Times_FM3Forecaster:")
+    assert _contains_restricted_identifier("from times.fm3 import Forecaster")
+    assert _contains_restricted_identifier("times___fm3_worker = object()")
+    assert not _contains_restricted_identifier("time_series_timestamp = object()")
 
 
 def test_timesfm_policy_preserves_licence_and_conservative_policy_attribution() -> None:
@@ -326,3 +337,136 @@ def test_neutral_catalogue_modules_import_no_provider_runtime_packages() -> None
             alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names
         ]
         assert all(not imported.startswith(prohibited_prefixes) for imported in from_imports + direct_imports)
+
+
+def test_timesfm_allowlisted_policy_module_is_structurally_inert() -> None:
+    source_root = Path(__file__).resolve().parents[1] / "src" / "flinttrade_core"
+    policy_tree = ast.parse((source_root / "model_rights_policies.py").read_text(encoding="utf-8"))
+    policy_imports = [
+        node.module
+        for node in ast.walk(policy_tree)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    ]
+    policy_direct_imports = [
+        alias.name for node in ast.walk(policy_tree) if isinstance(node, ast.Import) for alias in node.names
+    ]
+    assert policy_imports == ["flinttrade_core.service_providers"]
+    assert policy_direct_imports == []
+    assert [alias.name for alias in policy_tree.body[1].names] == [
+        "EvidenceUseScope",
+        "LicenceFact",
+        "ModelIdentity",
+        "PermissionState",
+        "RightsBasis",
+        "RightsGrant",
+        "RightsResolution",
+        "UsageRights",
+        "intersect_rights",
+    ]
+    assignments = [node for node in policy_tree.body[2:] if isinstance(node, (ast.Assign, ast.AnnAssign))]
+    assert all(_assignment_targets(node) for node in assignments)
+    assert [target.id for node in assignments for target in _assignment_targets(node)] == [
+        "_TIMESFM_3_MODEL_IDENTITY",
+        "TIMESFM_3_RESTRICTION_POLICY",
+    ]
+    policy_calls = [node for node in ast.walk(policy_tree) if isinstance(node, ast.Call)]
+    assert all(isinstance(node.func, ast.Name) for node in policy_calls)
+    assert {node.func.id for node in policy_calls if isinstance(node.func, ast.Name)} == {
+        "LicenceFact",
+        "ModelIdentity",
+        "RightsGrant",
+        "UsageRights",
+        "intersect_rights",
+    }
+    policy_attributes = [node for node in ast.walk(policy_tree) if isinstance(node, ast.Attribute)]
+    assert all(isinstance(node.value, ast.Name) for node in policy_attributes)
+    assert {
+        f"{node.value.id}.{node.attr}"
+        for node in policy_attributes
+        if isinstance(node.value, ast.Name)
+    } == {
+        "EvidenceUseScope.ISOLATED_RESEARCH",
+        "PermissionState.DENIED",
+        "RightsBasis.FLINTTRADE_POLICY",
+        "RightsBasis.LICENCE",
+    }
+    assert all(isinstance(node.value, str) for node in ast.walk(policy_tree) if isinstance(node, ast.Constant))
+    assert all(isinstance(node, ast.Tuple) for node in ast.walk(policy_tree) if isinstance(node, (ast.List, ast.Set, ast.Dict, ast.Tuple)))
+    allowed_node_types = {
+        ast.Module,
+        ast.Expr,
+        ast.Constant,
+        ast.ImportFrom,
+        ast.alias,
+        ast.Assign,
+        ast.AnnAssign,
+        ast.Name,
+        ast.Load,
+        ast.Store,
+        ast.Call,
+        ast.keyword,
+        ast.Attribute,
+        ast.Tuple,
+    }
+    assert {type(node) for node in ast.walk(policy_tree)} <= allowed_node_types
+
+
+def _assignment_targets(node: ast.stmt) -> tuple[ast.Name, ...]:
+    if isinstance(node, ast.Assign):
+        return tuple(target for target in node.targets if isinstance(target, ast.Name))
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        return (node.target,)
+    return ()
+
+
+def test_timesfm_guard_file_has_only_its_scanning_exception() -> None:
+    guard_tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    guard_direct_imports = [alias.name for node in ast.walk(guard_tree) if isinstance(node, ast.Import) for alias in node.names]
+    guard_from_imports = [
+        node.module
+        for node in ast.walk(guard_tree)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    ]
+    subprocess_attributes = [
+        node
+        for node in ast.walk(guard_tree)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "subprocess"
+    ]
+    subprocess_calls = [
+        node
+        for node in ast.walk(guard_tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and node.func.attr == "run"
+    ]
+    guard_top_level_functions = [node.name for node in guard_tree.body if isinstance(node, ast.FunctionDef)]
+
+    assert guard_direct_imports == ["ast", "re", "subprocess"]
+    assert set(guard_from_imports) == {"pathlib", "flinttrade_core.model_rights_policies", "flinttrade_core.service_providers"}
+    assert all(node.attr == "run" for node in subprocess_attributes)
+    assert len(subprocess_calls) == 1
+    assert isinstance(subprocess_calls[0].args[0], ast.Tuple)
+    assert [item.value for item in subprocess_calls[0].args[0].elts if isinstance(item, ast.Constant)] == ["git", "ls-files"]
+    assert guard_top_level_functions == [
+        "_fact",
+        "_contains_restricted_identifier",
+        "_decode_static_literal",
+        "_static_literal_contains_restricted_identifier",
+        "_python_static_strings",
+        "_python_source_contains_restricted_identifier",
+        "_static_literal_chain_contains_restricted_identifier",
+        "test_timesfm_guard_detects_static_concatenated_identifier",
+        "test_timesfm_policy_preserves_licence_and_conservative_policy_attribution",
+        "test_timesfm_policy_cannot_be_widened_by_a_caller_claim",
+        "test_timesfm_identity_mismatch_remains_isolated_research",
+        "test_timesfm_has_no_runtime_artifact_or_dependency",
+        "test_neutral_catalogue_modules_import_no_provider_runtime_packages",
+        "test_timesfm_allowlisted_policy_module_is_structurally_inert",
+        "_assignment_targets",
+        "test_timesfm_guard_file_has_only_its_scanning_exception",
+    ]
+    assert not [
+        node for node in ast.walk(guard_tree) if isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef))
+    ]

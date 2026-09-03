@@ -64,7 +64,19 @@ def test_rights_intersection_never_widens_scope_or_permissions() -> None:
             max_evidence_use_scope=EvidenceUseScope.LIVE_DECISION,
             restrictions=("retain-provenance",),
         ),
-        evidence=(_fact(RightsBasis.ENTITLEMENT),),
+        evidence=(
+            _fact(
+                RightsBasis.ENTITLEMENT,
+                subject_kind="model_entitlement",
+                identifier="fixture/model",
+            ),
+        ),
+        model_identity=ModelIdentity(
+            provider_id="forecast:fixture",
+            model_id="fixture/model",
+            revision="revision-1",
+            sha256="a" * 64,
+        ),
     )
     research_only = RightsGrant(
         grant_id="grant:research",
@@ -134,6 +146,156 @@ def test_licence_facts_bind_subject_identity_and_basis() -> None:
         basis=RightsBasis.LICENCE,
     )
     assert fact.to_public_dict()["identifier"] == "provider/model"
+
+
+def test_model_identity_requires_a_namespaced_provider_id() -> None:
+    with pytest.raises(ValueError, match="namespaced"):
+        ModelIdentity(
+            provider_id="unnamespaced",
+            model_id="provider/model",
+            revision="revision-1",
+            sha256="a" * 64,
+        )
+
+
+@pytest.mark.parametrize("field", ("model_distribution", "derivative_distribution"))
+def test_model_scoped_allowed_rights_require_matching_model_evidence(field: str) -> None:
+    with pytest.raises(ValueError, match="model-scoped allowed rights require exact model evidence"):
+        RightsGrant(
+            grant_id=f"grant:{field}",
+            basis=RightsBasis.LICENCE,
+            rights=UsageRights(
+                **{
+                    field: PermissionState.ALLOWED,
+                    "production_use": PermissionState.ALLOWED,
+                    "max_evidence_use_scope": EvidenceUseScope.LIVE_DECISION,
+                },
+            ),
+            evidence=(_fact(RightsBasis.LICENCE),),
+        )
+
+
+def test_model_scoped_allowed_rights_accept_exact_model_evidence() -> None:
+    identity = ModelIdentity(
+        provider_id="forecast:fixture",
+        model_id="fixture/model",
+        revision="revision-1",
+        sha256="a" * 64,
+    )
+
+    grant = RightsGrant(
+        grant_id="grant:exact-model",
+        basis=RightsBasis.LICENCE,
+        rights=UsageRights(
+            model_distribution=PermissionState.ALLOWED,
+            derivative_distribution=PermissionState.ALLOWED,
+            production_use=PermissionState.ALLOWED,
+            max_evidence_use_scope=EvidenceUseScope.LIVE_DECISION,
+        ),
+        evidence=(
+            _fact(
+                RightsBasis.LICENCE,
+                subject_kind="model_licence",
+                identifier="fixture/model",
+            ),
+        ),
+        model_identity=identity,
+    )
+
+    assert grant.model_identity == identity
+
+
+def test_descriptor_rejects_default_rights_for_another_provider() -> None:
+    local_grant = RightsGrant(
+        grant_id="grant:local-provider-model",
+        basis=RightsBasis.LICENCE,
+        rights=UsageRights(model_distribution=PermissionState.ALLOWED),
+        evidence=(
+            _fact(
+                RightsBasis.LICENCE,
+                subject_kind="model_licence",
+                identifier="fixture/model",
+            ),
+        ),
+        model_identity=ModelIdentity(
+            provider_id="forecast:fixture",
+            model_id="fixture/model",
+            revision="revision-1",
+            sha256="a" * 64,
+        ),
+    )
+    foreign_grant = RightsGrant(
+        grant_id="grant:other-provider-model",
+        basis=RightsBasis.LICENCE,
+        rights=UsageRights(output_use=PermissionState.ALLOWED),
+        evidence=(
+            _fact(
+                RightsBasis.LICENCE,
+                subject_kind="model_licence",
+                identifier="other/model",
+            ),
+        ),
+        model_identity=ModelIdentity(
+            provider_id="forecast:other",
+            model_id="other/model",
+            revision="revision-1",
+            sha256="a" * 64,
+        ),
+    )
+    default_rights = RightsResolution(rights=UsageRights(), grants=(local_grant, foreign_grant))
+
+    with pytest.raises(ValueError, match="default rights model identity must match provider_id"):
+        ProviderDescriptor(
+            provider_id="forecast:fixture",
+            display_name="Fixture",
+            service_kinds=frozenset({ServiceKind.FORECAST}),
+            default_rights=default_rights,
+        )
+
+
+def test_rights_resolution_preserves_cross_model_scoped_grant_lineage() -> None:
+    first = RightsGrant(
+        grant_id="grant:first-model",
+        basis=RightsBasis.LICENCE,
+        rights=UsageRights(model_distribution=PermissionState.ALLOWED),
+        evidence=(
+            _fact(
+                RightsBasis.LICENCE,
+                subject_kind="model_licence",
+                identifier="fixture/first-model",
+            ),
+        ),
+        model_identity=ModelIdentity(
+            provider_id="forecast:fixture",
+            model_id="fixture/first-model",
+            revision="revision-1",
+            sha256="a" * 64,
+        ),
+    )
+    second = RightsGrant(
+        grant_id="grant:second-model",
+        basis=RightsBasis.LICENCE,
+        rights=UsageRights(derivative_distribution=PermissionState.ALLOWED),
+        evidence=(
+            _fact(
+                RightsBasis.LICENCE,
+                subject_kind="model_licence",
+                identifier="fixture/second-model",
+            ),
+        ),
+        model_identity=ModelIdentity(
+            provider_id="forecast:fixture",
+            model_id="fixture/second-model",
+            revision="revision-2",
+            sha256="b" * 64,
+        ),
+    )
+
+    resolution = intersect_rights(first, second)
+
+    assert resolution.rights.model_distribution is PermissionState.UNKNOWN
+    assert resolution.rights.derivative_distribution is PermissionState.UNKNOWN
+    assert resolution.grants == (first, second)
 
 
 @pytest.mark.parametrize(
