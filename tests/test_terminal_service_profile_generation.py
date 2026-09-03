@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import stat
 import subprocess
 import sys
@@ -26,6 +27,13 @@ def _generator_module():
     return module
 
 
+def _assert_mode(path: Path, expected: int) -> None:
+    if os.name == "nt":
+        assert path.stat().st_mode & stat.S_IWRITE
+    else:
+        assert stat.S_IMODE(path.stat().st_mode) == expected
+
+
 def test_terminal_profile_projection_is_current_and_reproducible(tmp_path: Path) -> None:
     """The checked-in terminal data is an exact deterministic core projection."""
     assert GENERATOR.is_file(), "terminal service-profile generator is missing"
@@ -38,7 +46,10 @@ def test_terminal_profile_projection_is_current_and_reproducible(tmp_path: Path)
     assert OUTPUT.read_bytes() == tracked_bytes
     assert tracked_after.st_ino == tracked_before.st_ino
     assert tracked_after.st_mtime_ns == tracked_before.st_mtime_ns
-    assert stat.S_IMODE(tracked_after.st_mode) == stat.S_IMODE(tracked_before.st_mode)
+    if os.name == "nt":
+        assert bool(tracked_after.st_mode & stat.S_IWRITE) == bool(tracked_before.st_mode & stat.S_IWRITE)
+    else:
+        assert stat.S_IMODE(tracked_after.st_mode) == stat.S_IMODE(tracked_before.st_mode)
 
     temporary_output = tmp_path / "serviceProviders.ts"
     subprocess.run(
@@ -53,7 +64,7 @@ def test_terminal_profile_projection_is_current_and_reproducible(tmp_path: Path)
         check=True,
     )
     assert temporary_output.read_bytes() == before
-    assert stat.S_IMODE(temporary_output.stat().st_mode) == 0o644
+    _assert_mode(temporary_output, 0o644)
 
     generated = OUTPUT.read_text(encoding="utf-8")
     profile_ids = tuple(profile.provider_id for profile in LLM_PROVIDER_PROFILES)
@@ -89,5 +100,17 @@ def test_atomic_generation_failure_preserves_existing_output_and_cleans_temporar
         module._atomic_write("replacement projection\n", output)
 
     assert output.read_text(encoding="utf-8") == "previous projection\n"
-    assert stat.S_IMODE(output.stat().st_mode) == 0o640
+    _assert_mode(output, 0o640)
     assert list(tmp_path.glob(f".{output.name}.*")) == []
+
+
+def test_atomic_generation_succeeds_without_descriptor_chmod(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The atomic write path remains usable where descriptor chmod is unavailable."""
+    module = _generator_module()
+    output = tmp_path / "serviceProviders.ts"
+    monkeypatch.delattr(module.os, "fchmod", raising=False)
+
+    module._atomic_write("cross-platform projection\n", output)
+
+    assert output.read_text(encoding="utf-8") == "cross-platform projection\n"
+    _assert_mode(output, 0o644)

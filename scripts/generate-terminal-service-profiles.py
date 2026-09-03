@@ -68,8 +68,8 @@ def _atomic_write(content: str, output: Path) -> None:
     temporary_path = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-            os.fchmod(stream.fileno(), mode)
             stream.write(content)
+        temporary_path.chmod(mode)
         os.replace(temporary_path, output)
     except BaseException:
         temporary_path.unlink(missing_ok=True)
