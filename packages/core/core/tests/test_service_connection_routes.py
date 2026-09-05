@@ -123,6 +123,11 @@ def test_service_connection_imports_are_inert_under_transport_and_credential_poi
         ("POST", "/v1/config/llm", "/v1/config/llm"),
         ("POST", "/v1/config/openalgo", "/v1/config/openalgo"),
         ("POST", "/v1/test-connection", "/v1/test-connection"),
+        ("POST", "/api/v1/ditto/accounts", "/api/v1/ditto/accounts"),
+        ("DELETE", "/ft-api/api/v1/ditto/accounts/private?key=private", "/api/v1/ditto/accounts/{account_id}"),
+        ("POST", "/admin/credentials/rotation/private/schedule", "/admin/credentials/rotation/{broker}/schedule"),
+        ("POST", "/admin/credentials/rotation/private/rotate-now", "/admin/credentials/rotation/{broker}/rotate-now"),
+        ("PUT", "/ft-api/v1/rate-limits?private=value", "/v1/rate-limits"),
     ],
 )
 def test_secret_envelope_classifier_returns_fixed_templates_for_untrusted_paths(method, path, want):
@@ -142,6 +147,12 @@ def test_secret_envelope_classifier_returns_fixed_templates_for_untrusted_paths(
         "/v1/auth/status",
         "/v1/config/llm-extra",
         "/api/v1/native/account",
+        "/api/v1/ditto/accounts-extra",
+        "/api/v1/ditto/accounts/private/enable",
+        "/api/v1/ditto/accounts/private/disable",
+        "/admin/credentials/rotation/status",
+        "/admin/credentials/rotation/private/schedule-extra",
+        "/v1/rate-limits-extra",
     ],
 )
 def test_secret_envelope_classifier_leaves_lookalike_non_secret_routes_useful(path):
@@ -151,6 +162,13 @@ def test_secret_envelope_classifier_leaves_lookalike_non_secret_routes_useful(pa
     ) else None
     classify = getattr(module, "classify_secret_envelope", lambda method, path: None)
     assert classify("POST", path) is None
+
+
+@pytest.mark.parametrize("path", ["/api/v1/ditto/accounts", "/admin/credentials/rotation/status", "/v1/rate-limits"])
+def test_cutover_metadata_reads_keep_ordinary_observability(path):
+    from flinttrade_core.request_observability import classify_secret_envelope
+
+    assert classify_secret_envelope("GET", path) is None
 
 
 def _unit_app(

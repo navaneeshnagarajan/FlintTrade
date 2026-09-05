@@ -342,7 +342,7 @@ def test_real_factory_keeps_default_guard_and_preserved_http_boundaries(monkeypa
         assert response.status_code == 503, (method, path, response.json)
         assert response.json == {"error": "broker_account_cutover_unavailable"}
         assert response.headers["Cache-Control"] == "no-store"
-        assert client.open(path, method="OPTIONS").status_code == 200
+        assert client.open(path, method="OPTIONS", data="synthetic", content_type="text/plain").status_code == 200
     for path in ("/api/v1/native/oauth/callback", "/v1/auth/oauth/callback"):
         response = client.get(path + "?code=synthetic&state=synthetic")
         assert response.status_code == 503
@@ -355,7 +355,7 @@ def test_real_factory_keeps_default_guard_and_preserved_http_boundaries(monkeypa
         "/api/v1/native/accounts",
         "/admin/credentials/rotation/status",
     ):
-        assert client.get(path, headers=headers).status_code == 200, path
+        assert client.get(path, headers=headers, data="synthetic", content_type="text/plain").status_code == 200, path
     response = client.post("/api/v1/native/postbacks/upstox", json={"update_type": "order"})
     assert response.status_code == 200
     assert response.json["data"]["accepted"] is True
@@ -363,6 +363,138 @@ def test_real_factory_keeps_default_guard_and_preserved_http_boundaries(monkeypa
     response = client.post("/v1/config/openalgo", headers=headers, json={"telegram_username": "synthetic"})
     assert response.status_code == 200, response.json
     assert app.config["CREDENTIAL_STORE"].list_accounts() == rows_before
+
+
+@pytest.mark.parametrize("content_type", ["application/json", "text/plain", "application/x-www-form-urlencoded"])
+@pytest.mark.parametrize("principal", ["missing", "invalid", "operator"])
+@pytest.mark.parametrize("sink_raises", [False, True])
+def test_real_factory_rejection_precedes_body_validation_and_observability(
+    monkeypatch, caplog, content_type, principal, sink_raises
+):
+    """Exercise production hook ordering, including exceptions swallowed by sinks."""
+    from flinttrade_core.app import create_flask_app
+
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.setenv("ENABLE_ANALYZER", "true")
+    app = create_flask_app()
+    with app.app_context():
+        headers = {"Authorization": f"Bearer {auth_routes._create_token('synthetic', mode='explore')}"}
+    if principal == "missing":
+        headers = {}
+    elif principal == "invalid":
+        headers = {"Authorization": "Bearer synthetic-invalid-token"}
+    forbidden = Forbidden()
+    body_reads = Forbidden()
+
+    class AuthorityConfig(Config):
+        def get(self, key, default=None):
+            if key in {"REGISTRY", "CREDENTIAL_STORE", "NATIVE_ADAPTERS", "BROKER_ROUTER_REBUILD_LOCK"}:
+                forbidden.calls.append(key)
+                raise AssertionError("authority lookup before admission")
+            return super().get(key, default)
+
+        def __getitem__(self, key):
+            if key in {"REGISTRY", "CREDENTIAL_STORE", "NATIVE_ADAPTERS", "BROKER_ROUTER_REBUILD_LOCK"}:
+                forbidden.calls.append(key)
+                raise AssertionError("authority lookup before admission")
+            return super().__getitem__(key)
+
+    app.config = AuthorityConfig(app.root_path, defaults=app.config)
+    monkeypatch.setattr(native_account_routes, "_pop_pending_oauth_callback", forbidden)
+    monkeypatch.setattr(operations_routes, "_ditto_manager", forbidden)
+    monkeypatch.setattr(operations_routes, "_quiesce_ditto_account_generation", forbidden)
+    monkeypatch.setattr("flinttrade_gateway.auth._oauth_states", forbidden)
+    for method in ("get_json", "get_data", "_load_form_data"):
+        monkeypatch.setattr(Request, method, body_reads)
+    observed = []
+    errors = []
+    traffic = []
+    real_analyser = app.config["API_ANALYZER"].log_call
+    real_traffic = app.config["TRAFFIC_LOGGER"].log
+
+    def record_analyser(**fields):
+        observed.append(fields)
+        # The hook catches this: recording first proves it cannot hide body access.
+        if sink_raises:
+            raise RuntimeError("synthetic analyser failure")
+        return real_analyser(**fields)
+
+    def record_traffic(**fields):
+        traffic.append(fields)
+        if sink_raises:
+            raise RuntimeError("synthetic traffic failure")
+        return real_traffic(**fields)
+
+    def record_error(**fields):
+        errors.append(fields)
+        raise RuntimeError("synthetic error sink failure")
+
+    monkeypatch.setattr(app.config["API_ANALYZER"], "log_call", record_analyser)
+    monkeypatch.setattr(app.config["ERROR_LOG"], "log", record_error)
+    monkeypatch.setattr(app.config["TRAFFIC_LOGGER"], "log", record_traffic)
+    client = app.test_client()
+    for method, path in MUTATIONS:
+        observed.clear()
+        traffic.clear()
+        response = client.open(
+            path,
+            method=method,
+            headers=headers,
+            data=(
+                "review_marker=synthetic-body-must-not-be-read"
+                if content_type == "application/x-www-form-urlencoded"
+                else '{"review_marker":"synthetic-body-must-not-be-read"}'
+            ),
+            content_type=content_type,
+        )
+        assert response.status_code == (503 if principal == "operator" else 401), (method, path, response.json)
+        if principal == "operator":
+            assert response.json == {"error": "broker_account_cutover_unavailable"}
+            assert response.headers["Cache-Control"] == "no-store"
+        assert body_reads.calls == [], (method, path)
+        assert forbidden.calls == [], (method, path)
+        assert errors == []
+        assert len(observed) == 1, (method, path)
+        assert observed[0]["request_body"] is None
+        assert observed[0]["safe_request"] is not None
+        assert observed[0]["response_status"] == response.status_code
+        assert len(traffic) == 1
+        assert traffic[0]["ip"] == "redacted"
+        assert traffic[0]["path"] == observed[0]["safe_request"].route_template
+        assert traffic[0]["user_agent"] is None
+        assert "synthetic-body-must-not-be-read" not in repr(observed)
+        assert "synthetic-body-must-not-be-read" not in repr(traffic)
+        assert "synthetic-body-must-not-be-read" not in caplog.text
+        if not sink_raises:
+            stored = app.config["API_ANALYZER"].recent(limit=1)[0]
+            assert stored["request_body"] == observed[0]["safe_request"].to_dict()
+            assert stored["route"] == observed[0]["safe_request"].route_template
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/config/openalgo",
+        "/v1/config/telegram",
+        "/api/v1/native/postbacks/upstox",
+        "/api/v1/ditto/accounts/synthetic/enable",
+        "/api/v1/ditto/accounts/synthetic/disable",
+        "/v1/accounts-extra",
+        "/v1/rate-limits-extra",
+        "/admin/credentials/rotation/upstox/schedule-extra",
+        "/api/v1/native/unmatched",
+    ],
+)
+def test_real_factory_retains_non_cutover_content_type_validation(path):
+    from flinttrade_core.app import create_flask_app
+
+    app = create_flask_app()
+    with app.app_context():
+        headers = {"Authorization": f"Bearer {auth_routes._create_token('synthetic', mode='explore')}"}
+    response = app.test_client().post(path, headers=headers, data="synthetic", content_type="text/plain")
+    assert response.status_code == 415
+    assert response.json == {"status": "error", "message": "Content-Type must be application/json"}
 
 
 @pytest.mark.parametrize("invalid", [False, True])

@@ -51,6 +51,19 @@ def classify_secret_envelope(method: object, path: object) -> str | None:
     clean = _normalise_path(path)
     if clean is None:
         return None
+    # Cutover rejection must not parse envelopes in after-request/error sinks.
+    # Keep ordinary metadata reads and neighbouring enable/disable routes useful.
+    match (method, clean.split("/")):
+        case ("POST", ["", "api", "v1", "ditto", "accounts"]):
+            return "/api/v1/ditto/accounts"
+        case ("DELETE", ["", "api", "v1", "ditto", "accounts", account_id]) if account_id:
+            return "/api/v1/ditto/accounts/{account_id}"
+        case ("POST", ["", "admin", "credentials", "rotation", broker, action]) if (
+            broker and action in {"schedule", "rotate-now"}
+        ):
+            return "/admin/credentials/rotation/{broker}/" + action
+        case ("PUT", ["", "v1", "rate-limits"]):
+            return "/v1/rate-limits"
     if _exact_or_descendant(clean, "/v1/services/connections"):
         return (
             "/v1/services/connections"

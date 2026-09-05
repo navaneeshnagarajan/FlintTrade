@@ -4756,6 +4756,18 @@ def create_flask_app(
     def _require_json_content_type() -> Any:
         """Reject POST/PUT/PATCH requests that don't send JSON."""
         if request.method in ("POST", "PUT", "PATCH") and request.content_length:
+            # These matched routes own operator authentication followed by the
+            # shared cutover guard. Let that boundary reject before validating
+            # bodies; this is routing precedence, not mutation admission.
+            if (
+                request.blueprint in {"gateway", "rotation_admin"}
+                or (
+                    request.blueprint == "native_accounts"
+                    and request.endpoint != "native_accounts.native_broker_postback"
+                )
+                or request.endpoint in {"operations.ditto_account_create", "operations.ditto_account_delete"}
+            ):
+                return None
             content_type = request.content_type or ""
             if "json" not in content_type and "text/event-stream" not in content_type:
                 return jsonify(
