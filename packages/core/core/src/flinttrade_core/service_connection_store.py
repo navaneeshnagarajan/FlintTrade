@@ -958,9 +958,8 @@ class ServiceConnectionStore:
             raise ValueError("ambiguous service slice")
         if journal["phase"] == "committed" and not forward_published:
             raise ValueError("committed state cannot be authenticated")
-        observed_binding = (
-            config["services"].get("_connection_store", {}).get("bindings", {}).get(journal["ref"]["connection_id"])
-        )
+        metadata = config["services"].get("_connection_store")
+        observed_binding = None if metadata is None else metadata["bindings"].get(journal["ref"]["connection_id"])
         expected_binding = journal["before_binding"]
         if forward_published:
             expected_binding = journal["after_binding"]

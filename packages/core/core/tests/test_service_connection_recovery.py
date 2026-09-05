@@ -25,6 +25,109 @@ ACTOR = ConnectionActorContext("operator", "session:" + "a" * 64)
 PAYLOAD = {"provider_id": "llm:openai", "label": "Primary", "auth_mode": "api_key", "credential": "1234"}
 
 
+@pytest.mark.parametrize("explicit_null", [False, True], ids=["absent", "null"])
+@pytest.mark.parametrize(
+    "boundary,credential,epoch,status",
+    [
+        ("prepared_journal", False, 0, 503),
+        ("prepared_journal", True, 0, 503),
+        ("secret_install", True, 1, 503),
+        ("workspace_cas", False, 2, 503),
+        ("workspace_cas", True, 2, 503),
+        ("committed", False, 1, 201),
+        ("committed", True, 1, 201),
+    ],
+)
+def test_admitted_empty_authority_settles_and_replays(
+    tmp_path, monkeypatch, explicit_null, boundary, credential, epoch, status
+):
+    from flinttrade_core.workspace_migrations import compare_and_swap_workspace, read_workspace_snapshot
+
+    def initialise(config):
+        config["unrelated"] = "retained"
+        if explicit_null:
+            config["services"]["_connection_store"] = None
+
+    original = compare_and_swap_workspace(tmp_path, None, initialise)
+    workspace_bytes = (tmp_path / "workspace.json").read_bytes()
+    store = ServiceConnectionStore(tmp_path)
+    before = store.read_snapshot()
+    assert before.epoch == 0 and before.connections == ()
+    payload = PAYLOAD if credential else {"provider_id": "llm:ollama", "label": "Local"}
+    key = str(uuid4())
+
+    def crash(name):
+        if name == boundary:
+            raise Crash()
+
+    monkeypatch.setattr(module, "_checkpoint", crash)
+    with pytest.raises(Crash):
+        store.mutate(
+            "create", payload, connection_id=None, expected_etag=before.etag, idempotency_key=key, actor_context=ACTOR
+        )
+    monkeypatch.setattr(module, "_checkpoint", lambda _name: None)
+    recovered = store.recover()
+    assert recovered.epoch == epoch
+    assert len(recovered.connections) == (1 if status == 201 else 0)
+    workspace = read_workspace_snapshot(tmp_path)
+    assert workspace.version.instance_id == original.version.instance_id
+    assert workspace.as_dict()["unrelated"] == "retained"
+    if boundary == "prepared_journal":
+        assert (tmp_path / "workspace.json").read_bytes() == workspace_bytes
+        assert recovered.etag == before.etag
+    assert store.recover() == recovered
+    control = tmp_path / "service-connections-state"
+    assert not (control / "transaction.json").exists()
+    assert not list((control / "candidates").iterdir())
+    receipt = json.loads((control / "receipts" / f"{key}.json").read_text())["result"]
+    replay = store.mutate(
+        "create", payload, connection_id=None, expected_etag=before.etag, idempotency_key=key, actor_context=ACTOR
+    )
+    assert replay.to_dict() == receipt
+    assert replay.status == status and replay.etag == recovered.etag
+    if status == 503:
+        assert dict(replay.body) == {"error": "transaction_rolled_back"}
+    assert (
+        store.mutate(
+            "create", payload, connection_id=None, expected_etag=before.etag, idempotency_key=key, actor_context=ACTOR
+        )
+        == replay
+    )
+    assert store.read_snapshot() == recovered
+
+
+@pytest.mark.parametrize("metadata", [False, 0, "", [], {}, {"bindings": {}}])
+def test_malformed_non_null_empty_authority_is_not_admitted(tmp_path, metadata):
+    from flinttrade_core.workspace_migrations import compare_and_swap_workspace
+
+    original = compare_and_swap_workspace(tmp_path, None, lambda _config: None)
+    store = ServiceConnectionStore(tmp_path)
+    etag = store.read_snapshot().etag
+    compare_and_swap_workspace(
+        tmp_path, original.version, lambda config: config["services"].update(_connection_store=metadata)
+    )
+    workspace = tmp_path / "workspace.json"
+    before = workspace.read_bytes()
+    key = str(uuid4())
+    for operation in (
+        store.read_snapshot,
+        store.recover,
+        lambda: store.mutate(
+            "create",
+            {"provider_id": "llm:ollama", "label": "Local"},
+            connection_id=None,
+            expected_etag=etag,
+            idempotency_key=key,
+            actor_context=ACTOR,
+        ),
+    ):
+        with pytest.raises(ConnectionStoreUnavailable):
+            operation()
+        assert workspace.read_bytes() == before
+        assert not (tmp_path / "service-connections-state" / "transaction.json").exists()
+        assert not (tmp_path / "service-connections-state" / "receipts" / f"{key}.json").exists()
+
+
 @pytest.mark.parametrize(
     "boundary", ["new_published", "workspace_cas", "workspace_bound", "committed", "recovery_published", "recovery_cas"]
 )
