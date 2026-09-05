@@ -34,6 +34,33 @@ _MP = "test-master-password-123"
 _CREDS = {"api_key": "k", "api_secret": "s"}
 
 
+@pytest.mark.parametrize("schema_change", ["column", "index", "trigger"])
+def test_unsupported_legacy_sql_semantics_refused_before_migration(tmp_path, schema_change):
+    from contextlib import closing
+
+    path = tmp_path / "legacy.db"
+    legacy_vault(path, _MP, account_id="CaseA")
+    with closing(sqlite3.connect(path)) as conn:
+        if schema_change == "column":
+            conn.execute("PRAGMA writable_schema=ON")
+            conn.execute("""UPDATE sqlite_master SET sql=replace(sql,'account_id TEXT',
+                            'account_id TEXT COLLATE NOCASE') WHERE name='accounts'""")
+        elif schema_change == "index":
+            conn.execute("CREATE UNIQUE INDEX legacy_nocase ON accounts(account_id COLLATE NOCASE)")
+        else:
+            conn.execute("""CREATE TRIGGER migration_side_effect AFTER UPDATE ON accounts
+                            BEGIN UPDATE accounts SET label='changed-by-trigger'; END""")
+        conn.commit()
+        original = conn.execute("SELECT * FROM accounts").fetchall()
+        schema = conn.execute("SELECT type,name,sql FROM sqlite_master ORDER BY name").fetchall()
+    with pytest.raises(CredentialError, match="^credential_vault_invalid$"):
+        CredentialStore(path, _MP)
+    with closing(sqlite3.connect(path)) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+        assert conn.execute("SELECT * FROM accounts").fetchall() == original
+        assert conn.execute("SELECT type,name,sql FROM sqlite_master ORDER BY name").fetchall() == schema
+
+
 def test_store_with_adapter_id_retrieve_for_round_trip(tmp_path) -> None:
     harden_directory(tmp_path)
     store = CredentialStore(tmp_path / "c.db", _MP)

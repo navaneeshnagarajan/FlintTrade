@@ -309,6 +309,8 @@ def test_list_and_remove_native_account(client):
 
 def test_remove_failure_keeps_session_credentials_and_workspace(client, monkeypatch):
     """A failed vault delete is a failed removal, with no partial teardown."""
+    from flinttrade_core.broker_identity import BrokerSelector
+
     c, app, tmp_path = client
     connected = c.post(
         "/api/v1/native/accounts",
@@ -322,11 +324,13 @@ def test_remove_failure_keeps_session_credentials_and_workspace(client, monkeypa
     assert connected.status_code == 200
     store = app.config["CREDENTIAL_STORE"]
 
-    monkeypatch.setattr(
-        store,
-        "remove_selector",
-        lambda *_args: (_ for _ in ()).throw(RuntimeError("vault busy")),
-    )
+    fault_calls = []
+
+    def fail_remove(selector, *, expected):
+        fault_calls.append((selector, expected))
+        raise RuntimeError("vault busy")
+
+    monkeypatch.setattr(store, "remove_selector", fail_remove)
 
     removed = c.delete(
         "/api/v1/native/accounts/upstox/UPXREMOVEFAIL",
@@ -334,6 +338,10 @@ def test_remove_failure_keeps_session_credentials_and_workspace(client, monkeypa
     )
 
     assert removed.status_code == 500
+    assert len(fault_calls) == 1
+    assert fault_calls[0][0] == BrokerSelector("upstox", "UPXREMOVEFAIL")
+    assert fault_calls[0][1] == store.selector_state(fault_calls[0][0]).version
+    assert "vault busy" not in removed.get_data(as_text=True)
     assert store.retrieve_for("upstox", "UPXREMOVEFAIL")["access_token"] == "still-valid"
     assert app.config["REGISTRY"].get_session_for("upstox", "UPXREMOVEFAIL") is not None
     assert "upstox:UPXREMOVEFAIL" in _workspace_brokers(tmp_path)["registered"]

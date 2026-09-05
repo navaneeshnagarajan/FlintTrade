@@ -559,3 +559,145 @@ def test_legacy_stage_primary_metadata_commits_once_with_complete_cas(store):
     with pytest.raises(vault.CredentialStaleError):
         stage.commit()
     assert store.retrieve_credentials(a) == {"token": "old"}
+
+
+@pytest.mark.parametrize("column,collation", [("account_id", "NOCASE"), ("adapter_id", "RTRIM")])
+@pytest.mark.parametrize("already_open", [False, True])
+def test_copied_nonbinary_account_columns_are_refused(store, column, collation, already_open):
+    seed(store, BrokerSelector("dhan", "CaseA"))
+    path = store._db_path
+    if not already_open:
+        store.close()
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute("PRAGMA writable_schema=ON")
+        conn.execute(
+            "UPDATE sqlite_master SET sql=replace(sql,?,?) WHERE name='accounts'",
+            (f"{column} TEXT", f"{column} TEXT COLLATE/**/{collation}"),
+        )
+        conn.commit()
+    if already_open:
+        with pytest.raises(vault.CredentialStaleError):
+            store.retrieve_credentials(BrokerSelector("dhan", "casea"))
+        with pytest.raises(vault.CredentialStaleError):
+            store.retrieve_credentials(BrokerSelector("dhan", "CaseA"))
+    else:
+        with pytest.raises(vault.CredentialVaultInvalidError):
+            vault.CredentialStore(path, "synthetic-password")
+
+
+@pytest.mark.parametrize("table", ["credential_selector_versions", "broker_selector_setup"])
+def test_extra_nonbinary_authority_index_refused(store, table):
+    seed(store, BrokerSelector("dhan", "CaseA"))
+    path = store._db_path
+    store.close()
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute(f"CREATE UNIQUE INDEX unexpected_equality ON {table}(adapter_id, account_id COLLATE NOCASE)")
+        conn.commit()
+    with pytest.raises(vault.CredentialVaultInvalidError):
+        vault.CredentialStore(path, "synthetic-password")
+
+
+def test_nonbinary_composite_index_is_refused(store):
+    seed(store, BrokerSelector("dhan", "CaseA"))
+    path = store._db_path
+    store.close()
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute("DROP INDEX idx_accounts_adapter_account")
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_accounts_adapter_account ON accounts(adapter_id,account_id COLLATE NOCASE)"
+        )
+        conn.commit()
+    with pytest.raises(vault.CredentialVaultInvalidError):
+        vault.CredentialStore(path, "synthetic-password")
+
+
+def test_wrong_case_cannot_retrieve_or_mask_absence(store):
+    exact, wrong = BrokerSelector("dhan", "CaseA"), BrokerSelector("dhan", "casea")
+    seed(store, exact)
+    assert store.account_for_selector(wrong) is None
+    assert not store.selector_state(wrong).credential_present
+    assert store.selector_state(wrong).version.generation == 0
+    with pytest.raises(vault.CredentialNotFoundError):
+        store.retrieve_credentials(wrong)
+    store.put_credentials(wrong, "dhan", "Different case", {"token": "separate"},
+                          expected=store.selector_state(wrong).version)
+    assert store.retrieve_credentials(exact) == {"token": "old"}
+    assert store.retrieve_credentials(wrong) == {"token": "separate"}
+
+
+@pytest.mark.parametrize("already_open", [False, True])
+@pytest.mark.parametrize("table", [
+    "accounts", "credential_vault_metadata", "credential_selector_versions", "broker_selector_setup"
+])
+def test_authority_trigger_refused_before_side_effects(store, table, already_open):
+    a, b = BrokerSelector("dhan", "A"), BrokerSelector("dhan", "B")
+    expected = seed(store, a)
+    seed(store, b)
+    path = store._db_path
+    if not already_open:
+        store.close()
+    with closing(sqlite3.connect(path)) as conn:
+        before_accounts = conn.execute("SELECT * FROM accounts ORDER BY account_id").fetchall()
+        before_versions = conn.execute("SELECT * FROM credential_selector_versions ORDER BY account_id").fetchall()
+        conn.execute(f"""CREATE TRIGGER unexpected_sibling_write AFTER UPDATE ON {table}
+                         BEGIN UPDATE accounts SET label='changed-by-trigger' WHERE account_id='B'; END""")
+        conn.commit()
+    if already_open:
+        with pytest.raises(vault.CredentialStaleError):
+            store.update_credentials(a, {"token": "updated"}, expected=expected)
+        with pytest.raises(vault.CredentialStaleError):
+            store.selector_state(b)
+    else:
+        with pytest.raises(vault.CredentialVaultInvalidError):
+            vault.CredentialStore(path, "synthetic-password")
+    with closing(sqlite3.connect(path)) as conn:
+        assert conn.execute("SELECT * FROM accounts ORDER BY account_id").fetchall() == before_accounts
+        assert conn.execute("SELECT * FROM credential_selector_versions ORDER BY account_id").fetchall() == before_versions
+        assert conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger'").fetchone()[0] == 1
+
+
+def test_failed_real_strict_open_latches_missing_main_before_restore(store, monkeypatch):
+    selector = BrokerSelector("dhan", "A")
+    seed(store, selector)
+    path, saved = store._db_path, store._db_path.with_name("saved.db")
+    real_open = vault.open_sqlite
+    observed_errors = []
+
+    def disappear_then_open(*args, **kwargs):
+        os.replace(path, saved)
+        try:
+            return real_open(*args, **kwargs)
+        except sqlite3.OperationalError as exc:
+            observed_errors.append(exc.sqlite_errorcode)
+            raise
+
+    monkeypatch.setattr(vault, "open_sqlite", disappear_then_open)
+    try:
+        with pytest.raises(vault.CredentialStaleError, match="^credential_stale$"):
+            store.selector_state(selector)
+        assert observed_errors == [sqlite3.SQLITE_CANTOPEN]
+    finally:
+        # Restoration occurs only after the failed real mode=rw open returns.
+        os.replace(saved, path)
+    monkeypatch.setattr(vault, "open_sqlite", real_open)
+    with pytest.raises(vault.CredentialStaleError):
+        store.selector_state(selector)
+
+
+def test_failed_open_with_unchanged_family_remains_fixed_transient_failure(store, monkeypatch):
+    selector = BrokerSelector("dhan", "A")
+    expected = seed(store, selector)
+    real_open = vault.open_sqlite
+    calls = []
+
+    def transient_failure(*args, **kwargs):
+        calls.append(1)
+        raise sqlite3.OperationalError("synthetic-private-io-detail")
+
+    monkeypatch.setattr(vault, "open_sqlite", transient_failure)
+    with pytest.raises(vault.CredentialError, match="^credential_operation_failed$") as error:
+        store.selector_state(selector)
+    assert calls == [1]
+    assert error.value.__suppress_context__
+    monkeypatch.setattr(vault, "open_sqlite", real_open)
+    assert store.selector_state(selector).version == expected

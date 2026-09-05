@@ -427,8 +427,14 @@ class CredentialStore:
                 raise CredentialVaultInvalidError
             return conn
         except Exception as exc:
-            if conn is not None:
-                conn.close()
+            try:
+                if conn is not None:
+                    conn.close()
+            finally:
+                # A real mode=rw open can fail after the pre-open observation.
+                # Observe this boundary too: restoring A later must not revive
+                # a store that saw A disappear or change while opening it.
+                self._validate_family()
             if self._incarnation is not None and getattr(exc, "sqlite_errorcode", None) in (
                 sqlite3.SQLITE_CORRUPT,
                 sqlite3.SQLITE_NOTADB,
@@ -438,7 +444,24 @@ class CredentialStore:
             raise
 
     @staticmethod
+    def _binary_indices(conn: sqlite3.Connection, table: str) -> bool:
+        return all(
+            term[4] == "BINARY"
+            for index in conn.execute("SELECT name FROM pragma_index_list(?)", (table,))
+            for term in conn.execute("SELECT * FROM pragma_index_xinfo(?)", (index[0],))
+            if term[5]
+        )
+
+    @staticmethod
     def _accounts_schema(conn: sqlite3.Connection, *, legacy: bool = False) -> bool:
+        ddl = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='accounts'").fetchone()
+        # Historical and current producers use implicit BINARY columns only.
+        # Refuse any COLLATE declaration (including commented/quoted syntax),
+        # rather than trying to parse and inherit unrecognised SQL equality.
+        if ddl is None or re.search(r"\bcollate\b", ddl[0], re.IGNORECASE):
+            return False
+        if not CredentialStore._binary_indices(conn, "accounts"):
+            return False
         columns = {row[1]: row for row in conn.execute("PRAGMA table_info(accounts)")}
         expected = {
             "account_id": "TEXT",
@@ -465,6 +488,7 @@ class CredentialStore:
         conn = self._get_connection()
         try:
             conn.execute("BEGIN IMMEDIATE")
+            self._reject_authority_triggers(conn)
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             marker = conn.execute("PRAGMA user_version").fetchone()[0]
             legacy = not fresh and marker == 0 and not tables.intersection(_AUTHORITY_SCHEMA)
@@ -532,8 +556,19 @@ class CredentialStore:
         ):
             raise CredentialVaultInvalidError
 
+    @staticmethod
+    def _reject_authority_triggers(conn: sqlite3.Connection) -> None:
+        tables = ("accounts", *_AUTHORITY_SCHEMA)
+        for schema in ("sqlite_master", "sqlite_temp_master"):
+            if conn.execute(
+                f"SELECT 1 FROM {schema} WHERE type='trigger' AND lower(tbl_name) IN (?,?,?,?) LIMIT 1",
+                tables,
+            ).fetchone():
+                raise CredentialVaultInvalidError
+
     def _validate_authority(self, conn: sqlite3.Connection) -> UUID:
         try:
+            self._reject_authority_triggers(conn)
             if conn.execute("PRAGMA user_version").fetchone()[0] != 1 or not self._accounts_schema(conn):
                 raise ValueError
             indices = {row[1]: row for row in conn.execute("PRAGMA index_list(accounts)")}
@@ -551,7 +586,7 @@ class CredentialStore:
                 # These tables have exactly one producer. Compare its DDL
                 # verbatim: folding case/whitespace inside CHECK literals can
                 # turn a changed constraint into an apparently valid schema.
-                if row is None or row[0] != sql:
+                if row is None or row[0] != sql or not self._binary_indices(conn, name):
                     raise ValueError
             metadata = conn.execute("SELECT * FROM credential_vault_metadata").fetchall()
             if len(metadata) != 1 or metadata[0]["singleton"] != 1 or metadata[0]["schema_version"] != 1:
