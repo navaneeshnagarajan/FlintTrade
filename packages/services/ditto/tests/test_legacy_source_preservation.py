@@ -13,7 +13,21 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from flinttrade_core.secure_file import harden_directory
+
 import pytest
+
+# Per-package pytest binds 'tests' locally; load the shared opt-in fixture by path.
+import importlib.util as _fixture_import
+from pathlib import Path as _FixturePath
+
+_fixture_spec = _fixture_import.spec_from_file_location(
+    "_credential_fixtures", _FixturePath(__file__).resolve().parents[4] / "tests" / "credential_fixtures.py",
+)
+_fixture_module = _fixture_import.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(_fixture_module)
+seed_credentials = _fixture_module.seed_credentials
+
 
 
 _FORK_INHERITED_STATE = None
@@ -796,6 +810,12 @@ def test_case_alias_state_handles_share_one_nested_fence_on_case_insensitive_fs(
 
 def test_spawned_account_writer_blocks_on_parent_ditto_fence(tmp_path):
     from flinttrade_core.installation_state import InstallationState
+    from flinttrade_gateway.credentials import CredentialStore
+
+    harden_directory(tmp_path)
+    seed_store = CredentialStore(tmp_path / "ditto_credentials.db", "test-master-pw")
+    seed_credentials(seed_store, "spawned", "openalgo", "Synthetic", {"api_key": "key"}, adapter_id="openalgo")
+    seed_store.close()
 
     root = tmp_path / "installation"
     db_path = tmp_path / "accounts.sqlite"
@@ -863,6 +883,7 @@ def test_account_writer_uses_the_shared_installation_fence(tmp_path):
         master_password="test-master-pw",
         installation_state_root=root,
     )
+    seed_credentials(manager._cred, "blocked", "openalgo", "Synthetic", {"api_key": "test-key"}, adapter_id="openalgo")
     writer_done = threading.Event()
 
     def write() -> None:
@@ -947,6 +968,7 @@ def test_default_constructor_reads_migrated_canonical_vault(tmp_path, monkeypatc
     platform_workspace = tmp_path / "platform-workspace"
     legacy_fast = tmp_path / "legacy" / "data"
     legacy_fast.mkdir(parents=True)
+    harden_directory(legacy_fast)
     monkeypatch.setattr(workspace, "_default_home", lambda: platform_workspace)
     monkeypatch.setattr(workspace, "_legacy_fast_data_dir", lambda: legacy_fast)
 
@@ -956,6 +978,7 @@ def test_default_constructor_reads_migrated_canonical_vault(tmp_path, monkeypatc
         master_password="test-master-pw",
         installation_state_root=tmp_path / "installation-state",
     ) as legacy_manager:
+        seed_credentials(legacy_manager._cred, "legacy", "openalgo", "Synthetic", {"api_key": "preserved-api-key"}, adapter_id="openalgo")
         legacy_manager.add_account(BrokerAccount("legacy", "http://127.0.0.1:1", "preserved-api-key"))
 
     with AccountManager(
@@ -976,6 +999,8 @@ def test_migration_survives_deferred_vault_connection_collection(tmp_path):
     legacy = tmp_path / "legacy"
     target = tmp_path / "target"
     installation = tmp_path / "installation"
+    legacy.mkdir()
+    harden_directory(legacy)
     prior_gc = gc.isenabled()
     gc.disable()
     try:
@@ -985,6 +1010,7 @@ def test_migration_survives_deferred_vault_connection_collection(tmp_path):
             master_password="disposable-password",
             installation_state_root=installation,
         ) as manager:
+            seed_credentials(manager._cred, "fixture", "openalgo", "Synthetic", {"api_key": "disposable-fixture"}, adapter_id="openalgo")
             manager.add_account(BrokerAccount("fixture", "http://127.0.0.1:1", "disposable-fixture"))
 
         def collect(phase):
@@ -1099,6 +1125,8 @@ def test_data_dir_and_explicit_database_keep_adjacent_vaults(tmp_path, monkeypat
         pass
 
     data_dir = tmp_path / "data-dir"
+    data_dir.mkdir()
+    harden_directory(data_dir)
     monkeypatch.setenv("DATA_DIR", str(data_dir))
     default_manager = AccountManager(
         master_password="test-master-pw",
@@ -1136,6 +1164,8 @@ def test_default_constructor_preserves_data_dir_adjacent_vault(tmp_path, monkeyp
     from flinttrade_ditto.account_manager import AccountManager, BrokerAccount
 
     data_dir = tmp_path / "explicit-data"
+    data_dir.mkdir()
+    harden_directory(data_dir)
     workspace = tmp_path / "workspace"
     monkeypatch.setenv("DATA_DIR", str(data_dir))
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
@@ -1144,6 +1174,7 @@ def test_default_constructor_preserves_data_dir_adjacent_vault(tmp_path, monkeyp
         master_password="test-master-pw",
         mutation_admission=lambda: None,
     ) as manager:
+        seed_credentials(manager._cred, "data-dir", "openalgo", "Synthetic", {"api_key": "preserved-api-key"}, adapter_id="openalgo")
         manager.add_account(BrokerAccount("data-dir", "http://127.0.0.1:1", "preserved-api-key"))
 
     assert (data_dir / "ditto_accounts.sqlite").is_file()

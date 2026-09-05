@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
-import pytest
 
+import pytest
 from flinttrade_ditto.account_manager import AccountManager, BrokerAccount
+
+# Per-package pytest binds 'tests' locally; load the shared opt-in fixture by path.
+import importlib.util as _fixture_import
+from pathlib import Path as _FixturePath
+
+_fixture_spec = _fixture_import.spec_from_file_location(
+    "_credential_fixtures", _FixturePath(__file__).resolve().parents[4] / "tests" / "credential_fixtures.py",
+)
+_fixture_module = _fixture_import.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(_fixture_module)
+seed_credentials = _fixture_module.seed_credentials
+
+
 
 pytestmark = pytest.mark.unit
 
@@ -32,9 +45,13 @@ class _FakeHttp:
 
 @pytest.fixture
 def mgr(tmp_path):
+    from flinttrade_core.secure_file import harden_directory
+
+    harden_directory(tmp_path)
     m = AccountManager(
         db_path=str(tmp_path / "acc.db"), master_password="test-master-pw", mutation_admission=lambda: None,
     )
+    seed_credentials(m._cred, "A1", "openalgo", "Acc 1", {"api_key": "k"}, adapter_id="openalgo")
     m.add_account(BrokerAccount(account_id="A1", openalgo_host="http://host:5000", api_key="k", name="Acc 1"))
     yield m
     m.close()

@@ -8,7 +8,21 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock
 
+from flinttrade_core.secure_file import harden_directory
+
 import pytest
+
+# Per-package pytest binds 'tests' locally; load the shared opt-in fixture by path.
+import importlib.util as _fixture_import
+from pathlib import Path as _FixturePath
+
+_fixture_spec = _fixture_import.spec_from_file_location(
+    "_credential_fixtures", _FixturePath(__file__).resolve().parents[4] / "tests" / "credential_fixtures.py",
+)
+_fixture_module = _fixture_import.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(_fixture_module)
+seed_credentials = _fixture_module.seed_credentials
+
 
 # ======================================================================
 # Helpers
@@ -38,39 +52,48 @@ def _make_account(
 # ======================================================================
 
 
+def _seed_and_add(manager, account):
+    seed_credentials(manager._cred, account.account_id, "openalgo", account.name,
+                     {"api_key": account.api_key}, adapter_id="openalgo")
+    manager.add_account(account)
+
+
 class TestAccountManager:
     """Test account registration, listing, groups, and health."""
 
     def test_add_and_list(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
         )
-        mgr.add_account(_make_account("a1", name="Personal"))
-        mgr.add_account(_make_account("a2", name="Family"))
+        _seed_and_add(mgr, _make_account("a1", name="Personal"))
+        _seed_and_add(mgr, _make_account("a2", name="Family"))
         accounts = mgr.list_accounts()
         assert len(accounts) == 2
         mgr.close()
 
     def test_remove_account(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
         )
-        mgr.add_account(_make_account("a1"))
+        _seed_and_add(mgr, _make_account("a1"))
         mgr.remove_account("a1")
         assert len(mgr.list_accounts()) == 0
         mgr.close()
 
     def test_get_account(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
         )
-        mgr.add_account(_make_account("a1", name="Test"))
+        _seed_and_add(mgr, _make_account("a1", name="Test"))
         acc = mgr.get_account("a1")
         assert acc is not None
         assert acc.name == "Test"
@@ -78,6 +101,7 @@ class TestAccountManager:
 
     def test_get_nonexistent(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
@@ -87,22 +111,24 @@ class TestAccountManager:
 
     def test_enabled_filter(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
         )
-        mgr.add_account(_make_account("a1", enabled=True))
-        mgr.add_account(_make_account("a2", enabled=False))
+        _seed_and_add(mgr, _make_account("a1", enabled=True))
+        _seed_and_add(mgr, _make_account("a2", enabled=False))
         assert len(mgr.get_enabled_accounts()) == 1
         mgr.close()
 
     def test_enable_disable(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
         )
-        mgr.add_account(_make_account("a1"))
+        _seed_and_add(mgr, _make_account("a1"))
         mgr.disable_account("a1")
         assert len(mgr.get_enabled_accounts()) == 0
         mgr.enable_account("a1")
@@ -111,25 +137,27 @@ class TestAccountManager:
 
     def test_groups(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
         )
-        mgr.add_account(_make_account("a1", group="family"))
-        mgr.add_account(_make_account("a2", group="personal"))
-        mgr.add_account(_make_account("a3", group="family"))
+        _seed_and_add(mgr, _make_account("a1", group="family"))
+        _seed_and_add(mgr, _make_account("a2", group="personal"))
+        _seed_and_add(mgr, _make_account("a3", group="family"))
         assert len(mgr.get_accounts_by_group("family")) == 2
         assert len(mgr.get_accounts_by_group("personal")) == 1
         mgr.close()
 
     def test_master_account(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
         )
-        mgr.add_account(_make_account("a1", is_master=False))
-        mgr.add_account(_make_account("a2", is_master=True))
+        _seed_and_add(mgr, _make_account("a1", is_master=False))
+        _seed_and_add(mgr, _make_account("a2", is_master=True))
         master = mgr.get_master_account()
         assert master is not None
         assert master.account_id == "a2"
@@ -137,12 +165,13 @@ class TestAccountManager:
 
     def test_health_check_mock(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
         )
         acc = _make_account("a1")
-        mgr.add_account(acc)
+        _seed_and_add(mgr, acc)
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -710,20 +739,22 @@ class TestDefaultDB:
 class TestAccountManagerExtra:
     def test_enter_exit(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         with AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
         ) as mgr:
-            mgr.add_account(_make_account("a1"))
+            _seed_and_add(mgr, _make_account("a1"))
             assert len(mgr.list_accounts()) == 1
 
     def test_get_account_not_in_cache(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
         )
-        mgr.add_account(_make_account("a1"))
+        _seed_and_add(mgr, _make_account("a1"))
         # Clear cache to force DB lookup
         mgr._cache.clear()
         acc = mgr.get_account("a1")
@@ -733,6 +764,7 @@ class TestAccountManagerExtra:
 
     def test_health_check_http_error(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
@@ -751,6 +783,7 @@ class TestAccountManagerExtra:
 
     def test_health_check_exception(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
@@ -768,12 +801,13 @@ class TestAccountManagerExtra:
 
     def test_health_check_all(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,
         )
-        mgr.add_account(_make_account("a1", enabled=True))
-        mgr.add_account(_make_account("a2", enabled=False)) # Should be skipped
+        _seed_and_add(mgr, _make_account("a1", enabled=True))
+        _seed_and_add(mgr, _make_account("a2", enabled=False)) # Should be skipped
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -788,6 +822,7 @@ class TestAccountManagerExtra:
 
     def test_api_key_missing_from_vault_returns_empty(self, tmp_path):
         from flinttrade_ditto.account_manager import AccountManager
+        harden_directory(tmp_path)
         mgr = AccountManager(
             db_path=str(tmp_path / "test.sqlite"), master_password="test-master-pw",
             mutation_admission=lambda: None,

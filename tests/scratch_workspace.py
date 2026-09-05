@@ -596,6 +596,10 @@ def acquire_workspace() -> Path:
         ours = True
 
     base.mkdir(parents=True, exist_ok=True)
+    if ours:
+        from flinttrade_core.secure_file import harden_directory
+
+        harden_directory(base)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
     # Installation lineage is deliberately outside the mutable workspace in
     # production.  Tests that build the app must therefore get a second,

@@ -19,11 +19,24 @@ import json
 import threading
 import time
 
+import importlib.util
 import pytest
+from pathlib import Path
+
+# A package-only pytest invocation binds `tests` to core's own test namespace.
+_credential_spec = importlib.util.spec_from_file_location(
+    "_flinttrade_native_credential_fixtures", Path(__file__).resolve().parents[4] / "tests" / "credential_fixtures.py",
+)
+_credential_helpers = importlib.util.module_from_spec(_credential_spec)
+_credential_spec.loader.exec_module(_credential_helpers)
+seed_credentials = _credential_helpers.seed_credentials
 
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
+    from flinttrade_core.secure_file import harden_directory
+
+    harden_directory(tmp_path)
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     # Other test modules set OPENALGO_API_KEY / FLINTTRADE_API_KEY via os.environ
     # directly (not monkeypatch), so the value leaks into this xdist worker and
@@ -63,6 +76,42 @@ def _h() -> dict[str, str]:
     from flinttrade_core.auth_routes import _create_token
 
     return {"Authorization": f"Bearer {_create_token('nava', mode='explore')}"}
+
+
+def test_exact_colon_account_connect_relogin_delete_uses_public_authority(client):
+    c, app, _tmp_path = client
+    real_store = app.config["CREDENTIAL_STORE"]
+    forbidden = []
+
+    class PublicStore:
+        def __getattr__(self, name):
+            if name.startswith("_"):
+                forbidden.append(name)
+                raise AssertionError("private authority access")
+            return getattr(real_store, name)
+
+    app.config["CREDENTIAL_STORE"] = PublicStore()
+    result = c.post("/api/v1/native/accounts", headers=_h(), json={
+        "adapter_id": "upstox", "account_id": "CASE:Part+1", "credentials": {"access_token": "synthetic"},
+    })
+    assert result.status_code == 200, result.get_json()
+    assert c.post("/api/v1/native/accounts/upstox/CASE%3APart%2B1/login", headers=_h()).status_code == 200
+    assert c.delete("/api/v1/native/accounts/upstox/CASE%3APart%2B1", headers=_h()).status_code == 200
+    assert forbidden == []
+
+
+@pytest.mark.parametrize("adapter,account", [([], "A"), ("Upstox", "A"), ("upstox", "A%3AB"), ("upstox", True)])
+def test_oauth_identity_validation_precedes_pending_state(client, adapter, account):
+    from flinttrade_core import native_account_routes
+
+    c, app, _tmp_path = client
+    before = app.config["CREDENTIAL_STORE"].list_accounts()
+    response = c.post("/api/v1/native/oauth/start", headers=_h(), json={
+        "adapter_id": adapter, "account_id": account, "api_key": "synthetic", "api_secret": "synthetic",
+    })
+    assert response.status_code == 400
+    assert native_account_routes._OAUTH_PENDING == {}
+    assert app.config["CREDENTIAL_STORE"].list_accounts() == before
 
 
 def _workspace_brokers(tmp_path):
@@ -275,7 +324,7 @@ def test_remove_failure_keeps_session_credentials_and_workspace(client, monkeypa
 
     monkeypatch.setattr(
         store,
-        "remove_for",
+        "remove_selector",
         lambda *_args: (_ for _ in ()).throw(RuntimeError("vault busy")),
     )
 
@@ -354,7 +403,7 @@ def test_remove_restore_failure_evicts_session_and_rebuilds_fail_closed(client, 
     )
     monkeypatch.setattr(
         store,
-        "store",
+        "restore_selector",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("vault busy")),
     )
 
@@ -483,7 +532,7 @@ def test_remove_native_account_is_selector_scoped(client):
     store = app.config["CREDENTIAL_STORE"]
     registry = app.config["REGISTRY"]
 
-    store.store(
+    seed_credentials(store,
         "SHARED01",
         "dhan",
         "Dhan shared id",
@@ -3452,7 +3501,7 @@ def test_relogin_persistence_failure_restores_runtime_without_secret_leak(
 
     monkeypatch.setattr(
         store,
-        "update_credentials_for",
+        "update_credentials",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(marker)),
     )
 
@@ -3488,7 +3537,7 @@ def test_successful_relogin_swaps_registry_session_only_after_commit(client, mon
     selector = "upstox:SWAPAFTERCOMMIT"
     app.config["NATIVE_SESSION_STATUS"][selector] = "prior-live-status"
     app.config["BROKER_ROUTER"] = _DrainRouter(True)
-    original_stage = store.stage_credentials_for
+    original_stage = store.stage_credentials
     original_put_session = registry.put_session
 
     def _stage_with_observed_commit(*args, **kwargs):
@@ -3498,14 +3547,15 @@ def test_successful_relogin_swaps_registry_session_only_after_commit(client, mon
         def _commit() -> None:
             assert registry.get_session_for("upstox", "SWAPAFTERCOMMIT") is prior_session
             assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
-            original_commit()
+            applied = original_commit()
             assert registry.get_session_for("upstox", "SWAPAFTERCOMMIT") is prior_session
             assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
+            return applied
 
         candidate.commit = _commit
         return candidate
 
-    monkeypatch.setattr(store, "stage_credentials_for", _stage_with_observed_commit)
+    monkeypatch.setattr(store, "stage_credentials", _stage_with_observed_commit)
 
     def _put_session_after_commit(adapter_id, account_id, session):
         assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
@@ -3541,7 +3591,7 @@ def test_relogin_candidate_staging_runs_under_serialisation_lock(client, monkeyp
     app.config["BROKER_ROUTER"] = _DrainRouter(True)
     import flinttrade_core.native_account_routes as routes
 
-    original_stage = store.stage_credentials_for
+    original_stage = store.stage_credentials
     lock_observations: list[bool] = []
 
     def _stage_under_lock(*args, **kwargs):
@@ -3551,7 +3601,7 @@ def test_relogin_candidate_staging_runs_under_serialisation_lock(client, monkeyp
         lock_observations.append(not acquired)
         return original_stage(*args, **kwargs)
 
-    monkeypatch.setattr(store, "stage_credentials_for", _stage_under_lock)
+    monkeypatch.setattr(store, "stage_credentials", _stage_under_lock)
 
     response = c.post(
         "/api/v1/native/accounts/upstox/SERIALREL/login",
@@ -4002,7 +4052,7 @@ def test_relogin_rejects_coming_soon_native_even_if_vault_row_exists(client, ada
     """A stale vault row must not bypass a native broker's activation blockers."""
     c, app, _tmp = client
     store = app.config["CREDENTIAL_STORE"]
-    store.store(
+    seed_credentials(store,
         "CSRELOGIN", adapter_id, "Coming-soon stale",
         {"access_token": "tok"}, is_primary=False, adapter_id=adapter_id,
     )

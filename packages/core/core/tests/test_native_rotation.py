@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from uuid import uuid4
 from typing import Any
 
 import pytest
@@ -72,6 +73,7 @@ class _Store:
     def __init__(self, rows: dict[tuple[str, str], dict[str, Any]]) -> None:
         self.rows = rows
         self.generations = {selector: 1 for selector in rows}
+        self.incarnation = uuid4()
 
     def list_accounts(self) -> list[dict[str, Any]]:
         return [
@@ -92,6 +94,24 @@ class _Store:
 
     def selector_generation(self, adapter_id: str, account_id: str) -> int | None:
         return self.generations.get((adapter_id, account_id))
+
+    def selector_state(self, selector):
+        from flinttrade_core.broker_identity import CredentialVersion
+        from flinttrade_gateway.credentials import CredentialSelectorState
+
+        key = (selector.adapter_id, selector.account_id)
+        present = key in self.rows
+        generation = self.generations.get(key, 0) + int(not present and key in self.generations)
+        return CredentialSelectorState(CredentialVersion(selector, self.incarnation, generation),
+                                       present, present, False, "managed" if generation else None)
+
+    def update_credentials(self, selector, credentials, *, expected):
+        from flinttrade_gateway.credentials import CredentialStaleError
+
+        if self.selector_state(selector).version != expected:
+            raise CredentialStaleError()
+        self.update_credentials_for(selector.adapter_id, selector.account_id, credentials)
+        return self.selector_state(selector).version
 
 
 def _app(adapter: _Adapter, registry: _Registry, store: _Store) -> Flask:

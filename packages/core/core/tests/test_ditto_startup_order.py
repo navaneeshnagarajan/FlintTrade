@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import sqlite3
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 
@@ -23,9 +24,10 @@ def _wait_for_path(path: Path, *, timeout: float = 10.0) -> bool:
 
 def _database(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         connection.execute("CREATE TABLE state (value TEXT)")
         connection.execute("INSERT INTO state VALUES (?)", (value,))
+        connection.commit()
 
 
 def test_ditto_store_open_runs_migration_first(tmp_path, monkeypatch):
@@ -64,6 +66,11 @@ def test_ditto_store_open_runs_migration_first(tmp_path, monkeypatch):
 
 def test_app_vault_open_cannot_interleave_with_consumed_migration(tmp_path):
     """A real app process must not expose the vault while migration owns the fence."""
+    fixture_spec = importlib.util.spec_from_file_location(
+        "credential_fixtures", Path(__file__).parents[4] / "tests" / "credential_fixtures.py"
+    )
+    fixture_helpers = importlib.util.module_from_spec(fixture_spec)
+    fixture_spec.loader.exec_module(fixture_helpers)
     workspace = tmp_path / "workspace"
     legacy = tmp_path / "legacy"
     installation = tmp_path / "installation"
@@ -75,7 +82,9 @@ def test_app_vault_open_cannot_interleave_with_consumed_migration(tmp_path):
     opener_done = tmp_path / "opener-done"
     target_vault = workspace / "ditto_credentials.db"
     _database(legacy / "ditto_accounts.sqlite", "accounts")
-    _database(legacy / "ditto_credentials.db", "vault")
+    original_salt, original_ciphertext = fixture_helpers.legacy_vault(
+        legacy / "ditto_credentials.db", "test-master-password"
+    )
     workspace.mkdir()
     master_password = workspace / "master_password"
     master_password.write_text("test-master-password\n")
@@ -160,5 +169,8 @@ def test_app_vault_open_cannot_interleave_with_consumed_migration(tmp_path):
     assert migration_done.exists()
     assert opener_done.exists()
     assert not fake_home.exists()
-    with sqlite3.connect(target_vault) as connection:
-        assert connection.execute("SELECT value FROM state").fetchone()[0] == "vault"
+    with closing(sqlite3.connect(target_vault)) as connection:
+        assert connection.execute("SELECT salt, encrypted_creds FROM accounts").fetchone() == (
+            original_salt, original_ciphertext
+        )
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1

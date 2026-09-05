@@ -1,332 +1,1071 @@
-"""Fernet-encrypted credential storage in SQLite.
+"""Exact Fernet credential authority with bounded pathname replacement checks.
 
-Location: ``workspace_dir() / "credentials.db"`` — the active workspace
-directory, resolved by :func:`flinttrade_core.workspace.workspace_dir`.
-
-Schema::
-
-    accounts(
-        account_id    TEXT PRIMARY KEY,
-        broker        TEXT NOT NULL,
-        label         TEXT NOT NULL,
-        salt          BLOB NOT NULL,
-        encrypted_creds BLOB NOT NULL,
-        is_primary    INTEGER NOT NULL DEFAULT 0,   -- SQLite bool
-        created_at    TEXT NOT NULL                 -- ISO-8601 UTC
-    )
-
-Each account uses a **unique random salt** so that two accounts with
-identical credentials produce distinct ciphertexts.  The master password
-is never stored; it is only used as the key-derivation input.
+Primary flags are a compatibility projection, not workspace execution authority.
+The physical account-only key remains until the later composite migration.
 """
 
 from __future__ import annotations
 
 import base64
+import ipaddress
 import json
-import logging
 import os
+import re
 import sqlite3
-from contextlib import closing
+import sys
+import weakref
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+from uuid import UUID, uuid4
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+from flinttrade_core.broker_account_cutover import BrokerAccountCutoverUnavailable, require_broker_account_mutations
+from flinttrade_core.broker_identity import INT64_MAX, BrokerSelector, CredentialVersion
 from flinttrade_core.db import open_sqlite
-
-logger = logging.getLogger("flinttrade.gateway.credentials")
-
-# ---------------------------------------------------------------------------
-# Error class — always defined here so callers get a stable class identity
-# regardless of import path.  exceptions.py (Task 1) re-exports this class
-# rather than defining its own, avoiding the dual-class-object problem that
-# arises under pytest --import-mode=importlib.
-# ---------------------------------------------------------------------------
+from flinttrade_core.secure_file import (
+    HeldOwnerDirectory,
+    InsecureFilePermissionsError,
+    validate_owner_owned_regular_file,
+)
 
 
 class CredentialError(Exception):
-    """Raised for all credential-storage failures.
+    """Stable exception identity, also re-exported by exceptions.py."""
 
-    Args:
-        message: Human-readable description of the failure.
-    """
-
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str = "credential_operation_failed") -> None:
         self.message = message
         super().__init__(message)
 
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
+class CredentialNotFoundError(CredentialError):
+    def __init__(self) -> None:
+        super().__init__("credential_not_found")
 
-_KDF_ITERATIONS: int = 390_000  # NIST-recommended minimum for PBKDF2-SHA256
-_SALT_BYTES: int = 16
-_CREATE_TABLE_SQL: str = """
-CREATE TABLE IF NOT EXISTS accounts (
-    account_id      TEXT PRIMARY KEY,
-    adapter_id      TEXT NOT NULL DEFAULT '',
-    broker          TEXT NOT NULL,
-    label           TEXT NOT NULL,
-    salt            BLOB NOT NULL,
-    encrypted_creds BLOB NOT NULL,
-    is_primary      INTEGER NOT NULL DEFAULT 0,
-    created_at      TEXT NOT NULL
-);
-"""
-# Composite selector index (contract §12 / identity X7). account_id remains the
-# PRIMARY KEY (so existing rows are never recreated — no data-loss risk); the
-# adapter_id column + this index give the router a fast (adapter_id, account_id)
-# lookup. Same account_id under two adapters is the one shape this does not
-# support; in practice broker client codes differ per adapter.
-_COMPOSITE_INDEX_SQL: str = (
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_adapter_account "
-    "ON accounts(adapter_id, account_id);"
+
+class CredentialAmbiguityError(CredentialError):
+    def __init__(self) -> None:
+        super().__init__("credential_selector_ambiguous")
+
+
+class CredentialConflictError(CredentialError):
+    def __init__(self) -> None:
+        super().__init__("credential_conflict")
+
+
+class CredentialStaleError(CredentialError):
+    def __init__(self) -> None:
+        super().__init__("credential_stale")
+
+
+class CredentialValidationError(CredentialError):
+    def __init__(self) -> None:
+        super().__init__("credential_validation_failed")
+
+
+class CredentialVaultInvalidError(CredentialError):
+    def __init__(self) -> None:
+        super().__init__("credential_vault_invalid")
+
+
+class CredentialVaultHardeningRequiredError(CredentialError):
+    def __init__(self) -> None:
+        super().__init__("credential_vault_hardening_required")
+
+
+@dataclass(frozen=True)
+class CredentialSelectorState:
+    version: CredentialVersion
+    present: bool
+    credential_present: bool
+    setup_present: bool
+    origin: str | None
+
+
+@dataclass(frozen=True)
+class CredentialAccount:
+    selector: BrokerSelector
+    broker: str
+    label: str
+    is_primary: bool
+    created_at: str
+    version: CredentialVersion
+
+
+class _OpaqueReceipt:
+    def __reduce__(self) -> Any:
+        raise TypeError("credential_receipt_not_serialisable")
+
+
+@dataclass(frozen=True, eq=False)
+class SelectorSnapshot(_OpaqueReceipt):
+    selector: BrokerSelector
+    version: CredentialVersion
+
+
+@dataclass(frozen=True, eq=False)
+class PrimaryProjectionSnapshot(_OpaqueReceipt):
+    selector: BrokerSelector
+    versions: tuple[CredentialVersion, ...]
+
+
+@dataclass(frozen=True, eq=False)
+class PrimaryProjectionMutation(_OpaqueReceipt):
+    selector: BrokerSelector
+    before_versions: tuple[CredentialVersion, ...]
+    after_versions: tuple[CredentialVersion, ...]
+
+
+_KDF_ITERATIONS = 390_000
+_SALT_BYTES = 16
+_ORIGINS = ("legacy_pre_workspace_authority", "legacy_interim_candidate", "legacy_interim_writer", "managed")
+# Closed historical evidence: future catalogue additions do not enlarge migration inference.
+_LEGACY_BROKERS = frozenset(
+    """zerodha fyers flattrade arrow tradesmart hdfcsecurities hdfcsky pocketful
+paytm dhan aliceblue upstox compositedge rmoney angel fivepaisa zebu shoonya firstock tradejini mstock
+kotak kotakneo motilal nubra samco deltaexchange groww wisdom ibulls iifl iiflcapital jainamxts
+indmoney fivepaisaxts definedge dhan_sandbox""".split()
 )
+_CREATE_TABLE_SQL = """CREATE TABLE accounts (
+    account_id TEXT PRIMARY KEY, adapter_id TEXT NOT NULL DEFAULT '',
+    broker TEXT NOT NULL, label TEXT NOT NULL, salt BLOB NOT NULL,
+    encrypted_creds BLOB NOT NULL, is_primary INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+)"""
+_COMPOSITE_INDEX_SQL = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_adapter_account ON accounts(adapter_id, account_id)"
+)
+_AUTHORITY_SCHEMA = {
+    "credential_vault_metadata": """CREATE TABLE credential_vault_metadata (
+        singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+        schema_version INTEGER NOT NULL CHECK(typeof(schema_version)='integer' AND schema_version=1),
+        vault_incarnation TEXT NOT NULL
+    )""",
+    "credential_selector_versions": """CREATE TABLE credential_selector_versions (
+        adapter_id TEXT NOT NULL, account_id TEXT NOT NULL,
+        generation INTEGER NOT NULL CHECK(typeof(generation)='integer' AND generation BETWEEN 1 AND 9223372036854775807),
+        present INTEGER NOT NULL CHECK(typeof(present)='integer' AND present IN (0,1)),
+        origin TEXT NOT NULL CHECK(origin IN ('legacy_pre_workspace_authority','legacy_interim_candidate',
+                                             'legacy_interim_writer','managed')),
+        PRIMARY KEY(adapter_id, account_id)
+    )""",
+    "broker_selector_setup": """CREATE TABLE broker_selector_setup (
+        adapter_id TEXT NOT NULL, account_id TEXT NOT NULL,
+        present INTEGER NOT NULL CHECK(typeof(present)='integer' AND present IN (0,1)),
+        setup_json TEXT,
+        CHECK((present=0 AND setup_json IS NULL) OR (present=1 AND typeof(setup_json)='text')),
+        PRIMARY KEY(adapter_id, account_id)
+    )""",
+}
+
+
+def _selector(value: BrokerSelector, *, mutation: bool = False) -> BrokerSelector:
+    try:
+        if type(value) is not BrokerSelector:
+            raise ValueError
+        value.__post_init__()
+    except ValueError:
+        raise CredentialValidationError from None
+    if mutation and value == BrokerSelector("openalgo", "default"):
+        raise CredentialValidationError
+    return value
+
+
+def _pair(selector: BrokerSelector) -> tuple[str, str]:
+    return selector.adapter_id, selector.account_id
 
 
 def _copy_credential_payload(credentials: dict[str, Any]) -> dict[str, Any]:
-    """Validate and detach a credential payload without exposing its values."""
     try:
-        encoded = json.dumps(credentials)
-        copied = json.loads(encoded)
-    except (TypeError, ValueError) as exc:
-        raise CredentialError("Cannot serialise staged credentials") from exc
-    if not isinstance(copied, dict):  # pragma: no cover - input annotation + JSON invariant
-        raise CredentialError("Staged credentials must be an object")
-    return copied
+        if type(credentials) is not dict:
+            raise ValueError
+        return json.loads(json.dumps(credentials, allow_nan=False))
+    except (TypeError, ValueError, OverflowError):
+        raise CredentialValidationError from None
+
+
+def _metadata(selector: BrokerSelector, broker: str, label: str) -> None:
+    try:
+        BrokerSelector(broker, selector.account_id)
+        if type(label) is not str or (selector.adapter_id != "openalgo" and broker != selector.adapter_id):
+            raise ValueError
+    except ValueError:
+        raise CredentialValidationError from None
+
+
+def _normalise_setup(selector: BrokerSelector, setup: dict[str, Any]) -> str:
+    """Validate a bounded OpenAlgo origin without DNS or client invocation."""
+    try:
+        if (
+            selector.adapter_id != "openalgo"
+            or type(setup) is not dict
+            or set(setup)
+            not in (
+                {"base_url"},
+                {"base_url", "ws_port"},
+            )
+        ):
+            raise ValueError
+        value = setup["base_url"]
+        if (
+            type(value) is not str
+            or len(value) > 2048
+            or not value.isascii()
+            or any(ord(c) <= 32 or ord(c) == 127 or c in "\\?#" for c in value)
+        ):
+            raise ValueError
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.path not in {"", "/"}
+            or "@" in parsed.netloc
+            or "%" in parsed.netloc
+        ):
+            raise ValueError
+        authority = parsed.netloc
+        if authority.startswith("["):
+            end = authority.index("]")
+            host = "[" + str(ipaddress.IPv6Address(authority[1:end])) + "]"
+            tail = authority[end + 1 :]
+        else:
+            host, separator, port = authority.partition(":")
+            tail = separator + port
+            if (
+                not host
+                or len(host) > 253
+                or any(
+                    not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", part)
+                    for part in host.removesuffix(".").split(".")
+                )
+            ):
+                raise ValueError
+            host = host.lower()
+        if tail and (not re.fullmatch(r":[0-9]+", tail) or not 1 <= int(tail[1:]) <= 65535):
+            raise ValueError
+        result = {"base_url": parsed.scheme.lower() + "://" + host + tail}
+        if "ws_port" in setup:
+            if type(setup["ws_port"]) is not int or not 1 <= setup["ws_port"] <= 65535:
+                raise ValueError
+            result["ws_port"] = setup["ws_port"]
+        encoded = json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        if len(encoded.encode("utf-8")) > 4096:
+            raise ValueError
+        return encoded
+    except (ValueError, TypeError, OverflowError):
+        raise CredentialValidationError from None
 
 
 class StagedCredentialStore:
-    """One-selector, in-memory credential overlay used for candidate login.
-
-    Router activation and native login can read and rewrite the candidate through
-    the normal credential-store surface, while the backing SQLite row remains
-    untouched. ``commit`` is the only operation that writes to the durable vault.
-    """
+    """Detached one-selector login overlay, committed only at captured CAS."""
 
     def __init__(
         self,
         store: CredentialStore,
-        *,
-        adapter_id: str,
-        account_id: str,
+        selector: BrokerSelector,
         credentials: dict[str, Any],
         metadata: dict[str, Any],
         replace_metadata: bool,
+        expected: CredentialVersion,
     ) -> None:
-        self._store = store
-        self._adapter_id = adapter_id
-        self._account_id = account_id
-        self._credentials = _copy_credential_payload(credentials)
-        self._metadata = dict(metadata)
-        self._replace_metadata = replace_metadata
-        self._active = True
+        self._store, self._selector = store, selector
+        self._credentials, self._metadata = _copy_credential_payload(credentials), dict(metadata)
+        self._replace_metadata, self._active = replace_metadata, True
+        self._expected_version = expected
+        self._primary_snapshot: PrimaryProjectionSnapshot | None = None
+
+    @property
+    def expected_version(self) -> CredentialVersion:
+        return self._expected_version
 
     def __repr__(self) -> str:
-        state = "pending" if self._active else "closed"
-        return f"<StagedCredentialStore state={state}>"
+        return "<StagedCredentialStore pending>" if self._active else "<StagedCredentialStore closed>"
 
     def _ensure_active(self) -> None:
         if not self._active:
-            raise CredentialError("Staged credentials are no longer available")
+            raise CredentialStaleError
 
     def _ensure_selector(self, adapter_id: str, account_id: str) -> None:
         self._ensure_active()
-        if (adapter_id, account_id) != (self._adapter_id, self._account_id):
-            raise CredentialError("Staged credential access is limited to its selector")
+        if BrokerSelector(adapter_id, account_id) != self._selector:
+            raise CredentialNotFoundError
 
     def list_accounts(self) -> list[dict[str, Any]]:
-        """Return backing metadata with the candidate selector overlaid."""
         self._ensure_active()
-        rows = [dict(row) for row in self._store.list_accounts()]
-        for index, row in enumerate(rows):
-            if (
-                str(row.get("adapter_id") or row.get("broker") or "") == self._adapter_id
-                and str(row.get("account_id") or "") == self._account_id
-            ):
-                rows[index] = dict(self._metadata)
-                break
-        else:
-            rows.append(dict(self._metadata))
-        return rows
+        rows = [
+            row
+            for row in self._store.list_accounts()
+            if (row["adapter_id"], row["account_id"]) != _pair(self._selector)
+        ]
+        return rows + [dict(self._metadata)]
 
     def retrieve_for(self, adapter_id: str, account_id: str) -> dict[str, Any]:
-        """Return a detached copy of the staged candidate payload."""
         self._ensure_selector(adapter_id, account_id)
         return _copy_credential_payload(self._credentials)
 
-    def update_credentials_for(
-        self,
-        adapter_id: str,
-        account_id: str,
-        credentials: dict[str, Any],
-    ) -> None:
-        """Stage replayable credentials produced by a successful adapter login."""
+    def update_credentials_for(self, adapter_id: str, account_id: str, credentials: dict[str, Any]) -> None:
         self._ensure_selector(adapter_id, account_id)
         self._credentials = _copy_credential_payload(credentials)
 
-    def commit(self) -> None:
-        """Atomically publish the candidate payload to the backing vault."""
+    def commit(self) -> CredentialVersion:
         self._ensure_active()
-        if self._replace_metadata:
-            self._store.store(
-                self._account_id,
-                str(self._metadata["broker"]),
-                str(self._metadata["label"]),
+        if self._primary_snapshot is not None:
+            version = self._store._commit_legacy_stage(self)
+        elif self._replace_metadata:
+            version = self._store.put_credentials(
+                self._selector,
+                self._metadata["broker"],
+                self._metadata["label"],
                 self._credentials,
-                is_primary=bool(self._metadata["is_primary"]),
-                adapter_id=self._adapter_id,
+                expected=self.expected_version,
             )
         else:
-            self._store.update_credentials_for(
-                self._adapter_id,
-                self._account_id,
-                self._credentials,
-            )
+            version = self._store.update_credentials(self._selector, self._credentials, expected=self.expected_version)
         self.discard()
+        return version
 
     def discard(self) -> None:
-        """Forget the candidate without touching the durable vault."""
         self._credentials.clear()
         self._active = False
 
 
-# ---------------------------------------------------------------------------
-# CredentialStore
-# ---------------------------------------------------------------------------
-
-
 class CredentialStore:
-    """Fernet-encrypted credential store backed by a SQLite database.
-
-    Each broker account's credentials are encrypted with a Fernet key
-    derived from the master password plus a per-account random salt via
-    PBKDF2-SHA256.  The master password is held in memory only for the
-    lifetime of this object; it is never persisted.
-
-    Args:
-        db_path: Absolute path to the SQLite database file.  The parent
-            directory is created if it does not exist.
-        master_password: Passphrase used for key derivation.  Must be
-            identical across store/retrieve calls for the same account.
-
-    Raises:
-        CredentialError: If the database cannot be initialised.
-
-    Example::
-
-        from flinttrade_core.workspace import workspace_dir
-
-        store = CredentialStore(workspace_dir() / "credentials.db", "<MASTER_PASSWORD>")
-        store.store("acc1", "broker_name", "Primary", {"api_key": "<YOUR_KEY>", "api_secret": "<YOUR_SECRET>"})
-        creds = store.retrieve("acc1")
-    """
+    """One owner-only vault incarnation; each operation owns and closes its connection."""
 
     def __init__(self, db_path: Path, master_password: str) -> None:
-        self._db_path = db_path
-        self._master_password: bytes = master_password.encode("utf-8")
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    def _get_connection(self) -> sqlite3.Connection:
-        """Return a new SQLite connection with WAL mode for concurrency.
-
-        Returns:
-            A configured :class:`sqlite3.Connection`.
-        """
-        conn = open_sqlite(str(self._db_path), durability="normal")
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _init_db(self) -> None:
-        """Create the ``accounts`` table and evolve its schema if it predates
-        the composite (adapter_id, account_id) selector (contract §12).
-
-        The migration is purely additive — ``ALTER TABLE ADD COLUMN`` plus a
-        backfill — so a pre-existing ``credentials.db`` is never recreated and no
-        encrypted credential row can be orphaned.
-        """
-        with closing(self._get_connection()) as conn, conn:
-            conn.execute(_CREATE_TABLE_SQL)
-            self._ensure_adapter_id_column(conn)
-            conn.execute(_COMPOSITE_INDEX_SQL)
-            conn.commit()
-
-    def _ensure_adapter_id_column(self, conn: sqlite3.Connection) -> None:
-        """Add ``adapter_id`` to a legacy single-key table and backfill it.
-
-        Existing rows take their ``adapter_id`` from the ``broker`` column as a
-        best-effort default; the operator re-saves an account to correct it if
-        the routing adapter differs from the broker name (e.g. an OpenAlgo-routed
-        account whose selector adapter is ``"openalgo"``).
-
-        The connection runs in SQLite autocommit mode (``isolation_level=None``),
-        so the ALTER and the backfill are wrapped in one explicit
-        ``BEGIN IMMEDIATE`` ... ``COMMIT`` transaction. Without it a crash between
-        the two statements would strand legacy rows at ``adapter_id = ''``
-        permanently, because the ``"adapter_id" not in columns`` guard would never
-        re-run the backfill. The backfill ``UPDATE`` is also run on **every** open,
-        even when the column already exists, so any rows left blank by an earlier
-        partial migration are self-healed.
-        """
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
-        conn.execute("BEGIN IMMEDIATE")
+        self._db_path = Path(db_path).absolute()
+        self._master_password = master_password.encode("utf-8")
+        self._incarnation: UUID | None = None
+        self._poisoned = False
+        self._parent: HeldOwnerDirectory | None = None
+        self._ancestor: HeldOwnerDirectory | None = None
+        self._receipts: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         try:
-            if "adapter_id" not in columns:
+            parent = self._db_path.parent
+            if not parent.exists():
+                self._ancestor = HeldOwnerDirectory(parent.parent).__enter__()
+                self._parent = self._ancestor.child(parent.name, create=True).__enter__()
+            else:
+                self._parent = HeldOwnerDirectory(parent, require_hardened=False).__enter__()
+                # Classify topology/ownership before a hardening-only refusal.
+                for suffix in ("", "-wal", "-shm", "-journal"):
+                    member = self._db_path.with_name(self._db_path.name + suffix)
+                    if self._parent.exists(member.name):
+                        validate_owner_owned_regular_file(member)
+                self._parent.require_hardened = True
+                self._parent.revalidate()
+            fresh = False
+            if not self._parent.exists(self._db_path.name):
+                if any(self._parent.exists(self._db_path.name + suffix) for suffix in ("-wal", "-shm", "-journal")):
+                    raise CredentialVaultInvalidError
                 try:
-                    conn.execute(
-                        "ALTER TABLE accounts ADD COLUMN adapter_id TEXT NOT NULL DEFAULT ''"
-                    )
-                except sqlite3.OperationalError as exc:
-                    # Tolerate a cross-process race where another connection added
-                    # the column first — treat "duplicate column" as already
-                    # migrated and fall through to the self-healing backfill.
-                    if "duplicate column" not in str(exc).lower():
-                        raise
-            # Self-healing backfill: idempotent, runs on every open so a crash
-            # mid-migration (or a row inserted with a blank adapter_id) recovers.
-            conn.execute(
-                "UPDATE accounts SET adapter_id = broker "
-                "WHERE adapter_id IS NULL OR adapter_id = ''"
-            )
-            conn.execute("COMMIT")
+                    self._parent.create_empty_hardened_member(self._db_path.name)
+                    fresh = True
+                except FileExistsError:
+                    pass
+            self._identity = validate_owner_owned_regular_file(self._db_path, require_hardened=True)
+            if not fresh and self._identity.st_size == 0:
+                raise CredentialVaultInvalidError
+            self._validate_family()
+            self._init_db(fresh)
+        except InsecureFilePermissionsError:
+            self.close()
+            raise CredentialVaultHardeningRequiredError from None
+        except CredentialError:
+            self.close()
+            raise
         except Exception:
-            if conn.in_transaction:
-                conn.execute("ROLLBACK")
+            self.close()
+            raise CredentialVaultInvalidError from None
+
+    def close(self) -> None:
+        """Release held directory descriptors; this instance cannot be reused."""
+        self._poisoned = True
+        if self._parent is not None:
+            self._parent.__exit__()
+        if self._ancestor is not None:
+            self._ancestor.__exit__()
+
+    def __del__(self) -> None:
+        self.close()
+
+    def _validate_family(self) -> None:
+        if self._poisoned:
+            raise CredentialStaleError
+        try:
+            self._parent.revalidate()
+            current = validate_owner_owned_regular_file(self._db_path, require_hardened=True)
+            if (current.st_dev, current.st_ino) != (self._identity.st_dev, self._identity.st_ino):
+                raise OSError
+            for suffix in ("-wal", "-shm", "-journal"):
+                path = self._db_path.with_name(self._db_path.name + suffix)
+                if self._parent.exists(path.name):
+                    validate_owner_owned_regular_file(path, require_hardened=True)
+        except Exception:
+            if self._incarnation is not None:
+                self._poisoned = True
+                raise CredentialStaleError from None
             raise
 
+    def _get_connection(self) -> sqlite3.Connection:
+        self._validate_family()
+        conn = None
+        try:
+            conn = open_sqlite(self._db_path, durability="full", strict_existing=True)
+            conn.row_factory = sqlite3.Row
+            self._validate_family()
+            if (
+                conn.execute("PRAGMA journal_mode").fetchone()[0] != "wal"
+                or conn.execute("PRAGMA synchronous").fetchone()[0] != 2
+            ):
+                raise CredentialVaultInvalidError
+            return conn
+        except Exception as exc:
+            if conn is not None:
+                conn.close()
+            if self._incarnation is not None and getattr(exc, "sqlite_errorcode", None) in (
+                sqlite3.SQLITE_CORRUPT,
+                sqlite3.SQLITE_NOTADB,
+            ):
+                self._poisoned = True
+                raise CredentialStaleError from None
+            raise
+
+    @staticmethod
+    def _accounts_schema(conn: sqlite3.Connection, *, legacy: bool = False) -> bool:
+        columns = {row[1]: row for row in conn.execute("PRAGMA table_info(accounts)")}
+        expected = {
+            "account_id": "TEXT",
+            "broker": "TEXT",
+            "label": "TEXT",
+            "salt": "BLOB",
+            "encrypted_creds": "BLOB",
+            "is_primary": "INTEGER",
+            "created_at": "TEXT",
+        }
+        if set(columns) not in (set(expected), set(expected) | {"adapter_id"}):
+            return False
+        if not legacy and "adapter_id" not in columns:
+            return False
+        if "adapter_id" in columns and columns["adapter_id"][2].upper() != "TEXT":
+            return False
+        if any(columns[key][5] for key in columns if key != "account_id"):
+            return False
+        if columns["account_id"][5] != 1 or any(columns[key][2].upper() != kind for key, kind in expected.items()):
+            return False
+        return all(columns[key][3] == 1 for key in expected if key != "account_id")
+
+    def _init_db(self, fresh: bool) -> None:
+        conn = self._get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            marker = conn.execute("PRAGMA user_version").fetchone()[0]
+            legacy = not fresh and marker == 0 and not tables.intersection(_AUTHORITY_SCHEMA)
+            if fresh:
+                if tables or marker:
+                    raise CredentialVaultInvalidError
+                conn.execute(_CREATE_TABLE_SQL)
+            elif legacy:
+                if not self._accounts_schema(conn, legacy=True):
+                    raise CredentialVaultInvalidError
+                rows = [dict(row) for row in conn.execute("SELECT * FROM accounts")]
+                adapters = []
+                for row in rows:
+                    adapter = row.get("adapter_id")
+                    if adapter in (None, ""):
+                        if row["broker"] not in _LEGACY_BROKERS:
+                            raise CredentialVaultInvalidError
+                        adapter = row["broker"]
+                    elif not (
+                        (adapter in _LEGACY_BROKERS and adapter == row["broker"])
+                        or (adapter == "openalgo" and row["broker"] in _LEGACY_BROKERS | {"openalgo"})
+                    ):
+                        raise CredentialVaultInvalidError
+                    self._validate_account_row(row, adapter)
+                    adapters.append((adapter, row["account_id"]))
+                if "adapter_id" not in {row[1] for row in conn.execute("PRAGMA table_info(accounts)")}:
+                    conn.execute("ALTER TABLE accounts ADD COLUMN adapter_id TEXT NOT NULL DEFAULT ''")
+                conn.executemany("UPDATE accounts SET adapter_id=? WHERE account_id=?", adapters)
+            elif marker != 1 or not set(_AUTHORITY_SCHEMA).issubset(tables):
+                raise CredentialVaultInvalidError
+            if fresh or legacy:
+                for sql in _AUTHORITY_SCHEMA.values():
+                    conn.execute(sql)
+                conn.execute("INSERT INTO credential_vault_metadata VALUES(1,1,?)", (str(uuid4()),))
+                conn.execute(
+                    "INSERT INTO credential_selector_versions SELECT adapter_id,account_id,1,1,? FROM accounts",
+                    (_ORIGINS[0],),
+                )
+                conn.execute(_COMPOSITE_INDEX_SQL)
+                conn.execute("PRAGMA user_version=1")
+            incarnation = self._validate_authority(conn)
+            self._validate_family()
+            conn.commit()
+            self._validate_family()
+            self._incarnation = incarnation
+        except Exception:
+            if conn.in_transaction:
+                conn.rollback()
+            raise CredentialVaultInvalidError from None
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _validate_account_row(row: dict[str, Any], adapter: str) -> None:
+        selector = _selector(BrokerSelector(adapter, row["account_id"]), mutation=True)
+        _metadata(selector, row["broker"], row["label"])
+        if (
+            type(row["is_primary"]) is not int
+            or row["is_primary"] not in (0, 1)
+            or type(row["salt"]) is not bytes
+            or len(row["salt"]) != _SALT_BYTES
+            or type(row["encrypted_creds"]) is not bytes
+            or not row["encrypted_creds"]
+            or type(row["created_at"]) is not str
+        ):
+            raise CredentialVaultInvalidError
+
+    def _validate_authority(self, conn: sqlite3.Connection) -> UUID:
+        try:
+            if conn.execute("PRAGMA user_version").fetchone()[0] != 1 or not self._accounts_schema(conn):
+                raise ValueError
+            indices = {row[1]: row for row in conn.execute("PRAGMA index_list(accounts)")}
+            index = indices.get("idx_accounts_adapter_account")
+            if (
+                index is None
+                or index[2] != 1
+                or index[4] != 0
+                or [row[2] for row in conn.execute("PRAGMA index_info(idx_accounts_adapter_account)")]
+                != ["adapter_id", "account_id"]
+            ):
+                raise ValueError
+            for name, sql in _AUTHORITY_SCHEMA.items():
+                row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
+                # These tables have exactly one producer. Compare its DDL
+                # verbatim: folding case/whitespace inside CHECK literals can
+                # turn a changed constraint into an apparently valid schema.
+                if row is None or row[0] != sql:
+                    raise ValueError
+            metadata = conn.execute("SELECT * FROM credential_vault_metadata").fetchall()
+            if len(metadata) != 1 or metadata[0]["singleton"] != 1 or metadata[0]["schema_version"] != 1:
+                raise ValueError
+            raw = metadata[0]["vault_incarnation"]
+            incarnation = UUID(raw)
+            CredentialVersion(BrokerSelector("vault", "identity"), incarnation, 0)
+            if str(incarnation) != raw or (self._incarnation is not None and incarnation != self._incarnation):
+                raise ValueError
+            versions = {}
+            for row in conn.execute("SELECT * FROM credential_selector_versions"):
+                selector = _selector(BrokerSelector(row["adapter_id"], row["account_id"]), mutation=True)
+                if (
+                    type(row["generation"]) is not int
+                    or not 1 <= row["generation"] <= INT64_MAX
+                    or type(row["present"]) is not int
+                    or row["present"] not in (0, 1)
+                    or row["origin"] not in _ORIGINS
+                ):
+                    raise ValueError
+                versions[selector] = row["present"]
+            accounts = set()
+            for row in conn.execute("SELECT * FROM accounts"):
+                self._validate_account_row(dict(row), row["adapter_id"])
+                accounts.add(BrokerSelector(row["adapter_id"], row["account_id"]))
+            setups = set()
+            for row in conn.execute("SELECT * FROM broker_selector_setup"):
+                selector = _selector(BrokerSelector(row["adapter_id"], row["account_id"]), mutation=True)
+                if selector not in versions or type(row["present"]) is not int or row["present"] not in (0, 1):
+                    raise ValueError
+                if row["present"]:
+                    if (
+                        type(row["setup_json"]) is not str
+                        or _normalise_setup(selector, json.loads(row["setup_json"])) != row["setup_json"]
+                    ):
+                        raise ValueError
+                    setups.add(selector)
+                elif row["setup_json"] is not None:
+                    raise ValueError
+            if not accounts.issubset(versions) or any(
+                bool(present) != (key in accounts or key in setups) for key, present in versions.items()
+            ):
+                raise ValueError
+            return incarnation
+        except Exception:
+            if self._incarnation is not None:
+                self._poisoned = True
+                raise CredentialStaleError from None
+            raise CredentialVaultInvalidError from None
+
+    @contextmanager
+    def _transaction(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+        conn = None
+        try:
+            conn = self._get_connection()
+            conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+            self._validate_authority(conn)
+            yield conn
+            self._validate_family()
+            self._validate_authority(conn)
+            conn.commit()
+            # A failure here can be applied. Never resample a version or auto-retry.
+            self._validate_family()
+            conn.execute("BEGIN")
+            self._validate_authority(conn)
+            conn.rollback()
+            self._validate_family()
+        except (CredentialError, BrokerAccountCutoverUnavailable):
+            raise
+        except Exception:
+            raise CredentialError from None
+        finally:
+            if conn is not None:
+                pending_error = sys.exception()
+                cleanup_failed = False
+                try:
+                    if conn.in_transaction:
+                        conn.rollback()
+                except Exception:
+                    cleanup_failed = True
+                finally:
+                    try:
+                        conn.close()
+                    except Exception:
+                        cleanup_failed = True
+                if cleanup_failed and pending_error is None:
+                    raise CredentialError from None
+
     def _derive_key(self, salt: bytes) -> Fernet:
-        """Derive a Fernet symmetric key from the master password and salt.
+        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=_KDF_ITERATIONS)
+        return Fernet(base64.urlsafe_b64encode(kdf.derive(self._master_password)))
 
-        Uses PBKDF2-HMAC-SHA256 with :data:`_KDF_ITERATIONS` iterations.
+    def _encrypt(self, credentials: dict[str, Any]) -> tuple[bytes, bytes]:
+        payload = _copy_credential_payload(credentials)
+        salt = os.urandom(_SALT_BYTES)
+        return salt, self._derive_key(salt).encrypt(json.dumps(payload).encode("utf-8"))
 
-        Args:
-            salt: Per-account random bytes used as the PBKDF2 salt.
+    def _decrypt(self, row: sqlite3.Row | None) -> dict[str, Any]:
+        if row is None:
+            raise CredentialNotFoundError
+        return _copy_credential_payload(json.loads(self._derive_key(row["salt"]).decrypt(row["encrypted_creds"])))
 
-        Returns:
-            A ready-to-use :class:`~cryptography.fernet.Fernet` instance.
-        """
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=_KDF_ITERATIONS,
+    @staticmethod
+    def _row(conn: sqlite3.Connection, selector: BrokerSelector) -> sqlite3.Row | None:
+        return conn.execute("SELECT * FROM accounts WHERE adapter_id=? AND account_id=?", _pair(selector)).fetchone()
+
+    def _state(self, conn: sqlite3.Connection, selector: BrokerSelector) -> CredentialSelectorState:
+        row = conn.execute(
+            "SELECT * FROM credential_selector_versions WHERE adapter_id=? AND account_id=?", _pair(selector)
+        ).fetchone()
+        setup = conn.execute(
+            "SELECT present FROM broker_selector_setup WHERE adapter_id=? AND account_id=?", _pair(selector)
+        ).fetchone()
+        return CredentialSelectorState(
+            CredentialVersion(selector, self._incarnation, row["generation"] if row else 0),
+            bool(row and row["present"]),
+            self._row(conn, selector) is not None,
+            bool(setup and setup[0]),
+            row["origin"] if row else None,
         )
-        key = base64.urlsafe_b64encode(kdf.derive(self._master_password))
-        return Fernet(key)
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    def _available(self, conn: sqlite3.Connection, selector: BrokerSelector) -> None:
+        if self._state(conn, selector).origin == "legacy_interim_candidate":
+            raise CredentialConflictError
+
+    def _expected(self, conn: sqlite3.Connection, selector: BrokerSelector, expected: CredentialVersion) -> None:
+        try:
+            if type(expected) is not CredentialVersion:
+                raise ValueError
+            expected.__post_init__()
+        except ValueError:
+            raise CredentialValidationError from None
+        if expected != self._state(conn, selector).version:
+            raise CredentialStaleError
+        self._available(conn, selector)
+
+    def _check_bump(self, conn: sqlite3.Connection, selector: BrokerSelector) -> None:
+        if self._state(conn, selector).version.generation == INT64_MAX:
+            raise CredentialConflictError
+
+    def _bump(self, conn: sqlite3.Connection, selector: BrokerSelector) -> CredentialVersion:
+        self._check_bump(conn, selector)
+        current = self._state(conn, selector)
+        generation = current.version.generation + 1
+        conn.execute(
+            """INSERT INTO credential_selector_versions VALUES(?,?,?,?,?)
+                        ON CONFLICT(adapter_id,account_id) DO UPDATE SET
+                        generation=excluded.generation,present=excluded.present""",
+            (
+                *_pair(selector),
+                generation,
+                int(current.credential_present or current.setup_present),
+                current.origin or "managed",
+            ),
+        )
+        return CredentialVersion(selector, self._incarnation, generation)
+
+    def selector_state(self, selector: BrokerSelector) -> CredentialSelectorState:
+        _selector(selector)
+        with self._transaction() as conn:
+            return self._state(conn, selector)
+
+    def account_for_selector(self, selector: BrokerSelector) -> CredentialAccount | None:
+        _selector(selector)
+        with self._transaction() as conn:
+            state = self._state(conn, selector)
+            if state.origin == "legacy_interim_candidate":
+                return None
+            row = self._row(conn, selector)
+            return (
+                None
+                if row is None
+                else CredentialAccount(
+                    selector, row["broker"], row["label"], bool(row["is_primary"]), row["created_at"], state.version
+                )
+            )
+
+    def retrieve_credentials(self, selector: BrokerSelector) -> dict[str, Any]:
+        _selector(selector)
+        with self._transaction() as conn:
+            if self._state(conn, selector).origin == "legacy_interim_candidate":
+                raise CredentialNotFoundError
+            return self._decrypt(self._row(conn, selector))
+
+    def retrieve_setup(self, selector: BrokerSelector) -> dict[str, Any]:
+        _selector(selector)
+        with self._transaction() as conn:
+            if self._state(conn, selector).origin == "legacy_interim_candidate":
+                raise CredentialNotFoundError
+            row = conn.execute(
+                "SELECT setup_json FROM broker_selector_setup WHERE adapter_id=? AND account_id=? AND present=1",
+                _pair(selector),
+            ).fetchone()
+            if row is None:
+                raise CredentialNotFoundError
+            return json.loads(row[0])
+
+    def _put(
+        self, conn: sqlite3.Connection, selector: BrokerSelector, broker: str, label: str, credentials: dict[str, Any]
+    ) -> None:
+        _metadata(selector, broker, label)
+        collision = conn.execute(
+            "SELECT adapter_id FROM accounts WHERE account_id=?", (selector.account_id,)
+        ).fetchall()
+        if any(row[0] != selector.adapter_id for row in collision):
+            raise CredentialConflictError
+        salt, encrypted = self._encrypt(credentials)
+        conn.execute(
+            """INSERT INTO accounts(account_id,adapter_id,broker,label,salt,encrypted_creds,is_primary,created_at)
+                        VALUES(?,?,?,?,?,?,0,?) ON CONFLICT(account_id) DO UPDATE SET
+                        broker=excluded.broker,label=excluded.label,salt=excluded.salt,encrypted_creds=excluded.encrypted_creds""",
+            (selector.account_id, selector.adapter_id, broker, label, salt, encrypted, datetime.now(UTC).isoformat()),
+        )
+
+    def put_credentials(
+        self,
+        selector: BrokerSelector,
+        broker: str,
+        label: str,
+        credentials: dict[str, Any],
+        *,
+        expected: CredentialVersion,
+    ) -> CredentialVersion:
+        _selector(selector, mutation=True)
+        with self._transaction(write=True) as conn:
+            self._expected(conn, selector, expected)
+            self._check_bump(conn, selector)
+            self._put(conn, selector, broker, label, credentials)
+            return self._bump(conn, selector)
+
+    def update_credentials(
+        self, selector: BrokerSelector, credentials: dict[str, Any], *, expected: CredentialVersion
+    ) -> CredentialVersion:
+        _selector(selector, mutation=True)
+        with self._transaction(write=True) as conn:
+            self._expected(conn, selector, expected)
+            row = self._row(conn, selector)
+            if row is None:
+                raise CredentialNotFoundError
+            self._check_bump(conn, selector)
+            self._put(conn, selector, row["broker"], row["label"], credentials)
+            return self._bump(conn, selector)
+
+    def put_setup(
+        self, selector: BrokerSelector, setup: dict[str, Any], *, expected: CredentialVersion
+    ) -> CredentialVersion:
+        _selector(selector, mutation=True)
+        with self._transaction(write=True) as conn:
+            self._expected(conn, selector, expected)
+            self._check_bump(conn, selector)
+            encoded = _normalise_setup(selector, setup)
+            conn.execute(
+                """INSERT INTO broker_selector_setup VALUES(?,?,1,?)
+                            ON CONFLICT(adapter_id,account_id) DO UPDATE SET present=1,setup_json=excluded.setup_json""",
+                (*_pair(selector), encoded),
+            )
+            return self._bump(conn, selector)
+
+    def _remove(
+        self, conn: sqlite3.Connection, selector: BrokerSelector, *, credentials: bool, setup: bool
+    ) -> CredentialVersion:
+        self._check_bump(conn, selector)
+        if credentials:
+            conn.execute("DELETE FROM accounts WHERE adapter_id=? AND account_id=?", _pair(selector))
+        if setup:
+            conn.execute(
+                """INSERT INTO broker_selector_setup VALUES(?,?,0,NULL)
+                            ON CONFLICT(adapter_id,account_id) DO UPDATE SET present=0,setup_json=NULL""",
+                _pair(selector),
+            )
+        return self._bump(conn, selector)
+
+    def remove_credentials(self, selector: BrokerSelector, *, expected: CredentialVersion) -> CredentialVersion:
+        _selector(selector, mutation=True)
+        with self._transaction(write=True) as conn:
+            self._expected(conn, selector, expected)
+            return self._remove(conn, selector, credentials=True, setup=False)
+
+    def remove_setup(self, selector: BrokerSelector, *, expected: CredentialVersion) -> CredentialVersion:
+        _selector(selector, mutation=True)
+        with self._transaction(write=True) as conn:
+            self._expected(conn, selector, expected)
+            return self._remove(conn, selector, credentials=False, setup=True)
+
+    def remove_selector(self, selector: BrokerSelector, *, expected: CredentialVersion) -> CredentialVersion:
+        _selector(selector, mutation=True)
+        with self._transaction(write=True) as conn:
+            self._expected(conn, selector, expected)
+            return self._remove(conn, selector, credentials=True, setup=True)
+
+    def stage_credentials(
+        self,
+        selector: BrokerSelector,
+        credentials: dict[str, Any] | None = None,
+        *,
+        broker: str | None = None,
+        label: str | None = None,
+    ) -> StagedCredentialStore:
+        _selector(selector, mutation=True)
+        with self._transaction() as conn:
+            self._available(conn, selector)
+            row = self._row(conn, selector)
+            if (broker is None) != (label is None):
+                raise CredentialValidationError
+            if row is None and (broker is None or credentials is None):
+                raise CredentialNotFoundError
+            if broker is not None:
+                _metadata(selector, broker, label)
+            collision = conn.execute(
+                "SELECT adapter_id FROM accounts WHERE account_id=?", (selector.account_id,)
+            ).fetchall()
+            if any(item[0] != selector.adapter_id for item in collision):
+                raise CredentialConflictError
+            metadata = {
+                "adapter_id": selector.adapter_id,
+                "account_id": selector.account_id,
+                "broker": broker if broker is not None else row["broker"],
+                "label": label if label is not None else row["label"],
+                "is_primary": bool(row and row["is_primary"]),
+                "created_at": row["created_at"] if row else None,
+            }
+            return StagedCredentialStore(
+                self,
+                selector,
+                self._decrypt(row) if credentials is None else credentials,
+                metadata,
+                broker is not None,
+                self._state(conn, selector).version,
+            )
+
+    def _primary(self, conn: sqlite3.Connection) -> dict[BrokerSelector, CredentialVersion]:
+        result = {}
+        for row in conn.execute("SELECT adapter_id,account_id FROM accounts WHERE is_primary=1"):
+            selector = BrokerSelector(row[0], row[1])
+            self._available(conn, selector)
+            result[selector] = self._state(conn, selector).version
+        return result
+
+    def _receipt(self, receipt: object, kind: type) -> Any:
+        if type(receipt) is not kind or receipt not in self._receipts:
+            raise CredentialStaleError
+        return self._receipts[receipt]
+
+    def snapshot_selector(self, selector: BrokerSelector) -> SelectorSnapshot:
+        _selector(selector)
+        with self._transaction() as conn:
+            self._available(conn, selector)
+            receipt = SelectorSnapshot(selector, self._state(conn, selector).version)
+            row = self._row(conn, selector)
+            setup = conn.execute(
+                "SELECT present,setup_json FROM broker_selector_setup WHERE adapter_id=? AND account_id=?",
+                _pair(selector),
+            ).fetchone()
+            self._receipts[receipt] = (
+                dict(row) if row else None,
+                tuple(setup) if setup else (0, None),
+                self._primary(conn),
+            )
+            return receipt
+
+    def restore_selector(self, snapshot: SelectorSnapshot, *, expected: CredentialVersion) -> CredentialVersion:
+        row, setup, primary = self._receipt(snapshot, SelectorSnapshot)
+        selector = _selector(snapshot.selector, mutation=True)
+        with self._transaction(write=True) as conn:
+            self._expected(conn, selector, expected)
+            self._check_bump(conn, selector)
+            current = self._row(conn, selector)
+            if bool(current and current["is_primary"]) != bool(row and row["is_primary"]):
+                other_current = {key: value for key, value in self._primary(conn).items() if key != selector}
+                other_prior = {key: value for key, value in primary.items() if key != selector}
+                if other_current != other_prior:
+                    raise CredentialStaleError
+            if row:
+                if any(
+                    item[0] != selector.adapter_id
+                    for item in conn.execute(
+                        "SELECT adapter_id FROM accounts WHERE account_id=?", (selector.account_id,)
+                    )
+                ):
+                    raise CredentialConflictError
+                conn.execute("DELETE FROM accounts WHERE adapter_id=? AND account_id=?", _pair(selector))
+                conn.execute(
+                    """INSERT INTO accounts(account_id,adapter_id,broker,label,salt,encrypted_creds,is_primary,created_at)
+                                VALUES(?,?,?,?,?,?,?,?)""",
+                    tuple(
+                        row[key]
+                        for key in (
+                            "account_id",
+                            "adapter_id",
+                            "broker",
+                            "label",
+                            "salt",
+                            "encrypted_creds",
+                            "is_primary",
+                            "created_at",
+                        )
+                    ),
+                )
+            else:
+                conn.execute("DELETE FROM accounts WHERE adapter_id=? AND account_id=?", _pair(selector))
+            conn.execute(
+                """INSERT INTO broker_selector_setup VALUES(?,?,?,?)
+                            ON CONFLICT(adapter_id,account_id) DO UPDATE SET
+                            present=excluded.present,setup_json=excluded.setup_json""",
+                (*_pair(selector), *setup),
+            )
+            return self._bump(conn, selector)
+
+    def _snapshot_primary(
+        self, conn: sqlite3.Connection, selector: BrokerSelector, is_primary: bool
+    ) -> PrimaryProjectionSnapshot:
+        if type(is_primary) is not bool:
+            raise CredentialValidationError
+        self._available(conn, selector)
+        if self._row(conn, selector) is None:
+            raise CredentialNotFoundError
+        primary = self._primary(conn)
+        participants = sorted(set(primary) | {selector})
+        versions = tuple(self._state(conn, key).version for key in participants)
+        flags = {key: key in primary for key in participants}
+        receipt = PrimaryProjectionSnapshot(selector, versions)
+        self._receipts[receipt] = (is_primary, flags, primary)
+        return receipt
+
+    def snapshot_primary_projection(self, selector: BrokerSelector, is_primary: bool) -> PrimaryProjectionSnapshot:
+        _selector(selector, mutation=True)
+        with self._transaction() as conn:
+            return self._snapshot_primary(conn, selector, is_primary)
+
+    def _apply_primary(
+        self, conn: sqlite3.Connection, snapshot: PrimaryProjectionSnapshot, *, bump_target: bool = False
+    ) -> PrimaryProjectionMutation:
+        desired, flags, primary = self._receipt(snapshot, PrimaryProjectionSnapshot)
+        if self._primary(conn) != primary:
+            raise CredentialStaleError
+        for version in snapshot.versions:
+            self._expected(conn, version.selector, version)
+        after_flags = {
+            key: (key == snapshot.selector if desired else False if key == snapshot.selector else value)
+            for key, value in flags.items()
+        }
+        changed = {key for key in flags if flags[key] != after_flags[key]}
+        if bump_target:
+            changed.add(snapshot.selector)
+        for key in changed:
+            self._check_bump(conn, key)
+        for key in changed:
+            conn.execute(
+                "UPDATE accounts SET is_primary=? WHERE adapter_id=? AND account_id=?",
+                (int(after_flags[key]), *_pair(key)),
+            )
+            self._bump(conn, key)
+        after_versions = tuple(self._state(conn, version.selector).version for version in snapshot.versions)
+        receipt = PrimaryProjectionMutation(snapshot.selector, snapshot.versions, after_versions)
+        self._receipts[receipt] = (flags, after_flags)
+        return receipt
+
+    def apply_primary_projection(self, snapshot: PrimaryProjectionSnapshot) -> PrimaryProjectionMutation:
+        self._receipt(snapshot, PrimaryProjectionSnapshot)
+        _selector(snapshot.selector, mutation=True)
+        with self._transaction(write=True) as conn:
+            return self._apply_primary(conn, snapshot)
+
+    def restore_primary_projection(self, mutation: PrimaryProjectionMutation) -> tuple[CredentialVersion, ...]:
+        flags, after_flags = self._receipt(mutation, PrimaryProjectionMutation)
+        with self._transaction(write=True) as conn:
+            if set(self._primary(conn)) != {key for key, flag in after_flags.items() if flag}:
+                raise CredentialStaleError
+            for version in mutation.after_versions:
+                self._expected(conn, version.selector, version)
+            changed = {key for key in flags if flags[key] != after_flags[key]}
+            for key in changed:
+                self._check_bump(conn, key)
+            for key in changed:
+                conn.execute(
+                    "UPDATE accounts SET is_primary=? WHERE adapter_id=? AND account_id=?",
+                    (int(flags[key]), *_pair(key)),
+                )
+                self._bump(conn, key)
+            return tuple(self._state(conn, version.selector).version for version in mutation.after_versions)
+
+    # Compatibility resolution and writes share one owned transaction.
+    def _resolve_legacy(self, conn: sqlite3.Connection, account_id: str) -> BrokerSelector | None:
+        BrokerSelector("legacy", account_id)
+        rows = conn.execute("SELECT adapter_id FROM accounts WHERE account_id=?", (account_id,)).fetchall()
+        if len(rows) > 1:
+            raise CredentialAmbiguityError
+        if not rows:
+            return None
+        selector = BrokerSelector(rows[0][0], account_id)
+        self._available(conn, selector)
+        return selector
+
+    def retrieve_for(self, adapter_id: str, account_id: str) -> dict[str, Any]:
+        return self.retrieve_credentials(BrokerSelector(adapter_id, account_id))
+
+    def retrieve(self, account_id: str) -> dict[str, Any]:
+        with self._transaction() as conn:
+            selector = self._resolve_legacy(conn, account_id)
+            if selector is None:
+                raise CredentialNotFoundError
+            return self._decrypt(self._row(conn, selector))
+
+    def account_exists(self, account_id: str) -> bool:
+        with self._transaction() as conn:
+            return self._resolve_legacy(conn, account_id) is not None
+
+    def list_accounts(self) -> list[dict[str, Any]]:
+        with self._transaction() as conn:
+            rows = conn.execute("""SELECT a.account_id,a.adapter_id,a.broker,a.label,a.is_primary,a.created_at
+                                   FROM accounts a JOIN credential_selector_versions v
+                                   ON a.adapter_id=v.adapter_id AND a.account_id=v.account_id
+                                   WHERE v.origin!='legacy_interim_candidate' ORDER BY a.created_at""").fetchall()
+            return [dict(row) | {"is_primary": bool(row["is_primary"])} for row in rows]
 
     def store(
         self,
@@ -337,123 +1076,53 @@ class CredentialStore:
         is_primary: bool = False,
         adapter_id: str | None = None,
     ) -> None:
-        """Encrypt and persist broker credentials for an account.
+        selector = _selector(BrokerSelector(broker if adapter_id is None else adapter_id, account_id), mutation=True)
+        with self._transaction(write=True) as conn:
+            found = self._resolve_legacy(conn, account_id)
+            if found is None:
+                require_broker_account_mutations()
+            if found != selector:
+                raise CredentialConflictError
+            snapshot = self._snapshot_primary(conn, selector, is_primary)
+            desired, flags, _primary = self._receipt(snapshot, PrimaryProjectionSnapshot)
+            for key, flag in flags.items():
+                if key == selector or (desired and flag):
+                    self._check_bump(conn, key)
+            self._put(conn, selector, broker, label, credentials)
+            self._apply_primary(conn, snapshot, bump_target=True)
 
-        If an account with ``account_id`` already exists its credentials,
-        broker, label, ``adapter_id``, and ``is_primary`` flag are overwritten
-        (salt and ``created_at`` are preserved for existing rows; a new salt and
-        timestamp are generated for brand-new accounts).
+    def update_credentials_for(self, adapter_id: str, account_id: str, credentials: dict[str, Any]) -> None:
+        selector = _selector(BrokerSelector(adapter_id, account_id), mutation=True)
+        with self._transaction(write=True) as conn:
+            self._available(conn, selector)
+            row = self._row(conn, selector)
+            if row is None:
+                raise CredentialNotFoundError
+            self._check_bump(conn, selector)
+            self._put(conn, selector, row["broker"], row["label"], credentials)
+            self._bump(conn, selector)
 
-        Args:
-            account_id: Unique identifier for the account (e.g. client code).
-            broker: Canonical broker name (e.g. ``"zerodha"``).
-            label: Human-readable label shown in the UI.
-            credentials: Arbitrary key-value dict of sensitive credentials
-                (API keys, secrets, tokens, etc.).
-            is_primary: Whether this account is the default for order routing.
-            adapter_id: The routing adapter for this account (e.g. ``"dhan"``,
-                ``"openalgo"``). Defaults to ``broker`` when omitted, so legacy
-                callers keep working; pass it explicitly for the selector model.
+    def remove(self, account_id: str) -> None:
+        with self._transaction(write=True) as conn:
+            selector = self._resolve_legacy(conn, account_id)
+            if selector is not None:
+                _selector(selector, mutation=True)
+                self._remove(conn, selector, credentials=True, setup=True)
 
-        Raises:
-            CredentialError: If serialisation or encryption fails.
-        """
-        try:
-            payload: bytes = json.dumps(credentials).encode("utf-8")
-        except (TypeError, ValueError) as exc:
-            raise CredentialError(f"Cannot serialise credentials: {exc}") from exc
+    def remove_for(self, adapter_id: str, account_id: str) -> None:
+        selector = _selector(BrokerSelector(adapter_id, account_id), mutation=True)
+        with self._transaction(write=True) as conn:
+            self._available(conn, selector)
+            if self._row(conn, selector) is not None:
+                self._remove(conn, selector, credentials=True, setup=True)
 
-        salt: bytes = os.urandom(_SALT_BYTES)
-        fernet: Fernet = self._derive_key(salt)
-
-        try:
-            encrypted: bytes = fernet.encrypt(payload)
-        except Exception as exc:  # pragma: no cover
-            raise CredentialError(f"Encryption failed: {exc}") from exc
-
-        created_at: str = datetime.now(tz=UTC).isoformat()
-        is_primary_int: int = int(is_primary)
-        resolved_adapter_id: str = adapter_id or broker
-
-        with closing(self._get_connection()) as conn, conn:
-            # The table's PRIMARY KEY is ``account_id`` alone, but the selector
-            # model is composite ``(adapter_id, account_id)``. Without this guard
-            # the ON CONFLICT(account_id) upsert would let a second broker that
-            # happens to share a client code silently OVERWRITE the first
-            # broker's encrypted credentials (unrecoverable). Reject the
-            # cross-adapter collision explicitly; re-storing under the SAME
-            # adapter (a credential update) is still allowed.
-            existing = conn.execute(
-                "SELECT adapter_id FROM accounts WHERE account_id = ?",
-                (account_id,),
-            ).fetchone()
-            if existing is not None and str(existing["adapter_id"]) != resolved_adapter_id:
-                raise CredentialError(
-                    f"account_id {account_id!r} is already used by adapter "
-                    f"{existing['adapter_id']!r}; a different broker cannot reuse it "
-                    "(it would overwrite the other broker's stored credentials)"
-                )
-            conn.execute(
-                """
-                INSERT INTO accounts
-                    (account_id, adapter_id, broker, label, salt, encrypted_creds,
-                     is_primary, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(account_id) DO UPDATE SET
-                    adapter_id      = excluded.adapter_id,
-                    broker          = excluded.broker,
-                    label           = excluded.label,
-                    salt            = excluded.salt,
-                    encrypted_creds = excluded.encrypted_creds,
-                    is_primary      = excluded.is_primary
-                """,
-                (account_id, resolved_adapter_id, broker, label, salt, encrypted, is_primary_int, created_at),
-            )
-            conn.commit()
-
-    def update_credentials_for(
-        self, adapter_id: str, account_id: str, credentials: dict[str, Any]
-    ) -> None:
-        """Re-encrypt and replace ONLY the credential payload for a selector.
-
-        The write-back half of reconnect realism (G7): after a successful
-        ``login()`` the vault swaps single-use artefacts (an OAuth ``code``, a
-        30-second TOTP) for the minted, replayable material (the live
-        ``access_token``) — without touching the row's broker, label,
-        ``is_primary``, or ``created_at``. A fresh salt is generated per write,
-        matching the per-row random-salt design.
-
-        Args:
-            adapter_id: The routing adapter (e.g. ``"upstox"``).
-            account_id: The account within that adapter.
-            credentials: The replayable credential dict to persist.
-
-        Raises:
-            CredentialError: If no matching row exists or encryption fails.
-        """
-        try:
-            payload: bytes = json.dumps(credentials).encode("utf-8")
-        except (TypeError, ValueError) as exc:
-            raise CredentialError(f"Cannot serialise credentials: {exc}") from exc
-
-        salt: bytes = os.urandom(_SALT_BYTES)
-        fernet: Fernet = self._derive_key(salt)
-        try:
-            encrypted: bytes = fernet.encrypt(payload)
-        except Exception as exc:  # pragma: no cover
-            raise CredentialError(f"Encryption failed: {exc}") from exc
-
-        with closing(self._get_connection()) as conn, conn:
-            cursor = conn.execute(
-                "UPDATE accounts SET salt = ?, encrypted_creds = ? "
-                "WHERE adapter_id = ? AND account_id = ?",
-                (salt, encrypted, adapter_id, account_id),
-            )
-            conn.commit()
-        if cursor.rowcount == 0:
-            raise CredentialError(
-                f"Account not found for selector {adapter_id!r}:{account_id!r}"
-            )
+    def set_primary(self, account_id: str) -> None:
+        with self._transaction(write=True) as conn:
+            selector = self._resolve_legacy(conn, account_id)
+            if selector is None:
+                raise CredentialNotFoundError
+            _selector(selector, mutation=True)
+            self._apply_primary(conn, self._snapshot_primary(conn, selector, True))
 
     def stage_credentials_for(
         self,
@@ -465,269 +1134,33 @@ class CredentialStore:
         label: str | None = None,
         is_primary: bool | None = None,
     ) -> StagedCredentialStore:
-        """Build a non-persistent one-selector credential view.
+        selector = _selector(BrokerSelector(adapter_id, account_id), mutation=True)
+        if self.account_for_selector(selector) is None:
+            require_broker_account_mutations()
+        if is_primary is not None and (broker is None or label is None):
+            raise CredentialValidationError
+        stage = self.stage_credentials(selector, credentials, broker=broker, label=label)
+        if is_primary is not None:
+            snapshot = self.snapshot_primary_projection(selector, is_primary)
+            if stage.expected_version not in snapshot.versions:
+                raise CredentialStaleError
+            stage._primary_snapshot = snapshot
+            stage._metadata["is_primary"] = is_primary
+        return stage
 
-        Omitting all metadata stages a payload-only update for an existing row.
-        Supplying metadata stages a full store/upsert, used by native connect.
-        The candidate is activation-visible through ``list_accounts`` but does
-        not alter SQLite until its explicit ``commit``.
-        """
-        rows = self.list_accounts()
-        same_account = next(
-            (row for row in rows if str(row.get("account_id") or "") == account_id),
-            None,
-        )
-        if same_account is not None:
-            existing_adapter = str(
-                same_account.get("adapter_id") or same_account.get("broker") or ""
-            )
-            if existing_adapter != adapter_id:
-                raise CredentialError(
-                    "A different broker already uses this account identifier"
-                )
-
-        supplied_metadata = (broker, label, is_primary)
-        replace_metadata = any(value is not None for value in supplied_metadata)
-        if replace_metadata and not all(value is not None for value in supplied_metadata):
-            raise CredentialError("Staged credential metadata must be complete")
-        if not replace_metadata and same_account is None:
-            raise CredentialError("Cannot stage a payload update for a missing account")
-
-        if replace_metadata:
-            metadata = {
-                "account_id": account_id,
-                "adapter_id": adapter_id,
-                "broker": str(broker),
-                "label": str(label),
-                "is_primary": bool(is_primary),
-                "created_at": same_account.get("created_at") if same_account else None,
-            }
-        else:
-            metadata = dict(same_account or {})
-
-        return StagedCredentialStore(
-            self,
-            adapter_id=adapter_id,
-            account_id=account_id,
-            credentials=credentials,
-            metadata=metadata,
-            replace_metadata=replace_metadata,
-        )
-
-    def retrieve_for(self, adapter_id: str, account_id: str) -> dict[str, Any]:
-        """Decrypt and return credentials by composite ``(adapter_id, account_id)``.
-
-        The selector-keyed counterpart to :meth:`retrieve` (contract §12). Use
-        this on the routing path so two accounts that share an ``account_id``
-        across adapters resolve to the correct row.
-
-        Args:
-            adapter_id: The routing adapter (e.g. ``"dhan"``).
-            account_id: The account within that adapter.
-
-        Returns:
-            The original credentials dict.
-
-        Raises:
-            CredentialError: If no matching row exists, the master password is
-                wrong, or the ciphertext is corrupt.
-        """
-        with closing(self._get_connection()) as conn, conn:
-            row = conn.execute(
-                "SELECT salt, encrypted_creds FROM accounts "
-                "WHERE adapter_id = ? AND account_id = ?",
-                (adapter_id, account_id),
-            ).fetchone()
-
-        if row is None:
-            raise CredentialError(
-                f"Account not found for selector {adapter_id!r}:{account_id!r}"
-            )
-
-        fernet: Fernet = self._derive_key(bytes(row["salt"]))
-        try:
-            plaintext: bytes = fernet.decrypt(bytes(row["encrypted_creds"]))
-        except InvalidToken as exc:
-            raise CredentialError(
-                f"Decryption failed for selector {adapter_id!r}:{account_id!r} — "
-                "wrong master password or corrupt data"
-            ) from exc
-
-        try:
-            return json.loads(plaintext.decode("utf-8"))  # type: ignore[no-any-return]
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:  # pragma: no cover
-            raise CredentialError(f"Credential payload corrupt: {exc}") from exc
-
-    def retrieve(self, account_id: str) -> dict[str, Any]:
-        """Decrypt and return the credentials for an account.
-
-        Args:
-            account_id: Account identifier previously passed to :meth:`store`.
-
-        Returns:
-            The original credentials dict as passed to :meth:`store`.
-
-        Raises:
-            CredentialError: If the account does not exist, the master
-                password is wrong, or the ciphertext is corrupt.
-        """
-        with closing(self._get_connection()) as conn, conn:
-            row = conn.execute(
-                "SELECT salt, encrypted_creds FROM accounts WHERE account_id = ?",
-                (account_id,),
-            ).fetchone()
-
-        if row is None:
-            raise CredentialError(f"Account not found: {account_id!r}")
-
-        fernet: Fernet = self._derive_key(bytes(row["salt"]))
-        try:
-            plaintext: bytes = fernet.decrypt(bytes(row["encrypted_creds"]))
-        except InvalidToken as exc:
-            raise CredentialError(
-                f"Decryption failed for account {account_id!r} — "
-                "wrong master password or corrupt data"
-            ) from exc
-
-        try:
-            return json.loads(plaintext.decode("utf-8"))  # type: ignore[no-any-return]
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:  # pragma: no cover
-            raise CredentialError(f"Credential payload corrupt: {exc}") from exc
-
-    def remove(self, account_id: str) -> None:
-        """Delete an account from the store.
-
-        Silently succeeds if the account does not exist.
-
-        Args:
-            account_id: Account identifier to remove.
-        """
-        with closing(self._get_connection()) as conn, conn:
-            conn.execute(
-                "DELETE FROM accounts WHERE account_id = ?", (account_id,)
-            )
-            conn.commit()
-
-    def remove_for(self, adapter_id: str, account_id: str) -> None:
-        """Delete an account by composite ``(adapter_id, account_id)`` selector.
-
-        Native account-management routes carry both selector parts in the URL.
-        Deleting by ``account_id`` alone would let a mistyped adapter path remove
-        a different broker's vault row when account ids collide or when the
-        caller simply supplied the wrong adapter. Missing selectors are a no-op,
-        matching :meth:`remove`.
-
-        Args:
-            adapter_id: The routing adapter (e.g. ``"dhan"``).
-            account_id: The account within that adapter.
-        """
-        with closing(self._get_connection()) as conn, conn:
-            conn.execute(
-                "DELETE FROM accounts WHERE adapter_id = ? AND account_id = ?",
-                (adapter_id, account_id),
-            )
-            conn.commit()
-
-    def list_accounts(self) -> list[dict[str, Any]]:
-        """Return metadata for all stored accounts without decrypted credentials.
-
-        Returns:
-            List of dicts with keys ``account_id``, ``broker``, ``label``,
-            ``is_primary``, and ``created_at``.  Ordered by ``created_at``
-            ascending (oldest first).
-        """
-        with closing(self._get_connection()) as conn, conn:
-            rows = conn.execute(
-                """
-                SELECT account_id, adapter_id, broker, label, is_primary, created_at
-                FROM accounts
-                ORDER BY created_at ASC
-                """
-            ).fetchall()
-
-        return [
-            {
-                "account_id": row["account_id"],
-                "adapter_id": row["adapter_id"],
-                "broker": row["broker"],
-                "label": row["label"],
-                "is_primary": bool(row["is_primary"]),
-                "created_at": row["created_at"],
-            }
-            for row in rows
-        ]
-
-    def set_primary(self, account_id: str) -> None:
-        """Mark one account as primary and clear the flag on all others.
-
-        Args:
-            account_id: The account to promote to primary.
-
-        Raises:
-            CredentialError: If the account does not exist.
-        """
-        with closing(self._get_connection()) as conn, conn:
-            exists = conn.execute(
-                "SELECT 1 FROM accounts WHERE account_id = ?", (account_id,)
-            ).fetchone()
-            if exists is None:
-                raise CredentialError(
-                    f"Cannot set primary — account not found: {account_id!r}"
-                )
-            # One atomic statement: under SQLite autocommit
-            # (``isolation_level=None``) two separate UPDATEs would leave a
-            # transient window in which no row is primary, and the trailing
-            # ``conn.commit()`` is a no-op. A single CASE expression sets the
-            # chosen account and clears every other in the same write.
-            conn.execute(
-                "UPDATE accounts SET is_primary = "
-                "CASE WHEN account_id = ? THEN 1 ELSE 0 END",
-                (account_id,),
-            )
-
-    def snapshot_primary_metadata(self) -> dict[str, bool]:
-        """Snapshot every vault row's primary flag without decrypting credentials."""
-        with closing(self._get_connection()) as conn, conn:
-            rows = conn.execute(
-                "SELECT account_id, is_primary FROM accounts"
-            ).fetchall()
-        return {str(row["account_id"]): bool(row["is_primary"]) for row in rows}
-
-    def restore_primary_metadata(self, snapshot: dict[str, bool]) -> None:
-        """Atomically restore a prior primary-flag snapshot.
-
-        A changed account set means the snapshot is stale. Refuse it instead of
-        overwriting primary metadata created by a concurrent vault mutation.
-        """
-        with closing(self._get_connection()) as conn, conn:
-            try:
-                conn.execute("BEGIN IMMEDIATE")
-                current_ids = {
-                    str(row["account_id"])
-                    for row in conn.execute("SELECT account_id FROM accounts").fetchall()
-                }
-                if current_ids != set(snapshot):
-                    raise CredentialError("Primary metadata snapshot is stale")
-                conn.executemany(
-                    "UPDATE accounts SET is_primary = ? WHERE account_id = ?",
-                    [(int(is_primary), account_id) for account_id, is_primary in snapshot.items()],
-                )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-
-    def account_exists(self, account_id: str) -> bool:
-        """Check whether an account is stored in the database.
-
-        Args:
-            account_id: Account identifier to look up.
-
-        Returns:
-            ``True`` if the account exists, ``False`` otherwise.
-        """
-        with closing(self._get_connection()) as conn, conn:
-            row = conn.execute(
-                "SELECT 1 FROM accounts WHERE account_id = ?", (account_id,)
-            ).fetchone()
-        return row is not None
+    def _commit_legacy_stage(self, stage: StagedCredentialStore) -> CredentialVersion:
+        """Apply legacy metadata and its captured complete primary CAS atomically."""
+        snapshot = stage._primary_snapshot
+        desired, flags, primary = self._receipt(snapshot, PrimaryProjectionSnapshot)
+        with self._transaction(write=True) as conn:
+            if self._primary(conn) != primary:
+                raise CredentialStaleError
+            for version in snapshot.versions:
+                self._expected(conn, version.selector, version)
+            self._expected(conn, stage._selector, stage.expected_version)
+            for key, flag in flags.items():
+                if key == stage._selector or (desired and flag):
+                    self._check_bump(conn, key)
+            self._put(conn, stage._selector, stage._metadata["broker"], stage._metadata["label"], stage._credentials)
+            self._apply_primary(conn, snapshot, bump_target=True)
+            return self._state(conn, stage._selector).version

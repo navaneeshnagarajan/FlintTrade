@@ -265,6 +265,41 @@ class HeldOwnerDirectory:
             raise OSError("directory member changed while read")
         return result, opened
 
+    def create_empty_hardened_member(self, name: str) -> os.stat_result:
+        """Exclusively create and sync an empty binary member, never replace it.
+
+        A failed creation may leave an empty member requiring explicit recovery.
+        SQLite callers must initialise it only if this call returns successfully.
+        """
+        self.revalidate()
+        name = self._name(name)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+        if _is_windows():
+            descriptor = os.open(self.path / name, flags, 0o600)
+        else:
+            descriptor = os.open(name, flags | os.O_NOFOLLOW, 0o600, dir_fd=self._descriptor)
+        try:
+            if _is_windows():
+                descriptor = _reopen_windows_descriptor_for_security(descriptor, write_dacl=True)
+                _install_exact_windows_descriptor_dacl(descriptor)
+            else:
+                os.fchmod(descriptor, 0o600)
+            opened = os.fstat(descriptor)
+            _assert_current_user_owns(descriptor, opened)
+            _assert_hardened_descriptor(descriptor, opened, path=self.path / name)
+            os.fsync(descriptor)
+            self.revalidate()
+            if not _same_file_identity(opened, self._entry_stat(name)) or opened.st_nlink != 1:
+                raise OSError("directory member changed")
+            if _is_windows():
+                fsync_parent_directory(self.path / name)
+            else:
+                os.fsync(self._descriptor)
+            self.revalidate()
+            return opened
+        finally:
+            os.close(descriptor)
+
     def write_text(self, name: str, value: str) -> None:
         """Atomically publish text under the retained namespace authority."""
         self.revalidate()

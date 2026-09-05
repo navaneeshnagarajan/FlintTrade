@@ -133,11 +133,13 @@ def test_stale_resumed_onboarding_does_not_overwrite_another_writer(tmp_path):
 
 def test_credential_database_delete_recreate_does_not_change_workspace_identity(tmp_path):
     from flinttrade_gateway.credentials import CredentialStore
+    from flinttrade_core.secure_file import harden_directory
 
+    harden_directory(tmp_path)
     Workspace(tmp_path).initialise()
     initial = persistence.read_workspace_snapshot(tmp_path)
     path = tmp_path / "credentials.db"
-    CredentialStore(path, "controlled-test-password")
+    CredentialStore(path, "controlled-test-password").close()
     path.unlink()
     CredentialStore(path, "controlled-test-password")
     assert persistence.read_workspace_snapshot(tmp_path).version == initial.version

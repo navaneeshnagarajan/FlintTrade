@@ -533,8 +533,14 @@ def test_published_native_read_remains_available_and_evicts_only_invalid_session
 def test_ditto_default_manager_retains_reads_and_fenced_metadata_only_changes(tmp_path, monkeypatch):
     from flinttrade_ditto.account_manager import AccountManager, BrokerAccount
     from flinttrade_gateway.credentials import CredentialStore
+    from flinttrade_core.broker_identity import BrokerSelector
+    from flinttrade_core.secure_file import harden_directory
 
+    harden_directory(tmp_path)
     store = CredentialStore(tmp_path / "vault.db", "synthetic-password")
+    selector = BrokerSelector("openalgo", "synthetic")
+    store.put_credentials(selector, "openalgo", "Synthetic", {"api_key": "synthetic-key"},
+                          expected=store.selector_state(selector).version)
     kwargs = {
         "db_path": str(tmp_path / "metadata.db"),
         "credential_store": store,

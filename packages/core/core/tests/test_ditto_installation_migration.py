@@ -1048,12 +1048,14 @@ def test_unsafe_shm_sidecar_fails_before_sqlite_backup(tmp_path):
 
 def test_workspace_copy_and_account_writer_share_one_fence(tmp_path):
     from flinttrade_core import workspace
+    from flinttrade_core.broker_identity import BrokerSelector
     from flinttrade_ditto.account_manager import AccountManager, BrokerAccount
 
     legacy = tmp_path / "legacy"
     target = tmp_path / "target"
     installation = tmp_path / "installation"
     _database(legacy / "ditto_accounts.sqlite", "before")
+    legacy.chmod(0o700)
     migration_paused = threading.Event()
     release_migration = threading.Event()
     manager = AccountManager(
@@ -1061,6 +1063,11 @@ def test_workspace_copy_and_account_writer_share_one_fence(tmp_path):
         db_path=str(legacy / "writer.sqlite"),
         master_password="test-master-pw",
         installation_state_root=installation,
+    )
+    selector = BrokerSelector("openalgo", "after")
+    manager._cred.put_credentials(
+        selector, "openalgo", "after", {"api_key": "secret"},
+        expected=manager._cred.selector_state(selector).version,
     )
 
     def hook(phase: str) -> None:
