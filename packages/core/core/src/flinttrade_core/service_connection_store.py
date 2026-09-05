@@ -21,6 +21,8 @@ from .service_connection_transactions import (
     MAX_MUTATION_BYTES,
     TransactionFiles,
     canonical,
+    decode,
+    member_identity,
     parse_record,
     parse_version,
     record_dict,
@@ -31,6 +33,7 @@ from .service_connection_transactions import (
 from .service_connections import (
     INT64_MAX,
     ServiceConnection,
+    ServiceConnectionInputError,
     ServiceConnectionRef,
     ServiceSecretVersion,
     create_service_connection,
@@ -59,6 +62,38 @@ class ConnectionIdempotencyConflict(RuntimeError):
 
 class ConnectionStoreUnavailable(RuntimeError):
     """Only the connection authority is unavailable."""
+
+
+class ConnectionMutationRejected(ValueError):
+    """A closed, immutable client-rejection reason with no request data."""
+
+    __slots__ = ("_reason",)
+
+    def __init__(self, reason: str) -> None:
+        if type(reason) is not str or reason not in {"invalid_request", "not_found", "connection_limit"}:
+            raise ValueError("invalid rejection reason")
+        super().__init__(reason)
+        object.__setattr__(self, "_reason", reason)
+
+    @property
+    def reason(self) -> str:
+        return self._reason
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in {"reason", "_reason"}:
+            raise AttributeError("rejection reason is immutable")
+        super().__setattr__(name, value)
+
+    def __str__(self) -> str:
+        return self.reason
+
+    def __delattr__(self, name: str) -> None:
+        if name in {"reason", "_reason"}:
+            raise AttributeError("rejection reason is immutable")
+        super().__delattr__(name)
+
+    def __repr__(self) -> str:
+        return f"ConnectionMutationRejected({self.reason!r})"
 
 
 def _freeze(value: object) -> Any:
@@ -316,14 +351,27 @@ class ServiceConnectionStore:
         actor_context: ConnectionActorContext,
     ) -> ConnectionMutationResult:
         """Durably admit exactly one actor-bound create, update or delete."""
-        result = self._mutate(
-            operation,
-            payload,
-            connection_id=connection_id,
-            expected_etag=expected_etag,
-            idempotency_key=idempotency_key,
-            actor_context=actor_context,
-        )
+        try:
+            result = self._mutate(
+                operation,
+                payload,
+                connection_id=connection_id,
+                expected_etag=expected_etag,
+                idempotency_key=idempotency_key,
+                actor_context=actor_context,
+            )
+        except ServiceConnectionInputError:
+            raise ConnectionMutationRejected("invalid_request") from None
+        except (
+            ConnectionMutationRejected,
+            ConnectionRevisionRequired,
+            ConnectionRevisionConflict,
+            ConnectionIdempotencyConflict,
+            ConnectionStoreUnavailable,
+        ):
+            raise
+        except Exception:
+            raise ConnectionStoreUnavailable("service_connection_store_unavailable") from None
         self._flush()
         return result
 
@@ -345,17 +393,23 @@ class ServiceConnectionStore:
             or not expected_etag.startswith('"')
             or not expected_etag.endswith('"')
         ):
-            raise ValueError("invalid connection revision")
-        uuid_text(idempotency_key)
+            raise ConnectionMutationRejected("invalid_request")
+        try:
+            uuid_text(idempotency_key)
+        except ValueError:
+            raise ConnectionMutationRejected("invalid_request") from None
         if type(actor_context) is not ConnectionActorContext:
             raise ValueError("trusted actor context required")
         if type(operation) is not str or operation not in {"create", "update", "delete"} or type(payload) is not dict:
-            raise ValueError("invalid connection mutation")
+            raise ConnectionMutationRejected("invalid_request")
         if operation == "create":
             if connection_id is not None:
-                raise ValueError("create identity is server-owned")
+                raise ConnectionMutationRejected("invalid_request")
         else:
-            uuid_text(connection_id)
+            try:
+                uuid_text(connection_id)
+            except ValueError:
+                raise ConnectionMutationRejected("invalid_request") from None
         request = {
             "schema": 1,
             "key": idempotency_key,
@@ -366,8 +420,12 @@ class ServiceConnectionStore:
             "etag": expected_etag,
             "payload": payload,
         }
-        if len(canonical(request).encode()) > MAX_MUTATION_BYTES:
-            raise ValueError("mutation exceeds size limit")
+        try:
+            request_size = len(canonical(request).encode())
+        except (ValueError, TypeError, UnicodeError):
+            raise ConnectionMutationRejected("invalid_request") from None
+        if request_size > MAX_MUTATION_BYTES:
+            raise ConnectionMutationRejected("invalid_request")
         request = copy.deepcopy(request)
         payload = request["payload"]
         metadata_payload = dict(payload)
@@ -375,15 +433,15 @@ class ServiceConnectionStore:
         replace_credential = "credential" in payload
         clear = metadata_payload.pop("clear_credential", False)
         if "clear_credential" in payload and clear is not True:
-            raise ValueError("clear_credential must be true")
+            raise ConnectionMutationRejected("invalid_request")
         if replace_credential and (
             type(credential) is not str or not credential or len(credential.encode()) > MAX_CREDENTIAL_BYTES
         ):
-            raise ValueError("credential must be a bounded non-empty string")
+            raise ConnectionMutationRejected("invalid_request")
         if replace_credential and clear:
-            raise ValueError("conflicting credential instructions")
+            raise ConnectionMutationRejected("invalid_request")
         if operation == "delete" and payload:
-            raise ValueError("delete payload must be empty")
+            raise ConnectionMutationRejected("invalid_request")
         try:
             with TransactionFiles(self.workspace_dir) as files:
                 # Completed receipt replay is independent of a later collection
@@ -430,10 +488,10 @@ class ServiceConnectionStore:
                         (item for item in before.connections if str(item.connection_id) == connection_id), None
                     )
                     if operation != "create" and current is None:
-                        raise ValueError("connection not found")
+                        raise ConnectionMutationRejected("not_found")
                     if operation == "create":
                         if len(before.connections) >= MAX_CONNECTIONS:
-                            raise ValueError("connection limit reached")
+                            raise ConnectionMutationRejected("connection_limit")
                         desired = create_service_connection(metadata_payload)
                         connection_id = str(desired.connection_id)
                         if any(item.connection_id == desired.connection_id for item in before.connections):
@@ -444,7 +502,7 @@ class ServiceConnectionStore:
                         desired = None
                     subject = desired or current
                     if subject.auth_mode is None and (replace_credential or clear):
-                        raise ValueError("provider rejects credential instructions")
+                        raise ConnectionMutationRejected("invalid_request")
                     config = workspace.as_dict()
                     private = config["services"].get("_connection_store")
                     old_binding = parse_version(private["bindings"].get(connection_id)) if private else None
@@ -515,6 +573,7 @@ class ServiceConnectionStore:
                         "recovery": None,
                         "result": None,
                         "secret_change": bool(change_secret),
+                        "claims": {},
                     }
                     self._audit(files, journal, receipt, "prepared", before.epoch)
                     _checkpoint("prepared_audit")
@@ -553,7 +612,12 @@ class ServiceConnectionStore:
                     self._finish(files, journal, receipt, result, "succeeded")
             self._flush()
             return result
-        except (ConnectionRevisionConflict, ConnectionIdempotencyConflict, ValueError):
+        except (
+            ConnectionRevisionConflict,
+            ConnectionIdempotencyConflict,
+            ConnectionMutationRejected,
+            ServiceConnectionInputError,
+        ):
             raise
         except Exception:
             raise ConnectionStoreUnavailable("service_connection_store_unavailable") from None
@@ -578,7 +642,13 @@ class ServiceConnectionStore:
         return result
 
     def _cas(
-        self, files: TransactionFiles, journal: dict[str, Any], workspace: WorkspaceSnapshot, desired: dict[str, Any]
+        self,
+        files: TransactionFiles,
+        journal: dict[str, Any],
+        workspace: WorkspaceSnapshot,
+        desired: dict[str, Any],
+        *,
+        recovery: bool = False,
     ) -> WorkspaceSnapshot:
         expected_instance = workspace.version.instance_id if workspace.version else None
         for _ in range(8):
@@ -587,6 +657,13 @@ class ServiceConnectionStore:
                 files.revalidate()
                 if _domain_digest(latest) != journal["before_digest"]:
                     raise ConnectionRevisionConflict("connection_revision_conflict")
+                # Forward publication must leave one legal physical generation
+                # for compensation, including after an unrelated-writer retry.
+                if latest.get("workspace_generation", 0) > INT64_MAX - (1 if recovery else 2):
+                    raise ConnectionStoreUnavailable("service_connection_store_unavailable")
+                self._check_claims(files, journal, restore=False)
+                for binding in desired["services"]["_connection_store"]["bindings"].values():
+                    files.live(parse_version(binding))
                 for key, value in _domain(desired).items():
                     latest["services"][key] = copy.deepcopy(value)
 
@@ -603,16 +680,97 @@ class ServiceConnectionStore:
     def _journal(files: TransactionFiles, journal: dict[str, Any]) -> None:
         files.write(files.control, "transaction.json", journal, MAX_JOURNAL_BYTES)
 
-    @staticmethod
     def _install(
-        files: TransactionFiles, journal: dict[str, Any], version: ServiceSecretVersion, candidate: str
+        self, files: TransactionFiles, journal: dict[str, Any], version: ServiceSecretVersion, candidate: str
     ) -> None:
-        files.revalidate()
-        envelope = files.read(files.candidates, candidate)
-        files.verify(envelope, version)
-        with files.binding_directory(journal["ref"]["connection_id"], create=True) as directory:
-            files.candidates.replace(candidate, directory, "credential")
-        files.live(version)
+        try:
+            phase = "new" if candidate == f"{journal['key']}.new" else "recovery"
+            if candidate != f"{journal['key']}.{phase}":
+                raise ValueError("invalid install phase")
+            files.revalidate()
+            files.verify(files.read(files.candidates, candidate), version)
+            expected = parse_version(journal["before_binding"] if phase == "new" else journal["after_binding"])
+            claim_name = f"{candidate}.claimed"
+            with files.binding_directory(journal["ref"]["connection_id"], create=True) as directory:
+                if expected is None:
+                    if directory.existing_member("credential") is not None:
+                        raise OSError("expected credential absence")
+                else:
+                    envelope, identity = files.read_identity(directory, "credential")
+                    files.verify(envelope, expected)
+                    _checkpoint(f"{phase}_target_read")
+                    claim = {
+                        "identity": identity,
+                        "expected": version_dict(expected),
+                        "intended": version_dict(version),
+                    }
+                    previous = journal["claims"].get(phase)
+                    if previous is not None and previous != claim:
+                        raise ValueError("claim intent changed")
+                    journal["claims"][phase] = claim
+                    self._journal(files, journal)
+                    _checkpoint(f"{phase}_claim_intent")
+                    directory.move_no_replace("credential", files.candidates, claim_name)
+                    _checkpoint(f"{phase}_claim")
+                    claimed_text, claimed_stat = files.candidates.read_text_with_identity(claim_name)
+                    moved_identity = member_identity(claimed_stat)
+                    try:
+                        if moved_identity != identity:
+                            raise ValueError("destination changed before claim")
+                        files.verify(decode(claimed_text), expected)
+                    except (ValueError, KeyError, TypeError):
+                        # Only the exact just-observed moved object is eligible
+                        # for immediate restoration; restart requires the durable
+                        # expected identity and full binding authentication.
+                        _text, current_stat = files.candidates.read_text_with_identity(claim_name)
+                        if member_identity(current_stat) != moved_identity:
+                            raise OSError("claimed object changed before restoration") from None
+                        _checkpoint("claim_restore_before")
+                        files.candidates.move_no_replace(claim_name, directory, "credential")
+                        _checkpoint("claim_restored")
+                        raise OSError("destination claim rejected") from None
+                    _checkpoint(f"{phase}_claim_verified")
+                files.candidates.move_no_replace(candidate, directory, "credential")
+                _checkpoint(f"{phase}_published")
+            files.live(version)
+        except (ValueError, KeyError, TypeError):
+            raise OSError("credential install authority mismatch") from None
+
+    def _check_claims(self, files: TransactionFiles, journal: dict[str, Any], *, restore: bool) -> None:
+        """Authenticate retained claims; restore only a proved missing member."""
+        claims = journal["claims"]
+        if "recovery" in claims and journal["recovery"] is None and not files.control.exists("blocked.json"):
+            raise ValueError("compensation claim lacks a durable decision")
+        for phase in ("recovery", "new"):
+            name = f"{journal['key']}.{phase}.claimed"
+            actual = files.candidates.existing_member(name)
+            if actual is None:
+                continue
+            claim = claims.get(phase)
+            if claim is None:
+                raise ValueError("unjournalled claim retained")
+            envelope, identity = files.read_identity(files.candidates, actual)
+            expected, intended = parse_version(claim["expected"]), parse_version(claim["intended"])
+            if identity != claim["identity"]:
+                raise ValueError("claimed object identity mismatch")
+            files.verify(envelope, expected)
+            with files.binding_directory(journal["ref"]["connection_id"]) as directory:
+                if directory.existing_member("credential") is None:
+                    if not restore or actual != name:
+                        raise ValueError("missing credential with an unresumable claim")
+                    _checkpoint("claim_restore_before")
+                    files.candidates.move_no_replace(name, directory, "credential")
+                    _checkpoint("claim_restored")
+                    files.live(expected)
+                else:
+                    live = files.read(directory, "credential")
+                    live_version = parse_version(live["version"])
+                    allowed = {intended}
+                    if phase == "new" and journal["recovery"] is not None:
+                        allowed.add(parse_version(journal["recovery"]["after_binding"]))
+                    if live_version not in allowed:
+                        raise ValueError("unexpected entrant beside claim")
+                    files.verify(live, live_version)
 
     @staticmethod
     def _audit(
@@ -647,6 +805,7 @@ class ServiceConnectionStore:
         result: ConnectionMutationResult,
         outcome: str,
     ) -> None:
+        self._check_claims(files, journal, restore=False)
         for suffix, version in (
             ("new", journal["after_binding"]),
             ("old", journal["before_binding"]),
@@ -666,7 +825,8 @@ class ServiceConnectionStore:
         receipt["result"] = result.to_dict()
         files.write(files.receipts, f"{journal['key']}.json", receipt)
         _checkpoint("terminal_receipt")
-        for suffix in ("new", "old", "recovery"):
+        self._check_claims(files, journal, restore=False)
+        for suffix in ("new", "old", "recovery", "new.claimed", "recovery.claimed"):
             name = f"{journal['key']}.{suffix}"
             if files.candidates.existing_member(name) is not None:
                 files.candidates.unlink(name)
@@ -712,7 +872,22 @@ class ServiceConnectionStore:
                 or anchor["domain_digest"] not in allowed
             ):
                 raise ValueError("recovery independent anchor mismatch")
-        elif expected is not None:
+        elif expected is not None and not (
+            journal["operation"] == "create"
+            and journal["before_epoch"] == 0
+            and journal["before_record"] is None
+            and journal["before_binding"] is None
+            and journal["before_digest"]
+            == _domain_digest(
+                {
+                    "services": {
+                        "connections": [],
+                        "connection_epoch": 0,
+                        "_connection_store": None,
+                    }
+                }
+            )
+        ):
             raise ValueError("recovery independent anchor is missing")
         same_instance = (workspace.version is None and expected is None) or (
             expected is not None
@@ -748,6 +923,12 @@ class ServiceConnectionStore:
             and workspace.version.generation <= expected["generation"]
         ):
             raise ValueError("published workspace did not advance journal authority")
+        if recovery is not None and (
+            observed_digest not in {recovery["before_digest"], recovery["after_digest"]}
+            or _domain_digest(self._apply(config, {**journal, **recovery}, "after")) != recovery["after_digest"]
+        ):
+            raise ValueError("recovery decision does not reconstruct authenticated state")
+        self._check_claims(files, journal, restore=True)
         if journal["phase"] == "committed":
             if observed_digest != journal["after_digest"]:
                 raise ValueError("committed state cannot be authenticated")
@@ -770,6 +951,13 @@ class ServiceConnectionStore:
                 elif old_version is not None:
                     raise ValueError("missing prior credential")
         forward_published = observed_digest == journal["after_digest"]
+        if (
+            forward_published
+            and journal["secret_change"]
+            and live_version != intended
+            and (recovery is None or live_version != parse_version(recovery["after_binding"]))
+        ):
+            raise ValueError("published credential does not match journal")
         changed = forward_published or (journal["secret_change"] and live_version == intended)
         if observed_digest not in {journal["before_digest"], journal["after_digest"]} and not own_recovery:
             raise ValueError("ambiguous service slice")
@@ -802,6 +990,7 @@ class ServiceConnectionStore:
             recovery["after_digest"] = _domain_digest(recovery_config)
             self._journal(files, journal)
             _checkpoint("recovery_decision")
+        recovery_config = self._apply(config, {**journal, **recovery}, "after")
         restored_version = parse_version(recovery["after_binding"])
         if not own_recovery:
             if journal["secret_change"] and restored_version != live_version:
@@ -817,7 +1006,11 @@ class ServiceConnectionStore:
                 _checkpoint("recovery_install")
             recovery_config = self._apply(config, {**journal, **recovery}, "after")
             workspace = self._cas(
-                files, {**journal, "before_digest": recovery["before_digest"]}, workspace, recovery_config
+                files,
+                {**journal, "before_digest": recovery["before_digest"]},
+                workspace,
+                recovery_config,
+                recovery=True,
             )
             _checkpoint("recovery_cas")
         self._snapshot(files, workspace, verify_anchor=False)
@@ -877,6 +1070,7 @@ class ServiceConnectionStore:
                 or compensation.present
             ):
                 raise ValueError("invalid blocked compensation identity")
+            self._check_claims(files, journal, restore=True)
             with files.binding_directory(journal["ref"]["connection_id"]) as directory:
                 live = files.read(directory, "credential")
             observed = parse_version(live["version"])
@@ -889,6 +1083,7 @@ class ServiceConnectionStore:
                     files.write(files.candidates, name, files.envelope(compensation, None))
                 self._install(files, journal, compensation, name)
                 _checkpoint("foreign_install")
+            self._check_claims(files, journal, restore=False)
         result = ConnectionMutationResult(409, {"error": "connection_revision_conflict"}, receipt["expected_etag"])
         event = ConnectionMutationAudit(
             uuid_text(journal["terminal_event"]),

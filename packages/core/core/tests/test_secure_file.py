@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import errno
 import sys
 from pathlib import Path
 
@@ -19,6 +20,107 @@ except ImportError:  # pragma: no cover
     _HAS_PYWIN32 = False
 
 _IS_WIN = sys.platform == "win32"
+
+
+def test_exclusive_member_move_never_overwrites_a_destination(tmp_path):
+    with secure_file.HeldOwnerDirectory(tmp_path) as directory:
+        directory.write_text("candidate", "candidate")
+        directory.write_text("occupied", "retain entrant")
+        move = getattr(directory, "move_no_replace", directory.replace)
+        try:
+            move("candidate", directory, "occupied")
+        except OSError:
+            pass
+        assert directory.read_text("occupied") == "retain entrant"
+        assert directory.read_text("candidate") == "candidate"
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX descriptor barriers")
+def test_exclusive_move_preserves_member_identity_and_flushes_both_namespaces(tmp_path, monkeypatch):
+    with secure_file.HeldOwnerDirectory(tmp_path) as parent:
+        with parent.child("source", create=True) as source, parent.child("target", create=True) as target:
+            source.write_text("candidate", "fixture")
+            payload, observed = source.read_text_with_identity("candidate")
+            calls = []
+            sync = os.fsync
+
+            def synced(descriptor):
+                calls.append(descriptor)
+                sync(descriptor)
+
+            monkeypatch.setattr(os, "fsync", synced)
+            source.move_no_replace("candidate", target, "installed")
+            installed, current = target.read_text_with_identity("installed")
+            assert installed == payload == "fixture"
+            assert (observed.st_dev, observed.st_ino) == (current.st_dev, current.st_ino)
+            assert not source.exists("candidate")
+            assert calls == [target._descriptor, source._descriptor]
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX native failure branches")
+@pytest.mark.parametrize(
+    "platform,symbol,flags,error",
+    [
+        ("darwin", "renameatx_np", 4, errno.EXDEV),
+        ("linux", "renameat2", 1, errno.ENOTSUP),
+    ],
+)
+def test_exclusive_native_failure_has_no_overwrite_fallback(tmp_path, monkeypatch, platform, symbol, flags, error):
+    calls = []
+
+    class NativeFailure:
+        def __call__(self, *arguments):
+            calls.append(arguments)
+            secure_file.ctypes.set_errno(error)
+            return -1
+
+    class Library:
+        pass
+
+    library = Library()
+    setattr(library, symbol, NativeFailure())
+    with secure_file.HeldOwnerDirectory(tmp_path) as directory:
+        directory.write_text("candidate", "retain candidate")
+        directory.write_text("occupied", "retain entrant")
+        monkeypatch.setattr(sys, "platform", platform)
+        monkeypatch.setattr(secure_file.ctypes, "CDLL", lambda *args, **kwargs: library)
+        with pytest.raises(OSError) as caught:
+            directory.move_no_replace("candidate", directory, "occupied")
+        assert caught.value.errno == error
+        assert calls == [(directory._descriptor, b"candidate", directory._descriptor, b"occupied", flags)]
+        assert directory.read_text("candidate") == "retain candidate"
+        assert directory.read_text("occupied") == "retain entrant"
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX native availability")
+def test_missing_exclusive_native_symbol_fails_closed(tmp_path, monkeypatch):
+    with secure_file.HeldOwnerDirectory(tmp_path) as directory:
+        directory.write_text("candidate", "retained")
+        monkeypatch.setattr(secure_file.ctypes, "CDLL", lambda *args, **kwargs: object())
+        with pytest.raises(OSError) as caught:
+            directory.move_no_replace("candidate", directory, "installed")
+        assert caught.value.errno == errno.ENOTSUP
+        assert directory.read_text("candidate") == "retained"
+        assert not directory.exists("installed")
+
+
+def test_windows_exclusive_move_has_only_write_through_flag(monkeypatch):
+    calls = []
+
+    class Move:
+        def __call__(self, *args):
+            calls.append(args)
+            return 0
+
+    class Kernel:
+        MoveFileExW = Move()
+
+    monkeypatch.setattr(secure_file.ctypes, "WinDLL", lambda *args, **kwargs: Kernel(), raising=False)
+    monkeypatch.setattr(secure_file.ctypes, "get_last_error", lambda: 80, raising=False)
+    monkeypatch.setattr(secure_file.ctypes, "WinError", lambda error: OSError(error, "fixture conflict"), raising=False)
+    with pytest.raises(OSError):
+        secure_file._windows_replace_write_through(Path("candidate"), Path("occupied"), replace=False)
+    assert calls == [("candidate", "occupied", secure_file._MOVEFILE_WRITE_THROUGH)]
 
 
 @pytest.mark.skipif(_IS_WIN, reason="POSIX substitution; Windows denies directory delete sharing")

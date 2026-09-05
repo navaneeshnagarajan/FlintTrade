@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import ctypes
+import errno
 import functools
 import hashlib
 import os
 import pathlib
 import stat
+import sys
 import tempfile
 
 SENSITIVE_PATTERNS = (
@@ -213,12 +215,26 @@ class HeldOwnerDirectory:
 
     def read_text(self, name: str, *, max_bytes: int = 64 * 1024) -> str:
         """Read one bounded hardened regular member of the retained directory."""
+        return self.read_text_with_identity(name, max_bytes=max_bytes)[0]
+
+    def read_text_with_identity(
+        self,
+        name: str,
+        *,
+        max_bytes: int = 64 * 1024,
+    ) -> tuple[str, os.stat_result]:
+        """Observe bounded text and its physical member identity together.
+
+        This is not an inode-CAS. Exclusive claim users must compare the moved
+        object with this observation before publishing a replacement.
+        """
         self.revalidate()
         name = self._name(name)
+        before = self._entry_stat(name)
         if _is_windows():
             result = read_hardened_owner_owned_text(self.path / name, max_bytes=max_bytes)
+            opened = before
         else:
-            before = self._entry_stat(name)
             if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
                 raise OSError("unsafe directory member")
             descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self._descriptor)
@@ -232,12 +248,22 @@ class HeldOwnerDirectory:
                     path=self.path / name,
                     require_hardened=True,
                 ).decode("utf-8")
+                after = os.fstat(descriptor)
+                if (opened.st_size, opened.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                    raise OSError("directory member changed while read")
                 if not _same_file_identity(opened, self._entry_stat(name)):
                     raise OSError("directory member changed")
             finally:
                 os.close(descriptor)
         self.revalidate()
-        return result
+        current = self._entry_stat(name)
+        if (
+            not _same_file_identity(opened, current)
+            or (opened.st_size, opened.st_mtime_ns) != (current.st_size, current.st_mtime_ns)
+            or not opened.st_ino
+        ):
+            raise OSError("directory member changed while read")
+        return result, opened
 
     def write_text(self, name: str, value: str) -> None:
         """Atomically publish text under the retained namespace authority."""
@@ -303,6 +329,24 @@ class HeldOwnerDirectory:
         self.revalidate()
         destination.revalidate()
 
+    def move_no_replace(self, name: str, destination: HeldOwnerDirectory, target: str) -> None:
+        """Exclusively move a hardened member; never overwrite a destination.
+
+        Unsupported native/filesystem semantics fail closed. The caller owns
+        journalled member identity and authentication, including crash recovery.
+        """
+        name, target = self._name(name), self._name(target)
+        self.read_text_with_identity(name, max_bytes=1024 * 1024)
+        destination.revalidate()
+        if _is_windows():
+            _windows_replace_write_through(self.path / name, destination.path / target, replace=False)
+        else:
+            _posix_move_no_replace(self._descriptor, name, destination._descriptor, target)
+            os.fsync(destination._descriptor)
+            os.fsync(self._descriptor)
+        self.revalidate()
+        destination.revalidate()
+
     def unlink(self, name: str) -> None:
         """Durably remove a validated member; transaction ownership is caller policy."""
         name = self._name(name)
@@ -319,6 +363,24 @@ class HeldOwnerDirectory:
             os.unlink(actual, dir_fd=self._descriptor)
             os.fsync(self._descriptor)
         self.revalidate()
+
+
+def _posix_move_no_replace(source_fd: int, source: str, target_fd: int, target: str) -> None:
+    """Native descriptor-relative exclusive rename, with no fallback."""
+    if sys.platform == "darwin":
+        symbol, flags = "renameatx_np", 0x4  # RENAME_EXCL, Darwin sys/stdio.h
+    elif sys.platform.startswith("linux"):
+        symbol, flags = "renameat2", 0x1  # RENAME_NOREPLACE
+    else:
+        raise OSError(errno.ENOTSUP, "exclusive rename is unsupported")
+    library = ctypes.CDLL(None, use_errno=True)
+    function = getattr(library, symbol, None)
+    if function is None:
+        raise OSError(errno.ENOTSUP, "exclusive rename is unavailable")
+    function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    function.restype = ctypes.c_int
+    if function(source_fd, os.fsencode(source), target_fd, os.fsencode(target), flags):
+        raise OSError(ctypes.get_errno(), "exclusive rename failed")
 
 
 def _open_windows_directory(path: pathlib.Path) -> int:
@@ -829,12 +891,17 @@ def harden_directory(path: pathlib.Path, user: str | None = None) -> None:
     path.chmod(0o700)
 
 
-def _windows_replace_write_through(source: pathlib.Path, destination: pathlib.Path) -> None:
+def _windows_replace_write_through(
+    source: pathlib.Path,
+    destination: pathlib.Path,
+    *,
+    replace: bool = True,
+) -> None:
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
     move_file = kernel32.MoveFileExW
     move_file.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
     move_file.restype = ctypes.c_int
-    flags = _MOVEFILE_REPLACE_EXISTING | _MOVEFILE_WRITE_THROUGH
+    flags = _MOVEFILE_WRITE_THROUGH | (_MOVEFILE_REPLACE_EXISTING if replace else 0)
     if not move_file(str(source), str(destination), flags):
         raise ctypes.WinError(ctypes.get_last_error())
 

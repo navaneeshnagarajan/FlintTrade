@@ -29,6 +29,40 @@ NOW = datetime(2026, 9, 5, 9, 30, tzinfo=UTC)
 LATER = datetime(2026, 9, 5, 9, 31, tzinfo=UTC)
 CONNECTION_ID = UUID("00000000-0000-4000-8000-000000000001")
 OTHER_CONNECTION_ID = UUID("00000000-0000-4000-8000-000000000002")
+
+
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_factory_request_failures_have_input_only_type(operation):
+    from flinttrade_core import service_connections as contracts
+
+    current = create_service_connection({"provider_id": "llm:ollama", "label": "Local"}, clock_factory=lambda: NOW)
+    with pytest.raises(ValueError) as caught:
+        if operation == "create":
+            create_service_connection({"provider_id": "llm:ollama", "label": ""})
+        else:
+            update_service_connection(current, {"label": ""})
+    assert isinstance(caught.value, getattr(contracts, "ServiceConnectionInputError", ()))
+    assert caught.value.__cause__ is None
+
+
+@pytest.mark.parametrize("failure", ["uuid", "clock", "regression", "current"])
+def test_factory_authority_failures_are_not_input_rejections(failure):
+    from flinttrade_core import service_connections as contracts
+
+    payload = {"provider_id": "llm:ollama", "label": "Local"}
+    current = create_service_connection(payload, clock_factory=lambda: NOW)
+    with pytest.raises(ValueError) as caught:
+        if failure == "uuid":
+            create_service_connection(payload, uuid_factory=lambda: UUID(int=0))
+        elif failure == "clock":
+            create_service_connection(payload, clock_factory=lambda: datetime(2026, 9, 5))
+        elif failure == "regression":
+            update_service_connection(current, {}, clock_factory=lambda: NOW - timedelta(seconds=1))
+        else:
+            update_service_connection(object(), {})
+    assert not isinstance(caught.value, getattr(contracts, "ServiceConnectionInputError", ()))
+
+
 STORE_ID = UUID("00000000-0000-4000-8000-000000000003")
 BINDING_ID = UUID("00000000-0000-4000-8000-000000000004")
 SECRET_GENERATION_MARKER = 818181818181818181

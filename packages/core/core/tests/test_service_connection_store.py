@@ -542,7 +542,7 @@ def test_epoch_exhaustion_refuses_before_secret_install(tmp_path):
     before = store.read_snapshot()
     secret = tmp_path / "secrets" / "services" / first.body["connection_id"] / "credential"
     ciphertext = secret.read_bytes()
-    with pytest.raises(ValueError):
+    with pytest.raises(ConnectionStoreUnavailable):
         store.mutate(
             "update",
             {"credential": "5678"},
@@ -555,6 +555,104 @@ def test_epoch_exhaustion_refuses_before_secret_install(tmp_path):
     assert store.read_snapshot() == before
 
 
+@pytest.mark.parametrize(
+    "case,reason", [("input", "invalid_request"), ("missing", "not_found"), ("capacity", "connection_limit")]
+)
+def test_mutation_client_rejection_is_typed_closed_and_safe(tmp_path, monkeypatch, case, reason):
+    from flinttrade_core import service_connection_store as module
+
+    store = ServiceConnectionStore(tmp_path)
+    before = store.read_snapshot()
+    if case == "capacity":
+        monkeypatch.setattr(module, "MAX_CONNECTIONS", 0)
+    with pytest.raises(ValueError) as caught:
+        store.mutate(
+            "update" if case == "missing" else "create",
+            {} if case == "missing" else {**PAYLOAD, "label": "" if case == "input" else "Local"},
+            connection_id=str(uuid4()) if case == "missing" else None,
+            expected_etag=before.etag,
+            idempotency_key=str(uuid4()),
+            actor_context=ACTOR,
+        )
+    assert isinstance(caught.value, getattr(module, "ConnectionMutationRejected", ()))
+    assert caught.value.reason == reason
+    assert str(caught.value) == reason
+    assert repr(caught.value) == f"ConnectionMutationRejected({reason!r})"
+    assert caught.value.__cause__ is None
+    with pytest.raises(AttributeError):
+        caught.value.reason = "private input"
+    with pytest.raises(AttributeError):
+        del caught.value._reason
+    caught.value.__dict__["_reason"] = "private input"
+    caught.value.args = ("private input",)
+    assert str(caught.value) == reason
+    assert repr(caught.value) == f"ConnectionMutationRejected({reason!r})"
+    assert not (tmp_path / "workspace.json").exists()
+
+
+@pytest.mark.parametrize("kind", ["workspace", "receipt", "secret", "counter", "uuid", "clock"])
+def test_mutation_authority_failures_are_scoped_unavailable(tmp_path, monkeypatch, kind):
+    from flinttrade_core import service_connection_store as module
+    from flinttrade_core import service_connections as contracts
+    from datetime import datetime
+    from uuid import UUID
+
+    store = ServiceConnectionStore(tmp_path)
+    first = create(store)
+    etag, key = store.read_snapshot().etag, str(uuid4())
+    payload = {"label": "Updated"}
+    if kind == "workspace":
+        path = tmp_path / "workspace.json"
+        value = json.loads(path.read_text())
+        value["services"]["connections"][0]["label"] = ""
+        path.write_text(json.dumps(value))
+    elif kind == "receipt":
+        store.mutate(
+            "update",
+            payload,
+            connection_id=first.body["connection_id"],
+            expected_etag=etag,
+            idempotency_key=key,
+            actor_context=ACTOR,
+        )
+        path = tmp_path / "service-connections-state" / "receipts" / f"{key}.json"
+        path.write_text('{"private": "fixture diagnostic"}')
+    elif kind == "secret":
+        path = tmp_path / "secrets" / "services" / first.body["connection_id"] / "credential"
+        path.write_text('{"private": "fixture diagnostic"}')
+    elif kind == "counter":
+        path = tmp_path / "workspace.json"
+        value = json.loads(path.read_text())
+        value["workspace_generation"] = (1 << 63) - 1
+        path.write_text(json.dumps(value))
+    elif kind == "uuid":
+        monkeypatch.setattr(
+            module,
+            "create_service_connection",
+            lambda value: contracts.create_service_connection(value, uuid_factory=lambda: UUID(int=0)),
+        )
+    else:
+        monkeypatch.setattr(
+            module,
+            "update_service_connection",
+            lambda current, value: contracts.update_service_connection(
+                current, value, clock_factory=lambda: datetime(2026, 9, 5)
+            ),
+        )
+    with pytest.raises(ConnectionStoreUnavailable) as caught:
+        store.mutate(
+            "create" if kind == "uuid" else "update",
+            PAYLOAD if kind == "uuid" else payload,
+            connection_id=None if kind == "uuid" else first.body["connection_id"],
+            expected_etag=etag,
+            idempotency_key=key,
+            actor_context=ACTOR,
+        )
+    assert str(caught.value) == "service_connection_store_unavailable"
+    assert "fixture" not in repr(caught.value)
+    assert caught.value.__cause__ is None
+
+
 def test_server_uuid_collision_cannot_replace_an_existing_connection(tmp_path, monkeypatch):
     from flinttrade_core import service_connection_store as module
 
@@ -562,6 +660,6 @@ def test_server_uuid_collision_cannot_replace_an_existing_connection(tmp_path, m
     create(store)
     before = store.read_snapshot()
     monkeypatch.setattr(module, "create_service_connection", lambda _payload: before.connections[0])
-    with pytest.raises(ValueError):
+    with pytest.raises(ConnectionStoreUnavailable):
         create(store, label="Colliding create")
     assert store.read_snapshot() == before

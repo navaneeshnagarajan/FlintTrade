@@ -24,6 +24,11 @@ MAX_CONNECTION_LABEL_LENGTH = 128
 MAX_CONNECTION_MODEL_LENGTH = 256
 INT64_MAX = (1 << 63) - 1
 
+
+class ServiceConnectionInputError(ValueError):
+    """An invalid caller payload, distinct from trusted identity/clock errors."""
+
+
 _URI_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 _URI_REG_NAME_CHARACTERS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~!$&'()*+,;=")
 _URI_PATH_CHARACTERS = _URI_REG_NAME_CHARACTERS | frozenset(":@/")
@@ -373,23 +378,26 @@ def create_service_connection(
     clock_factory: Callable[[], datetime] = _utc_now,
 ) -> ServiceConnection:
     """Validate an operator payload and mint one inert server-owned connection."""
-    values = _payload_dict(payload)
-    _validate_create_fields(values)
-    profile = _profile(values.get("provider_id"))
-    label = _validate_text(
-        values.get("label"),
-        field_name="label",
-        maximum=MAX_CONNECTION_LABEL_LENGTH,
-        blank=False,
-    )
-    model = _validate_text(
-        values.get("model", profile.default_model),
-        field_name="model",
-        maximum=MAX_CONNECTION_MODEL_LENGTH,
-        blank=True,
-    )
-    endpoint = _validate_endpoint(profile, values.get("endpoint"), supplied="endpoint" in values)
-    auth_mode = _validate_auth_mode(profile, values.get("auth_mode"), supplied="auth_mode" in values)
+    try:
+        values = _payload_dict(payload)
+        _validate_create_fields(values)
+        profile = _profile(values.get("provider_id"))
+        label = _validate_text(
+            values.get("label"),
+            field_name="label",
+            maximum=MAX_CONNECTION_LABEL_LENGTH,
+            blank=False,
+        )
+        model = _validate_text(
+            values.get("model", profile.default_model),
+            field_name="model",
+            maximum=MAX_CONNECTION_MODEL_LENGTH,
+            blank=True,
+        )
+        endpoint = _validate_endpoint(profile, values.get("endpoint"), supplied="endpoint" in values)
+        auth_mode = _validate_auth_mode(profile, values.get("auth_mode"), supplied="auth_mode" in values)
+    except ValueError as error:
+        raise ServiceConnectionInputError(str(error)) from None
     connection_id = _validate_uuid4(uuid_factory(), field_name="connection_id")
     now = _validate_utc(clock_factory(), field_name="clock factory result")
     return ServiceConnection(
@@ -414,29 +422,33 @@ def update_service_connection(
     """Apply an immutable metadata patch and invalidate unsafe binding reuse."""
     if type(current) is not ServiceConnection:
         raise ValueError("current must be an exact ServiceConnection")
-    values = _payload_dict(payload)
-    _validate_update_fields(values)
+    current.__post_init__()
     profile = _profile(current.provider_id)
-    label = _validate_text(
-        values.get("label", current.label),
-        field_name="label",
-        maximum=MAX_CONNECTION_LABEL_LENGTH,
-        blank=False,
-    )
-    model = _validate_text(
-        values.get("model", current.model),
-        field_name="model",
-        maximum=MAX_CONNECTION_MODEL_LENGTH,
-        blank=True,
-    )
-    if "endpoint" in values:
-        endpoint = _validate_endpoint(profile, values["endpoint"], supplied=True)
-    else:
-        endpoint = current.endpoint
-    if "auth_mode" in values:
-        auth_mode = _validate_auth_mode(profile, values["auth_mode"], supplied=True)
-    else:
-        auth_mode = current.auth_mode
+    try:
+        values = _payload_dict(payload)
+        _validate_update_fields(values)
+        label = _validate_text(
+            values.get("label", current.label),
+            field_name="label",
+            maximum=MAX_CONNECTION_LABEL_LENGTH,
+            blank=False,
+        )
+        model = _validate_text(
+            values.get("model", current.model),
+            field_name="model",
+            maximum=MAX_CONNECTION_MODEL_LENGTH,
+            blank=True,
+        )
+        if "endpoint" in values:
+            endpoint = _validate_endpoint(profile, values["endpoint"], supplied=True)
+        else:
+            endpoint = current.endpoint
+        if "auth_mode" in values:
+            auth_mode = _validate_auth_mode(profile, values["auth_mode"], supplied=True)
+        else:
+            auth_mode = current.auth_mode
+    except ValueError as error:
+        raise ServiceConnectionInputError(str(error)) from None
     binding = current.secret_version if endpoint == current.endpoint and auth_mode == current.auth_mode else None
     updated_at = _validate_utc(clock_factory(), field_name="clock factory result")
     if updated_at < current.updated_at:

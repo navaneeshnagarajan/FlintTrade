@@ -152,6 +152,25 @@ def directory_pin(value: os.stat_result, previous: dict[str, object] | None = No
     return result
 
 
+def member_identity(value: os.stat_result) -> dict[str, int]:
+    """Stable across a rename; content is authenticated separately."""
+    identity = {"device": value.st_dev, "object": value.st_ino, "size": value.st_size, "mtime_ns": value.st_mtime_ns}
+    validate_member_identity(identity)
+    return identity
+
+
+def validate_member_identity(value: object) -> None:
+    if (
+        type(value) is not dict
+        or set(value) != {"device", "object", "size", "mtime_ns"}
+        or any(type(item) is not int for item in value.values())
+        or value["device"] < 0
+        or value["object"] <= 0
+        or value["size"] < 0
+    ):
+        raise ValueError("invalid claimed member identity")
+
+
 def validate_journal(value: dict[str, Any]) -> None:
     """Reject unknown, ambiguous or counter-regressing recovery instructions."""
     if set(value) != {
@@ -177,6 +196,7 @@ def validate_journal(value: dict[str, Any]) -> None:
         "recovery",
         "result",
         "secret_change",
+        "claims",
     }:
         raise ValueError("invalid journal members")
     if type(value["schema"]) is not int or value["schema"] != 1 or value["phase"] not in {"prepared", "committed"}:
@@ -241,6 +261,13 @@ def validate_journal(value: dict[str, Any]) -> None:
         }:
             raise ValueError("invalid recovery decision")
         uuid_text(recovery["witness"])
+        for name in ("before_digest", "after_digest"):
+            if (
+                type(recovery[name]) is not str
+                or len(recovery[name]) != 64
+                or any(c not in "0123456789abcdef" for c in recovery[name])
+            ):
+                raise ValueError("invalid recovery slice proof")
         if (
             type(recovery["after_epoch"]) is not int
             or recovery["after_epoch"]
@@ -252,15 +279,44 @@ def validate_journal(value: dict[str, Any]) -> None:
         ):
             raise ValueError("invalid recovery epoch")
         binding = parse_version(recovery["after_binding"])
-        if binding is not None and (
-            binding.connection_ref != identity
-            or binding.store_incarnation != new.store_incarnation
-            or binding.binding_id != new.binding_id
-            or binding.generation < new.generation
-        ):
-            raise ValueError("invalid recovery binding")
+        if value["secret_change"]:
+            if binding is None or (
+                binding.connection_ref != identity
+                or binding.store_incarnation != new.store_incarnation
+                or binding.binding_id != new.binding_id
+                or binding.generation != new.generation + 1
+                or binding.present != (old.present if old else False)
+            ):
+                raise ValueError("invalid compensation binding")
+        elif binding != old:
+            raise ValueError("invalid unchanged recovery binding")
         if recovery["after_record"] != value["before_record"]:
             raise ValueError("invalid recovery logical record")
+        if recovery["after_record"] is not None:
+            parse_record(recovery["after_record"], binding)
+    claims = value["claims"]
+    if type(claims) is not dict or set(claims) - {"new", "recovery"}:
+        raise ValueError("invalid claim phases")
+    for phase, claim in claims.items():
+        if type(claim) is not dict or set(claim) != {"identity", "expected", "intended"}:
+            raise ValueError("invalid claim intent")
+        validate_member_identity(claim["identity"])
+        expected, intended = parse_version(claim["expected"]), parse_version(claim["intended"])
+        if not value["secret_change"] or expected is None or intended is None:
+            raise ValueError("claim lacks binding authority")
+        if phase == "new":
+            if expected != old or intended != new:
+                raise ValueError("foreign forward claim")
+        elif (
+            expected != new
+            or intended.connection_ref != new.connection_ref
+            or intended.store_incarnation != new.store_incarnation
+            or intended.binding_id != new.binding_id
+            or intended.generation != new.generation + 1
+            or intended.present != (old.present if old else False)
+            or (recovery is not None and claim["intended"] != recovery["after_binding"])
+        ):
+            raise ValueError("foreign compensation claim")
 
 
 class TransactionFiles:
@@ -362,6 +418,11 @@ class TransactionFiles:
     @staticmethod
     def read(directory: HeldOwnerDirectory, name: str, limit: int = MAX_ENVELOPE_BYTES) -> dict[str, Any]:
         return decode(directory.read_text(name, max_bytes=limit))
+
+    @staticmethod
+    def read_identity(directory: HeldOwnerDirectory, name: str) -> tuple[dict[str, Any], dict[str, int]]:
+        text, observed = directory.read_text_with_identity(name, max_bytes=MAX_ENVELOPE_BYTES)
+        return decode(text), member_identity(observed)
 
     @staticmethod
     def write(directory: HeldOwnerDirectory, name: str, value: object, limit: int = MAX_ENVELOPE_BYTES) -> None:
