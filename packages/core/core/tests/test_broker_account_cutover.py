@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+
 import asyncio
 from copy import deepcopy
 import logging
@@ -16,7 +19,6 @@ from flinttrade_gateway.auth import gateway_bp
 from flinttrade_gateway.credentials_rotation import CredentialsRotator
 from flinttrade_gateway.native_login import establish_native_session, establish_native_sessions
 from flinttrade_gateway.registry import BrokerRegistry
-from flinttrade_gateway.exceptions import BrokerNotFoundError
 
 
 class Forbidden:
@@ -229,27 +231,28 @@ def test_standalone_rotation_blueprint_denies_before_body_and_rotator(endpoint):
     assert forbidden.calls == []
 
 
-def test_only_exact_default_openalgo_session_is_published():
+def test_only_exact_default_openalgo_session_is_published(tmp_path):
     from flinttrade_core.app import build_broker_router
-
-    registry = BrokerRegistry()
-    build_broker_router(
-        brokers_config={
-            "registered": ["openalgo:default", "openalgo:other"],
-            "execution": {"default": "openalgo:default"},
-            "data": {
-                "ticks": "openalgo:default",
-                "historical": "openalgo:default",
-                "option_chains": "openalgo:default",
-            },
-            "account_acls": {"openalgo": {"default": ["synthetic"], "other": ["synthetic"]}},
-        },
-        registry=registry,
-        openalgo_client=object(),
-    )
-    assert registry.get_session_for("openalgo", "default").account_id == "default"
-    with pytest.raises(BrokerNotFoundError):
-        registry.get_session_for("openalgo", "other")
+    from flinttrade_core.broker_identity import BrokerSelector
+    from flinttrade_core.config import Settings
+    from flinttrade_core.openalgo_client import OpenAlgoClient
+    from flinttrade_core.workspace_migrations import compare_and_swap_workspace
+    fixture = RegistryFixture(tmp_path)
+    def configure(config):
+        config["openalgo"]["api_key"] = "synthetic-key"
+        config["brokers"]["registered"] = ["openalgo:default", "openalgo:other"]
+    snapshot = compare_and_swap_workspace(tmp_path, fixture.workspace.version, configure)
+    cfg = snapshot.as_dict()["openalgo"]
+    client = OpenAlgoClient(Settings(openalgo_host=cfg["host"], openalgo_api_key=cfg["api_key"],
+        openalgo_port=int(cfg["port"]), openalgo_ws_port=int(cfg["ws_port"])))
+    try:
+        build_broker_router(fixture.registry, snapshot.as_dict()["brokers"], openalgo_client=client,
+            registry_publication_owner=fixture.owner, workspace_snapshot=snapshot, workspace_path=tmp_path)
+        assert fixture.registry.snapshot_exact_state(BrokerSelector("openalgo", "default")).status == "connected"
+        assert fixture.registry.snapshot_exact_state(BrokerSelector("openalgo", "other")) is None
+    finally:
+        client.close_sync()
+        fixture.close()
 
 
 @pytest.mark.parametrize("weekly", [False, True])
@@ -497,37 +500,34 @@ def test_real_factory_retains_non_cutover_content_type_validation(path):
     assert response.json == {"status": "error", "message": "Content-Type must be application/json"}
 
 
-@pytest.mark.parametrize("invalid", [False, True])
-def test_published_native_read_remains_available_and_evicts_only_invalid_session(invalid):
-    from types import SimpleNamespace
 
+_fixture_spec = importlib.util.spec_from_file_location("_registry_fixtures", Path(__file__).resolve().parents[4] / "tests" / "registry_fixtures.py")
+_fixture_module = importlib.util.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(_fixture_module)
+RegistryFixture = _fixture_module.RegistryFixture
+
+
+def test_published_native_read_refuses_until_verified_read_port_cutover(tmp_path):
+    from flinttrade_gateway.brokers._base import Session
+    fixture = RegistryFixture(tmp_path)
+    calls = []
     class Adapter:
         async def profile(self, session):
-            if invalid:
-                raise RuntimeError("401 token expired")
-            return {"status": "ok"}
-
+            calls.append(session)
+            raise AssertionError("provider must not run")
     app = Flask(__name__)
     app.register_blueprint(native_account_routes.native_accounts_bp)
-    registry = BrokerRegistry()
-    session = SimpleNamespace(account_id="synthetic", expires_at=4_102_444_800.0)
-    other = SimpleNamespace(account_id="other", expires_at=4_102_444_800.0)
-    registry.put_session("upstox", "synthetic", session)
-    registry.put_session("upstox", "other", other)
+    for account in ("synthetic", "other"):
+        fixture.publish("upstox", account, Session("secret", 4102444800.0, account, "upstox"))
+    before = fixture.registry.list_exact_states()
     forbidden = Forbidden()
-    app.config.update(REGISTRY=registry, NATIVE_ADAPTERS={"upstox": Adapter()}, CREDENTIAL_STORE=forbidden)
+    app.config.update(REGISTRY=fixture.registry, NATIVE_ADAPTERS={"upstox": Adapter()}, CREDENTIAL_STORE=forbidden)
     response = app.test_client().get("/api/v1/native/accounts/upstox/synthetic/profile")
-    assert response.status_code == (409 if invalid else 200)
-    assert registry.get_session_for("upstox", "other") is other
-    if invalid:
-        with pytest.raises(BrokerNotFoundError):
-            registry.get_session_for("upstox", "synthetic")
-        assert app.config["NATIVE_SESSION_STATUS"] == {
-            "upstox:synthetic": "Broker session expired or invalid; re-login required.",
-        }
-    else:
-        assert registry.get_session_for("upstox", "synthetic") is session
-    assert forbidden.calls == []
+    assert response.status_code == 409
+    assert response.json == {"status": "error", "message": "Native broker session is unavailable."}
+    assert fixture.registry.list_exact_states() == before
+    assert forbidden.calls == calls == []
+    fixture.close()
 
 
 def test_ditto_default_manager_retains_reads_and_fenced_metadata_only_changes(tmp_path, monkeypatch):

@@ -13,16 +13,13 @@ import pytest
 
 from flinttrade_core.models import Order
 from flinttrade_ditto.account_manager import BrokerAccount
-from flinttrade_ditto.mirror import MirrorRiskError, PositionMirror
+from flinttrade_ditto.mirror import MirrorRiskError
 from flinttrade_ditto.runtime import DittoCapabilityUnavailable, DittoRouterOwner, DittoRuntime
 from flinttrade_engine.emergency_intents import InMemoryEmergencyIntentJournal
-from flinttrade_engine.local_state_provider import OrderLifecycleLedger
 from flinttrade_engine.safety import (
-    EMERGENCY_INTENT_SOURCE,
     EmergencyDispatchResult,
     EmergencyVerbOutcome,
     EmergencyWritePolicy,
-    SafetyContext,
     set_safety_gate_secret,
 )
 
@@ -1741,97 +1738,37 @@ def _production_router_owner(
     return owner, clients, write_admissions
 
 
-def test_production_ditto_owner_mints_and_consumes_account_bound_safety_context(
+def test_production_ditto_owner_denies_before_client_allocation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
 ) -> None:
-    from flinttrade_engine import safety as safety_module
+    from flinttrade_core.broker_account_cutover import BrokerAccountCutoverUnavailable
 
-    account = _account("target")
-    lifecycle_store = OrderLifecycleLedger(
-        ledger_path=tmp_path / "order-lifecycle.sqlite3"
-    )
-    owner, clients, write_admissions = _production_router_owner(
-        monkeypatch,
-        account,
-        lifecycle_store=lifecycle_store,
-    )
-    minted: list[SafetyContext] = []
-    real_gate_order = safety_module.gate_order
-
-    def capture_gate_order(*args: Any, **kwargs: Any) -> SafetyContext:
-        context = real_gate_order(*args, **kwargs)
-        minted.append(context)
-        return context
-
-    monkeypatch.setattr(safety_module, "gate_order", capture_gate_order)
-    acknowledgements: list[tuple[Any, str]] = []
-
-    class _Lease:
-        def reserve(self, _order: Order, _positions: list[Any]) -> object:
-            return object()
-
-        def acknowledge(self, reservation: object, order_id: str) -> None:
-            acknowledgements.append((reservation, order_id))
-
-    @contextmanager
-    def admit_order(_account_id: str, _order: Order):
-        yield _Lease(), []
-
-    mirror = PositionMirror(
-        [account],
-        broker_router=owner.router,
-        actor_id="operator-1",
-        actor_type="human",
-        trading_mode="live",
-        run_router_call=owner.run_router_call,
-        admit_order=admit_order,
-    )
-    result = mirror.execute(
-        Order(
-            symbol="RELIANCE",
-            exchange="NSE",
-            action="BUY",
-            product="MIS",
-            quantity="2",
-            pricetype="MARKET",
-        )
-    )
-
-    assert result.all_succeeded is True
-    assert len(minted) == 1
-    assert isinstance(minted[0], SafetyContext)
-    assert minted[0].adapter_id == "openalgo"
-    assert minted[0].account_id == "target"
-    assert minted[0].actor_type == "human"
-    assert [call[0] for call in clients[0].calls] == ["place_order"]
-    assert write_admissions == [(False, "openalgo:target")]
-    assert acknowledgements and acknowledgements[0][1] == "DITTO-OID-1"
-    attempts = lifecycle_store.list_dispatch_attempts()
-    assert attempts[0]["account_id"].startswith("ditto-")
-    assert attempts[0]["account_id"] != "target"
-    assert owner.close(timeout=1.0) is True
-    assert clients[0].closed is True
+    allocations = []
+    def forbidden(*args, **kwargs):
+        allocations.append("client")
+        raise AssertionError("client allocation before cutover guard")
+    monkeypatch.setattr("flinttrade_core.openalgo_client.OpenAlgoClient", forbidden)
+    with pytest.raises(BrokerAccountCutoverUnavailable):
+        DittoRouterOwner([_account("target")], "operator-1",
+            write_admission=lambda *_: None, intent_journal=object(), safety_system=object())
+    assert allocations == []
 
 
-def test_production_ditto_owner_exposes_only_live_reconciliation_targets(
+def test_production_ditto_owner_denies_before_account_enumeration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    account = _account("target")
-    owner, clients, _write_admissions = _production_router_owner(monkeypatch, account)
+    from flinttrade_core.broker_account_cutover import BrokerAccountCutoverUnavailable
 
-    targets = owner.reconciliation_targets()
-
-    assert len(targets) == 1
-    adapter, session = targets[0]
-    assert adapter.broker_id == "openalgo"
-    assert session.adapter_id == "openalgo"
-    assert session.account_id.startswith("ditto-")
-    assert session.account_id != "target"
-
-    assert owner.close(timeout=1.0) is True
-    assert clients[0].closed is True
-    assert owner.reconciliation_targets() == []
+    allocations = []
+    def forbidden(*args, **kwargs):
+        allocations.append("client")
+        raise AssertionError("client allocation before cutover guard")
+    monkeypatch.setattr("flinttrade_core.openalgo_client.OpenAlgoClient", forbidden)
+    with pytest.raises(BrokerAccountCutoverUnavailable):
+        DittoRouterOwner([_account("target")], "operator-1",
+            write_admission=lambda *_: None, intent_journal=object(), safety_system=object())
+    assert allocations == []
 
 
 def test_runtime_exposes_current_owner_reconciliation_targets() -> None:
@@ -1845,47 +1782,17 @@ def test_runtime_exposes_current_owner_reconciliation_targets() -> None:
     assert runtime.reconciliation_targets() == expected
 
 
-def test_production_ditto_emergency_owner_uses_gated_dispatcher_and_real_router(
+def test_production_ditto_emergency_owner_denies_before_runtime_allocation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from flinttrade_engine import safety as safety_module
+    from flinttrade_core.broker_account_cutover import BrokerAccountCutoverUnavailable
 
-    account = _account("target")
-    owner, clients, write_admissions = _production_router_owner(
-        monkeypatch,
-        account,
-        positions=[
-            {
-                "symbol": "RELIANCE",
-                "exchange": "NSE",
-                "product": "MIS",
-                "quantity": "2",
-            }
-        ],
-    )
-    minted: list[SafetyContext] = []
-    real_gate_broker_write = safety_module.gate_broker_write
-
-    def capture_gate_broker_write(*args: Any, **kwargs: Any) -> SafetyContext:
-        context = real_gate_broker_write(*args, **kwargs)
-        minted.append(context)
-        return context
-
-    monkeypatch.setattr(safety_module, "gate_broker_write", capture_gate_broker_write)
-    result = owner.dispatch_kill_all(
-        actor_id="operator-1",
-        jti="jwt-1",
-        reason="Operator confirmed Ditto flatten",
-    )
-
-    assert result.complete is True
-    assert len(minted) == 1
-    assert isinstance(minted[0], SafetyContext)
-    assert minted[0].adapter_id == "openalgo"
-    assert minted[0].account_id == "target"
-    assert minted[0].actor_type == "human"
-    assert minted[0].intent_source == EMERGENCY_INTENT_SOURCE
-    assert [call[0] for call in clients[0].calls].count("place_order") == 1
-    assert write_admissions == [(True, "openalgo:target")]
-    assert owner.close(timeout=1.0) is True
-    assert clients[0].closed is True
+    allocations = []
+    def forbidden(*args, **kwargs):
+        allocations.append("client")
+        raise AssertionError("client allocation before cutover guard")
+    monkeypatch.setattr("flinttrade_core.openalgo_client.OpenAlgoClient", forbidden)
+    with pytest.raises(BrokerAccountCutoverUnavailable):
+        DittoRouterOwner([_account("target")], "operator-1",
+            write_admission=lambda *_: None, intent_journal=object(), safety_system=object())
+    assert allocations == []

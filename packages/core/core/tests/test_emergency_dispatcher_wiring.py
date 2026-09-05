@@ -380,6 +380,10 @@ def test_background_l5_scope_blocks_router_rebuild_until_every_verb_finishes(
 
     monkeypatch.setattr(safety_module, "gate_broker_write", lambda *_args, **_kwargs: object())
     app = Flask("emergency-parent-rebuild-race")
+    from flinttrade_gateway.registry import create_owned_registry
+
+    registry, owner = create_owned_registry()
+    app.extensions["flinttrade.registry_publication_owner"] = owner
     old_router = BlockingRouter()
     candidate_router = _Router(("upstox:replacement",))
     safety = SafetySystem(reservation_db_path=tmp_path / "order-exposure-reservations.sqlite")
@@ -422,7 +426,7 @@ def test_background_l5_scope_blocks_router_rebuild_until_every_verb_finishes(
 
     def rebuild_router() -> None:
         rebuild_started.set()
-        rebuild["result"] = app_module.configure_broker_router(app, object(), object(), object())
+        rebuild["result"] = app_module.configure_broker_router(app, registry, object(), object())
         rebuild_finished.set()
 
     activation_thread.start()

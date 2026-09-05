@@ -1811,9 +1811,10 @@ def _native_account_statuses() -> list[dict[str, Any]]:
         expires_at = None
         if registry is not None:
             try:
-                session = registry.get_session_for(adapter_id, account_id)
-                has_session = True
-                expires_at = getattr(session, "expires_at", None)
+                from flinttrade_core.broker_identity import BrokerSelector
+                state = registry.snapshot_exact_state(BrokerSelector(adapter_id, account_id))
+                has_session = state is not None and state.status == "connected"
+                expires_at = state.expires_at if has_session else None
             except Exception:  # noqa: BLE001 - no registered live session
                 has_session = False
         connectable = bool(info.connectable)

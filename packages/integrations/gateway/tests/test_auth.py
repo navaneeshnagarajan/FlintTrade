@@ -42,7 +42,7 @@ class MockRegistry:
         from flinttrade_gateway.adapter import BROKER_CATALOG
         if broker not in BROKER_CATALOG:
             raise BrokerNotFoundError(f"Broker '{broker}' not found in catalog.")
-        info = BrokerAccountInfo(
+        info = BrokerAccountInfo(adapter_id="openalgo",
             account_id=account_id,
             broker=broker,
             label=label,

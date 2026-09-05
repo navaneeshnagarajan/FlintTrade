@@ -59,8 +59,10 @@ def test_broker_interface_module_is_retired() -> None:
 
 def test_public_openalgo_adapter_is_async_and_router_guarded() -> None:
     """The package-level OpenAlgo surface is the async BrokerAdapter, not a sync shim."""
-    adapter = flinttrade_gateway.OpenAlgoAdapter()
-    assert isinstance(adapter, BrokerAdapter)
+    adapter = flinttrade_gateway.OpenAlgoAdapter
+    assert issubclass(adapter, BrokerAdapter)
+    with pytest.raises(TypeError):
+        adapter()  # A concrete sealed-session resolver is mandatory.
     assert inspect.iscoroutinefunction(adapter.place_order)
     assert "_router_token" in inspect.signature(adapter.place_order).parameters
 

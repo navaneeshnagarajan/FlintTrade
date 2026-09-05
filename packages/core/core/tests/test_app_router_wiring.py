@@ -9,6 +9,13 @@ and leaves BROKER_ROUTER unset rather than bricking the app.
 
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+from flinttrade_core.broker_identity import BrokerSelector
+from flinttrade_gateway.brokers._base import Session
+from flinttrade_core.workspace_migrations import read_workspace_snapshot
+
 from collections.abc import Callable
 import threading
 from types import SimpleNamespace
@@ -24,6 +31,60 @@ from flinttrade_gateway.registry import BrokerRegistry
 from flinttrade_gateway.router import BrokerRouter
 from flinttrade_gateway.routing_config import RoutingConfig, RoutingConfigError
 from flinttrade_gateway.session_provider import AuthenticatingSessionProvider
+
+
+
+_fixture_spec = importlib.util.spec_from_file_location("_registry_fixtures", Path(__file__).resolve().parents[4] / "tests" / "registry_fixtures.py")
+_fixture_module = importlib.util.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(_fixture_module)
+RegistryFixture = _fixture_module.RegistryFixture
+
+
+_BRIDGE_FIXTURES = []
+
+
+@pytest.fixture(autouse=True)
+def _close_bridge_fixtures():
+    yield
+    for fixture, client in _BRIDGE_FIXTURES:
+        client.close_sync()
+        fixture.close()
+    _BRIDGE_FIXTURES.clear()
+
+
+def _bridge_fixture(path, app=None):
+    from flinttrade_core.config import Settings
+    from flinttrade_core.openalgo_client import OpenAlgoClient
+    fixture = RegistryFixture(path)
+    config = read_workspace_snapshot(path).as_dict()["openalgo"]
+    client = OpenAlgoClient(Settings(openalgo_host=config["host"], openalgo_api_key=config["api_key"],
+        openalgo_port=int(config["port"]), openalgo_ws_port=int(config["ws_port"])))
+    if app is not None:
+        app.extensions["flinttrade.registry_publication_owner"] = fixture.owner
+    _BRIDGE_FIXTURES.append((fixture, client))
+    return fixture, client
+
+
+def _build_bridge(path, **kwargs):
+    from flinttrade_core.workspace import Workspace
+    workspace = Workspace(path)
+    workspace.initialise()
+    workspace.set("openalgo.api_key", "synthetic-key")
+    fixture, client = _bridge_fixture(path)
+    snapshot = read_workspace_snapshot(path)
+    router = build_broker_router(fixture.registry, snapshot.as_dict()["brokers"],
+        openalgo_client=client, workspace_snapshot=snapshot, workspace_path=path,
+        registry_publication_owner=fixture.owner, **kwargs)
+    return router, fixture
+
+
+def _owned_registry(app):
+    from flinttrade_gateway.registry import create_owned_registry
+    if "TEST_REGISTRY" not in app.config:
+        registry, owner = create_owned_registry()
+        app.config["TEST_REGISTRY"] = registry
+        app.extensions["flinttrade.registry_publication_owner"] = owner
+    return app.config["TEST_REGISTRY"]
 
 
 def _mark_router_prerequisites_ready(app: Flask, *, admission: object | None = None) -> object:
@@ -53,27 +114,26 @@ def _mark_router_prerequisites_ready(app: Flask, *, admission: object | None = N
     ("brokers.data.ticks", "openalgo:sibling", True),
     ("openalgo.api_key", "fixture-key", True), ("openalgo.host", "https://fixture.invalid", True),
 ])
-def test_app_sessions_follow_broker_authority_and_rebind_every_sibling(tmp_path, monkeypatch, key, value, stales):
+def test_app_rebuild_never_rebinds_managed_siblings(tmp_path, monkeypatch, key, value, stales):
     import flinttrade_core.app as app_module
     from flinttrade_core.workspace import Workspace
-    from flinttrade_core.exceptions import SafetyBypassError
     from flinttrade_engine.request_context import RequestContext
 
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     ws = Workspace(tmp_path)
     ws.initialise()
     def configure_accounts(config):
+        config["openalgo"]["api_key"] = "initial-key"
         config["brokers"]["registered"] = ["openalgo:default", "openalgo:sibling"]
         config["brokers"]["account_acls"] = {"openalgo": {"default": ["operator"], "sibling": ["operator"]}}
     ws.update(configure_accounts)
     app = Flask("workspace-liveness")
     _mark_router_prerequisites_ready(app)
     monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
-    registry = BrokerRegistry()
-    client = object()
-    # Synthetic pre-existing session: cutover may create only openalgo:default.
-    registry.put_session("openalgo", "sibling", SimpleNamespace(account_id="sibling", is_connected=True))
-    assert app_module.configure_broker_router(app, registry, None, client)
+    exact, client = _bridge_fixture(tmp_path, app)
+    registry = exact.registry
+    exact.publish("openalgo", "sibling", Session("synthetic", 4102444800.0, "sibling", "openalgo"), client=object())
+    assert app_module.configure_broker_router(app, registry, exact.store, client)
     old = app.config["BROKER_ROUTER"]
     context = RequestContext(jti="fixture", actor_type="human", actor_id="operator", mode="explore")
     assert old._session_provider(context, "openalgo", "sibling").account_id == "sibling"
@@ -82,16 +142,22 @@ def test_app_sessions_follow_broker_authority_and_rebind_every_sibling(tmp_path,
     if not stales:
         assert old._session_provider(context, "openalgo", "sibling").account_id == "sibling"
         return
-    with pytest.raises(SafetyBypassError, match="workspace"):
+    with pytest.raises(RegistrySessionUnavailable):
         old._session_provider(context, "openalgo", "sibling")
-    assert app_module.configure_broker_router(app, registry, None, client)
+    if key.startswith("openalgo."):
+        from flinttrade_core.config import Settings
+        cfg = read_workspace_snapshot(tmp_path).as_dict()["openalgo"]
+        client.reconfigure(Settings(openalgo_host=cfg["host"], openalgo_api_key=cfg["api_key"],
+            openalgo_port=int(cfg["port"]), openalgo_ws_port=int(cfg["ws_port"])))
+    assert app_module.configure_broker_router(app, registry, exact.store, client)
     rebound = app.config["BROKER_ROUTER"]
     assert rebound is not old
-    for account in ("default", "sibling"):
-        assert rebound._session_provider(context, "openalgo", account).account_id == account
+    assert rebound._session_provider(context, "openalgo", "default").account_id == "default"
+    with pytest.raises(RegistrySessionUnavailable):
+        rebound._session_provider(context, "openalgo", "sibling")
 
 
-def test_rate_limit_endpoint_republishes_every_workspace_broker_session(tmp_path, monkeypatch):
+def test_rate_limit_endpoint_invalidates_managed_siblings(tmp_path, monkeypatch):
     import flinttrade_core.app as app_module
     from flinttrade_core.workspace import Workspace
     from flinttrade_engine.request_context import RequestContext
@@ -101,6 +167,7 @@ def test_rate_limit_endpoint_republishes_every_workspace_broker_session(tmp_path
     ws = Workspace(tmp_path)
     ws.initialise()
     def accounts(config):
+        config["openalgo"]["api_key"] = "initial-key"
         config["brokers"]["registered"] = ["openalgo:default", "openalgo:sibling"]
         config["brokers"]["account_acls"] = {"openalgo": {"default": ["operator"], "sibling": ["operator"]}}
     ws.update(accounts)
@@ -109,20 +176,20 @@ def test_rate_limit_endpoint_republishes_every_workspace_broker_session(tmp_path
     app.register_blueprint(gateway_bp)
     _mark_router_prerequisites_ready(app)
     monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
-    registry = BrokerRegistry()
-    client = object()
-    # Retain Task 4 rebind coverage without allowing new compatibility selectors.
-    registry.put_session("openalgo", "sibling", SimpleNamespace(account_id="sibling", is_connected=True))
-    app.config.update(REGISTRY=registry, CREDENTIAL_STORE=None, CLIENT=client)
-    assert app_module.configure_broker_router(app, registry, None, client)
+    exact, client = _bridge_fixture(tmp_path, app)
+    registry = exact.registry
+    exact.publish("openalgo", "sibling", Session("synthetic", 4102444800.0, "sibling", "openalgo"), client=object())
+    app.config.update(REGISTRY=registry, CREDENTIAL_STORE=exact.store, CLIENT=client)
+    assert app_module.configure_broker_router(app, registry, exact.store, client)
     old = app.config["BROKER_ROUTER"]
     response = app.test_client().put("/v1/rate-limits", json={"broker_id": "openalgo", "order": 3})
     assert response.status_code == 200
     rebound = app.config["BROKER_ROUTER"]
     assert rebound is not old
     context = RequestContext(jti="fixture", actor_type="human", actor_id="operator", mode="explore")
-    for account in ("default", "sibling"):
-        assert rebound._session_provider(context, "openalgo", account).account_id == account
+    assert rebound._session_provider(context, "openalgo", "default").account_id == "default"
+    with pytest.raises(RegistrySessionUnavailable):
+        rebound._session_provider(context, "openalgo", "sibling")
     assert rebound.rate_limiter.snapshot()["openalgo"]["order"] == 3.0
     assert rebound._session_provider.broker_workspace_version.generation == 3
 
@@ -151,7 +218,7 @@ def test_router_rebuild_rechecks_only_broker_authority_and_contains_read_failure
             workspace.config_path.unlink()
         return candidate
     monkeypatch.setattr(app_module, "build_broker_router", racing_build)
-    assert app_module.configure_broker_router(app, BrokerRegistry(), None, object()) is expected
+    assert app_module.configure_broker_router(app, _owned_registry(app), None, None) is expected
     assert (app.config.get("BROKER_ROUTER") is not None) is expected
 
 
@@ -212,7 +279,7 @@ def test_configure_broker_router_revokes_old_generation_before_publish(
     monkeypatch.setattr(app_module, "build_broker_router", lambda *_args, **_kwargs: candidate)
     monkeypatch.setattr(app_module, "_snapshot_brokers_bak", lambda _config: None)
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is True
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is True
 
     old_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
     assert app.config["BROKER_ROUTER"] is candidate
@@ -244,8 +311,8 @@ def test_configure_broker_router_forwards_composite_safety_admission_to_every_ge
     monkeypatch.setattr(app_module, "build_broker_router", build)
     monkeypatch.setattr(app_module, "_snapshot_brokers_bak", lambda _config: None)
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is True
-    assert app_module.configure_broker_router(app, object(), object(), object()) is True
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is True
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is True
 
     assert build.call_count == 2
     assert all(
@@ -281,7 +348,7 @@ def test_configure_broker_router_binds_lifecycle_audit_receipt_verifier(
     monkeypatch.setattr(app_module, "build_broker_router", MagicMock(return_value=router))
     monkeypatch.setattr(app_module, "_snapshot_brokers_bak", lambda _config: None)
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is True
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is True
 
     lifecycle_store.set_audit_receipt_verifier.assert_called_once_with(
         audit.verify_event_receipt
@@ -305,7 +372,7 @@ def test_configure_broker_router_build_failure_revokes_and_fails_closed(
         MagicMock(side_effect=ValueError("invalid routing")),
     )
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
 
     old_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
     assert app.config["BROKER_ROUTER"] is None
@@ -334,7 +401,7 @@ def test_configure_broker_router_refuses_an_unhealthy_emergency_journal(
     monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: ({}, {}))
     monkeypatch.setattr(app_module, "build_broker_router", build)
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
 
     old_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
     build.assert_not_called()
@@ -364,7 +431,7 @@ def test_configure_broker_router_refuses_an_unhealthy_daily_pnl_store(
     )
     monkeypatch.setattr(app_module, "build_broker_router", build)
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
 
     old_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
     build.assert_not_called()
@@ -386,7 +453,7 @@ def test_configure_broker_router_refuses_invalid_durable_safety_config(
     app.config["SAFETY_CONFIG_READY"] = False
     monkeypatch.setattr(app_module, "build_broker_router", build)
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
 
     old_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
     build.assert_not_called()
@@ -408,7 +475,7 @@ def test_configure_broker_router_refuses_non_durable_order_reservations(
     )
     monkeypatch.setattr(app_module, "build_broker_router", build)
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
 
     build.assert_not_called()
     assert app.config.get("BROKER_ROUTER") is None
@@ -429,7 +496,7 @@ def test_configure_broker_router_refuses_publication_without_emergency_runtime(
     build = MagicMock(return_value=object())
     monkeypatch.setattr(app_module, "build_broker_router", build)
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
 
     build.assert_not_called()
     assert app.config.get("BROKER_ROUTER") is None
@@ -477,7 +544,7 @@ def test_configure_broker_router_requires_explicit_journal_and_safety_readiness(
     build = MagicMock(return_value=object())
     monkeypatch.setattr(app_module, "build_broker_router", build)
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
 
     build.assert_not_called()
     assert app.config.get("BROKER_ROUTER") is None
@@ -506,7 +573,7 @@ def test_configure_broker_router_snapshots_before_publication_and_fails_closed(
 
     monkeypatch.setattr(app_module, "_snapshot_brokers_bak", fail_snapshot)
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
     assert app.config.get("BROKER_ROUTER") is None
 
 
@@ -526,7 +593,7 @@ def test_configure_broker_router_drain_timeout_never_publishes_candidate(
     )
     monkeypatch.setattr(app_module, "build_broker_router", lambda *_args, **_kwargs: candidate)
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
 
     old_router.revoke_and_drain.assert_called_once_with(timeout=0.25)
     assert app.config["BROKER_ROUTER"] is None
@@ -575,7 +642,7 @@ def test_configure_broker_router_times_out_waiting_for_rebuild_lease(
     monkeypatch.setattr(app_module, "build_broker_router", build)
     completed, results = _call_while_lock_is_held(
         lock,
-        lambda: app_module.configure_broker_router(app, object(), object(), object()),
+        lambda: app_module.configure_broker_router(app, _owned_registry(app), object(), object()),
     )
 
     assert completed is True
@@ -609,12 +676,12 @@ def test_configure_broker_router_retries_retained_generation_before_build(
     monkeypatch.setattr(app_module, "build_broker_router", build)
     monkeypatch.setattr(app_module, "_snapshot_brokers_bak", lambda _config: None)
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
     build.assert_not_called()
     assert app.config["BROKER_ROUTER"] is None
     assert app.config["BROKER_ROUTER_DRAINING"] is old_router
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is True
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is True
 
     assert old_router.revoke_and_drain.call_count == 2
     assert app.config["BROKER_ROUTER_DRAINING"] is None
@@ -637,7 +704,7 @@ def test_configure_broker_router_refuses_and_retires_during_shutdown(
     )
     monkeypatch.setattr(app_module, "build_broker_router", build)
 
-    assert app_module.configure_broker_router(app, object(), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
 
     router.revoke_and_drain.assert_called_once_with(timeout=10.0)
     build.assert_not_called()
@@ -728,17 +795,11 @@ def test_safety_gate_prune_does_not_evict_live_marker() -> None:
     assert gate.consume("live") is False
 
 
-def test_openalgo_client_registers_bridge_adapter_and_session() -> None:
-    reg = BrokerRegistry()
-    brokers = {
-        **default_workspace_config()["brokers"],
-        "account_acls": {"openalgo": {"default": ["me"]}},
-    }
-    router = build_broker_router(reg, brokers, openalgo_client=object())
+def test_openalgo_client_registers_bridge_adapter_and_session(tmp_path) -> None:
+    router, fixture = _build_bridge(tmp_path)
     assert "openalgo" in router._adapters
     assert type(router._adapters["openalgo"]).__name__ == "OpenAlgoAdapter"
-    # a Session is registered for the openalgo:default selector so the provider resolves it
-    assert reg.get_session_for("openalgo", "default").adapter_id == "openalgo"
+    assert fixture.registry.snapshot_exact_state(BrokerSelector("openalgo", "default")).status == "connected"
 
 
 def test_no_openalgo_client_leaves_adapters_empty() -> None:
@@ -987,15 +1048,9 @@ def test_on_native_activated_sink_receives_active_natives_only() -> None:
 
 
 @pytest.mark.unit
-def test_all_adapter_sink_includes_openalgo_for_reconciliation() -> None:
-    active: dict[str, object] = {}
-    router = build_broker_router(
-        BrokerRegistry(),
-        default_workspace_config()["brokers"],
-        openalgo_client=object(),
-        on_adapters_activated=active.update,
-    )
-
+def test_all_adapter_sink_includes_openalgo_for_reconciliation(tmp_path) -> None:
+    active = {}
+    router, fixture = _build_bridge(tmp_path, on_adapters_activated=active.update)
     assert set(active) == {"openalgo"}
     assert active["openalgo"] is router._adapters["openalgo"]
 
@@ -1013,36 +1068,21 @@ def test_on_native_activated_sink_empty_when_dormant() -> None:
 
 
 @pytest.mark.unit
-def test_reconcile_targets_provider_yields_only_live_native_sessions() -> None:
-    """``_build_reconcile_targets_provider`` resolves at call time: a selector
-    becomes a target only when its adapter is active AND a session exists."""
+def test_reconcile_targets_provider_refuses_unversioned_native_read(tmp_path) -> None:
+    """Real registry refuses until the verified read-port cutover (7C.2)."""
     from flinttrade_core.app import _build_reconcile_targets_provider
-
-    class _FakeAdapter:
+    fixture = RegistryFixture(tmp_path)
+    calls = []
+    class Adapter:
         broker_id = "dhan"
-
-    reg = BrokerRegistry()
-    adapter = _FakeAdapter()
-    natives: dict[str, object] = {}
-    targets = _build_reconcile_targets_provider(
-        reg, natives, ["dhan:personal", "upstox:main", "not-a-selector"]
-    )
-
-    # Nothing active, nothing logged in → no targets.
+        def funds(self, *args):
+            calls.append(args)
+            raise AssertionError("provider must not run")
+    fixture.publish("dhan", "personal", Session("test", 4102444800.0, "raw-id", "dhan"))
+    targets = _build_reconcile_targets_provider(fixture.registry, {"dhan": Adapter()}, ["dhan:personal"])
     assert targets() == []
-
-    # Adapter active but no session yet (pre-login) → still no targets.
-    natives["dhan"] = adapter
-    assert targets() == []
-
-    # Session established (credential-replay login) → picked up next call.
-    session = object()
-    reg.put_session("dhan", "personal", session)
-    assert targets() == [(adapter, session)]
-
-    # A session for a DORMANT adapter never becomes a target.
-    reg.put_session("upstox", "main", object())
-    assert targets() == [(adapter, session)]
+    assert calls == []
+    fixture.close()
 
 
 @pytest.mark.unit
@@ -1199,12 +1239,11 @@ def test_configure_ditto_runtime_forwards_complete_safety_dependencies(
     }
 
 
-def test_authorise_default_actor_trust_on_first_use() -> None:
+def test_authorise_default_actor_trust_on_first_use(tmp_path) -> None:
     """A freshly authenticated operator claims the default execution selector once."""
     from flinttrade_engine.request_context import RequestContext
 
-    reg = BrokerRegistry()
-    router = build_broker_router(reg, default_workspace_config()["brokers"], openalgo_client=object())
+    router, fixture = _build_bridge(tmp_path)
     # Default execution selector is openalgo:default with an empty ACL.
     assert router._config.execution.default == "openalgo:default"
 

@@ -50,6 +50,17 @@ EXPECTED_ABSTRACT = {
 }
 
 
+def _instance(cls):
+    if cls is openalgo.OpenAlgoAdapter:
+        from flinttrade_gateway.registry import create_owned_registry
+        from flinttrade_gateway.session_provider import AuthenticatingSessionProvider, ConnectedSessionClientResolver
+        registry, owner = create_owned_registry()
+        # Contract introspection only: no publication and deliberately no routing authority.
+        provider = AuthenticatingSessionProvider(registry, {})
+        return cls(session_clients=ConnectedSessionClientResolver(provider, registry))
+    return cls()
+
+
 def test_abc_declares_full_contract_surface() -> None:
     """The ABC itself must declare every §5 method as abstract."""
     declared = {
@@ -66,7 +77,7 @@ def test_concrete_adapter_can_instantiate(cls, expected_id) -> None:
     assert cls.__abstractmethods__ == frozenset(), (
         f"{cls.__name__} leaves abstract: {sorted(cls.__abstractmethods__)}"
     )
-    instance = cls()
+    instance = _instance(cls)
     assert instance.broker_id == expected_id
     for name in EXPECTED_ABSTRACT:
         assert hasattr(instance, name), f"{cls.__name__} missing {name}"
@@ -74,7 +85,7 @@ def test_concrete_adapter_can_instantiate(cls, expected_id) -> None:
 
 @pytest.mark.parametrize("cls,_", ADAPTERS)
 def test_capabilities_advertises_realistic_values(cls, _) -> None:
-    caps = cls().capabilities
+    caps = _instance(cls).capabilities
     assert caps.segments, "must advertise at least one segment"
     assert caps.order_types, "must advertise at least one order type"
 
@@ -82,7 +93,7 @@ def test_capabilities_advertises_realistic_values(cls, _) -> None:
 @pytest.mark.parametrize("cls,_", ADAPTERS)
 def test_trading_and_data_methods_are_coroutines(cls, _) -> None:
     """Contract §5: every trading/data method is async (the S9 sync→async fix)."""
-    instance = cls()
+    instance = _instance(cls)
     async_methods = EXPECTED_ABSTRACT - {"broker_id", "capabilities", "stream"}
     for name in async_methods:
         assert inspect.iscoroutinefunction(getattr(instance, name)), (

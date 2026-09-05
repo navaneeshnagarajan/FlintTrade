@@ -32,6 +32,101 @@ _credential_spec.loader.exec_module(_credential_helpers)
 seed_credentials = _credential_helpers.seed_credentials
 
 
+# Exact state assertions use genuine disposable authority. The formatting fixture
+# below is separately labelled and never stands in for registry integration.
+_REGISTRY_CONTEXT = {}
+
+
+def _test_handle(registry, adapter_id, account_id):
+    from flinttrade_core.broker_identity import BrokerSelector
+    from flinttrade_core.workspace_migrations import read_workspace_snapshot, broker_workspace_version
+    from flinttrade_gateway.registry import ManagedLookupAuthority
+    from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+    app, path = _REGISTRY_CONTEXT[registry]
+    selector = BrokerSelector(adapter_id, account_id)
+    state = app.config["CREDENTIAL_STORE"].selector_state(selector)
+    if not state.present or not state.credential_present:
+        raise RegistrySessionUnavailable
+    current = read_workspace_snapshot(path)
+    return registry.get_connected_session_for(selector,
+        current_authority=ManagedLookupAuthority(state.version, broker_workspace_version(current)))
+
+
+def _test_remove(registry, adapter_id, account_id):
+    from flinttrade_core.broker_identity import BrokerSelector
+    app, _ = _REGISTRY_CONTEXT[registry]
+    selector = BrokerSelector(adapter_id, account_id)
+    return app.extensions["flinttrade.registry_publication_owner"].remove_session_for_exact(
+        selector, expected_registry=registry.snapshot_selector(selector))
+
+
+def _test_publish(registry, adapter_id, account_id, session):
+    from flinttrade_core.broker_identity import BrokerSelector
+    from flinttrade_core.native_account_routes import _register_selector_in_workspace
+    from flinttrade_core.workspace_migrations import read_workspace_snapshot, broker_workspace_version
+    from flinttrade_gateway.registry import ManagedSessionAuthority
+    app, path = _REGISTRY_CONTEXT[registry]
+    with app.app_context():
+        _register_selector_in_workspace(adapter_id, account_id, "nava", False)
+    selector = BrokerSelector(adapter_id, account_id)
+    store = app.config["CREDENTIAL_STORE"]
+    state = store.selector_state(selector)
+    if not state.present:
+        store.put_credentials(selector, adapter_id, "Synthetic", {"access_token": "synthetic"}, expected=state.version)
+    workspace = read_workspace_snapshot(path)
+    authority = ManagedSessionAuthority(store.selector_state(selector).version, workspace.version,
+                                        broker_workspace_version(workspace))
+    owner = app.extensions["flinttrade.registry_publication_owner"]
+    metadata = store.account_for_selector(selector)
+    receipt = owner.prepare_session_candidate(selector, session, expected_registry=registry.snapshot_selector(selector),
+        authority=authority, broker=metadata.broker, label=metadata.label)
+    return owner.publish_prepared_candidate(receipt, current_authority=authority)
+
+
+def _assert_unavailable(registry, adapter, account):
+    from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+    with pytest.raises(RegistrySessionUnavailable):
+        _test_handle(registry, adapter, account)
+    return True
+
+
+@pytest.fixture
+def projection_client(client):
+    """Fake handler-input tests only; production exact reads are separately refused."""
+    from flinttrade_gateway.brokers._base import Session
+    from urllib.parse import urlsplit, unquote
+    c, app, path = client
+
+    class ProjectionClient:
+        def get(self, url, **kwargs):
+            parts = urlsplit(url).path.split("/")
+            if len(parts) < 8 or parts[4] != "accounts":
+                return c.get(url, **kwargs)
+            expected = (unquote(parts[5]), unquote(parts[6]))
+            calls = []
+            class ReadInput:
+                def snapshot_selector(self, selector):
+                    return prior.snapshot_selector(selector)
+
+                def get_session_for(self, adapter, account):
+                    calls.append((adapter, account))
+                    assert (adapter, account) == expected
+                    return Session("synthetic-projection", 4102444800, account, adapter)
+            prior = app.config["REGISTRY"]
+            app.config["REGISTRY"] = ReadInput()
+            try:
+                response = c.get(url, **kwargs)
+                assert calls and all(call == expected for call in calls)
+                return response
+            finally:
+                app.config["REGISTRY"] = prior
+
+        def post(self, *args, **kwargs):
+            return c.post(*args, **kwargs)
+
+    return ProjectionClient(), app, path
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     from flinttrade_core.secure_file import harden_directory
@@ -66,8 +161,10 @@ def client(tmp_path, monkeypatch):
     # production can set this only through _bind_runtime_emergency_dispatcher.
     app.config["EMERGENCY_DISPATCHER"] = object()
     app.config["EMERGENCY_RUNTIME_READY"] = True
+    _REGISTRY_CONTEXT[app.config["REGISTRY"]] = (app, tmp_path)
     with app.test_client() as c:
         yield c, app, tmp_path
+    _REGISTRY_CONTEXT.pop(app.config["REGISTRY"], None)
     native_routes._OAUTH_PENDING.clear()
 
 
@@ -76,6 +173,21 @@ def _h() -> dict[str, str]:
     from flinttrade_core.auth_routes import _create_token
 
     return {"Authorization": f"Bearer {_create_token('nava', mode='explore')}"}
+
+
+def test_real_registry_native_read_refuses_without_provider_calls(client, monkeypatch):
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+    c, app, _ = client
+    response = c.post("/api/v1/native/accounts", headers=_h(), json={
+        "adapter_id": "upstox", "account_id": "ExactRead", "credentials": {"access_token": "synthetic"},
+    })
+    assert response.status_code == 200
+    async def forbidden(*args):
+        pytest.fail("provider read must remain unavailable")
+    monkeypatch.setattr(UpstoxAdapter, "order_book", forbidden)
+    response = c.get("/api/v1/native/accounts/upstox/ExactRead/orders", headers=_h())
+    assert response.status_code == 409
+    assert response.get_json() == {"status": "error", "message": "Native broker session is unavailable."}
 
 
 def test_exact_colon_account_connect_relogin_delete_uses_public_authority(client):
@@ -237,7 +349,7 @@ def test_connect_upstox_stores_registers_and_establishes_session(client):
     assert brokers["execution"]["default"] == "upstox:UPXTEST01"
 
     # Session registered in the registry.
-    session = app.config["REGISTRY"].get_session_for("upstox", "UPXTEST01")
+    session = _test_handle(app.config["REGISTRY"], "upstox", "UPXTEST01")
     assert session.adapter_id == "upstox"
 
 
@@ -304,7 +416,7 @@ def test_list_and_remove_native_account(client):
     brokers = _workspace_brokers(tmp_path)
     assert "upstox:UPXTEST02" not in brokers.get("registered", [])
     with pytest.raises(Exception):
-        app.config["REGISTRY"].get_session_for("upstox", "UPXTEST02")
+        _test_handle(app.config["REGISTRY"], "upstox", "UPXTEST02")
 
 
 def test_remove_failure_keeps_session_credentials_and_workspace(client, monkeypatch):
@@ -343,7 +455,7 @@ def test_remove_failure_keeps_session_credentials_and_workspace(client, monkeypa
     assert fault_calls[0][1] == store.selector_state(fault_calls[0][0]).version
     assert "vault busy" not in removed.get_data(as_text=True)
     assert store.retrieve_for("upstox", "UPXREMOVEFAIL")["access_token"] == "still-valid"
-    assert app.config["REGISTRY"].get_session_for("upstox", "UPXREMOVEFAIL") is not None
+    assert _test_handle(app.config["REGISTRY"], "upstox", "UPXREMOVEFAIL") is not None
     assert "upstox:UPXREMOVEFAIL" in _workspace_brokers(tmp_path)["registered"]
 
 
@@ -380,7 +492,7 @@ def test_remove_workspace_failure_restores_vault_and_keeps_session(client, monke
     assert app.config["CREDENTIAL_STORE"].retrieve_for(
         "upstox", "UPXWORKSPACEFAIL"
     )["access_token"] == "restore-me"
-    assert app.config["REGISTRY"].get_session_for("upstox", "UPXWORKSPACEFAIL") is not None
+    assert _assert_unavailable(app.config["REGISTRY"], "upstox", "UPXWORKSPACEFAIL")
     brokers = _workspace_brokers(tmp_path)
     assert "upstox:UPXWORKSPACEFAIL" in brokers["registered"]
     assert brokers["execution"]["default"] == "upstox:UPXWORKSPACEFAIL"
@@ -424,7 +536,7 @@ def test_remove_restore_failure_evicts_session_and_rebuilds_fail_closed(client, 
     with pytest.raises(Exception):
         store.retrieve_for("upstox", "UPXRESTOREFAIL")
     with pytest.raises(Exception):
-        app.config["REGISTRY"].get_session_for("upstox", "UPXRESTOREFAIL")
+        _test_handle(app.config["REGISTRY"], "upstox", "UPXRESTOREFAIL")
     assert "upstox" not in app.config["NATIVE_ADAPTERS"]
 
 
@@ -550,7 +662,7 @@ def test_remove_native_account_is_selector_scoped(client):
     )
     from flinttrade_gateway.brokers._base import Session
 
-    registry.put_session(
+    _test_publish(registry,
         "dhan",
         "SHARED01",
         Session(
@@ -568,7 +680,8 @@ def test_remove_native_account_is_selector_scoped(client):
     assert removed.status_code == 200
 
     assert store.retrieve_for("dhan", "SHARED01")["access_token"] == "dhan-token"
-    assert registry.get_session_for("dhan", "SHARED01").adapter_id == "dhan"
+    from flinttrade_core.broker_identity import BrokerSelector
+    assert registry.snapshot_exact_state(BrokerSelector("dhan", "SHARED01")).status == "connected"
     brokers = _workspace_brokers(tmp_path)
     assert "dhan:SHARED01" in brokers.get("registered", [])
 
@@ -991,7 +1104,7 @@ def test_relogin_replays_stored_credentials(client):
         json={"adapter_id": "upstox", "account_id": "UPXTEST03", "credentials": {"access_token": "tok3"}},
     )
     # Drop the session, then re-login should re-establish it from stored creds.
-    app.config["REGISTRY"].remove_session_for("upstox", "UPXTEST03")
+    _test_remove(app.config["REGISTRY"], "upstox", "UPXTEST03")
     resp = c.post("/api/v1/native/accounts/upstox/UPXTEST03/login", headers=_h())
     assert resp.status_code == 200
     assert resp.get_json()["data"]["session"]["has_session"] is True
@@ -1240,7 +1353,7 @@ def test_reads_keep_the_loopback_allowance(client):
     assert c.get("/api/v1/native/accounts").status_code == 200
 
 
-def test_native_account_reads_include_orders_and_trades(client, monkeypatch):
+def test_native_account_reads_include_orders_and_trades(projection_client, monkeypatch):
     """The terminal account widgets can use a live native session for order and
     trade book reads when no OpenAlgo key is configured."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
@@ -1254,7 +1367,7 @@ def test_native_account_reads_include_orders_and_trades(client, monkeypatch):
     monkeypatch.setattr(UpstoxAdapter, "order_book", _orders)
     monkeypatch.setattr(UpstoxAdapter, "trade_book", _trades)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1271,7 +1384,7 @@ def test_native_account_reads_include_orders_and_trades(client, monkeypatch):
     assert trades.get_json()["data"] == [{"symbol": "INFY", "trade_id": "T1"}]
 
 
-def test_live_native_positions_trigger_authoritative_runtime_mtm_breaker(client, monkeypatch):
+def test_live_native_positions_trigger_authoritative_runtime_mtm_breaker(projection_client, monkeypatch):
     from flinttrade_engine.safety import (
         EmergencyDispatchResult,
         EmergencyVerbOutcome,
@@ -1350,7 +1463,7 @@ def test_live_native_positions_trigger_authoritative_runtime_mtm_breaker(client,
     monkeypatch.setattr(UpstoxAdapter, "funds", _funds)
     monkeypatch.setattr(UpstoxAdapter, "order_book", _order_book)
     monkeypatch.setattr(UpstoxAdapter, "quotes", _quotes)
-    c, app, _tmp = client
+    c, app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1383,7 +1496,7 @@ def test_live_native_positions_trigger_authoritative_runtime_mtm_breaker(client,
         loop.close()
 
 
-def test_native_positions_mtm_submission_carries_the_exact_account_selector(client):
+def test_native_positions_mtm_submission_carries_the_exact_account_selector(projection_client):
     from flinttrade_core.native_account_routes import _submit_live_positions_mtm
     from flinttrade_core.l2_state import PortfolioSafetyState
 
@@ -1394,7 +1507,7 @@ def test_native_positions_mtm_submission_carries_the_exact_account_selector(clie
             calls.append((daily_pnl, adapter_id, account_id))
             return True
 
-    _client, app, _tmp = client
+    _client, app, _tmp = projection_client
     app.config["SAFETY"] = RecordingSafety()
 
     with app.app_context():
@@ -1413,7 +1526,7 @@ def test_native_positions_mtm_submission_carries_the_exact_account_selector(clie
     assert calls == [(-1000.25, "dhan", "family")]
 
 
-def test_native_account_reads_include_quotes_and_history(client, monkeypatch):
+def test_native_account_reads_include_quotes_and_history(projection_client, monkeypatch):
     """Native-only sessions can power read-only market data without OpenAlgo."""
     from flinttrade_core.models import Candles, OHLCV, Quote
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
@@ -1438,7 +1551,7 @@ def test_native_account_reads_include_quotes_and_history(client, monkeypatch):
     monkeypatch.setattr(UpstoxAdapter, "quotes", _quotes)
     monkeypatch.setattr(UpstoxAdapter, "historical", _historical)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1458,7 +1571,7 @@ def test_native_account_reads_include_quotes_and_history(client, monkeypatch):
     assert history.get_json()["data"]["bars"][0]["close"] == 1.5
 
 
-def test_native_account_reads_include_ltp(client, monkeypatch):
+def test_native_account_reads_include_ltp(projection_client, monkeypatch):
     """LTP reads go through the unified native route when a broker exposes only
     a broker-SDK-shaped ltp_quotes method."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
@@ -1469,7 +1582,7 @@ def test_native_account_reads_include_ltp(client, monkeypatch):
 
     monkeypatch.setattr(UpstoxAdapter, "ltp_quotes", _ltp_quotes)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1483,7 +1596,7 @@ def test_native_account_reads_include_ltp(client, monkeypatch):
     assert ltp.get_json()["data"][0]["ltp"] == 1450.25
 
 
-def test_ltp_reads_serve_one_canonical_shape_for_every_adapter_payload(client, monkeypatch):
+def test_ltp_reads_serve_one_canonical_shape_for_every_adapter_payload(projection_client, monkeypatch):
     """One-core contract: broker payload differences are absorbed in the core
     reads facade, never in the terminal. Every adapter ltp shape — a raw SDK
     row list, an EXCHANGE:SYMBOL->price map, or a scalar — must serialise to
@@ -1502,7 +1615,7 @@ def test_ltp_reads_serve_one_canonical_shape_for_every_adapter_payload(client, m
 
     monkeypatch.setattr(UpstoxAdapter, "ltp_quotes", _ltp_quotes)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1530,7 +1643,7 @@ def test_ltp_reads_serve_one_canonical_shape_for_every_adapter_payload(client, m
     assert detail.get_json()["data"][0] == {"symbol": "INFY", "exchange": "NSE", "ltp": 1450.25}
 
 
-def test_native_account_reads_include_market_depth(client, monkeypatch):
+def test_native_account_reads_include_market_depth(projection_client, monkeypatch):
     """Depth/DOM widgets can use native market-depth reads without OpenAlgo."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
@@ -1545,7 +1658,7 @@ def test_native_account_reads_include_market_depth(client, monkeypatch):
 
     monkeypatch.setattr(UpstoxAdapter, "market_depth", _market_depth)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1559,7 +1672,7 @@ def test_native_account_reads_include_market_depth(client, monkeypatch):
     assert depth.get_json()["data"][0]["bids"][0]["price"] == 1450.0
 
 
-def test_native_account_reads_include_margin_calculator(client, monkeypatch):
+def test_native_account_reads_include_margin_calculator(projection_client, monkeypatch):
     """Margin widgets can use native pre-trade margin reads without OpenAlgo."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
@@ -1577,7 +1690,7 @@ def test_native_account_reads_include_margin_calculator(client, monkeypatch):
 
     monkeypatch.setattr(UpstoxAdapter, "margin_calculator", _margin_calculator)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1591,7 +1704,7 @@ def test_native_account_reads_include_margin_calculator(client, monkeypatch):
     assert margin.get_json()["data"]["required_margin"] == "2500.50"
 
 
-def test_native_account_reads_include_market_calendar(client, monkeypatch):
+def test_native_account_reads_include_market_calendar(projection_client, monkeypatch):
     """Market status hooks can read native calendar data without OpenAlgo."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
@@ -1611,7 +1724,7 @@ def test_native_account_reads_include_market_calendar(client, monkeypatch):
     monkeypatch.setattr(UpstoxAdapter, "market_timings", _market_timings)
     monkeypatch.setattr(UpstoxAdapter, "market_holidays", _market_holidays)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1628,7 +1741,7 @@ def test_native_account_reads_include_market_calendar(client, monkeypatch):
     assert holidays.get_json()["data"][0]["description"] == "Independence Day"
 
 
-def test_native_holiday_reads_accept_year_selector(client, monkeypatch):
+def test_native_holiday_reads_accept_year_selector(projection_client, monkeypatch):
     """A year query must reach the adapter instead of always using the current calendar."""
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -1648,7 +1761,7 @@ def test_native_holiday_reads_accept_year_selector(client, monkeypatch):
 
     monkeypatch.setattr(UpstoxAdapter, "market_holidays", _market_holidays)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1670,7 +1783,7 @@ def test_native_holiday_reads_accept_year_selector(client, monkeypatch):
     assert seen == [None, f"{next_year:04d}-01-01", "2026-08-15"]
 
 
-def test_native_account_reads_include_option_greeks(client, monkeypatch):
+def test_native_account_reads_include_option_greeks(projection_client, monkeypatch):
     """Portfolio Greeks can batch native option-greek reads without OpenAlgo."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
@@ -1683,7 +1796,7 @@ def test_native_account_reads_include_option_greeks(client, monkeypatch):
 
     monkeypatch.setattr(UpstoxAdapter, "option_greeks", _option_greeks)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1701,7 +1814,7 @@ def test_native_account_reads_include_option_greeks(client, monkeypatch):
     assert resp.get_json()["data"][1]["iv"] == 14.2
 
 
-def test_native_account_reads_include_dhan_display_alias_greeks(client, monkeypatch):
+def test_native_account_reads_include_dhan_display_alias_greeks(projection_client, monkeypatch):
     """Dhan's selector-aware native read serves compact-master display aliases."""
     from flinttrade_gateway.brokers.dhan import DhanAdapter
 
@@ -1715,7 +1828,7 @@ def test_native_account_reads_include_dhan_display_alias_greeks(client, monkeypa
     monkeypatch.setattr(DhanAdapter, "funds", _funds)
     monkeypatch.setattr(DhanAdapter, "option_greeks", _option_greeks)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1737,7 +1850,7 @@ def test_native_account_reads_include_dhan_display_alias_greeks(client, monkeypa
     assert resp.get_json()["data"][0]["iv"] == 18.4
 
 
-def test_native_account_reads_include_dhan_ltp(client, monkeypatch):
+def test_native_account_reads_include_dhan_ltp(projection_client, monkeypatch):
     """Dhan native LTP is served from the existing quotes implementation."""
     from flinttrade_core.models import Quote
     from flinttrade_gateway.brokers.dhan import DhanAdapter
@@ -1752,7 +1865,7 @@ def test_native_account_reads_include_dhan_ltp(client, monkeypatch):
     monkeypatch.setattr(DhanAdapter, "funds", _funds)
     monkeypatch.setattr(DhanAdapter, "quotes", _quotes)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1772,7 +1885,7 @@ def test_native_account_reads_include_dhan_ltp(client, monkeypatch):
     assert row["ltp"] == 1450.25
 
 
-def test_native_account_reads_include_dhan_ohlc(client, monkeypatch):
+def test_native_account_reads_include_dhan_ohlc(projection_client, monkeypatch):
     """Dhan native OHLC is served from the existing quotes implementation."""
     from flinttrade_core.models import Quote
     from flinttrade_gateway.brokers.dhan import DhanAdapter
@@ -1787,7 +1900,7 @@ def test_native_account_reads_include_dhan_ohlc(client, monkeypatch):
     monkeypatch.setattr(DhanAdapter, "funds", _funds)
     monkeypatch.setattr(DhanAdapter, "quotes", _quotes)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1809,7 +1922,7 @@ def test_native_account_reads_include_dhan_ohlc(client, monkeypatch):
     assert row["close"] == 11.0
 
 
-def test_native_account_reads_include_dhan_quote_details(client, monkeypatch):
+def test_native_account_reads_include_dhan_quote_details(projection_client, monkeypatch):
     """Dhan native quote_details is served from the existing quotes implementation."""
     from flinttrade_core.models import Quote
     from flinttrade_gateway.brokers.dhan import DhanAdapter
@@ -1824,7 +1937,7 @@ def test_native_account_reads_include_dhan_quote_details(client, monkeypatch):
     monkeypatch.setattr(DhanAdapter, "funds", _funds)
     monkeypatch.setattr(DhanAdapter, "quotes", _quotes)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1850,7 +1963,7 @@ def test_native_account_reads_include_dhan_quote_details(client, monkeypatch):
     assert row["close"] == 1448
 
 
-def test_native_dhan_quote_details_rejects_unknown_type_without_broker_read(client, monkeypatch):
+def test_native_dhan_quote_details_rejects_unknown_type_without_broker_read(projection_client, monkeypatch):
     """Invalid Dhan quote_type is a client 4xx and must not call the broker."""
     from flinttrade_gateway.brokers.dhan import DhanAdapter
 
@@ -1863,7 +1976,7 @@ def test_native_dhan_quote_details_rejects_unknown_type_without_broker_read(clie
     monkeypatch.setattr(DhanAdapter, "funds", _funds)
     monkeypatch.setattr(DhanAdapter, "quotes", _quotes)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1884,7 +1997,7 @@ def test_native_dhan_quote_details_rejects_unknown_type_without_broker_read(clie
     assert body["message"] == "Unsupported quote_type for quote_details."
 
 
-def test_native_dhan_ltp_omits_missing_symbols_without_fabricating_zero(client, monkeypatch):
+def test_native_dhan_ltp_omits_missing_symbols_without_fabricating_zero(projection_client, monkeypatch):
     """Native Dhan LTP keeps quotes' omit-missing contract and never invents 0.0 rows."""
     from flinttrade_core.models import Quote
     from flinttrade_gateway.brokers.dhan import DhanAdapter
@@ -1899,7 +2012,7 @@ def test_native_dhan_ltp_omits_missing_symbols_without_fabricating_zero(client, 
     monkeypatch.setattr(DhanAdapter, "funds", _funds)
     monkeypatch.setattr(DhanAdapter, "quotes", _quotes)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1917,7 +2030,7 @@ def test_native_dhan_ltp_omits_missing_symbols_without_fabricating_zero(client, 
     assert rows == [{"symbol": "INFY", "exchange": "NSE", "ltp": 1450.25}]
 
 
-def test_native_account_reads_include_ohlc(client, monkeypatch):
+def test_native_account_reads_include_ohlc(projection_client, monkeypatch):
     """Native account reads can expose broker OHLC snapshots when an adapter supports them."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
@@ -1927,7 +2040,7 @@ def test_native_account_reads_include_ohlc(client, monkeypatch):
 
     monkeypatch.setattr(UpstoxAdapter, "ohlc_quotes", _ohlc_quotes)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1941,7 +2054,7 @@ def test_native_account_reads_include_ohlc(client, monkeypatch):
     assert resp.get_json()["data"][0]["close"] == 11
 
 
-def test_native_account_reads_include_order_status(client, monkeypatch):
+def test_native_account_reads_include_order_status(projection_client, monkeypatch):
     """Native-only order status can read a broker's single-order details."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
@@ -1951,7 +2064,7 @@ def test_native_account_reads_include_order_status(client, monkeypatch):
 
     monkeypatch.setattr(UpstoxAdapter, "order_details", _order_details)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1965,7 +2078,7 @@ def test_native_account_reads_include_order_status(client, monkeypatch):
     assert resp.get_json()["data"]["status"] == "COMPLETE"
 
 
-def test_native_margin_read_rejects_invalid_order_fields(client, monkeypatch):
+def test_native_margin_read_rejects_invalid_order_fields(projection_client, monkeypatch):
     """Native margin validation errors should stay a public 400, not a 500."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
@@ -1974,7 +2087,7 @@ def test_native_margin_read_rejects_invalid_order_fields(client, monkeypatch):
 
     monkeypatch.setattr(UpstoxAdapter, "margin_calculator", _margin_calculator)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -1988,7 +2101,7 @@ def test_native_margin_read_rejects_invalid_order_fields(client, monkeypatch):
     assert margin.get_json()["message"] == "margin read received invalid order fields."
 
 
-def test_native_account_reads_include_expiry_and_optionchain(client, monkeypatch):
+def test_native_account_reads_include_expiry_and_optionchain(projection_client, monkeypatch):
     """Dhan/Upstox native option-chain reads should not require the OpenAlgo bridge."""
     from flinttrade_core.models import OptionChain, OptionChainStrike
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
@@ -2023,7 +2136,7 @@ def test_native_account_reads_include_expiry_and_optionchain(client, monkeypatch
     monkeypatch.setattr(UpstoxAdapter, "expiry_list", _expiry_list)
     monkeypatch.setattr(UpstoxAdapter, "option_chain", _option_chain)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -2043,7 +2156,7 @@ def test_native_account_reads_include_expiry_and_optionchain(client, monkeypatch
     assert chain.get_json()["data"]["strikes"][0]["ce_ltp"] == 100
 
 
-def test_native_account_reads_include_instrument_search(client, monkeypatch):
+def test_native_account_reads_include_instrument_search(projection_client, monkeypatch):
     """Native adapters that expose instrument search can feed terminal symbol search."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
@@ -2060,7 +2173,7 @@ def test_native_account_reads_include_instrument_search(client, monkeypatch):
 
     monkeypatch.setattr(UpstoxAdapter, "search_instruments", _search_instruments)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -2075,7 +2188,7 @@ def test_native_account_reads_include_instrument_search(client, monkeypatch):
     assert resp.get_json()["data"][0]["instrument_key"] == "NSE_EQ|INE002A01018"
 
 
-def test_native_account_reads_include_broker_specific_surfaces(client, monkeypatch):
+def test_native_account_reads_include_broker_specific_surfaces(projection_client, monkeypatch):
     """Broker-specific read methods stay reachable through the unified native route."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
@@ -2119,7 +2232,7 @@ def test_native_account_reads_include_broker_specific_surfaces(client, monkeypat
     monkeypatch.setattr(UpstoxAdapter, "order_history", _order_history, raising=False)
     monkeypatch.setattr(UpstoxAdapter, "order_trades", _order_trades, raising=False)
 
-    c, _app, _tmp = client
+    c, _app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -2151,7 +2264,7 @@ def test_native_account_reads_include_broker_specific_surfaces(client, monkeypat
     assert trades.get_json()["data"][0]["trade_id"] == "T1"
 
 
-def test_native_account_reads_cover_kotak_neo_documented_surfaces(client, monkeypatch):
+def test_native_account_reads_cover_kotak_neo_documented_surfaces(projection_client, monkeypatch):
     """Kotak Neo's documented read helpers stay routed once an adapter session is active."""
     from flinttrade_gateway.brokers._base import Session
     from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
@@ -2216,9 +2329,9 @@ def test_native_account_reads_cover_kotak_neo_documented_surfaces(client, monkey
     monkeypatch.setattr(KotakNeoAdapter, "market_depth", _market_depth)
     monkeypatch.setattr(KotakNeoAdapter, "margin_calculator", _margin_calculator)
 
-    c, app, _tmp = client
+    c, app, _tmp = projection_client
     app.config["NATIVE_ADAPTERS"]["kotakneo"] = KotakNeoAdapter()
-    app.config["REGISTRY"].put_session(
+    _test_publish(app.config["REGISTRY"],
         "kotakneo",
         "KOTAKREADS",
         Session(access_token="tok", expires_at=9e9, account_id="KOTAKREADS", adapter_id="kotakneo"),
@@ -2256,11 +2369,11 @@ def test_native_account_reads_cover_kotak_neo_documented_surfaces(client, monkey
     assert margin.get_json()["data"]["required_margin"] == 1234.5
 
 
-def test_native_account_read_service_window_is_retryable_without_dropping_session(client, monkeypatch):
+def test_native_account_read_service_window_is_retryable_without_dropping_session(projection_client, monkeypatch):
     """A broker service-hours outage is a read outage, not a re-auth signal."""
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
-    c, app, _tmp = client
+    c, app, _tmp = projection_client
     connected = c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -2282,7 +2395,7 @@ def test_native_account_read_service_window_is_retryable_without_dropping_sessio
     assert resp.status_code == 503
     assert body["message"] == "Broker read is temporarily unavailable; the session remains connected."
     assert body["data"]["retryable"] is True
-    session = app.config["REGISTRY"].get_session_for("upstox", "UPXWINDOW")
+    session = _test_handle(app.config["REGISTRY"], "upstox", "UPXWINDOW")
     assert session.adapter_id == "upstox"
 
 
@@ -2315,7 +2428,7 @@ def test_sessionless_account_with_failed_replay_surfaces_needs_relogin(client):
         json={"adapter_id": "upstox", "account_id": "UPXG7", "credentials": {"access_token": "tok"}},
     )
     # Simulate the next boot: session gone, replay failed on stale credentials.
-    app.config["REGISTRY"].remove_session_for("upstox", "UPXG7")
+    _test_remove(app.config["REGISTRY"], "upstox", "UPXG7")
     app.config.setdefault("NATIVE_SESSION_STATUS", {})["upstox:UPXG7"] = (
         "login-failed: IndMoney login requires an access_token"
     )
@@ -2323,7 +2436,7 @@ def test_sessionless_account_with_failed_replay_surfaces_needs_relogin(client):
     listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
     entry = next(a for a in listing if a["account_id"] == "UPXG7")
     assert entry["has_session"] is False
-    assert entry["needs_relogin"] is True
+    assert "login_retryable" not in entry
     assert "login-failed" in entry["login_error"]
 
 
@@ -2337,7 +2450,7 @@ def test_sessionless_account_with_retryable_replay_failure_does_not_need_relogin
         headers=_h(),
         json={"adapter_id": "upstox", "account_id": "UPXRETRY", "credentials": {"access_token": "tok"}},
     )
-    app.config["REGISTRY"].remove_session_for("upstox", "UPXRETRY")
+    _test_remove(app.config["REGISTRY"], "upstox", "UPXRETRY")
     app.config.setdefault("NATIVE_SESSION_STATUS", {})["upstox:UPXRETRY"] = BROKER_LOGIN_RETRY_MESSAGE
 
     listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
@@ -2389,7 +2502,7 @@ def test_set_primary_native_account_requires_live_session(client):
         json={"adapter_id": "upstox", "account_id": "UPXPRIMARYDEAD", "credentials": {"access_token": "tok"}},
     )
     assert connected.status_code == 200, connected.get_json()
-    app.config["REGISTRY"].remove_session_for("upstox", "UPXPRIMARYDEAD")
+    _test_remove(app.config["REGISTRY"], "upstox", "UPXPRIMARYDEAD")
 
     resp = c.post("/api/v1/native/accounts/upstox/UPXPRIMARYDEAD/set-primary", headers=_h())
 
@@ -2479,7 +2592,8 @@ def test_remove_one_of_multiple_native_accounts_keeps_refresh_and_adapter(client
     assert "cred_refresh_upstox" in rotator._job_ids
     assert any(job.id == "cred_refresh_upstox" for job in app.config["ROTATION_SCHEDULER"].get_jobs())
     assert "upstox" in app.config["NATIVE_ADAPTERS"]
-    assert app.config["REGISTRY"].get_session_for("upstox", "UPXJOBKEEP2").adapter_id == "upstox"
+    assert _assert_unavailable(app.config["REGISTRY"], "upstox", "UPXJOBKEEP2")
+    # Removing a workspace selector advances shared broker authority; no sibling rebind.
 
 
 def test_relogin_with_fresh_credentials_preserves_label_and_primary(client):
@@ -2629,42 +2743,33 @@ def test_relogin_rejects_unattested_sdk_before_fresh_credential_update(client, m
     assert app.config["CREDENTIAL_STORE"].retrieve_for("upstox", "SDKREL")["access_token"] == "good"
 
 
-def test_relogin_dead_candidate_preserves_prior_session(client, monkeypatch):
-    """A rejected candidate must not evict the previously published session."""
-    c, app, _tmp = client
-    # First connect with the passing stub (fixture default) so the account exists.
-    c.post(
-        "/api/v1/native/accounts",
-        headers=_h(),
-        json={"adapter_id": "upstox", "account_id": "UPXRL", "credentials": {"access_token": "tok"}},
-    )
-    prior_session = app.config["REGISTRY"].get_session_for("upstox", "UPXRL")
-    # Now the token has "gone dead": funds probe fails on re-authenticate.
+def test_relogin_dead_candidate_retires_prior_exact_session(client, monkeypatch):
+    from flinttrade_core.broker_identity import BrokerSelector
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
-
-    async def _dead_funds(_self, _session):
+    c, app, _ = client
+    assert c.post("/api/v1/native/accounts", headers=_h(), json={
+        "adapter_id": "upstox", "account_id": "UPXRL", "credentials": {"access_token": "prior"},
+    }).status_code == 200
+    registry = app.config["REGISTRY"]
+    selector = BrokerSelector("upstox", "UPXRL")
+    before = registry.snapshot_selector(selector)
+    async def dead(*args):
         raise RuntimeError("401 token expired")
-
-    monkeypatch.setattr(UpstoxAdapter, "funds", _dead_funds)
-    resp = c.post("/api/v1/native/accounts/upstox/UPXRL/login", headers=_h())
-    assert resp.status_code == 502
-    assert resp.get_json()["data"]["session"]["has_session"] is False
-    assert app.config["REGISTRY"].get_session_for("upstox", "UPXRL") is prior_session
-    listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
-    entry = next(a for a in listing if a["account_id"] == "UPXRL")
-    assert entry["has_session"] is True
-    assert "needs_relogin" not in entry
+    monkeypatch.setattr(UpstoxAdapter, "funds", dead)
+    assert c.post("/api/v1/native/accounts/upstox/UPXRL/login", headers=_h()).status_code == 502
+    after = registry.snapshot_selector(selector)
+    assert not after.present and after.generation == before.generation + 1
 
 
-def test_relogin_login_failure_preserves_prior_session(client, monkeypatch):
-    """A login exception in the isolated candidate leaves the prior session live."""
+def test_relogin_login_failure_retires_prior_session(client, monkeypatch):
+    """A login exception retires only the captured exact prior session."""
     c, app, _tmp = client
     c.post(
         "/api/v1/native/accounts",
         headers=_h(),
         json={"adapter_id": "upstox", "account_id": "UPXLOGINFAIL", "credentials": {"access_token": "tok"}},
     )
-    prior_session = app.config["REGISTRY"].get_session_for("upstox", "UPXLOGINFAIL")
+    _test_handle(app.config["REGISTRY"], "upstox", "UPXLOGINFAIL")
 
     from flinttrade_gateway.brokers.upstox import UpstoxAdapter
 
@@ -2681,51 +2786,36 @@ def test_relogin_login_failure_preserves_prior_session(client, monkeypatch):
 
     assert resp.status_code == 502
     assert resp.get_json()["data"]["session"]["has_session"] is False
-    assert app.config["REGISTRY"].get_session_for("upstox", "UPXLOGINFAIL") is prior_session
+    assert _assert_unavailable(app.config["REGISTRY"], "upstox", "UPXLOGINFAIL")
     listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
     entry = next(a for a in listing if a["account_id"] == "UPXLOGINFAIL")
-    assert entry["has_session"] is True
-    assert "needs_relogin" not in entry
-
-
-def test_native_read_dead_token_drops_session_and_surfaces_relogin(client, monkeypatch):
-    """A token can expire after a successful connect; the next authenticated
-    native read must not leave the account looking connected with only 502s."""
-    c, app, _tmp = client
-    c.post(
-        "/api/v1/native/accounts",
-        headers=_h(),
-        json={"adapter_id": "upstox", "account_id": "UPXREADDEAD", "credentials": {"access_token": "tok"}},
-    )
-
-    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
-
-    async def _dead_profile(_self, _session):
-        raise RuntimeError("401 token expired")
-
-    monkeypatch.setattr(UpstoxAdapter, "profile", _dead_profile)
-
-    resp = c.get("/api/v1/native/accounts/upstox/UPXREADDEAD/profile")
-
-    assert resp.status_code == 409
-    body = resp.get_json()
-    assert body["message"] == "Broker session expired or invalid; re-login required."
-    public_body = json.dumps(body)
-    assert "UPXREADDEAD" not in public_body
-    assert "tok" not in public_body
-    with pytest.raises(Exception):
-        app.config["REGISTRY"].get_session_for("upstox", "UPXREADDEAD")
-    listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
-    entry = next(a for a in listing if a["account_id"] == "UPXREADDEAD")
     assert entry["has_session"] is False
-    assert entry["needs_relogin"] is True
-    assert entry["login_error"] == "Broker session expired or invalid; re-login required."
+    assert "login_retryable" not in entry
 
 
-def test_native_read_service_window_keeps_session(client, monkeypatch):
+def test_native_read_refusal_never_probes_or_evicts_an_unobserved_token(client, monkeypatch):
+    from flinttrade_core.broker_identity import BrokerSelector
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+    c, app, _ = client
+    c.post("/api/v1/native/accounts", headers=_h(), json={
+        "adapter_id": "upstox", "account_id": "UPXREADDEAD", "credentials": {"access_token": "tok"},
+    })
+    registry = app.config["REGISTRY"]
+    selector = BrokerSelector("upstox", "UPXREADDEAD")
+    before = registry.snapshot_selector(selector)
+    async def forbidden(*args):
+        pytest.fail("unverified read port invoked")
+    monkeypatch.setattr(UpstoxAdapter, "profile", forbidden)
+    response = c.get("/api/v1/native/accounts/upstox/UPXREADDEAD/profile")
+    assert response.status_code == 409
+    assert response.get_json() == {"status": "error", "message": "Native broker session is unavailable."}
+    assert registry.snapshot_selector(selector) == before
+
+
+def test_native_read_service_window_keeps_session(projection_client, monkeypatch):
     """Closed broker service windows are not auth failures; keep the session so
     the operator is not forced through daily login for a temporary venue issue."""
-    c, app, _tmp = client
+    c, app, _tmp = projection_client
     c.post(
         "/api/v1/native/accounts",
         headers=_h(),
@@ -2743,7 +2833,7 @@ def test_native_read_service_window_keeps_session(client, monkeypatch):
 
     assert resp.status_code == 503
     assert resp.get_json()["data"]["retryable"] is True
-    assert app.config["REGISTRY"].get_session_for("upstox", "UPXSERVICE").adapter_id == "upstox"
+    assert _test_handle(app.config["REGISTRY"], "upstox", "UPXSERVICE").adapter_id == "upstox"
     listing = c.get("/api/v1/native/accounts").get_json()["data"]["accounts"]
     entry = next(a for a in listing if a["account_id"] == "UPXSERVICE")
     assert entry["has_session"] is True
@@ -3249,7 +3339,7 @@ def test_relogin_rejects_without_mutation_when_router_cannot_drain(client):
     assert connected.status_code == 200
     store = app.config["CREDENTIAL_STORE"]
     registry = app.config["REGISTRY"]
-    prior_session = registry.get_session_for("upstox", "DRAINRELOGIN")
+    prior_session = _test_handle(registry, "upstox", "DRAINRELOGIN")
     router = _DrainRouter(False)
     app.config["BROKER_ROUTER"] = router
 
@@ -3262,7 +3352,7 @@ def test_relogin_rejects_without_mutation_when_router_cannot_drain(client):
     assert response.status_code == 503
     assert router.calls >= 1
     assert store.retrieve_for("upstox", "DRAINRELOGIN") == {"access_token": "prior"}
-    assert registry.get_session_for("upstox", "DRAINRELOGIN") is prior_session
+    assert _test_handle(registry, "upstox", "DRAINRELOGIN").version == prior_session.version
 
 
 def test_relogin_candidate_timeout_preserves_live_state_and_releases_lock(client, monkeypatch):
@@ -3279,7 +3369,7 @@ def test_relogin_candidate_timeout_preserves_live_state_and_releases_lock(client
     assert connected.status_code == 200
     store = app.config["CREDENTIAL_STORE"]
     registry = app.config["REGISTRY"]
-    prior_session = registry.get_session_for("upstox", "TIMEOUTRELOGIN")
+    _test_handle(registry, "upstox", "TIMEOUTRELOGIN")
     selector = "upstox:TIMEOUTRELOGIN"
     app.config["NATIVE_SESSION_STATUS"][selector] = "prior-live-status"
     router = _DrainRouter(True)
@@ -3316,7 +3406,7 @@ def test_relogin_candidate_timeout_preserves_live_state_and_releases_lock(client
         assert app.config["BROKER_ROUTER"] is router
         assert router.calls == 0
         assert store.retrieve_for("upstox", "TIMEOUTRELOGIN") == {"access_token": "prior"}
-        assert registry.get_session_for("upstox", "TIMEOUTRELOGIN") is prior_session
+        assert _assert_unavailable(registry, "upstox", "TIMEOUTRELOGIN")
         assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
 
         import flinttrade_core.native_account_routes as routes
@@ -3342,7 +3432,7 @@ def test_remove_rejects_without_mutation_when_router_cannot_drain(client):
     assert connected.status_code == 200
     store = app.config["CREDENTIAL_STORE"]
     registry = app.config["REGISTRY"]
-    prior_session = registry.get_session_for("upstox", "DRAINREMOVE")
+    prior_session = _test_handle(registry, "upstox", "DRAINREMOVE")
     router = _DrainRouter(False)
     app.config["BROKER_ROUTER"] = router
 
@@ -3354,7 +3444,7 @@ def test_remove_rejects_without_mutation_when_router_cannot_drain(client):
     assert response.status_code == 503
     assert router.calls >= 1
     assert store.retrieve_for("upstox", "DRAINREMOVE") == {"access_token": "prior"}
-    assert registry.get_session_for("upstox", "DRAINREMOVE") is prior_session
+    assert _test_handle(registry, "upstox", "DRAINREMOVE").version == prior_session.version
     assert "upstox:DRAINREMOVE" in _workspace_brokers(tmp_path)["registered"]
 
 
@@ -3409,7 +3499,7 @@ def test_failed_relogin_preserves_prior_registry_session(client, monkeypatch):
     assert connected.status_code == 200
     store = app.config["CREDENTIAL_STORE"]
     registry = app.config["REGISTRY"]
-    prior_session = registry.get_session_for("upstox", "RESTOREREL")
+    _test_handle(registry, "upstox", "RESTOREREL")
     selector = "upstox:RESTOREREL"
     app.config["NATIVE_SESSION_STATUS"][selector] = "prior-live-status"
     router = _DrainRouter(True)
@@ -3432,7 +3522,7 @@ def test_failed_relogin_preserves_prior_registry_session(client, monkeypatch):
     assert app.config["BROKER_ROUTER"] is router
     assert router.calls == 0
     assert store.retrieve_for("upstox", "RESTOREREL") == {"access_token": "prior"}
-    assert registry.get_session_for("upstox", "RESTOREREL") is prior_session
+    assert _assert_unavailable(registry, "upstox", "RESTOREREL")
     assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
 
 
@@ -3450,7 +3540,7 @@ def test_failed_existing_reconnect_never_calls_durable_store(client, monkeypatch
     assert connected.status_code == 200
     store = app.config["CREDENTIAL_STORE"]
     registry = app.config["REGISTRY"]
-    prior_session = registry.get_session_for("upstox", "STAGERECONNECT")
+    _test_handle(registry, "upstox", "STAGERECONNECT")
     router = _DrainRouter(True)
     app.config["BROKER_ROUTER"] = router
     durable_store_calls = 0
@@ -3483,7 +3573,7 @@ def test_failed_existing_reconnect_never_calls_durable_store(client, monkeypatch
     assert router.calls == 0
     assert durable_store_calls == 0
     assert store.retrieve_for("upstox", "STAGERECONNECT") == {"access_token": "prior"}
-    assert registry.get_session_for("upstox", "STAGERECONNECT") is prior_session
+    assert _assert_unavailable(registry, "upstox", "STAGERECONNECT")
 
 
 def test_relogin_persistence_failure_restores_runtime_without_secret_leak(
@@ -3502,7 +3592,7 @@ def test_relogin_persistence_failure_restores_runtime_without_secret_leak(
     assert connected.status_code == 200
     store = app.config["CREDENTIAL_STORE"]
     registry = app.config["REGISTRY"]
-    prior_session = registry.get_session_for("upstox", "PERSISTREL")
+    prior_session = _test_handle(registry, "upstox", "PERSISTREL")
     router = _DrainRouter(True)
     app.config["BROKER_ROUTER"] = router
     marker = "credential-value-must-stay-private"
@@ -3522,7 +3612,7 @@ def test_relogin_persistence_failure_restores_runtime_without_secret_leak(
     assert response.status_code == 500
     assert router.calls >= 1
     assert store.retrieve_for("upstox", "PERSISTREL") == {"access_token": "prior"}
-    assert registry.get_session_for("upstox", "PERSISTREL") is prior_session
+    assert _test_handle(registry, "upstox", "PERSISTREL").version == prior_session.version
     assert marker not in response.get_data(as_text=True)
     assert marker not in caplog.text
 
@@ -3541,22 +3631,22 @@ def test_successful_relogin_swaps_registry_session_only_after_commit(client, mon
     assert connected.status_code == 200
     store = app.config["CREDENTIAL_STORE"]
     registry = app.config["REGISTRY"]
-    prior_session = registry.get_session_for("upstox", "SWAPAFTERCOMMIT")
+    prior_session = _test_handle(registry, "upstox", "SWAPAFTERCOMMIT")
     selector = "upstox:SWAPAFTERCOMMIT"
     app.config["NATIVE_SESSION_STATUS"][selector] = "prior-live-status"
     app.config["BROKER_ROUTER"] = _DrainRouter(True)
     original_stage = store.stage_credentials
-    original_put_session = registry.put_session
+    original_publish = registry.publish_prepared_candidate
 
     def _stage_with_observed_commit(*args, **kwargs):
         candidate = original_stage(*args, **kwargs)
         original_commit = candidate.commit
 
         def _commit() -> None:
-            assert registry.get_session_for("upstox", "SWAPAFTERCOMMIT") is prior_session
+            assert registry.snapshot_selector(prior_session.selector) == prior_session.version.registry_version
             assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
             applied = original_commit()
-            assert registry.get_session_for("upstox", "SWAPAFTERCOMMIT") is prior_session
+            assert registry.snapshot_selector(prior_session.selector) == prior_session.version.registry_version
             assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
             return applied
 
@@ -3565,12 +3655,11 @@ def test_successful_relogin_swaps_registry_session_only_after_commit(client, mon
 
     monkeypatch.setattr(store, "stage_credentials", _stage_with_observed_commit)
 
-    def _put_session_after_commit(adapter_id, account_id, session):
+    def observed_publish(receipt, **kwargs):
         assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
-        original_put_session(adapter_id, account_id, session)
-        assert app.config["NATIVE_SESSION_STATUS"][selector] == "prior-live-status"
+        return original_publish(receipt, **kwargs)
 
-    monkeypatch.setattr(registry, "put_session", _put_session_after_commit)
+    monkeypatch.setattr(registry, "publish_prepared_candidate", observed_publish)
 
     response = c.post(
         "/api/v1/native/accounts/upstox/SWAPAFTERCOMMIT/login",
@@ -3579,7 +3668,7 @@ def test_successful_relogin_swaps_registry_session_only_after_commit(client, mon
     )
 
     assert response.status_code == 200, response.get_json()
-    assert registry.get_session_for("upstox", "SWAPAFTERCOMMIT") is not prior_session
+    assert _test_handle(registry, "upstox", "SWAPAFTERCOMMIT").version != prior_session.version
     assert app.config["NATIVE_SESSION_STATUS"][selector] == "ok"
 
 
@@ -3634,7 +3723,7 @@ def test_relogin_fails_closed_when_final_router_rebuild_returns_false(client, mo
     )
     assert connected.status_code == 200
     store = app.config["CREDENTIAL_STORE"]
-    prior_session = app.config["REGISTRY"].get_session_for("upstox", "REBUILDREL")
+    _test_handle(app.config["REGISTRY"], "upstox", "REBUILDREL")
     router = _DrainRouter(True)
     app.config["BROKER_ROUTER"] = router
     import flinttrade_core.app as app_module
@@ -3651,7 +3740,7 @@ def test_relogin_fails_closed_when_final_router_rebuild_returns_false(client, mo
     assert router.calls >= 1
     assert store.retrieve_for("upstox", "REBUILDREL") == {"access_token": "prior"}
     assert app.config["BROKER_ROUTER"] is None
-    assert app.config["REGISTRY"].get_session_for("upstox", "REBUILDREL") is prior_session
+    assert _assert_unavailable(app.config["REGISTRY"], "upstox", "REBUILDREL")
 
 
 def test_relogin_rollback_does_not_overwrite_newer_credential_aba(client, monkeypatch):
@@ -3719,7 +3808,7 @@ def test_read_only_relogin_router_failure_restores_default_primary_and_credentia
     )
     assert connected.status_code == 200
     registry = app.config["REGISTRY"]
-    prior_session = registry.get_session_for("upstox", "READONLYROLLBACK")
+    _test_handle(registry, "upstox", "READONLYROLLBACK")
     import flinttrade_core.app as app_module
 
     monkeypatch.setattr(app_module, "configure_broker_router", lambda *_args, **_kwargs: False)
@@ -3747,7 +3836,7 @@ def test_read_only_relogin_router_failure_restores_default_primary_and_credentia
     assert app.config["CREDENTIAL_STORE"].retrieve_for(
         "upstox", "READONLYROLLBACK"
     ) == {"access_token": "prior"}
-    assert registry.get_session_for("upstox", "READONLYROLLBACK") is prior_session
+    assert _assert_unavailable(registry, "upstox", "READONLYROLLBACK")
 
 
 def test_connect_router_publication_failure_rolls_back_vault_workspace_and_session(
@@ -3783,7 +3872,7 @@ def test_connect_router_publication_failure_rolls_back_vault_workspace_and_sessi
         prior_default or "openalgo:default"
     )
     with pytest.raises(Exception):
-        app.config["REGISTRY"].get_session_for("upstox", "ROLLBACKCONNECT")
+        _test_handle(app.config["REGISTRY"], "upstox", "ROLLBACKCONNECT")
     from flinttrade_core.workspace_migrations import default_workspace_config
 
     workspace_path = tmp_path / "workspace.json"
@@ -3802,7 +3891,7 @@ def test_connect_registry_publication_failure_rolls_back_durable_state(client, m
     prior_default = str(_workspace_brokers(tmp_path).get("execution", {}).get("default") or "")
     monkeypatch.setattr(
         registry,
-        "put_session",
+        "publish_prepared_candidate",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("registry unavailable")),
     )
 
@@ -4010,7 +4099,7 @@ def test_remove_fails_closed_when_router_rebuild_returns_false(client, monkeypat
     assert response.status_code == 500
     assert router.calls >= 1
     with pytest.raises(Exception):
-        app.config["REGISTRY"].get_session_for("upstox", "REMOVEFALSE")
+        _test_handle(app.config["REGISTRY"], "upstox", "REMOVEFALSE")
 
 
 def test_failed_reconnect_restores_label_and_is_primary(client, monkeypatch):

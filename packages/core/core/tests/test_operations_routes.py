@@ -2806,11 +2806,13 @@ class TestAccountsStatus:
         def __init__(self, sessions=None):
             self._sessions = sessions or {}
 
-        def get_session_for(self, adapter_id, account_id):
-            key = (adapter_id, account_id)
-            if key not in self._sessions:
-                raise KeyError(key)
-            return self._sessions[key]
+        def snapshot_exact_state(self, selector):
+            # Read-independent status projection fake; exact registry is tested separately.
+            from types import SimpleNamespace
+            session = self._sessions.get((selector.adapter_id, selector.account_id))
+            if session is None:
+                return None
+            return SimpleNamespace(status="connected", expires_at=session.expires_at, read_only=False)
 
     def test_returns_summary_and_per_account_status(self, client, monkeypatch):
         statuses = [

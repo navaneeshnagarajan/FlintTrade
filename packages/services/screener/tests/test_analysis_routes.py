@@ -1086,7 +1086,6 @@ class TestLiveOptionChain:
         import time
         from types import SimpleNamespace
 
-        from flinttrade_gateway.registry import BrokerRegistry
 
         native_calls = []
 
@@ -1107,9 +1106,9 @@ class TestLiveOptionChain:
             async def option_chain(self, _symbol, _exchange="NSE_INDEX", _expiry=""):
                 return TestLiveOptionChain._Chain([_IncompleteStrike()], spot_price=24000.0)
 
-        registry = BrokerRegistry()
+        # Parser/projection evidence through the injected read-independent fake.
         session = SimpleNamespace(expires_at=time.time() + 3600)
-        registry.put_session("dhan", "native-1", session)
+        registry = SimpleNamespace(is_connected=lambda: False, list_connected_adapter_sessions=lambda: (("dhan", "native-1", session),))
         app.config["REGISTRY"] = registry
         app.config["NATIVE_ADAPTERS"] = {"dhan": _NativeAdapter()}
         app.config["OPENALGO_CLIENT"] = _IncompleteOpenAlgo()
@@ -1137,7 +1136,6 @@ class TestLiveOptionChain:
         import time
         from types import SimpleNamespace
 
-        from flinttrade_gateway.registry import BrokerRegistry
 
         class _NativeAdapter:
             def __init__(self, payload):
@@ -1150,9 +1148,11 @@ class TestLiveOptionChain:
         spotless["spot"] = None
         usable = _chain_payload()
         usable["spot"] = 25123.5
-        registry = BrokerRegistry()
-        registry.put_session("spotless", "one", SimpleNamespace(expires_at=time.time() + 3600))
-        registry.put_session("usable", "two", SimpleNamespace(expires_at=time.time() + 3600))
+        # Parser-only source selection, not production registry access.
+        registry = SimpleNamespace(is_connected=lambda: False, list_connected_adapter_sessions=lambda: (
+            ("spotless", "one", SimpleNamespace(expires_at=time.time() + 3600)),
+            ("usable", "two", SimpleNamespace(expires_at=time.time() + 3600)),
+        ))
         app.config["REGISTRY"] = registry
         app.config["NATIVE_ADAPTERS"] = {
             "spotless": _NativeAdapter(spotless),
@@ -1174,7 +1174,6 @@ class TestLiveOptionChain:
         import time
         from types import SimpleNamespace
 
-        from flinttrade_gateway.registry import BrokerRegistry
 
         class _NativeAdapter:
             def __init__(self, payload):
@@ -1187,9 +1186,11 @@ class TestLiveOptionChain:
         for row in zero_strike["strikes"]:
             row["strike_price"] = 0
         usable = _chain_payload()
-        registry = BrokerRegistry()
-        registry.put_session("invalid", "one", SimpleNamespace(expires_at=time.time() + 3600))
-        registry.put_session("usable", "two", SimpleNamespace(expires_at=time.time() + 3600))
+        # Parser-only source selection, not production registry access.
+        registry = SimpleNamespace(is_connected=lambda: False, list_connected_adapter_sessions=lambda: (
+            ("invalid", "one", SimpleNamespace(expires_at=time.time() + 3600)),
+            ("usable", "two", SimpleNamespace(expires_at=time.time() + 3600)),
+        ))
         app.config["REGISTRY"] = registry
         app.config["NATIVE_ADAPTERS"] = {
             "invalid": _NativeAdapter(zero_strike),
@@ -2092,3 +2093,18 @@ class TestCandlestickPatternsRoute:
         assert data["is_sample_data"] is False
         patterns = {m["pattern"] for m in data["scan"]["matches"]}
         assert "bullish_engulfing" in patterns
+
+
+def test_real_registry_native_enumeration_refuses_all_provider_fallbacks(app, tmp_path):
+    from flinttrade_screener.analysis_routes import _live_option_chain
+    from flinttrade_gateway.registry import create_owned_registry
+    calls = []
+    class Forbidden:
+        async def option_chain(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            raise AssertionError("provider must not run")
+    registry, owner = create_owned_registry()
+    app.config.update(REGISTRY=registry, NATIVE_ADAPTERS={"dhan": Forbidden()}, OPENALGO_CLIENT=Forbidden())
+    with app.app_context():
+        assert _live_option_chain("NIFTY", "NFO", _future_expiry()) is None
+    assert calls == []

@@ -20,6 +20,7 @@ pytestmark = pytest.mark.unit
 def _runtime_app() -> object:
     """Build the lifecycle shell without running the heavyweight constructor."""
     from flinttrade_core.app import FlintTradeApp
+    from flinttrade_gateway.registry import create_owned_registry
 
     app = FlintTradeApp.__new__(FlintTradeApp)
     app.safety = MagicMock()
@@ -30,7 +31,7 @@ def _runtime_app() -> object:
     app.cron = MagicMock()
     app.audit = MagicMock()
     app.client = MagicMock(close=AsyncMock(), ping=AsyncMock(return_value={}))
-    app.registry = MagicMock()
+    app.registry, app._registry_publication_owner = create_owned_registry()
     app.credential_store = MagicMock()
     app.contract_manager = MagicMock()
     app.rag = None

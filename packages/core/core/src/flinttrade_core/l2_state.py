@@ -2142,8 +2142,12 @@ async def gather_l2_state(
     if adapter is None or registry is None:
         return [], 0.0, 0.0
 
+    from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+
     try:
         session = registry.get_session_for(adapter_id, account_id)
+    except RegistrySessionUnavailable as exc:
+        raise PortfolioSafetyStateError("Native account session is unavailable") from exc
     except Exception:
         return [], 0.0, 0.0
 

@@ -14,12 +14,13 @@ the filesystem beyond temporary paths.
 
 from __future__ import annotations
 
-import sys
+import importlib.util
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
 
-import pytest
+import sys
+from typing import Any
+from unittest.mock import MagicMock
+
 
 # ---------------------------------------------------------------------------
 # Ensure gateway src/ is on sys.path so bare-name gateway imports work.
@@ -140,105 +141,49 @@ def test_gateway_blueprint_registered() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_reconnect_with_no_saved_accounts(caplog: pytest.LogCaptureFixture) -> None:
-    """_reconnect_saved_accounts must not raise when no accounts are stored."""
-    import logging  # noqa: PLC0415
 
-    # Import _reconnect_saved_accounts via the packages path (repo-root import)
-    sys.path.insert(0, str(_REPO_ROOT))
-    from flinttrade_core.app import _reconnect_saved_accounts  # noqa: PLC0415
-
-    registry = BrokerRegistry()
-    cs = MagicMock(spec=CredentialStore)
-    cs.list_accounts.return_value = []
-
-    reconnect_logger = logging.getLogger("test.reconnect.empty")
-    with caplog.at_level(logging.INFO, logger="test.reconnect.empty"):
-        # Must complete without raising
-        _reconnect_saved_accounts(registry, cs, reconnect_logger, mutation_admission=lambda: None)
-
-    assert len(registry.list_accounts()) == 0
-    # The store's list_accounts was called exactly once
-    cs.list_accounts.assert_called_once()
+_fixture_spec = importlib.util.spec_from_file_location("_registry_fixtures", Path(__file__).resolve().parents[4] / "tests" / "registry_fixtures.py")
+_fixture_module = importlib.util.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(_fixture_module)
+RegistryFixture = _fixture_module.RegistryFixture
 
 
-# ---------------------------------------------------------------------------
-# 5. test_reconnect_partial_failure
-# ---------------------------------------------------------------------------
+def test_reconnect_with_no_saved_accounts(tmp_path, caplog):
+    import logging
+    from flinttrade_core.app import _reconnect_saved_accounts
+    fixture = RegistryFixture(tmp_path)
+    _reconnect_saved_accounts(fixture.registry, fixture.store, logging.getLogger("test.reconnect"),
+        registry_publication_owner=fixture.owner, workspace_path=tmp_path, mutation_admission=lambda: None)
+    assert fixture.registry.list_accounts() == []
+    fixture.close()
 
 
-def test_reconnect_partial_failure(caplog: pytest.LogCaptureFixture) -> None:
-    """_reconnect_saved_accounts must continue past a failed account.
-
-    Setup: two saved accounts.
-      - Account A (FAIL001): authenticate raises AuthFlowError.
-      - Account B (OK001): authenticate succeeds.
-
-    After the call, Account B is in the registry; no exception is raised.
-    """
-    import logging  # noqa: PLC0415
-
-    from flinttrade_core.app import _reconnect_saved_accounts  # noqa: PLC0415
-
-    registry = BrokerRegistry()
-
-    cs = MagicMock(spec=CredentialStore)
-    cs.list_accounts.return_value = [
-        {
-            "account_id": "FAIL001",
-            "broker": "zerodha",
-            "label": "Bad Account",
-            "is_primary": False,
-        },
-        {
-            "account_id": "OK001",
-            "broker": "zerodha",
-            "label": "Good Account",
-            "is_primary": True,
-        },
-    ]
-
-    def _retrieve(account_id: str) -> dict[str, Any]:
-        if account_id == "FAIL001":
-            return {"api_key": "bad", "totp": "000000"}
-        return {"api_key": "good", "totp": "123456"}
-
-    cs.retrieve.side_effect = _retrieve
-
-    reconnect_logger = logging.getLogger("test.reconnect.partial")
-
-    # Build mock BrokerSession instances — FAIL001 raises on authenticate,
-    # OK001 succeeds.  We patch the BrokerSession class inside the module
-    # that _reconnect_saved_accounts imports it from.
-    _fail_session = MagicMock()
-    _fail_session.authenticate.side_effect = AuthFlowError("Bad credentials")
-
-    _ok_session = MagicMock()
-    _ok_session.authenticate.return_value = None  # success — no exception
-
-    _session_map: dict[str, Any] = {
-        "FAIL001": _fail_session,
-        "OK001": _ok_session,
-    }
-
-    def _make_session(account_id: str, broker: str, label: str) -> Any:
-        return _session_map[account_id]
-
-    with patch("flinttrade_gateway.session.BrokerSession", side_effect=_make_session):
-        with caplog.at_level(logging.INFO, logger="test.reconnect.partial"):
-            # Must not raise even though FAIL001 fails
-            _reconnect_saved_accounts(registry, cs, reconnect_logger, mutation_admission=lambda: None)
-
-    # OK001's mock session must have been inserted into the registry
-    assert "OK001" in registry._sessions
-    assert registry._sessions["OK001"] is _ok_session
-    # FAIL001 must not have been added
-    assert "FAIL001" not in registry._sessions
-    # Primary should be set to OK001 (is_primary=True in saved accounts)
-    assert registry._primary == "OK001"
+def test_reconnect_partial_failure_uses_exact_owner_and_explicit_primary(tmp_path, monkeypatch, caplog):
+    import logging
+    from flinttrade_core.app import _reconnect_saved_accounts
+    from flinttrade_core.broker_identity import BrokerSelector
+    fixture = RegistryFixture(tmp_path)
+    for account in ("FAIL001", "OK001"):
+        selector = BrokerSelector("openalgo", account)
+        fixture.store.put_credentials(selector, "zerodha", "Private label", {"api_key": account},
+            expected=fixture.store.selector_state(selector).version)
+    calls = []
+    class Adapter:
+        def authenticate(self, credentials):
+            calls.append(credentials["api_key"])
+            if credentials["api_key"] == "FAIL001":
+                raise AuthFlowError("Rejected synthetic credential")
+            return "synthetic-token", None
+    monkeypatch.setattr("flinttrade_gateway.session.load_broker_adapter", lambda _: Adapter())
+    with caplog.at_level(logging.INFO):
+        _reconnect_saved_accounts(fixture.registry, fixture.store, logging.getLogger("test.reconnect"),
+            registry_publication_owner=fixture.owner, workspace_path=tmp_path,
+            execution_default_selector=BrokerSelector("openalgo", "OK001"), mutation_admission=lambda: None)
+    assert calls == ["FAIL001", "OK001"]
+    assert fixture.registry.snapshot_exact_state(BrokerSelector("openalgo", "OK001")).status == "connected"
+    assert fixture.registry.snapshot_exact_state(BrokerSelector("openalgo", "FAIL001")).status == "tombstoned"
+    assert fixture.registry.get_primary_session().info.account_id == "OK001"
     logs = "\n".join(caplog.messages)
-    assert "FAIL001" not in logs
-    assert "OK001" not in logs
-    assert "Bad Account" not in logs
-    assert "Good Account" not in logs
+    assert not any(secret in logs for secret in ("FAIL001", "OK001", "Private label", "synthetic-token"))
     assert "account#" in logs
+    fixture.close()

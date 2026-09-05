@@ -126,7 +126,9 @@ _GATEWAY_SRC = str(Path(_REPO_ROOT) / "packages" / "integrations" / "gateway" / 
 if _GATEWAY_SRC not in sys.path:
     sys.path.append(_GATEWAY_SRC)
 
-from flinttrade_gateway.registry import BrokerRegistry  # noqa: E402
+from flinttrade_gateway.registry import (  # noqa: E402
+    BrokerRegistry, RegistryPublicationOwner, ManagedSessionAuthority, create_owned_registry,
+)
 from flinttrade_gateway.credentials import CredentialStore  # noqa: E402
 from flinttrade_gateway.auth import gateway_bp  # noqa: E402
 from flinttrade_gateway.contracts import ContractManager  # noqa: E402
@@ -1496,6 +1498,9 @@ def _reconnect_saved_accounts(
     credential_store: CredentialStore,
     reconnect_logger: logging.Logger,
     *,
+    registry_publication_owner: RegistryPublicationOwner | None = None,
+    workspace_path: Path | None = None,
+    execution_default_selector: Any | None = None,
     mutation_admission: MutationAdmission = require_broker_account_mutations,
 ) -> None:
     """Reconnect previously saved broker accounts on startup.
@@ -1518,6 +1523,15 @@ def _reconnect_saved_accounts(
     from flinttrade_gateway.log_safety import account_ref  # noqa: PLC0415
     from flinttrade_gateway.session import BrokerSession  # noqa: PLC0415
 
+    from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+    from flinttrade_core.broker_identity import BrokerSelector
+    from flinttrade_core.workspace_migrations import read_workspace_snapshot, broker_workspace_version
+
+    owner = registry_publication_owner
+    if type(owner) is not RegistryPublicationOwner or not owner.owns(registry) or workspace_path is None:
+        raise RegistrySessionUnavailable
+    workspace = read_workspace_snapshot(workspace_path)
+    owner.set_execution_default_projection(execution_default_selector, workspace_version=workspace.version)
     saved = credential_store.list_accounts()
     if not saved:
         reconnect_logger.info("No saved broker accounts to reconnect")
@@ -1535,12 +1549,28 @@ def _reconnect_saved_accounts(
             reconnect_logger.info("  Skipped native account: %s (%s)", safe_account, adapter_id)
             continue
         try:
-            creds = credential_store.retrieve(account_id)
+            selector = BrokerSelector(adapter_id, account_id)
+            expected = registry.snapshot_selector(selector)
+            version = credential_version_reader(credential_store)(selector)
+            creds = credential_store.retrieve_credentials(selector)
+            workspace = read_workspace_snapshot(workspace_path)
+            authority = ManagedSessionAuthority(version, workspace.version, broker_workspace_version(workspace))
             session = BrokerSession(account_id, broker, label)
-            session.authenticate(creds)
-            registry._sessions[account_id] = session
-            if acct.get("is_primary"):
-                registry._primary = account_id
+            candidate = owner.prepare_session_candidate(selector, session, expected_registry=expected,
+                authority=authority, broker=broker, label=label)
+            try:
+                session.authenticate(creds)
+            except BaseException:
+                owner.abandon_prepared_candidate(candidate)
+                from flinttrade_core.account_mutation_contracts import RegistryVersionConflict
+                try:
+                    owner.remove_session_for_exact(selector, expected_registry=expected)
+                except RegistryVersionConflict:
+                    pass  # A concurrent successor is not this replay attempt's session.
+                raise
+            current = read_workspace_snapshot(workspace_path)
+            owner.publish_prepared_candidate(candidate, current_authority=ManagedSessionAuthority(
+                credential_version_reader(credential_store)(selector), current.version, broker_workspace_version(current)))
             reconnect_logger.info("  Connected: %s (%s)", safe_account, broker)
         except Exception as exc:
             reconnect_logger.warning(
@@ -2096,6 +2126,28 @@ def _record_current_reconcile_snapshot(app: Flask, **snapshot: Any) -> int:
     return recorder(**snapshot)
 
 
+def registry_publication_owner_for(app: Flask, registry: BrokerRegistry) -> RegistryPublicationOwner:
+    """Require an explicitly composed owner; never create authority for an injected registry."""
+    from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+
+    owner = app.extensions.get("flinttrade.registry_publication_owner")
+    if type(owner) is not RegistryPublicationOwner or not owner.owns(registry):
+        raise RegistrySessionUnavailable
+    return owner
+
+
+def credential_version_reader(store: CredentialStore) -> Callable:
+    """Read actual exact present managed credential authority."""
+    from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+
+    def read(selector):
+        state = store.selector_state(selector)
+        if not state.present or not state.credential_present or state.origin != "managed":
+            raise RegistrySessionUnavailable
+        return state.version
+    return read
+
+
 def build_broker_router(
     registry: BrokerRegistry,
     brokers_config: dict[str, Any],
@@ -2111,6 +2163,8 @@ def build_broker_router(
     lifecycle_store: Any | None = None,
     workspace_snapshot: Any | None = None,
     workspace_path: Path | None = None,
+    registry_publication_owner: RegistryPublicationOwner | None = None,
+    credential_version_for: Callable | None = None,
 ) -> Any:
     """Construct a config-driven :class:`BrokerRouter` (contract §13 / §11.4).
 
@@ -2159,13 +2213,32 @@ def build_broker_router(
     from flinttrade_gateway.router import BrokerRouter  # noqa: PLC0415
     from flinttrade_gateway.routing_config import RoutingConfig  # noqa: PLC0415
     from flinttrade_gateway.session_provider import (  # noqa: PLC0415
-        AuthenticatingSessionProvider,
+        AuthenticatingSessionProvider, ConnectedSessionClientResolver,
     )
 
     config = RoutingConfig.from_workspace(brokers_config)
+    from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+    from flinttrade_core.broker_identity import BrokerSelector, parse_broker_selector
+    from flinttrade_core.workspace_migrations import read_workspace_snapshot
+
+    owner = registry_publication_owner
+    if owner is not None and (type(owner) is not RegistryPublicationOwner or not owner.owns(registry)):
+        raise RegistrySessionUnavailable
+
+    def compatibility_authority():
+        if owner is None or workspace_path is None:
+            raise RegistrySessionUnavailable
+        return owner.seal_openalgo_default_compatibility_authority(read_workspace_snapshot(workspace_path))
+
     session_provider = AuthenticatingSessionProvider(
         registry, config.account_acls, workspace_snapshot=workspace_snapshot, workspace_path=workspace_path,
+        credential_version_for=credential_version_for, compatibility_authority_for=compatibility_authority,
     )
+    if owner is not None and workspace_snapshot is not None and workspace_snapshot.version is not None:
+        owner.set_execution_default_projection(
+            parse_broker_selector(config.execution.default) if config.execution.default else None,
+            workspace_version=workspace_snapshot.version,
+        )
     gate = SafetyGate()
 
     resolved_adapters: dict[str, Any] = dict(adapters or {})
@@ -2200,27 +2273,26 @@ def build_broker_router(
         from flinttrade_gateway.brokers.openalgo import OpenAlgoAdapter  # noqa: PLC0415
 
         resolved_adapters["openalgo"] = OpenAlgoAdapter(
-            default_client=openalgo_client,
+            session_clients=ConnectedSessionClientResolver(session_provider, registry),
             local_state_provider=lifecycle_store,
         )
-        # Only the frozen local compatibility selector may be rebuilt during
-        # cutover. This does not authenticate or publish another account.
-        for selector in config.registered:
-            try:
-                adapter_id, account_id = parse_selector(selector)
-            except ValueError:
-                continue
-            if adapter_id == "openalgo" and account_id == "default":
-                registry.put_session(
-                    "openalgo",
-                    account_id,
-                    _AdapterSession(
-                        access_token="",
-                        expires_at=4_102_444_800.0,
-                        account_id=account_id,
-                        adapter_id="openalgo",
-                    ),
-                )
+        if "openalgo:default" in config.registered:
+            if owner is None or workspace_snapshot is None or workspace_path is None:
+                raise RegistrySessionUnavailable
+            if not isinstance(openalgo_client, OpenAlgoClient) or not openalgo_client.matches_workspace_openalgo(workspace_snapshot):
+                raise RegistrySessionUnavailable
+            authority = owner.seal_openalgo_default_compatibility_authority(workspace_snapshot)
+            receipt = owner.prepare_openalgo_default_compatibility_candidate(
+                _AdapterSession("", 4_102_444_800.0, account_id="default", adapter_id="openalgo"),
+                expected_registry=registry.snapshot_selector(BrokerSelector("openalgo", "default")),
+                authority=authority, client=openalgo_client, broker=None, label="OpenAlgo",
+            )
+            current = read_workspace_snapshot(workspace_path)
+            if not openalgo_client.matches_workspace_openalgo(current):
+                owner.abandon_prepared_candidate(receipt)
+                raise RegistrySessionUnavailable
+            owner.publish_prepared_candidate(receipt,
+                current_authority=owner.seal_openalgo_default_compatibility_authority(current))
 
     # Report the ACTIVE native adapters (factory-built or injected) to the
     # caller's sink so the engine-side reconciliation runner can enumerate them
@@ -2505,6 +2577,8 @@ def configure_broker_router(
                 lifecycle_store=local_state_provider,
                 workspace_snapshot=workspace_snapshot,
                 workspace_path=target_workspace,
+                registry_publication_owner=registry_publication_owner_for(app, registry),
+                credential_version_for=credential_version_reader(credential_store),
             )
             candidate_reconcile_targets = _build_reconcile_targets_provider(
                 registry,
@@ -2720,6 +2794,8 @@ def _reestablish_native_sessions(app: Flask, *, verify: bool = True) -> dict[str
                 selectors,
                 verify=verify,
                 mutation_admission=mutation_admission,
+                registry_publication_owner=registry_publication_owner_for(app, registry),
+                workspace_path=_workspace_dir(),
             )
 
         try:
@@ -3136,6 +3212,7 @@ def create_flask_app(
     service_provider_catalogue: Any | None = None,
     service_connection_store: ServiceConnectionStore | None = None,
     broker_account_mutation_admission: MutationAdmission = require_broker_account_mutations,
+    registry_publication_owner: RegistryPublicationOwner | None = None,
 ) -> Flask:
     """Create the Flask app with FlintTrade API routes.
 
@@ -3606,7 +3683,12 @@ def create_flask_app(
 
     # --- Gateway initialization ---
     if registry is None:
-        registry = BrokerRegistry(mutation_admission=broker_account_mutation_admission)
+        registry, registry_publication_owner = create_owned_registry(mutation_admission=broker_account_mutation_admission)
+    if registry_publication_owner is not None:
+        if type(registry_publication_owner) is not RegistryPublicationOwner or not registry_publication_owner.owns(registry):
+            from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+            raise RegistrySessionUnavailable
+        app.extensions["flinttrade.registry_publication_owner"] = registry_publication_owner
 
     # Ensure API_KEY_PEPPER is set in os.environ BEFORE the OpenAlgo
     # broker modules are imported via the gateway shim. Upstream's
@@ -4617,9 +4699,19 @@ def create_flask_app(
     # is a single-operator tool; operator == user == data principal. Archived to
     # .local/archive/user-multi-2026-06-10/.)
 
-    # Reconnect saved accounts (best-effort, don't block startup)
+    # Reconnect saved accounts only after admission; pass explicit workspace intent.
     try:
-        _reconnect_saved_accounts(registry, credential_store, logger)
+        broker_account_mutation_admission()
+        from .broker_identity import parse_broker_selector
+        from .workspace_migrations import read_workspace_snapshot
+        replay_workspace = read_workspace_snapshot(_workspace_dir())
+        replay_default = replay_workspace.as_dict()["brokers"]["execution"]["default"]
+        _reconnect_saved_accounts(registry, credential_store, logger,
+            registry_publication_owner=registry_publication_owner, workspace_path=_workspace_dir(),
+            execution_default_selector=parse_broker_selector(replay_default) if replay_default else None,
+            mutation_admission=broker_account_mutation_admission)
+    except BrokerAccountCutoverUnavailable as exc:
+        logger.info("Saved broker reconnect unavailable: %s", exc)
     except Exception as exc:
         logger.error("Account reconnection failed (%s)", type(exc).__name__)
 
@@ -6046,7 +6138,7 @@ class FlintTradeApp:
         contracts_dir = flinttrade_dir / "contracts"
         contracts_dir.mkdir(exist_ok=True)
         self.contract_manager = ContractManager(contracts_dir)
-        self.registry = BrokerRegistry()
+        self.registry, self._registry_publication_owner = create_owned_registry()
 
         # RAG — knowledge base (persistent).
         # LLMClient and RAGPipeline are imported lazily here to avoid loading
@@ -6576,6 +6668,7 @@ class FlintTradeApp:
             audit=self.audit,
             client=self.client,
             registry=self.registry,
+            registry_publication_owner=self._registry_publication_owner,
             credential_store=self.credential_store,
             contract_manager=self.contract_manager,
             rag=self.rag,

@@ -216,8 +216,9 @@ class BrokerAccountInfo(BaseModel):
         is_primary: Whether this is the primary account for order routing.
     """
 
+    adapter_id: str
     account_id: str
-    broker: str
+    broker: str | None
     label: str
     status: AccountStatus = AccountStatus.disconnected
     connected_at: datetime | None = None

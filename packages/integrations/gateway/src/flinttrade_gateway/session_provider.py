@@ -15,8 +15,10 @@ router stays workspace-agnostic.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+from flinttrade_core.broker_identity import BrokerSelector, CredentialVersion
 from flinttrade_core.exceptions import SafetyBypassError
 from flinttrade_core.workspace_migrations import (
     WorkspaceSnapshot,
@@ -25,7 +27,12 @@ from flinttrade_core.workspace_migrations import (
 )
 from flinttrade_engine.request_context import RequestContext
 
-from .registry import BrokerRegistry
+from .registry import (
+    BrokerRegistry,
+    ConnectedRegistrySession,
+    ManagedLookupAuthority,
+    OpenAlgoDefaultCompatibilityAuthorityReceipt,
+)
 
 
 class AuthenticatingSessionProvider:
@@ -49,26 +56,42 @@ class AuthenticatingSessionProvider:
         *,
         workspace_snapshot: WorkspaceSnapshot | None = None,
         workspace_path: Path | None = None,
+        credential_version_for: Callable[[BrokerSelector], CredentialVersion] | None = None,
+        compatibility_authority_for: Callable[[], OpenAlgoDefaultCompatibilityAuthorityReceipt] | None = None,
     ) -> None:
         self._registry = registry
         self._acls = account_acls
+        self._credential_version_for = credential_version_for
+        self._compatibility_authority_for = compatibility_authority_for
         if (workspace_snapshot is None) != (workspace_path is None):
             raise ValueError("workspace binding requires both snapshot and path")
         if workspace_snapshot is not None and workspace_snapshot.version is None:
             raise ValueError("workspace sessions require a persisted workspace")
-        # Ditto's pre-cutover local routing deliberately has no workspace binding.
         self._workspace_path = workspace_path
         self.workspace_version = workspace_snapshot.version if workspace_snapshot is not None else None
-        self.broker_workspace_version = broker_workspace_version(workspace_snapshot) if workspace_snapshot is not None else None
+        self.broker_workspace_version = (
+            broker_workspace_version(workspace_snapshot) if workspace_snapshot is not None else None
+        )
 
-    def __call__(self, request_ctx: RequestContext, adapter_id: str, account_id: str) -> Any:
-        if self._workspace_path is not None:
-            try:
-                current = broker_workspace_version(read_workspace_snapshot(self._workspace_path))
-            except Exception as exc:
-                raise SafetyBypassError("broker workspace authority is unavailable") from exc
-            if current != self.broker_workspace_version:
-                raise SafetyBypassError("broker workspace authority changed; rebuild routing before session use")
+    def current_authority_for(self, selector: BrokerSelector) -> Any:
+        if self._workspace_path is None:
+            raise RegistrySessionUnavailable
+        current = broker_workspace_version(read_workspace_snapshot(self._workspace_path))
+        if current != self.broker_workspace_version:
+            raise RegistrySessionUnavailable
+        if selector == BrokerSelector("openalgo", "default"):
+            if self._compatibility_authority_for is None:
+                raise RegistrySessionUnavailable
+            return self._compatibility_authority_for()
+        if self._credential_version_for is None:
+            raise RegistrySessionUnavailable
+        version = self._credential_version_for(selector)
+        if type(version) is not CredentialVersion or version.selector != selector:
+            raise RegistrySessionUnavailable
+        return ManagedLookupAuthority(version, current)
+
+    def __call__(self, request_ctx: RequestContext, adapter_id: str, account_id: str) -> ConnectedRegistrySession:
+        selector = BrokerSelector(adapter_id, account_id)
         allowed_actors = self._acls.get(adapter_id, {}).get(account_id, [])
         if request_ctx.actor_id not in allowed_actors:
             raise SafetyBypassError(
@@ -76,7 +99,9 @@ class AuthenticatingSessionProvider:
                 f"({adapter_id}, {account_id}). workspace.json.brokers.account_acls "
                 f"must list this actor for this account."
             )
-        return self._registry.get_session_for(adapter_id, account_id)
+        return self._registry.get_connected_session_for(
+            selector, current_authority=self.current_authority_for(selector)
+        )
 
     def authorise_if_unclaimed(self, adapter_id: str, account_id: str, actor_id: str) -> bool:
         """Trust-on-first-use: claim an unauthorised ``(adapter, account)`` for ``actor_id``.
@@ -98,3 +123,32 @@ class AuthenticatingSessionProvider:
             return False
         per_adapter[account_id] = [actor_id]
         return True
+
+
+class ConnectedSessionClientResolver:
+    """Resolve only sealed current handles after fresh durable authority reads."""
+
+    def __init__(self, provider: AuthenticatingSessionProvider, registry: BrokerRegistry) -> None:
+        if type(provider) is not AuthenticatingSessionProvider or provider._registry is not registry:
+            raise RegistrySessionUnavailable
+        self._provider = provider
+        self._registry = registry
+
+    def openalgo_client(self, session: ConnectedRegistrySession) -> Any:
+        if type(session) is not ConnectedRegistrySession:
+            raise RegistrySessionUnavailable
+        try:
+            selector = session.selector
+        except (AttributeError, TypeError):
+            raise RegistrySessionUnavailable from None
+        if type(selector) is not BrokerSelector or selector.adapter_id != "openalgo":
+            raise RegistrySessionUnavailable
+        authority = self._provider.current_authority_for(selector)
+        client = self._registry.client_for_connected_session(session, current_authority=authority)
+        if selector == BrokerSelector("openalgo", "default"):
+            from flinttrade_core.openalgo_client import OpenAlgoClient
+
+            current = read_workspace_snapshot(self._provider._workspace_path)
+            if not isinstance(client, OpenAlgoClient) or not client.matches_workspace_openalgo(current):
+                raise RegistrySessionUnavailable
+        return client

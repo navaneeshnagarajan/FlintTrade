@@ -739,16 +739,11 @@ def _schedule_refresh_job(adapter_id: str, *, remove: bool = False) -> None:
 
 
 def _session_status(registry: Any, adapter_id: str, account_id: str) -> dict[str, Any]:
-    """Non-throwing snapshot of a selector's live session, for the UI."""
-    try:
-        session = registry.get_session_for(adapter_id, account_id)
-    except Exception:  # noqa: BLE001 - no session registered
+    """Detached exact status never grants access to a session payload."""
+    state = registry.snapshot_exact_state(BrokerSelector(adapter_id, account_id))
+    if state is None or state.status != "connected":
         return {"has_session": False, "expires_at": None, "read_only": False}
-    return {
-        "has_session": True,
-        "expires_at": getattr(session, "expires_at", None),
-        "read_only": bool(getattr(session, "is_read_only", False)),
-    }
+    return {"has_session": True, "expires_at": state.expires_at, "read_only": state.read_only is True}
 
 
 def _stored_native_account(store: Any, adapter_id: str, account_id: str) -> dict[str, Any] | None:
@@ -803,70 +798,63 @@ def _compare_and_set_selector_primary(
 
 
 def _registry_session_generation(registry: Any, adapter_id: str, account_id: str) -> Any:
-    lock = getattr(registry, "_lock", None)
-    sessions = getattr(registry, "_adapter_sessions", None)
-    if lock is not None and isinstance(sessions, dict):
-        with lock:
-            return sessions.get((adapter_id, account_id), _MISSING_REGISTRY_SESSION)
-    try:
-        return registry.get_session_for(adapter_id, account_id)
-    except Exception:  # noqa: BLE001 - absence is an explicit generation
-        return _MISSING_REGISTRY_SESSION
+    return registry.snapshot_selector(BrokerSelector(adapter_id, account_id))
 
 
-def _registry_session_generation_matches(
-    registry: Any,
-    adapter_id: str,
-    account_id: str,
-    expected: Any,
-) -> bool:
-    return _registry_session_generation(registry, adapter_id, account_id) is expected
+def _registry_session_generation_matches(registry: Any, adapter_id: str, account_id: str, expected: Any) -> bool:
+    return _registry_session_generation(registry, adapter_id, account_id) == expected
 
 
 def _compare_and_put_registry_session(
-    registry: Any,
-    adapter_id: str,
-    account_id: str,
-    expected: Any,
-    candidate: Any,
+    registry: Any, adapter_id: str, account_id: str, expected: Any, candidate: Any,
 ) -> bool:
-    """Publish a session only while the exact captured registry entry remains."""
-    lock = getattr(registry, "_lock", None)
-    sessions = getattr(registry, "_adapter_sessions", None)
-    put_overridden = "put_session" in getattr(registry, "__dict__", {})
-    if lock is not None and isinstance(sessions, dict) and not put_overridden:
-        with lock:
-            current = sessions.get((adapter_id, account_id), _MISSING_REGISTRY_SESSION)
-            if current is not expected:
-                return False
-            sessions[(adapter_id, account_id)] = candidate
-            return True
-    if not _registry_session_generation_matches(registry, adapter_id, account_id, expected):
+    """Publish a prepared candidate against exact registry and durable authority."""
+    from flinttrade_core.account_mutation_contracts import RegistryVersionConflict
+    from flinttrade_core.workspace_migrations import broker_workspace_version, read_workspace_snapshot
+    from flinttrade_gateway.native_login import NativeSessionCandidate
+    from flinttrade_gateway.registry import ManagedSessionAuthority
+
+    from .app import credential_version_reader, registry_publication_owner_for
+
+    app = current_app._get_current_object()
+    owner = registry_publication_owner_for(app, registry)
+    store = app.config["CREDENTIAL_STORE"]
+    selector = BrokerSelector(adapter_id, account_id)
+    workspace = read_workspace_snapshot(workspace_dir())
+    version_for = credential_version_reader(store)
+    authority = ManagedSessionAuthority(version_for(selector), workspace.version, broker_workspace_version(workspace))
+    metadata = store.account_for_selector(selector)
+    if not isinstance(candidate, NativeSessionCandidate):
+        raise TypeError("native_candidate_required")
+    receipt = owner.prepare_session_candidate(selector, candidate.session,
+        expected_registry=expected, authority=authority, broker=metadata.broker, label=metadata.label)
+    current = read_workspace_snapshot(workspace_dir())
+    try:
+        current_authority = ManagedSessionAuthority(version_for(selector), current.version, broker_workspace_version(current))
+    except BaseException:
+        owner.abandon_prepared_candidate(receipt)
+        raise
+    try:
+        result = owner.publish_prepared_candidate(receipt, current_authority=current_authority)
+    except RegistryVersionConflict:
         return False
-    registry.put_session(adapter_id, account_id, candidate)
+    candidate.registry_version = result.version.registry_version
     return True
 
 
 def _compare_and_remove_registry_session(
-    registry: Any,
-    adapter_id: str,
-    account_id: str,
-    expected: Any,
+    registry: Any, adapter_id: str, account_id: str, expected: Any,
 ) -> bool:
-    """Remove a session only while it is still the exact expected object."""
-    lock = getattr(registry, "_lock", None)
-    sessions = getattr(registry, "_adapter_sessions", None)
-    remove_overridden = "remove_session_for" in getattr(registry, "__dict__", {})
-    if lock is not None and isinstance(sessions, dict) and not remove_overridden:
-        with lock:
-            current = sessions.get((adapter_id, account_id), _MISSING_REGISTRY_SESSION)
-            if current is not expected:
-                return False
-            sessions.pop((adapter_id, account_id), None)
-            return True
-    if not _registry_session_generation_matches(registry, adapter_id, account_id, expected):
+    """Retire only the exact expected registry version; never call an SDK."""
+    from flinttrade_core.account_mutation_contracts import RegistryVersionConflict
+
+    from .app import registry_publication_owner_for
+
+    owner = registry_publication_owner_for(current_app._get_current_object(), registry)
+    try:
+        owner.remove_session_for_exact(BrokerSelector(adapter_id, account_id), expected_registry=expected)
+    except RegistryVersionConflict:
         return False
-    registry.remove_session_for(adapter_id, account_id)
     return True
 
 
@@ -1069,6 +1057,11 @@ class _CandidateLoginAttempt:
                 abandoned = self._abandoned
                 self._finished = True
             if abandoned:
+                from flinttrade_gateway.native_login import NativeSessionCandidate, quarantine_native_candidate
+                candidates = self.result if isinstance(self.result, tuple) else (self.result,)
+                for candidate in candidates:
+                    if isinstance(candidate, NativeSessionCandidate):
+                        quarantine_native_candidate(candidate)
                 try:
                     self._candidate_store.discard()
                 except Exception:  # noqa: BLE001 - staged material is already unreachable
@@ -1236,50 +1229,42 @@ def _quiesce_current_router() -> bool:
     return True
 
 
-def _activate_candidate_credentials(
-    candidate_store: Any,
-    adapter_id: str,
-    account_id: str,
-) -> tuple[dict[str, Any], Any | None]:
-    """Authenticate through an unpublished adapter within a wall-clock bound."""
+def _activate_candidate_credentials(candidate_store: Any, adapter_id: str, account_id: str) -> tuple[dict[str, Any], Any | None]:
+    """Authenticate/probe directly into an owned unpublished candidate."""
     mutation_admission = mutation_admission_for(current_app)
     mutation_admission()
-    from flinttrade_gateway.brokers.native_factory import build_native_adapters  # noqa: PLC0415
-    from flinttrade_gateway.native_login import establish_native_sessions  # noqa: PLC0415
-    from flinttrade_gateway.registry import BrokerRegistry  # noqa: PLC0415
-
-    candidate_registry = BrokerRegistry()
-    native_adapters = build_native_adapters(
-        [adapter_id],
-        attest_ok=lambda broker_id: broker_id == adapter_id,
-        has_credentials=lambda broker_id: broker_id == adapter_id,
+    from flinttrade_gateway.brokers.native_factory import build_native_adapters
+    from flinttrade_gateway.native_login import (
+        SESSION_INVALID_RELOGIN_MESSAGE,
+        prepare_native_session,
+        quarantine_native_candidate,
+        should_keep_session_after_probe_error,
     )
-    if adapter_id not in native_adapters:
+
+    adapters = build_native_adapters([adapter_id],
+        attest_ok=lambda broker_id: broker_id == adapter_id,
+        has_credentials=lambda broker_id: broker_id == adapter_id)
+    if adapter_id not in adapters:
         raise _RouterRebuildError("Candidate native adapter did not initialise")
     selector = serialise_broker_selector(BrokerSelector(adapter_id, account_id))
 
-    async def _run() -> dict[str, Any]:
-        return await establish_native_sessions(
-            native_adapters,
-            candidate_registry,
-            candidate_store,
-            [selector],
-            verify=True,
-            mutation_admission=mutation_admission,
-        )
+    async def run():
+        credentials = candidate_store.retrieve_for(adapter_id, account_id)
+        candidate = None
+        try:
+            candidate = await prepare_native_session(adapters[adapter_id], credentials, verify=True,
+                                                      mutation_admission=mutation_admission)
+            if candidate.probe_error is None and candidate.replay_credentials != credentials:
+                candidate_store.update_credentials_for(adapter_id, account_id, candidate.replay_credentials)
+            return candidate.probe_error, candidate
+        except Exception as exc:
+            if candidate is not None:
+                quarantine_native_candidate(candidate)
+            message = BROKER_LOGIN_RETRY_MESSAGE if should_keep_session_after_probe_error(exc) else SESSION_INVALID_RELOGIN_MESSAGE
+            return message, None
 
-    timeout = _candidate_login_timeout_seconds()
-    results = _run_bounded_candidate_coroutine(
-        _run,
-        candidate_store,
-        timeout=timeout,
-    ) or {}
-
-    try:
-        candidate_session = candidate_registry.get_session_for(adapter_id, account_id)
-    except Exception:  # noqa: BLE001 - failed candidates intentionally have no session
-        candidate_session = None
-    return results, candidate_session
+    error, candidate = _run_bounded_candidate_coroutine(run, candidate_store, timeout=_candidate_login_timeout_seconds())
+    return {selector: error or "ok"}, candidate if error is None else None
 
 
 def _candidate_session_status(session: Any | None) -> dict[str, Any]:
@@ -1293,45 +1278,22 @@ def _candidate_session_status(session: Any | None) -> dict[str, Any]:
     }
 
 
-def _registry_session_or_none(registry: Any, adapter_id: str, account_id: str) -> Any | None:
-    """Snapshot one shared registry selector without raising."""
-    try:
-        return registry.get_session_for(adapter_id, account_id)
-    except Exception:  # noqa: BLE001 - a disconnected selector has no prior session
-        return None
+def _registry_session_or_none(registry: Any, adapter_id: str, account_id: str) -> Any:
+    """Capture exact registry state, including unseen and removal tombstones."""
+    return registry.snapshot_selector(BrokerSelector(adapter_id, account_id))
 
 
 def _restore_registry_session(
-    registry: Any,
-    adapter_id: str,
-    account_id: str,
-    prior_session: Any | None,
-    published_session: Any,
+    registry: Any, adapter_id: str, account_id: str, prior_session: Any, published_session: Any,
 ) -> bool:
-    """Restore prior runtime state only while our published session is current."""
-    current = _registry_session_generation(registry, adapter_id, account_id)
-    prior_generation = (
-        _MISSING_REGISTRY_SESSION if prior_session is None else prior_session
-    )
-    if current is prior_generation:
+    """Retire our failed publication; prior broker authentication is not restorable."""
+    current = registry.snapshot_selector(BrokerSelector(adapter_id, account_id))
+    if current == prior_session:
         return True
-    if current is not published_session:
-        logger.critical("Refused stale native session rollback")
+    published_version = getattr(published_session, "registry_version", None)
+    if published_version is None or current != published_version:
         return False
-    if prior_session is None:
-        return _compare_and_remove_registry_session(
-            registry,
-            adapter_id,
-            account_id,
-            published_session,
-        )
-    return _compare_and_put_registry_session(
-        registry,
-        adapter_id,
-        account_id,
-        published_session,
-        prior_session,
-    )
+    return _compare_and_remove_registry_session(registry, adapter_id, account_id, published_version)
 
 
 def _rollback_committed_candidate(
@@ -1521,146 +1483,96 @@ def _do_connect(
             account_id,
         )
     except _CandidateLoginTimeoutError:
+        _compare_and_remove_registry_session(registry, adapter_id, account_id, prior_session)
         return _public_connect_timeout_body(), 504
     except _RouterRebuildError:
         candidate_store.discard()
+        _compare_and_remove_registry_session(registry, adapter_id, account_id, prior_session)
         return {"status": "error", "message": "Could not activate broker candidate"}, 500
 
-    selector = serialise_broker_selector(BrokerSelector(adapter_id, account_id))
-    login_state = login_results.get(selector, "not-activated")
-    session_status = _candidate_session_status(candidate_session)
-    connected = session_status["has_session"]
-    if not connected:
-        candidate_store.discard()
-        return {
-            "status": "error",
-            "data": {
-                "adapter_id": adapter_id,
-                "account_id": account_id,
-                "connected": False,
-                "login": login_state,
-                "session": session_status,
-            },
-            "message": f"Login did not establish a session ({login_state}); credentials were not kept.",
-        }, 502
-
-    if not _selector_credential_generation_matches(
-        store,
-        adapter_id,
-        account_id,
-        credential_receipt.prior_generation,
-    ):
-        candidate_store.discard()
-        _disable_broker_routing()
-        return {"status": "error", "message": "Broker account changed during login"}, 409
-    expected_prior_session = (
-        _MISSING_REGISTRY_SESSION if prior_session is None else prior_session
-    )
-    if not _registry_session_generation_matches(
-        registry,
-        adapter_id,
-        account_id,
-        expected_prior_session,
-    ):
-        candidate_store.discard()
-        _disable_broker_routing()
-        return {"status": "error", "message": "Broker session changed during login"}, 409
-
-    actor_id = _operator_actor_id()
-    if not _quiesce_current_router():
-        candidate_store.discard()
-        return {"status": "error", "message": "Broker router is still processing writes"}, 503
-
     try:
-        workspace_mutation = _register_selector_in_workspace(
-            adapter_id,
-            account_id,
-            actor_id,
-            is_primary,
-        )
-    except Exception:  # noqa: BLE001
-        logger.error("Failed to register native broker selector in workspace")
-        candidate_store.discard()
-        _restore_router_from_vault(store, registry)
-        return {"status": "error", "message": "Could not register broker selector"}, 500
+        selector = serialise_broker_selector(BrokerSelector(adapter_id, account_id))
+        login_state = login_results.get(selector, "not-activated")
+        session_status = _candidate_session_status(candidate_session)
+        connected = session_status["has_session"]
+        if not connected:
+            candidate_store.discard()
+            _compare_and_remove_registry_session(registry, adapter_id, account_id, prior_session)
+            return {
+                "status": "error",
+                "data": {
+                    "adapter_id": adapter_id,
+                    "account_id": account_id,
+                    "connected": False,
+                    "login": login_state,
+                    "session": session_status,
+                },
+                "message": f"Login did not establish a session ({login_state}); credentials were not kept.",
+            }, 502
 
-    try:
-        committed_generation = _commit_candidate_credentials(
+        if not _selector_credential_generation_matches(
             store,
-            candidate_store,
             adapter_id,
             account_id,
             credential_receipt.prior_generation,
+        ):
+            candidate_store.discard()
+            _disable_broker_routing()
+            return {"status": "error", "message": "Broker account changed during login"}, 409
+        expected_prior_session = (
+            prior_session
         )
-        if committed_generation is None:
-            raise RuntimeError("credential generation changed before commit")
-        credential_receipt.applied_generation = committed_generation
-        if is_primary and not session_status["read_only"]:
-            projection = store.snapshot_primary_projection(BrokerSelector(adapter_id, account_id), True)
-            if committed_generation not in projection.versions:
-                raise CredentialStaleError
-            primary_mutation = store.apply_primary_projection(projection)
-            credential_receipt.primary_mutation = primary_mutation
-            credential_receipt.applied_generation = next(
-                version for version in primary_mutation.after_versions
-                if version.selector == committed_generation.selector
-            )
-    except Exception:  # noqa: BLE001 - candidate values must never reach logs
-        candidate_store.discard()
-        _rollback_committed_candidate(
-            store,
-            registry,
-            adapter_id,
-            account_id,
-            credential_receipt,
-            prior_session,
-            candidate_session,
-            workspace_mutation=workspace_mutation,
-        )
-        return {"status": "error", "message": "Could not persist broker auth material"}, 500
-
-    try:
-        if not _compare_and_put_registry_session(
+        if not _registry_session_generation_matches(
             registry,
             adapter_id,
             account_id,
             expected_prior_session,
-            candidate_session,
         ):
-            raise RuntimeError("registry generation changed before publication")
-    except Exception:  # noqa: BLE001
-        _rollback_committed_candidate(
-            store,
-            registry,
-            adapter_id,
-            account_id,
-            credential_receipt,
-            prior_session,
-            candidate_session,
-            workspace_mutation=workspace_mutation,
-        )
-        return {"status": "error", "message": "Could not publish broker session"}, 500
+            candidate_store.discard()
+            _disable_broker_routing()
+            return {"status": "error", "message": "Broker session changed during login"}, 409
 
-    demotion_notice: str | None = None
-    execution_default_mutations: list[_ExecutionDefaultMutation] = []
-    if bool(session_status.get("read_only")):
-        demotion_notice = _demote_read_only_connected_account(
-            store,
-            registry,
-            account_id=account_id,
-            adapter_id=adapter_id,
-            fallback_label=label,
-            prior_execution_default=workspace_mutation.prior_default,
-            mutation_sink=execution_default_mutations,
-            credential_receipt=credential_receipt,
-        )
+        actor_id = _operator_actor_id()
+        if not _quiesce_current_router():
+            candidate_store.discard()
+            return {"status": "error", "message": "Broker router is still processing writes"}, 503
 
-    if _workspace_execution_default_is_disabled():
-        _disable_broker_routing()
-    else:
         try:
-            _configure_broker_router_checked(store, registry)
-        except _RouterRebuildError:
+            workspace_mutation = _register_selector_in_workspace(
+                adapter_id,
+                account_id,
+                actor_id,
+                is_primary,
+            )
+        except Exception:  # noqa: BLE001
+            logger.error("Failed to register native broker selector in workspace")
+            candidate_store.discard()
+            _restore_router_from_vault(store, registry)
+            return {"status": "error", "message": "Could not register broker selector"}, 500
+
+        try:
+            committed_generation = _commit_candidate_credentials(
+                store,
+                candidate_store,
+                adapter_id,
+                account_id,
+                credential_receipt.prior_generation,
+            )
+            if committed_generation is None:
+                raise RuntimeError("credential generation changed before commit")
+            credential_receipt.applied_generation = committed_generation
+            if is_primary and not session_status["read_only"]:
+                projection = store.snapshot_primary_projection(BrokerSelector(adapter_id, account_id), True)
+                if committed_generation not in projection.versions:
+                    raise CredentialStaleError
+                primary_mutation = store.apply_primary_projection(projection)
+                credential_receipt.primary_mutation = primary_mutation
+                credential_receipt.applied_generation = next(
+                    version for version in primary_mutation.after_versions
+                    if version.selector == committed_generation.selector
+                )
+        except Exception:  # noqa: BLE001 - candidate values must never reach logs
+            candidate_store.discard()
             _rollback_committed_candidate(
                 store,
                 registry,
@@ -1670,37 +1582,95 @@ def _do_connect(
                 prior_session,
                 candidate_session,
                 workspace_mutation=workspace_mutation,
-                execution_default_mutation=(
-                    execution_default_mutations[0]
-                    if execution_default_mutations
-                    else None
-                ),
             )
-            return {"status": "error", "message": "Could not publish broker routing"}, 500
+            return {"status": "error", "message": "Could not persist broker auth material"}, 500
 
-    status: dict[str, Any] = current_app.config.setdefault("NATIVE_SESSION_STATUS", {})
-    status.update(login_results)
+        try:
+            if not _compare_and_put_registry_session(
+                registry,
+                adapter_id,
+                account_id,
+                expected_prior_session,
+                candidate_session,
+            ):
+                raise RuntimeError("registry generation changed before publication")
+        except Exception:  # noqa: BLE001
+            _rollback_committed_candidate(
+                store,
+                registry,
+                adapter_id,
+                account_id,
+                credential_receipt,
+                prior_session,
+                candidate_session,
+                workspace_mutation=workspace_mutation,
+            )
+            return {"status": "error", "message": "Could not publish broker session"}, 500
 
-    # G5: runtime connects join the already-running daily refresh schedule.
-    _schedule_refresh_job(adapter_id)
+        demotion_notice: str | None = None
+        execution_default_mutations: list[_ExecutionDefaultMutation] = []
+        if bool(session_status.get("read_only")):
+            demotion_notice = _demote_read_only_connected_account(
+                store,
+                registry,
+                account_id=account_id,
+                adapter_id=adapter_id,
+                fallback_label=label,
+                prior_execution_default=workspace_mutation.prior_default,
+                mutation_sink=execution_default_mutations,
+                credential_receipt=credential_receipt,
+            )
 
-    body: dict[str, Any] = {
-        "status": "success",
-        "data": {
-            "adapter_id": adapter_id,
-            "account_id": account_id,
-            "connected": True,
-            "login": login_state,
-            "session": session_status,
-        },
-        "message": f"{adapter_id} account {account_id} connected.",
-    }
-    if demotion_notice:
-        # Surface the write-default change so the UI can tell the operator —
-        # a silent workspace.json diff is exactly the failure mode the
-        # fail-closed demotion policy exists to prevent.
-        body["data"]["notice"] = demotion_notice
-    return body, 200
+        if _workspace_execution_default_is_disabled():
+            _disable_broker_routing()
+        else:
+            try:
+                _configure_broker_router_checked(store, registry)
+            except _RouterRebuildError:
+                _rollback_committed_candidate(
+                    store,
+                    registry,
+                    adapter_id,
+                    account_id,
+                    credential_receipt,
+                    prior_session,
+                    candidate_session,
+                    workspace_mutation=workspace_mutation,
+                    execution_default_mutation=(
+                        execution_default_mutations[0]
+                        if execution_default_mutations
+                        else None
+                    ),
+                )
+                return {"status": "error", "message": "Could not publish broker routing"}, 500
+
+        status: dict[str, Any] = current_app.config.setdefault("NATIVE_SESSION_STATUS", {})
+        status.update(login_results)
+
+        # G5: runtime connects join the already-running daily refresh schedule.
+        _schedule_refresh_job(adapter_id)
+
+        body: dict[str, Any] = {
+            "status": "success",
+            "data": {
+                "adapter_id": adapter_id,
+                "account_id": account_id,
+                "connected": True,
+                "login": login_state,
+                "session": session_status,
+            },
+            "message": f"{adapter_id} account {account_id} connected.",
+        }
+        if demotion_notice:
+            # Surface the write-default change so the UI can tell the operator —
+            # a silent workspace.json diff is exactly the failure mode the
+            # fail-closed demotion policy exists to prevent.
+            body["data"]["notice"] = demotion_notice
+        return body, 200
+    finally:
+        if candidate_session is not None and candidate_session.registry_version is None:
+            from flinttrade_gateway.native_login import quarantine_native_candidate
+            quarantine_native_candidate(candidate_session)
 
 
 @native_accounts_bp.route("/brokers", methods=["GET"])
@@ -2112,124 +2082,76 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
             account_id,
         )
     except _CandidateLoginTimeoutError:
+        _compare_and_remove_registry_session(registry, adapter_id, account_id, prior_session)
         return jsonify(_public_connect_timeout_body()), 504
     except _RouterRebuildError:
         candidate_store.discard()
+        _compare_and_remove_registry_session(registry, adapter_id, account_id, prior_session)
         return jsonify({"status": "error", "message": "Could not activate broker login."}), 500
 
-    selector = serialise_broker_selector(BrokerSelector(adapter_id, account_id))
-    session_status = _candidate_session_status(candidate_session)
-    connected = session_status["has_session"]
-    if not connected:
-        candidate_store.discard()
-        return jsonify({
-            "status": "error",
-            "data": {
-                "login": login_results.get(selector, "not-activated"),
-                "session": session_status,
-            },
-        }), 502
-
-    if not _selector_credential_generation_matches(
-        store,
-        adapter_id,
-        account_id,
-        credential_receipt.prior_generation,
-    ):
-        candidate_store.discard()
-        _disable_broker_routing()
-        return jsonify({
-            "status": "error",
-            "message": "Broker account changed during login.",
-        }), 409
-    expected_prior_session = (
-        _MISSING_REGISTRY_SESSION if prior_session is None else prior_session
-    )
-    if not _registry_session_generation_matches(
-        registry,
-        adapter_id,
-        account_id,
-        expected_prior_session,
-    ):
-        candidate_store.discard()
-        _disable_broker_routing()
-        return jsonify({
-            "status": "error",
-            "message": "Broker session changed during login.",
-        }), 409
-
-    if not _quiesce_current_router():
-        candidate_store.discard()
-        return jsonify({
-            "status": "error",
-            "message": "Broker router is still processing writes; account was not changed.",
-        }), 503
-
     try:
-        committed_generation = _commit_candidate_credentials(
+        selector = serialise_broker_selector(BrokerSelector(adapter_id, account_id))
+        session_status = _candidate_session_status(candidate_session)
+        connected = session_status["has_session"]
+        if not connected:
+            candidate_store.discard()
+            _compare_and_remove_registry_session(registry, adapter_id, account_id, prior_session)
+            return jsonify({
+                "status": "error",
+                "data": {
+                    "login": login_results.get(selector, "not-activated"),
+                    "session": session_status,
+                },
+            }), 502
+
+        if not _selector_credential_generation_matches(
             store,
-            candidate_store,
             adapter_id,
             account_id,
             credential_receipt.prior_generation,
+        ):
+            candidate_store.discard()
+            _disable_broker_routing()
+            return jsonify({
+                "status": "error",
+                "message": "Broker account changed during login.",
+            }), 409
+        expected_prior_session = (
+            prior_session
         )
-        if committed_generation is None:
-            raise RuntimeError("credential generation changed before commit")
-        credential_receipt.applied_generation = committed_generation
-    except Exception:  # noqa: BLE001 - never log candidate credential values
-        candidate_store.discard()
-        _rollback_committed_candidate(
-            store,
-            registry,
-            adapter_id,
-            account_id,
-            credential_receipt,
-            prior_session,
-            candidate_session,
-        )
-        logger.warning("Could not persist verified native broker credentials")
-        return jsonify({"status": "error", "message": "Could not persist broker credentials."}), 500
-
-    try:
-        if not _compare_and_put_registry_session(
+        if not _registry_session_generation_matches(
             registry,
             adapter_id,
             account_id,
             expected_prior_session,
-            candidate_session,
         ):
-            raise RuntimeError("registry generation changed before publication")
-    except Exception:  # noqa: BLE001
-        _rollback_committed_candidate(
-            store,
-            registry,
-            adapter_id,
-            account_id,
-            credential_receipt,
-            prior_session,
-            candidate_session,
-        )
-        return jsonify({"status": "error", "message": "Could not publish broker session."}), 500
+            candidate_store.discard()
+            _disable_broker_routing()
+            return jsonify({
+                "status": "error",
+                "message": "Broker session changed during login.",
+            }), 409
 
-    demotion_notice: str | None = None
-    execution_default_mutations: list[_ExecutionDefaultMutation] = []
-    if bool(session_status.get("read_only")):
-        demotion_notice = _demote_read_only_connected_account(
-            store,
-            registry,
-            adapter_id=adapter_id,
-            account_id=account_id,
-            fallback_label=str(row.get("label") or adapter_id),
-            mutation_sink=execution_default_mutations,
-            credential_receipt=credential_receipt,
-        )
+        if not _quiesce_current_router():
+            candidate_store.discard()
+            return jsonify({
+                "status": "error",
+                "message": "Broker router is still processing writes; account was not changed.",
+            }), 503
 
-    if _workspace_execution_default_is_disabled():
-        _disable_broker_routing()
-    else:
         try:
-            _configure_broker_router_checked(store, registry)
-        except _RouterRebuildError:
+            committed_generation = _commit_candidate_credentials(
+                store,
+                candidate_store,
+                adapter_id,
+                account_id,
+                credential_receipt.prior_generation,
+            )
+            if committed_generation is None:
+                raise RuntimeError("credential generation changed before commit")
+            credential_receipt.applied_generation = committed_generation
+        except Exception:  # noqa: BLE001 - never log candidate credential values
+            candidate_store.discard()
             _rollback_committed_candidate(
                 store,
                 registry,
@@ -2238,27 +2160,83 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
                 credential_receipt,
                 prior_session,
                 candidate_session,
-                execution_default_mutation=(
-                    execution_default_mutations[0]
-                    if execution_default_mutations
-                    else None
-                ),
             )
-            return jsonify({"status": "error", "message": "Could not publish broker routing."}), 500
+            logger.warning("Could not persist verified native broker credentials")
+            return jsonify({"status": "error", "message": "Could not persist broker credentials."}), 500
 
-    status: dict[str, Any] = current_app.config.setdefault("NATIVE_SESSION_STATUS", {})
-    status.update(login_results)
+        try:
+            if not _compare_and_put_registry_session(
+                registry,
+                adapter_id,
+                account_id,
+                expected_prior_session,
+                candidate_session,
+            ):
+                raise RuntimeError("registry generation changed before publication")
+        except Exception:  # noqa: BLE001
+            _rollback_committed_candidate(
+                store,
+                registry,
+                adapter_id,
+                account_id,
+                credential_receipt,
+                prior_session,
+                candidate_session,
+            )
+            return jsonify({"status": "error", "message": "Could not publish broker session."}), 500
 
-    data: dict[str, Any] = {
-        "login": login_results.get(selector, "not-activated"),
-        "session": session_status,
-    }
-    if demotion_notice:
-        data["notice"] = demotion_notice
-    return jsonify({
-        "status": "success",
-        "data": data,
-    }), 200
+        demotion_notice: str | None = None
+        execution_default_mutations: list[_ExecutionDefaultMutation] = []
+        if bool(session_status.get("read_only")):
+            demotion_notice = _demote_read_only_connected_account(
+                store,
+                registry,
+                adapter_id=adapter_id,
+                account_id=account_id,
+                fallback_label=str(row.get("label") or adapter_id),
+                mutation_sink=execution_default_mutations,
+                credential_receipt=credential_receipt,
+            )
+
+        if _workspace_execution_default_is_disabled():
+            _disable_broker_routing()
+        else:
+            try:
+                _configure_broker_router_checked(store, registry)
+            except _RouterRebuildError:
+                _rollback_committed_candidate(
+                    store,
+                    registry,
+                    adapter_id,
+                    account_id,
+                    credential_receipt,
+                    prior_session,
+                    candidate_session,
+                    execution_default_mutation=(
+                        execution_default_mutations[0]
+                        if execution_default_mutations
+                        else None
+                    ),
+                )
+                return jsonify({"status": "error", "message": "Could not publish broker routing."}), 500
+
+        status: dict[str, Any] = current_app.config.setdefault("NATIVE_SESSION_STATUS", {})
+        status.update(login_results)
+
+        data: dict[str, Any] = {
+            "login": login_results.get(selector, "not-activated"),
+            "session": session_status,
+        }
+        if demotion_notice:
+            data["notice"] = demotion_notice
+        return jsonify({
+            "status": "success",
+            "data": data,
+        }), 200
+    finally:
+        if candidate_session is not None and candidate_session.registry_version is None:
+            from flinttrade_gateway.native_login import quarantine_native_candidate
+            quarantine_native_candidate(candidate_session)
 
 
 @native_accounts_bp.route("/accounts", methods=["GET"])
@@ -2696,11 +2674,12 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
             "message": f"Native adapter '{adapter_id}' is not active (not connected / not attested).",
         }), 404
     try:
+        expected_registry = registry.snapshot_selector(BrokerSelector(adapter_id, account_id))
         session = registry.get_session_for(adapter_id, account_id)
     except Exception:  # noqa: BLE001
         return jsonify({
             "status": "error",
-            "message": f"No live session for {adapter_id}:{account_id} — connect or re-login first.",
+            "message": "Native broker session is unavailable.",
         }), 409
 
     reader = None
@@ -2753,7 +2732,7 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
             }), 503
         if should_drop_session_after_probe_error(exc):
             try:
-                registry.remove_session_for(adapter_id, account_id)
+                _compare_and_remove_registry_session(registry, adapter_id, account_id, expected_registry)
             except Exception:  # noqa: BLE001 - read failure response must still be deterministic
                 pass
             login_status: dict[str, Any] = current_app.config.setdefault("NATIVE_SESSION_STATUS", {})
@@ -2821,18 +2800,11 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
     if row is None:
         return jsonify({"status": "error", "message": "Native broker account not found."}), 404
 
-    try:
-        session = registry.get_session_for(adapter_id, account_id)
-    except Exception:  # noqa: BLE001
-        return jsonify({
-            "status": "error",
-            "message": "Broker account has no live session; re-authenticate first.",
-        }), 409
-    if bool(getattr(session, "is_read_only", False)):
-        return jsonify({
-            "status": "error",
-            "message": "Broker account is read-only and cannot be used as the live write default.",
-        }), 409
+    state = registry.snapshot_exact_state(BrokerSelector(adapter_id, account_id))
+    if state is None or state.status != "connected":
+        return jsonify({"status": "error", "message": "Broker account has no live session; re-authenticate first."}), 409
+    if state.read_only is True:
+        return jsonify({"status": "error", "message": "Broker account is read-only and cannot be used as the live write default."}), 409
 
     try:
         primary_receipt = _primary_rollback_receipt(store, BrokerSelector(adapter_id, account_id))
@@ -2918,6 +2890,7 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
         })
 
     # The vault owns restorative ciphertext and metadata.
+    expected_registry = registry.snapshot_selector(BrokerSelector(adapter_id, account_id))
     try:
         snapshot = store.snapshot_selector(BrokerSelector(adapter_id, account_id))
     except Exception:  # noqa: BLE001
@@ -2936,6 +2909,10 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
         logger.warning("Credential delete failed for %s", selector_ref(adapter_id, account_id))
         _restore_router_from_vault(store, registry)
         return jsonify({"status": "error", "message": "Could not remove native account."}), 500
+
+    def deleted_state_is_current() -> bool:
+        state = store.selector_state(BrokerSelector(adapter_id, account_id))
+        return state.version == removed_version and not state.present
 
     # Commit workspace state before evicting the live session. If the workspace
     # is locked or unwritable, restore the vault row and leave runtime state
@@ -2956,18 +2933,22 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
             # reachable write path fails closed instead of keeping an
             # unrepairable in-memory account alive.
             try:
-                registry.remove_session_for(adapter_id, account_id)
+                _compare_and_remove_registry_session(registry, adapter_id, account_id, expected_registry)
             except Exception:  # noqa: BLE001 - the router rebuild is the safety boundary
                 pass
         _restore_router_from_vault(store, registry)
         logger.warning("Selector deregister failed for %s", selector_ref(adapter_id, account_id))
         return jsonify({"status": "error", "message": "Could not remove native account."}), 500
 
+    if not deleted_state_is_current():
+        _disable_broker_routing()
+        return jsonify({"status": "error", "message": "Native account state changed during removal."}), 409
+
     # The old generation is drained and persistent removal is committed. Evict
     # the session before publishing a replacement so the new router cannot ever
     # resolve a removed selector through a stale registry entry.
     try:
-        registry.remove_session_for(adapter_id, account_id)
+        _compare_and_remove_registry_session(registry, adapter_id, account_id, expected_registry)
     except Exception:  # noqa: BLE001 - no session is fine
         pass
     if _workspace_execution_default_is_disabled():

@@ -161,11 +161,17 @@ def broker_workspace_version(snapshot: WorkspaceSnapshot) -> BrokerWorkspaceVers
     return BrokerWorkspaceVersion(snapshot.version.instance_id, snapshot.config["broker_authority_generation"])
 
 
-def _broker_authority(config: dict[str, Any]) -> str:
+def legacy_openalgo_broker_projection(config: Mapping[str, Any]) -> Any:
+    """Return detached sensitive comparison material, never public metadata."""
     openalgo = copy.deepcopy(config.get("openalgo"))
     if isinstance(openalgo, dict):
         # This legacy location stores global Telegram metadata, not broker setup.
         openalgo.pop("telegram_username", None)
+    return openalgo
+
+
+def _broker_authority(config: dict[str, Any]) -> str:
+    openalgo = legacy_openalgo_broker_projection(config)
     return json.dumps([config.get("brokers"), openalgo], sort_keys=True, allow_nan=False)
 
 

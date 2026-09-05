@@ -600,6 +600,38 @@ class OpenAlgoClient:
         self._closing = False
         self._closed = False
 
+    def matches_workspace_openalgo(self, snapshot: Any) -> bool:
+        """Privately compare authoritative configuration without env or provider work."""
+        from .config import DEFAULT_OPENALGO_HOST, DEFAULT_OPENALGO_PORT, DEFAULT_OPENALGO_WS_PORT
+        from .workspace_migrations import WorkspaceSnapshot, legacy_openalgo_broker_projection
+
+        if type(snapshot) is not WorkspaceSnapshot or snapshot.version is None:
+            return False
+        config = legacy_openalgo_broker_projection(snapshot.as_dict())
+        if type(config) is not dict or type(config.get("api_key")) is not str or not config["api_key"].strip():
+            return False
+        try:
+            host = config.get("host", DEFAULT_OPENALGO_HOST)
+            key = config["api_key"].strip()
+            if type(host) is not str or not host.strip():
+                return False
+            ports = [config.get("port", DEFAULT_OPENALGO_PORT), config.get("ws_port", DEFAULT_OPENALGO_WS_PORT)]
+            if any(type(port) not in (str, int) or not str(port).isdigit() for port in ports):
+                return False
+            expected = Settings(openalgo_host=host.strip(), openalgo_api_key=key,
+                                openalgo_port=int(ports[0]), openalgo_ws_port=int(ports[1]))
+        except (ValueError, TypeError):
+            return False
+        with self._config_guard:
+            return (
+                self.settings.openalgo_host == expected.openalgo_host
+                and self.settings.openalgo_api_key == expected.openalgo_api_key
+                and self.settings.openalgo_port == expected.openalgo_port
+                and self.settings.openalgo_ws_port == expected.openalgo_ws_port
+                and self._base == f"{openalgo_rest_base_url(expected)}/api/v1"
+                and self._api_key == expected.openalgo_api_key
+            )
+
     def reconfigure(self, settings: Settings) -> OpenAlgoClient:
         """Atomically update endpoint and credentials without replacing this client.
 

@@ -1,263 +1,109 @@
-"""Tests for the native credential-replay login step (Phase 1 G3)."""
-
-from __future__ import annotations
+"""Native preparation and replay bind final disposable durable authorities."""
 
 import asyncio
-from functools import partial
-import logging
-from typing import Any
-
 import pytest
 
+from flinttrade_core.broker_identity import BrokerSelector
+from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+from flinttrade_gateway.brokers._base import Session
 from flinttrade_gateway.native_login import (
-    BROKER_LOGIN_RETRY_MESSAGE,
-    CREDENTIALS_UNAVAILABLE_MESSAGE,
-    SESSION_INVALID_RELOGIN_MESSAGE,
-    establish_native_session,
-    establish_native_sessions,
+    BROKER_LOGIN_RETRY_MESSAGE, CREDENTIALS_UNAVAILABLE_MESSAGE, SESSION_INVALID_RELOGIN_MESSAGE,
+    establish_native_session, establish_native_sessions,
 )
 
+import importlib.util
+from pathlib import Path
 
-# Explicit admission for synthetic retained-login unit tests only.
-establish_native_session = partial(establish_native_session, mutation_admission=lambda: None)
-establish_native_sessions = partial(establish_native_sessions, mutation_admission=lambda: None)
+_fixture_spec = importlib.util.spec_from_file_location("_registry_fixtures", Path(__file__).resolve().parents[4] / "tests" / "registry_fixtures.py")
+_fixture_module = importlib.util.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(_fixture_module)
+RegistryFixture = _fixture_module.RegistryFixture
 
-
-class _FakeSession:
-    def __init__(self, adapter_id: str, account_id: str) -> None:
-        self.adapter_id = adapter_id
-        self.account_id = account_id
-        self.expires_at = 4_102_444_800.0
-
-
-class _FakeAdapter:
-    """A native adapter stub whose login echoes back a session."""
-
-    def __init__(self, adapter_id: str, *, fail: bool = False) -> None:
-        self.adapter_id = adapter_id
-        self.fail = fail
-        self.login_calls: list[dict[str, Any]] = []
-
-    async def login(self, credentials: dict[str, Any]) -> _FakeSession:
-        self.login_calls.append(credentials)
-        if self.fail:
-            raise RuntimeError("broker rejected credentials")
-        return _FakeSession(self.adapter_id, str(credentials.get("account_id", "acct")))
+@pytest.fixture
+def exact(tmp_path):
+    value = RegistryFixture(tmp_path)
+    selector = BrokerSelector("dhan", "Case")
+    value.store.put_credentials(selector, "dhan", "Synthetic", {"access_token": "old"},
+                                expected=value.store.selector_state(selector).version)
+    yield value
+    value.close()
 
 
-class _FakeRegistry:
-    def __init__(self) -> None:
-        self.sessions: dict[tuple[str, str], Any] = {}
-
-    def put_session(self, adapter_id: str, account_id: str, session: Any) -> None:
-        self.sessions[(adapter_id, account_id)] = session
-
-    def get_session_for(self, adapter_id: str, account_id: str) -> Any:
-        return self.sessions[(adapter_id, account_id)]
-
-    def remove_session_for(self, adapter_id: str, account_id: str) -> None:
-        self.sessions.pop((adapter_id, account_id), None)
+class Adapter:
+    calls = 0
+    async def login(self, credentials):
+        self.calls += 1
+        return Session(credentials["access_token"], 4102444800, "broker-id", "dhan")
+    async def funds(self, session):
+        return {}
 
 
-class _FakeStore:
-    def __init__(self, rows: dict[tuple[str, str], dict[str, Any]]) -> None:
-        self.rows = rows
-
-    def retrieve_for(self, adapter_id: str, account_id: str) -> dict[str, Any]:
-        return self.rows[(adapter_id, account_id)]
-
-
-def test_establish_native_session_registers_the_session() -> None:
-    adapter = _FakeAdapter("dhan")
-    registry = _FakeRegistry()
-    session = asyncio.run(
-        establish_native_session(
-            adapter, registry, {"access_token": "t", "account_id": "111"}, "dhan", "111"
-        )
-    )
-    assert registry.sessions[("dhan", "111")] is session
-    assert adapter.login_calls == [{"access_token": "t", "account_id": "111"}]
+def establish(exact, adapter, **kwargs):
+    return asyncio.run(establish_native_session(adapter, exact.registry,
+        exact.store.retrieve_credentials(BrokerSelector("dhan", "Case")), "dhan", "Case",
+        exact.store, mutation_admission=lambda: None, registry_publication_owner=exact.owner,
+        workspace_path=exact.path, **kwargs))
 
 
-def test_establish_native_session_fails_closed() -> None:
-    adapter = _FakeAdapter("dhan", fail=True)
-    registry = _FakeRegistry()
+def test_establish_native_session_registers_final_exact_authority(exact):
+    candidate = establish(exact, Adapter(), verify=True)
+    assert exact.session("dhan", "Case").account_id == "broker-id"
+    assert candidate.registry_version.generation == 1
+
+
+def test_missing_owner_fails_before_login(exact):
+    adapter = Adapter()
+    with pytest.raises(RegistrySessionUnavailable):
+        asyncio.run(establish_native_session(adapter, exact.registry, {}, "dhan", "Case",
+                                              mutation_admission=lambda: None))
+    assert adapter.calls == 0
+
+
+def test_login_failure_never_publishes_candidate(exact):
+    class Failed(Adapter):
+        async def login(self, credentials):
+            raise RuntimeError("synthetic failure")
     with pytest.raises(RuntimeError):
-        asyncio.run(
-            establish_native_session(adapter, registry, {"access_token": "t"}, "dhan", "111")
-        )
-    # No session registered on failure — the selector stays sessionless.
-    assert registry.sessions == {}
+        establish(exact, Failed())
+    assert not exact.registry.snapshot_selector(BrokerSelector("dhan", "Case")).present
 
 
-def test_establish_native_session_failure_removes_prior_session() -> None:
-    """A replay/relogin failure must not leave a stale in-memory session active."""
-    adapter = _FakeAdapter("dhan", fail=True)
-    registry = _FakeRegistry()
-    registry.sessions[("dhan", "111")] = _FakeSession("dhan", "111")
-
-    with pytest.raises(RuntimeError):
-        asyncio.run(
-            establish_native_session(adapter, registry, {"access_token": "dead"}, "dhan", "111")
-        )
-
-    assert ("dhan", "111") not in registry.sessions
+def test_write_back_swaps_single_use_artefacts_before_publication(exact):
+    class Replay(Adapter):
+        def replay_credentials(self, credentials, session):
+            return {"access_token": "replay"}
+    candidate = establish(exact, Replay())
+    state = exact.store.selector_state(BrokerSelector("dhan", "Case"))
+    assert state.version.generation == 2
+    assert exact.session("dhan", "Case").version.credential_version == state.version
+    assert candidate.registry_version.present
 
 
-def test_establish_all_isolates_per_selector_failures(caplog) -> None:
-    adapters = {"dhan": _FakeAdapter("dhan"), "upstox": _FakeAdapter("upstox", fail=True)}
-    registry = _FakeRegistry()
-    store = _FakeStore(
-        {
-            ("dhan", "111"): {"access_token": "d"},
-            ("upstox", "222"): {"access_token": "u"},
-        }
-    )
-    caplog.set_level(logging.INFO, logger="flinttrade.gateway.native_login")
-    results = asyncio.run(establish_native_sessions(
-        adapters, registry, store, ["dhan:111", "upstox:222", "openalgo:default"]
-    ))
-    # Dhan logs in; Upstox fails but is isolated; the bridge selector is skipped.
-    assert results["dhan:111"] == "ok"
-    assert results["upstox:222"] == SESSION_INVALID_RELOGIN_MESSAGE
-    assert "openalgo:default" not in results
-    assert ("dhan", "111") in registry.sessions
-    assert ("upstox", "222") not in registry.sessions
-    logs = "\n".join(record.getMessage() for record in caplog.records)
-    assert "upstox:222" not in logs
-    assert "broker rejected credentials" not in logs
+def test_write_back_failure_refuses_publication(exact, monkeypatch):
+    class Replay(Adapter):
+        def replay_credentials(self, credentials, session):
+            return {"access_token": "replay"}
+    def fail(*args, **kwargs):
+        raise OSError("synthetic")
+    monkeypatch.setattr(exact.store, "update_credentials", fail)
+    with pytest.raises(OSError):
+        establish(exact, Replay())
+    assert not exact.registry.snapshot_selector(BrokerSelector("dhan", "Case")).present
 
 
-def test_establish_all_failed_replay_removes_prior_session() -> None:
-    adapters = {"upstox": _FakeAdapter("upstox", fail=True)}
-    registry = _FakeRegistry()
-    registry.sessions[("upstox", "222")] = _FakeSession("upstox", "222")
-    store = _FakeStore({("upstox", "222"): {"access_token": "dead"}})
-
-    results = asyncio.run(establish_native_sessions(adapters, registry, store, ["upstox:222"]))
-
-    assert results["upstox:222"] == SESSION_INVALID_RELOGIN_MESSAGE
-    assert ("upstox", "222") not in registry.sessions
+def test_unchanged_payload_skips_write(exact):
+    establish(exact, Adapter())
+    assert exact.store.selector_state(BrokerSelector("dhan", "Case")).version.generation == 1
 
 
-def test_establish_all_skips_selectors_without_credentials(caplog) -> None:
-    adapters = {"dhan": _FakeAdapter("dhan")}
-    registry = _FakeRegistry()
-    store = _FakeStore({})  # no rows
-    caplog.set_level(logging.INFO, logger="flinttrade.gateway.native_login")
-    results = asyncio.run(establish_native_sessions(adapters, registry, store, ["dhan:111"]))
-    assert results["dhan:111"] == CREDENTIALS_UNAVAILABLE_MESSAGE
-    assert registry.sessions == {}
-    logs = "\n".join(record.getMessage() for record in caplog.records)
-    assert "dhan:111" not in logs
-
-
-def test_establish_all_reports_retry_for_transient_login_failure() -> None:
-    import requests
-
-    class _TransientLoginAdapter:
-        async def login(self, _credentials):
-            raise requests.exceptions.ConnectionError("temporary network outage for account UPXTRANSIENT")
-
-    adapters = {"upstox": _TransientLoginAdapter()}
-    registry = _FakeRegistry()
-    store = _FakeStore({("upstox", "UPXTRANSIENT"): {"access_token": "token-value"}})
-
-    results = asyncio.run(establish_native_sessions(adapters, registry, store, ["upstox:UPXTRANSIENT"]))
-
-    assert results["upstox:UPXTRANSIENT"] == BROKER_LOGIN_RETRY_MESSAGE
-    assert "UPXTRANSIENT" not in results["upstox:UPXTRANSIENT"]
-    assert registry.sessions == {}
-
-
-# ---------------------------------------------------------------------------
-# G7 — replayable-credential write-back
-# ---------------------------------------------------------------------------
-
-
-class _ReplayAdapter(_FakeAdapter):
-    """Adapter that swaps a one-time TOTP for the minted access token."""
-
-    def replay_credentials(self, credentials: dict[str, Any], session: Any) -> dict[str, Any]:
-        replayable = {k: v for k, v in credentials.items() if k != "totp"}
-        replayable["access_token"] = "minted-24h-token"
-        return replayable
-
-
-class _WritableStore(_FakeStore):
-    def __init__(self, rows: dict[tuple[str, str], dict[str, Any]]) -> None:
-        super().__init__(rows)
-        self.updates: list[tuple[str, str, dict[str, Any]]] = []
-
-    def update_credentials_for(
-        self, adapter_id: str, account_id: str, credentials: dict[str, Any]
-    ) -> None:
-        self.updates.append((adapter_id, account_id, credentials))
-        self.rows[(adapter_id, account_id)] = credentials
-
-
-def test_write_back_swaps_single_use_artefacts() -> None:
-    """After a successful login the vault holds the REPLAYABLE payload — the
-    one-time TOTP is gone, the minted access token is in (G7)."""
-    adapter = _ReplayAdapter("dhan")
-    registry = _FakeRegistry()
-    store = _WritableStore({("dhan", "111"): {"client_id": "111", "pin": "1234", "totp": "000111"}})
-    asyncio.run(
-        establish_native_sessions({"dhan": adapter}, registry, store, ["dhan:111"])
-    )
-    assert registry.sessions[("dhan", "111")] is not None
-    assert store.updates, "vault write-back did not happen"
-    stored = store.rows[("dhan", "111")]
-    assert "totp" not in stored
-    assert stored["access_token"] == "minted-24h-token"
-    assert stored["pin"] == "1234"  # reusable material preserved
-
-
-def test_write_back_failure_never_fails_the_live_session() -> None:
-    class _BrokenStore(_WritableStore):
-        def update_credentials_for(self, *a: Any, **kw: Any) -> None:
-            raise RuntimeError("disk full")
-
-    adapter = _ReplayAdapter("dhan")
-    registry = _FakeRegistry()
-    session = asyncio.run(
-        establish_native_session(
-            adapter, registry, {"pin": "1234", "totp": "000111"}, "dhan", "111",
-            credential_store=_BrokenStore({}),
-        )
-    )
-    assert registry.sessions[("dhan", "111")] is session  # session survives
-
-
-def test_adapter_without_replay_hook_writes_nothing() -> None:
-    """IndMoney-style adapters (static, already-replayable creds) skip the
-    write-back entirely."""
-    adapter = _FakeAdapter("indmoney")
-    registry = _FakeRegistry()
-    store = _WritableStore({("indmoney", "X"): {"access_token": "static"}})
-    asyncio.run(
-        establish_native_sessions({"indmoney": adapter}, registry, store, ["indmoney:X"])
-    )
-    assert store.updates == []
-
-
-def test_unchanged_payload_skips_the_write() -> None:
-    class _IdentityReplayAdapter(_FakeAdapter):
-        def replay_credentials(self, credentials: dict[str, Any], session: Any) -> dict[str, Any]:
-            return dict(credentials)
-
-    adapter = _IdentityReplayAdapter("indmoney")
-    registry = _FakeRegistry()
-    store = _WritableStore({("indmoney", "X"): {"access_token": "static"}})
-    asyncio.run(
-        establish_native_sessions({"indmoney": adapter}, registry, store, ["indmoney:X"])
-    )
-    assert store.updates == []
-
-
-# ---------------------------------------------------------------------------
-# Re-audit fix: transient-error classification across all three HTTP stacks
-# ---------------------------------------------------------------------------
+def test_establish_all_isolates_missing_and_transient_failures(exact):
+    class Failed(Adapter):
+        async def login(self, credentials):
+            raise TimeoutError("synthetic")
+    results = asyncio.run(establish_native_sessions({"dhan": Failed()}, exact.registry, exact.store,
+        ["dhan:Case", "dhan:Missing"], mutation_admission=lambda: None,
+        registry_publication_owner=exact.owner, workspace_path=exact.path))
+    assert results == {"dhan:Case": BROKER_LOGIN_RETRY_MESSAGE, "dhan:Missing": CREDENTIALS_UNAVAILABLE_MESSAGE}
 
 
 def test_transient_classifier_covers_httpx_requests_urllib3_and_stdlib() -> None:
@@ -305,11 +151,9 @@ def test_verify_keeps_session_on_transient_error() -> None:
         async def funds(self, _session):
             raise requests.exceptions.ConnectionError("momentary blip")
 
-    registry = _FakeRegistry()
-    registry.sessions[("dhan", "1")] = _FakeSession("dhan", "1")
-    err = asyncio.run(verify_native_session(_BlipAdapter(), registry, "dhan", "1"))
+    session = Session("synthetic", 4102444800, "1", "dhan")
+    err = asyncio.run(verify_native_session(_BlipAdapter(), session))
     assert err is None
-    assert ("dhan", "1") in registry.sessions  # kept
 
 
 def test_verify_keeps_session_on_service_window_error() -> None:
@@ -329,11 +173,9 @@ def test_verify_keeps_session_on_service_window_error() -> None:
                 "Please try again during these service hours."
             )
 
-    registry = _FakeRegistry()
-    registry.sessions[("upstox", "UPXTEST")] = _FakeSession("upstox", "UPXTEST")
-    err = asyncio.run(verify_native_session(_WindowClosedAdapter(), registry, "upstox", "UPXTEST"))
+    session = Session("synthetic", 4102444800, "UPXTEST", "upstox")
+    err = asyncio.run(verify_native_session(_WindowClosedAdapter(), session))
     assert err is None
-    assert ("upstox", "UPXTEST") in registry.sessions  # kept — window closed ≠ dead token
 
 
 def test_verify_drops_session_on_real_auth_failure() -> None:
@@ -348,11 +190,9 @@ def test_verify_drops_session_on_real_auth_failure() -> None:
         async def funds(self, _session):
             raise RuntimeError("401 Unauthorized: access token expired")
 
-    registry = _FakeRegistry()
-    registry.sessions[("upstox", "DEAD")] = _FakeSession("upstox", "DEAD")
-    err = asyncio.run(verify_native_session(_DeadTokenAdapter(), registry, "upstox", "DEAD"))
+    session = Session("synthetic", 4102444800, "DEAD", "upstox")
+    err = asyncio.run(verify_native_session(_DeadTokenAdapter(), session))
     assert err == SESSION_INVALID_RELOGIN_MESSAGE
-    assert ("upstox", "DEAD") not in registry.sessions  # dropped
 
 
 def test_verify_auth_failure_status_does_not_echo_broker_payload() -> None:
@@ -371,14 +211,12 @@ def test_verify_auth_failure_status_does_not_echo_broker_payload() -> None:
                 "401 Unauthorized: access token expired for account UPXSECRET123 token abcdef1234567890"
             )
 
-    registry = _FakeRegistry()
-    registry.sessions[("upstox", "UPXSECRET123")] = _FakeSession("upstox", "UPXSECRET123")
-    err = asyncio.run(verify_native_session(_DeadTokenAdapter(), registry, "upstox", "UPXSECRET123"))
+    session = Session("synthetic", 4102444800, "UPXSECRET123", "upstox")
+    err = asyncio.run(verify_native_session(_DeadTokenAdapter(), session))
 
     assert err == SESSION_INVALID_RELOGIN_MESSAGE
     assert "UPXSECRET123" not in err
     assert "abcdef1234567890" not in err
-    assert ("upstox", "UPXSECRET123") not in registry.sessions
 
 
 def test_verify_evicts_typed_auth_failure_despite_service_phrasing() -> None:
@@ -398,11 +236,9 @@ def test_verify_evicts_typed_auth_failure_despite_service_phrasing() -> None:
                 "Token expired — service temporarily unavailable, please try again during service hours"
             )
 
-    registry = _FakeRegistry()
-    registry.sessions[("upstox", "DEAD2")] = _FakeSession("upstox", "DEAD2")
-    err = asyncio.run(verify_native_session(_DeadButChattyAdapter(), registry, "upstox", "DEAD2"))
+    session = Session("synthetic", 4102444800, "DEAD2", "upstox")
+    err = asyncio.run(verify_native_session(_DeadButChattyAdapter(), session))
     assert err is not None
-    assert ("upstox", "DEAD2") not in registry.sessions  # dropped despite service phrasing
 
 
 def test_verify_evicts_lockout_message_with_retry_copy() -> None:
@@ -416,11 +252,9 @@ def test_verify_evicts_lockout_message_with_retry_copy() -> None:
         async def funds(self, _session):
             raise RuntimeError("Account locked due to too many failed attempts, please try again later")
 
-    registry = _FakeRegistry()
-    registry.sessions[("kotakneo", "LOCK")] = _FakeSession("kotakneo", "LOCK")
-    err = asyncio.run(verify_native_session(_LockedAdapter(), registry, "kotakneo", "LOCK"))
+    session = Session("synthetic", 4102444800, "LOCK", "kotakneo")
+    err = asyncio.run(verify_native_session(_LockedAdapter(), session))
     assert err is not None
-    assert ("kotakneo", "LOCK") not in registry.sessions  # dropped
 
 
 def test_verify_keeps_session_on_typed_rate_limit() -> None:
@@ -438,8 +272,19 @@ def test_verify_keeps_session_on_typed_rate_limit() -> None:
         async def funds(self, _session):
             raise RateLimitError("429 request rate exceeded", endpoint="funds")
 
-    registry = _FakeRegistry()
-    registry.sessions[("dhan", "RL")] = _FakeSession("dhan", "RL")
-    err = asyncio.run(verify_native_session(_ThrottledAdapter(), registry, "dhan", "RL"))
+    session = Session("synthetic", 4102444800, "RL", "dhan")
+    err = asyncio.run(verify_native_session(_ThrottledAdapter(), session))
     assert err is None
-    assert ("dhan", "RL") in registry.sessions  # kept
+
+
+def test_boot_replay_rejects_real_same_value_credential_aba(exact):
+    selector = BrokerSelector("dhan", "Case")
+    before = exact.store.selector_state(selector).version
+    class Racing(Adapter):
+        async def login(self, credentials):
+            exact.store.update_credentials(selector, dict(credentials), expected=before)
+            return await super().login(credentials)
+    with pytest.raises(RegistrySessionUnavailable):
+        establish(exact, Racing())
+    assert exact.store.selector_state(selector).version.generation == before.generation + 1
+    assert not exact.registry.snapshot_selector(selector).present

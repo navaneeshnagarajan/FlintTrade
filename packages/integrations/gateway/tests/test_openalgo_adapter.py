@@ -7,6 +7,9 @@ UnsupportedCapability for streaming, and broker-error-taxonomy mapping.
 
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+
 from types import SimpleNamespace
 
 import pytest
@@ -98,12 +101,34 @@ class _FakeClient:
         return {}
 
 
-def _adapter(client: _FakeClient) -> OpenAlgoAdapter:
-    return OpenAlgoAdapter(default_client=client)
+
+_fixture_spec = importlib.util.spec_from_file_location("_registry_fixtures", Path(__file__).resolve().parents[4] / "tests" / "registry_fixtures.py")
+_fixture_module = importlib.util.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(_fixture_module)
+RegistryFixture = _fixture_module.RegistryFixture
+
+exact_openalgo_adapter = _fixture_module.exact_openalgo_adapter
+_TEST_FIXTURE = None
+_TEST_SESSION = None
 
 
-def _session() -> Session:
-    return Session(access_token="api-key-1", expires_at=4_102_444_800.0, account_id="dhan", adapter_id="openalgo")
+@pytest.fixture(autouse=True)
+def _real_registry(tmp_path):
+    global _TEST_FIXTURE, _TEST_SESSION
+    _TEST_FIXTURE = RegistryFixture(tmp_path)
+    yield
+    _TEST_FIXTURE.close()
+    _TEST_FIXTURE = _TEST_SESSION = None
+
+
+def _adapter(client: _FakeClient, **kwargs) -> OpenAlgoAdapter:
+    global _TEST_SESSION
+    adapter, _TEST_SESSION = exact_openalgo_adapter(_TEST_FIXTURE, client, account="dhan", **kwargs)
+    return adapter
+
+
+def _session():
+    return _TEST_SESSION
 
 
 def _order() -> object:
@@ -311,7 +336,7 @@ async def test_reconcile_uses_canonical_reads_and_injected_local_state() -> None
         return local_state
 
     client = _FakeClient(orders=orders, positions=positions, holdings=holdings)
-    adapter = OpenAlgoAdapter(default_client=client, local_state_provider=local_state_provider)
+    adapter = _adapter(client, local_state_provider=local_state_provider)
 
     report = await adapter.reconcile(_session())
 
@@ -403,7 +428,7 @@ async def test_reconcile_returns_critical_report_when_local_state_read_fails() -
         raise ValueError("local snapshot unavailable")
 
     client = _FakeClient(orders=[], positions=[], holdings=[])
-    adapter = OpenAlgoAdapter(default_client=client, local_state_provider=failing_local_state_provider)
+    adapter = _adapter(client, local_state_provider=failing_local_state_provider)
 
     report = await adapter.reconcile(_session())
 
