@@ -18,6 +18,7 @@ COORDINATED_RESTORE_UNAVAILABLE = "coordinated_restore_unavailable"
 _PRIVATE_ROOTS = frozenset(
     {
         "secrets",
+        "service-connections-state",
         "logs",
         "archive",
         "flows",

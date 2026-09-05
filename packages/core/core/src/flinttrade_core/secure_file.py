@@ -86,6 +86,281 @@ class _TokenUser(ctypes.Structure):
     _fields_ = [("user", _SidAndAttributes)]
 
 
+class HeldOwnerDirectory:
+    """Retain an owner-validated directory as publication authority.
+
+    Descendants retain their parent scope. POSIX operations are relative to
+    descriptors; Windows holds the namespace without delete sharing. This
+    prevents pathname redirection, not arbitrary compromise of the OS owner.
+    """
+
+    def __init__(
+        self,
+        path: pathlib.Path,
+        *,
+        require_hardened: bool = True,
+        _parent: HeldOwnerDirectory | None = None,
+    ) -> None:
+        self.path = pathlib.Path(path)
+        self.require_hardened = require_hardened
+        self._parent = _parent
+        self._descriptor = -1
+
+    @staticmethod
+    def _name(name: str) -> str:
+        if type(name) is not str or not name or name in {".", ".."} or any(c in name for c in "/\\\0:"):
+            raise OSError("unsafe directory member")
+        return name
+
+    def __enter__(self) -> HeldOwnerDirectory:
+        if self._descriptor != -1:
+            raise OSError("directory scope already open")
+        if self._parent is not None:
+            self._parent.revalidate()
+        before = self.path.lstat()
+        if not stat.S_ISDIR(before.st_mode) or stat.S_ISLNK(before.st_mode) or _is_reparse_point(before):
+            raise OSError("unsafe directory")
+        if _is_windows():
+            self._descriptor = _open_windows_directory(self.path)
+        else:
+            flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+            self._descriptor = os.open(
+                self.path.name if self._parent else self.path,
+                flags,
+                dir_fd=self._parent._descriptor if self._parent else None,
+            )
+        try:
+            self._stat = os.fstat(self._descriptor)
+            if not _same_file_identity(before, self._stat):
+                raise OSError("directory changed while opened")
+            self.revalidate()
+            return self
+        except BaseException:
+            self.__exit__()
+            raise
+
+    def __exit__(self, *args: object) -> None:
+        if self._descriptor != -1:
+            os.close(self._descriptor)
+            self._descriptor = -1
+
+    def revalidate(self) -> os.stat_result:
+        """Prove the held directory still occupies its admitted path."""
+        if self._descriptor == -1:
+            raise OSError("directory scope is closed")
+        if self._parent is not None:
+            self._parent.revalidate()
+        opened = os.fstat(self._descriptor)
+        current = self.path.lstat()
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or not stat.S_ISDIR(current.st_mode)
+            or stat.S_ISLNK(current.st_mode)
+            or _is_reparse_point(current)
+            or not _same_file_identity(opened, current)
+            or not _same_file_identity(opened, self._stat)
+            or not opened.st_ino
+        ):
+            raise OSError("directory identity changed")
+        _assert_current_user_owns(self._descriptor, opened)
+        if self.require_hardened:
+            if _is_windows():
+                valid, _reason = _verify_exact_windows_descriptor_dacl(self._descriptor)
+                if not valid:
+                    raise InsecureFilePermissionsError("directory is not hardened")
+            elif stat.S_IMODE(opened.st_mode) != 0o700:
+                raise InsecureFilePermissionsError("directory is not hardened")
+        return opened
+
+    def child(self, name: str, *, create: bool = False) -> HeldOwnerDirectory:
+        """Return a child scope; create only a previously absent directory."""
+        self.revalidate()
+        name = self._name(name)
+        if create:
+            try:
+                if _is_windows():
+                    os.mkdir(self.path / name, 0o700)
+                    harden_directory(self.path / name)
+                else:
+                    os.mkdir(name, 0o700, dir_fd=self._descriptor)
+                    os.fsync(self._descriptor)
+            except FileExistsError:
+                pass
+        return HeldOwnerDirectory(self.path / name, _parent=self)
+
+    def exists(self, name: str) -> bool:
+        self.revalidate()
+        try:
+            self._entry_stat(name)
+            return True
+        except FileNotFoundError:
+            return False
+
+    def existing_member(self, name: str) -> str | None:
+        """Locate an entry or its deterministic durable-delete remainder."""
+        name = self._name(name)
+        pending = pending_unlink_path(self.path / name).name
+        present, pending_present = self.exists(name), self.exists(pending)
+        if present and pending_present:
+            raise OSError("ambiguous pending deletion")
+        return name if present else pending if pending_present else None
+
+    def _entry_stat(self, name: str) -> os.stat_result:
+        name = self._name(name)
+        if _is_windows():
+            return (self.path / name).lstat()
+        return os.stat(name, dir_fd=self._descriptor, follow_symlinks=False)
+
+    def read_text(self, name: str, *, max_bytes: int = 64 * 1024) -> str:
+        """Read one bounded hardened regular member of the retained directory."""
+        self.revalidate()
+        name = self._name(name)
+        if _is_windows():
+            result = read_hardened_owner_owned_text(self.path / name, max_bytes=max_bytes)
+        else:
+            before = self._entry_stat(name)
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                raise OSError("unsafe directory member")
+            descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self._descriptor)
+            try:
+                opened = os.fstat(descriptor)
+                if not _same_file_identity(before, opened):
+                    raise OSError("directory member changed")
+                result = _read_bounded_descriptor(
+                    descriptor,
+                    max_bytes=max_bytes,
+                    path=self.path / name,
+                    require_hardened=True,
+                ).decode("utf-8")
+                if not _same_file_identity(opened, self._entry_stat(name)):
+                    raise OSError("directory member changed")
+            finally:
+                os.close(descriptor)
+        self.revalidate()
+        return result
+
+    def write_text(self, name: str, value: str) -> None:
+        """Atomically publish text under the retained namespace authority."""
+        self.revalidate()
+        name = self._name(name)
+        if self.exists(name):
+            self.read_text(name, max_bytes=1024 * 1024)
+        if _is_windows():
+            write_secret_text(self.path / name, value)
+            self.revalidate()
+            return
+        import uuid
+
+        temporary = f".{name}.{uuid.uuid4()}.tmp"
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=self._descriptor,
+        )
+        created = os.fstat(descriptor)
+        try:
+            os.fchmod(descriptor, 0o600)
+            _assert_current_user_owns(descriptor, os.fstat(descriptor))
+            payload = value.encode("utf-8")
+            offset = 0
+            while offset < len(payload):
+                written = os.write(descriptor, payload[offset:])
+                if written <= 0:
+                    raise OSError("secure write made no progress")
+                offset += written
+            os.fsync(descriptor)
+            self.revalidate()
+            if not _same_file_identity(created, self._entry_stat(temporary)):
+                raise OSError("candidate changed")
+            os.replace(temporary, name, src_dir_fd=self._descriptor, dst_dir_fd=self._descriptor)
+            os.fsync(self._descriptor)
+            self.revalidate()
+        except BaseException:
+            try:
+                if _same_file_identity(created, self._entry_stat(temporary)):
+                    os.unlink(temporary, dir_fd=self._descriptor)
+                    os.fsync(self._descriptor)
+            except FileNotFoundError:
+                pass
+            raise
+        finally:
+            os.close(descriptor)
+
+    def replace(self, name: str, destination: HeldOwnerDirectory, target: str) -> None:
+        """Publish a validated journal-owned candidate into another held scope."""
+        name, target = self._name(name), self._name(target)
+        self.read_text(name, max_bytes=1024 * 1024)
+        destination.revalidate()
+        if destination.exists(target):
+            destination.read_text(target, max_bytes=1024 * 1024)
+        if _is_windows():
+            durable_replace(self.path / name, destination.path / target)
+        else:
+            os.replace(name, target, src_dir_fd=self._descriptor, dst_dir_fd=destination._descriptor)
+            os.fsync(destination._descriptor)
+            os.fsync(self._descriptor)
+        self.revalidate()
+        destination.revalidate()
+
+    def unlink(self, name: str) -> None:
+        """Durably remove a validated member; transaction ownership is caller policy."""
+        name = self._name(name)
+        actual = self.existing_member(name)
+        if actual is None:
+            raise FileNotFoundError("directory member is absent")
+        self.read_text(actual, max_bytes=1024 * 1024)
+        if _is_windows():
+            if actual != name:
+                cleanup_pending_unlink(self.path / name)
+            else:
+                durable_unlink(self.path / name)
+        else:
+            os.unlink(actual, dir_fd=self._descriptor)
+            os.fsync(self._descriptor)
+        self.revalidate()
+
+
+def _open_windows_directory(path: pathlib.Path) -> int:
+    """Open a directory with native no-reparse and no-delete-sharing semantics."""
+    import msvcrt
+
+    kernel32, _advapi32 = _windows_security_libraries()
+    create = kernel32.CreateFileW
+    create.argtypes = [
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    ]
+    create.restype = ctypes.c_void_p
+    handle = create(
+        str(path),
+        _GENERIC_READ | _READ_CONTROL,
+        _FILE_SHARE_READ | _FILE_SHARE_WRITE,
+        None,
+        3,
+        0x02000000 | 0x00200000,
+        None,
+    )
+    if not handle or handle == ctypes.c_void_p(-1).value:
+        _raise_windows_error()
+    try:
+        return msvcrt.open_osfhandle(handle, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    except BaseException:
+        kernel32.CloseHandle(ctypes.c_void_p(handle))
+        raise
+
+
+def validate_owner_owned_directory(path: pathlib.Path, *, require_hardened: bool = True) -> os.stat_result:
+    """Observe a safe directory; retain a scope separately for later publication."""
+    with HeldOwnerDirectory(path, require_hardened=require_hardened) as directory:
+        return directory.revalidate()
+
+
 class PendingDurableUnlinkError(OSError):
     """A Windows unlink is logically committed but tombstone cleanup is pending."""
 

@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -254,7 +255,7 @@ class CredentialStore:
         backfill — so a pre-existing ``credentials.db`` is never recreated and no
         encrypted credential row can be orphaned.
         """
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             conn.execute(_CREATE_TABLE_SQL)
             self._ensure_adapter_id_column(conn)
             conn.execute(_COMPOSITE_INDEX_SQL)
@@ -374,7 +375,7 @@ class CredentialStore:
         is_primary_int: int = int(is_primary)
         resolved_adapter_id: str = adapter_id or broker
 
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             # The table's PRIMARY KEY is ``account_id`` alone, but the selector
             # model is composite ``(adapter_id, account_id)``. Without this guard
             # the ON CONFLICT(account_id) upsert would let a second broker that
@@ -442,7 +443,7 @@ class CredentialStore:
         except Exception as exc:  # pragma: no cover
             raise CredentialError(f"Encryption failed: {exc}") from exc
 
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             cursor = conn.execute(
                 "UPDATE accounts SET salt = ?, encrypted_creds = ? "
                 "WHERE adapter_id = ? AND account_id = ?",
@@ -531,7 +532,7 @@ class CredentialStore:
             CredentialError: If no matching row exists, the master password is
                 wrong, or the ciphertext is corrupt.
         """
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             row = conn.execute(
                 "SELECT salt, encrypted_creds FROM accounts "
                 "WHERE adapter_id = ? AND account_id = ?",
@@ -570,7 +571,7 @@ class CredentialStore:
             CredentialError: If the account does not exist, the master
                 password is wrong, or the ciphertext is corrupt.
         """
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             row = conn.execute(
                 "SELECT salt, encrypted_creds FROM accounts WHERE account_id = ?",
                 (account_id,),
@@ -601,7 +602,7 @@ class CredentialStore:
         Args:
             account_id: Account identifier to remove.
         """
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             conn.execute(
                 "DELETE FROM accounts WHERE account_id = ?", (account_id,)
             )
@@ -620,7 +621,7 @@ class CredentialStore:
             adapter_id: The routing adapter (e.g. ``"dhan"``).
             account_id: The account within that adapter.
         """
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             conn.execute(
                 "DELETE FROM accounts WHERE adapter_id = ? AND account_id = ?",
                 (adapter_id, account_id),
@@ -635,7 +636,7 @@ class CredentialStore:
             ``is_primary``, and ``created_at``.  Ordered by ``created_at``
             ascending (oldest first).
         """
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             rows = conn.execute(
                 """
                 SELECT account_id, adapter_id, broker, label, is_primary, created_at
@@ -665,7 +666,7 @@ class CredentialStore:
         Raises:
             CredentialError: If the account does not exist.
         """
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             exists = conn.execute(
                 "SELECT 1 FROM accounts WHERE account_id = ?", (account_id,)
             ).fetchone()
@@ -686,7 +687,7 @@ class CredentialStore:
 
     def snapshot_primary_metadata(self) -> dict[str, bool]:
         """Snapshot every vault row's primary flag without decrypting credentials."""
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             rows = conn.execute(
                 "SELECT account_id, is_primary FROM accounts"
             ).fetchall()
@@ -698,7 +699,7 @@ class CredentialStore:
         A changed account set means the snapshot is stale. Refuse it instead of
         overwriting primary metadata created by a concurrent vault mutation.
         """
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 current_ids = {
@@ -725,7 +726,7 @@ class CredentialStore:
         Returns:
             ``True`` if the account exists, ``False`` otherwise.
         """
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             row = conn.execute(
                 "SELECT 1 FROM accounts WHERE account_id = ?", (account_id,)
             ).fetchone()

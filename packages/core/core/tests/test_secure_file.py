@@ -21,6 +21,156 @@ except ImportError:  # pragma: no cover
 _IS_WIN = sys.platform == "win32"
 
 
+@pytest.mark.skipif(_IS_WIN, reason="POSIX substitution; Windows denies directory delete sharing")
+def test_held_directory_publication_cannot_follow_replaced_root(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    with secure_file.HeldOwnerDirectory(root) as directory:
+        root.rename(tmp_path / "original")
+        root.mkdir(mode=0o700)
+        try:
+            directory.write_text("candidate", "1234")
+        except OSError:
+            pass
+        assert list(root.iterdir()) == [], "a replaced root must never receive the candidate"
+        with pytest.raises(OSError):
+            directory.revalidate()
+
+
+def test_held_directory_roundtrip_and_lifetime(tmp_path):
+    with secure_file.HeldOwnerDirectory(tmp_path) as directory:
+        directory.write_text("candidate", "1234")
+        assert directory.read_text("candidate", max_bytes=4) == "1234"
+        with pytest.raises(OSError):
+            directory.read_text("candidate", max_bytes=3)
+        directory.replace("candidate", directory, "installed")
+        assert directory.read_text("installed", max_bytes=4) == "1234"
+        directory.unlink("installed")
+        assert not directory.exists("installed")
+    with pytest.raises(OSError):
+        directory.revalidate()
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX descriptor-relative race")
+def test_held_publication_remains_anchored_when_root_moves_during_open(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    original_open = os.open
+
+    def replace_during_open(name, flags, *args, **kwargs):
+        if str(name).startswith(".candidate."):
+            root.rename(tmp_path / "original")
+            root.mkdir(mode=0o700)
+        return original_open(name, flags, *args, **kwargs)
+
+    with secure_file.HeldOwnerDirectory(root) as directory:
+        monkeypatch.setattr(os, "open", replace_during_open)
+        with pytest.raises(OSError):
+            directory.write_text("candidate", "1234")
+    assert list(root.iterdir()) == []
+    assert list((tmp_path / "original").iterdir()) == []
+
+
+def test_held_directory_rejects_links_and_hardlinked_members(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    link = tmp_path / "link"
+    link.symlink_to(root, target_is_directory=True)
+    with pytest.raises(OSError):
+        with secure_file.HeldOwnerDirectory(link):
+            pass
+    with secure_file.HeldOwnerDirectory(root) as directory:
+        directory.write_text("candidate", "1234")
+        os.link(root / "candidate", root / "second")
+        with pytest.raises(OSError):
+            directory.unlink("candidate")
+        with pytest.raises(OSError):
+            directory.write_text("candidate", "5678")
+    assert (root / "candidate").read_text() == "1234"
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX owner and fd checks")
+def test_held_directory_owner_failure_closes_descriptor(tmp_path, monkeypatch):
+    descriptors = []
+
+    def reject(descriptor, _stat):
+        descriptors.append(descriptor)
+        raise PermissionError("foreign owner")
+
+    monkeypatch.setattr(secure_file, "_assert_current_user_owns", reject)
+    with pytest.raises(PermissionError):
+        with secure_file.HeldOwnerDirectory(tmp_path):
+            pass
+    assert len(descriptors) == 1
+    with pytest.raises(OSError):
+        os.fstat(descriptors[0])
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX fsync ordering")
+def test_held_write_hardens_before_payload_and_flushes_file_then_directory(tmp_path, monkeypatch):
+    calls = []
+    write, chmod, sync = os.write, os.fchmod, os.fsync
+
+    def hardened(descriptor, mode):
+        calls.append("harden")
+        return chmod(descriptor, mode)
+
+    def written(descriptor, payload):
+        calls.append("write")
+        return write(descriptor, payload[:2])
+
+    def synced(descriptor):
+        calls.append("directory-sync" if __import__("stat").S_ISDIR(os.fstat(descriptor).st_mode) else "file-sync")
+        return sync(descriptor)
+
+    with secure_file.HeldOwnerDirectory(tmp_path) as directory:
+        monkeypatch.setattr(os, "fchmod", hardened)
+        monkeypatch.setattr(os, "write", written)
+        monkeypatch.setattr(os, "fsync", synced)
+        directory.write_text("candidate", "123456")
+        assert directory.read_text("candidate") == "123456"
+    assert calls == ["harden", "write", "write", "write", "file-sync", "directory-sync"]
+
+
+def test_native_windows_directory_open_denies_delete_sharing_and_opens_reparse_object(monkeypatch):
+    calls = []
+
+    class Create:
+        def __call__(self, *args):
+            calls.append(args)
+            return 222
+
+    class Kernel:
+        CreateFileW = Create()
+
+        def CloseHandle(self, handle):
+            calls.append(("closed", handle.value))
+
+    class CRT:
+        @staticmethod
+        def open_osfhandle(handle, flags):
+            assert handle == 222
+            return 73
+
+    monkeypatch.setattr(secure_file, "_windows_security_libraries", lambda: (Kernel(), object()))
+    monkeypatch.setitem(sys.modules, "msvcrt", CRT)
+    assert secure_file._open_windows_directory(Path("fixture")) == 73
+    args = calls[0]
+    assert not args[2] & secure_file._FILE_SHARE_DELETE
+    assert args[2] & secure_file._FILE_SHARE_READ and args[2] & secure_file._FILE_SHARE_WRITE
+    assert args[5] & 0x02000000 and args[5] & 0x00200000
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX modes")
+@pytest.mark.parametrize("mode", [0o755, 0o777, 0o600])
+def test_held_directory_rejects_unsafe_modes(tmp_path, mode):
+    root = tmp_path / "root"
+    root.mkdir(mode=mode)
+    with pytest.raises(OSError):
+        with secure_file.HeldOwnerDirectory(root):
+            pass
+
+
 def test_harden_is_idempotent(tmp_path) -> None:
     f = tmp_path / "jwt_secret"
     f.write_text("s3cret")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import multiprocessing
 import os
 import sqlite3
@@ -954,6 +955,44 @@ def test_default_constructor_reads_migrated_canonical_vault(tmp_path, monkeypatc
     assert migrated is not None
     assert migrated.api_key == "preserved-api-key"
     assert (platform_workspace / "ditto_credentials.db").is_file()
+
+
+def test_migration_survives_deferred_vault_connection_collection(tmp_path):
+    from flinttrade_core.workspace import _migrate_legacy_ditto_state
+    from flinttrade_ditto.account_manager import AccountManager, BrokerAccount
+
+    legacy = tmp_path / "legacy"
+    target = tmp_path / "target"
+    installation = tmp_path / "installation"
+    prior_gc = gc.isenabled()
+    gc.disable()
+    try:
+        with AccountManager(
+            db_path=str(legacy / "ditto_accounts.sqlite"),
+            master_password="disposable-password",
+            installation_state_root=installation,
+        ) as manager:
+            manager.add_account(BrokerAccount("fixture", "http://127.0.0.1:1", "disposable-fixture"))
+
+        def collect(phase):
+            if phase == "snapshotted":
+                gc.enable()
+                gc.collect()
+
+        _migrate_legacy_ditto_state(
+            legacy, target, installation_state_root=installation, phase_hook=collect
+        )
+        with AccountManager(
+            db_path=str(target / "ditto_accounts.sqlite"),
+            master_password="disposable-password",
+            installation_state_root=installation,
+        ) as reopened:
+            assert reopened.get_account("fixture").api_key == "disposable-fixture"
+    finally:
+        if prior_gc:
+            gc.enable()
+        else:
+            gc.disable()
 
 
 @pytest.mark.parametrize(

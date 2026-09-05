@@ -6,6 +6,8 @@ never touch ``~/.flinttrade/``.
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 from pathlib import Path
 
@@ -52,6 +54,33 @@ def populated_store(store: CredentialStore) -> CredentialStore:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("reject_collision", [False, True])
+def test_vault_operation_closes_connection_on_success_and_failure(store, monkeypatch, reject_collision):
+    store.store("fixture", "zerodha", "Original", CREDS_A)
+    opened = []
+    real_open = store._get_connection
+
+    def retain_real_connection():
+        connection = real_open()
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(store, "_get_connection", retain_real_connection)
+    if reject_collision:
+        with pytest.raises(CredentialError):
+            store.store("fixture", "upstox", "Rejected", CREDS_B)
+    else:
+        store.store("fixture", "zerodha", "Updated", CREDS_B)
+    operation_connection = opened[0]
+    try:
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            operation_connection.execute("SELECT 1")
+        assert store.retrieve("fixture") == (CREDS_A if reject_collision else CREDS_B)
+    finally:
+        for connection in opened:
+            connection.close()
 
 
 class TestStoreAndRetrieve:

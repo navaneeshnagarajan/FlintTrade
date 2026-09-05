@@ -146,6 +146,17 @@ def test_recursive_registry_prunes_all_sensitive_families_before_walk(tmp_path, 
         "data/ditto_accounts.sqlite-wal",
         "data/.ditto_accounts.sqlite.fixture.tmp",
         "logs/freeform.log",
+        "secrets/services/00000000-0000-4000-8000-000000000001/credential",
+        "service-connections-state/encryption.key",
+        "service-connections-state/recovery.key",
+        "service-connections-state/idempotency.key",
+        "service-connections-state/transaction.json",
+        "service-connections-state/candidates/staged.new",
+        "service-connections-state/candidates/recovery.old",
+        "service-connections-state/receipts/private.json",
+        "service-connections-state/outbox/pending.json",
+        "service-connections-state/.transaction.json.delete-pending",
+        "data/bhavcopy/equity/service-connections-state/nested-private",
     ]
     for name in names:
         path = ws / name
@@ -154,7 +165,7 @@ def test_recursive_registry_prunes_all_sensitive_families_before_walk(tmp_path, 
     original_scandir = os.scandir
 
     def refuse_secret_traversal(path):
-        if Path(path).name == "secrets":
+        if Path(path).name in {"secrets", "service-connections-state"}:
             pytest.fail("collector traversed a complete secret namespace")
         return original_scandir(path)
 
