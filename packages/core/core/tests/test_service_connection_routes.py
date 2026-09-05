@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import builtins
 import importlib
+import json
 import logging
 import os
 import subprocess
@@ -51,54 +52,15 @@ class RecordingAudit:
         return event_id if self.acknowledgement is None else self.acknowledgement
 
 
-def test_service_connection_imports_are_inert_under_transport_and_credential_poison(tmp_path):
-    script = r"""
-import asyncio
-import os
-import socket
-import subprocess
-from unittest.mock import patch
-
-import httpx
-
-from flinttrade_core.llm_provider_profiles import LLM_PROVIDER_PROFILES
-
-provider_credentials = {profile.api_key_env for profile in LLM_PROVIDER_PROFILES if profile.api_key_env}
-environment_get = os.environ.get
-environment_getitem = type(os.environ).__getitem__
-def guarded_environment_get(name, default=None):
-    if name in provider_credentials:
-        raise AssertionError("provider environment credential")
-    return environment_get(name, default)
-def guarded_environment_getitem(environ, name):
-    if name in provider_credentials:
-        raise AssertionError("provider environment credential")
-    return environment_getitem(environ, name)
-
-with (
-    patch.object(os.environ, "get", side_effect=guarded_environment_get),
-    patch.object(type(os.environ), "__getitem__", guarded_environment_getitem),
-    patch.object(httpx, "get", side_effect=AssertionError("HTTP transport")),
-    patch.object(httpx, "post", side_effect=AssertionError("HTTP transport")),
-    patch.object(httpx.Client, "get", side_effect=AssertionError("HTTP transport")),
-    patch.object(httpx.Client, "post", side_effect=AssertionError("HTTP transport")),
-    patch.object(socket.socket, "connect", side_effect=AssertionError("socket transport")),
-    patch.object(subprocess, "Popen", side_effect=AssertionError("subprocess launcher")),
-    patch.object(subprocess, "run", side_effect=AssertionError("subprocess launcher")),
-    patch.object(asyncio, "create_subprocess_exec", side_effect=AssertionError("async subprocess launcher")),
-):
-    import flinttrade_core.service_connection_routes
-    import flinttrade_core.app
-
-print("service connection imports inert")
-"""
+def _run_service_connection_import_probe(tmp_path: Path, mode: str) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment["FLINTTRADE_WORKSPACE_DIR"] = str(tmp_path)
-    for name in {profile.api_key_env for profile in LLM_PROVIDER_PROFILES if profile.api_key_env}:
+    provider_credentials = sorted(profile.api_key_env for profile in LLM_PROVIDER_PROFILES if profile.api_key_env)
+    environment["FLINTTRADE_TEST_PROVIDER_CREDENTIAL_NAMES"] = json.dumps(provider_credentials)
+    for name in provider_credentials:
         environment.pop(name, None)
-
-    result = subprocess.run(
-        [sys.executable, "-B", "-c", script],
+    return subprocess.run(
+        [sys.executable, "-B", str(Path(__file__).with_name("service_connection_import_probe.py")), mode],
         cwd=Path.cwd(),
         env=environment,
         text=True,
@@ -106,8 +68,44 @@ print("service connection imports inert")
         check=False,
     )
 
+
+def test_service_connection_import_probe_detects_caught_forbidden_attempts(tmp_path):
+    observations = {
+        mode: _run_service_connection_import_probe(tmp_path / mode, mode)
+        for mode in ("caught-transport", "caught-environment-index", "caught-named")
+    }
+
+    assert observations["caught-transport"].returncode != 0
+    assert json.loads(observations["caught-transport"].stdout)["attempts"] == ["httpx.get"]
+    assert observations["caught-environment-index"].returncode != 0
+    assert json.loads(observations["caught-environment-index"].stdout)["attempts"] == [
+        "os.environ.__getitem__:HERMES_API_KEY"
+    ]
+    assert observations["caught-named"].returncode != 0
+    assert json.loads(observations["caught-named"].stdout)["attempts"] == [
+        "flinttrade_ai.llm_client.LLMClient"
+    ]
+
+
+def test_service_connection_imports_are_inert_under_transport_and_credential_poison(tmp_path):
+    result = _run_service_connection_import_probe(tmp_path, "clean")
+
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "service connection imports inert"
+    observation = json.loads(result.stdout)
+    assert observation["attempts"] == []
+    assert observation["named_guards"] == [
+        "flinttrade_ai.llm_client.LLMClient",
+        "flinttrade_ai.llm_client.LLMConfig.from_env",
+        "flinttrade_core.ollama_runtime.OllamaRuntime.start",
+        "flinttrade_core.ollama_runtime.OllamaRuntime.start_async",
+        "flinttrade_ai.agent_backends.codex_session.CodexAppServerSession.ensure_started",
+        "flinttrade_ai.agent_backends.hermes_session.HermesACPSession.ensure_started",
+        "flinttrade_gateway.adapter.load_broker_adapter",
+        "flinttrade_gateway.session.load_broker_adapter",
+        "flinttrade_gateway.registry.BrokerRegistry",
+        "flinttrade_gateway.credentials.CredentialStore",
+        "flinttrade_gateway.contracts.ContractManager",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -567,6 +565,11 @@ def test_real_app_composition_is_lazy_inert_and_cors_bounded(tmp_path, monkeypat
             "test_ordinary_iteration_failure",
             iteration_failure,
         )
+        app.add_url_rule(
+            "/v1/services/connections/probe",
+            "test_service_connection_observability_probe",
+            lambda: ({"status": "ok"}, 200),
+        )
         assert app.config["SERVICE_CONNECTION_STORE"] is injected
         app.config["SERVICE_CONNECTION_STORE"] = None
         assert not (tmp_path / "service-connections-state").exists()
@@ -771,6 +774,32 @@ def test_real_app_composition_is_lazy_inert_and_cors_bounded(tmp_path, monkeypat
     assert captures[2][:2] == ("/ordinary-iteration-failure", False)
     assert captures[2][2] is not None
     assert captures[2][3] is not None
+
+    for malformed_host, expected_sdk_url in (
+        ("[", "http://[/v1/services/connections/probe"),
+        ("fixture.invalid/ordinary", "http://fixture.invalid/ordinary/v1/services/connections/probe"),
+        ("fixture.invalid?next=", "http://fixture.invalid?next=/v1/services/connections/probe"),
+        ("fixture.invalid#ordinary", "http://fixture.invalid#ordinary/v1/services/connections/probe"),
+    ):
+        malformed_environ = EnvironBuilder(
+            path="/v1/services/connections/probe?code=synthetic-private-query",
+            headers={"X-API-Key": "synthetic-read-key"},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        ).get_environ()
+        malformed_environ["HTTP_HOST"] = malformed_host
+        malformed_body = middleware(malformed_environ, start_response)
+        list(malformed_body)
+        malformed_body.close()
+        assert current_safe_request_summary() is None
+
+        sdk_event = sentry_wsgi._make_wsgi_event_processor(malformed_environ, False)(
+            {"exception": {"value": "synthetic private exception"}},
+            {},
+        )
+        assert sdk_event["request"]["url"] == expected_sdk_url
+        assert "PATH_INFO" not in sdk_event["request"]["env"]
+        assert sentry_options["before_send"](sdk_event, {}) is None
+        assert sentry_options["before_send_transaction"](sdk_event, {}) is None
 
 
 def test_werkzeug_fallback_logging_is_reference_counted_for_owned_servers(monkeypatch):

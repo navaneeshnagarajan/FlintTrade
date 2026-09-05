@@ -132,8 +132,31 @@ def sentry_event_is_secret(event: object) -> bool:
         if type(url) is not str:
             return False
         try:
-            path = urlsplit(url).path
+            parsed_url = urlsplit(url)
         except ValueError:
-            return False
+            return True
+        headers = request_data.get("headers")
+        if isinstance(headers, Mapping):
+            hosts = [value for name, value in headers.items() if type(name) is str and name.lower() == "host"]
+            if hosts:
+                host = hosts[0]
+                if len(hosts) != 1 or type(host) is not str or any(character in host for character in "/?#\\"):
+                    return True
+                try:
+                    parsed_host = urlsplit(f"//{host}")
+                    _ = parsed_host.port
+                except ValueError:
+                    return True
+                if (
+                    not parsed_host.netloc
+                    or parsed_host.path
+                    or parsed_host.query
+                    or parsed_host.fragment
+                    or parsed_host.username is not None
+                    or parsed_host.password is not None
+                    or parsed_url.netloc != parsed_host.netloc
+                ):
+                    return True
+        path = parsed_url.path
     method = request_data.get("method")
     return classify_secret_envelope(method if type(method) is str else "UNKNOWN", path) is not None
