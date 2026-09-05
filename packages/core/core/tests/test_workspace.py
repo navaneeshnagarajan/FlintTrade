@@ -211,18 +211,63 @@ class TestWorkspaceResolution:
         legacy_fast.mkdir(parents=True)
         legacy_accounts = legacy_fast / "ditto_accounts.sqlite"
         legacy_vault = legacy_fast / "ditto_credentials.db"
-        legacy_accounts.write_bytes(b"ditto-accounts")
-        legacy_vault.write_bytes(b"ditto-vault")
+        import sqlite3
+
+        for path, value in ((legacy_accounts, "ditto-accounts"), (legacy_vault, "ditto-vault")):
+            with sqlite3.connect(path) as connection:
+                connection.execute("CREATE TABLE preserved (value TEXT)")
+                connection.execute("INSERT INTO preserved VALUES (?)", (value,))
         target_home = tmp_path / "platform-workspace"
+        installation_root = tmp_path / "installation"
         monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
         monkeypatch.setattr(workspace, "_legacy_fast_data_dir", lambda: legacy_fast, raising=False)
+        monkeypatch.setenv("FLINTTRADE_INSTALLATION_STATE_DIR", str(installation_root))
 
         target = workspace.ditto_accounts_path()
 
-        assert target.read_bytes() == b"ditto-accounts"
-        assert (target.parent / "ditto_credentials.db").read_bytes() == b"ditto-vault"
+        with sqlite3.connect(target) as connection:
+            assert connection.execute("SELECT value FROM preserved").fetchone()[0] == "ditto-accounts"
+        with sqlite3.connect(target_home / "ditto_credentials.db") as connection:
+            assert connection.execute("SELECT value FROM preserved").fetchone()[0] == "ditto-vault"
         assert legacy_accounts.exists()
         assert legacy_vault.exists()
+
+    def test_linux_in_place_accounts_still_migrate_vault_once(self, tmp_path, monkeypatch):
+        import sqlite3
+
+        _clear_storage_overrides(monkeypatch, "DATA_DIR")
+        from flinttrade_core import workspace
+
+        linux_home = tmp_path / ".flinttrade"
+        legacy_fast = linux_home / "data"
+        legacy_fast.mkdir(parents=True)
+        accounts = legacy_fast / "ditto_accounts.sqlite"
+        vault = legacy_fast / "ditto_credentials.db"
+        for path, value in ((accounts, "in-place-accounts"), (vault, "legacy-vault")):
+            with sqlite3.connect(path) as connection:
+                connection.execute("CREATE TABLE preserved (value TEXT)")
+                connection.execute("INSERT INTO preserved VALUES (?)", (value,))
+        installation = tmp_path / ".flinttrade-installation"
+        monkeypatch.setattr(workspace, "_default_home", lambda: linux_home)
+        monkeypatch.setattr(workspace, "_legacy_fast_data_dir", lambda: legacy_fast)
+        monkeypatch.setenv("FLINTTRADE_INSTALLATION_STATE_DIR", str(installation))
+
+        target = workspace.ditto_accounts_path()
+
+        assert target == accounts
+        with sqlite3.connect(target) as connection:
+            assert connection.execute("SELECT value FROM preserved").fetchone()[0] == "in-place-accounts"
+        canonical_vault = linux_home / "ditto_credentials.db"
+        with sqlite3.connect(canonical_vault) as connection:
+            assert connection.execute("SELECT value FROM preserved").fetchone()[0] == "legacy-vault"
+        canonical_vault.unlink()
+        accounts.unlink()
+        assert workspace.ditto_accounts_path() == accounts
+        assert not canonical_vault.exists()
+        assert not accounts.exists()
+        receipt = json.loads((installation / "ditto-legacy-migration.json").read_text())
+        assert receipt["phase"] == "published"
+        assert receipt["sources"]["accounts"]["in_place"] is True
 
     def test_audit_log_dir_copies_chain_without_source_lock(self, tmp_path, monkeypatch):
         _clear_storage_overrides(monkeypatch, "AUDIT_LOG_DIR")

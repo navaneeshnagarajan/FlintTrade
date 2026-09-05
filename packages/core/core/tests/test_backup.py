@@ -9,6 +9,8 @@ Run with:
 from __future__ import annotations
 
 import json
+import io
+import os
 import tarfile
 from pathlib import Path
 
@@ -184,6 +186,41 @@ class TestCreateBackup:
         bk.create_backup(out)
         assert out.exists()
 
+    def test_create_rejects_workspace_or_output_overlapping_installation_state(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        ws = tmp_path / "workspace"
+        _populate_workspace(ws)
+        installation = ws / "installation-lineage"
+        monkeypatch.setenv("FLINTTRADE_INSTALLATION_STATE_DIR", str(installation))
+
+        with pytest.raises(BackupError, match="backup source workspace overlaps"):
+            WorkspaceBackup(workspace_dir=ws).create_backup(tmp_path / "backup.tar.gz")
+
+        separate_workspace = tmp_path / "separate-workspace"
+        _populate_workspace(separate_workspace)
+        with pytest.raises(BackupError, match="backup archive overlaps"):
+            WorkspaceBackup(workspace_dir=separate_workspace).create_backup(installation / "backup.tar.gz")
+
+    @pytest.mark.skipif(not hasattr(Path, "symlink_to"), reason="symlinks unavailable")
+    def test_create_rejects_dangling_symlink_alias_into_installation_state(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        ws = tmp_path / "workspace"
+        _populate_workspace(ws)
+        installation = tmp_path / "installation"
+        installation.mkdir()
+        pivot = tmp_path / "pivot"
+        pivot.symlink_to(installation / "missing", target_is_directory=True)
+        monkeypatch.setenv("FLINTTRADE_INSTALLATION_STATE_DIR", str(installation))
+
+        with pytest.raises(BackupError, match="backup archive overlaps"):
+            WorkspaceBackup(workspace_dir=ws).create_backup(pivot / "backup.tar.gz")
+
 
 # ---------------------------------------------------------------------------
 # WorkspaceBackup.restore_backup
@@ -240,6 +277,150 @@ class TestRestoreBackup:
         # Should not raise with force=True.
         result = bk.restore_backup(archive, target_dir=target, force=True)
         assert result["files_restored"] >= 1
+
+    def test_restore_rejects_tree_overlapping_installation_state(self, tmp_path: Path, monkeypatch) -> None:
+        archive = self._make_archive(tmp_path)
+        target = tmp_path / "restore"
+        installation = target / ".flinttrade" / "lineage"
+        monkeypatch.setenv("FLINTTRADE_INSTALLATION_STATE_DIR", str(installation))
+
+        with pytest.raises(BackupError, match="restore tree overlaps"):
+            WorkspaceBackup(workspace_dir=tmp_path / ".flinttrade").restore_backup(
+                archive,
+                target_dir=target,
+            )
+        assert not target.exists()
+
+    @pytest.mark.parametrize("member_type", [tarfile.SYMTYPE, tarfile.LNKTYPE, tarfile.FIFOTYPE])
+    def test_restore_rejects_link_or_special_pivot_before_identity_change(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+        member_type: bytes,
+    ) -> None:
+        installation = tmp_path / ".flinttrade-installation"
+        installation.mkdir()
+        identity = installation / "installation_id"
+        identity.write_bytes(b"stable-identity")
+        identity_before = identity.read_bytes()
+        inode_before = identity.stat().st_ino
+        monkeypatch.setenv("FLINTTRADE_INSTALLATION_STATE_DIR", str(installation))
+        archive = tmp_path / "hostile.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            pivot = tarfile.TarInfo(".flinttrade/pivot")
+            pivot.type = member_type
+            pivot.linkname = "../.flinttrade-installation"
+            tar.addfile(pivot)
+            payload = b"replaced-identity"
+            overwrite = tarfile.TarInfo(".flinttrade/pivot/installation_id")
+            overwrite.size = len(payload)
+            tar.addfile(overwrite, io.BytesIO(payload))
+
+        with pytest.raises(BackupError, match="link or special"):
+            WorkspaceBackup(workspace_dir=tmp_path / ".flinttrade").restore_backup(
+                archive,
+                target_dir=tmp_path,
+                force=True,
+            )
+
+        assert identity.read_bytes() == identity_before
+        assert identity.stat().st_ino == inode_before
+
+    def test_restore_rejects_preexisting_symlink_pivot_before_identity_change(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        installation = tmp_path / ".flinttrade-installation"
+        installation.mkdir()
+        identity = installation / "installation_id"
+        identity.write_bytes(b"stable-identity")
+        inode_before = identity.stat().st_ino
+        monkeypatch.setenv("FLINTTRADE_INSTALLATION_STATE_DIR", str(installation))
+        workspace = tmp_path / ".flinttrade"
+        workspace.mkdir()
+        (workspace / "pivot").symlink_to(installation, target_is_directory=True)
+        archive = tmp_path / "hostile-existing-pivot.tar.gz"
+        payload = b"replaced-identity"
+        with tarfile.open(archive, "w:gz") as tar:
+            overwrite = tarfile.TarInfo(".flinttrade/pivot/installation_id")
+            overwrite.size = len(payload)
+            tar.addfile(overwrite, io.BytesIO(payload))
+
+        with pytest.raises(BackupError, match="overlaps|unsafe existing path"):
+            WorkspaceBackup(workspace_dir=workspace).restore_backup(
+                archive,
+                target_dir=tmp_path,
+                force=True,
+            )
+
+        assert identity.read_bytes() == b"stable-identity"
+        assert identity.stat().st_ino == inode_before
+
+    def test_restore_rejects_preexisting_hardlinked_file_before_identity_change(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        installation = tmp_path / ".flinttrade-installation"
+        installation.mkdir()
+        identity = installation / "installation_id"
+        identity.write_bytes(b"stable-identity")
+        identity_before = identity.read_bytes()
+        inode_before = identity.stat().st_ino
+        monkeypatch.setenv("FLINTTRADE_INSTALLATION_STATE_DIR", str(installation))
+        workspace = tmp_path / ".flinttrade"
+        workspace.mkdir()
+        destination = workspace / "pivot.txt"
+        try:
+            os.link(identity, destination)
+        except OSError as exc:
+            pytest.skip(f"hard links unavailable: {exc}")
+        assert destination.stat().st_nlink == 2
+        archive = tmp_path / "hostile-existing-hardlink.tar.gz"
+        payload = b"replaced-identity"
+        with tarfile.open(archive, "w:gz") as tar:
+            overwrite = tarfile.TarInfo(".flinttrade/pivot.txt")
+            overwrite.size = len(payload)
+            tar.addfile(overwrite, io.BytesIO(payload))
+
+        with pytest.raises(BackupError, match="unsafe existing path"):
+            WorkspaceBackup(workspace_dir=workspace).restore_backup(
+                archive,
+                target_dir=tmp_path,
+                force=True,
+            )
+
+        assert identity.read_bytes() == identity_before
+        assert identity.stat().st_ino == inode_before
+
+    def test_restore_rejects_windows_backslash_member_before_extraction(self, tmp_path: Path) -> None:
+        archive = tmp_path / "windows-separator.tar.gz"
+        payload = b"unsafe"
+        with tarfile.open(archive, "w:gz") as tar:
+            member = tarfile.TarInfo(".flinttrade\\pivot\\installation_id")
+            member.size = len(payload)
+            tar.addfile(member, io.BytesIO(payload))
+
+        with pytest.raises(BackupError, match="unsafe member path"):
+            WorkspaceBackup(workspace_dir=tmp_path / ".flinttrade").restore_backup(
+                archive,
+                target_dir=tmp_path / "restore",
+                force=True,
+            )
+        assert not (tmp_path / "restore").exists()
+
+    def test_restore_member_validator_rejects_nul_name(self, tmp_path: Path) -> None:
+        from flinttrade_core.backup import _validated_restore_members
+
+        member = tarfile.TarInfo(".flinttrade/pivot\x00/installation_id")
+        with pytest.raises(BackupError, match="unsafe member path"):
+            _validated_restore_members(
+                [member],
+                target_dir=tmp_path / "restore",
+                workspace_basename=".flinttrade",
+                disjoint=lambda *_args, **_kwargs: None,
+            )
 
     @pytest.mark.parametrize(
         "archive_name",

@@ -115,7 +115,6 @@ def create_backup_blueprint(
             from datetime import datetime  # noqa: PLC0415
 
             ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-            backup_dir.mkdir(parents=True, exist_ok=True)
             output_path = backup_dir / f"flint_backup_{ts}.tar.gz"
 
         try:

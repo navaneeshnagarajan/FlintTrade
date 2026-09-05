@@ -31,10 +31,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import stat
 import tarfile
 import tempfile
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 logger = logging.getLogger("flinttrade.core.backup")
@@ -75,6 +77,72 @@ _RUNTIME_STATE_FILENAMES: frozenset[str] = frozenset(
 )
 
 _MANIFEST_FILENAME = "manifest.json"
+
+
+def _is_reparse_point(path_stat: os.stat_result) -> bool:
+    mask = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return bool(mask and getattr(path_stat, "st_file_attributes", 0) & mask)
+
+
+def _assert_restore_path_components_safe(target_dir: Path, relative: PurePosixPath) -> None:
+    """Reject an existing link/reparse/non-directory pivot before extraction."""
+    current = target_dir
+    for component in relative.parts[:-1]:
+        current /= component
+        try:
+            path_stat = current.lstat()
+        except FileNotFoundError:
+            break
+        if (
+            not stat.S_ISDIR(path_stat.st_mode)
+            or stat.S_ISLNK(path_stat.st_mode)
+            or _is_reparse_point(path_stat)
+        ):
+            raise BackupError("Restore archive targets an unsafe existing path")
+
+
+def _validated_restore_members(
+    members: list[tarfile.TarInfo],
+    *,
+    target_dir: Path,
+    workspace_basename: str,
+    disjoint: Any,
+) -> list[tarfile.TarInfo]:
+    """Admit only ordinary files/directories under one exact workspace tree."""
+    admitted: list[tarfile.TarInfo] = []
+    for member in members:
+        if "\\" in member.name or "\x00" in member.name:
+            raise BackupError("Restore archive contains an unsafe member path")
+        relative = PurePosixPath(member.name)
+        if relative.is_absolute() or not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+            raise BackupError("Restore archive contains an unsafe member path")
+        if relative.parts == (_MANIFEST_FILENAME,):
+            if not member.isfile():
+                raise BackupError("Restore manifest is not an ordinary file")
+        else:
+            if relative.parts[0] != workspace_basename:
+                raise BackupError("Restore archive member is outside the workspace tree")
+            if not (member.isfile() or member.isdir()):
+                raise BackupError("Restore archive contains a link or special member")
+        destination = target_dir.joinpath(*relative.parts)
+        disjoint(destination, label="restore member")
+        _assert_restore_path_components_safe(target_dir, relative)
+        try:
+            existing = destination.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            if stat.S_ISLNK(existing.st_mode) or _is_reparse_point(existing):
+                raise BackupError("Restore archive targets an unsafe existing path")
+            if member.isfile():
+                if not stat.S_ISREG(existing.st_mode):
+                    raise BackupError("Restore archive targets a non-regular file")
+                if existing.st_nlink != 1:
+                    raise BackupError("Restore archive targets an unsafe existing path")
+            if member.isdir() and not stat.S_ISDIR(existing.st_mode):
+                raise BackupError("Restore archive targets a non-directory")
+        admitted.append(member)
+    return admitted
 
 
 def _is_runtime_state_filename(name: str) -> bool:
@@ -163,7 +231,17 @@ class WorkspaceBackup:
                 f"Workspace directory does not exist: {self._workspace_dir}"
             )
 
-        output_path = output_path.expanduser().resolve()
+        try:
+            from flinttrade_core.installation_state import (  # noqa: PLC0415
+                InstallationStateError,
+                assert_installation_state_disjoint,
+            )
+
+            assert_installation_state_disjoint(self._workspace_dir, label="backup source workspace")
+            output_path = output_path.expanduser().resolve()
+            assert_installation_state_disjoint(output_path, label="backup archive")
+        except InstallationStateError as exc:
+            raise BackupError(str(exc)) from exc
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         files_to_backup = self._collect_files(
@@ -251,13 +329,39 @@ class WorkspaceBackup:
         target_dir = target_dir.expanduser().resolve()
 
         try:
+            from flinttrade_core.installation_state import (  # noqa: PLC0415
+                InstallationStateError,
+                assert_installation_state_disjoint,
+            )
+
+            # The default restore container is the workspace's parent (and on
+            # macOS also the installation-state root's parent), so validate the
+            # actual extracted workspace tree rather than rejecting that safe
+            # sibling container wholesale.
+            assert_installation_state_disjoint(
+                target_dir / self._workspace_dir.name,
+                label="restore tree",
+            )
+        except InstallationStateError as exc:
+            raise BackupError(str(exc)) from exc
+
+        try:
             with tarfile.open(backup_path, "r:gz") as tar:
                 members = tar.getmembers()
-                restorable_members = [
+                eligible_members = [
                     member
                     for member in members
                     if not _is_runtime_state_filename(member.name)
                 ]
+                try:
+                    restorable_members = _validated_restore_members(
+                        eligible_members,
+                        target_dir=target_dir,
+                        workspace_basename=self._workspace_dir.name,
+                        disjoint=assert_installation_state_disjoint,
+                    )
+                except InstallationStateError as exc:
+                    raise BackupError(str(exc)) from exc
 
                 if not force:
                     for member in restorable_members:

@@ -13,12 +13,14 @@ All user preferences and UI-owned integration settings live in workspace.json.
 from __future__ import annotations
 
 import copy
-import filecmp
 import json
 import logging
 import os
 import platform
 import shutil
+import sqlite3
+import stat
+import uuid
 from collections.abc import Callable
 from contextlib import ExitStack
 from pathlib import Path
@@ -26,6 +28,19 @@ from typing import Any
 
 from filelock import FileLock, Timeout as FileLockTimeout
 
+from .installation_state import InstallationState, paths_resolve_same_location
+from .secure_file import (
+    copy_owner_owned_file_durable,
+    digest_owner_owned_regular_file,
+    digest_owner_owned_regular_file_identity,
+    durable_replace,
+    durable_unlink,
+    fsync_parent_directory,
+    harden,
+    read_hardened_owner_owned_text,
+    validate_owner_owned_regular_file,
+    write_secret_text,
+)
 from .workspace_migrations import (
     WORKSPACE_VERSION,
     default_workspace_config,
@@ -193,16 +208,58 @@ def historify_queue_path() -> Path:
     return target
 
 
-def ditto_accounts_path() -> Path:
-    """Resolve Ditto metadata and migrate its adjacent canonical vault together."""
+def ditto_accounts_path(*, installation_state_root: Path | None = None) -> Path:
+    """Resolve Ditto metadata and preserve its legacy vault into the workspace root."""
     override = os.environ.get("DATA_DIR")
     if override:
         return Path(override).expanduser() / "ditto_accounts.sqlite"
     workspace = Workspace()
     target = workspace.fast_data_dir / "ditto_accounts.sqlite"
     if _uses_implicit_default_storage(workspace, "storage.fast", _LEGACY_FAST_DATA_PATH):
-        _migrate_legacy_ditto_state(_legacy_fast_data_dir(), target.parent)
+        _migrate_legacy_ditto_state(
+            _legacy_fast_data_dir(),
+            target.parent,
+            installation_state_root=installation_state_root,
+            target_vault_path=workspace.workspace_dir / "ditto_credentials.db",
+        )
     return target
+
+
+def ditto_account_manager_paths(*, installation_state_root: Path | None = None) -> tuple[Path, Path]:
+    """Resolve default Ditto metadata and its receipt-bound direct-client vault.
+
+    Historical direct ``AccountManager(master_password=...)`` clients used the
+    metadata-adjacent vault.  Only a validated, terminal migration receipt that
+    includes the credentials family permanently selects the workspace-root
+    vault; file existence never changes authority.
+    """
+    accounts = ditto_accounts_path(installation_state_root=installation_state_root)
+    adjacent_vault = accounts.parent / "ditto_credentials.db"
+    if os.environ.get("DATA_DIR"):
+        return accounts, adjacent_vault
+    workspace = Workspace()
+    root_vault = workspace.workspace_dir / "ditto_credentials.db"
+    if not _uses_implicit_default_storage(workspace, "storage.fast", _LEGACY_FAST_DATA_PATH):
+        return accounts, adjacent_vault
+    state = InstallationState(installation_state_root)
+    receipt_path = state.root / "ditto-legacy-migration.json"
+    with state.ditto_fence():
+        receipt = _read_ditto_receipt(
+            receipt_path,
+            state,
+            _legacy_fast_data_dir() / "ditto_accounts.sqlite",
+            _legacy_fast_data_dir() / "ditto_credentials.db",
+            accounts,
+            root_vault,
+        )
+        if (
+            receipt is not None
+            and receipt["phase"] == "published"
+            and "credentials" in receipt["sources"]
+            and "credentials" in receipt["snapshots"]
+        ):
+            return accounts, root_vault
+    return accounts, adjacent_vault
 
 
 def audit_log_dir() -> Path:
@@ -299,34 +356,606 @@ def _uses_implicit_default_storage(workspace: Workspace, key: str, default: str)
     )
 
 
-def _migrate_legacy_ditto_state(legacy_dir: Path, target_dir: Path) -> None:
+def _migrate_legacy_ditto_state(
+    legacy_dir: Path,
+    target_dir: Path,
+    *,
+    installation_state_root: Path | None = None,
+    target_vault_path: Path | None = None,
+    phase_hook: Callable[[str], None] | None = None,
+) -> None:
+    """Snapshot Ditto's legacy SQLite families exactly once per installation.
+
+    The durable consumed phase precedes target publication.  It is therefore a
+    tombstone as well as a recovery journal: after it exists, a missing target
+    is never interpreted as permission to import the legacy source again.
+    """
     legacy_accounts = legacy_dir / "ditto_accounts.sqlite"
     target_accounts = target_dir / "ditto_accounts.sqlite"
-    if target_accounts.exists() or not legacy_accounts.exists():
-        return
-
     legacy_vault = legacy_dir / "ditto_credentials.db"
-    target_vault = target_dir / "ditto_credentials.db"
-    if target_vault.exists():
-        if not legacy_vault.exists() or not filecmp.cmp(legacy_vault, target_vault, shallow=False):
-            raise WorkspaceStateMigrationError(
-                "Ditto migration found an unmatched target credential vault; both states were preserved"
-            )
-    elif legacy_vault.exists():
-        copy_legacy_database_once(
-            legacy_vault,
-            target_vault,
-            sidecar_suffixes=("-wal", "-journal"),
-            lock_name=".ditto-state-migration.lock",
-            label="Ditto credential vault",
-        )
+    target_vault = target_vault_path or target_dir / "ditto_credentials.db"
+    state = InstallationState(installation_state_root)
+    receipt_path = state.root / "ditto-legacy-migration.json"
+    hook = phase_hook or (lambda _phase: None)
 
-    copy_legacy_database_once(
-        legacy_accounts,
-        target_accounts,
-        sidecar_suffixes=("-wal", "-journal"),
-        lock_name=".ditto-state-migration.lock",
-        label="Ditto account metadata",
+    try:
+        with state.ditto_fence():
+            receipt = _read_ditto_receipt(
+                receipt_path,
+                state,
+                legacy_accounts,
+                legacy_vault,
+                target_accounts,
+                target_vault,
+            )
+            if receipt is not None and receipt["phase"] in {"published", "quarantined"}:
+                return
+            _assert_sqlite_source_family_complete(legacy_accounts)
+            _assert_sqlite_source_family_complete(legacy_vault)
+            accounts_present = _path_present_no_follow(legacy_accounts)
+            vault_present = _path_present_no_follow(legacy_vault)
+            if receipt is None and not accounts_present and not vault_present:
+                return
+            if receipt is None and not accounts_present and vault_present:
+                _quarantine_ambiguous_ditto_sources(
+                    state,
+                    receipt_path,
+                    legacy_accounts,
+                    legacy_vault,
+                    target_accounts,
+                    target_vault,
+                )
+                return
+            if receipt is None and (
+                (not _same_location(legacy_accounts, target_accounts) and _path_present_no_follow(target_accounts))
+                or (not _same_location(legacy_vault, target_vault) and _path_present_no_follow(target_vault))
+            ):
+                _quarantine_ambiguous_ditto_sources(
+                    state,
+                    receipt_path,
+                    legacy_accounts,
+                    legacy_vault,
+                    target_accounts,
+                    target_vault,
+                )
+                return
+
+            if receipt is None:
+                receipt_id = str(uuid.uuid4())
+                receipt = {
+                    "installation_id": str(state.installation_id),
+                    "receipt_id": receipt_id,
+                    "phase": "preparing",
+                    "sources": {},
+                    "snapshots": {},
+                    "targets": {
+                        "accounts": _absolute_path(target_accounts),
+                        "credentials": _absolute_path(target_vault),
+                    },
+                }
+                _write_ditto_receipt(receipt_path, receipt)
+                hook("preparing")
+
+            if receipt["phase"] == "preparing":
+                snapshots: dict[str, str] = {}
+                sources: dict[str, object] = {}
+                for name, source, destination in (
+                    ("accounts", legacy_accounts, target_accounts),
+                    ("credentials", legacy_vault, target_vault),
+                ):
+                    if not _path_present_no_follow(source):
+                        if name == "accounts":
+                            raise WorkspaceStateMigrationError("Could not preserve legacy Ditto state; source vanished")
+                        continue
+                    snapshot = state.root / f"ditto-{receipt['receipt_id']}-{name}.snapshot"
+                    _sqlite_snapshot(source, snapshot)
+                    snapshots[name] = str(snapshot)
+                    sources[name] = _sqlite_source_identity(source, snapshot, target=destination)
+                receipt["sources"] = sources
+                receipt["snapshots"] = snapshots
+                receipt["phase"] = "snapshotted"
+                _write_ditto_receipt(receipt_path, receipt)
+                hook("snapshotted")
+
+            if receipt["phase"] == "snapshotted":
+                legacy_sources = {
+                    "accounts": legacy_accounts,
+                    "credentials": legacy_vault,
+                }
+                present_source_names = {
+                    name
+                    for name, source in legacy_sources.items()
+                    if _path_present_no_follow(source)
+                }
+                if present_source_names != set(receipt["sources"]):
+                    raise WorkspaceStateMigrationError(
+                        "Legacy Ditto SQLite source set changed after snapshot"
+                    )
+                for name, identity in receipt["sources"].items():
+                    if not _sqlite_source_matches_identity(legacy_sources[name], identity):
+                        raise WorkspaceStateMigrationError(
+                            "Legacy Ditto SQLite source changed after snapshot"
+                        )
+                receipt["phase"] = "consumed"
+                _write_ditto_receipt(receipt_path, receipt)
+                hook("consumed")
+
+            if receipt["phase"] == "consumed":
+                _ensure_owned_directory(target_accounts.parent)
+                _ensure_owned_directory(target_vault.parent)
+                for name, destination in (("credentials", target_vault), ("accounts", target_accounts)):
+                    snapshot_name = receipt["snapshots"].get(name)
+                    if snapshot_name is None:
+                        continue
+                    snapshot = Path(snapshot_name)
+                    if not _safe_regular_file(snapshot, require_hardened=True):
+                        raise WorkspaceStateMigrationError("Could not preserve legacy Ditto state; recovery snapshot missing")
+                    expected_hash = receipt["sources"][name]["snapshot_sha256"]
+                    if _sha256_file(snapshot, require_hardened=True) != expected_hash:
+                        raise WorkspaceStateMigrationError("Legacy Ditto recovery snapshot digest changed")
+                    _ensure_owned_directory(destination.parent)
+                    if receipt["sources"][name]["in_place"]:
+                        if _path_present_no_follow(destination):
+                            if not _sqlite_source_matches_identity(destination, receipt["sources"][name]):
+                                raise WorkspaceStateMigrationError("In-place legacy Ditto target changed after snapshot")
+                            continue
+                    if _path_present_no_follow(destination):
+                        if not _safe_regular_file(destination, require_hardened=True) or _sha256_file(
+                            destination,
+                            require_hardened=True,
+                        ) != expected_hash:
+                            raise WorkspaceStateMigrationError(
+                                "Ditto migration found ambiguous workspace state; originals were preserved"
+                            )
+                        _assert_sqlite_target_sidecars_absent(destination)
+                        continue
+                    _assert_sqlite_target_family_absent(destination)
+                    publishing = destination.with_name(f".{destination.name}.{receipt['receipt_id']}.publishing")
+                    if _path_present_no_follow(publishing):
+                        if not _safe_regular_file(publishing, require_hardened=True):
+                            if not _windows_publish_candidate_pre_dacl_recovery_required():
+                                raise WorkspaceStateMigrationError("Ditto migration publish candidate is unsafe")
+                            try:
+                                candidate_stat = validate_owner_owned_regular_file(publishing)
+                            except (OSError, PermissionError) as exc:
+                                raise WorkspaceStateMigrationError(
+                                    "Ditto migration publish candidate is unsafe"
+                                ) from exc
+                            if candidate_stat.st_size != 0:
+                                raise WorkspaceStateMigrationError("Ditto migration publish candidate is unsafe")
+                        # A real kill may leave a truncated but otherwise safe
+                        # candidate, or Windows may expose its O_EXCL-created
+                        # zero-byte inode before its exact DACL is installed.
+                        # Discard the bounded owner-owned artifact durably and
+                        # recreate it from the durable receipt snapshot; unsafe
+                        # aliases and non-empty unhardened files remain fatal.
+                        durable_unlink(publishing)
+                    copy_owner_owned_file_durable(snapshot, publishing)
+                    if _sha256_file(publishing, require_hardened=True) != expected_hash:
+                        raise WorkspaceStateMigrationError("Ditto migration publish candidate digest changed")
+                    hook(f"durable:{name}")
+                    durable_replace(publishing, destination)
+                    if _sha256_file(destination, require_hardened=True) != expected_hash:
+                        raise WorkspaceStateMigrationError("Ditto migration target digest verification failed")
+                    hook(f"published:{name}")
+                # The receipt lives outside the workspace tree, so commit the
+                # target directory entries once more after both database files
+                # are exposed and before that external tombstone can become
+                # terminal.
+                _ensure_owned_directory(target_accounts.parent)
+                _ensure_owned_directory(target_vault.parent)
+                receipt["phase"] = "published"
+                _write_ditto_receipt(receipt_path, receipt)
+                hook("published")
+    except RuntimeError:
+        raise
+    except WorkspaceStateMigrationError:
+        raise
+    except Exception as exc:
+        logger.error("Could not preserve legacy Ditto state: %s", exc)
+        raise WorkspaceStateMigrationError("Could not preserve legacy Ditto state; source retained") from exc
+
+
+def _sqlite_snapshot(source: Path, snapshot: Path) -> None:
+    """Create one consistent SQLite-family snapshot, including live WAL pages."""
+    if not _safe_regular_file(source):
+        raise WorkspaceStateMigrationError("Legacy Ditto SQLite source is unsafe")
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(f"{source}{suffix}")
+        if _path_present_no_follow(sidecar) and not _safe_regular_file(sidecar):
+            raise WorkspaceStateMigrationError("Legacy Ditto SQLite sidecar is unsafe")
+    _discard_owned_sqlite_snapshot_family(snapshot)
+    source_connection = sqlite3.connect(f"{Path(_absolute_path(source)).as_uri()}?mode=ro", uri=True)
+    target_connection = sqlite3.connect(snapshot)
+    try:
+        source_connection.backup(target_connection)
+        target_connection.commit()
+    finally:
+        target_connection.close()
+        source_connection.close()
+    harden(snapshot)
+    _durably_seal_sqlite_snapshot(snapshot)
+
+
+def _assert_sqlite_source_family_complete(source: Path) -> None:
+    if _path_present_no_follow(source):
+        return
+    for suffix in ("-wal", "-shm", "-journal"):
+        if _path_present_no_follow(Path(f"{source}{suffix}")):
+            raise WorkspaceStateMigrationError(
+                "Legacy Ditto SQLite source has an orphan sidecar without its main database"
+            )
+
+
+def _assert_sqlite_target_family_absent(target: Path) -> None:
+    _assert_sqlite_target_sidecars_absent(target)
+
+
+def _assert_sqlite_target_sidecars_absent(target: Path) -> None:
+    for suffix in ("-wal", "-shm", "-journal"):
+        if _path_present_no_follow(Path(f"{target}{suffix}")):
+            raise WorkspaceStateMigrationError(
+                "Ditto migration found a stale target SQLite sidecar without its main database"
+            )
+
+
+def _discard_owned_sqlite_snapshot_family(snapshot: Path) -> None:
+    members = [Path(f"{snapshot}{suffix}") for suffix in ("-wal", "-shm", "-journal")]
+    members.append(snapshot)
+    for member in members:
+        if not _path_present_no_follow(member):
+            continue
+        # SQLite can create the deterministic snapshot main/sidecars before
+        # the post-backup hardening step.  Owner/regular/single-link proof is
+        # therefore the safe deletion authority after a kill; broad mode alone
+        # must not brick recovery inside the already owner-only lineage root.
+        if not _safe_regular_file(member):
+            raise WorkspaceStateMigrationError("Legacy Ditto recovery snapshot path is unsafe")
+        durable_unlink(member)
+
+
+def _durably_seal_sqlite_snapshot(snapshot: Path) -> None:
+    """Persist a hardened SQLite snapshot and its directory entry."""
+    expected = validate_owner_owned_regular_file(snapshot, require_hardened=True)
+    flags = getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    if _windows_snapshot_flush_required():
+        flags |= os.O_RDWR
+    else:
+        flags |= os.O_RDONLY
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(snapshot, flags)
+    try:
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino) != (expected.st_dev, expected.st_ino):
+            raise WorkspaceStateMigrationError("Legacy Ditto recovery snapshot changed before fsync")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    final = validate_owner_owned_regular_file(snapshot, require_hardened=True)
+    if (final.st_dev, final.st_ino) != (expected.st_dev, expected.st_ino):
+        raise WorkspaceStateMigrationError("Legacy Ditto recovery snapshot changed during fsync")
+    fsync_parent_directory(snapshot)
+
+
+def _windows_snapshot_flush_required() -> bool:
+    return os.name == "nt"
+
+
+def _windows_publish_candidate_pre_dacl_recovery_required() -> bool:
+    """Return whether O_EXCL creation can precede exact owner DACL installation."""
+    return os.name == "nt"
+
+
+def _sha256_file(path: Path, *, require_hardened: bool = False) -> str:
+    return digest_owner_owned_regular_file(path, require_hardened=require_hardened)
+
+
+def _safe_regular_file(path: Path, *, require_hardened: bool = False) -> bool:
+    try:
+        validate_owner_owned_regular_file(path, require_hardened=require_hardened)
+    except (OSError, PermissionError):
+        return False
+    return True
+
+
+def _path_present_no_follow(path: Path) -> bool:
+    try:
+        path.lstat()
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise WorkspaceStateMigrationError("Ditto state path is unsafe") from exc
+
+
+def _absolute_path(path: Path) -> str:
+    return os.path.abspath(path.expanduser())
+
+
+def _same_location(left: Path, right: Path) -> bool:
+    return paths_resolve_same_location(left, right)
+
+
+def _ensure_owned_directory(path: Path) -> None:
+    created = False
+    try:
+        path_stat = path.lstat()
+    except FileNotFoundError:
+        try:
+            os.mkdir(path, 0o700)
+            created = True
+        except OSError as exc:
+            raise WorkspaceStateMigrationError("Ditto target directory is unsafe") from exc
+        path_stat = path.lstat()
+    reparse_mask = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    getuid = getattr(os, "geteuid", None)
+    if (
+        not stat.S_ISDIR(path_stat.st_mode)
+        or stat.S_ISLNK(path_stat.st_mode)
+        or (reparse_mask and getattr(path_stat, "st_file_attributes", 0) & reparse_mask)
+        or (callable(getuid) and path_stat.st_uid != getuid())
+    ):
+        raise WorkspaceStateMigrationError("Ditto target directory is unsafe")
+    _durably_barrier_directory_entry(path, newly_created=created)
+
+
+def _durably_barrier_directory_entry(path: Path, *, newly_created: bool) -> None:
+    """Persist a target directory entry before an external receipt names it.
+
+    POSIX exposes the required containing-directory fsync directly.  Windows
+    does not expose directory fsync through Python, so publish a temporary
+    owner-only child with ``MoveFileExW(MOVEFILE_WRITE_THROUGH)`` via
+    :func:`write_secret_text`, then durably retire it.  The synchronous child
+    namespace transaction necessarily commits the parent directory chain; a
+    crash may at worst retain the non-secret delete tombstone, never a terminal
+    migration receipt whose target directory was only in volatile cache.
+    """
+    if not _windows_directory_barrier_required():
+        fsync_parent_directory(path)
+        return
+    marker = path / f".ditto-directory-barrier-{uuid.uuid4()}.tmp"
+    try:
+        write_secret_text(marker, "directory-entry-barrier\n")
+        durable_unlink(marker)
+    except Exception as exc:
+        boundary = "new" if newly_created else "existing"
+        raise WorkspaceStateMigrationError(
+            f"Could not durably commit {boundary} Ditto target directory"
+        ) from exc
+
+
+def _windows_directory_barrier_required() -> bool:
+    return os.name == "nt"
+
+
+def _sqlite_source_identity(source: Path, snapshot: Path, *, target: Path | None = None) -> dict[str, object]:
+    try:
+        source_digest, source_stat = digest_owner_owned_regular_file_identity(source)
+    except (OSError, PermissionError) as exc:
+        raise WorkspaceStateMigrationError("Legacy Ditto SQLite source is unsafe") from exc
+    sidecars: dict[str, dict[str, object]] = {}
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(f"{source}{suffix}")
+        if _path_present_no_follow(sidecar):
+            try:
+                sidecar_digest, sidecar_stat = digest_owner_owned_regular_file_identity(sidecar)
+            except (OSError, PermissionError) as exc:
+                raise WorkspaceStateMigrationError("Legacy Ditto SQLite sidecar is unsafe") from exc
+            sidecars[suffix] = {
+                "device": sidecar_stat.st_dev,
+                "inode": sidecar_stat.st_ino,
+                "size": sidecar_stat.st_size,
+                "mtime_ns": sidecar_stat.st_mtime_ns,
+                "sha256": sidecar_digest,
+            }
+    return {
+        "device": source_stat.st_dev,
+        "inode": source_stat.st_ino,
+        "size": source_stat.st_size,
+        "mtime_ns": source_stat.st_mtime_ns,
+        "sha256": source_digest,
+        "path": _absolute_path(source),
+        "in_place": target is not None and _same_location(source, target),
+        "sidecars": sidecars,
+        "snapshot_sha256": _sha256_file(snapshot),
+    }
+
+
+def _sqlite_source_matches_identity(source: Path, identity: dict[str, object]) -> bool:
+    try:
+        source_digest, source_stat = digest_owner_owned_regular_file_identity(source)
+    except (OSError, PermissionError):
+        return False
+    if any(
+        getattr(source_stat, attribute) != identity[key]
+        for attribute, key in (
+            ("st_dev", "device"),
+            ("st_ino", "inode"),
+            ("st_size", "size"),
+            ("st_mtime_ns", "mtime_ns"),
+        )
+    ) or source_digest != identity["sha256"]:
+        return False
+    actual_sidecars: dict[str, dict[str, object]] = {}
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(f"{source}{suffix}")
+        if not _path_present_no_follow(sidecar):
+            continue
+        try:
+            sidecar_digest, sidecar_stat = digest_owner_owned_regular_file_identity(sidecar)
+        except (OSError, PermissionError):
+            return False
+        actual_sidecars[suffix] = {
+            "device": sidecar_stat.st_dev,
+            "inode": sidecar_stat.st_ino,
+            "size": sidecar_stat.st_size,
+            "mtime_ns": sidecar_stat.st_mtime_ns,
+            "sha256": sidecar_digest,
+        }
+    return actual_sidecars == identity["sidecars"]
+
+
+def _read_ditto_receipt(
+    path: Path,
+    state: InstallationState,
+    legacy_accounts: Path,
+    legacy_vault: Path,
+    target_accounts: Path,
+    target_vault: Path,
+) -> dict[str, object] | None:
+    if not _path_present_no_follow(path):
+        return None
+    try:
+        receipt = json.loads(read_hardened_owner_owned_text(path, max_bytes=64 * 1024))
+        claimed_checksum = receipt.pop("journal_sha256")
+        from hashlib import sha256
+
+        actual_checksum = sha256(
+            json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        if claimed_checksum != actual_checksum:
+            raise ValueError("journal checksum mismatch")
+        if receipt.get("installation_id") != str(state.installation_id):
+            raise ValueError("installation identity mismatch")
+        if receipt.get("phase") not in {"preparing", "snapshotted", "consumed", "published", "quarantined"}:
+            raise ValueError("invalid migration phase")
+        receipt_id = str(uuid.UUID(receipt["receipt_id"]))
+        if receipt_id != receipt["receipt_id"]:
+            raise ValueError("non-canonical receipt identifier")
+        phase = receipt["phase"]
+        if phase == "quarantined":
+            if receipt.get("targets") != {}:
+                raise ValueError("quarantine journal has targets")
+        elif receipt.get("targets") != {
+            "accounts": _absolute_path(target_accounts),
+            "credentials": _absolute_path(target_vault),
+        }:
+            raise ValueError("migration target mismatch")
+        snapshots = receipt.get("snapshots")
+        sources = receipt.get("sources")
+        if not isinstance(snapshots, dict) or not isinstance(sources, dict):
+            raise ValueError("invalid source snapshot map")
+        prefix = "ditto-quarantine" if phase == "quarantined" else "ditto"
+        for name, snapshot_name in snapshots.items():
+            if name not in {"accounts", "credentials"}:
+                raise ValueError("unknown snapshot family")
+            expected = state.root / f"{prefix}-{receipt_id}-{name}.snapshot"
+            if snapshot_name != str(expected) or name not in sources:
+                raise ValueError("snapshot path mismatch")
+        snapshot_keys = set(snapshots)
+        source_keys = set(sources)
+        if phase == "preparing":
+            if snapshot_keys or source_keys:
+                raise ValueError("preparing journal already names snapshots")
+        elif phase == "quarantined":
+            if not snapshot_keys or snapshot_keys != source_keys:
+                raise ValueError("empty or incomplete quarantine journal")
+        elif "accounts" not in snapshot_keys or snapshot_keys != source_keys:
+            raise ValueError("migration journal lacks its required account snapshot")
+        for identity in sources.values():
+            _validate_ditto_source_identity(identity)
+        for name, identity in sources.items():
+            expected_source = legacy_accounts if name == "accounts" else legacy_vault
+            expected_target = target_accounts if name == "accounts" else target_vault
+            if identity["path"] != _absolute_path(expected_source):
+                raise ValueError("source path mismatch")
+            if identity["in_place"] != _same_location(expected_source, expected_target):
+                raise ValueError("source/target placement mismatch")
+        return receipt
+    except Exception as exc:
+        raise WorkspaceStateMigrationError("Ditto installation migration journal is unsafe") from exc
+
+
+def _validate_ditto_source_identity(identity: object) -> None:
+    if not isinstance(identity, dict) or set(identity) != {
+        "device",
+        "inode",
+        "size",
+        "mtime_ns",
+        "sha256",
+        "path",
+        "in_place",
+        "sidecars",
+        "snapshot_sha256",
+    }:
+        raise ValueError("invalid source identity")
+    for key in ("device", "inode", "size", "mtime_ns"):
+        if type(identity[key]) is not int or identity[key] < 0:
+            raise ValueError("invalid source generation")
+    if not isinstance(identity["path"], str) or type(identity["in_place"]) is not bool:
+        raise ValueError("invalid source placement")
+    for digest_key in ("sha256", "snapshot_sha256"):
+        digest = identity[digest_key]
+        if not isinstance(digest, str) or len(digest) != 64 or any(
+            char not in "0123456789abcdef" for char in digest
+        ):
+            raise ValueError("invalid source digest")
+    sidecars = identity["sidecars"]
+    if not isinstance(sidecars, dict) or not set(sidecars).issubset({"-wal", "-shm", "-journal"}):
+        raise ValueError("invalid sidecar identity")
+    for sidecar in sidecars.values():
+        if not isinstance(sidecar, dict) or set(sidecar) != {
+            "device",
+            "inode",
+            "size",
+            "mtime_ns",
+            "sha256",
+        }:
+            raise ValueError("invalid sidecar generation")
+        if any(
+            type(sidecar[key]) is not int or sidecar[key] < 0
+            for key in ("device", "inode", "size", "mtime_ns")
+        ):
+            raise ValueError("invalid sidecar generation")
+        digest = sidecar["sha256"]
+        if not isinstance(digest, str) or len(digest) != 64 or any(
+            char not in "0123456789abcdef" for char in digest
+        ):
+            raise ValueError("invalid sidecar digest")
+
+
+def _write_ditto_receipt(path: Path, receipt: dict[str, object]) -> None:
+    payload = dict(receipt)
+    payload.pop("journal_sha256", None)
+    from hashlib import sha256
+
+    payload["journal_sha256"] = sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    write_secret_text(path, json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
+
+
+def _quarantine_ambiguous_ditto_sources(
+    state: InstallationState,
+    receipt_path: Path,
+    legacy_accounts: Path,
+    legacy_vault: Path,
+    target_accounts: Path,
+    target_vault: Path,
+) -> None:
+    receipt_id = str(uuid.uuid4())
+    snapshots: dict[str, str] = {}
+    sources: dict[str, object] = {}
+    for name, source, target in (
+        ("accounts", legacy_accounts, target_accounts),
+        ("credentials", legacy_vault, target_vault),
+    ):
+        if not _path_present_no_follow(source):
+            continue
+        snapshot = state.root / f"ditto-quarantine-{receipt_id}-{name}.snapshot"
+        _sqlite_snapshot(source, snapshot)
+        snapshots[name] = str(snapshot)
+        sources[name] = _sqlite_source_identity(source, snapshot, target=target)
+    _write_ditto_receipt(
+        receipt_path,
+        {
+            "installation_id": str(state.installation_id),
+            "receipt_id": receipt_id,
+            "phase": "quarantined",
+            "sources": sources,
+            "snapshots": snapshots,
+            "targets": {},
+        },
     )
 
 

@@ -23,12 +23,14 @@ import sys
 
 runpy.run_path(sys.argv[1])
 print(os.environ["FLINTTRADE_WORKSPACE_DIR"])
+print(os.environ["FLINTTRADE_INSTALLATION_STATE_DIR"])
 """
 
 
-def _probe_workspace(*, worker: str | None = None, explicit: Path | None = None) -> Path:
+def _probe_workspace(*, worker: str | None = None, explicit: Path | None = None) -> tuple[Path, Path]:
     env = dict(os.environ)
     env.pop("FLINTTRADE_WORKSPACE_DIR", None)
+    env.pop("FLINTTRADE_INSTALLATION_STATE_DIR", None)
     env.pop("PYTEST_XDIST_WORKER", None)
     if worker is not None:
         env["PYTEST_XDIST_WORKER"] = worker
@@ -40,14 +42,16 @@ def _probe_workspace(*, worker: str | None = None, explicit: Path | None = None)
         env=env,
         text=True,
     )
-    return Path(output.strip())
+    workspace, installation = output.splitlines()
+    return Path(workspace), Path(installation)
 
 
 def test_serial_pytest_processes_get_distinct_workspaces() -> None:
-    first = _probe_workspace()
-    second = _probe_workspace()
+    first, first_installation = _probe_workspace()
+    second, second_installation = _probe_workspace()
     # The probe subprocess never reaches pytest_sessionfinish, so its scratch
-    # workspace has to be released from here or this test leaks two trees a run.
+    # workspace and installation container have to be released from here or
+    # this test leaks four trees a run.
     try:
         assert first != second
         assert first.name.startswith("flinttrade-pytest-main-")
@@ -55,11 +59,13 @@ def test_serial_pytest_processes_get_distinct_workspaces() -> None:
     finally:
         release(first)
         release(second)
+        release(first_installation.parent)
+        release(second_installation.parent)
 
 
 def test_xdist_worker_processes_get_distinct_workspaces() -> None:
-    first = _probe_workspace(worker="gw0")
-    second = _probe_workspace(worker="gw0")
+    first, first_installation = _probe_workspace(worker="gw0")
+    second, second_installation = _probe_workspace(worker="gw0")
     try:
         assert first != second
         assert first.name.startswith("flinttrade-pytest-gw0-")
@@ -67,10 +73,19 @@ def test_xdist_worker_processes_get_distinct_workspaces() -> None:
     finally:
         release(first)
         release(second)
+        release(first_installation.parent)
+        release(second_installation.parent)
 
 
 def test_explicit_workspace_override_is_preserved(tmp_path: Path) -> None:
-    assert _probe_workspace(explicit=tmp_path) == tmp_path
+    workspace, installation = _probe_workspace(explicit=tmp_path)
+    try:
+        assert workspace == tmp_path
+        assert installation.parent != workspace
+        assert installation not in workspace.parents
+        assert workspace not in installation.parents
+    finally:
+        release(installation.parent)
 
 
 def test_release_unwinds_a_hardened_scratch_workspace() -> None:
@@ -176,7 +191,12 @@ _HOLD_WORKSPACE = """
 import os, runpy, sys, time
 
 runpy.run_path(sys.argv[1])
-print(os.environ["FLINTTRADE_WORKSPACE_DIR"], flush=True)
+print(
+    os.environ["FLINTTRADE_WORKSPACE_DIR"],
+    os.environ["FLINTTRADE_INSTALLATION_STATE_DIR"],
+    sep="\t",
+    flush=True,
+)
 time.sleep(float(sys.argv[2]))
 """
 """Acquire a scratch workspace exactly as a worker does, then hold it open.
@@ -203,16 +223,21 @@ def test_sweep_spares_a_live_sibling_process_however_old_its_marker_looks() -> N
     the strongest form of the condition that used to destroy it, and the only
     thing standing between the sweep and the directory is the sibling's claim.
     """
+    holder_env = {**os.environ, "PYTEST_XDIST_WORKER": "gw-sibling"}
+    holder_env.pop("FLINTTRADE_INSTALLATION_STATE_DIR", None)
     holder = subprocess.Popen(  # noqa: S603
         [sys.executable, "-c", _HOLD_WORKSPACE, str(ROOT_CONFTEST), "60"],
         stdout=subprocess.PIPE,
         text=True,
-        env={**os.environ, "PYTEST_XDIST_WORKER": "gw-sibling"},
+        env=holder_env,
     )
     sibling: Path | None = None
+    sibling_installation: Path | None = None
     try:
         assert holder.stdout is not None
-        sibling = Path(holder.stdout.readline().strip())
+        workspace_text, installation_text = holder.stdout.readline().strip().split("\t")
+        sibling = Path(workspace_text)
+        sibling_installation = Path(installation_text)
         password = sibling / "master_password"
         assert password.is_file(), "the sibling seeded its workspace before we looked"
 
@@ -233,6 +258,8 @@ def test_sweep_spares_a_live_sibling_process_however_old_its_marker_looks() -> N
         # The holder is killed, so it never releases its own workspace.
         if sibling is not None:
             shutil.rmtree(sibling, ignore_errors=True)
+        if sibling_installation is not None:
+            release(sibling_installation.parent)
 
 
 def test_a_dead_process_workspace_is_still_collected() -> None:
@@ -242,14 +269,18 @@ def test_a_dead_process_workspace_is_still_collected() -> None:
     would reintroduce the unbounded temp-directory growth the sweep exists to
     stop. The claim has to die with its process.
     """
+    holder_env = {**os.environ, "PYTEST_XDIST_WORKER": "gw-departed"}
+    holder_env.pop("FLINTTRADE_INSTALLATION_STATE_DIR", None)
     holder = subprocess.Popen(  # noqa: S603
         [sys.executable, "-c", _HOLD_WORKSPACE, str(ROOT_CONFTEST), "0"],
         stdout=subprocess.PIPE,
         text=True,
-        env={**os.environ, "PYTEST_XDIST_WORKER": "gw-departed"},
+        env=holder_env,
     )
     assert holder.stdout is not None
-    departed = Path(holder.stdout.readline().strip())
+    workspace_text, installation_text = holder.stdout.readline().strip().split("\t")
+    departed = Path(workspace_text)
+    departed_installation = Path(installation_text)
     holder.wait(timeout=60)
     holder.stdout.close()
 
@@ -263,6 +294,7 @@ def test_a_dead_process_workspace_is_still_collected() -> None:
         assert not departed.exists()
     finally:
         shutil.rmtree(departed, ignore_errors=True)
+        release(departed_installation.parent)
 
 
 _COUNT_WORKSPACES = """
@@ -276,22 +308,36 @@ for conftest in (
     os.path.join("packages", "core", "data", "tests", "conftest.py"),
 ):
     runpy.run_path(os.path.join(repo, conftest))
-minted = list(pathlib.Path(tempfile.gettempdir()).glob("flinttrade-pytest-*"))
-print(len(minted))
-print(os.environ["FLINTTRADE_WORKSPACE_DIR"])
+temp_root = pathlib.Path(tempfile.gettempdir())
+minted = list(temp_root.glob("flinttrade-pytest-*"))
+installations = [path for path in minted if path.name.startswith("flinttrade-pytest-installation-")]
+workspaces = [path for path in minted if path not in installations]
+workspace = pathlib.Path(os.environ["FLINTTRADE_WORKSPACE_DIR"])
+installation = pathlib.Path(os.environ["FLINTTRADE_INSTALLATION_STATE_DIR"])
+print(len(workspaces))
+print(len(installations))
+print(workspace)
+print(installation)
+print((workspace / "master_password").is_file())
+print(installation.parent in installations)
+sys.modules["_flinttrade_scratch_workspace"].release_all()
+print(len(list(temp_root.glob("flinttrade-pytest-*"))))
 """
 
 
-def test_every_conftest_shares_one_workspace_per_process(tmp_path: Path) -> None:
-    """Loading all three isolating conftests mints exactly one workspace.
+def test_every_conftest_shares_one_workspace_and_installation_per_process(tmp_path: Path) -> None:
+    """All isolating conftests share one workspace and one separate lineage root.
 
     Each used to mint and seed its own, so a worker created three, whichever was
     imported last silently won ``FLINTTRADE_WORKSPACE_DIR``, and the other two
     sat registered and abandoned. That churn is what made the workspace a
-    process-global nobody owned.
+    process-global nobody owned. Installation lineage must be separately shared
+    so no conftest touches real user state and no probe subprocess leaks either
+    registered scratch tree.
     """
     env = dict(os.environ)
     env.pop("FLINTTRADE_WORKSPACE_DIR", None)
+    env.pop("FLINTTRADE_INSTALLATION_STATE_DIR", None)
     env["PYTEST_XDIST_WORKER"] = "gw7"
     for var in ("TMPDIR", "TEMP", "TMP"):
         env[var] = str(tmp_path)
@@ -304,10 +350,17 @@ def test_every_conftest_shares_one_workspace_per_process(tmp_path: Path) -> None
     ).splitlines()
 
     assert output[0] == "1", f"expected one workspace, got {output[0]}"
-    workspace = Path(output[1])
+    assert output[1] == "1", f"expected one installation container, got {output[1]}"
+    workspace = Path(output[2])
+    installation = Path(output[3])
     assert workspace.parent == tmp_path
     assert workspace.name.startswith("flinttrade-pytest-gw7-")
-    assert (workspace / "master_password").is_file()
+    assert installation.parent.parent == tmp_path
+    assert installation.parent.name.startswith("flinttrade-pytest-installation-gw7-")
+    assert installation.name == "installation-state"
+    assert output[4] == "True"
+    assert output[5] == "True"
+    assert output[6] == "0", f"probe leaked {output[6]} registered scratch roots"
 
 
 def test_register_leaves_an_unclaimable_workspace_unmarked(monkeypatch) -> None:

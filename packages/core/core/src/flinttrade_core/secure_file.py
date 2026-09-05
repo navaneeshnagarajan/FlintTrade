@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import functools
+import hashlib
 import os
 import pathlib
 import stat
@@ -952,6 +953,220 @@ def read_hardened_owner_owned_text(
 ) -> str:
     """Read hardened owner-owned text without following links."""
     return read_hardened_owner_owned_bytes(path, max_bytes=max_bytes).decode(encoding)
+
+
+def validate_owner_owned_regular_file(
+    path: pathlib.Path,
+    *,
+    require_hardened: bool = False,
+) -> os.stat_result:
+    """Validate one current-user-owned regular file without reading its payload.
+
+    The path is opened without following links where the platform supports it,
+    ownership is proved on the descriptor, and the directory entry is compared
+    again before returning.  This is the streaming-safe counterpart to the
+    bounded secure readers for large SQLite snapshots.
+    """
+    path = pathlib.Path(path)
+    path_stat = path.lstat()
+    parent_stat = path.parent.lstat()
+    if (
+        not stat.S_ISDIR(parent_stat.st_mode)
+        or stat.S_ISLNK(parent_stat.st_mode)
+        or _is_reparse_point(parent_stat)
+        or not stat.S_ISREG(path_stat.st_mode)
+        or stat.S_ISLNK(path_stat.st_mode)
+        or _is_reparse_point(path_stat)
+        or path_stat.st_nlink != 1
+    ):
+        raise OSError("secure file path is unsafe")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    if not _is_windows():
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        if _is_windows():
+            descriptor = _reopen_windows_descriptor_for_security(descriptor, write_dacl=False)
+        opened_stat = os.fstat(descriptor)
+        if not _same_file_identity(path_stat, opened_stat) or opened_stat.st_nlink != 1:
+            raise OSError("secure file changed while it was opened")
+        _assert_current_user_owns(descriptor, opened_stat)
+        if require_hardened:
+            _assert_hardened_descriptor(descriptor, opened_stat, path=path)
+        final_stat = path.lstat()
+        if (
+            not _same_file_identity(opened_stat, final_stat)
+            or stat.S_ISLNK(final_stat.st_mode)
+            or _is_reparse_point(final_stat)
+            or final_stat.st_nlink != 1
+        ):
+            raise OSError("secure file changed while it was validated")
+        return opened_stat
+    finally:
+        os.close(descriptor)
+
+
+def digest_owner_owned_regular_file(
+    path: pathlib.Path,
+    *,
+    require_hardened: bool = False,
+) -> str:
+    """Return a SHA-256 digest from one validated, descriptor-pinned file."""
+    digest, _path_stat = digest_owner_owned_regular_file_identity(
+        path,
+        require_hardened=require_hardened,
+    )
+    return digest
+
+
+def digest_owner_owned_regular_file_identity(
+    path: pathlib.Path,
+    *,
+    require_hardened: bool = False,
+) -> tuple[str, os.stat_result]:
+    """Return a stable descriptor-pinned digest and file generation.
+
+    Size and timestamp metadata are checked on the open descriptor before and
+    after streaming, as well as against the final directory entry.  Callers
+    can therefore persist both the content digest and the exact generation
+    that produced it without a path-based stat/hash race.
+    """
+    path = pathlib.Path(path)
+    path_stat = path.lstat()
+    parent_stat = path.parent.lstat()
+    if (
+        not stat.S_ISDIR(parent_stat.st_mode)
+        or stat.S_ISLNK(parent_stat.st_mode)
+        or _is_reparse_point(parent_stat)
+        or not stat.S_ISREG(path_stat.st_mode)
+        or stat.S_ISLNK(path_stat.st_mode)
+        or _is_reparse_point(path_stat)
+        or path_stat.st_nlink != 1
+    ):
+        raise OSError("secure file path is unsafe")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    if not _is_windows():
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        if _is_windows():
+            descriptor = _reopen_windows_descriptor_for_security(descriptor, write_dacl=False)
+        opened_stat = os.fstat(descriptor)
+        if not _same_file_identity(path_stat, opened_stat) or opened_stat.st_nlink != 1:
+            raise OSError("secure file changed while it was opened")
+        _assert_current_user_owns(descriptor, opened_stat)
+        if require_hardened:
+            _assert_hardened_descriptor(descriptor, opened_stat, path=path)
+        digest = hashlib.sha256()
+        while chunk := os.read(descriptor, 1 << 20):
+            digest.update(chunk)
+        final_descriptor_stat = os.fstat(descriptor)
+        final_stat = path.lstat()
+        if (
+            _stable_file_generation(opened_stat) != _stable_file_generation(final_descriptor_stat)
+            or _stable_file_generation(final_descriptor_stat) != _stable_file_generation(final_stat)
+            or stat.S_ISLNK(final_stat.st_mode)
+            or _is_reparse_point(final_stat)
+            or final_stat.st_nlink != 1
+        ):
+            raise OSError("secure file changed while it was hashed")
+        return digest.hexdigest(), final_descriptor_stat
+    finally:
+        os.close(descriptor)
+
+
+def _stable_file_generation(path_stat: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        path_stat.st_dev,
+        path_stat.st_ino,
+        path_stat.st_size,
+        path_stat.st_mtime_ns,
+        path_stat.st_ctime_ns,
+    )
+
+
+def copy_owner_owned_file_durable(source: pathlib.Path, destination: pathlib.Path) -> None:
+    """Copy a hardened owner-owned file to a new hardened, fsynced candidate."""
+    source = pathlib.Path(source)
+    destination = pathlib.Path(destination)
+    source_stat = validate_owner_owned_regular_file(source, require_hardened=True)
+    parent_stat = destination.parent.lstat()
+    if (
+        not stat.S_ISDIR(parent_stat.st_mode)
+        or stat.S_ISLNK(parent_stat.st_mode)
+        or _is_reparse_point(parent_stat)
+    ):
+        raise OSError("secure copy destination parent is unsafe")
+    source_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    if not _is_windows():
+        source_flags |= getattr(os, "O_NOFOLLOW", 0)
+    source_descriptor = os.open(source, source_flags)
+    destination_descriptor = -1
+    destination_stat: os.stat_result | None = None
+    try:
+        if _is_windows():
+            source_descriptor = _reopen_windows_descriptor_for_security(source_descriptor, write_dacl=False)
+        opened_source_stat = os.fstat(source_descriptor)
+        if not _same_file_identity(source_stat, opened_source_stat):
+            raise OSError("secure copy source changed while it was opened")
+        _assert_current_user_owns(source_descriptor, opened_source_stat)
+        _assert_hardened_descriptor(source_descriptor, opened_source_stat, path=source)
+        destination_flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        destination_descriptor = os.open(destination, destination_flags, 0o600)
+        if _is_windows():
+            destination_descriptor = _reopen_windows_descriptor_for_security(
+                destination_descriptor,
+                write_dacl=True,
+            )
+        destination_stat = os.fstat(destination_descriptor)
+        if _is_windows():
+            _install_exact_windows_descriptor_dacl(destination_descriptor)
+        else:
+            os.fchmod(destination_descriptor, 0o600)
+        hardened_destination_stat = os.fstat(destination_descriptor)
+        _assert_current_user_owns(destination_descriptor, hardened_destination_stat)
+        _assert_hardened_descriptor(destination_descriptor, hardened_destination_stat, path=destination)
+        while chunk := os.read(source_descriptor, 1 << 20):
+            offset = 0
+            while offset < len(chunk):
+                written = os.write(destination_descriptor, chunk[offset:])
+                if written <= 0:
+                    raise OSError("secure copy made no progress")
+                offset += written
+        final_source_stat = source.lstat()
+        if (
+            not _same_file_identity(opened_source_stat, final_source_stat)
+            or stat.S_ISLNK(final_source_stat.st_mode)
+            or _is_reparse_point(final_source_stat)
+            or final_source_stat.st_nlink != 1
+        ):
+            raise OSError("secure copy source changed while it was read")
+        os.fsync(destination_descriptor)
+        final_destination_stat = destination.lstat()
+        if not _same_file_identity(hardened_destination_stat, final_destination_stat):
+            raise OSError("secure copy destination changed while it was written")
+    except Exception:
+        if destination_descriptor != -1:
+            os.close(destination_descriptor)
+            destination_descriptor = -1
+        if destination_stat is not None:
+            try:
+                current_stat = destination.lstat()
+                if _same_file_identity(destination_stat, current_stat):
+                    durable_unlink(destination)
+            except OSError:
+                pass
+        raise
+    finally:
+        if destination_descriptor != -1:
+            os.close(destination_descriptor)
+        os.close(source_descriptor)
 
 
 def assert_hardened(path: pathlib.Path, user: str | None = None) -> tuple[bool, str]:

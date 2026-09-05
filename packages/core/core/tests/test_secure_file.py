@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -351,3 +352,208 @@ def test_harden_replaces_unrelated_explicit_windows_aces(tmp_path) -> None:
     actual_sids = {dacl.GetAce(index)[2] for index in range(dacl.GetAceCount())}
     assert everyone_sid not in actual_sids
     assert len(actual_sids) == 2
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        secure_file.validate_owner_owned_regular_file,
+        secure_file.digest_owner_owned_regular_file,
+    ],
+)
+def test_streaming_file_apis_reject_symlinks(tmp_path, operation) -> None:  # type: ignore[no-untyped-def]
+    source = tmp_path / "source"
+    source.write_bytes(b"payload")
+    source.chmod(0o600)
+    link = tmp_path / "link"
+    link.symlink_to(source)
+
+    with pytest.raises(OSError, match="unsafe"):
+        operation(link, require_hardened=True)
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX hard-link and mode semantics")
+@pytest.mark.parametrize(
+    "operation",
+    [
+        secure_file.validate_owner_owned_regular_file,
+        secure_file.digest_owner_owned_regular_file,
+    ],
+)
+def test_streaming_file_apis_reject_hardlinks_and_broad_mode(tmp_path, operation) -> None:  # type: ignore[no-untyped-def]
+    source = tmp_path / "source"
+    source.write_bytes(b"payload")
+    source.chmod(0o600)
+    os.link(source, tmp_path / "other-name")
+    with pytest.raises(OSError, match="unsafe"):
+        operation(source, require_hardened=True)
+
+    source.unlink()
+    broad = tmp_path / "broad"
+    broad.write_bytes(b"payload")
+    broad.chmod(0o640)
+    with pytest.raises(secure_file.InsecureFilePermissionsError):
+        operation(broad, require_hardened=True)
+
+
+def test_validate_owner_owned_regular_file_detects_open_path_replacement(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    source.write_bytes(b"original")
+    source.chmod(0o600)
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(b"replacement")
+    replacement.chmod(0o600)
+    real_open = secure_file.os.open
+    swapped = False
+
+    def swapping_open(path, flags, *args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal swapped
+        if Path(path) == source and not swapped:
+            swapped = True
+            os.replace(replacement, source)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(secure_file.os, "open", swapping_open)
+
+    with pytest.raises(OSError, match="changed"):
+        secure_file.validate_owner_owned_regular_file(source, require_hardened=True)
+    assert swapped is True
+
+
+def test_digest_owner_owned_regular_file_detects_read_path_replacement(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    source.write_bytes(b"original")
+    source.chmod(0o600)
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(b"replacement")
+    replacement.chmod(0o600)
+    real_read = secure_file.os.read
+    swapped = False
+
+    def swapping_read(descriptor: int, count: int) -> bytes:
+        nonlocal swapped
+        payload = real_read(descriptor, count)
+        if not swapped:
+            swapped = True
+            os.replace(replacement, source)
+        return payload
+
+    monkeypatch.setattr(secure_file.os, "read", swapping_read)
+
+    with pytest.raises(OSError, match="changed"):
+        secure_file.digest_owner_owned_regular_file(source, require_hardened=True)
+    assert swapped is True
+
+
+def test_digest_owner_owned_regular_file_detects_in_place_change_during_stream(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    source.write_bytes(b"A" * ((1 << 20) + 1))
+    source.chmod(0o600)
+    real_read = secure_file.os.read
+    mutated = False
+
+    def mutating_read(descriptor: int, count: int) -> bytes:
+        nonlocal mutated
+        payload = real_read(descriptor, count)
+        if payload and not mutated:
+            mutated = True
+            with source.open("r+b") as writer:
+                writer.seek(-1, os.SEEK_END)
+                writer.write(b"B")
+                writer.flush()
+                os.fsync(writer.fileno())
+        return payload
+
+    monkeypatch.setattr(secure_file.os, "read", mutating_read)
+
+    with pytest.raises(OSError, match="changed"):
+        secure_file.digest_owner_owned_regular_file(source, require_hardened=True)
+    assert mutated is True
+
+
+def test_durable_owner_copy_cleans_failed_candidate(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "candidate"
+    source.write_bytes(b"payload")
+    source.chmod(0o600)
+    real_write = secure_file.os.write
+
+    def fail_destination_write(descriptor: int, payload: bytes | memoryview) -> int:
+        if os.fstat(descriptor).st_ino != source.stat().st_ino:
+            raise OSError("injected write failure")
+        return real_write(descriptor, payload)
+
+    monkeypatch.setattr(secure_file.os, "write", fail_destination_write)
+
+    with pytest.raises(OSError, match="injected write failure"):
+        secure_file.copy_owner_owned_file_durable(source, destination)
+    assert not destination.exists()
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX descriptor-mode ordering")
+def test_durable_owner_copy_hardens_then_writes_then_fsyncs(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "candidate"
+    source.write_bytes(b"payload")
+    source.chmod(0o600)
+    events: list[str] = []
+    real_fchmod = secure_file.os.fchmod
+    real_write = secure_file.os.write
+    real_fsync = secure_file.os.fsync
+
+    def record_fchmod(descriptor: int, mode: int) -> None:
+        events.append("harden")
+        real_fchmod(descriptor, mode)
+
+    def record_write(descriptor: int, payload: bytes | memoryview) -> int:
+        events.append("write")
+        return real_write(descriptor, payload)
+
+    def record_fsync(descriptor: int) -> None:
+        events.append("fsync")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(secure_file.os, "fchmod", record_fchmod)
+    monkeypatch.setattr(secure_file.os, "write", record_write)
+    monkeypatch.setattr(secure_file.os, "fsync", record_fsync)
+
+    secure_file.copy_owner_owned_file_durable(source, destination)
+
+    assert events.index("harden") < events.index("write") < events.index("fsync")
+    assert destination.read_bytes() == b"payload"
+
+
+@pytest.mark.skipif(_IS_WIN, reason="mocked Windows descriptor-DACL path runs on POSIX")
+def test_windows_durable_owner_copy_installs_descriptor_dacl_before_write(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "candidate"
+    source.write_bytes(b"payload")
+    source.chmod(0o600)
+    events: list[str] = []
+    real_write = secure_file.os.write
+
+    monkeypatch.setattr(secure_file, "_is_windows", lambda: True)
+
+    def record_reopen(descriptor: int, **kwargs) -> int:  # type: ignore[no-untyped-def]
+        if kwargs.get("write_dacl"):
+            events.append("reopen-write-dacl")
+        return descriptor
+
+    monkeypatch.setattr(secure_file, "_reopen_windows_descriptor_for_security", record_reopen)
+    monkeypatch.setattr(secure_file, "_assert_current_user_owns", lambda *_args: None)
+    monkeypatch.setattr(secure_file, "_assert_hardened_descriptor", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        secure_file,
+        "_install_exact_windows_descriptor_dacl",
+        lambda _descriptor: events.append("dacl"),
+    )
+
+    def record_write(descriptor: int, payload: bytes | memoryview) -> int:
+        events.append("write")
+        return real_write(descriptor, payload)
+
+    monkeypatch.setattr(secure_file.os, "write", record_write)
+
+    secure_file.copy_owner_owned_file_durable(source, destination)
+
+    assert events.index("reopen-write-dacl") < events.index("dacl") < events.index("write")

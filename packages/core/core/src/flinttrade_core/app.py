@@ -2851,6 +2851,17 @@ def _wire_ml_signal_runtime(
     return True
 
 
+def _open_ditto_credential_store() -> CredentialStore:
+    """Finish the one-time legacy snapshot before opening the canonical vault."""
+    from .installation_state import InstallationState  # noqa: PLC0415
+    from .workspace import ditto_accounts_path  # noqa: PLC0415
+
+    state = InstallationState()
+    with state.ditto_fence():
+        ditto_accounts_path(installation_state_root=state.root)
+        return CredentialStore(_workspace_dir() / "ditto_credentials.db", _get_master_password())
+
+
 def _configure_ditto_runtime(app: Flask, safety: Any) -> None:
     """Configure the process-owned, fail-closed Ditto orchestration runtime."""
     store = app.config.get("DITTO_CREDENTIAL_STORE")
@@ -3542,9 +3553,7 @@ def create_flask_app(
     # authenticate each ditto:openalgo row as a bridge session. Optional: a
     # missing vault must never block startup (Ditto routes 503 without it).
     try:
-        app.config["DITTO_CREDENTIAL_STORE"] = CredentialStore(
-            _workspace_dir() / "ditto_credentials.db", _get_master_password()
-        )
+        app.config["DITTO_CREDENTIAL_STORE"] = _open_ditto_credential_store()
     except Exception as exc:  # noqa: BLE001 - Ditto is optional
         logger.warning("Ditto credential vault unavailable (%s)", type(exc).__name__)
         app.config["DITTO_CREDENTIAL_STORE"] = None

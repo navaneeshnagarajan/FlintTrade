@@ -9,14 +9,13 @@ random salt + a PBKDF2-derived key from the operator's master password), keyed b
 ``(adapter_id="openalgo", account_id)`` in a Ditto-scoped vault file. Non-secret
 account metadata (host, group, weight, limits, flags) lives in the local
 ``ditto_accounts.sqlite``. The former Ditto-only ``DITTO_ENCRYPTION_KEY`` Fernet
-store was folded into the vault on 2026-07-09 (map U5) — there is no longer a
-separate weak-crypto credential store.
+column is an inert preserved source: construction never decrypts, rewrites or
+drops it; a later journalled importer owns any retirement decision.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -26,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from flinttrade_core.db import open_sqlite
+from flinttrade_core.installation_state import InstallationState
 
 if TYPE_CHECKING:
     from flinttrade_gateway.credentials import CredentialStore
@@ -140,8 +140,12 @@ class AccountManager:
     Secrets are read/written through an injected
     :class:`~flinttrade_gateway.credentials.CredentialStore` (the canonical
     vault). Pass either a ``credential_store`` or a ``master_password`` (used to
-    open a Ditto-scoped vault next to the metadata DB). Reads that need the
-    api_key (health/status) re-source it from the vault.
+    open the metadata-adjacent historical vault). A validated same-installation
+    terminal receipt that includes the migrated credentials family permanently
+    redirects only the default database to the workspace-root vault; file
+    existence never switches authority. Explicit databases and ``DATA_DIR``
+    remain adjacent. Reads that need the api_key (health/status) re-source it
+    from the selected vault.
 
     Usage::
 
@@ -160,12 +164,27 @@ class AccountManager:
         db_path: str | None = None,
         credential_store: CredentialStore | None = None,
         master_password: str | None = None,
+        installation_state_root: str | Path | None = None,
     ) -> None:
-        self._db_path = db_path or _default_db()
+        self._uses_default_db = db_path is None
+        self._installation_state = InstallationState(installation_state_root)
         self._conn: sqlite3.Connection | None = None
+        self._legacy_api_key_column = False
         self._cache: dict[str, BrokerAccount] = {}
         self._http = httpx.Client(timeout=10.0)
-        self._cred = self._resolve_credential_store(credential_store, master_password)
+        with self._installation_state.ditto_fence():
+            if self._uses_default_db:
+                from flinttrade_core.workspace import ditto_account_manager_paths  # noqa: PLC0415
+
+                metadata_path, vault_path = ditto_account_manager_paths(
+                    installation_state_root=self._installation_state.root,
+                )
+                self._db_path = str(metadata_path)
+                self._default_vault_path = vault_path
+            else:
+                self._db_path = str(db_path)
+                self._default_vault_path = Path(self._db_path).parent / "ditto_credentials.db"
+            self._cred = self._resolve_credential_store(credential_store, master_password)
 
     def _resolve_credential_store(
         self, credential_store: CredentialStore | None, master_password: str | None
@@ -175,7 +194,7 @@ class AccountManager:
         if master_password:
             from flinttrade_gateway.credentials import CredentialStore  # noqa: PLC0415
 
-            vault_path = Path(self._db_path).parent / "ditto_credentials.db"
+            vault_path = self._default_vault_path
             vault_path.parent.mkdir(parents=True, exist_ok=True)
             return CredentialStore(vault_path, master_password)
         raise ValueError(
@@ -184,61 +203,28 @@ class AccountManager:
         )
 
     def _get_conn(self) -> sqlite3.Connection:
-        if self._conn is None:
-            Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-            self._conn = open_sqlite(self._db_path, durability="normal")
-            self._conn.execute(_SCHEMA)
-            self._conn.commit()
-            self._migrate_legacy_api_key_column(self._conn)
-        return self._conn
+        with self._installation_state.ditto_fence():
+            if self._conn is None:
+                Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+                self._conn = open_sqlite(self._db_path, durability="normal")
+                self._conn.execute(_SCHEMA)
+                self._conn.commit()
+                self._migrate_legacy_api_key_column(self._conn)
+            return self._conn
 
     def _migrate_legacy_api_key_column(self, conn: sqlite3.Connection) -> None:
-        """Fold a legacy ``api_key_encrypted`` column into the vault, then drop it.
-
-        Pre-2026-07-09 databases stored the api_key as Fernet ciphertext keyed by
-        ``DITTO_ENCRYPTION_KEY``. Best-effort migrate each into the vault (when the
-        legacy key is still available to decrypt it), then drop the column so new
-        writes never touch weak-crypto storage again.
-        """
+        """Detect the legacy secret column without consuming or changing it."""
         cols = {row[1] for row in conn.execute("PRAGMA table_info(accounts)")}
-        if "api_key_encrypted" not in cols:
-            return
-        legacy_key = os.getenv("DITTO_ENCRYPTION_KEY", "")
-        migrated = 0
-        for account_id, ciphertext in conn.execute(
-            "SELECT account_id, api_key_encrypted FROM accounts"
-        ).fetchall():
-            if not ciphertext or not legacy_key:
-                continue
-            try:
-                from cryptography.fernet import Fernet  # noqa: PLC0415
-
-                plaintext = Fernet(legacy_key.encode()).decrypt(ciphertext.encode()).decode()
-            except Exception:
-                continue
-            try:
-                self._cred.store(
-                    account_id,
-                    broker=_DITTO_ADAPTER_ID,
-                    label=account_id,
-                    credentials={"api_key": plaintext},
-                    adapter_id=_DITTO_ADAPTER_ID,
-                )
-                migrated += 1
-            except Exception:  # noqa: BLE001 - migration is best-effort
-                logger.warning("Could not migrate legacy Ditto api_key into the vault")
-        conn.execute("ALTER TABLE accounts DROP COLUMN api_key_encrypted")
-        conn.commit()
-        logger.info(
-            "Migrated %d legacy Ditto api_key(s) into the vault; dropped api_key_encrypted",
-            migrated,
-        )
+        self._legacy_api_key_column = "api_key_encrypted" in cols
+        if self._legacy_api_key_column:
+            logger.warning("Preserving legacy Ditto api_key_encrypted column for journalled import")
 
     def close(self) -> None:
-        if self._conn:
-            self._conn.close()
-            self._conn = None
-        self._http.close()
+        with self._installation_state.ditto_fence():
+            if self._conn:
+                self._conn.close()
+                self._conn = None
+            self._http.close()
 
     def __enter__(self) -> AccountManager:
         return self
@@ -252,60 +238,97 @@ class AccountManager:
 
     def add_account(self, account: BrokerAccount) -> None:
         """Register a new broker account (secret → vault, metadata → sqlite)."""
-        self._cred.store(
-            account.account_id,
-            broker=_DITTO_ADAPTER_ID,
-            label=account.name or account.account_id,
-            credentials={"api_key": account.api_key},
-            adapter_id=_DITTO_ADAPTER_ID,
-        )
-        conn = self._get_conn()
-        now = datetime.now(IST).isoformat()
-        conn.execute(
-            """INSERT OR REPLACE INTO accounts
-               (account_id, name, openalgo_host, enabled,
-                allocation_weight, account_group, max_loss_daily, is_master,
-                created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            [
-                account.account_id, account.name, account.openalgo_host,
-                int(account.enabled), account.allocation_weight,
-                account.group, account.max_loss_daily, int(account.is_master),
-                now, now,
-            ],
-        )
-        conn.commit()
-        self._cache[account.account_id] = account
-        logger.info("Account added: %s", account.display)
+        with self._installation_state.ditto_fence():
+            self._cred.store(
+                account.account_id,
+                broker=_DITTO_ADAPTER_ID,
+                label=account.name or account.account_id,
+                credentials={"api_key": account.api_key},
+                adapter_id=_DITTO_ADAPTER_ID,
+            )
+            conn = self._get_conn()
+            now = datetime.now(IST).isoformat()
+            values = [
+                account.account_id,
+                account.name,
+                account.openalgo_host,
+                int(account.enabled),
+                account.allocation_weight,
+                account.group,
+                account.max_loss_daily,
+                int(account.is_master),
+                now,
+                now,
+            ]
+            if self._legacy_api_key_column:
+                conn.execute(
+                    """INSERT INTO accounts
+                       (account_id, name, openalgo_host, api_key_encrypted, enabled,
+                        allocation_weight, account_group, max_loss_daily, is_master,
+                        created_at, updated_at)
+                       VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(account_id) DO UPDATE SET
+                         name=excluded.name,
+                         openalgo_host=excluded.openalgo_host,
+                         enabled=excluded.enabled,
+                         allocation_weight=excluded.allocation_weight,
+                         account_group=excluded.account_group,
+                         max_loss_daily=excluded.max_loss_daily,
+                         is_master=excluded.is_master,
+                         updated_at=excluded.updated_at""",
+                    values,
+                )
+            else:
+                conn.execute(
+                    """INSERT OR REPLACE INTO accounts
+                       (account_id, name, openalgo_host, enabled,
+                        allocation_weight, account_group, max_loss_daily, is_master,
+                        created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    values,
+                )
+            conn.commit()
+            self._cache[account.account_id] = account
+            logger.info("Account added: %s", account.display)
 
     def remove_account(self, account_id: str) -> None:
         """Remove a broker account (metadata + vault credential)."""
-        conn = self._get_conn()
-        conn.execute("DELETE FROM accounts WHERE account_id = ?", [account_id])
-        conn.commit()
-        self._cache.pop(account_id, None)
-        try:
-            self._cred.remove_for(_DITTO_ADAPTER_ID, account_id)
-        except Exception:  # noqa: BLE001 - vault row may already be absent
-            logger.info("No vault credential to remove for Ditto account")
+        with self._installation_state.ditto_fence():
+            conn = self._get_conn()
+            conn.execute("DELETE FROM accounts WHERE account_id = ?", [account_id])
+            conn.commit()
+            self._cache.pop(account_id, None)
+            try:
+                self._cred.remove_for(_DITTO_ADAPTER_ID, account_id)
+            except Exception:  # noqa: BLE001 - vault row may already be absent
+                logger.info("No vault credential to remove for Ditto account")
 
     def get_account(self, account_id: str) -> BrokerAccount | None:
         """Get a single account by ID."""
-        if account_id in self._cache:
-            return self._cache[account_id]
-        conn = self._get_conn()
-        row = conn.execute(
-            "SELECT * FROM accounts WHERE account_id = ?", [account_id],
-        ).fetchone()
-        if not row:
-            return None
-        return self._row_to_account(row)
+        with self._installation_state.ditto_fence():
+            if account_id in self._cache:
+                return self._cache[account_id]
+            conn = self._get_conn()
+            row = conn.execute(
+                """SELECT account_id, name, openalgo_host, enabled, allocation_weight,
+                          account_group, max_loss_daily, is_master
+                   FROM accounts WHERE account_id = ?""",
+                [account_id],
+            ).fetchone()
+            if not row:
+                return None
+            return self._row_to_account(row)
 
     def list_accounts(self) -> list[BrokerAccount]:
         """List all registered accounts."""
-        conn = self._get_conn()
-        rows = conn.execute("SELECT * FROM accounts ORDER BY account_id").fetchall()
-        return [self._row_to_account(r) for r in rows]
+        with self._installation_state.ditto_fence():
+            conn = self._get_conn()
+            rows = conn.execute(
+                """SELECT account_id, name, openalgo_host, enabled, allocation_weight,
+                          account_group, max_loss_daily, is_master
+                   FROM accounts ORDER BY account_id"""
+            ).fetchall()
+            return [self._row_to_account(r) for r in rows]
 
     def get_enabled_accounts(self) -> list[BrokerAccount]:
         """Get only enabled accounts."""
@@ -323,18 +346,20 @@ class AccountManager:
         return None
 
     def enable_account(self, account_id: str) -> None:
-        conn = self._get_conn()
-        conn.execute("UPDATE accounts SET enabled = 1 WHERE account_id = ?", [account_id])
-        conn.commit()
-        if account_id in self._cache:
-            self._cache[account_id].enabled = True
+        with self._installation_state.ditto_fence():
+            conn = self._get_conn()
+            conn.execute("UPDATE accounts SET enabled = 1 WHERE account_id = ?", [account_id])
+            conn.commit()
+            if account_id in self._cache:
+                self._cache[account_id].enabled = True
 
     def disable_account(self, account_id: str) -> None:
-        conn = self._get_conn()
-        conn.execute("UPDATE accounts SET enabled = 0 WHERE account_id = ?", [account_id])
-        conn.commit()
-        if account_id in self._cache:
-            self._cache[account_id].enabled = False
+        with self._installation_state.ditto_fence():
+            conn = self._get_conn()
+            conn.execute("UPDATE accounts SET enabled = 0 WHERE account_id = ?", [account_id])
+            conn.commit()
+            if account_id in self._cache:
+                self._cache[account_id].enabled = False
 
     # ------------------------------------------------------------------
     # Health check
@@ -409,12 +434,13 @@ class AccountManager:
 
     def _api_key_for(self, account_id: str) -> str:
         """Read an account's api_key from the vault (empty string if absent)."""
-        try:
-            creds = self._cred.retrieve_for(_DITTO_ADAPTER_ID, account_id)
-        except Exception:
-            logger.warning("Could not read Ditto account auth material from the vault")
-            return ""
-        return str(creds.get("api_key", ""))
+        with self._installation_state.ditto_fence():
+            try:
+                creds = self._cred.retrieve_for(_DITTO_ADAPTER_ID, account_id)
+            except Exception:
+                logger.warning("Could not read Ditto account auth material from the vault")
+                return ""
+            return str(creds.get("api_key", ""))
 
     def _row_to_account(self, row: sqlite3.Row | tuple) -> BrokerAccount:
         """Convert a metadata row to a BrokerAccount (api_key sourced from vault)."""
