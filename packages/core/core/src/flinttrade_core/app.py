@@ -101,6 +101,7 @@ from .request_observability import (  # noqa: E402
     current_safe_request_summary,
     project_safe_request,
     reset_safe_request_summary,
+    sentry_event_is_secret,
     set_safe_request_summary,
 )
 from .secure_file import write_secret_text as _write_secret_text  # noqa: E402
@@ -130,7 +131,26 @@ _WERKZEUG_FALLBACK_LOG_OWNERS = 0
 _WERKZEUG_FALLBACK_ORIGINAL_DISABLED = False
 
 
-def _acquire_werkzeug_fallback_log_suppression() -> None:
+class _WerkzeugFallbackLogSuppressionLease:
+    """One idempotently releasable ownership share of fallback suppression."""
+
+    def __init__(self) -> None:
+        self._released = False
+
+    def release(self) -> None:
+        global _WERKZEUG_FALLBACK_LOG_OWNERS
+        with _WERKZEUG_FALLBACK_LOG_LOCK:
+            if self._released:
+                return
+            self._released = True
+            if _WERKZEUG_FALLBACK_LOG_OWNERS == 0:
+                return
+            _WERKZEUG_FALLBACK_LOG_OWNERS -= 1
+            if _WERKZEUG_FALLBACK_LOG_OWNERS == 0:
+                logging.getLogger("werkzeug").disabled = _WERKZEUG_FALLBACK_ORIGINAL_DISABLED
+
+
+def _acquire_werkzeug_fallback_log_suppression() -> _WerkzeugFallbackLogSuppressionLease:
     global _WERKZEUG_FALLBACK_LOG_OWNERS, _WERKZEUG_FALLBACK_ORIGINAL_DISABLED
     with _WERKZEUG_FALLBACK_LOG_LOCK:
         werkzeug_logger = logging.getLogger("werkzeug")
@@ -138,16 +158,7 @@ def _acquire_werkzeug_fallback_log_suppression() -> None:
             _WERKZEUG_FALLBACK_ORIGINAL_DISABLED = werkzeug_logger.disabled
         _WERKZEUG_FALLBACK_LOG_OWNERS += 1
         werkzeug_logger.disabled = True
-
-
-def _release_werkzeug_fallback_log_suppression() -> None:
-    global _WERKZEUG_FALLBACK_LOG_OWNERS
-    with _WERKZEUG_FALLBACK_LOG_LOCK:
-        if _WERKZEUG_FALLBACK_LOG_OWNERS == 0:
-            return
-        _WERKZEUG_FALLBACK_LOG_OWNERS -= 1
-        if _WERKZEUG_FALLBACK_LOG_OWNERS == 0:
-            logging.getLogger("werkzeug").disabled = _WERKZEUG_FALLBACK_ORIGINAL_DISABLED
+    return _WerkzeugFallbackLogSuppressionLease()
 
 DEFAULT_BACKEND_PORT = 5100
 
@@ -3500,10 +3511,10 @@ def create_flask_app(
     _glitchtip_dsn = os.environ.get("GLITCHTIP_DSN", "")
     if _glitchtip_dsn:
         def _drop_secret_event(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any] | None:
-            return None if current_safe_request_summary() is not None else event
+            return None if current_safe_request_summary() is not None or sentry_event_is_secret(event) else event
 
         def _drop_secret_transaction(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any] | None:
-            return None if current_safe_request_summary() is not None else event
+            return None if current_safe_request_summary() is not None or sentry_event_is_secret(event) else event
 
         def _sample_transaction(context: dict[str, Any]) -> float:
             try:
@@ -5666,22 +5677,26 @@ def _run_flask_server(app: Flask, port: int = 5100, host: str = "127.0.0.1") -> 
             "Waitress not installed; falling back to Werkzeug dev server. Install with: pip install waitress"
         )
         server = make_server(host, port, app, threaded=True)
-        _acquire_werkzeug_fallback_log_suppression()
+        suppression_lease = _acquire_werkzeug_fallback_log_suppression()
 
         def close_werkzeug() -> None:
-            try:
-                server.shutdown()
-            finally:
-                try:
-                    server.server_close()
-                finally:
-                    _release_werkzeug_fallback_log_suppression()
+            server.shutdown()
+            server.server_close()
+            suppression_lease.release()
 
-        owner = _FlaskServerOwner(
-            server,
-            run=server.serve_forever,
-            close=close_werkzeug,
-        )
+        try:
+            owner = _FlaskServerOwner(
+                server,
+                run=server.serve_forever,
+                close=close_werkzeug,
+            )
+            owner.start()
+        except BaseException:
+            try:
+                server.server_close()
+            finally:
+                suppression_lease.release()
+            raise
     else:
         from waitress.task import ThreadedTaskDispatcher  # noqa: PLC0415
 
@@ -5724,8 +5739,7 @@ def _run_flask_server(app: Flask, port: int = 5100, host: str = "127.0.0.1") -> 
             close=server.close,
             dispatcher=dispatcher,
         )
-
-    owner.start()
+        owner.start()
     logger.info("FlintTrade API server started on http://%s:%d", host, port)
 
     # Arm the daily session-refresh jobs (G5) on the serve path only, so

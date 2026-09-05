@@ -193,6 +193,10 @@ def test_dump_blueprints_script_runs_against_current_app_path() -> None:
         ("PREFIX = make_prefix()", None),
         ('if enabled:\n    PREFIX = "/conditional"', None),
         ('PREFIX = "/first"\nPREFIX = "/rebound"', None),
+        ('PREFIX = "/first"\nPREFIX += "/augmented"', None),
+        ('PREFIX = "/first"\nPREFIX, other = values', None),
+        ('PREFIX = "/first"\nfor PREFIX in values:\n    pass', None),
+        ('PREFIX = "/first"\ndel PREFIX', None),
     ],
 )
 def test_blueprint_prefix_literal_resolution_is_static_and_unambiguous(source: str, expected: str | None) -> None:

@@ -98,6 +98,16 @@ def _module_path(module: str) -> Path | None:
 
 
 def _literal_string_binding_before(tree: ast.Module, name: str, before_line: int) -> str | None:
+    name_writes = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and node.id == name
+        and node.lineno < before_line
+    ]
+    if len(name_writes) != 1:
+        return None
     bindings: list[ast.Assign | ast.AnnAssign] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.lineno >= before_line:

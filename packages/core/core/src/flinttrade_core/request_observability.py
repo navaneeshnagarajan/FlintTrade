@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextvars import ContextVar, Token
 from dataclasses import asdict, dataclass
+from urllib.parse import urlsplit
 
 MAX_OBSERVED_CONTENT_LENGTH = 64 * 1024 * 1024
 
@@ -112,3 +114,26 @@ def reset_safe_request_summary(token: Token[SafeRequestSummary | None]) -> None:
 def current_safe_request_summary() -> SafeRequestSummary | None:
     """Return the current synchronous secret-request projection."""
     return _CURRENT_SAFE_REQUEST.get()
+
+
+def sentry_event_is_secret(event: object) -> bool:
+    """Classify a Sentry event without retaining its raw request metadata."""
+    if not isinstance(event, Mapping):
+        return False
+    request_data = event.get("request")
+    if not isinstance(request_data, Mapping):
+        return False
+    path: object = None
+    environ = request_data.get("env")
+    if isinstance(environ, Mapping):
+        path = environ.get("PATH_INFO")
+    if type(path) is not str:
+        url = request_data.get("url")
+        if type(url) is not str:
+            return False
+        try:
+            path = urlsplit(url).path
+        except ValueError:
+            return False
+    method = request_data.get("method")
+    return classify_secret_envelope(method if type(method) is str else "UNKNOWN", path) is not None

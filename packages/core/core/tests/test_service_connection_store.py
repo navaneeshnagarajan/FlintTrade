@@ -60,6 +60,33 @@ def test_first_create_and_same_key_retry_survive_restart(tmp_path):
     assert reopened.read_snapshot() == after
 
 
+def test_same_key_retry_normalises_only_outer_etag_ows(tmp_path):
+    store = ServiceConnectionStore(tmp_path)
+    before = store.read_snapshot()
+    key = str(uuid4())
+    result = store.mutate(
+        "create",
+        PAYLOAD,
+        connection_id=None,
+        expected_etag=before.etag,
+        idempotency_key=key,
+        actor_context=ACTOR,
+    )
+    reopened = ServiceConnectionStore(tmp_path)
+
+    replay = reopened.mutate(
+        "create",
+        PAYLOAD,
+        connection_id=None,
+        expected_etag=f" \t{before.etag}\t ",
+        idempotency_key=key,
+        actor_context=ACTOR,
+    )
+
+    assert replay == result
+    assert reopened.read_snapshot().epoch == 1
+
+
 def create(store, **changes):
     return store.mutate(
         "create",

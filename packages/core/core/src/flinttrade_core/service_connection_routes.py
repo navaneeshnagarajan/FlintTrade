@@ -32,6 +32,13 @@ from .service_connection_transactions import MAX_MUTATION_BYTES, uuid_text
 SERVICE_CONNECTION_COLLECTION_PATH = "/v1/services/connections"
 SERVICE_CONNECTION_COLLECTION_TEMPLATE = "/ft-api/v1/services/connections"
 SERVICE_CONNECTION_ITEM_TEMPLATE = "/ft-api/v1/services/connections/{connection_id}"
+_MUTATION_ENDPOINTS = frozenset(
+    {
+        "service_connections.create_service_connection_route",
+        "service_connections.update_service_connection_route",
+        "service_connections.delete_service_connection_route",
+    }
+)
 
 service_connection_bp = Blueprint(
     "service_connections",
@@ -159,6 +166,9 @@ def _route_template() -> str:
 def _record_attempt(outcome: str, proof: _ConnectionProof | None) -> None:
     if request.method not in {"POST", "PATCH", "DELETE"}:
         return
+    if getattr(g, "service_connection_attempt_recorded", False):
+        return
+    g.service_connection_attempt_recorded = True
     actor = proof.principal.actor_ref if proof is not None and proof.principal is not None else None
     authentication_class = proof.authentication_class if proof is not None else "invalid"
     try:
@@ -211,6 +221,12 @@ def guard_service_connection_family() -> tuple[Response, int] | None:
 def apply_service_connection_cache_policy(response: Response) -> Response:
     """Prevent storage of every matched, malformed or rejected family response."""
     if _is_service_connection_path(request.path):
+        if (
+            request.method in {"POST", "PATCH", "DELETE"}
+            and not getattr(g, "service_connection_attempt_recorded", False)
+            and (response.status_code == 429 or request.endpoint not in _MUTATION_ENDPOINTS)
+        ):
+            _record_attempt("rejected", getattr(g, "service_connection_proof", None))
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
     return response
