@@ -1,10 +1,4 @@
-"""T4-B (gap G4): composite (adapter_id, account_id) credentials + additive backfill.
-
-The CredentialStore gains an ``adapter_id`` column and a selector-keyed
-``retrieve_for``. The schema evolution is purely additive (ALTER TABLE ADD
-COLUMN + backfill), so a legacy single-key ``credentials.db`` is migrated in
-place with no data loss.
-"""
+"""Exact credential access and lossless migration of historical adapter roles."""
 
 from __future__ import annotations
 
@@ -182,19 +176,18 @@ def test_legacy_openalgo_roles_are_retained(tmp_path, broker, adapter):
     ("kotak", "kotakneo", "A"), ("iifl", "iiflcapital", "A"),
     ("openalgo", "openalgo", "default"), ("dhan", None, "A%3AB"), ("dhan", None, ".."),
 ])
-def test_unrecognised_legacy_identity_refuses_without_schema_or_content_changes(tmp_path, broker, adapter, account):
+def test_unrecognised_legacy_identity_is_preserved_only_in_quarantine(tmp_path, broker, adapter, account):
     from contextlib import closing
-    from flinttrade_gateway.credentials import CredentialVaultInvalidError
 
     path = tmp_path / "historical.db"
     legacy_vault(path, _MP, broker=broker, adapter_id=adapter, account_id=account)
+    store = CredentialStore(path, _MP)
+    assert store.list_accounts() == []
+    metadata = store.list_quarantine()
+    assert len(metadata) == 1 and metadata[0].ref.row_generation == 1
     with closing(sqlite3.connect(path)) as conn:
-        before = list(conn.iterdump())
-    with pytest.raises(CredentialVaultInvalidError):
-        CredentialStore(path, _MP)
-    with closing(sqlite3.connect(path)) as conn:
-        assert list(conn.iterdump()) == before
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM credential_quarantine").fetchone()[0] == 1
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
 
 
 def test_primary_projection_captures_every_legacy_primary(tmp_path):

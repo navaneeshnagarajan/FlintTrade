@@ -3599,6 +3599,11 @@ def create_flask_app(
     app.after_request(apply_service_connection_cache_policy)
     install_service_connection_rate_limits(app)
 
+    from flinttrade_gateway.auth import apply_quarantine_cache_policy, guard_quarantine_family  # noqa: PLC0415
+
+    app.before_request(guard_quarantine_family)
+    app.after_request(apply_quarantine_cache_policy)
+
     # --- Gateway initialization ---
     if registry is None:
         registry = BrokerRegistry(mutation_admission=broker_account_mutation_admission)
@@ -4150,7 +4155,10 @@ def create_flask_app(
                     response_size=response.content_length,
                 )
         except Exception as _exc:
-            logger.debug("suppressed: %s", _exc)  # Never let traffic logging break the response
+            if current_safe_request_summary() is not None:
+                logger.debug("Secret-request traffic logging unavailable")
+            else:
+                logger.debug("suppressed: %s", _exc)  # Never let traffic logging break the response
         return response
 
     # Initialise LatencyMonitor (DuckDB-backed, always active).
@@ -4193,7 +4201,10 @@ def create_flask_app(
                     safe_request=current_safe_request_summary(),
                 )
             except Exception as _exc:
-                logger.debug("suppressed: %s", _exc)
+                if current_safe_request_summary() is not None:
+                    logger.debug("Secret-request analysis logging unavailable")
+                else:
+                    logger.debug("suppressed: %s", _exc)
             return response
 
         logger.info("API Analyser enabled — capturing all requests")
@@ -4704,6 +4715,8 @@ def create_flask_app(
         # descendants). Never recast a rejected session as a competing key.
         if getattr(_flask_g, "service_connection_guard_complete", False):
             return None
+        if getattr(_flask_g, "credential_quarantine_guard_complete", False):
+            return None
         # External signal providers cannot send the FlintTrade API key. Keep
         # only POST intake public; the route itself enforces HMAC signatures,
         # replay defence, endpoint enabled-state, and fail-closed dispatch.
@@ -4795,9 +4808,16 @@ def create_flask_app(
             try:
                 skt = app.config.get("SECURITY_TRACKER")
                 if skt is not None:
-                    skt.track_404(request.remote_addr or "unknown", request.path)
+                    safe_request = current_safe_request_summary()
+                    skt.track_404(
+                        "redacted" if safe_request is not None else request.remote_addr or "unknown",
+                        safe_request.route_template if safe_request is not None else request.path,
+                    )
             except Exception as _exc:
-                logger.debug("suppressed: %s", _exc)
+                if current_safe_request_summary() is not None:
+                    logger.debug("Secret-request 404 tracking unavailable")
+                else:
+                    logger.debug("suppressed: %s", _exc)
         return response
 
     @app.before_request

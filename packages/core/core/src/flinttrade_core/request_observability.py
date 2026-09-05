@@ -70,6 +70,12 @@ def classify_secret_envelope(method: object, path: object) -> str | None:
             if clean == "/v1/services/connections"
             else "/v1/services/connections/{connection_id}"
         )
+    if _exact_or_descendant(clean, "/v1/accounts/quarantine"):
+        return (
+            "/v1/accounts/quarantine"
+            if clean == "/v1/accounts/quarantine"
+            else "/v1/accounts/quarantine/{quarantine_id}"
+        )
     if _exact_or_descendant(clean, "/v1/accounts"):
         return "/v1/accounts" if clean == "/v1/accounts" else "/v1/accounts/{account_id}/reconnect"
     if _exact_or_descendant(clean, "/api/v1/native/accounts"):

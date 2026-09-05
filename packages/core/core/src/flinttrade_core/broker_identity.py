@@ -66,6 +66,22 @@ class CredentialVersion:
             raise BrokerSelectorValidationError
 
 
+@dataclass(frozen=True)
+class QuarantineRef:
+    """An immutable reference to one unavailable physical source component."""
+
+    quarantine_id: UUID
+    source_vault_incarnation: UUID
+    row_generation: int
+
+    def __post_init__(self) -> None:
+        if any(
+            type(value) is not UUID or value.version != 4 or value.variant != RFC_4122
+            for value in (self.quarantine_id, self.source_vault_incarnation)
+        ) or (type(self.row_generation) is not int or not 1 <= self.row_generation <= INT64_MAX):
+            raise BrokerSelectorValidationError
+
+
 def _validate_selector(selector: object) -> None:
     if type(selector) is not BrokerSelector:
         raise BrokerSelectorValidationError

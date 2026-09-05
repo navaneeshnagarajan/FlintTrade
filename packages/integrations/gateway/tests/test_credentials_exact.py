@@ -299,9 +299,9 @@ def test_lost_main_contents_latch_stale(store):
         store.selector_state(a)
 
 
-def test_lost_required_composite_index_is_corruption(store):
+def test_lost_required_account_compatibility_index_is_corruption(store):
     with closing(sqlite3.connect(store._db_path)) as conn:
-        conn.execute("DROP INDEX idx_accounts_adapter_account")
+        conn.execute("DROP INDEX idx_accounts_account_id")
         conn.commit()
     with pytest.raises(vault.CredentialVaultInvalidError):
         vault.CredentialStore(store._db_path, "synthetic-password")
@@ -597,14 +597,14 @@ def test_extra_nonbinary_authority_index_refused(store, table):
         vault.CredentialStore(path, "synthetic-password")
 
 
-def test_nonbinary_composite_index_is_refused(store):
+def test_nonbinary_account_compatibility_index_is_refused(store):
     seed(store, BrokerSelector("dhan", "CaseA"))
     path = store._db_path
     store.close()
     with closing(sqlite3.connect(path)) as conn:
-        conn.execute("DROP INDEX idx_accounts_adapter_account")
+        conn.execute("DROP INDEX idx_accounts_account_id")
         conn.execute(
-            "CREATE UNIQUE INDEX idx_accounts_adapter_account ON accounts(adapter_id,account_id COLLATE NOCASE)"
+            "CREATE INDEX idx_accounts_account_id ON accounts(account_id COLLATE NOCASE)"
         )
         conn.commit()
     with pytest.raises(vault.CredentialVaultInvalidError):

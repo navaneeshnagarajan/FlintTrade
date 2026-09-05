@@ -173,4 +173,4 @@ def test_app_vault_open_cannot_interleave_with_consumed_migration(tmp_path):
         assert connection.execute("SELECT salt, encrypted_creds FROM accounts").fetchone() == (
             original_salt, original_ciphertext
         )
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2

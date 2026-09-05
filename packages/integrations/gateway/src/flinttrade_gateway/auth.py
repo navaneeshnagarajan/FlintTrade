@@ -20,7 +20,7 @@ import time
 from functools import wraps
 from typing import Any
 
-from flask import Blueprint, current_app, jsonify, redirect, request
+from flask import Blueprint, current_app, g, jsonify, redirect, request
 
 from flinttrade_core.broker_account_cutover import guard_broker_account_http, mutation_admission_for
 
@@ -39,6 +39,50 @@ _BROKER_NOT_FOUND_MESSAGE = "Broker not found"
 _CREDENTIALS_INVALID_MESSAGE = "Invalid broker credentials"
 
 
+def _is_quarantine_path() -> bool:
+    return request.path == "/v1/accounts/quarantine" or request.path.startswith("/v1/accounts/quarantine/")
+
+
+def guard_quarantine_family() -> Any | None:
+    """Full-session recovery proof before body interpretation or unmatched dispatch."""
+    if not _is_quarantine_path() or getattr(g, "credential_quarantine_guard_complete", False):
+        return None
+    from flinttrade_core.auth_routes import (  # noqa: PLC0415
+        _OperatorSessionVerificationError,
+        verify_operator_session_token,
+    )
+
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not token:
+        token = request.headers.get("X-FlintTrade-Token", "").strip()
+    if not token:
+        return jsonify({"error": "authentication_required"}), 401
+    try:
+        principal = verify_operator_session_token(token)
+    except _OperatorSessionVerificationError:
+        return jsonify({"error": "authentication_required"}), 401
+    mutating = request.method in {"POST", "PUT", "PATCH", "DELETE"}
+    scope = "admin.accounts.write" if mutating else "admin.accounts.read"
+    if scope not in principal.scopes:
+        return jsonify({"error": "forbidden"}), 403
+    if mutating:
+        denied = guard_broker_account_http()
+        if denied is not None:
+            return denied
+    if request.method not in {"GET", "HEAD"}:
+        return jsonify({"error": "method_not_allowed"}), 405
+    g.credential_quarantine_guard_complete = True
+    return None
+
+
+@gateway_bp.after_request
+def apply_quarantine_cache_policy(response: Any) -> Any:
+    """Also cover unmatched descendants when registered on the application."""
+    if _is_quarantine_path():
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @gateway_bp.before_request
 def _guard_management_writes() -> Any | None:
     """Require the operator's app session on every management write (G9).
@@ -53,6 +97,8 @@ def _guard_management_writes() -> Any | None:
     behaviour. Account availability is checked afterwards in every composition.
     The browser-redirect GET callback checks availability at its own entrypoint.
     """
+    if _is_quarantine_path():
+        return guard_quarantine_family()
     if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
         return None
     guard = current_app.config.get("BROKER_MGMT_WRITE_GUARD")
@@ -115,6 +161,25 @@ def list_brokers() -> Any:
 # ---------------------------------------------------------------------------
 # Account management
 # ---------------------------------------------------------------------------
+
+
+@gateway_bp.route("/accounts/quarantine", methods=["GET"])
+def list_quarantined_credentials() -> Any:
+    """Read the composed vault's explicit metadata projection, without recreation."""
+    denied = guard_quarantine_family()
+    if denied is not None:
+        return denied
+    try:
+        entries = _credential_store().list_quarantine()
+        return jsonify({"quarantined_credentials": [{
+            "quarantine_id": str(entry.ref.quarantine_id),
+            "source_vault_incarnation": str(entry.ref.source_vault_incarnation),
+            "row_generation": entry.ref.row_generation,
+            "reason": entry.reason,
+            "provenance": entry.provenance,
+        } for entry in entries]})
+    except Exception:
+        return jsonify({"error": "credential_quarantine_unavailable"}), 503
 
 
 @gateway_bp.route("/accounts", methods=["GET"])

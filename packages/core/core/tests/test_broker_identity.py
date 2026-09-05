@@ -87,3 +87,24 @@ def test_version_requires_uuid4_object_and_is_frozen():
             m.CredentialVersion(selector, bad, 1)
     with pytest.raises(AttributeError):
         version.generation = 1
+
+
+@pytest.mark.parametrize("generation", [True, False, 0, -1, 2**63, 1.0, "1"])
+def test_quarantine_reference_rejects_non_live_generations(generation):
+    m = identity()
+    assert hasattr(m, "QuarantineRef"), "neutral quarantine reference is missing"
+    with pytest.raises(m.BrokerSelectorValidationError, match="^broker_selector_invalid$"):
+        m.QuarantineRef(uuid.uuid4(), uuid.uuid4(), generation)
+
+
+def test_quarantine_reference_requires_two_uuid4_objects_and_is_immutable():
+    m = identity()
+    assert hasattr(m, "QuarantineRef"), "neutral quarantine reference is missing"
+    reference = m.QuarantineRef(uuid.uuid4(), uuid.uuid4(), 2**63 - 1)
+    for bad in (str(uuid.uuid4()), uuid.uuid1(), uuid.UUID(int=0), None):
+        with pytest.raises(m.BrokerSelectorValidationError):
+            m.QuarantineRef(bad, reference.source_vault_incarnation, 1)
+        with pytest.raises(m.BrokerSelectorValidationError):
+            m.QuarantineRef(reference.quarantine_id, bad, 1)
+    with pytest.raises(AttributeError):
+        reference.row_generation = 2
