@@ -661,7 +661,7 @@ class ServiceConnectionStore:
                 # for compensation, including after an unrelated-writer retry.
                 if latest.get("workspace_generation", 0) > INT64_MAX - (1 if recovery else 2):
                     raise ConnectionStoreUnavailable("service_connection_store_unavailable")
-                self._check_claims(files, journal, restore=False)
+                self._check_claims(files, journal)
                 for binding in desired["services"]["_connection_store"]["bindings"].values():
                     files.live(parse_version(binding))
                 for key, value in _domain(desired).items():
@@ -736,9 +736,13 @@ class ServiceConnectionStore:
         except (ValueError, KeyError, TypeError):
             raise OSError("credential install authority mismatch") from None
 
-    def _check_claims(self, files: TransactionFiles, journal: dict[str, Any], *, restore: bool) -> None:
-        """Authenticate retained claims; restore only a proved missing member."""
+    def _check_claims(
+        self, files: TransactionFiles, journal: dict[str, Any], *, restore_phase: str | None = None
+    ) -> str | None:
+        """Inspect all claims without effects; return one admitted claim gap."""
         claims = journal["claims"]
+        pending = None
+        projected_live = None
         if "recovery" in claims and journal["recovery"] is None and not files.control.exists("blocked.json"):
             raise ValueError("compensation claim lacks a durable decision")
         for phase in ("recovery", "new"):
@@ -756,21 +760,42 @@ class ServiceConnectionStore:
             files.verify(envelope, expected)
             with files.binding_directory(journal["ref"]["connection_id"]) as directory:
                 if directory.existing_member("credential") is None:
-                    if not restore or actual != name:
-                        raise ValueError("missing credential with an unresumable claim")
-                    _checkpoint("claim_restore_before")
-                    files.candidates.move_no_replace(name, directory, "credential")
-                    _checkpoint("claim_restored")
-                    files.live(expected)
+                    if projected_live is None:
+                        if phase != restore_phase or actual != name:
+                            raise ValueError("missing credential with an unresumable claim")
+                        # A consumed candidate cannot prove an interrupted claim:
+                        # its intended generation may already have been installed.
+                        files.verify(files.read(files.candidates, f"{journal['key']}.{phase}"), intended)
+                        pending, projected_live = phase, expected
+                        continue
+                    live_version = projected_live
                 else:
                     live = files.read(directory, "credential")
                     live_version = parse_version(live["version"])
-                    allowed = {intended}
-                    if phase == "new" and journal["recovery"] is not None:
-                        allowed.add(parse_version(journal["recovery"]["after_binding"]))
-                    if live_version not in allowed:
-                        raise ValueError("unexpected entrant beside claim")
                     files.verify(live, live_version)
+                allowed = {intended}
+                if phase == "new" and journal["recovery"] is not None:
+                    allowed.add(parse_version(journal["recovery"]["after_binding"]))
+                if live_version not in allowed:
+                    raise ValueError("unexpected entrant beside claim")
+        return pending
+
+    @staticmethod
+    def _restore_claim(files: TransactionFiles, journal: dict[str, Any], phase: str) -> None:
+        """Execute a previously admitted claim restoration without clobbering."""
+        name = f"{journal['key']}.{phase}.claimed"
+        claim = journal["claims"][phase]
+        envelope, identity = files.read_identity(files.candidates, name)
+        expected = parse_version(claim["expected"])
+        if identity != claim["identity"]:
+            raise ValueError("claimed object changed after admission")
+        files.verify(envelope, expected)
+        files.verify(files.read(files.candidates, f"{journal['key']}.{phase}"), parse_version(claim["intended"]))
+        with files.binding_directory(journal["ref"]["connection_id"]) as directory:
+            _checkpoint("claim_restore_before")
+            files.candidates.move_no_replace(name, directory, "credential")
+            _checkpoint("claim_restored")
+        files.live(expected)
 
     @staticmethod
     def _audit(
@@ -805,7 +830,7 @@ class ServiceConnectionStore:
         result: ConnectionMutationResult,
         outcome: str,
     ) -> None:
-        self._check_claims(files, journal, restore=False)
+        self._check_claims(files, journal)
         for suffix, version in (
             ("new", journal["after_binding"]),
             ("old", journal["before_binding"]),
@@ -825,7 +850,7 @@ class ServiceConnectionStore:
         receipt["result"] = result.to_dict()
         files.write(files.receipts, f"{journal['key']}.json", receipt)
         _checkpoint("terminal_receipt")
-        self._check_claims(files, journal, restore=False)
+        self._check_claims(files, journal)
         for suffix in ("new", "old", "recovery", "new.claimed", "recovery.claimed"):
             name = f"{journal['key']}.{suffix}"
             if files.candidates.existing_member(name) is not None:
@@ -928,10 +953,31 @@ class ServiceConnectionStore:
             or _domain_digest(self._apply(config, {**journal, **recovery}, "after")) != recovery["after_digest"]
         ):
             raise ValueError("recovery decision does not reconstruct authenticated state")
-        self._check_claims(files, journal, restore=True)
+        forward_published = observed_digest == journal["after_digest"]
+        if observed_digest not in {journal["before_digest"], journal["after_digest"]} and not own_recovery:
+            raise ValueError("ambiguous service slice")
+        if journal["phase"] == "committed" and not forward_published:
+            raise ValueError("committed state cannot be authenticated")
+        observed_binding = (
+            config["services"].get("_connection_store", {}).get("bindings", {}).get(journal["ref"]["connection_id"])
+        )
+        expected_binding = journal["before_binding"]
+        if forward_published:
+            expected_binding = journal["after_binding"]
+        if own_recovery:
+            expected_binding = recovery["after_binding"]
+        if parse_version(observed_binding) != parse_version(expected_binding):
+            raise ValueError("retained binding does not admit recovery")
+        restore_phase = None
+        if journal["phase"] == "prepared" and not own_recovery:
+            if recovery is not None:
+                restore_phase = "recovery"
+            elif not forward_published and journal["published_workspace"] is None:
+                restore_phase = "new"
+        pending = self._check_claims(files, journal, restore_phase=restore_phase)
+        if pending is not None:
+            self._restore_claim(files, journal, pending)
         if journal["phase"] == "committed":
-            if observed_digest != journal["after_digest"]:
-                raise ValueError("committed state cannot be authenticated")
             self._snapshot(files, workspace, verify_anchor=False)
             self._finish(files, journal, receipt, ConnectionMutationResult(**journal["result"]), "succeeded")
             return
@@ -950,7 +996,6 @@ class ServiceConnectionStore:
                     files.verify(live, live_version)
                 elif old_version is not None:
                     raise ValueError("missing prior credential")
-        forward_published = observed_digest == journal["after_digest"]
         if (
             forward_published
             and journal["secret_change"]
@@ -959,8 +1004,6 @@ class ServiceConnectionStore:
         ):
             raise ValueError("published credential does not match journal")
         changed = forward_published or (journal["secret_change"] and live_version == intended)
-        if observed_digest not in {journal["before_digest"], journal["after_digest"]} and not own_recovery:
-            raise ValueError("ambiguous service slice")
         if not changed and recovery is None:
             result = ConnectionMutationResult(
                 503, {"error": "transaction_rolled_back"}, _etag(workspace.version, journal["before_epoch"])
@@ -1070,7 +1113,9 @@ class ServiceConnectionStore:
                 or compensation.present
             ):
                 raise ValueError("invalid blocked compensation identity")
-            self._check_claims(files, journal, restore=True)
+            pending = self._check_claims(files, journal, restore_phase="recovery")
+            if pending is not None:
+                self._restore_claim(files, journal, pending)
             with files.binding_directory(journal["ref"]["connection_id"]) as directory:
                 live = files.read(directory, "credential")
             observed = parse_version(live["version"])
@@ -1083,7 +1128,7 @@ class ServiceConnectionStore:
                     files.write(files.candidates, name, files.envelope(compensation, None))
                 self._install(files, journal, compensation, name)
                 _checkpoint("foreign_install")
-            self._check_claims(files, journal, restore=False)
+            self._check_claims(files, journal)
         result = ConnectionMutationResult(409, {"error": "connection_revision_conflict"}, receipt["expected_etag"])
         event = ConnectionMutationAudit(
             uuid_text(journal["terminal_event"]),

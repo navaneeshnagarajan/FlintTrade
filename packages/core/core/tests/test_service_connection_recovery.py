@@ -25,6 +25,119 @@ ACTOR = ConnectionActorContext("operator", "session:" + "a" * 64)
 PAYLOAD = {"provider_id": "llm:openai", "label": "Primary", "auth_mode": "api_key", "credential": "1234"}
 
 
+@pytest.mark.parametrize(
+    "boundary", ["new_published", "workspace_cas", "workspace_bound", "committed", "recovery_published", "recovery_cas"]
+)
+def test_published_missing_credential_cannot_resurrect_retained_claim(tmp_path, monkeypatch, boundary):
+    store = ServiceConnectionStore(tmp_path)
+    first = store.mutate(
+        "create",
+        PAYLOAD,
+        connection_id=None,
+        expected_etag=store.read_snapshot().etag,
+        idempotency_key=str(uuid4()),
+        actor_context=ACTOR,
+    )
+    key = str(uuid4())
+
+    def fail_at(target):
+        def crash(name):
+            if name == target:
+                raise Crash()
+
+        monkeypatch.setattr(module, "_checkpoint", crash)
+
+    fail_at("secret_install" if boundary.startswith("recovery_") else boundary)
+    with pytest.raises(Crash):
+        store.mutate(
+            "update",
+            {"credential": "5678"},
+            connection_id=first.body["connection_id"],
+            expected_etag=first.etag,
+            idempotency_key=key,
+            actor_context=ACTOR,
+        )
+    if boundary.startswith("recovery_"):
+        fail_at(boundary)
+        with pytest.raises(Crash):
+            store.recover()
+    secret = tmp_path / "secrets" / "services" / first.body["connection_id"] / "credential"
+    moved = tmp_path / "missing-live-fixture"
+    secret.rename(moved)
+    assert json.loads(moved.read_text())["version"]["generation"] == (3 if boundary.startswith("recovery_") else 2)
+    control = tmp_path / "service-connections-state"
+    claims = list((control / "candidates").glob("*.claimed"))
+    assert claims
+    retained = [
+        tmp_path / "workspace.json",
+        control / "transaction.json",
+        control / "receipts" / f"{key}.json",
+        moved,
+        *claims,
+    ]
+    before = {path: (path.read_bytes(), path.stat().st_dev, path.stat().st_ino) for path in retained}
+    monkeypatch.setattr(module, "_checkpoint", lambda _name: None)
+    for _ in range(2):
+        with pytest.raises(ConnectionStoreUnavailable):
+            store.recover()
+        assert not secret.exists(), "refusal resurrected an older credential generation"
+        assert {path: (path.read_bytes(), path.stat().st_dev, path.stat().st_ino) for path in retained} == before
+
+
+@pytest.mark.parametrize("changed_authority", ["binding", "record"])
+def test_incompatible_slice_cannot_restore_forward_claim(tmp_path, monkeypatch, changed_authority):
+    from flinttrade_core.workspace_migrations import compare_and_swap_workspace, read_workspace_snapshot
+
+    store = ServiceConnectionStore(tmp_path)
+    first = store.mutate(
+        "create",
+        PAYLOAD,
+        connection_id=None,
+        expected_etag=store.read_snapshot().etag,
+        idempotency_key=str(uuid4()),
+        actor_context=ACTOR,
+    )
+    key = str(uuid4())
+
+    def crash(name):
+        if name == "new_claim":
+            raise Crash()
+
+    monkeypatch.setattr(module, "_checkpoint", crash)
+    with pytest.raises(Crash):
+        store.mutate(
+            "update",
+            {"credential": "5678"},
+            connection_id=first.body["connection_id"],
+            expected_etag=first.etag,
+            idempotency_key=key,
+            actor_context=ACTOR,
+        )
+    current = read_workspace_snapshot(tmp_path)
+
+    def alter(config):
+        if changed_authority == "binding":
+            config["services"]["_connection_store"]["bindings"][first.body["connection_id"]]["binding_id"] = str(
+                uuid4()
+            )
+        else:
+            config["services"]["connections"][0]["label"] = "Different retained authority"
+
+    compare_and_swap_workspace(tmp_path, current.version, alter)
+    control = tmp_path / "service-connections-state"
+    claim = control / "candidates" / f"{key}.new.claimed"
+    secret = tmp_path / "secrets" / "services" / first.body["connection_id"] / "credential"
+    assert not secret.exists()
+    retained = [tmp_path / "workspace.json", control / "transaction.json", control / "receipts" / f"{key}.json", claim]
+    before = {path: (path.read_bytes(), path.stat().st_dev, path.stat().st_ino) for path in retained}
+    monkeypatch.setattr(module, "_checkpoint", lambda _name: None)
+    for _ in range(2):
+        with pytest.raises(ConnectionStoreUnavailable):
+            store.recover()
+        assert not secret.exists(), "unadmitted authority caused a live restoration"
+        assert {path: (path.read_bytes(), path.stat().st_dev, path.stat().st_ino) for path in retained} == before
+
+
 @pytest.mark.parametrize("kind", ["unrecognised", "generation", "binding"])
 @pytest.mark.parametrize("boundary", ["backup", "new_target_read"])
 def test_install_preserves_substituted_destination_after_backup(tmp_path, monkeypatch, kind, boundary):
@@ -190,7 +303,10 @@ def test_claim_conflicts_preserve_both_members_and_workspace(tmp_path, monkeypat
         "claim_restored",
     ],
 )
-def test_second_claim_crash_does_not_remint_compensation(tmp_path, monkeypatch, second_boundary):
+@pytest.mark.parametrize("first_boundary,expected_epoch", [("secret_install", 2), ("workspace_bound", 3)])
+def test_second_claim_crash_does_not_remint_compensation(
+    tmp_path, monkeypatch, second_boundary, first_boundary, expected_epoch
+):
     store = ServiceConnectionStore(tmp_path)
     first = store.mutate(
         "create",
@@ -208,14 +324,15 @@ def test_second_claim_crash_does_not_remint_compensation(tmp_path, monkeypatch, 
 
         monkeypatch.setattr(module, "_checkpoint", crash)
 
-    fail_at("secret_install")
+    key = str(uuid4())
+    fail_at(first_boundary)
     with pytest.raises(Crash):
         store.mutate(
             "update",
             {"credential": "5678"},
             connection_id=first.body["connection_id"],
             expected_etag=first.etag,
-            idempotency_key=str(uuid4()),
+            idempotency_key=key,
             actor_context=ACTOR,
         )
     if second_boundary == "claim_restored":
@@ -227,9 +344,30 @@ def test_second_claim_crash_does_not_remint_compensation(tmp_path, monkeypatch, 
         store.recover()
     monkeypatch.setattr(module, "_checkpoint", lambda _name: None)
     result = store.recover()
-    assert result.epoch == 2
+    assert result.epoch == expected_epoch
     assert result.connections[0].secret_version.generation == 3
     assert store.recover() == result
+    replay = store.mutate(
+        "update",
+        {"credential": "5678"},
+        connection_id=first.body["connection_id"],
+        expected_etag=first.etag,
+        idempotency_key=key,
+        actor_context=ACTOR,
+    )
+    assert replay.status == 503
+    assert replay.etag == result.etag
+    assert (
+        store.mutate(
+            "update",
+            {"credential": "5678"},
+            connection_id=first.body["connection_id"],
+            expected_etag=first.etag,
+            idempotency_key=key,
+            actor_context=ACTOR,
+        )
+        == replay
+    )
 
 
 def test_bad_compensation_digest_cannot_restore_a_claim_before_rejection(tmp_path, monkeypatch):
@@ -275,6 +413,59 @@ def test_bad_compensation_digest_cannot_restore_a_claim_before_rejection(tmp_pat
         store.recover()
     assert not secret.exists(), "malformed recovery changed live state before refusal"
     assert journal_path.read_bytes() == before
+
+
+def test_bad_forward_claim_cannot_follow_an_effectful_compensation_claim_check(tmp_path, monkeypatch):
+    store = ServiceConnectionStore(tmp_path)
+    first = store.mutate(
+        "create",
+        PAYLOAD,
+        connection_id=None,
+        expected_etag=store.read_snapshot().etag,
+        idempotency_key=str(uuid4()),
+        actor_context=ACTOR,
+    )
+    key = str(uuid4())
+
+    def fail_at(target):
+        def crash(name):
+            if name == target:
+                raise Crash()
+
+        monkeypatch.setattr(module, "_checkpoint", crash)
+
+    fail_at("secret_install")
+    with pytest.raises(Crash):
+        store.mutate(
+            "update",
+            {"credential": "5678"},
+            connection_id=first.body["connection_id"],
+            expected_etag=first.etag,
+            idempotency_key=key,
+            actor_context=ACTOR,
+        )
+    fail_at("recovery_claim")
+    with pytest.raises(Crash):
+        store.recover()
+    control = tmp_path / "service-connections-state"
+    forward = control / "candidates" / f"{key}.new.claimed"
+    forward.write_text("retain this unknown claim")
+    compensation = control / "candidates" / f"{key}.recovery.claimed"
+    secret = tmp_path / "secrets" / "services" / first.body["connection_id"] / "credential"
+    retained = [
+        tmp_path / "workspace.json",
+        control / "transaction.json",
+        control / "receipts" / f"{key}.json",
+        forward,
+        compensation,
+    ]
+    before = {path: (path.read_bytes(), path.stat().st_dev, path.stat().st_ino) for path in retained}
+    monkeypatch.setattr(module, "_checkpoint", lambda _name: None)
+    for _ in range(2):
+        with pytest.raises(ConnectionStoreUnavailable):
+            store.recover()
+        assert not secret.exists(), "claim inspection restored before checking every retained claim"
+        assert {path: (path.read_bytes(), path.stat().st_dev, path.stat().st_ino) for path in retained} == before
 
 
 @pytest.mark.parametrize("barrier", [1, 2])
