@@ -161,6 +161,23 @@ def test_stale_and_missing_revisions_do_not_mutate(tmp_path):
         assert store.read_snapshot() == before
 
 
+@pytest.mark.parametrize("foreign_tag", ['""', '"short"', '"comma,slash\\value"'])
+def test_valid_foreign_width_strong_tags_are_stale_not_malformed(tmp_path, foreign_tag):
+    """Catch digest-width coupling that turns valid strong tags into client-shape errors."""
+    store = ServiceConnectionStore(tmp_path)
+    before = store.read_snapshot()
+    with pytest.raises(ConnectionRevisionConflict):
+        store.mutate(
+            "create",
+            PAYLOAD,
+            connection_id=None,
+            expected_etag=foreign_tag,
+            idempotency_key=str(uuid4()),
+            actor_context=ACTOR,
+        )
+    assert store.read_snapshot() == before
+
+
 @pytest.mark.parametrize("kind", ["identity", "rollback"])
 def test_independent_anchor_rejects_workspace_copy_or_rollback(tmp_path, kind):
     store = ServiceConnectionStore(tmp_path)

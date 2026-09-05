@@ -14,6 +14,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from .service_connection_audit import ConnectionActorContext, ConnectionMutationAudit
+from .service_connection_etags import parse_single_strong_entity_tag
 from .service_connection_transactions import (
     MAX_CONNECTIONS,
     MAX_CREDENTIAL_BYTES,
@@ -387,12 +388,9 @@ class ServiceConnectionStore:
     ) -> ConnectionMutationResult:
         if expected_etag is None:
             raise ConnectionRevisionRequired("connection_revision_required")
-        if (
-            type(expected_etag) is not str
-            or len(expected_etag) != 66
-            or not expected_etag.startswith('"')
-            or not expected_etag.endswith('"')
-        ):
+        try:
+            expected_etag = parse_single_strong_entity_tag(expected_etag)
+        except ValueError:
             raise ConnectionMutationRejected("invalid_request")
         try:
             uuid_text(idempotency_key)

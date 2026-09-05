@@ -97,6 +97,23 @@ def _module_path(module: str) -> Path | None:
     return None
 
 
+def _literal_string_binding_before(tree: ast.Module, name: str, before_line: int) -> str | None:
+    bindings: list[ast.Assign | ast.AnnAssign] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.lineno >= before_line:
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if any(isinstance(target, ast.Name) and target.id == name for target in targets):
+            bindings.append(node)
+
+    if len(bindings) != 1 or bindings[0] not in tree.body:
+        return None
+    value = bindings[0].value
+    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+        return value.value
+    return None
+
+
 def _blueprint_prefix(bp_name: str, module: str) -> str:
     module_path = _module_path(module)
     if module_path is None or not module_path.exists():
@@ -122,6 +139,10 @@ def _blueprint_prefix(bp_name: str, module: str) -> str:
             if keyword.arg == "url_prefix":
                 if isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, str):
                     return keyword.value.value
+                if isinstance(keyword.value, ast.Name):
+                    literal = _literal_string_binding_before(tree, keyword.value.id, node.lineno)
+                    if literal is not None:
+                        return literal
                 return ast.unparse(keyword.value).strip("'\"")
     return ""
 

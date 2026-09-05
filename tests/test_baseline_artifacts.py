@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import csv
 import importlib.util
 import json
@@ -179,6 +180,30 @@ def test_dump_blueprints_script_runs_against_current_app_path() -> None:
     ]
     assert any(row["blueprint_name"] == "auth_bp" for row in rows)
     assert any(row["blueprint_name"] == "data_sandbox_bp" for row in rows)
+    assert next(row for row in rows if row["blueprint_name"] == "service_connection_bp")["current_url_prefix"] == (
+        "/v1/services/connections"
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ('PREFIX = "/literal"', "/literal"),
+        ('PREFIX: str = "/annotated"', "/annotated"),
+        ("PREFIX = make_prefix()", None),
+        ('if enabled:\n    PREFIX = "/conditional"', None),
+        ('PREFIX = "/first"\nPREFIX = "/rebound"', None),
+    ],
+)
+def test_blueprint_prefix_literal_resolution_is_static_and_unambiguous(source: str, expected: str | None) -> None:
+    script_path = ROOT / "scripts" / "dump-blueprints.py"
+    spec = importlib.util.spec_from_file_location("dump_blueprints", script_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module._literal_string_binding_before(ast.parse(source), "PREFIX", before_line=100) == expected
 
 
 def test_blueprint_baseline_matches_dumper_output() -> None:

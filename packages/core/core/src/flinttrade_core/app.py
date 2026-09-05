@@ -97,7 +97,14 @@ from .csp import (  # noqa: E402
     inject_csp_nonce as _inject_csp_nonce,
 )
 from .openalgo_client import OpenAlgoClient  # noqa: E402
+from .request_observability import (  # noqa: E402
+    current_safe_request_summary,
+    project_safe_request,
+    reset_safe_request_summary,
+    set_safe_request_summary,
+)
 from .secure_file import write_secret_text as _write_secret_text  # noqa: E402
+from .service_connection_store import ServiceConnectionStore  # noqa: E402
 from .version import APP_VERSION_TAG  # noqa: E402
 from .workspace import workspace_dir as _workspace_dir  # noqa: E402
 from flinttrade_data.audit_logger import AuditLogger  # noqa: E402
@@ -118,6 +125,29 @@ from flinttrade_gateway.auth import gateway_bp  # noqa: E402
 from flinttrade_gateway.contracts import ContractManager  # noqa: E402
 
 logger = logging.getLogger("flinttrade")
+_WERKZEUG_FALLBACK_LOG_LOCK = threading.Lock()
+_WERKZEUG_FALLBACK_LOG_OWNERS = 0
+_WERKZEUG_FALLBACK_ORIGINAL_DISABLED = False
+
+
+def _acquire_werkzeug_fallback_log_suppression() -> None:
+    global _WERKZEUG_FALLBACK_LOG_OWNERS, _WERKZEUG_FALLBACK_ORIGINAL_DISABLED
+    with _WERKZEUG_FALLBACK_LOG_LOCK:
+        werkzeug_logger = logging.getLogger("werkzeug")
+        if _WERKZEUG_FALLBACK_LOG_OWNERS == 0:
+            _WERKZEUG_FALLBACK_ORIGINAL_DISABLED = werkzeug_logger.disabled
+        _WERKZEUG_FALLBACK_LOG_OWNERS += 1
+        werkzeug_logger.disabled = True
+
+
+def _release_werkzeug_fallback_log_suppression() -> None:
+    global _WERKZEUG_FALLBACK_LOG_OWNERS
+    with _WERKZEUG_FALLBACK_LOG_LOCK:
+        if _WERKZEUG_FALLBACK_LOG_OWNERS == 0:
+            return
+        _WERKZEUG_FALLBACK_LOG_OWNERS -= 1
+        if _WERKZEUG_FALLBACK_LOG_OWNERS == 0:
+            logging.getLogger("werkzeug").disabled = _WERKZEUG_FALLBACK_ORIGINAL_DISABLED
 
 DEFAULT_BACKEND_PORT = 5100
 
@@ -3074,6 +3104,7 @@ def create_flask_app(
     safety_config_ready: bool | None = None,
     telegram: Any | None = None,
     service_provider_catalogue: Any | None = None,
+    service_connection_store: ServiceConnectionStore | None = None,
 ) -> Flask:
     """Create the Flask app with FlintTrade API routes.
 
@@ -3091,6 +3122,7 @@ def create_flask_app(
         cron_strategy_scheduler: Shared market-aware strategy cron scheduler.
         time_scheduler: Shared effective-session calendar owner.
         service_provider_catalogue: Optional immutable static provider catalogue.
+        service_connection_store: Optional preconstructed inert connection authority.
 
     Returns:
         Flask application with all FlintTrade API endpoints registered.
@@ -3239,12 +3271,24 @@ def create_flask_app(
     @app.before_request
     def _bind_request_context() -> None:
         """Bind request fields before any hook can reject the request."""
+        safe_request = project_safe_request(request.method, request.path, request.content_length)
+        _flask_g._safe_request_token = set_safe_request_summary(safe_request)
         structlog.contextvars.clear_contextvars()
-        structlog.contextvars.bind_contextvars(
-            request_id=request.headers.get("X-Request-ID", secrets.token_hex(8)),
-            method=request.method,
-            path=request.path,
-        )
+        if safe_request is not None:
+            structlog.contextvars.bind_contextvars(**safe_request.to_dict())
+        else:
+            structlog.contextvars.bind_contextvars(
+                request_id=request.headers.get("X-Request-ID", secrets.token_hex(8)),
+                method=request.method,
+                path=request.path,
+            )
+
+    @app.teardown_request
+    def _reset_safe_request_context(_error: BaseException | None) -> None:
+        token = getattr(_flask_g, "_safe_request_token", None)
+        _flask_g._safe_request_token = None
+        if token is not None:
+            reset_safe_request_summary(token)
 
     _install_runtime_request_tracking(app)
     app.config["LOG_STREAM_SHUTDOWN_EVENT"] = threading.Event()
@@ -3398,13 +3442,16 @@ def create_flask_app(
     CORS(
         app,
         origins=os.environ.get("CORS_ORIGINS", "http://127.0.0.1:5173").split(","),
-        methods=["GET", "POST", "PUT", "DELETE"],
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=[
             "Content-Type",
             "X-API-Key",
             "X-FlintTrade-Mode",
             "Authorization",
+            "If-Match",
+            "Idempotency-Key",
         ],
+        expose_headers=["ETag"],
     )
 
     # ------------------------------------------------------------------
@@ -3452,10 +3499,35 @@ def create_flask_app(
     # ------------------------------------------------------------------
     _glitchtip_dsn = os.environ.get("GLITCHTIP_DSN", "")
     if _glitchtip_dsn:
+        def _drop_secret_event(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any] | None:
+            return None if current_safe_request_summary() is not None else event
+
+        def _drop_secret_transaction(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any] | None:
+            return None if current_safe_request_summary() is not None else event
+
+        def _sample_transaction(context: dict[str, Any]) -> float:
+            try:
+                if current_safe_request_summary() is not None:
+                    return 0.0
+                environ = context.get("wsgi_environ")
+                if isinstance(environ, Mapping):
+                    method = environ.get("REQUEST_METHOD")
+                    path = environ.get("PATH_INFO")
+                    if project_safe_request(method, path, environ.get("CONTENT_LENGTH")) is not None:
+                        return 0.0
+            except Exception:
+                return 0.0
+            return 0.1
+
         sentry_sdk.init(
             dsn=_glitchtip_dsn,
             integrations=[FlaskIntegration()],
-            traces_sample_rate=0.1,
+            max_request_body_size="never",
+            include_local_variables=False,
+            send_default_pii=False,
+            before_send=_drop_secret_event,
+            before_send_transaction=_drop_secret_transaction,
+            traces_sampler=_sample_transaction,
             environment="production" if not app.debug else "development",
         )
         logger.info("Glitchtip error tracking initialised")
@@ -3466,6 +3538,7 @@ def create_flask_app(
     app.config["SCHEDULER"] = scheduler
     app.config["CRON"] = cron
     app.config["AUDIT"] = audit
+    app.config["AUDIT_LOGGER"] = audit
     app.config["CLIENT"] = client
     # The runtime-owned Telegram bot (may be None in tests) — the settings
     # route uses it to apply a saved config without a full backend restart.
@@ -3473,6 +3546,25 @@ def create_flask_app(
     # Read-only OpenAlgo consumers must remain available even when this process
     # has no emergency runtime and live BrokerRouter publication fails closed.
     app.config["OPENALGO_CLIENT"] = client
+
+    from .service_connection_routes import (  # noqa: PLC0415
+        apply_service_connection_cache_policy,
+        build_connection_audit_sink,
+        guard_service_connection_family,
+        install_service_connection_rate_limits,
+        service_connection_bp,
+    )
+    app.config["SERVICE_CONNECTION_STORE"] = service_connection_store
+    app.config["SERVICE_CONNECTION_STORE_LOCK"] = threading.Lock()
+
+    def _create_service_connection_store() -> ServiceConnectionStore:
+        return ServiceConnectionStore(_workspace_dir(), audit_sink=build_connection_audit_sink(audit))
+
+    app.config["SERVICE_CONNECTION_STORE_FACTORY"] = _create_service_connection_store
+    app.register_blueprint(service_connection_bp)
+    app.before_request(guard_service_connection_family)
+    app.after_request(apply_service_connection_cache_policy)
+    install_service_connection_rate_limits(app)
 
     # --- Gateway initialization ---
     if registry is None:
@@ -3966,9 +4058,14 @@ def create_flask_app(
                     route=request.path,
                     method=request.method,
                     status_code=500,
-                    request_body=request.get_json(silent=True, force=True),
+                    request_body=(
+                        None
+                        if current_safe_request_summary() is not None
+                        else request.get_json(silent=True, force=True)
+                    ),
                     error=exc,
                     user_id=None,  # user context not available at this layer
+                    safe_request=current_safe_request_summary(),
                 )
         except Exception:
             # Never let the error logger itself crash the request.
@@ -4000,13 +4097,23 @@ def create_flask_app(
                 start = getattr(_flask_g, "_traffic_start", None)
                 duration_ms = (_time.monotonic() - start) * 1000 if start is not None else 0.0
                 _traffic_logger.log(
-                    ip=request.remote_addr or "unknown",
+                    ip=("redacted" if current_safe_request_summary() is not None else request.remote_addr or "unknown"),
                     method=request.method,
-                    path=request.path,
+                    path=(
+                        current_safe_request_summary().route_template
+                        if current_safe_request_summary() is not None
+                        else request.path
+                    ),
                     status_code=response.status_code,
                     duration_ms=duration_ms,
-                    user_agent=request.headers.get("User-Agent"),
-                    request_size=request.content_length,
+                    user_agent=(
+                        None if current_safe_request_summary() is not None else request.headers.get("User-Agent")
+                    ),
+                    request_size=(
+                        current_safe_request_summary().content_length
+                        if current_safe_request_summary() is not None
+                        else request.content_length
+                    ),
                     response_size=response.content_length,
                 )
         except Exception as _exc:
@@ -4042,10 +4149,15 @@ def create_flask_app(
                 _api_analyzer.log_call(
                     route=request.path,
                     method=request.method,
-                    request_body=request.get_json(silent=True, force=True),
+                    request_body=(
+                        None
+                        if current_safe_request_summary() is not None
+                        else request.get_json(silent=True, force=True)
+                    ),
                     response_status=response.status_code,
                     response_body=None,  # Not parsing response body to avoid re-reading stream
                     duration_ms=duration_ms,
+                    safe_request=current_safe_request_summary(),
                 )
             except Exception as _exc:
                 logger.debug("suppressed: %s", _exc)
@@ -4553,6 +4665,11 @@ def create_flask_app(
             return None
         # Allow OPTIONS for CORS preflight
         if request.method == "OPTIONS":
+            return None
+        # The complete service-connection family is already covered by the
+        # earlier, stronger loopback/proof/scope guard (including unmatched
+        # descendants). Never recast a rejected session as a competing key.
+        if getattr(_flask_g, "service_connection_guard_complete", False):
             return None
         # External signal providers cannot send the FlintTrade API key. Keep
         # only POST intake public; the route itself enforces HMAC signatures,
@@ -5549,10 +5666,16 @@ def _run_flask_server(app: Flask, port: int = 5100, host: str = "127.0.0.1") -> 
             "Waitress not installed; falling back to Werkzeug dev server. Install with: pip install waitress"
         )
         server = make_server(host, port, app, threaded=True)
+        _acquire_werkzeug_fallback_log_suppression()
 
         def close_werkzeug() -> None:
-            server.shutdown()
-            server.server_close()
+            try:
+                server.shutdown()
+            finally:
+                try:
+                    server.server_close()
+                finally:
+                    _release_werkzeug_fallback_log_suppression()
 
         owner = _FlaskServerOwner(
             server,
