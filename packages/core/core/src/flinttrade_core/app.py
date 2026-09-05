@@ -44,6 +44,12 @@ from pathlib import Path
 from typing import Any, ContextManager
 
 from .source_root import discover_source_root
+from .broker_account_cutover import (
+    BrokerAccountCutoverUnavailable,
+    MutationAdmission,
+    mutation_admission_for,
+    require_broker_account_mutations,
+)
 
 # Ensure repo root is on sys.path for cross-package imports.
 _REPO_ROOT = str(discover_source_root())
@@ -1489,6 +1495,8 @@ def _reconnect_saved_accounts(
     registry: BrokerRegistry,
     credential_store: CredentialStore,
     reconnect_logger: logging.Logger,
+    *,
+    mutation_admission: MutationAdmission = require_broker_account_mutations,
 ) -> None:
     """Reconnect previously saved broker accounts on startup.
 
@@ -1501,6 +1509,11 @@ def _reconnect_saved_accounts(
         credential_store: The CredentialStore that holds persisted credentials.
         reconnect_logger: Logger instance to use for progress messages.
     """
+    try:
+        mutation_admission()
+    except BrokerAccountCutoverUnavailable as exc:
+        reconnect_logger.info("Saved broker reconnect unavailable: %s", exc)
+        return
     from flinttrade_gateway.adapter import BROKER_CATALOG  # noqa: PLC0415
     from flinttrade_gateway.log_safety import account_ref  # noqa: PLC0415
     from flinttrade_gateway.session import BrokerSession  # noqa: PLC0415
@@ -2108,9 +2121,9 @@ def build_broker_router(
 
     When ``openalgo_client`` is supplied, an :class:`OpenAlgoAdapter` is
     registered under the ``openalgo`` adapter id and a Session is put in the
-    registry for every ``openalgo:<account>`` selector in ``registered`` — so the
-    gated path can dispatch to ALL of the operator's brokers through OpenAlgo
-    (the actor still needs an entry in ``account_acls`` to be authorised).
+    registry for exact ``openalgo:default`` in ``registered``. This is the
+    frozen local compatibility exception until Task 9B.3; the actor still
+    needs an entry in ``account_acls`` to be authorised.
 
     Native SDK adapters activate the moment their prerequisites hold: when both
     ``native_attest_ok`` (SDK installed + pinned-match) and
@@ -2190,15 +2203,14 @@ def build_broker_router(
             default_client=openalgo_client,
             local_state_provider=lifecycle_store,
         )
-        # Register a Session for each openalgo:<account> selector so the
-        # AuthenticatingSessionProvider can resolve it (the actor still has to be
-        # authorised in account_acls).
+        # Only the frozen local compatibility selector may be rebuilt during
+        # cutover. This does not authenticate or publish another account.
         for selector in config.registered:
             try:
                 adapter_id, account_id = parse_selector(selector)
             except ValueError:
                 continue
-            if adapter_id == "openalgo":
+            if adapter_id == "openalgo" and account_id == "default":
                 registry.put_session(
                     "openalgo",
                     account_id,
@@ -2680,6 +2692,12 @@ def _reestablish_native_sessions(app: Flask, *, verify: bool = True) -> dict[str
     instead of a false "connected". Transient broker/service-window failures
     are treated as inconclusive and keep the session.
     """
+    mutation_admission = mutation_admission_for(app)
+    try:
+        mutation_admission()
+    except BrokerAccountCutoverUnavailable as exc:
+        logger.info("Native broker reconnect unavailable: %s", exc)
+        return {}
     import asyncio  # noqa: PLC0415
     import threading  # noqa: PLC0415
 
@@ -2701,6 +2719,7 @@ def _reestablish_native_sessions(app: Flask, *, verify: bool = True) -> dict[str
                 credential_store,
                 selectors,
                 verify=verify,
+                mutation_admission=mutation_admission,
             )
 
         try:
@@ -3116,6 +3135,7 @@ def create_flask_app(
     telegram: Any | None = None,
     service_provider_catalogue: Any | None = None,
     service_connection_store: ServiceConnectionStore | None = None,
+    broker_account_mutation_admission: MutationAdmission = require_broker_account_mutations,
 ) -> Flask:
     """Create the Flask app with FlintTrade API routes.
 
@@ -3134,6 +3154,7 @@ def create_flask_app(
         time_scheduler: Shared effective-session calendar owner.
         service_provider_catalogue: Optional immutable static provider catalogue.
         service_connection_store: Optional preconstructed inert connection authority.
+        broker_account_mutation_admission: Explicit dependency for isolated legacy tests; production denies mutations.
 
     Returns:
         Flask application with all FlintTrade API endpoints registered.
@@ -3252,6 +3273,7 @@ def create_flask_app(
     # through CSP nonce injection. A second Flask static route could expose the
     # raw document with a nonce-bearing CSP header that blocks its scripts.
     app = Flask(__name__, static_folder=None)
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = broker_account_mutation_admission
     if service_provider_catalogue is None:
         from flinttrade_ai.service_profiles import ai_service_descriptors  # noqa: PLC0415
         from flinttrade_gateway.service_profiles import broker_service_descriptors  # noqa: PLC0415
@@ -3579,7 +3601,7 @@ def create_flask_app(
 
     # --- Gateway initialization ---
     if registry is None:
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=broker_account_mutation_admission)
 
     # Ensure API_KEY_PEPPER is set in os.environ BEFORE the OpenAlgo
     # broker modules are imported via the gateway shim. Upstream's

@@ -43,6 +43,7 @@ from zoneinfo import ZoneInfo
 
 from flask import Blueprint, current_app, jsonify, request
 
+from flinttrade_core.broker_account_cutover import guard_broker_account_http, mutation_admission_for
 from flinttrade_core.models import Order
 from flinttrade_gateway.adapter import BROKER_CATALOG
 
@@ -74,10 +75,11 @@ _CONNECT_LOCK = NATIVE_ACCOUNT_MUTATION_LOCK
 
 
 def _serialized(fn: Any) -> Any:
-    """Run ``fn`` under ``_CONNECT_LOCK`` so connect transactions never interleave."""
+    """Check mutation admission before serialising legacy account transactions."""
 
     @functools.wraps(fn)
     def _wrap(*args: Any, **kwargs: Any) -> Any:
+        mutation_admission_for(current_app)()
         with _CONNECT_LOCK:
             return fn(*args, **kwargs)
 
@@ -163,7 +165,10 @@ def _guard_account_writes() -> Any | None:
     if request.method in ("POST", "DELETE", "PUT", "PATCH"):
         from .auth_routes import require_operator_session  # noqa: PLC0415
 
-        return require_operator_session()
+        auth_error = require_operator_session()
+        if auth_error is not None:
+            return auth_error
+        return guard_broker_account_http()
     return None
 
 
@@ -1666,6 +1671,8 @@ def _activate_candidate_credentials(
     account_id: str,
 ) -> tuple[dict[str, Any], Any | None]:
     """Authenticate through an unpublished adapter within a wall-clock bound."""
+    mutation_admission = mutation_admission_for(current_app)
+    mutation_admission()
     from flinttrade_gateway.brokers.native_factory import build_native_adapters  # noqa: PLC0415
     from flinttrade_gateway.native_login import establish_native_sessions  # noqa: PLC0415
     from flinttrade_gateway.registry import BrokerRegistry  # noqa: PLC0415
@@ -1687,6 +1694,7 @@ def _activate_candidate_credentials(
             candidate_store,
             [selector],
             verify=True,
+            mutation_admission=mutation_admission,
         )
 
     timeout = _candidate_login_timeout_seconds()
@@ -1906,6 +1914,7 @@ def _do_connect(
     is_primary: bool,
 ) -> tuple[dict[str, Any], int]:
     """Authenticate a staged candidate, then commit and publish it atomically."""
+    mutation_admission_for(current_app)()
     store = current_app.config.get("CREDENTIAL_STORE")
     registry = current_app.config.get("REGISTRY")
     if store is None or registry is None:
@@ -2363,6 +2372,9 @@ def native_oauth_callback() -> Any:
     adapter's login() exchanges the code/token for an access token), and returns
     a small HTML result the operator sees in the redirected tab.
     """
+    unavailable = guard_broker_account_http()
+    if unavailable is not None:
+        return unavailable
     oauth_code = request.args.get("code") or ""
     token_id = request.args.get("tokenId") or request.args.get("token_id") or ""
     code = oauth_code or token_id

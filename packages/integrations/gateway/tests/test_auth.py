@@ -114,6 +114,7 @@ def app():
     from flask import Flask
 
     flask_app = Flask(__name__)
+    flask_app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     flask_app.config["TESTING"] = True
     flask_app.config["REGISTRY"] = MockRegistry()
     flask_app.config["CREDENTIAL_STORE"] = MockCredentialStore()

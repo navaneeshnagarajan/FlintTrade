@@ -71,6 +71,8 @@ def test_app_sessions_follow_broker_authority_and_rebind_every_sibling(tmp_path,
     monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
     registry = BrokerRegistry()
     client = object()
+    # Synthetic pre-existing session: cutover may create only openalgo:default.
+    registry.put_session("openalgo", "sibling", SimpleNamespace(account_id="sibling", is_connected=True))
     assert app_module.configure_broker_router(app, registry, None, client)
     old = app.config["BROKER_ROUTER"]
     context = RequestContext(jti="fixture", actor_type="human", actor_id="operator", mode="explore")
@@ -103,11 +105,14 @@ def test_rate_limit_endpoint_republishes_every_workspace_broker_session(tmp_path
         config["brokers"]["account_acls"] = {"openalgo": {"default": ["operator"], "sibling": ["operator"]}}
     ws.update(accounts)
     app = Flask("rate-limit-rebind")
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.register_blueprint(gateway_bp)
     _mark_router_prerequisites_ready(app)
     monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
     registry = BrokerRegistry()
     client = object()
+    # Retain Task 4 rebind coverage without allowing new compatibility selectors.
+    registry.put_session("openalgo", "sibling", SimpleNamespace(account_id="sibling", is_connected=True))
     app.config.update(REGISTRY=registry, CREDENTIAL_STORE=None, CLIENT=client)
     assert app_module.configure_broker_router(app, registry, None, client)
     old = app.config["BROKER_ROUTER"]

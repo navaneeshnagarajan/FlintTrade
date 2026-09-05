@@ -455,7 +455,7 @@ class TestUnschedule:
 
         from flinttrade_gateway.credentials_rotation import CredentialsRotator
 
-        rot = CredentialsRotator(MagicMock(), MagicMock())
+        rot = CredentialsRotator(MagicMock(), MagicMock(), mutation_admission=lambda: None)
         rot.schedule_daily_refresh("dhan", "08:05")  # must not raise regardless of today's date
         rot.unschedule("dhan")
         rot.unschedule("dhan")  # second call is a no-op

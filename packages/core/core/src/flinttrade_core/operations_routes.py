@@ -30,6 +30,7 @@ from flask import Blueprint, Response, current_app, jsonify, request
 from werkzeug.utils import safe_join
 
 from .auth_scopes import require_scope
+from .broker_account_cutover import guard_broker_account_http
 from .news_provider_profiles import OPERATIONS_NEWS_FEEDS
 
 logger = logging.getLogger("flinttrade")
@@ -1861,6 +1862,9 @@ def ditto_account_create() -> tuple[Any, int]:
     _jwt_payload, auth_error = _authenticated_operator_identity()
     if auth_error is not None:
         return auth_error
+    unavailable = guard_broker_account_http()
+    if unavailable is not None:
+        return unavailable
     data = request.get_json(silent=True) or {}
     account_id = str(data.get("account_id", "")).strip()
     openalgo_host = str(data.get("openalgo_host", "")).strip()
@@ -2001,6 +2005,9 @@ def ditto_account_delete(account_id: str) -> tuple[Any, int]:
     _jwt_payload, auth_error = _authenticated_operator_identity()
     if auth_error is not None:
         return auth_error
+    unavailable = guard_broker_account_http()
+    if unavailable is not None:
+        return unavailable
     try:
         with _DITTO_CONTROL_LOCK:
             mgr = _ditto_manager()

@@ -56,7 +56,7 @@ def test_reconnect_saved_accounts_skips_native_rows(monkeypatch):
     logger = SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None)
     store = Store()
 
-    _reconnect_saved_accounts(registry, store, logger)
+    _reconnect_saved_accounts(registry, store, logger, mutation_admission=lambda: None)
 
     assert store.retrieved == ["OA1"]
     assert set(registry._sessions) == {"OA1"}
@@ -66,7 +66,7 @@ def test_reconnect_saved_accounts_skips_native_rows(monkeypatch):
 def test_reestablish_native_sessions_runs_inside_existing_event_loop(monkeypatch):
     from flinttrade_core import app as app_module
 
-    async def fake_establish(native_adapters, registry, credential_store, selectors, *, verify=False):
+    async def fake_establish(native_adapters, registry, credential_store, selectors, *, verify=False, mutation_admission=None):
         assert native_adapters == {
             "dhan": object_marker["dhan"],
             "upstox": object_marker["upstox"],
@@ -81,6 +81,7 @@ def test_reestablish_native_sessions_runs_inside_existing_event_loop(monkeypatch
     object_marker = {"dhan": object(), "upstox": object()}
     fake_app = SimpleNamespace(
         config={
+            "BROKER_ACCOUNT_MUTATION_ADMISSION": lambda: None,
             "NATIVE_ADAPTERS": {
                 "dhan": object_marker["dhan"],
                 "upstox": object_marker["upstox"],
@@ -111,13 +112,14 @@ def test_reestablish_native_sessions_verifies_by_default(monkeypatch):
 
     seen: dict[str, bool] = {}
 
-    async def fake_establish(native_adapters, registry, credential_store, selectors, *, verify=False):
+    async def fake_establish(native_adapters, registry, credential_store, selectors, *, verify=False, mutation_admission=None):
         seen["verify"] = verify
         assert selectors == ["upstox:U1"]
         return {"upstox:U1": "ok"}
 
     fake_app = SimpleNamespace(
         config={
+            "BROKER_ACCOUNT_MUTATION_ADMISSION": lambda: None,
             "NATIVE_ADAPTERS": {"upstox": object()},
             "REGISTRY": object(),
             "CREDENTIAL_STORE": object(),

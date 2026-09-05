@@ -32,6 +32,13 @@ from typing import Any
 
 from flask import Blueprint, current_app, request
 
+from .broker_account_cutover import (
+    BrokerAccountCutoverUnavailable,
+    MutationAdmission,
+    mutation_admission_for,
+    require_broker_account_mutations,
+)
+
 logger = logging.getLogger("flinttrade.native_rotation")
 
 _NATIVE_ROTATION_ADMISSION_CONFIG = "NATIVE_ROTATION_ADMISSION"
@@ -140,7 +147,10 @@ class NativeSessionRefresher:
         self,
         app: Any,
         admission: NativeRotationAdmission | None = None,
+        *,
+        mutation_admission: MutationAdmission = require_broker_account_mutations,
     ) -> None:
+        self._mutation_admission = mutation_admission
         self._app = app
         self._admission = admission or _rotation_admission(app)
 
@@ -155,6 +165,7 @@ class NativeSessionRefresher:
                 stored, or any selector's refresh fails (per-selector detail
                 also lands in ``NATIVE_SESSION_STATUS`` for the UI).
         """
+        self._mutation_admission()
         from .native_account_routes import NATIVE_ACCOUNT_MUTATION_LOCK  # noqa: PLC0415
 
         generation = self._admission.acquire()
@@ -166,6 +177,7 @@ class NativeSessionRefresher:
 
     def _refresh_token_locked(self, broker: str, generation: int) -> None:
         """Run one broker refresh while native-account mutations are excluded."""
+        self._mutation_admission()
         from flinttrade_gateway.native_login import (  # noqa: PLC0415
             BROKER_LOGIN_RETRY_MESSAGE,
             SESSION_INVALID_RELOGIN_MESSAGE,
@@ -281,6 +293,7 @@ class NativeSessionRefresher:
                         broker,
                         account_id,
                         verify=True,
+                        mutation_admission=self._mutation_admission,
                     )
                     return credentials, candidate_session
 
@@ -433,7 +446,9 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
     Stores the rotator on ``app.config["CREDENTIALS_ROTATOR"]`` and its
     UNSTARTED scheduler on ``app.config["ROTATION_SCHEDULER"]`` (the serve
     path calls ``.start()`` — tests never spawn the thread). Every active
-    registered native broker gets a daily 08:05 IST refresh job. Returns
+    registered native broker gets a daily 08:05 IST refresh job only after
+    mutation admission. During cutover construction and status remain usable,
+    but workspace lookup and job registration are suppressed. Returns
     ``None`` (and logs) when APScheduler is unavailable — rotation then simply
     stays off.
     """
@@ -449,13 +464,19 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
 
     scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
     admission = _rotation_admission(app)
-    rotator = CredentialsRotator(NativeSessionRefresher(app, admission), scheduler)
+    mutation_admission = mutation_admission_for(app)
+    rotator = CredentialsRotator(
+        NativeSessionRefresher(app, admission, mutation_admission=mutation_admission),
+        scheduler,
+        mutation_admission=mutation_admission,
+    )
     app.config["CREDENTIALS_ROTATOR"] = rotator
     app.config["ROTATION_SCHEDULER"] = scheduler
 
     # Morning re-auth for active registered natives (jobs queue on the
     # unstarted scheduler and arm when the serve path starts it).
     try:
+        mutation_admission()
         from .app import _read_workspace_brokers  # noqa: PLC0415
 
         registered = [str(s) for s in ((_read_workspace_brokers() or {}).get("registered") or [])]
@@ -467,6 +488,8 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
         })
         for broker in native_brokers:
             rotator.schedule_daily_refresh(broker, "08:05")
+    except BrokerAccountCutoverUnavailable as exc:
+        logger.info("Native session refresh scheduling unavailable: %s", exc)
     except Exception as exc:  # noqa: BLE001 - scheduling must not brick the factory
         logger.warning("Could not schedule native session refresh jobs: %s", exc)
 
@@ -477,12 +500,6 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
         """G9 + broker truth — writes need auth and an active native adapter."""
         if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
             return None
-        guard = current_app.config.get("BROKER_MGMT_WRITE_GUARD")
-        if guard is not None:
-            guard_result = guard()
-            if guard_result is not None:
-                return guard_result
-
         broker = (request.view_args or {}).get("broker")
         if not broker:
             return None

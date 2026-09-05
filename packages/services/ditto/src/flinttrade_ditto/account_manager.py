@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from flinttrade_core.broker_account_cutover import MutationAdmission, require_broker_account_mutations
 from flinttrade_core.db import open_sqlite
 from flinttrade_core.installation_state import InstallationState
 
@@ -165,7 +166,10 @@ class AccountManager:
         credential_store: CredentialStore | None = None,
         master_password: str | None = None,
         installation_state_root: str | Path | None = None,
+        *,
+        mutation_admission: MutationAdmission = require_broker_account_mutations,
     ) -> None:
+        self._mutation_admission = mutation_admission
         self._uses_default_db = db_path is None
         self._installation_state = InstallationState(installation_state_root)
         self._conn: sqlite3.Connection | None = None
@@ -238,6 +242,7 @@ class AccountManager:
 
     def add_account(self, account: BrokerAccount) -> None:
         """Register a new broker account (secret → vault, metadata → sqlite)."""
+        self._mutation_admission()
         with self._installation_state.ditto_fence():
             self._cred.store(
                 account.account_id,
@@ -293,6 +298,7 @@ class AccountManager:
 
     def remove_account(self, account_id: str) -> None:
         """Remove a broker account (metadata + vault credential)."""
+        self._mutation_admission()
         with self._installation_state.ditto_fence():
             conn = self._get_conn()
             conn.execute("DELETE FROM accounts WHERE account_id = ?", [account_id])

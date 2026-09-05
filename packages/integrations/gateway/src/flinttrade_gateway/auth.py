@@ -22,6 +22,8 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, redirect, request
 
+from flinttrade_core.broker_account_cutover import guard_broker_account_http, mutation_admission_for
+
 from .adapter import BROKER_CATALOG
 from .exceptions import AuthFlowError, BrokerNotFoundError, CredentialError
 from .log_safety import account_ref
@@ -47,16 +49,18 @@ def _guard_management_writes() -> Any | None:
     callable is injected by the core app factory via
     ``app.config["BROKER_MGMT_WRITE_GUARD"]`` (the gateway package cannot
     import core's JWT machinery without inverting the dependency); when the
-    blueprint is mounted without one (standalone unit tests) writes behave as
-    before. The OAuth callback is a browser-redirect GET protected by its
-    one-shot ``state`` token, so it is naturally exempt.
+    blueprint is mounted without one, authentication retains its standalone
+    behaviour. Account availability is checked afterwards in every composition.
+    The browser-redirect GET callback checks availability at its own entrypoint.
     """
     if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
         return None
     guard = current_app.config.get("BROKER_MGMT_WRITE_GUARD")
-    if guard is None:
-        return None
-    return guard()
+    if guard is not None:
+        auth_error = guard()
+        if auth_error is not None:
+            return auth_error
+    return guard_broker_account_http()
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +375,9 @@ def oauth_callback() -> Any:
         A redirect to ``/setup?auth=success`` on success, or
         ``/setup?auth=error`` on any failure.
     """
+    unavailable = guard_broker_account_http()
+    if unavailable is not None:
+        return unavailable
     state: str = request.args.get("state", "")
     code: str = request.args.get("code", "")
 
@@ -603,6 +610,7 @@ def _rate_limit_generation_lease(handler: Any) -> Any:
     """Serialise workspace broker mutation with app-owned generation rebuilds."""
     @wraps(handler)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
+        mutation_admission_for(current_app)()
         from flinttrade_core.app import _broker_router_drain_timeout  # noqa: PLC0415
 
         app = current_app._get_current_object()

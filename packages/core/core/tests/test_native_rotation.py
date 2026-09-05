@@ -96,6 +96,7 @@ class _Store:
 
 def _app(adapter: _Adapter, registry: _Registry, store: _Store) -> Flask:
     app = Flask(__name__)
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.config["NATIVE_ADAPTERS"] = {"dhan": adapter}
     app.config["REGISTRY"] = registry
     app.config["CREDENTIAL_STORE"] = store
@@ -108,7 +109,7 @@ def test_renew_in_place_when_session_live_and_adapter_renewable() -> None:
     registry.sessions[("dhan", "111")] = _Session("old-token")
     store = _Store({("dhan", "111"): {"client_id": "111", "access_token": "old-token"}})
 
-    NativeSessionRefresher(_app(adapter, registry, store)).refresh_token("dhan")
+    NativeSessionRefresher(_app(adapter, registry, store), mutation_admission=lambda: None).refresh_token("dhan")
 
     assert len(adapter.renew_calls) == 1
     # login() ran with the RENEWED token and the registry holds the new session.
@@ -121,7 +122,7 @@ def test_replays_vault_credentials_without_a_live_session() -> None:
     registry = _Registry()
     store = _Store({("dhan", "111"): {"client_id": "111", "access_token": "stored-token"}})
 
-    NativeSessionRefresher(_app(adapter, registry, store)).refresh_token("dhan")
+    NativeSessionRefresher(_app(adapter, registry, store), mutation_admission=lambda: None).refresh_token("dhan")
 
     assert adapter.renew_calls == []
     assert adapter.login_calls[0]["access_token"] == "stored-token"
@@ -135,7 +136,7 @@ def test_failure_raises_and_lands_in_the_status_surface() -> None:
     app = _app(adapter, registry, store)
 
     with pytest.raises(RuntimeError, match="Broker session expired or invalid") as raised:
-        NativeSessionRefresher(app).refresh_token("dhan")
+        NativeSessionRefresher(app, mutation_admission=lambda: None).refresh_token("dhan")
 
     # The UI surface (G7) records the per-selector reason.
     assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == SESSION_INVALID_RELOGIN_MESSAGE
@@ -146,11 +147,12 @@ def test_failure_raises_and_lands_in_the_status_surface() -> None:
 
 def test_inactive_adapter_raises() -> None:
     app = Flask(__name__)
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.config["NATIVE_ADAPTERS"] = {}
     app.config["REGISTRY"] = _Registry()
     app.config["CREDENTIAL_STORE"] = _Store({})
     with pytest.raises(RuntimeError, match="not active"):
-        NativeSessionRefresher(app).refresh_token("dhan")
+        NativeSessionRefresher(app, mutation_admission=lambda: None).refresh_token("dhan")
 
 
 def test_factory_wires_rotator_routes_and_guard(tmp_path, monkeypatch) -> None:
@@ -181,6 +183,7 @@ def test_rotation_schedules_only_active_native_adapters(monkeypatch) -> None:
     from flinttrade_core.native_rotation import configure_session_rotation
 
     app = Flask(__name__)
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.config["NATIVE_ADAPTERS"] = {
         "dhan": object(),
         "upstox": object(),
@@ -214,6 +217,7 @@ def test_rotation_route_auth_runs_before_active_broker_check(monkeypatch) -> Non
     from flinttrade_core.native_rotation import configure_session_rotation
 
     app = Flask(__name__)
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.config["NATIVE_ADAPTERS"] = {}
 
     def guard():
@@ -233,6 +237,7 @@ def test_rotation_route_rejects_inactive_native_after_auth(monkeypatch) -> None:
     from flinttrade_core.native_rotation import configure_session_rotation
 
     app = Flask(__name__)
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.config["NATIVE_ADAPTERS"] = {"dhan": object()}
     app.config["BROKER_MGMT_WRITE_GUARD"] = lambda: None
     monkeypatch.setattr(
@@ -256,6 +261,7 @@ def test_rotation_route_rejects_weekly_native_api_key_rotation(monkeypatch) -> N
     from flinttrade_core.native_rotation import configure_session_rotation
 
     app = Flask(__name__)
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.config["NATIVE_ADAPTERS"] = {"dhan": object()}
     app.config["BROKER_MGMT_WRITE_GUARD"] = lambda: None
     monkeypatch.setattr("flinttrade_core.app._read_workspace_brokers", lambda: {"registered": ["dhan:D1"]})
@@ -282,7 +288,7 @@ def test_renewed_token_is_persisted_to_the_vault() -> None:
     registry.sessions[("dhan", "111")] = _Session("old-token")
     store = _Store({("dhan", "111"): {"client_id": "111", "access_token": "old-token"}})
 
-    NativeSessionRefresher(_app(adapter, registry, store)).refresh_token("dhan")
+    NativeSessionRefresher(_app(adapter, registry, store), mutation_admission=lambda: None).refresh_token("dhan")
 
     assert store.rows[("dhan", "111")]["access_token"] == "renewed-token"
 
@@ -301,7 +307,7 @@ def test_dead_token_probe_downgrades_to_needs_relogin() -> None:
 
     import pytest
     with pytest.raises(RuntimeError, match="Broker session expired or invalid") as raised:
-        NativeSessionRefresher(app).refresh_token("dhan")
+        NativeSessionRefresher(app, mutation_admission=lambda: None).refresh_token("dhan")
     assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == SESSION_INVALID_RELOGIN_MESSAGE
     assert "dhan:111" not in str(raised.value)
     assert "401 token expired" not in str(raised.value)
@@ -317,7 +323,7 @@ def test_live_token_probe_passes() -> None:
     registry = _Registry()
     store = _Store({("dhan", "111"): {"access_token": "good"}})
     app = _app(adapter, registry, store)
-    NativeSessionRefresher(app).refresh_token("dhan")
+    NativeSessionRefresher(app, mutation_admission=lambda: None).refresh_token("dhan")
     assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == "ok"
 
 
@@ -346,7 +352,7 @@ def test_refresh_and_removal_share_the_native_account_mutation_lock() -> None:
 
     def refresh() -> None:
         try:
-            NativeSessionRefresher(app).refresh_token("dhan")
+            NativeSessionRefresher(app, mutation_admission=lambda: None).refresh_token("dhan")
         except BaseException as exc:  # noqa: BLE001 - asserted below
             refresh_errors.append(exc)
 
@@ -402,7 +408,7 @@ def test_refresh_revalidates_selector_before_shared_publication() -> None:
 
     def refresh() -> None:
         try:
-            NativeSessionRefresher(app).refresh_token("dhan")
+            NativeSessionRefresher(app, mutation_admission=lambda: None).refresh_token("dhan")
         except BaseException as exc:  # noqa: BLE001 - asserted below
             refresh_errors.append(exc)
 
@@ -450,7 +456,7 @@ def test_refresh_does_not_overwrite_newer_credential_generation() -> None:
 
     def refresh() -> None:
         try:
-            NativeSessionRefresher(app).refresh_token("dhan")
+            NativeSessionRefresher(app, mutation_admission=lambda: None).refresh_token("dhan")
         except BaseException as exc:  # noqa: BLE001 - asserted below
             errors.append(exc)
 
@@ -490,7 +496,7 @@ def test_refresh_rejects_same_value_selector_aba() -> None:
     app = _app(adapter, registry, store)
     app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "external-status"}
 
-    thread = threading.Thread(target=NativeSessionRefresher(app).refresh_token, args=("dhan",))
+    thread = threading.Thread(target=NativeSessionRefresher(app, mutation_admission=lambda: None).refresh_token, args=("dhan",))
     thread.start()
     assert login_started.wait(1.0)
     store.replace("dhan", "111", {"access_token": "old-token"})
@@ -521,7 +527,7 @@ def test_refresh_does_not_publish_over_newer_read_only_session() -> None:
     app = _app(adapter, registry, store)
     app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "external-status"}
 
-    thread = threading.Thread(target=NativeSessionRefresher(app).refresh_token, args=("dhan",))
+    thread = threading.Thread(target=NativeSessionRefresher(app, mutation_admission=lambda: None).refresh_token, args=("dhan",))
     thread.start()
     assert login_started.wait(1.0)
     read_only_replacement = _Session("external-read-only-token")
@@ -557,7 +563,7 @@ def test_shutdown_generation_revokes_blocked_refresh_before_shared_publication()
     app = _app(adapter, registry, store)
     app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "old-status"}
     errors: list[BaseException] = []
-    refresher = NativeSessionRefresher(app)
+    refresher = NativeSessionRefresher(app, mutation_admission=lambda: None)
 
     def refresh() -> None:
         try:
@@ -612,7 +618,7 @@ def test_blocked_rotation_sdk_work_times_out_without_accumulating_workers() -> N
     store = _Store({("dhan", "111"): {"access_token": "old-token"}})
     app = _app(adapter, registry, store)
     app.config["NATIVE_CANDIDATE_LOGIN_TIMEOUT_SECONDS"] = 0.02
-    refresher = NativeSessionRefresher(app)
+    refresher = NativeSessionRefresher(app, mutation_admission=lambda: None)
 
     try:
         with pytest.raises(RuntimeError, match="retry"):
@@ -705,14 +711,16 @@ def test_abandoned_candidate_keeps_its_own_selector_credentials(monkeypatch) -> 
         account_id: str,
         *,
         verify: bool = False,
+        mutation_admission: Any = None,
     ) -> Any:
+        mutation_admission()
         seen.append((dict(credentials), account_id))
         return _Session("candidate")
 
     monkeypatch.setattr(native_login, "establish_native_session", _establish)
 
     with pytest.raises(RuntimeError):
-        NativeSessionRefresher(app).refresh_token("dhan")
+        NativeSessionRefresher(app, mutation_admission=lambda: None).refresh_token("dhan")
 
     assert len(captured) == 2, "both selectors should have started a candidate login"
 

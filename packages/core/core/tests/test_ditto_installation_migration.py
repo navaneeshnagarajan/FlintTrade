@@ -1057,6 +1057,7 @@ def test_workspace_copy_and_account_writer_share_one_fence(tmp_path):
     migration_paused = threading.Event()
     release_migration = threading.Event()
     manager = AccountManager(
+        mutation_admission=lambda: None,
         db_path=str(legacy / "writer.sqlite"),
         master_password="test-master-pw",
         installation_state_root=installation,
@@ -1126,6 +1127,7 @@ def test_target_account_manager_constructor_and_write_wait_for_migration(tmp_pat
 
     def construct_and_write() -> None:
         with AccountManager(
+            mutation_admission=lambda: None,
             db_path=str(target / "ditto_accounts.sqlite"),
             credential_store=Store(),  # type: ignore[arg-type]
             installation_state_root=installation,

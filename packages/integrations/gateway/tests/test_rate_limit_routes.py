@@ -34,6 +34,7 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     flask_app = Flask(__name__)
     flask_app.config["TESTING"] = True
+    flask_app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     limiter = BrokerRateLimiter({"openalgo": {"order": 10.0, "data": 5.0}})
     flask_app.config["BROKER_ROUTER"] = _FakeRouter(limiter)
     flask_app.register_blueprint(gateway_bp)

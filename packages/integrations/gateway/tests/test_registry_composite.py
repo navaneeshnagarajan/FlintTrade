@@ -35,7 +35,7 @@ def _make_mock_session(account_id: str, broker: str, label: str) -> MagicMock:
 
 
 def test_put_and_get_session_for_round_trip() -> None:
-    reg = BrokerRegistry()
+    reg = BrokerRegistry(mutation_admission=lambda: None)
     s_personal = object()
     s_family = object()
     reg.put_session("dhan", "personal", s_personal)
@@ -45,7 +45,7 @@ def test_put_and_get_session_for_round_trip() -> None:
 
 
 def test_native_adapter_session_is_visible_to_connectivity_and_read_discovery() -> None:
-    reg = BrokerRegistry()
+    reg = BrokerRegistry(mutation_admission=lambda: None)
     session = SimpleNamespace(expires_at=time.time() + 3600)
 
     reg.put_session("dhan", "native-1", session)
@@ -55,7 +55,7 @@ def test_native_adapter_session_is_visible_to_connectivity_and_read_discovery() 
 
 
 def test_expired_native_adapter_session_is_not_connected() -> None:
-    reg = BrokerRegistry()
+    reg = BrokerRegistry(mutation_admission=lambda: None)
     reg.put_session("upstox", "native-1", SimpleNamespace(expires_at=time.time() - 1))
 
     assert reg.is_connected() is False
@@ -63,7 +63,7 @@ def test_expired_native_adapter_session_is_not_connected() -> None:
 
 
 def test_get_session_for_missing_raises_naming_selector() -> None:
-    reg = BrokerRegistry()
+    reg = BrokerRegistry(mutation_admission=lambda: None)
     with pytest.raises(BrokerNotFoundError, match="selector"):
         reg.get_session_for("dhan", "personal")
 
@@ -71,7 +71,7 @@ def test_get_session_for_missing_raises_naming_selector() -> None:
 def test_composite_store_independent_of_legacy_account_map() -> None:
     # Storing in the composite adapter-session store must not register the
     # account in the legacy account_id-keyed map.
-    reg = BrokerRegistry()
+    reg = BrokerRegistry(mutation_admission=lambda: None)
     reg.put_session("dhan", "personal", object())
     with pytest.raises(BrokerNotFoundError):
         reg.get_session("personal")
@@ -79,7 +79,7 @@ def test_composite_store_independent_of_legacy_account_map() -> None:
 
 def test_remove_session_for_evicts_composite_entry() -> None:
     # After remove_session_for, the selector must no longer resolve.
-    reg = BrokerRegistry()
+    reg = BrokerRegistry(mutation_admission=lambda: None)
     reg.put_session("dhan", "personal", object())
     reg.remove_session_for("dhan", "personal")
     with pytest.raises(BrokerNotFoundError, match="selector"):
@@ -88,14 +88,14 @@ def test_remove_session_for_evicts_composite_entry() -> None:
 
 def test_remove_session_for_absent_is_silent_noop() -> None:
     # Evicting a selector that was never registered must not raise.
-    reg = BrokerRegistry()
+    reg = BrokerRegistry(mutation_admission=lambda: None)
     reg.remove_session_for("dhan", "personal")  # no error
 
 
 def test_remove_account_evicts_matching_composite_entries() -> None:
     # remove_account must purge composite entries whose account_id matches,
     # while leaving entries for other accounts intact.
-    reg = BrokerRegistry()
+    reg = BrokerRegistry(mutation_admission=lambda: None)
     mock_session = _make_mock_session("personal", "dhan", "Personal Dhan")
     with patch(_SESSION_PATCH, return_value=mock_session):
         reg.add_account("personal", "dhan", "Personal Dhan", {"api_key": "k"})

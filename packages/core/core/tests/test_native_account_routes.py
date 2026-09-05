@@ -46,7 +46,7 @@ def client(tmp_path, monkeypatch):
     from flinttrade_core.app import create_flask_app
 
     native_routes._OAUTH_PENDING.clear()
-    app = create_flask_app()
+    app = create_flask_app(broker_account_mutation_admission=lambda: None)
     app.config["TESTING"] = True
     # Route tests do not start the process-owned safety loop. Mark that boundary
     # explicitly so connect/relogin rebuild tests exercise routing transactions;

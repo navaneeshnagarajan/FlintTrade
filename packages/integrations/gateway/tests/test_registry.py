@@ -68,7 +68,7 @@ def _registry_with_account(
     if mock_session is None:
         mock_session = _make_mock_session(account_id=account_id, broker=broker, label=label)
 
-    registry = BrokerRegistry()
+    registry = BrokerRegistry(mutation_admission=lambda: None)
     with patch(_SESSION_PATCH, return_value=mock_session):
         registry.add_account(account_id, broker, label, _CREDS)
 
@@ -81,7 +81,7 @@ class TestConnectivity:
     that pinned those screens to sample data / 500s in production)."""
 
     def test_is_connected_false_when_no_sessions(self) -> None:
-        assert BrokerRegistry().is_connected() is False
+        assert BrokerRegistry(mutation_admission=lambda: None).is_connected() is False
 
     def test_is_connected_true_when_a_session_is_connected(self) -> None:
         reg, sess = _registry_with_account("AB1234")
@@ -103,7 +103,7 @@ class TestConnectivity:
         assert reg.get_primary_account_id() == "AB1234"
 
     def test_get_primary_account_id_none_when_empty(self) -> None:
-        assert BrokerRegistry().get_primary_account_id() is None
+        assert BrokerRegistry(mutation_admission=lambda: None).get_primary_account_id() is None
 
 
 # ---------------------------------------------------------------------------
@@ -114,14 +114,14 @@ class TestConnectivity:
 class TestGetSupportedBrokers:
     def test_get_supported_brokers_excludes_sandbox(self) -> None:
         """dhan_sandbox must not appear in get_supported_brokers() results."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         brokers = registry.get_supported_brokers()
         names = [b.name for b in brokers]
         assert _SANDBOX not in names
 
     def test_get_supported_brokers_includes_live_brokers(self) -> None:
         """Live broker entries must be present in the supported list."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         brokers = registry.get_supported_brokers()
         names = [b.name for b in brokers]
         assert _BROKER in names
@@ -129,7 +129,7 @@ class TestGetSupportedBrokers:
 
     def test_get_supported_brokers_none_are_sandbox(self) -> None:
         """Every entry returned must have is_sandbox == False."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         for info in registry.get_supported_brokers():
             assert info.is_sandbox is False
 
@@ -143,7 +143,7 @@ class TestAddAccountSuccess:
     def test_add_account_success_returns_broker_account_info(self) -> None:
         """add_account() must return a BrokerAccountInfo on success."""
         mock_session = _make_mock_session()
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_session):
             info = registry.add_account("AB1234", _BROKER, _LABEL, _CREDS)
         assert isinstance(info, BrokerAccountInfo)
@@ -151,7 +151,7 @@ class TestAddAccountSuccess:
     def test_add_account_success_calls_authenticate(self) -> None:
         """add_account() must call session.authenticate with the given credentials."""
         mock_session = _make_mock_session()
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_session):
             registry.add_account("AB1234", _BROKER, _LABEL, _CREDS)
         mock_session.authenticate.assert_called_once_with(_CREDS)
@@ -159,7 +159,7 @@ class TestAddAccountSuccess:
     def test_add_account_session_stored_in_registry(self) -> None:
         """After add_account(), the session must be retrievable via get_session()."""
         mock_session = _make_mock_session()
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_session):
             registry.add_account("AB1234", _BROKER, _LABEL, _CREDS)
         retrieved = registry.get_session("AB1234")
@@ -168,7 +168,7 @@ class TestAddAccountSuccess:
     def test_add_account_passes_correct_args_to_session_constructor(self) -> None:
         """BrokerSession must be constructed with (account_id, broker_name, label)."""
         mock_session = _make_mock_session()
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_session) as mock_cls:
             registry.add_account("AB1234", _BROKER, _LABEL, _CREDS)
         mock_cls.assert_called_once_with("AB1234", _BROKER, _LABEL)
@@ -182,13 +182,13 @@ class TestAddAccountSuccess:
 class TestAddAccountUnknownBroker:
     def test_add_account_unknown_broker_raises(self) -> None:
         """add_account() must raise BrokerNotFoundError for an unknown broker."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with pytest.raises(BrokerNotFoundError):
             registry.add_account("AB1234", "not_a_real_broker", _LABEL, _CREDS)
 
     def test_add_account_unknown_broker_error_message(self) -> None:
         """The BrokerNotFoundError message must mention the unknown broker name."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with pytest.raises(BrokerNotFoundError, match="not_a_real_broker"):
             registry.add_account("AB1234", "not_a_real_broker", _LABEL, _CREDS)
 
@@ -197,7 +197,7 @@ class TestAddAccountUnknownBroker:
         # dhan_sandbox IS in the catalog, so it should not raise BrokerNotFoundError.
         # This test verifies the behavior is consistent with catalog contents.
         mock_session = _make_mock_session(broker=_SANDBOX)
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_session):
             # Should succeed — sandbox is in the catalog
             info = registry.add_account("SB001", _SANDBOX, "Sandbox", _CREDS)
@@ -247,13 +247,13 @@ class TestRemoveAccount:
 class TestRemoveNonexistentRaises:
     def test_remove_nonexistent_raises(self) -> None:
         """remove_account() must raise BrokerNotFoundError for unknown ID."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with pytest.raises(BrokerNotFoundError):
             registry.remove_account("GHOST")
 
     def test_remove_nonexistent_error_message(self) -> None:
         """The error message must identify the missing account ID."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with pytest.raises(BrokerNotFoundError, match="GHOST"):
             registry.remove_account("GHOST")
 
@@ -275,7 +275,7 @@ class TestGetSession:
         """get_session() must disambiguate between multiple registered accounts."""
         mock_a = _make_mock_session(account_id="AA001")
         mock_b = _make_mock_session(account_id="BB002", broker=_BROKER2)
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_a):
             registry.add_account("AA001", _BROKER, _LABEL, _CREDS)
         with patch(_SESSION_PATCH, return_value=mock_b):
@@ -292,13 +292,13 @@ class TestGetSession:
 class TestGetSessionMissingRaises:
     def test_get_session_missing_raises(self) -> None:
         """get_session() must raise BrokerNotFoundError for an unregistered ID."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with pytest.raises(BrokerNotFoundError):
             registry.get_session("NONEXISTENT")
 
     def test_get_session_missing_error_mentions_id(self) -> None:
         """The error message must include the missing account ID."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with pytest.raises(BrokerNotFoundError, match="NONEXISTENT"):
             registry.get_session("NONEXISTENT")
 
@@ -311,14 +311,14 @@ class TestGetSessionMissingRaises:
 class TestListAccounts:
     def test_list_accounts_empty_registry(self) -> None:
         """list_accounts() must return an empty list when no accounts are added."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         assert registry.list_accounts() == []
 
     def test_list_accounts_two_accounts_returns_two(self) -> None:
         """list_accounts() must return one entry per registered account."""
         mock_a = _make_mock_session(account_id="AA001")
         mock_b = _make_mock_session(account_id="BB002", broker=_BROKER2)
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_a):
             registry.add_account("AA001", _BROKER, _LABEL, _CREDS)
         with patch(_SESSION_PATCH, return_value=mock_b):
@@ -336,7 +336,7 @@ class TestListAccounts:
         """list_accounts() must include the registered account IDs."""
         mock_a = _make_mock_session(account_id="AA001")
         mock_b = _make_mock_session(account_id="BB002", broker=_BROKER2)
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_a):
             registry.add_account("AA001", _BROKER, _LABEL, _CREDS)
         with patch(_SESSION_PATCH, return_value=mock_b):
@@ -348,7 +348,7 @@ class TestListAccounts:
 class TestListSessions:
     def test_list_sessions_empty_registry(self) -> None:
         """list_sessions() must return an empty list when no accounts are added."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         assert registry.list_sessions() == []
 
     def test_list_sessions_reports_connection_state(self) -> None:
@@ -357,7 +357,7 @@ class TestListSessions:
         mock_a.is_connected = True
         mock_b = _make_mock_session(account_id="BB002", broker=_BROKER2)
         mock_b.is_connected = False
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_a):
             registry.add_account("AA001", _BROKER, _LABEL, _CREDS)
         with patch(_SESSION_PATCH, return_value=mock_b):
@@ -380,7 +380,7 @@ class TestSetPrimary:
         """set_primary() must make list_accounts() report is_primary=True for that account."""
         mock_a = _make_mock_session(account_id="AA001")
         mock_b = _make_mock_session(account_id="BB002", broker=_BROKER2)
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_a):
             registry.add_account("AA001", _BROKER, _LABEL, _CREDS)
         with patch(_SESSION_PATCH, return_value=mock_b):
@@ -395,7 +395,7 @@ class TestSetPrimary:
         """Calling set_primary() again must move the flag to the new account."""
         mock_a = _make_mock_session(account_id="AA001")
         mock_b = _make_mock_session(account_id="BB002", broker=_BROKER2)
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_a):
             registry.add_account("AA001", _BROKER, _LABEL, _CREDS)
         with patch(_SESSION_PATCH, return_value=mock_b):
@@ -409,7 +409,7 @@ class TestSetPrimary:
 
     def test_set_primary_unknown_account_raises(self) -> None:
         """set_primary() must raise BrokerNotFoundError for an unregistered ID."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with pytest.raises(BrokerNotFoundError):
             registry.set_primary("GHOST")
 
@@ -424,7 +424,7 @@ class TestGetPrimarySession:
         """get_primary_session() must return the session whose account was set as primary."""
         mock_a = _make_mock_session(account_id="AA001")
         mock_b = _make_mock_session(account_id="BB002", broker=_BROKER2)
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_a):
             registry.add_account("AA001", _BROKER, _LABEL, _CREDS)
         with patch(_SESSION_PATCH, return_value=mock_b):
@@ -438,7 +438,7 @@ class TestGetPrimarySession:
         """get_primary_session() must reflect the latest set_primary() call."""
         mock_a = _make_mock_session(account_id="AA001")
         mock_b = _make_mock_session(account_id="BB002", broker=_BROKER2)
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_a):
             registry.add_account("AA001", _BROKER, _LABEL, _CREDS)
         with patch(_SESSION_PATCH, return_value=mock_b):
@@ -458,7 +458,7 @@ class TestGetPrimarySession:
 class TestGetPrimaryNoneRaises:
     def test_get_primary_none_raises(self) -> None:
         """get_primary_session() must raise SessionError when no primary is set."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with pytest.raises(SessionError):
             registry.get_primary_session()
 
@@ -470,7 +470,7 @@ class TestGetPrimaryNoneRaises:
 
     def test_get_primary_session_raises_session_error_not_broker_not_found(self) -> None:
         """The exception raised must be SessionError, not BrokerNotFoundError."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with pytest.raises(SessionError):
             registry.get_primary_session()
         # Verify it is NOT a BrokerNotFoundError
@@ -567,7 +567,7 @@ class TestReconnectWithCredentials:
 
     def test_reconnect_unknown_account_raises(self) -> None:
         """reconnect_account() must raise BrokerNotFoundError for unknown ID."""
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with pytest.raises(BrokerNotFoundError):
             registry.reconnect_account("GHOST", credentials=_CREDS)
 
@@ -632,7 +632,7 @@ class TestThreadSafety:
         """Concurrent add_account() from 3 threads must all succeed without corruption."""
         account_ids = ["T001", "T002", "T003"]
         brokers = [_BROKER, _BROKER2, "angel"]
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         errors: list[Exception] = []
 
         def add(account_id: str, broker: str) -> None:
@@ -659,7 +659,7 @@ class TestThreadSafety:
         """All concurrently-added accounts must be individually retrievable."""
         account_ids = ["T001", "T002", "T003"]
         brokers = [_BROKER, _BROKER2, "angel"]
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
 
         def add(account_id: str, broker: str) -> None:
             mock_session = _make_mock_session(account_id=account_id, broker=broker)
@@ -684,7 +684,7 @@ class TestThreadSafety:
         """Concurrent set_primary() calls must leave exactly one primary active."""
         mock_a = _make_mock_session(account_id="TA001")
         mock_b = _make_mock_session(account_id="TB002", broker=_BROKER2)
-        registry = BrokerRegistry()
+        registry = BrokerRegistry(mutation_admission=lambda: None)
         with patch(_SESSION_PATCH, return_value=mock_a):
             registry.add_account("TA001", _BROKER, "A", _CREDS)
         with patch(_SESSION_PATCH, return_value=mock_b):

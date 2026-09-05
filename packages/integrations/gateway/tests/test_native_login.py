@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from functools import partial
 import logging
 from typing import Any
 
@@ -15,6 +16,11 @@ from flinttrade_gateway.native_login import (
     establish_native_session,
     establish_native_sessions,
 )
+
+
+# Explicit admission for synthetic retained-login unit tests only.
+establish_native_session = partial(establish_native_session, mutation_admission=lambda: None)
+establish_native_sessions = partial(establish_native_sessions, mutation_admission=lambda: None)
 
 
 class _FakeSession:

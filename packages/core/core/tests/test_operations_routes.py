@@ -64,6 +64,8 @@ def flask_app(monkeypatch_module):
 
     app = create_flask_app()
     app.config["TESTING"] = True
+    # Exercise retained legacy operations against synthetic dependencies.
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     return app
 
 

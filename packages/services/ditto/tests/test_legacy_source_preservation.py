@@ -99,6 +99,7 @@ def test_constructor_never_consumes_or_changes_legacy_column(tmp_path, monkeypat
         monkeypatch.setenv("DITTO_ENCRYPTION_KEY", legacy_key)
 
     with AccountManager(
+        mutation_admission=lambda: None,
         db_path=str(db),
         credential_store=store,  # type: ignore[arg-type]
         installation_state_root=tmp_path / "installation",
@@ -130,6 +131,7 @@ def test_legacy_target_store_read_failure_preserves_database_bytes(tmp_path):
     schema_before, _bytes_before = _legacy_database(db)
     store = FailingStore()
     with AccountManager(
+        mutation_admission=lambda: None,
         db_path=str(db),
         credential_store=store,  # type: ignore[arg-type]
         installation_state_root=tmp_path / "installation",
@@ -164,6 +166,7 @@ def test_legacy_writer_updates_metadata_without_changing_ciphertext_and_adds_emp
     db = tmp_path / "ditto_accounts.sqlite"
     schema_before, _bytes_before = _legacy_database(db)
     with AccountManager(
+        mutation_admission=lambda: None,
         db_path=str(db),
         credential_store=Store(),  # type: ignore[arg-type]
         installation_state_root=tmp_path / "installation",
@@ -191,6 +194,7 @@ def test_legacy_writer_vault_failure_leaves_metadata_database_unchanged(tmp_path
     db = tmp_path / "ditto_accounts.sqlite"
     _schema, bytes_before = _legacy_database(db)
     manager = AccountManager(
+        mutation_admission=lambda: None,
         db_path=str(db),
         credential_store=FailingStore(),  # type: ignore[arg-type]
         installation_state_root=tmp_path / "installation",
@@ -214,6 +218,7 @@ def test_explicit_legacy_remove_retires_metadata_and_canonical_credential(tmp_pa
     _legacy_database(db)
     store = Store()
     with AccountManager(
+        mutation_admission=lambda: None,
         db_path=str(db),
         credential_store=store,  # type: ignore[arg-type]
         installation_state_root=tmp_path / "installation",
@@ -232,6 +237,7 @@ def test_explicit_database_path_never_touches_real_home(tmp_path, monkeypatch):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path / "workspace"))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: (_ for _ in ()).throw(AssertionError("real home"))))
     manager = AccountManager(
+        mutation_admission=lambda: None,
         db_path=str(tmp_path / "accounts.sqlite"),
         master_password="test-master-pw",
         installation_state_root=installation,
@@ -801,7 +807,7 @@ def test_spawned_account_writer_blocks_on_parent_ditto_fence(tmp_path):
             "import pathlib, sys",
             "from flinttrade_ditto.account_manager import AccountManager, BrokerAccount",
             "pathlib.Path(sys.argv[3]).write_text('started')",
-            "with AccountManager(db_path=sys.argv[2], master_password='test-master-pw', installation_state_root=sys.argv[1]) as manager:",
+            "with AccountManager(mutation_admission=lambda: None, db_path=sys.argv[2], master_password='test-master-pw', installation_state_root=sys.argv[1]) as manager:",
             "    manager.add_account(BrokerAccount('spawned', 'http://127.0.0.1:1', 'key'))",
             "pathlib.Path(sys.argv[4]).write_text('finished')",
         )
@@ -852,6 +858,7 @@ def test_account_writer_uses_the_shared_installation_fence(tmp_path):
 
     root = tmp_path / "installation"
     manager = AccountManager(
+        mutation_admission=lambda: None,
         db_path=str(tmp_path / "accounts.sqlite"),
         master_password="test-master-pw",
         installation_state_root=root,
@@ -905,6 +912,7 @@ def test_every_account_manager_source_sensitive_path_enters_ditto_fence(tmp_path
 
     monkeypatch.setattr(account_manager, "InstallationState", lambda _root=None: state)
     manager = account_manager.AccountManager(
+        mutation_admission=lambda: None,
         db_path=str(tmp_path / "accounts.sqlite"),
         credential_store=Store(),  # type: ignore[arg-type]
     )
@@ -943,13 +951,17 @@ def test_default_constructor_reads_migrated_canonical_vault(tmp_path, monkeypatc
     monkeypatch.setattr(workspace, "_legacy_fast_data_dir", lambda: legacy_fast)
 
     with AccountManager(
+        mutation_admission=lambda: None,
         db_path=str(legacy_fast / "ditto_accounts.sqlite"),
         master_password="test-master-pw",
         installation_state_root=tmp_path / "installation-state",
     ) as legacy_manager:
         legacy_manager.add_account(BrokerAccount("legacy", "http://127.0.0.1:1", "preserved-api-key"))
 
-    with AccountManager(master_password="test-master-pw") as migrated_manager:
+    with AccountManager(
+        master_password="test-master-pw",
+        mutation_admission=lambda: None,
+    ) as migrated_manager:
         migrated = migrated_manager.get_account("legacy")
 
     assert migrated is not None
@@ -968,6 +980,7 @@ def test_migration_survives_deferred_vault_connection_collection(tmp_path):
     gc.disable()
     try:
         with AccountManager(
+            mutation_admission=lambda: None,
             db_path=str(legacy / "ditto_accounts.sqlite"),
             master_password="disposable-password",
             installation_state_root=installation,
@@ -983,6 +996,7 @@ def test_migration_survives_deferred_vault_connection_collection(tmp_path):
             legacy, target, installation_state_root=installation, phase_hook=collect
         )
         with AccountManager(
+            mutation_admission=lambda: None,
             db_path=str(target / "ditto_accounts.sqlite"),
             master_password="disposable-password",
             installation_state_root=installation,
@@ -1086,12 +1100,16 @@ def test_data_dir_and_explicit_database_keep_adjacent_vaults(tmp_path, monkeypat
 
     data_dir = tmp_path / "data-dir"
     monkeypatch.setenv("DATA_DIR", str(data_dir))
-    default_manager = AccountManager(master_password="test-master-pw")
+    default_manager = AccountManager(
+        master_password="test-master-pw",
+        mutation_admission=lambda: None,
+    )
     assert default_manager._default_vault_path == data_dir / "ditto_credentials.db"
     default_manager.close()
 
     explicit_db = tmp_path / "explicit" / "accounts.sqlite"
     explicit_manager = AccountManager(
+        mutation_admission=lambda: None,
         db_path=str(explicit_db),
         credential_store=Store(),  # type: ignore[arg-type]
         installation_state_root=tmp_path / "explicit-installation",
@@ -1122,7 +1140,10 @@ def test_default_constructor_preserves_data_dir_adjacent_vault(tmp_path, monkeyp
     monkeypatch.setenv("DATA_DIR", str(data_dir))
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
 
-    with AccountManager(master_password="test-master-pw") as manager:
+    with AccountManager(
+        master_password="test-master-pw",
+        mutation_admission=lambda: None,
+    ) as manager:
         manager.add_account(BrokerAccount("data-dir", "http://127.0.0.1:1", "preserved-api-key"))
 
     assert (data_dir / "ditto_accounts.sqlite").is_file()

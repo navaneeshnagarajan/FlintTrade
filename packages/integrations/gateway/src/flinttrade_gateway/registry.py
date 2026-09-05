@@ -11,6 +11,8 @@ import threading
 import time
 from typing import Any
 
+from flinttrade_core.broker_account_cutover import MutationAdmission, require_broker_account_mutations
+
 from .adapter import BROKER_CATALOG
 from .exceptions import BrokerNotFoundError, SessionError
 from .log_safety import account_ref, selector_ref
@@ -54,7 +56,8 @@ class BrokerRegistry:
     injected via ``reconnect_account``.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, mutation_admission: MutationAdmission = require_broker_account_mutations) -> None:
+        self._mutation_admission = mutation_admission
         self._sessions: dict[str, BrokerSession] = {}
         # Adapter-layer sessions keyed by the composite (adapter_id, account_id)
         # selector (contract §12 / identity X7). This is the store the
@@ -110,6 +113,7 @@ class BrokerRegistry:
             BrokerNotFoundError: If ``broker_name`` is not in the catalogue.
             AuthFlowError: If the broker rejects the credentials.
         """
+        self._mutation_admission()
         if broker_name not in BROKER_CATALOG:
             raise BrokerNotFoundError(
                 f"Broker '{broker_name}' not found in catalog. "
@@ -138,6 +142,7 @@ class BrokerRegistry:
         Raises:
             BrokerNotFoundError: If ``account_id`` is not registered.
         """
+        self._mutation_admission()
         with self._lock:
             session = self._sessions.get(account_id)
             if session is None:
@@ -186,6 +191,7 @@ class BrokerRegistry:
             ValueError: If neither ``credentials`` nor ``credential_store``
                 is provided.
         """
+        self._mutation_admission()
         with self._lock:
             session = self._sessions.get(account_id)
             if session is None:
@@ -217,6 +223,7 @@ class BrokerRegistry:
         Raises:
             BrokerNotFoundError: If ``account_id`` is not registered.
         """
+        self._mutation_admission()
         with self._lock:
             if account_id not in self._sessions:
                 raise BrokerNotFoundError(

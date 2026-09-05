@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from flinttrade_core.broker_account_cutover import MutationAdmission, require_broker_account_mutations
+
 logger = logging.getLogger("flinttrade.gateway.native_login")
 
 SESSION_INVALID_RELOGIN_MESSAGE = "Broker session expired or invalid; re-login required."
@@ -208,6 +210,8 @@ async def establish_native_session(
     account_id: str,
     credential_store: Any | None = None,
     verify: bool = False,
+    *,
+    mutation_admission: MutationAdmission = require_broker_account_mutations,
 ) -> Any:
     """Log a native adapter in and register its session under the selector.
 
@@ -239,6 +243,7 @@ async def establish_native_session(
         sessionless and the router keeps returning "no session" rather than
         dispatching against a half-authenticated broker.
     """
+    mutation_admission()
     try:
         session = await adapter.login(credentials)
     except Exception:
@@ -287,6 +292,8 @@ async def establish_native_sessions(
     credential_store: Any,
     selectors: list[str],
     verify: bool = False,
+    *,
+    mutation_admission: MutationAdmission = require_broker_account_mutations,
 ) -> dict[str, Any]:
     """Re-establish sessions for every active native selector with vault creds.
 
@@ -308,8 +315,12 @@ async def establish_native_sessions(
             login failures leave the selector sessionless with a retry message.
 
     Returns:
-        ``{selector: "ok" | "<error>"}`` for observability (never raises).
+        ``{selector: "ok" | "<error>"}`` for admitted replay attempts.
+
+    Raises:
+        BrokerAccountCutoverUnavailable: Before any lookup while cutover is active.
     """
+    mutation_admission()
     from flinttrade_engine.request_context import parse_selector  # noqa: PLC0415
 
     results: dict[str, Any] = {}
@@ -334,7 +345,7 @@ async def establish_native_sessions(
         try:
             await establish_native_session(
                 adapter, registry, credentials, adapter_id, account_id,
-                credential_store=credential_store, verify=verify,
+                credential_store=credential_store, verify=verify, mutation_admission=mutation_admission,
             )
             results[selector] = "ok"
         except Exception as exc:  # noqa: BLE001 - per-selector isolation

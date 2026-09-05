@@ -155,7 +155,7 @@ def test_reconnect_with_no_saved_accounts(caplog: pytest.LogCaptureFixture) -> N
     reconnect_logger = logging.getLogger("test.reconnect.empty")
     with caplog.at_level(logging.INFO, logger="test.reconnect.empty"):
         # Must complete without raising
-        _reconnect_saved_accounts(registry, cs, reconnect_logger)
+        _reconnect_saved_accounts(registry, cs, reconnect_logger, mutation_admission=lambda: None)
 
     assert len(registry.list_accounts()) == 0
     # The store's list_accounts was called exactly once
@@ -227,7 +227,7 @@ def test_reconnect_partial_failure(caplog: pytest.LogCaptureFixture) -> None:
     with patch("flinttrade_gateway.session.BrokerSession", side_effect=_make_session):
         with caplog.at_level(logging.INFO, logger="test.reconnect.partial"):
             # Must not raise even though FAIL001 fails
-            _reconnect_saved_accounts(registry, cs, reconnect_logger)
+            _reconnect_saved_accounts(registry, cs, reconnect_logger, mutation_admission=lambda: None)
 
     # OK001's mock session must have been inserted into the registry
     assert "OK001" in registry._sessions
