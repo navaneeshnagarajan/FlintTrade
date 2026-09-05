@@ -11,6 +11,7 @@ import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from ipaddress import IPv6Address
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import RFC_4122, UUID, uuid4
@@ -22,6 +23,10 @@ MAX_OPERATOR_ENDPOINT_LENGTH = 2048
 MAX_CONNECTION_LABEL_LENGTH = 128
 MAX_CONNECTION_MODEL_LENGTH = 256
 INT64_MAX = (1 << 63) - 1
+
+_URI_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+_URI_REG_NAME_CHARACTERS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~!$&'()*+,;=")
+_URI_PATH_CHARACTERS = _URI_REG_NAME_CHARACTERS | frozenset(":@/")
 
 _CREATE_FIELDS = frozenset({"provider_id", "label", "model", "endpoint", "auth_mode"})
 _UPDATE_FIELDS = frozenset({"label", "model", "endpoint", "auth_mode"})
@@ -75,9 +80,52 @@ def _validate_text(value: object, *, field_name: str, maximum: int, blank: bool)
     return value
 
 
+def _has_valid_uri_component_syntax(value: str, *, allowed_characters: frozenset[str]) -> bool:
+    position = 0
+    while position < len(value):
+        character = value[position]
+        if character == "%":
+            if position + 2 >= len(value) or any(
+                digit not in _URI_HEX_DIGITS for digit in value[position + 1 : position + 3]
+            ):
+                return False
+            position += 3
+            continue
+        if character not in allowed_characters:
+            return False
+        position += 1
+    return True
+
+
+def _has_valid_uri_authority(authority: str) -> bool:
+    if not authority or "@" in authority:
+        return False
+    if authority.startswith("["):
+        closing_bracket = authority.find("]")
+        if closing_bracket == -1 or authority.count("[") != 1 or authority.count("]") != 1:
+            return False
+        literal = authority[1:closing_bracket]
+        suffix = authority[closing_bracket + 1 :]
+        if not literal or "%" in literal:
+            return False
+        try:
+            IPv6Address(literal)
+        except ValueError:
+            return False
+        return not suffix or (suffix.startswith(":") and suffix[1:].isdigit())
+    if "[" in authority or "]" in authority or authority.count(":") > 1:
+        return False
+    host, separator, port = authority.partition(":")
+    if not host or not _has_valid_uri_component_syntax(host, allowed_characters=_URI_REG_NAME_CHARACTERS):
+        return False
+    return not separator or (bool(port) and port.isdigit())
+
+
 def _validate_operator_endpoint(value: object) -> str:
     if type(value) is not str or not value or len(value) > MAX_OPERATOR_ENDPOINT_LENGTH:
         raise ValueError("operator endpoint must be a non-empty absolute HTTP(S) URL of at most 2048 characters")
+    if not value.isascii():
+        raise ValueError("operator endpoint must use ASCII URI syntax")
     if any(unicodedata.category(character) == "Cc" for character in value):
         raise ValueError("operator endpoint must not contain control characters")
     if any(character.isspace() for character in value):
@@ -87,7 +135,13 @@ def _validate_operator_endpoint(value: object) -> str:
         _ = parsed.port
     except ValueError:
         raise ValueError("operator endpoint must be a valid absolute HTTP(S) URL") from None
-    if parsed.scheme.lower() not in {"http", "https"} or parsed.hostname is None:
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or parsed.hostname is None
+        or not _has_valid_uri_authority(parsed.netloc)
+        or (parsed.path and not parsed.path.startswith("/"))
+        or not _has_valid_uri_component_syntax(parsed.path, allowed_characters=_URI_PATH_CHARACTERS)
+    ):
         raise ValueError("operator endpoint must be an absolute HTTP(S) URL")
     if (
         parsed.netloc.endswith(":")
@@ -385,6 +439,8 @@ def update_service_connection(
         auth_mode = current.auth_mode
     binding = current.secret_version if endpoint == current.endpoint and auth_mode == current.auth_mode else None
     updated_at = _validate_utc(clock_factory(), field_name="clock factory result")
+    if updated_at < current.updated_at:
+        raise ValueError("updated_at must not precede the current connection timestamp")
     return replace(
         current,
         label=label,

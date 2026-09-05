@@ -31,6 +31,7 @@ CONNECTION_ID = UUID("00000000-0000-4000-8000-000000000001")
 OTHER_CONNECTION_ID = UUID("00000000-0000-4000-8000-000000000002")
 STORE_ID = UUID("00000000-0000-4000-8000-000000000003")
 BINDING_ID = UUID("00000000-0000-4000-8000-000000000004")
+SECRET_GENERATION_MARKER = 818181818181818181
 
 EXPECTED_PROVIDER_IDS = (
     "llm:ollama",
@@ -272,6 +273,77 @@ def test_operator_endpoint_rejects_unsafe_url_forms(provider_id: str, endpoint: 
         _create(provider_id, endpoint=endpoint)
 
 
+MALFORMED_OPERATOR_ENDPOINTS = (
+    "https://models.example.invalid/%",
+    "https://models.example.invalid/%2",
+    "https://models.example.invalid/%ZZ",
+    "https://models.example.invalid/%2G",
+    "https://models.example.invalid\\@other.invalid/base",
+    "https://models|example.invalid/base",
+    "https://bücher.example.invalid/base",
+    "https://models.example.invalid/✓",
+    "https://[2001:db8::1/base",
+    "https://models].example.invalid/base",
+    "https://models.example.invalid:443:444/base",
+    "https://models.example.invalid:not-a-port/base",
+    "https://models.example.invalid:65536/base",
+    "https://models.example.invalid/{raw}/base",
+    "https://models.example.invalid/[raw]/base",
+)
+
+
+@pytest.mark.parametrize("endpoint", MALFORMED_OPERATOR_ENDPOINTS)
+@pytest.mark.parametrize("provider_id", ("llm:hermes", "llm:custom"))
+def test_create_rejects_non_ascii_or_malformed_operator_uri_syntax(provider_id: str, endpoint: str) -> None:
+    with pytest.raises(ValueError, match="operator endpoint"):
+        _create(provider_id, endpoint=endpoint)
+
+
+@pytest.mark.parametrize("endpoint", MALFORMED_OPERATOR_ENDPOINTS)
+@pytest.mark.parametrize("provider_id", ("llm:hermes", "llm:custom"))
+def test_update_rejects_non_ascii_or_malformed_operator_uri_syntax(provider_id: str, endpoint: str) -> None:
+    with pytest.raises(ValueError, match="operator endpoint"):
+        update_service_connection(_create(provider_id), {"endpoint": endpoint}, clock_factory=lambda: LATER)
+
+
+@pytest.mark.parametrize("endpoint", MALFORMED_OPERATOR_ENDPOINTS)
+@pytest.mark.parametrize("provider_id", ("llm:hermes", "llm:custom"))
+def test_direct_construction_rejects_non_ascii_or_malformed_operator_uri_syntax(
+    provider_id: str,
+    endpoint: str,
+) -> None:
+    with pytest.raises(ValueError, match="operator endpoint"):
+        ServiceConnection(
+            schema_version=1,
+            provider_id=provider_id,
+            connection_id=CONNECTION_ID,
+            label="Strict URI",
+            model="model",
+            endpoint=endpoint,
+            auth_mode="api_key" if provider_id == "llm:custom" else None,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+
+
+@pytest.mark.parametrize("provider_id", ("llm:hermes", "llm:custom"))
+@pytest.mark.parametrize(
+    "endpoint",
+    (
+        "http://localhost",
+        "http://127.0.0.1:8080/base",
+        "https://[2001:db8::1]:8443/v1",
+        "https://xn--bcher-kva.example/%E2%9C%93/a-._~!$&'()*+,;=:@",
+    ),
+)
+def test_operator_endpoint_accepts_and_preserves_valid_ascii_uri_forms(provider_id: str, endpoint: str) -> None:
+    connection = _create(provider_id, endpoint=endpoint)
+    updated = update_service_connection(connection, {"endpoint": endpoint}, clock_factory=lambda: LATER)
+
+    assert connection.endpoint == endpoint
+    assert updated.endpoint == endpoint
+
+
 def test_operator_endpoint_preserves_exact_validated_spelling_at_the_2048_character_boundary() -> None:
     prefix = "https://models.example.invalid/"
     endpoint = prefix + ("a" * (2048 - len(prefix)))
@@ -280,11 +352,18 @@ def test_operator_endpoint_preserves_exact_validated_spelling_at_the_2048_charac
     assert _create("llm:custom", endpoint=endpoint).endpoint == endpoint
 
 
+@pytest.mark.parametrize(
+    "endpoint",
+    (
+        "https://fixture-secret＠example.invalid",
+        "https://models.example.invalid:fixture-secret",
+    ),
+)
 def test_parser_errors_and_exception_logs_do_not_chain_sensitive_endpoint_text(
+    endpoint: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     sensitive = "fixture-secret"
-    endpoint = f"https://{sensitive}＠example.invalid"
 
     with caplog.at_level(logging.ERROR):
         try:
@@ -367,6 +446,22 @@ def test_label_and_model_updates_preserve_the_credential_binding() -> None:
     assert updated.model == "gpt-5"
     assert updated.secret_version == connection.secret_version
     assert updated.credential_configured is True
+
+
+def test_sequential_updates_reject_a_regressed_clock_but_accept_equal_and_forward_times() -> None:
+    first_update_time = datetime(2026, 9, 5, 9, 32, tzinfo=UTC)
+    between_creation_and_update = datetime(2026, 9, 5, 9, 31, tzinfo=UTC)
+    forward_time = datetime(2026, 9, 5, 9, 33, tzinfo=UTC)
+    first = update_service_connection(_create(), {"label": "First"}, clock_factory=lambda: first_update_time)
+
+    with pytest.raises(ValueError, match="updated_at"):
+        update_service_connection(first, {"label": "Regressed"}, clock_factory=lambda: between_creation_and_update)
+
+    equal = update_service_connection(first, {"label": "Equal"}, clock_factory=lambda: first_update_time)
+    forward = update_service_connection(equal, {"label": "Forward"}, clock_factory=lambda: forward_time)
+
+    assert equal.updated_at == first_update_time
+    assert forward.updated_at == forward_time
 
 
 def test_auth_or_exact_operator_endpoint_changes_invalidate_the_credential_binding() -> None:
@@ -456,27 +551,59 @@ def test_materialised_absence_is_distinct_from_no_binding_but_publicly_unconfigu
     assert tombstoned.to_public_dict()["credential_configured"] is False
 
 
-def test_repr_public_dto_errors_and_logs_never_expose_binding_or_supplied_secrets(
+def test_repr_public_dto_errors_and_actual_logs_never_expose_binding_or_supplied_secrets(
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    connection = _create().with_secret_version(_secret_version(_create()))
+    base = _create()
+    secret_version = ServiceSecretVersion(
+        connection_ref=base.ref,
+        store_incarnation=STORE_ID,
+        binding_id=BINDING_ID,
+        generation=SECRET_GENERATION_MARKER,
+        present=True,
+    )
+    connection = base.with_secret_version(secret_version)
     sensitive_values = (
         "credential-material-super-secret",
         str(STORE_ID),
         str(BINDING_ID),
+        str(SECRET_GENERATION_MARKER),
         "secret://service/private-binding",
     )
 
     with caplog.at_level(logging.DEBUG):
+        logger = logging.getLogger("test.service-connections.binding-redaction")
+        logger.debug("connection str: %s", connection)
+        logger.debug("connection repr: %r", connection)
+        logger.debug("secret version str: %s", secret_version)
+        logger.debug("secret version repr: %r", secret_version)
         with pytest.raises(ValueError) as exc_info:
-            _create(api_key=sensitive_values[0], secret_ref=sensitive_values[3])
+            _create(api_key=sensitive_values[0], secret_ref=sensitive_values[4])
 
-    rendered = repr(connection) + repr(connection.to_public_dict()) + str(exc_info.value) + caplog.text
+    rendered = (
+        repr(connection) + repr(secret_version) + repr(connection.to_public_dict()) + str(exc_info.value) + caplog.text
+    )
+    assert len(caplog.records) == 4
     assert connection.to_public_dict()["credential_configured"] is True
     for sensitive in sensitive_values:
         assert sensitive not in rendered
     assert "last4" not in rendered.lower()
     assert "secret_version" not in connection.to_public_dict()
+
+    def unsafe_repr(value: ServiceSecretVersion) -> str:
+        return (
+            "ServiceSecretVersion("
+            f"connection_ref={value.connection_ref!r}, "
+            f"store_incarnation={value.store_incarnation!r}, "
+            f"binding_id={value.binding_id!r}, generation={value.generation!r}, present={value.present!r})"
+        )
+
+    monkeypatch.setattr(ServiceSecretVersion, "__repr__", unsafe_repr)
+    mutated_rendering = repr(secret_version)
+    with pytest.raises(AssertionError, match=str(STORE_ID)):
+        for sensitive in sensitive_values:
+            assert sensitive not in mutated_rendering, sensitive
 
 
 @pytest.mark.parametrize(
