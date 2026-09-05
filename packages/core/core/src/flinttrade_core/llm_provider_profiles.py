@@ -168,6 +168,8 @@ LLM_PROVIDER_PROFILES: tuple[LLMProviderProfile, ...] = (
 )
 
 LLM_PROVIDER_BY_ID = MappingProxyType({profile.provider_id: profile for profile in LLM_PROVIDER_PROFILES})
+LLM_SERVICE_PROVIDER_IDS = tuple(f"llm:{profile.provider_id}" for profile in LLM_PROVIDER_PROFILES)
+LLM_SERVICE_PROVIDER_BY_ID = MappingProxyType(dict(zip(LLM_SERVICE_PROVIDER_IDS, LLM_PROVIDER_PROFILES, strict=True)))
 
 
 def _connection_requirements(profile: LLMProviderProfile) -> tuple[str, ...]:
