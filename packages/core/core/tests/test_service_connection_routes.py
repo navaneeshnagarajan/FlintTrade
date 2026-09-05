@@ -775,6 +775,59 @@ def test_real_app_composition_is_lazy_inert_and_cors_bounded(tmp_path, monkeypat
     assert captures[2][2] is not None
     assert captures[2][3] is not None
 
+    def actual_sdk_event(path: str, *, host: str, scheme: str, method: str) -> dict[str, object]:
+        environ = EnvironBuilder(
+            path=path,
+            method=method,
+            headers={"X-API-Key": "synthetic-read-key"},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        ).get_environ()
+        environ["HTTP_HOST"] = host
+        environ["wsgi.url_scheme"] = scheme
+        body = middleware(environ, start_response)
+        list(body)
+        body.close()
+        assert current_safe_request_summary() is None
+        return sentry_wsgi._make_wsgi_event_processor(environ, False)(
+            {"exception": {"value": "synthetic diagnostic exception"}},
+            {},
+        )
+
+    for scheme, host, expected_sdk_url in (
+        ("http", "fixture.invalid:80", "http://fixture.invalid/v1/observability-control"),
+        ("https", "fixture.invalid:443", "https://fixture.invalid/v1/observability-control"),
+        ("http", "fixture.invalid:5100", "http://fixture.invalid:5100/v1/observability-control"),
+    ):
+        ordinary_event = actual_sdk_event(
+            "/v1/observability-control",
+            host=host,
+            scheme=scheme,
+            method="POST",
+        )
+        assert ordinary_event["request"]["url"] == expected_sdk_url
+        assert "PATH_INFO" not in ordinary_event["request"]["env"]
+        assert sentry_options["before_send"](ordinary_event, {}) == ordinary_event
+        assert sentry_options["before_send_transaction"](ordinary_event, {}) == ordinary_event
+
+        secret_event = actual_sdk_event(
+            "/v1/services/connections/probe?code=synthetic-private-query",
+            host=host,
+            scheme=scheme,
+            method="GET",
+        )
+        assert sentry_options["before_send"](secret_event, {}) is None
+        assert sentry_options["before_send_transaction"](secret_event, {}) is None
+
+    mismatched_event = actual_sdk_event(
+        "/v1/observability-control",
+        host="fixture.invalid:5100",
+        scheme="http",
+        method="POST",
+    )
+    mismatched_event["request"]["url"] = "http://different.invalid:5100/v1/observability-control"
+    assert sentry_options["before_send"](mismatched_event, {}) is None
+    assert sentry_options["before_send_transaction"](mismatched_event, {}) is None
+
     for malformed_host, expected_sdk_url in (
         ("[", "http://[/v1/services/connections/probe"),
         ("fixture.invalid/ordinary", "http://fixture.invalid/ordinary/v1/services/connections/probe"),

@@ -147,6 +147,11 @@ def sentry_event_is_secret(event: object) -> bool:
                     _ = parsed_host.port
                 except ValueError:
                     return True
+                sdk_netlocs = {parsed_host.netloc}
+                if parsed_url.scheme == "http" and parsed_host.netloc.endswith(":80"):
+                    sdk_netlocs.add(parsed_host.netloc[:-3])
+                elif parsed_url.scheme == "https" and parsed_host.netloc.endswith(":443"):
+                    sdk_netlocs.add(parsed_host.netloc[:-4])
                 if (
                     not parsed_host.netloc
                     or parsed_host.path
@@ -154,7 +159,7 @@ def sentry_event_is_secret(event: object) -> bool:
                     or parsed_host.fragment
                     or parsed_host.username is not None
                     or parsed_host.password is not None
-                    or parsed_url.netloc != parsed_host.netloc
+                    or parsed_url.netloc not in sdk_netlocs
                 ):
                     return True
         path = parsed_url.path
