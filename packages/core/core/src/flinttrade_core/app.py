@@ -4838,7 +4838,10 @@ def create_flask_app(
             if st is not None:
                 st.heartbeat(token)
         except Exception as _exc:
-            logger.debug("suppressed: %s", _exc)
+            if current_safe_request_summary() is not None:
+                logger.debug("Secret-request session heartbeat unavailable")
+            else:
+                logger.debug("suppressed: %s", _exc)
 
     # --- inline route handlers extracted to blueprints ---
     # indicators_bp  → packages/core/core/src/indicators_routes.py

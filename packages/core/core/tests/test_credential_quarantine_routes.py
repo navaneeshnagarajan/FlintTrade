@@ -265,3 +265,50 @@ def test_pre_password_change_session_has_no_recovery_access(recovery_app, monkey
     monkeypatch.setattr(auth_routes, "_get_auth_service", lambda: PasswordState())
     response = app.test_client().get("/v1/accounts/quarantine", headers={"Authorization": "Bearer " + token})
     assert response.status_code == 401 and response.headers["Cache-Control"] == "no-store"
+
+
+@pytest.mark.parametrize(
+    "method,path,status",
+    [
+        ("GET", "/ft-api/v1/accounts/quarantine", 200),
+        ("HEAD", "/ft-api/v1/accounts/quarantine", 200),
+        ("GET", "/ft-api/v1/accounts/quarantine/PRIVATE-path/missing", 404),
+    ],
+)
+def test_recovery_heartbeat_failure_keeps_private_diagnostics_out_of_logs(recovery_app, caplog, method, path, status):
+    app, token = recovery_app
+    calls = []
+    private_error = "PRIVATE-heartbeat-diagnostic: " + token
+
+    class FailingTracker:
+        def heartbeat(self, selected_token):
+            calls.append(selected_token)
+            raise RuntimeError(private_error)
+
+    app.config["SESSION_TRACKER"] = FailingTracker()
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        response = app.test_client().open(path, method=method, headers={"Authorization": "Bearer " + token})
+    assert calls == [token]
+    assert response.status_code == status
+    assert response.headers["Cache-Control"] == "no-store"
+    assert "PRIVATE" not in caplog.text and token not in caplog.text and private_error not in caplog.text
+
+
+def test_unclassified_heartbeat_failure_retains_ordinary_diagnostic(recovery_app, caplog):
+    app, token = recovery_app
+    calls = []
+    diagnostic = "synthetic ordinary heartbeat diagnostic"
+
+    class FailingTracker:
+        def heartbeat(self, selected_token):
+            calls.append(selected_token)
+            raise RuntimeError(diagnostic)
+
+    app.config["SESSION_TRACKER"] = FailingTracker()
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        response = app.test_client().get("/v1/brokers", headers={"Authorization": "Bearer " + token})
+    assert calls == [token]
+    assert response.status_code == 200
+    assert diagnostic in caplog.text

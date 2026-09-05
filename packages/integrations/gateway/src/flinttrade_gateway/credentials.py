@@ -591,7 +591,11 @@ class CredentialStore:
             return False
         if not legacy and version == 2:
             return ddl[0] == _CREATE_TABLE_SQL
-        columns = {row[1]: row for row in conn.execute("PRAGMA table_info(accounts)")}
+        # table_info omits generated/hidden columns; these are unsupported source
+        # shapes, not cells we may discard while quarantining excluded rows.
+        columns = {row[1]: row for row in conn.execute("PRAGMA table_xinfo(accounts)")}
+        if any(row[6] != 0 for row in columns.values()):
+            return False
         expected = {
             "account_id": "TEXT",
             "broker": "TEXT",

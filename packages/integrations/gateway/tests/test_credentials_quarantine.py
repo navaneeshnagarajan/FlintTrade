@@ -92,6 +92,35 @@ def logical(path):
         )
 
 
+@pytest.mark.parametrize("version", [0, 1])
+@pytest.mark.parametrize("generated_kind", ["STORED", "VIRTUAL"])
+def test_generated_source_columns_refuse_without_changing_any_source_state(tmp_path, version, generated_kind):
+    path = source(tmp_path, version=version)
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute(
+            "ALTER TABLE accounts ADD COLUMN unexpected TEXT "
+            f"GENERATED ALWAYS AS ('PRIVATE-generated-cell') {generated_kind}"
+        )
+        if version:
+            add(conn, "default", "openalgo", "openalgo", version=version)
+        else:
+            add(conn, "bad%")
+        conn.commit()
+        columns = conn.execute("PRAGMA table_xinfo(accounts)").fetchall()
+        assert columns[-1][1] == "unexpected" and columns[-1][6] in {2, 3}
+        assert conn.execute("SELECT unexpected FROM accounts").fetchone() == ("PRIVATE-generated-cell",)
+    before = logical(path)
+
+    with pytest.raises(vault.CredentialVaultInvalidError):
+        vault.CredentialStore(path, "synthetic")
+
+    assert logical(path) == before
+    with closing(sqlite3.connect(path)) as conn:
+        assert conn.execute("PRAGMA table_xinfo(accounts)").fetchall() == columns
+        assert conn.execute("PRAGMA user_version").fetchone() == (version,)
+        assert conn.execute("SELECT unexpected FROM accounts").fetchone() == ("PRIVATE-generated-cell",)
+
+
 @pytest.mark.parametrize("adapter", [False, True])
 def test_zero_to_two_partitions_invalid_rows_and_preserves_raw_types(tmp_path, monkeypatch, adapter):
     path = source(tmp_path, adapter=adapter)
