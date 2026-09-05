@@ -292,6 +292,46 @@ MALFORMED_OPERATOR_ENDPOINTS = (
 )
 
 
+PERCENT_ESCAPED_OPERATOR_AUTHORITIES = (
+    "https://%E2%98%83.example.invalid/base",
+    "https://models%2Eexample.invalid/base",
+    "https://models%2Fother.invalid/base",
+    "https://models%40other.invalid/base",
+    "https://models%3A443.example.invalid/base",
+)
+
+
+@pytest.mark.parametrize("endpoint", PERCENT_ESCAPED_OPERATOR_AUTHORITIES)
+@pytest.mark.parametrize("provider_id", ("llm:hermes", "llm:custom"))
+def test_create_rejects_percent_escaped_operator_authorities(provider_id: str, endpoint: str) -> None:
+    with pytest.raises(ValueError, match="operator endpoint"):
+        _create(provider_id, endpoint=endpoint)
+
+
+@pytest.mark.parametrize("endpoint", PERCENT_ESCAPED_OPERATOR_AUTHORITIES)
+@pytest.mark.parametrize("provider_id", ("llm:hermes", "llm:custom"))
+def test_update_rejects_percent_escaped_operator_authorities(provider_id: str, endpoint: str) -> None:
+    with pytest.raises(ValueError, match="operator endpoint"):
+        update_service_connection(_create(provider_id), {"endpoint": endpoint}, clock_factory=lambda: LATER)
+
+
+@pytest.mark.parametrize("endpoint", PERCENT_ESCAPED_OPERATOR_AUTHORITIES)
+@pytest.mark.parametrize("provider_id", ("llm:hermes", "llm:custom"))
+def test_direct_construction_rejects_percent_escaped_operator_authorities(provider_id: str, endpoint: str) -> None:
+    with pytest.raises(ValueError, match="operator endpoint"):
+        ServiceConnection(
+            schema_version=1,
+            provider_id=provider_id,
+            connection_id=CONNECTION_ID,
+            label="Plain authority",
+            model="model",
+            endpoint=endpoint,
+            auth_mode="api_key" if provider_id == "llm:custom" else None,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+
+
 @pytest.mark.parametrize("endpoint", MALFORMED_OPERATOR_ENDPOINTS)
 @pytest.mark.parametrize("provider_id", ("llm:hermes", "llm:custom"))
 def test_create_rejects_non_ascii_or_malformed_operator_uri_syntax(provider_id: str, endpoint: str) -> None:

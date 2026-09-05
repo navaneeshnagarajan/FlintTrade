@@ -98,7 +98,7 @@ def _has_valid_uri_component_syntax(value: str, *, allowed_characters: frozenset
 
 
 def _has_valid_uri_authority(authority: str) -> bool:
-    if not authority or "@" in authority:
+    if not authority or "@" in authority or "%" in authority:
         return False
     if authority.startswith("["):
         closing_bracket = authority.find("]")
