@@ -2808,6 +2808,47 @@ def test_failed_new_connect_preserves_a_prior_working_execution_default(client, 
     assert app.config["BROKER_ROUTER"].default_selector == "upstox:PRIMARY1"
 
 
+def test_native_workspace_transaction_uses_public_generation_and_preserves_service_cas(tmp_path, monkeypatch):
+    from flinttrade_core import native_account_routes as routes
+    from flinttrade_core.workspace import Workspace
+    from flinttrade_core.workspace_migrations import compare_and_swap_workspace, read_workspace_snapshot
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    Workspace(tmp_path).initialise()
+    mutation = routes._register_selector_in_workspace("upstox", "FIXTURE", "operator", True)
+    registered = read_workspace_snapshot(tmp_path)
+    assert registered.version.generation == 2
+    assert registered.config["broker_authority_generation"] == 2
+    assert mutation.workspace_generation == registered.version
+
+    def service_edit(config):
+        config["services"]["connection_epoch"] = 1
+    service = compare_and_swap_workspace(tmp_path, registered.version, service_edit)
+    assert service.version.generation == 3
+    assert service.config["broker_authority_generation"] == 2
+    assert routes._rollback_selector_workspace(mutation) is None
+    assert read_workspace_snapshot(tmp_path).version == service.version
+    assert "upstox:FIXTURE" in service.config["brokers"]["registered"]
+
+
+def test_native_noop_and_conditional_rollback_have_exact_counter_effects(tmp_path, monkeypatch):
+    from flinttrade_core import native_account_routes as routes
+    from flinttrade_core.workspace import Workspace
+    from flinttrade_core.workspace_migrations import read_workspace_snapshot
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    Workspace(tmp_path).initialise()
+    mutation = routes._register_selector_in_workspace("upstox", "FIXTURE", "operator", True)
+    before_noop = read_workspace_snapshot(tmp_path)
+    routes._register_selector_in_workspace("upstox", "FIXTURE", "operator", True)
+    assert read_workspace_snapshot(tmp_path).version == before_noop.version
+    rolled_back = routes._rollback_selector_workspace(mutation)
+    assert rolled_back.generation == 3
+    after = read_workspace_snapshot(tmp_path)
+    assert after.config["broker_authority_generation"] == 3
+    assert "upstox:FIXTURE" not in after.config["brokers"]["registered"]
+
+
 def test_failed_connect_rollback_preserves_unrelated_concurrent_workspace_edit(client, monkeypatch):
     """Rollback removes only this connect's selector, ACL, and default mutation."""
     c, _app, tmp_path = client
@@ -3689,9 +3730,12 @@ def test_connect_router_publication_failure_rolls_back_vault_workspace_and_sessi
 
     workspace_path = tmp_path / "workspace.json"
     assert workspace_path.exists()
-    assert json.loads(workspace_path.read_text(encoding="utf-8")) == default_workspace_config(
-        initialized=True
-    )
+    restored = json.loads(workspace_path.read_text(encoding="utf-8"))
+    assert restored.pop("workspace_generation") == 3
+    assert restored.pop("broker_authority_generation") == 3
+    from uuid import UUID
+    assert UUID(restored.pop("workspace_instance_id")).version == 4
+    assert restored == default_workspace_config(initialized=True)
 
 
 def test_connect_registry_publication_failure_rolls_back_durable_state(client, monkeypatch):

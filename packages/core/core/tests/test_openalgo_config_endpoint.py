@@ -261,6 +261,46 @@ def test_openalgo_config_hot_reload_reconfigures_the_shared_client_in_place(monk
     assert shared_client._base == "https://openalgo.example:5443/api/v1"
 
 
+def test_openalgo_key_reload_drains_old_router_before_reconfiguring_and_rebinds(monkeypatch, tmp_path):
+    from flinttrade_core import app as app_module
+    from flinttrade_core.workspace import Workspace
+    from flinttrade_core.openalgo_client import OpenAlgoClient
+    from flinttrade_core.config import Settings
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "fixture-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password")
+    workspace = Workspace(tmp_path)
+    workspace.initialise()
+    workspace.set("openalgo.api_key", "old-key")
+    shared = OpenAlgoClient(Settings(openalgo_api_key="old-key"))
+    app = app_module.create_flask_app(client=shared)
+    before_reconfigure = []
+    reconfigured = []
+    class Router:
+        def revoke_and_drain(self, **_kwargs):
+            before_reconfigure.append(shared.settings.openalgo_api_key)
+            return True
+    old_router = Router()
+    app.config["BROKER_ROUTER"] = old_router
+    original = shared.reconfigure
+    def reconfigure(settings):
+        reconfigured.append(app.config.get("BROKER_ROUTER"))
+        return original(settings)
+    monkeypatch.setattr(shared, "reconfigure", reconfigure)
+    replacement = object()
+    def rebuild(application, *_args):
+        application.config["BROKER_ROUTER"] = replacement
+        return True
+    monkeypatch.setattr(app_module, "configure_broker_router", rebuild)
+    response = app.test_client().post("/v1/config/openalgo", json={"api_key": "new-key"},
+        headers={"X-API-Key": "fixture-backend-key"})
+    assert response.status_code == 200
+    assert before_reconfigure == ["old-key"]
+    assert reconfigured == [None]
+    assert app.config["BROKER_ROUTER"] is replacement
+
+
 def test_openalgo_config_unauthenticated_remote_get_rejected_without_leaking_key(monkeypatch, tmp_path):
     """A non-loopback GET without credentials is refused before reading secrets."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))

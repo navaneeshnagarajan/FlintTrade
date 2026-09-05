@@ -134,6 +134,21 @@ def test_put_rejects_negative_rate(client):
     assert resp.status_code == 400
 
 
+def test_rejected_workspace_write_leaves_live_rate_limits_unchanged(app, client, tmp_path):
+    from flinttrade_core.workspace import Workspace
+
+    Workspace(tmp_path).initialise()
+    path = tmp_path / "workspace.json"
+    config = json.loads(path.read_text())
+    config["workspace_generation"] = (1 << 63) - 1
+    path.write_text(json.dumps(config))
+    before = path.read_bytes()
+    response = client.put("/v1/rate-limits", json={"broker_id": "openalgo", "order": 3})
+    assert response.status_code == 503
+    assert app.config["_TEST_LIMITER"]._rate("openalgo", "order") == 10.0
+    assert path.read_bytes() == before
+
+
 def test_put_requires_at_least_one_field(client):
     resp = client.put("/v1/rate-limits", json={"broker_id": "openalgo"})
     assert resp.status_code == 400

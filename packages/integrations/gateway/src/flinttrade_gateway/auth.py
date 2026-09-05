@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import logging
 import secrets
+import threading
 import time
+from functools import wraps
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, redirect, request
@@ -597,7 +599,25 @@ def get_rate_limits() -> Any:
     return jsonify({"status": "success", "limits": limits})
 
 
+def _rate_limit_generation_lease(handler: Any) -> Any:
+    """Serialise workspace broker mutation with app-owned generation rebuilds."""
+    @wraps(handler)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        from flinttrade_core.app import _broker_router_drain_timeout  # noqa: PLC0415
+
+        app = current_app._get_current_object()
+        lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+        if not lock.acquire(timeout=_broker_router_drain_timeout(app)):
+            return jsonify({"status": "error", "message": "Broker routing is busy"}), 503
+        try:
+            return handler(*args, **kwargs)
+        finally:
+            lock.release()
+    return wrapped
+
+
 @gateway_bp.route("/rate-limits", methods=["PUT"])
+@_rate_limit_generation_lease
 def update_rate_limits() -> Any:
     """Set a broker's order/data API rate limit (requests/sec; 0 = unlimited).
 
@@ -617,10 +637,8 @@ def update_rate_limits() -> Any:
     if order is None and data is None:
         return jsonify({"status": "error", "message": "provide at least one of order/data"}), 400
 
-    # Apply live to the running limiter (if any).
+    # Persist first: a rejected authority update must never alter live limits.
     limiter = _live_rate_limiter()
-    if limiter is not None:
-        limiter.apply_override(broker_id, order=order, data=data)
 
     # Persist as the permanent default in workspace.json.
     try:
@@ -643,9 +661,25 @@ def update_rate_limits() -> Any:
             brokers["rate_limits"] = overrides
             config["brokers"] = brokers
 
+        if "REGISTRY" in current_app.config:
+            from flinttrade_core.app import retire_broker_router_generation  # noqa: PLC0415
+
+            if not retire_broker_router_generation(current_app._get_current_object()):
+                return jsonify({"status": "error", "message": "Broker routing is busy"}), 503
         ws.update(update_override)
-    except Exception as exc:  # noqa: BLE001 - persistence is best-effort
-        logger.warning("Could not persist rate-limit override for %s: %s", broker_id, exc)
+    except Exception:  # noqa: BLE001 - rejected authority must stay fail-closed
+        logger.warning("Could not persist rate-limit override")
+        return jsonify({"status": "error", "message": "Rate-limit configuration unavailable"}), 503
+
+    if "REGISTRY" in current_app.config:
+        from flinttrade_core.app import configure_broker_router  # noqa: PLC0415
+
+        app = current_app._get_current_object()
+        if not configure_broker_router(app, _registry(), app.config.get("CREDENTIAL_STORE"), app.config.get("CLIENT")):
+            return jsonify({"status": "error", "message": "Broker routing unavailable"}), 503
+        limiter = _live_rate_limiter()
+    elif limiter is not None:
+        limiter.apply_override(broker_id, order=order, data=data)
 
     limits = limiter.snapshot() if limiter is not None else {}
     return jsonify({"status": "success", "limits": limits})

@@ -26,9 +26,7 @@ flow is limited to one unambiguous pending ``tokenId`` callback.
 from __future__ import annotations
 
 import concurrent.futures
-import copy
 import functools
-import hashlib
 import html
 import inspect
 import json
@@ -57,7 +55,13 @@ from flinttrade_gateway.log_safety import selector_ref
 from flinttrade_gateway.native_login import BROKER_LOGIN_RETRY_MESSAGE
 
 from .workspace import workspace_dir
-from .workspace_migrations import update_workspace_config
+from .workspace_migrations import (
+    WorkspaceVersion,
+    WorkspaceVersionConflict,
+    compare_and_swap_workspace,
+    read_workspace_snapshot,
+    update_workspace_config,
+)
 
 logger = logging.getLogger("flinttrade.native_accounts")
 
@@ -334,18 +338,6 @@ def _redacted_postback_snapshot(payload: Any) -> Any:
 
 
 @dataclass(frozen=True, slots=True)
-class _WorkspaceGeneration:
-    """Identity of one atomically replaced workspace.json generation."""
-
-    device: int
-    inode: int
-    size: int
-    modified_ns: int
-    changed_ns: int
-    digest: bytes
-
-
-@dataclass(frozen=True, slots=True)
 class _SelectorWorkspaceMutation:
     """Exact workspace fields introduced or changed by one selector action."""
 
@@ -357,7 +349,7 @@ class _SelectorWorkspaceMutation:
     added_actor: bool
     prior_default: str
     changed_default: bool
-    workspace_generation: _WorkspaceGeneration
+    workspace_generation: WorkspaceVersion
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,72 +397,40 @@ class _ExecutionDefaultMutation:
     prior_default: str
     applied_default: str
     changed: bool
-    workspace_generation: _WorkspaceGeneration
-
-
-def _workspace_file_generation(path: Any) -> _WorkspaceGeneration:
-    payload = path.read_bytes()
-    stat = path.stat()
-    return _WorkspaceGeneration(
-        device=int(stat.st_dev),
-        inode=int(stat.st_ino),
-        size=int(stat.st_size),
-        modified_ns=int(stat.st_mtime_ns),
-        changed_ns=int(stat.st_ctime_ns),
-        digest=hashlib.sha256(payload).digest(),
-    )
+    workspace_generation: WorkspaceVersion
 
 
 def _update_workspace_generation(
     updater: Any,
     *,
-    expected: _WorkspaceGeneration | None = None,
+    expected: WorkspaceVersion | None = None,
     require_existing: bool = False,
-) -> tuple[dict[str, Any], _WorkspaceGeneration] | None:
-    """Update workspace.json and capture/compare its generation under one lock."""
-    from .workspace_migrations import (  # noqa: PLC0415
-        WORKSPACE_VERSION,
-        _atomic_write,
-        _migration_lock,
-        default_workspace_config,
-    )
-
+) -> tuple[dict[str, Any], WorkspaceVersion] | None:
+    """Mutate through public CAS, preserving conditional rollback ownership."""
     target_dir = workspace_dir().expanduser().resolve()
-    path = target_dir / "workspace.json"
-    with _migration_lock(target_dir, wait=True):
-        existed = path.exists()
-        if require_existing and not existed:
-            return None
-        if expected is not None:
-            if not existed or _workspace_file_generation(path) != expected:
+    while True:
+        version = expected
+        if version is None:
+            snapshot = read_workspace_snapshot(target_dir)
+            version = snapshot.version
+            if require_existing and version is None:
                 return None
-        current = (
-            json.loads(path.read_text(encoding="utf-8"))
-            if existed
-            else default_workspace_config(initialized=True)
-        )
-        if current.get("version") != WORKSPACE_VERSION:
-            raise ValueError(
-                f"workspace update requires version {WORKSPACE_VERSION}; "
-                f"got {current.get('version')!r}"
-            )
-        candidate = copy.deepcopy(current)
-        updated = updater(candidate)
-        if updated is not None:
-            candidate = updated
-        if not isinstance(candidate, dict) or candidate.get("version") != WORKSPACE_VERSION:
-            raise ValueError("workspace updater must return the current-version configuration")
-        _atomic_write(path, json.dumps(candidate, indent=2, sort_keys=True))
-        return candidate, _workspace_file_generation(path)
+        try:
+            committed = compare_and_swap_workspace(target_dir, version, updater)
+        except WorkspaceVersionConflict:
+            if expected is not None:
+                return None
+            continue
+        assert committed.version is not None
+        return committed.as_dict(), committed.version
 
 
-def _workspace_generation_is_current(expected: _WorkspaceGeneration) -> bool:
-    from .workspace_migrations import _migration_lock  # noqa: PLC0415
-
-    target_dir = workspace_dir().expanduser().resolve()
-    path = target_dir / "workspace.json"
-    with _migration_lock(target_dir, wait=True):
-        return path.exists() and _workspace_file_generation(path) == expected
+def _workspace_generation_is_current(expected: WorkspaceVersion) -> bool:
+    try:
+        compare_and_swap_workspace(workspace_dir(), expected, lambda _config: None)
+    except WorkspaceVersionConflict:
+        return False
+    return True
 
 
 def _register_selector_in_workspace(
@@ -531,8 +491,8 @@ def _register_selector_in_workspace(
 def _rollback_selector_workspace(
     mutation: _SelectorWorkspaceMutation,
     *,
-    expected: _WorkspaceGeneration | None = None,
-) -> _WorkspaceGeneration | None:
+    expected: WorkspaceVersion | None = None,
+) -> WorkspaceVersion | None:
     """Undo one selector mutation only from its exact workspace generation."""
 
     def rollback(config: dict[str, Any]) -> dict[str, Any]:
@@ -671,7 +631,7 @@ def _demote_selector_as_execution_default(
 
 def _rollback_execution_default(
     mutation: _ExecutionDefaultMutation,
-) -> _WorkspaceGeneration | None:
+) -> WorkspaceVersion | None:
     """Restore a read-only demotion only from its exact workspace generation."""
     if not mutation.changed:
         return (
@@ -1809,7 +1769,7 @@ def _rollback_committed_candidate(
 ) -> None:
     """Restore every durable/runtime surface changed after candidate commit."""
     rollback_ok = True
-    workspace_generation: _WorkspaceGeneration | None = None
+    workspace_generation: WorkspaceVersion | None = None
     if execution_default_mutation is not None:
         try:
             workspace_generation = _rollback_execution_default(execution_default_mutation)

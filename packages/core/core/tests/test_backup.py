@@ -29,6 +29,8 @@ def _populate_workspace(ws: Path) -> None:
     ws.mkdir(parents=True, exist_ok=True)
     (ws / "workspace.json").write_text('{"theme": "graphite"}', encoding="utf-8")
     (ws / "api_analyzer.duckdb").write_bytes(b"\x00" * 16)
+    (ws / "data" / "bhavcopy" / "equity").mkdir(parents=True)
+    (ws / "data" / "bhavcopy" / "equity" / "cm05SEP2026bhav.csv").write_text("symbol,exchange\nFIXTURE,NSE\n", encoding="utf-8")
     audit = ws / "archive" / "audit"
     audit.mkdir(parents=True)
     (audit / "audit_2026-04-15.jsonl").write_text(
@@ -77,15 +79,14 @@ class TestCreateBackup:
             names = tar.getnames()
         assert not any("ticks" in n for n in names)
 
-    def test_create_includes_ticks_when_requested(self, tmp_path: Path) -> None:
+    def test_create_refuses_unclassified_ticks_when_requested(self, tmp_path: Path) -> None:
         ws = tmp_path / ".flinttrade"
         _populate_workspace(ws)
         bk = WorkspaceBackup(workspace_dir=ws)
         out = tmp_path / "backup.tar.gz"
-        bk.create_backup(out, include_ticks=True)
-        with tarfile.open(out, "r:gz") as tar:
-            names = tar.getnames()
-        assert any("ticks" in n for n in names)
+        with pytest.raises(BackupError, match="coordinated_restore_unavailable"):
+            bk.create_backup(out, include_ticks=True)
+        assert not out.exists()
 
     def test_create_excludes_secrets_and_credentials_by_default(self, tmp_path: Path) -> None:
         ws = tmp_path / ".flinttrade"
@@ -104,16 +105,14 @@ class TestCreateBackup:
         }
         assert forbidden.isdisjoint(names)
 
-    def test_create_can_include_credential_store_with_explicit_opt_in(self, tmp_path: Path) -> None:
+    def test_create_refuses_credential_store_opt_in_until_coordinated_backup(self, tmp_path: Path) -> None:
         ws = tmp_path / ".flinttrade"
         _populate_workspace(ws)
         bk = WorkspaceBackup(workspace_dir=ws)
         out = tmp_path / "backup.tar.gz"
-        bk.create_backup(out, include_credentials=True)
-        with tarfile.open(out, "r:gz") as tar:
-            names = set(tar.getnames())
-        assert ".flinttrade/credentials.db" in names
-        assert ".flinttrade/master_password" not in names
+        with pytest.raises(BackupError, match="coordinated_restore_unavailable"):
+            bk.create_backup(out, include_credentials=True)
+        assert not out.exists()
 
     def test_create_never_includes_live_order_reservation_state(self, tmp_path: Path) -> None:
         ws = tmp_path / ".flinttrade"
@@ -128,13 +127,13 @@ class TestCreateBackup:
             (ws / name).write_bytes(b"live-admission-state")
 
         out = tmp_path / "backup.tar.gz"
-        WorkspaceBackup(workspace_dir=ws).create_backup(out, include_credentials=True)
+        WorkspaceBackup(workspace_dir=ws).create_backup(out)
 
         with tarfile.open(out, "r:gz") as tar:
             names = {Path(name).name for name in tar.getnames()}
         assert runtime_files.isdisjoint(names)
 
-    def test_create_excludes_only_runtime_order_lifecycle_ledger(self, tmp_path: Path) -> None:
+    def test_create_refuses_unclassified_order_lifecycle_copies(self, tmp_path: Path) -> None:
         ws = tmp_path / ".flinttrade"
         _populate_workspace(ws)
         runtime_files = {
@@ -151,12 +150,9 @@ class TestCreateBackup:
             (ws / name).write_bytes(name.encode())
 
         out = tmp_path / "backup.tar.gz"
-        WorkspaceBackup(workspace_dir=ws).create_backup(out)
-
-        with tarfile.open(out, "r:gz") as tar:
-            names = set(tar.getnames())
-        assert {f".flinttrade/{name}" for name in runtime_files}.isdisjoint(names)
-        assert {f".flinttrade/{name}" for name in retained_files} <= names
+        with pytest.raises(BackupError, match="coordinated_restore_unavailable"):
+            WorkspaceBackup(workspace_dir=ws).create_backup(out)
+        assert not out.exists()
 
     def test_create_embeds_manifest(self, tmp_path: Path) -> None:
         ws = tmp_path / ".flinttrade"
@@ -250,8 +246,8 @@ class TestRestoreBackup:
         bk = WorkspaceBackup(workspace_dir=tmp_path / ".flinttrade")
         target = tmp_path / "restore"
         bk.restore_backup(archive, target_dir=target)
-        # workspace.json should have been restored somewhere under target.
-        restored = list(target.rglob("workspace.json"))
+        # Only non-authority market files are restored.
+        restored = list(target.rglob("cm05SEP2026bhav.csv"))
         assert len(restored) >= 1
 
     def test_restore_raises_if_archive_missing(self, tmp_path: Path) -> None:
@@ -317,7 +313,7 @@ class TestRestoreBackup:
             tar.addfile(overwrite, io.BytesIO(payload))
 
         with pytest.raises(BackupError, match="link or special"):
-            WorkspaceBackup(workspace_dir=tmp_path / ".flinttrade").restore_backup(
+            WorkspaceBackup(workspace_dir=tmp_path / "source" / ".flinttrade").restore_backup(
                 archive,
                 target_dir=tmp_path,
                 force=True,
@@ -348,7 +344,7 @@ class TestRestoreBackup:
             tar.addfile(overwrite, io.BytesIO(payload))
 
         with pytest.raises(BackupError, match="overlaps|unsafe existing path"):
-            WorkspaceBackup(workspace_dir=workspace).restore_backup(
+            WorkspaceBackup(workspace_dir=tmp_path / "source" / ".flinttrade").restore_backup(
                 archive,
                 target_dir=tmp_path,
                 force=True,
@@ -385,7 +381,7 @@ class TestRestoreBackup:
             tar.addfile(overwrite, io.BytesIO(payload))
 
         with pytest.raises(BackupError, match="unsafe existing path"):
-            WorkspaceBackup(workspace_dir=workspace).restore_backup(
+            WorkspaceBackup(workspace_dir=tmp_path / "source" / ".flinttrade").restore_backup(
                 archive,
                 target_dir=tmp_path,
                 force=True,
@@ -448,16 +444,14 @@ class TestRestoreBackup:
         live_ledger.parent.mkdir(parents=True)
         live_ledger.write_bytes(b"live-admission-state")
 
-        result = WorkspaceBackup(workspace_dir=target / ".flinttrade").restore_backup(
-            archive,
-            target_dir=target,
-            force=True,
-        )
+        with pytest.raises(BackupError, match="coordinated_restore_unavailable"):
+            WorkspaceBackup(workspace_dir=target / ".flinttrade").restore_backup(
+                archive, target_dir=target, force=True,
+            )
 
         assert live_ledger.read_bytes() == b"live-admission-state"
-        assert result["files_restored"] == 0
 
-    def test_restore_excludes_only_runtime_order_lifecycle_ledger(self, tmp_path: Path) -> None:
+    def test_restore_refuses_authority_and_unclassified_lifecycle_copies(self, tmp_path: Path) -> None:
         runtime_files = {
             "order-lifecycle.sqlite3",
             "order-lifecycle.sqlite3-journal",
@@ -483,19 +477,15 @@ class TestRestoreBackup:
         live_ledger = workspace / "order-lifecycle.sqlite3"
         live_ledger.write_bytes(b"live-order-state")
 
-        result = WorkspaceBackup(workspace_dir=workspace).restore_backup(
-            archive,
-            target_dir=target,
-            force=True,
-        )
+        with pytest.raises(BackupError, match="coordinated_restore_unavailable"):
+            WorkspaceBackup(workspace_dir=workspace).restore_backup(archive, target_dir=target, force=True)
 
         assert live_ledger.read_bytes() == b"live-order-state"
         assert not (workspace / "order-lifecycle.sqlite3-journal").exists()
         assert not (workspace / "order-lifecycle.sqlite3-shm").exists()
         assert not (workspace / "order-lifecycle.sqlite3-wal").exists()
         for name in retained_files:
-            assert (workspace / name).read_bytes() == f"archived:{name}".encode()
-        assert result["files_restored"] == len(retained_files)
+            assert not (workspace / name).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -538,7 +528,7 @@ class TestRoundtrip:
         """Files in workspace are faithfully recreated after restore."""
         ws = tmp_path / ".flinttrade"
         _populate_workspace(ws)
-        original_content = (ws / "workspace.json").read_text(encoding="utf-8")
+        original_content = (ws / "data" / "bhavcopy" / "equity" / "cm05SEP2026bhav.csv").read_text(encoding="utf-8")
 
         bk = WorkspaceBackup(workspace_dir=ws)
         archive = tmp_path / "backup.tar.gz"
@@ -547,6 +537,6 @@ class TestRoundtrip:
         target = tmp_path / "restored"
         bk.restore_backup(archive, target_dir=target)
 
-        restored_files = list(target.rglob("workspace.json"))
+        restored_files = list(target.rglob("cm05SEP2026bhav.csv"))
         assert len(restored_files) == 1
         assert restored_files[0].read_text(encoding="utf-8") == original_content

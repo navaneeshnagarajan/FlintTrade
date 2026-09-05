@@ -1217,6 +1217,21 @@ class TestWorkspaceLoadSave:
         assert reloaded.get("ui.theme") == "light"
         assert reloaded.get("llm.model") == "local-model"
 
+    def test_stale_complete_save_refuses_to_overwrite_a_newer_writer(self, tmp_path):
+        from flinttrade_core.workspace import Workspace
+
+        first = Workspace(home_dir=tmp_path / "ws")
+        first.initialise()
+        stale = Workspace(home_dir=tmp_path / "ws")
+        first.set("ui.theme", "light")
+        committed = first.config_path.read_bytes()
+
+        with pytest.raises(RuntimeError):
+            stale.save()
+
+        assert first.config_path.read_bytes() == committed
+        assert Workspace(home_dir=tmp_path / "ws").get("ui.theme") == "light"
+
     def test_failed_atomic_save_preserves_previous_workspace(self, tmp_path, monkeypatch):
         from flinttrade_core import workspace_migrations
         from flinttrade_core.workspace import Workspace
@@ -1273,11 +1288,12 @@ class TestWorkspaceLoadSave:
         d["version"] = "modified"
         assert ws.get("version") != "modified"
 
-    def test_corrupt_json_falls_back_to_defaults(self, tmp_path):
-        from flinttrade_core.workspace_migrations import WORKSPACE_VERSION
+    def test_corrupt_json_is_refused_without_overwriting(self, tmp_path):
+        import json
         from flinttrade_core.workspace import Workspace
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
         (ws_dir / "workspace.json").write_text("not valid json{{{")
-        ws = Workspace(home_dir=ws_dir)
-        assert ws.get("version") == WORKSPACE_VERSION  # fell back to current defaults
+        with pytest.raises(json.JSONDecodeError):
+            Workspace(home_dir=ws_dir)
+        assert (ws_dir / "workspace.json").read_text() == "not valid json{{{"

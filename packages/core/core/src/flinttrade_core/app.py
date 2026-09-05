@@ -1870,10 +1870,10 @@ def _snapshot_brokers_bak(brokers_config: dict[str, Any]) -> None:
     new-complete config — which is exactly when the operator needs it
     (contract §13.3).
     """
-    from .workspace_migrations import _atomic_write  # noqa: PLC0415
+    from .secure_file import write_secret_text  # noqa: PLC0415
 
     bak = _workspace_dir() / "workspace.brokers.bak.json"
-    _atomic_write(bak, json.dumps(brokers_config, indent=2))
+    write_secret_text(bak, json.dumps(brokers_config, indent=2))
 
 
 def _native_activation_checks(
@@ -2055,6 +2055,8 @@ def build_broker_router(
     on_adapters_activated: Callable[[dict[str, Any]], None] | None = None,
     write_admission: Callable[[bool, str], ContextManager[None]] | None = None,
     lifecycle_store: Any | None = None,
+    workspace_snapshot: Any | None = None,
+    workspace_path: Path | None = None,
 ) -> Any:
     """Construct a config-driven :class:`BrokerRouter` (contract §13 / §11.4).
 
@@ -2107,7 +2109,9 @@ def build_broker_router(
     )
 
     config = RoutingConfig.from_workspace(brokers_config)
-    session_provider = AuthenticatingSessionProvider(registry, config.account_acls)
+    session_provider = AuthenticatingSessionProvider(
+        registry, config.account_acls, workspace_snapshot=workspace_snapshot, workspace_path=workspace_path,
+    )
     gate = SafetyGate()
 
     resolved_adapters: dict[str, Any] = dict(adapters or {})
@@ -2404,10 +2408,18 @@ def configure_broker_router(
         brokers_cfg: dict[str, Any] | None = None
         build_error: Exception | None = None
         try:
-            from .workspace_migrations import default_workspace_config  # noqa: PLC0415
+            from .workspace_migrations import (  # noqa: PLC0415
+                default_workspace_config,
+                broker_workspace_version,
+                read_workspace_snapshot,
+                run_migrations,
+            )
             from flinttrade_engine.local_state_provider import OrderLifecycleLedger  # noqa: PLC0415
 
-            brokers_cfg = _read_workspace_brokers()
+            target_workspace = _workspace_dir()
+            run_migrations(target_workspace)
+            workspace_snapshot = read_workspace_snapshot(target_workspace)
+            brokers_cfg = workspace_snapshot.as_dict().get("brokers")
             effective_brokers = brokers_cfg or default_workspace_config()["brokers"]
             candidate_smart_routing = dict(effective_brokers.get("smart_routing") or {})
             native_attest_ok, native_has_credentials = _native_activation_checks(credential_store)
@@ -2438,6 +2450,8 @@ def configure_broker_router(
                 on_adapters_activated=candidate_active_adapters.update,
                 write_admission=write_admission,
                 lifecycle_store=local_state_provider,
+                workspace_snapshot=workspace_snapshot,
+                workspace_path=target_workspace,
             )
             candidate_reconcile_targets = _build_reconcile_targets_provider(
                 registry,
@@ -2461,6 +2475,22 @@ def configure_broker_router(
                     "~/.flinttrade/workspace.brokers.bak.json",
                     build_error,
                 )
+            return False
+
+        # Every session resolved by the candidate is rebound to this exact global
+        # broker authority. Do not publish if any workspace writer raced the build.
+        try:
+            broker_authority_unchanged = (
+                broker_workspace_version(read_workspace_snapshot(target_workspace))
+                == broker_workspace_version(workspace_snapshot)
+            )
+        except Exception:
+            broker_authority_unchanged = False
+        if not broker_authority_unchanged:
+            logger.warning("BrokerRouter candidate discarded because workspace changed during rebuild")
+            app.config["NATIVE_ADAPTERS"] = {}
+            app.config["ACTIVE_BROKER_ADAPTERS"] = {}
+            app.config["RECONCILE_TARGETS"] = None
             return False
 
         if not app.config.get("RUNTIME_ACCEPTING_REQUESTS", True):
@@ -4663,7 +4693,13 @@ def create_flask_app(
         @wraps(handler)
         def serialised(*args: Any, **kwargs: Any) -> Any:
             with openalgo_config_lock:
-                return handler(*args, **kwargs)
+                rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+                if not rebuild_lock.acquire(timeout=_broker_router_drain_timeout(app)):
+                    return jsonify({"status": "error", "message": "Broker routing is busy"}), 503
+                try:
+                    return handler(*args, **kwargs)
+                finally:
+                    rebuild_lock.release()
 
         return serialised
 
@@ -4843,6 +4879,12 @@ def create_flask_app(
                 config["openalgo"] = openalgo
                 candidate["settings"] = Settings.from_workspace_data(config)
 
+            # Validate before retiring a working router. The actual updater
+            # re-derives settings under workspace CAS from the latest state.
+            update_openalgo(ws.as_dict())
+            broker_change_requested = has_api_key or has_host or has_port or has_ws_port
+            if broker_change_requested and not retire_broker_router_generation(app):
+                return jsonify({"status": "error", "message": "Broker routing could not drain"}), 503
             ws.update(update_openalgo)
             candidate_settings = candidate["settings"]
         except (TypeError, ValueError):
@@ -4883,7 +4925,7 @@ def create_flask_app(
                 new_client = OpenAlgoClient(new_settings)
             app.config["CLIENT"] = new_client
             app.config["OPENALGO_CLIENT"] = new_client
-            if old_client is not new_client:
+            if broker_change_requested or old_client is not new_client:
                 configure_broker_router(app, registry, credential_store, new_client)
         except Exception as exc:
             diagnostic = _sanitise_tick_capture_error(exc, api_key)

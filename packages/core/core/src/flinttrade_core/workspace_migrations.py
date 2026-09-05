@@ -18,16 +18,20 @@ import secrets
 import stat
 import tempfile
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
+from uuid import UUID, uuid4
 
 from filelock import FileLock, Timeout as FileLockTimeout
 
 from .secure_file import (
     PendingDurableUnlinkError,
+    assert_hardened,
     cleanup_pending_unlink,
     durable_replace,
     durable_unlink,
@@ -37,7 +41,9 @@ from .secure_file import (
 
 logger = logging.getLogger("flinttrade.core.workspace_migrations")
 
-WORKSPACE_VERSION = "1.2.0"
+WORKSPACE_VERSION = "1.3.0"
+INT64_MAX = (1 << 63) - 1
+_AUTHORITY_FIELDS = ("workspace_instance_id", "workspace_generation", "broker_authority_generation")
 _LLM_API_KEY_REF = "secret://llm/api_key"
 _LMSTUDIO_DEFAULT_HOSTS = {
     "",
@@ -60,10 +66,120 @@ class AtomicWriteRetryExhaustedError(RuntimeError):
     """Raised when a transient atomic rename lock does not clear."""
 
 
+class WorkspaceVersionConflict(RuntimeError):
+    """The expected workspace incarnation/generation is no longer current."""
+
+
+@dataclass(frozen=True)
+class WorkspaceVersion:
+    """Complete provenance for one persisted workspace revision."""
+
+    instance_id: UUID
+    generation: int
+
+
+@dataclass(frozen=True)
+class BrokerWorkspaceVersion:
+    """Workspace incarnation and broker-only authority revision."""
+
+    instance_id: UUID
+    generation: int
+
+
+def _freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        if any(type(key) is not str for key in value):
+            raise TypeError("workspace configuration keys must be strings")
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, list | tuple):
+        return tuple(_freeze(item) for item in value)
+    if value is None or type(value) in (str, int, float, bool):
+        return value
+    raise TypeError("workspace configuration must contain JSON-compatible values")
+
+
+def _thaw(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw(item) for item in value]
+    return value
+
+
+@dataclass(frozen=True)
+class WorkspaceSnapshot:
+    """Deeply immutable configuration and its conditional-write version."""
+
+    config: Mapping[str, object]
+    version: WorkspaceVersion | None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "config", _freeze(dict(self.config)))
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a detached mutable configuration for an explicit edit."""
+        return _thaw(self.config)
+
+
+def _default_services() -> dict[str, Any]:
+    return {"connection_epoch": 0, "connections": [], "routing": {}, "budgets": {}, "access_grants": {}}
+
+
+def _validate_current(config: Any) -> None:
+    if not isinstance(config, dict) or config.get("version") != WORKSPACE_VERSION:
+        raise ValueError("workspace requires the current schema version")
+    identity = config.get("workspace_instance_id")
+    try:
+        valid_identity = type(identity) is str and str(UUID(identity)) == identity
+    except (ValueError, AttributeError):
+        valid_identity = False
+    if not valid_identity:
+        raise ValueError("workspace_instance_id must be a canonical UUID")
+    for field in ("workspace_generation", "broker_authority_generation"):
+        value = config.get(field)
+        if type(value) is not int or not 1 <= value <= INT64_MAX:
+            raise ValueError(f"{field} must be an integer in 1..INT64_MAX")
+    services = config.get("services")
+    if type(services) is not dict:
+        raise ValueError("workspace services must be an object")
+    epoch = services.get("connection_epoch")
+    if type(epoch) is not int or not 0 <= epoch <= INT64_MAX:
+        raise ValueError("services.connection_epoch must be an integer in 0..INT64_MAX")
+    for key, empty in _default_services().items():
+        if type(services.get(key)) is not type(empty):
+            raise ValueError(f"services.{key} has an invalid shape")
+
+
+def _version(config: dict[str, Any]) -> WorkspaceVersion:
+    return WorkspaceVersion(UUID(config["workspace_instance_id"]), config["workspace_generation"])
+
+
+def broker_workspace_version(snapshot: WorkspaceSnapshot) -> BrokerWorkspaceVersion | None:
+    """Return broker liveness authority without treating unrelated edits as revocation."""
+    if snapshot.version is None:
+        return None
+    return BrokerWorkspaceVersion(snapshot.version.instance_id, snapshot.config["broker_authority_generation"])
+
+
+def _broker_authority(config: dict[str, Any]) -> str:
+    openalgo = copy.deepcopy(config.get("openalgo"))
+    if isinstance(openalgo, dict):
+        # This legacy location stores global Telegram metadata, not broker setup.
+        openalgo.pop("telegram_username", None)
+    return json.dumps([config.get("brokers"), openalgo], sort_keys=True, allow_nan=False)
+
+
+def _mint_authority(config: dict[str, Any]) -> None:
+    if any(field in config for field in _AUTHORITY_FIELDS):
+        raise ValueError("workspace authority fields are server-owned")
+    config.update(workspace_instance_id=str(uuid4()), workspace_generation=1, broker_authority_generation=1)
+
+
 def default_workspace_config(*, initialized: bool = False) -> dict[str, Any]:
     """Return a fresh workspace config at the current schema version."""
     return {
         "version": WORKSPACE_VERSION,
+        "services": _default_services(),
         "initialized": initialized,
         "markets": [],
         "modules": {
@@ -150,20 +266,79 @@ def _migration_lock(
         ) from exc
 
 
-def write_workspace_config(workspace_dir: Path, config: dict[str, Any]) -> dict[str, Any]:
-    """Atomically replace the current-version workspace under the process lock."""
+def read_workspace_snapshot(workspace_dir: Path) -> WorkspaceSnapshot:
+    """Read and validate an immutable snapshot under the workspace process lock."""
     workspace_dir = workspace_dir.expanduser().resolve()
-    candidate = copy.deepcopy(config)
-    if candidate.get("version") != WORKSPACE_VERSION:
-        raise ValueError(
-            f"workspace write requires version {WORKSPACE_VERSION}; got {candidate.get('version')!r}"
-        )
     with _migration_lock(workspace_dir, wait=True):
-        _atomic_write(
-            workspace_dir / "workspace.json",
-            json.dumps(candidate, indent=2, sort_keys=True),
-        )
-    return candidate
+        if not (workspace_dir / "workspace.json").exists():
+            return WorkspaceSnapshot(default_workspace_config(initialized=True), None)
+        current = _run_migrations_locked(workspace_dir)
+        return WorkspaceSnapshot(current, _version(current))
+
+
+def _commit_update_locked(
+    workspace_dir: Path,
+    current: dict[str, Any] | None,
+    updater: Callable[[dict[str, Any]], dict[str, Any] | None],
+) -> WorkspaceSnapshot:
+    candidate = copy.deepcopy(current) if current is not None else default_workspace_config(initialized=True)
+    updated = updater(candidate)
+    if updated is not None:
+        candidate = updated
+    if not isinstance(candidate, dict) or candidate.get("version") != WORKSPACE_VERSION:
+        raise ValueError("workspace updater must return the current-version configuration")
+    if current is None:
+        _mint_authority(candidate)
+    else:
+        for field in _AUTHORITY_FIELDS:
+            if type(candidate.get(field)) is not type(current[field]) or candidate.get(field) != current[field]:
+                raise ValueError("workspace authority fields are server-owned")
+        _validate_current(candidate)
+        if json.dumps(candidate, sort_keys=True, allow_nan=False) == json.dumps(current, sort_keys=True, allow_nan=False):
+            return WorkspaceSnapshot(current, _version(current))
+        candidate["workspace_generation"] = current["workspace_generation"] + 1
+        if _broker_authority(candidate) != _broker_authority(current):
+            candidate["broker_authority_generation"] = current["broker_authority_generation"] + 1
+    _validate_current(candidate)
+    _atomic_write(workspace_dir / "workspace.json", json.dumps(candidate, indent=2, sort_keys=True, allow_nan=False))
+    return WorkspaceSnapshot(candidate, _version(candidate))
+
+
+def compare_and_swap_workspace(
+    workspace_dir: Path,
+    expected_version: WorkspaceVersion | None,
+    updater: Callable[[dict[str, object]], dict[str, object] | None],
+) -> WorkspaceSnapshot:
+    """Commit only against the exact workspace version; None admits only absence."""
+    if expected_version is not None and (
+        type(expected_version) is not WorkspaceVersion
+        or type(expected_version.instance_id) is not UUID
+        or type(expected_version.generation) is not int
+        or not 1 <= expected_version.generation <= INT64_MAX
+    ):
+        raise ValueError("expected version must contain an exact UUID and integer generation")
+    workspace_dir = workspace_dir.expanduser().resolve()
+    with _migration_lock(workspace_dir, wait=True):
+        exists = (workspace_dir / "workspace.json").exists()
+        if expected_version is None and exists:
+            raise WorkspaceVersionConflict("workspace already exists")
+        if expected_version is not None and not exists:
+            raise WorkspaceVersionConflict("workspace no longer exists")
+        current = json.loads((workspace_dir / "workspace.json").read_text(encoding="utf-8")) if exists else None
+        if exists:
+            if isinstance(current, dict) and isinstance(current.get("version"), str) and current["version"] in MIGRATIONS:
+                raise WorkspaceVersionConflict("workspace schema changed")
+            _validate_current(current)
+        if current is not None and _version(current) != expected_version:
+            raise WorkspaceVersionConflict("workspace version changed")
+        return _commit_update_locked(workspace_dir, current, updater)
+
+
+def write_workspace_config(
+    workspace_dir: Path, config: dict[str, Any], *, expected_version: WorkspaceVersion | None,
+) -> dict[str, Any]:
+    """Conditionally replace a complete configuration with authority-owned counters."""
+    return compare_and_swap_workspace(workspace_dir, expected_version, lambda _current: copy.deepcopy(config)).as_dict()
 
 
 def update_workspace_config(
@@ -172,24 +347,9 @@ def update_workspace_config(
 ) -> dict[str, Any]:
     """Read-modify-write workspace.json atomically without stale-snapshot loss."""
     workspace_dir = workspace_dir.expanduser().resolve()
-    workspace_path = workspace_dir / "workspace.json"
     with _migration_lock(workspace_dir, wait=True):
-        if workspace_path.exists():
-            current = json.loads(workspace_path.read_text(encoding="utf-8"))
-        else:
-            current = default_workspace_config(initialized=True)
-        if current.get("version") != WORKSPACE_VERSION:
-            raise ValueError(
-                f"workspace update requires version {WORKSPACE_VERSION}; got {current.get('version')!r}"
-            )
-        candidate = copy.deepcopy(current)
-        updated = updater(candidate)
-        if updated is not None:
-            candidate = updated
-        if not isinstance(candidate, dict) or candidate.get("version") != WORKSPACE_VERSION:
-            raise ValueError("workspace updater must return the current-version configuration")
-        _atomic_write(workspace_path, json.dumps(candidate, indent=2, sort_keys=True))
-        return candidate
+        current = _run_migrations_locked(workspace_dir) if (workspace_dir / "workspace.json").exists() else None
+        return _commit_update_locked(workspace_dir, current, updater).as_dict()
 
 
 def _safe_unlink(path: Path) -> None:
@@ -331,7 +491,22 @@ def _migrate_110_to_120(cfg: dict[str, Any]) -> dict[str, Any]:
         llm["api_key_ref"] = ""
         llm["api_key_provider"] = ""
         llm["api_key_destination"] = ""
-    cfg["version"] = WORKSPACE_VERSION
+    cfg["version"] = "1.2.0"
+    return cfg
+
+
+def _migrate_120_to_130(cfg: dict[str, Any]) -> dict[str, Any]:
+    services = cfg.get("services", {})
+    if type(services) is not dict:
+        raise ValueError("legacy services must be an object")
+    services = copy.deepcopy(services)
+    for key, empty in _default_services().items():
+        if key in services and (type(services[key]) is not type(empty) or services[key] != empty):
+            raise ValueError(f"legacy services.{key} collides with reserved schema")
+        services[key] = empty
+    _mint_authority(cfg)
+    cfg["services"] = services
+    cfg["version"] = "1.3.0"
     return cfg
 
 
@@ -351,7 +526,8 @@ MIGRATIONS: dict[str, tuple[str, Migration]] = {
     "0.5.0": ("0.5.2", _migrate_050_to_052),
     "0.5.2": ("1.0.0", _migrate_052_to_100),
     "1.0.0": ("1.1.0", _migrate_100_to_110),
-    "1.1.0": (WORKSPACE_VERSION, _migrate_110_to_120),
+    "1.1.0": ("1.2.0", _migrate_110_to_120),
+    "1.2.0": ("1.3.0", _migrate_120_to_130),
 }
 
 KNOWN_VERSIONS: set[str] = {WORKSPACE_VERSION, *MIGRATIONS.keys()}
@@ -399,12 +575,26 @@ def _atomic_write(path: Path, content: str | bytes) -> None:
 
 
 def _assert_backup_safe(backup_path: Path) -> None:
-    if not backup_path.exists():
+    if not backup_path.exists() and not backup_path.is_symlink():
         return
     try:
-        json.loads(backup_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+        payload = read_owner_owned_text(backup_path, max_bytes=16 * 1024 * 1024)
+        json.loads(payload)
+        if not assert_hardened(backup_path)[0]:
+            # Replace safely rather than chmod a caller-swappable pathname.
+            _atomic_write(backup_path, payload)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise MigrationLockError(f"existing migration backup is corrupt: {backup_path}") from exc
+
+
+def _protect_legacy_backups(workspace_dir: Path) -> None:
+    allowed = {f"workspace.{version}.bak.json" for version in MIGRATIONS}
+    for path in workspace_dir.glob("workspace.*.bak.json"):
+        if path.name == "workspace.brokers.bak.json":
+            continue  # Separate legacy broker-config rollback owner.
+        if path.name not in allowed:
+            raise MigrationLockError("unrecognised workspace rollback filename")
+        _assert_backup_safe(path)
 
 
 def _path_is_reparse(path_stat: os.stat_result) -> bool:
@@ -639,69 +829,98 @@ def _recover_staged_lmstudio_secret(workspace_dir: Path, cfg: dict[str, Any]) ->
 
 
 def run_migrations(workspace_dir: Path) -> dict[str, Any]:
-    """Read, migrate, and atomically write workspace.json.
-
-    Missing workspace.json is treated as a fresh install: the current default
-    config is written at WORKSPACE_VERSION and returned.
-    """
+    """Read, migrate, and atomically persist under the workspace process lock."""
     workspace_dir = workspace_dir.expanduser().resolve()
-    workspace_path = workspace_dir / "workspace.json"
-
     with _migration_lock(workspace_dir, wait=True):
-        if not workspace_path.exists():
-            cfg = default_workspace_config(initialized=True)
-            _atomic_write(workspace_path, json.dumps(cfg, indent=2, sort_keys=True))
-            return cfg
+        return _run_migrations_locked(workspace_dir)
 
-        on_disk_cfg = json.loads(workspace_path.read_text(encoding="utf-8"))
-        current = on_disk_cfg.get("version", "0.1.0-alpha")
-        if current not in KNOWN_VERSIONS:
-            raise ValueError(
-                f"workspace.json declares version {current!r}, but this installation only "
-                f"knows {sorted(KNOWN_VERSIONS)}. refusing to overwrite — this looks like a downgrade attempt."
-            )
 
-        _recover_staged_lmstudio_secret(workspace_dir, on_disk_cfg)
+def _run_migrations_locked(workspace_dir: Path) -> dict[str, Any]:
+    """Migration transaction; the caller already owns the cross-process lock."""
+    workspace_path = workspace_dir / "workspace.json"
+    if not workspace_path.exists():
+        return _commit_update_locked(workspace_dir, None, lambda _config: None).as_dict()
 
-        if current == WORKSPACE_VERSION:
-            return on_disk_cfg
-
-        backup_path = workspace_dir / f"workspace.{current}.bak.json"
-        _assert_backup_safe(backup_path)
-        _atomic_write(backup_path, json.dumps(on_disk_cfg, indent=2, sort_keys=True))
-        logger.info("workspace backup written: %s", backup_path)
-
-        cfg = copy.deepcopy(on_disk_cfg)
-        try:
-            while current != WORKSPACE_VERSION:
-                if current not in MIGRATIONS:
-                    raise ValueError(f"no migration registered from {current} to {WORKSPACE_VERSION}")
-                next_version, fn = MIGRATIONS[current]
-                cfg = fn(cfg)
-                current = next_version
-                logger.info("workspace migrated to %s", current)
-        except Exception:
-            _atomic_write(workspace_path, backup_path.read_text(encoding="utf-8"))
-            logger.exception("migration failed — on-disk workspace.json restored from %s", backup_path)
-            raise
-
-        if cfg.get("version") != WORKSPACE_VERSION:
-            raise RuntimeError(
-                f"migration ran but workspace.json did not reach {WORKSPACE_VERSION}; "
-                f"got {cfg.get('version')!r}. on-disk file unchanged."
-            )
-
-        staged_secret = (
-            _stage_lmstudio_secret_deletion(workspace_dir)
-            if _lmstudio_secret_is_bound(on_disk_cfg)
-            else None
+    on_disk_cfg = json.loads(workspace_path.read_text(encoding="utf-8"))
+    if not isinstance(on_disk_cfg, dict):
+        raise ValueError("workspace must be a JSON object")
+    current = on_disk_cfg.get("version", "0.1.0-alpha")
+    if not isinstance(current, str) or current not in KNOWN_VERSIONS:
+        raise ValueError(
+            f"workspace.json declares version {current!r}, but this installation only "
+            f"knows {sorted(KNOWN_VERSIONS)}. refusing to overwrite — this looks like a downgrade attempt."
         )
+
+    if current == WORKSPACE_VERSION:
+        _validate_current(on_disk_cfg)
+        _protect_legacy_backups(workspace_dir)
+        _recover_staged_lmstudio_secret(workspace_dir, on_disk_cfg)
+        return on_disk_cfg
+
+    _protect_legacy_backups(workspace_dir)
+    _recover_staged_lmstudio_secret(workspace_dir, on_disk_cfg)
+
+    backup_path = workspace_dir / f"workspace.{current}.bak.json"
+    _assert_backup_safe(backup_path)
+    _atomic_write(backup_path, json.dumps(on_disk_cfg, indent=2, sort_keys=True))
+    logger.info("workspace backup written: %s", backup_path)
+
+    cfg = copy.deepcopy(on_disk_cfg)
+    try:
+        while current != WORKSPACE_VERSION:
+            if current not in MIGRATIONS:
+                raise ValueError(f"no migration registered from {current} to {WORKSPACE_VERSION}")
+            next_version, fn = MIGRATIONS[current]
+            cfg = fn(cfg)
+            current = next_version
+            logger.info("workspace migrated to %s", current)
+    except Exception:
+        logger.exception("migration failed — on-disk workspace.json unchanged")
+        raise
+
+    if cfg.get("version") != WORKSPACE_VERSION:
+        raise RuntimeError(
+            f"migration ran but workspace.json did not reach {WORKSPACE_VERSION}; "
+            f"got {cfg.get('version')!r}. on-disk file unchanged."
+        )
+
+    _validate_current(cfg)
+    staged_secret = (
+        _stage_lmstudio_secret_deletion(workspace_dir)
+        if _lmstudio_secret_is_bound(on_disk_cfg)
+        else None
+    )
+    try:
+        _atomic_write(workspace_path, json.dumps(cfg, indent=2, sort_keys=True))
+        if staged_secret is not None:
+            _mark_lmstudio_retirement_committed(workspace_dir, staged_secret)
+    except Exception:
+        rollback_error: Exception | None = None
         try:
-            _atomic_write(workspace_path, json.dumps(cfg, indent=2, sort_keys=True))
-            if staged_secret is not None:
-                _mark_lmstudio_retirement_committed(workspace_dir, staged_secret)
+            _rollback_lmstudio_migration(
+                workspace_dir,
+                workspace_path,
+                backup_path,
+                cfg,
+                staged_secret,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface an unproven transaction
+            rollback_error = exc
+        if rollback_error is not None:
+            raise RuntimeError("workspace migration rollback could not be completed") from rollback_error
+        raise
+
+    if staged_secret is not None:
+        _, staged_path, journal_path = _retirement_paths(workspace_dir, staged_secret)
+        _assert_retirement_identity(staged_path, staged_secret)
+        try:
+            _safe_unlink(staged_path)
+        except PendingDurableUnlinkError as exc:
+            raise RuntimeError(
+                "workspace migration committed; staged secret cleanup is pending"
+            ) from exc
         except Exception:
-            rollback_error: Exception | None = None
+            rollback_error = None
             try:
                 _rollback_lmstudio_migration(
                     workspace_dir,
@@ -715,30 +934,5 @@ def run_migrations(workspace_dir: Path) -> dict[str, Any]:
             if rollback_error is not None:
                 raise RuntimeError("workspace migration rollback could not be completed") from rollback_error
             raise
-
-        if staged_secret is not None:
-            _, staged_path, journal_path = _retirement_paths(workspace_dir, staged_secret)
-            _assert_retirement_identity(staged_path, staged_secret)
-            try:
-                _safe_unlink(staged_path)
-            except PendingDurableUnlinkError as exc:
-                raise RuntimeError(
-                    "workspace migration committed; staged secret cleanup is pending"
-                ) from exc
-            except Exception:
-                rollback_error = None
-                try:
-                    _rollback_lmstudio_migration(
-                        workspace_dir,
-                        workspace_path,
-                        backup_path,
-                        cfg,
-                        staged_secret,
-                    )
-                except Exception as exc:  # noqa: BLE001 - surface an unproven transaction
-                    rollback_error = exc
-                if rollback_error is not None:
-                    raise RuntimeError("workspace migration rollback could not be completed") from rollback_error
-                raise
-            _safe_unlink(journal_path)
-        return cfg
+        _safe_unlink(journal_path)
+    return cfg

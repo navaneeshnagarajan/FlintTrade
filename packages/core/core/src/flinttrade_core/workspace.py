@@ -43,7 +43,10 @@ from .secure_file import (
 )
 from .workspace_migrations import (
     WORKSPACE_VERSION,
+    WorkspaceVersion,
+    WorkspaceVersionConflict,
     default_workspace_config,
+    read_workspace_snapshot,
     run_migrations,
     update_workspace_config,
     write_workspace_config,
@@ -1286,6 +1289,7 @@ class Workspace:
         else:
             self._home = workspace_dir().expanduser().resolve()
         self._config: dict[str, Any] = {}
+        self._version: WorkspaceVersion | None = None
         if self.config_path.exists():
             self._config = self.load()
 
@@ -1331,18 +1335,10 @@ class Workspace:
         """Load workspace.json from disk and run schema migrations."""
         if not self.config_path.exists():
             self.initialise()
-        try:
-            self._config = run_migrations(self.workspace_dir)
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.warning("Failed to load workspace.json: %s — using defaults", exc)
-            # deepcopy: _DEFAULT_CONFIG contains nested dicts ("ui", "modules",
-            # "storage", etc.). dict() does a shallow copy, so calls like
-            # ws.set("ui.theme", "light") would mutate the SHARED nested dict
-            # inside _DEFAULT_CONFIG itself — poisoning every subsequent
-            # Workspace() that initialises from defaults. Surfaced in CI as
-            # the test_get_dot_notation flake when pytest-randomly happened
-            # to schedule test_set_and_persist first.
-            self._config = copy.deepcopy(_DEFAULT_CONFIG)
+        run_migrations(self.workspace_dir)
+        snapshot = read_workspace_snapshot(self.workspace_dir)
+        self._config = snapshot.as_dict()
+        self._version = snapshot.version
         if self._config.get("version") != WORKSPACE_VERSION:
             raise RuntimeError(
                 f"workspace not migrated to {WORKSPACE_VERSION}; got {self._config.get('version')!r}"
@@ -1351,10 +1347,10 @@ class Workspace:
 
     def save(self, config: dict[str, Any] | None = None) -> None:
         """Atomically replace workspace.json with a complete configuration."""
-        if config is not None:
-            self._config = copy.deepcopy(config)
         self._home.mkdir(parents=True, exist_ok=True)
-        self._config = write_workspace_config(self.workspace_dir, self._config)
+        candidate = self._config if config is None else config
+        self._config = write_workspace_config(self.workspace_dir, candidate, expected_version=self._version)
+        self._version = WorkspaceVersion(uuid.UUID(self._config["workspace_instance_id"]), self._config["workspace_generation"])
 
     def initialise(self, config: dict[str, Any] | None = None) -> None:
         """First-time setup — create dirs, write default config.
@@ -1363,10 +1359,24 @@ class Workspace:
         config contains nested dicts that later ``set()`` calls would mutate
         in place — sharing those mutations across every Workspace instance.
         """
-        self._config = config or copy.deepcopy(_DEFAULT_CONFIG)
+        if config is not None:
+            self._config = copy.deepcopy(config)
+        elif self._version is None:
+            self._config = copy.deepcopy(_DEFAULT_CONFIG)
+        else:
+            # Onboarding may resume from a persisted, uninitialised workspace.
+            # Preserve its loaded identity/extensions; save still rejects staleness.
+            self._config = copy.deepcopy(self._config)
+        self._config.setdefault("services", default_workspace_config()["services"])
         self._config["initialized"] = True
         self.ensure_directories()
-        self.save()
+        try:
+            self.save()
+        except WorkspaceVersionConflict:
+            # Another first creator won; reload it without overwriting its choices.
+            if self._version is not None:
+                raise
+            self.load()
         logger.info("Workspace initialised at %s", self._home)
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -1393,6 +1403,7 @@ class Workspace:
             node[parts[-1]] = value
 
         self._config = update_workspace_config(self.workspace_dir, apply)
+        self._version = WorkspaceVersion(uuid.UUID(self._config["workspace_instance_id"]), self._config["workspace_generation"])
 
     def update(
         self,
@@ -1400,6 +1411,7 @@ class Workspace:
     ) -> dict[str, Any]:
         """Apply one caller-owned mutation to the latest workspace transaction."""
         self._config = update_workspace_config(self.workspace_dir, updater)
+        self._version = WorkspaceVersion(uuid.UUID(self._config["workspace_instance_id"]), self._config["workspace_generation"])
         return copy.deepcopy(self._config)
 
     def ensure_directories(self) -> None:

@@ -1,10 +1,9 @@
 """Workspace backup and restore.
 
-Creates compressed tar.gz archives of the FlintTrade workspace directory
-(resolved by :func:`flinttrade_core.workspace.workspace_dir`) containing
-``workspace.json``, DuckDB databases,
-audit logs, and config files.  Tick data (potentially large) is excluded
-unless *include_ticks* is set.
+Creates bounded tar.gz archives of registered historical bhavcopy CSVs.
+Workspace, credentials, installation security and live runtime state are
+excluded. Authority-bearing archives and all active-workspace restores are
+unavailable until a coordinated restore transaction exists.
 
 Backups store a ``manifest.json`` at the archive root so that restore and
 list operations can read metadata without extracting the full archive.
@@ -29,54 +28,61 @@ CLI::
 
 from __future__ import annotations
 
+import gzip
+import io
 import json
 import logging
 import os
 import stat
 import tarfile
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .backup_sensitivity import (
+    COORDINATED_RESTORE_UNAVAILABLE,
+    UnclassifiedArchivePath,
+    WorkspaceBackupSensitivity,
+)
+from .secure_file import durable_replace, harden
+
 logger = logging.getLogger("flinttrade.core.backup")
 
-# Patterns that are always excluded (even with include_ticks=False).
-_ALWAYS_EXCLUDE: frozenset[str] = frozenset({".git", "__pycache__"})
-
-# Sub-directory name patterns classified as "tick data" (large, optional).
-_TICK_DIRS: frozenset[str] = frozenset({"ticks", "tick_data", "questdb_data"})
-
-_PLAINTEXT_SECRET_FILENAMES: frozenset[str] = frozenset(
-    {
-        "master_password",
-        "api_key_pepper",
-        "jwt_secret",
-        "totp_install_key",
-    }
-)
-
-_CREDENTIAL_STORE_FILENAMES: frozenset[str] = frozenset(
-    {
-        "credentials.db",
-        "credentials.duckdb",
-    }
-)
-
-_RUNTIME_STATE_FILENAMES: frozenset[str] = frozenset(
-    {
-        "order-lifecycle.sqlite3",
-        "order-lifecycle.sqlite3-journal",
-        "order-lifecycle.sqlite3-shm",
-        "order-lifecycle.sqlite3-wal",
-        "order_exposure_reservations.sqlite",
-        "order_exposure_reservations.sqlite-journal",
-        "order_exposure_reservations.sqlite-shm",
-        "order_exposure_reservations.sqlite-wal",
-    }
-)
 
 _MANIFEST_FILENAME = "manifest.json"
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 50_000
+
+
+@contextmanager
+def open_backup_archive(path: Path) -> Iterator[tarfile.TarFile]:
+    """Read a gzip/tar through a bounded spool before interpreting any headers."""
+    with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024) as spool:
+        total = 0
+        try:
+            with gzip.open(path, "rb") as compressed:
+                while chunk := compressed.read(min(1024 * 1024, MAX_ARCHIVE_UNCOMPRESSED_BYTES - total + 1)):
+                    total += len(chunk)
+                    if total > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                        raise BackupError("Archive exceeds the decompressed size limit")
+                    spool.write(chunk)
+            spool.seek(0)
+            with tarfile.open(fileobj=spool, mode="r:") as archive:
+                seen: set[str] = set()
+                for count, member in enumerate(archive, start=1):
+                    if count > MAX_ARCHIVE_MEMBERS or member.size > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                        raise BackupError("Archive exceeds the member limit")
+                    if member.name in seen:
+                        raise BackupError("Archive contains duplicate members")
+                    seen.add(member.name)
+                    if member.sparse is not None or any(key.startswith("GNU.sparse") for key in member.pax_headers):
+                        raise BackupError("Archive contains unsupported sparse members")
+                yield archive
+        except (tarfile.TarError, EOFError, gzip.BadGzipFile) as exc:
+            raise BackupError("Archive is corrupt or invalid") from exc
 
 
 def _is_reparse_point(path_stat: os.stat_result) -> bool:
@@ -114,7 +120,7 @@ def _validated_restore_members(
         if "\\" in member.name or "\x00" in member.name:
             raise BackupError("Restore archive contains an unsafe member path")
         relative = PurePosixPath(member.name)
-        if relative.is_absolute() or not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        if relative.is_absolute() or not relative.parts or any(part in {"", ".", ".."} for part in member.name.split("/")):
             raise BackupError("Restore archive contains an unsafe member path")
         if relative.parts == (_MANIFEST_FILENAME,):
             if not member.isfile():
@@ -145,12 +151,6 @@ def _validated_restore_members(
     return admitted
 
 
-def _is_runtime_state_filename(name: str) -> bool:
-    return Path(name).name.casefold() in {
-        filename.casefold() for filename in _RUNTIME_STATE_FILENAMES
-    }
-
-
 class BackupError(Exception):
     """Raised when a backup or restore operation fails.
 
@@ -161,6 +161,16 @@ class BackupError(Exception):
     def __init__(self, message: str) -> None:
         self.message = message
         super().__init__(message)
+
+
+class CoordinatedRestoreUnavailable(BackupError):
+    """Authority snapshots/restores require the future coordinated transaction."""
+
+    code = COORDINATED_RESTORE_UNAVAILABLE
+    status_code = 503
+
+    def __init__(self) -> None:
+        super().__init__(self.code)
 
 
 class WorkspaceBackup:
@@ -202,10 +212,9 @@ class WorkspaceBackup:
     ) -> Path:
         """Create a tar.gz backup of the workspace directory.
 
-        Includes ``workspace.json``, DuckDB databases (``*.duckdb``),
-        audit log files (``*.jsonl``, ``*.jsonl.gz``), and general config
-        files.  Tick data directories are excluded unless *include_ticks*
-        is ``True``.
+        Includes only the composition-registered bhavcopy CSV family. All
+        authority and secret namespaces are pruned before traversal; unknown
+        paths fail closed. Live database and tick stores remain unavailable.
 
         A ``manifest.json`` is embedded at the archive root containing
         backup metadata (timestamp, version, file count, total size).
@@ -215,9 +224,8 @@ class WorkspaceBackup:
                 Parent directories are created if they do not exist.
             include_ticks: When ``True``, include tick data directories
                 (may be very large).  Defaults to ``False``.
-            include_credentials: When ``True``, include encrypted credential
-                database files such as ``credentials.db``. Plain-text secret
-                seed files are never included. Defaults to ``False``.
+            include_credentials: Reserved compatibility option. True raises
+                coordinated_restore_unavailable before collection.
 
         Returns:
             The resolved path to the created archive.
@@ -226,6 +234,8 @@ class WorkspaceBackup:
             BackupError: If the workspace directory does not exist or the
                 archive cannot be written.
         """
+        if include_credentials:
+            raise CoordinatedRestoreUnavailable
         if not self._workspace_dir.exists():
             raise BackupError(
                 f"Workspace directory does not exist: {self._workspace_dir}"
@@ -243,6 +253,8 @@ class WorkspaceBackup:
         except InstallationStateError as exc:
             raise BackupError(str(exc)) from exc
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._workspace_dir.resolve() in output_path.parents:
+            raise CoordinatedRestoreUnavailable
 
         files_to_backup = self._collect_files(
             include_ticks=include_ticks,
@@ -255,31 +267,38 @@ class WorkspaceBackup:
             include_credentials=include_credentials,
         )
 
-        # Write manifest to a temporary file so it can be added first.
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False, encoding="utf-8"
-        ) as tmp_manifest:
-            json.dump(manifest, tmp_manifest, indent=2, default=str)
-            tmp_manifest_path = Path(tmp_manifest.name)
-
+        descriptor, temporary = tempfile.mkstemp(prefix=".ordinary-backup-", suffix=".tar.gz", dir=output_path.parent)
+        os.close(descriptor)
+        staged = Path(temporary)
         try:
-            with tarfile.open(output_path, "w:gz") as tar:
-                # Embed manifest at archive root.
-                tar.add(tmp_manifest_path, arcname=_MANIFEST_FILENAME)
+            harden(staged)
+            with tarfile.open(staged, "w:gz") as tar:
+                payload = json.dumps(manifest, sort_keys=True).encode("utf-8")
+                header = tarfile.TarInfo(_MANIFEST_FILENAME)
+                header.size = len(payload)
+                header.mode = 0o600
+                tar.addfile(header, io.BytesIO(payload))
                 for file_path in files_to_backup:
-                    try:
-                        arcname = file_path.relative_to(
-                            self._workspace_dir.parent
-                        )
-                        tar.add(file_path, arcname=str(arcname))
-                    except Exception as exc:
-                        logger.warning(
-                            "Skipping file %s: %s", file_path, exc
-                        )
+                    fd = os.open(file_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+                    with os.fdopen(fd, "rb") as source:
+                        source_stat = os.fstat(source.fileno())
+                        if not stat.S_ISREG(source_stat.st_mode) or source_stat.st_nlink != 1:
+                            raise BackupError("Backup source is not an ordinary file")
+                        header = tarfile.TarInfo(file_path.relative_to(self._workspace_dir.parent).as_posix())
+                        header.mode = 0o600
+                        header.size = source_stat.st_size
+                        tar.addfile(header, source)
+            # Reopen the complete candidate using the same bounded reader as restore.
+            with open_backup_archive(staged) as archive:
+                _validated_restore_members(
+                    archive.getmembers(), target_dir=self._workspace_dir.parent,
+                    workspace_basename=self._workspace_dir.name, disjoint=assert_installation_state_disjoint,
+                )
+            durable_replace(staged, output_path)
         except Exception as exc:
-            raise BackupError(f"Failed to create backup archive: {exc}") from exc
+            raise BackupError("Failed to create ordinary backup archive") from exc
         finally:
-            tmp_manifest_path.unlink(missing_ok=True)
+            staged.unlink(missing_ok=True)
 
         size_mb = output_path.stat().st_size / (1024 * 1024)
         logger.info(
@@ -296,7 +315,7 @@ class WorkspaceBackup:
         target_dir: Path | None = None,
         force: bool = False,
     ) -> dict[str, Any]:
-        """Extract a backup archive to *target_dir*.
+        """Extract an ordinary archive into a proven disjoint non-authority tree.
 
         Args:
             backup_path: Path to a ``.tar.gz`` file created by
@@ -305,9 +324,8 @@ class WorkspaceBackup:
                 parent of the resolved workspace directory; the workspace
                 is restored under ``target_dir/<workspace-dir-name>/``
                 (``flinttrade`` on macOS/Windows, ``.flinttrade`` on Linux).
-            force: When ``True``, overwrite existing files without error.
-                When ``False`` (default) the restore fails if any target
-                file already exists.
+            force: Permit replacement of admitted non-authority files only.
+                This never permits authority or active-workspace restoration.
 
         Returns:
             Dict with:
@@ -327,6 +345,16 @@ class WorkspaceBackup:
         if target_dir is None:
             target_dir = self._workspace_dir.parent
         target_dir = target_dir.expanduser().resolve()
+        destination_workspace = target_dir / self._workspace_dir.name
+        from .workspace import workspace_dir  # noqa: PLC0415
+
+        for active_workspace in (self._workspace_dir.expanduser().resolve(), workspace_dir()):
+            if (
+                destination_workspace == active_workspace
+                or destination_workspace in active_workspace.parents
+                or active_workspace in destination_workspace.parents
+            ):
+                raise CoordinatedRestoreUnavailable
 
         try:
             from flinttrade_core.installation_state import (  # noqa: PLC0415
@@ -346,22 +374,31 @@ class WorkspaceBackup:
             raise BackupError(str(exc)) from exc
 
         try:
-            with tarfile.open(backup_path, "r:gz") as tar:
+            with open_backup_archive(backup_path) as tar:
                 members = tar.getmembers()
-                eligible_members = [
-                    member
-                    for member in members
-                    if not _is_runtime_state_filename(member.name)
-                ]
                 try:
                     restorable_members = _validated_restore_members(
-                        eligible_members,
+                        members,
                         target_dir=target_dir,
                         workspace_basename=self._workspace_dir.name,
                         disjoint=assert_installation_state_disjoint,
                     )
                 except InstallationStateError as exc:
                     raise BackupError(str(exc)) from exc
+
+                registry = WorkspaceBackupSensitivity(include_ticks=True)
+                for member in restorable_members:
+                    if member.name == _MANIFEST_FILENAME:
+                        continue
+                    relative = PurePosixPath(member.name)
+                    if len(relative.parts) == 1 and member.isdir():
+                        continue
+                    try:
+                        classification = registry.classify(PurePosixPath(*relative.parts[1:]), directory=member.isdir())
+                    except UnclassifiedArchivePath as exc:
+                        raise CoordinatedRestoreUnavailable from exc
+                    if classification == "excluded":
+                        raise CoordinatedRestoreUnavailable
 
                 if not force:
                     for member in restorable_members:
@@ -440,7 +477,7 @@ class WorkspaceBackup:
             }
             # Try to read embedded manifest.
             try:
-                with tarfile.open(archive_path, "r:gz") as tar:
+                with open_backup_archive(archive_path) as tar:
                     try:
                         member = tar.getmember(_MANIFEST_FILENAME)
                         f = tar.extractfile(member)
@@ -449,7 +486,7 @@ class WorkspaceBackup:
                             info.update(manifest)
                     except KeyError:
                         pass  # No manifest — older backup format.
-            except tarfile.TarError:
+            except (tarfile.TarError, BackupError):
                 info["error"] = "archive_corrupt"
             results.append(info)
 
@@ -533,32 +570,33 @@ class WorkspaceBackup:
         Returns:
             Sorted list of absolute :class:`~pathlib.Path` objects.
         """
+        if include_credentials:
+            raise CoordinatedRestoreUnavailable
+        registry = WorkspaceBackupSensitivity(include_ticks=include_ticks)
         collected: list[Path] = []
-        for item in self._workspace_dir.rglob("*"):
-            if not item.is_file():
-                continue
-
-            # Skip always-excluded patterns.
-            if any(part.startswith(".") and part != ".flinttrade" for part in item.parts):
-                continue
-            if any(part in _ALWAYS_EXCLUDE for part in item.parts):
-                continue
-            if item.suffix in (".pyc", ".pyo"):
-                continue
-            if item.name in _PLAINTEXT_SECRET_FILENAMES:
-                continue
-            if _is_runtime_state_filename(item.name):
-                continue
-            if not include_credentials and item.name in _CREDENTIAL_STORE_FILENAMES:
-                continue
-
-            # Optionally skip tick directories.
-            if not include_ticks:
-                if any(part in _TICK_DIRS for part in item.parts):
-                    continue
-
-            collected.append(item)
-
+        pending = [self._workspace_dir]
+        while pending:
+            directory = pending.pop()
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    item = Path(entry.path)
+                    relative = PurePosixPath(item.relative_to(self._workspace_dir).as_posix())
+                    is_directory = entry.is_dir(follow_symlinks=False)
+                    try:
+                        classification = registry.classify(relative, directory=is_directory)
+                    except UnclassifiedArchivePath as exc:
+                        raise CoordinatedRestoreUnavailable from exc
+                    if classification == "excluded":
+                        continue
+                    item_stat = entry.stat(follow_symlinks=False)
+                    if entry.is_symlink() or _is_reparse_point(item_stat):
+                        raise BackupError("Backup source contains an unsafe path")
+                    if is_directory:
+                        pending.append(item)
+                    elif stat.S_ISREG(item_stat.st_mode) and item_stat.st_nlink == 1:
+                        collected.append(item)
+                    else:
+                        raise BackupError("Backup source contains a non-regular file")
         return sorted(collected)
 
     def _build_manifest(
@@ -580,7 +618,6 @@ class WorkspaceBackup:
         total_bytes = sum(f.stat().st_size for f in files)
         return {
             "created_at": datetime.now(UTC).isoformat(),
-            "workspace_dir": str(self._workspace_dir),
             "file_count": len(files),
             "workspace_size_mb": round(total_bytes / (1024 * 1024), 3),
             "include_ticks": include_ticks,

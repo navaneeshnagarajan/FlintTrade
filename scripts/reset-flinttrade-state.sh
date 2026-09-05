@@ -21,6 +21,16 @@
 
 set -euo pipefail
 
+# Whole-authority copy/reset awaits the coordinated restore transaction.
+case "${1:-}" in
+    --help|-h)
+        printf '%s\n' 'Workspace reset is temporarily unavailable: coordinated_restore_unavailable'
+        exit 0
+        ;;
+esac
+printf '%s\n' 'coordinated_restore_unavailable' >&2
+exit 1
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 

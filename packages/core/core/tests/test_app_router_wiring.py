@@ -10,7 +10,6 @@ and leaves BROKER_ROUTER unset rather than bricking the app.
 from __future__ import annotations
 
 from collections.abc import Callable
-import json
 import threading
 from types import SimpleNamespace
 from typing import Any
@@ -43,6 +42,112 @@ def _mark_router_prerequisites_ready(app: Flask, *, admission: object | None = N
         ),
     )
     return guard
+
+
+@pytest.mark.parametrize("key,value,stales", [
+    ("services.connection_epoch", 1, False), ("llm.model", "fixture", False),
+    ("openalgo.telegram_username", "fixture-user", False),
+    ("brokers.execution.default", "openalgo:sibling", True),
+    ("brokers.registered", ["openalgo:default", "openalgo:sibling", "openalgo:new"], True),
+    ("brokers.account_acls.openalgo.default", ["operator", "another"], True),
+    ("brokers.data.ticks", "openalgo:sibling", True),
+    ("openalgo.api_key", "fixture-key", True), ("openalgo.host", "https://fixture.invalid", True),
+])
+def test_app_sessions_follow_broker_authority_and_rebind_every_sibling(tmp_path, monkeypatch, key, value, stales):
+    import flinttrade_core.app as app_module
+    from flinttrade_core.workspace import Workspace
+    from flinttrade_core.exceptions import SafetyBypassError
+    from flinttrade_engine.request_context import RequestContext
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    ws = Workspace(tmp_path)
+    ws.initialise()
+    def configure_accounts(config):
+        config["brokers"]["registered"] = ["openalgo:default", "openalgo:sibling"]
+        config["brokers"]["account_acls"] = {"openalgo": {"default": ["operator"], "sibling": ["operator"]}}
+    ws.update(configure_accounts)
+    app = Flask("workspace-liveness")
+    _mark_router_prerequisites_ready(app)
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
+    registry = BrokerRegistry()
+    client = object()
+    assert app_module.configure_broker_router(app, registry, None, client)
+    old = app.config["BROKER_ROUTER"]
+    context = RequestContext(jti="fixture", actor_type="human", actor_id="operator", mode="explore")
+    assert old._session_provider(context, "openalgo", "sibling").account_id == "sibling"
+
+    ws.set(key, value)
+    if not stales:
+        assert old._session_provider(context, "openalgo", "sibling").account_id == "sibling"
+        return
+    with pytest.raises(SafetyBypassError, match="workspace"):
+        old._session_provider(context, "openalgo", "sibling")
+    assert app_module.configure_broker_router(app, registry, None, client)
+    rebound = app.config["BROKER_ROUTER"]
+    assert rebound is not old
+    for account in ("default", "sibling"):
+        assert rebound._session_provider(context, "openalgo", account).account_id == account
+
+
+def test_rate_limit_endpoint_republishes_every_workspace_broker_session(tmp_path, monkeypatch):
+    import flinttrade_core.app as app_module
+    from flinttrade_core.workspace import Workspace
+    from flinttrade_engine.request_context import RequestContext
+    from flinttrade_gateway.auth import gateway_bp
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    ws = Workspace(tmp_path)
+    ws.initialise()
+    def accounts(config):
+        config["brokers"]["registered"] = ["openalgo:default", "openalgo:sibling"]
+        config["brokers"]["account_acls"] = {"openalgo": {"default": ["operator"], "sibling": ["operator"]}}
+    ws.update(accounts)
+    app = Flask("rate-limit-rebind")
+    app.register_blueprint(gateway_bp)
+    _mark_router_prerequisites_ready(app)
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
+    registry = BrokerRegistry()
+    client = object()
+    app.config.update(REGISTRY=registry, CREDENTIAL_STORE=None, CLIENT=client)
+    assert app_module.configure_broker_router(app, registry, None, client)
+    old = app.config["BROKER_ROUTER"]
+    response = app.test_client().put("/v1/rate-limits", json={"broker_id": "openalgo", "order": 3})
+    assert response.status_code == 200
+    rebound = app.config["BROKER_ROUTER"]
+    assert rebound is not old
+    context = RequestContext(jti="fixture", actor_type="human", actor_id="operator", mode="explore")
+    for account in ("default", "sibling"):
+        assert rebound._session_provider(context, "openalgo", account).account_id == account
+    assert rebound.rate_limiter.snapshot()["openalgo"]["order"] == 3.0
+    assert rebound._session_provider.broker_workspace_version.generation == 3
+
+
+@pytest.mark.parametrize("race,expected", [("service", True), ("broker", False), ("corrupt", False), ("removed", False)])
+def test_router_rebuild_rechecks_only_broker_authority_and_contains_read_failures(tmp_path, monkeypatch, race, expected):
+    import flinttrade_core.app as app_module
+    from flinttrade_core.workspace import Workspace
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    workspace = Workspace(tmp_path)
+    workspace.initialise()
+    app = Flask("rebuild-interleave")
+    _mark_router_prerequisites_ready(app)
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
+    original_build = app_module.build_broker_router
+    def racing_build(*args, **kwargs):
+        candidate = original_build(*args, **kwargs)
+        if race == "service":
+            workspace.set("services.connection_epoch", 1)
+        elif race == "broker":
+            workspace.set("brokers.execution.default", "")
+        elif race == "corrupt":
+            workspace.config_path.write_text("broken-json")
+        else:
+            workspace.config_path.unlink()
+        return candidate
+    monkeypatch.setattr(app_module, "build_broker_router", racing_build)
+    assert app_module.configure_broker_router(app, BrokerRegistry(), None, object()) is expected
+    assert (app.config.get("BROKER_ROUTER") is not None) is expected
 
 
 def _call_while_lock_is_held(lock: Any, callback: Callable[[], bool]) -> tuple[bool, list[bool]]:
@@ -1014,9 +1119,10 @@ def test_create_flask_app_keeps_routing_disabled_for_invalid_safety_config(
 ) -> None:
     from flinttrade_core.app import create_flask_app
 
-    workspace = default_workspace_config(initialized=True)
-    workspace.pop("safety")
-    (tmp_path / "workspace.json").write_text(json.dumps(workspace), encoding="utf-8")
+    from flinttrade_core.workspace import Workspace
+    workspace = Workspace(tmp_path)
+    workspace.initialise()
+    workspace.update(lambda config: config.pop("safety") and None)
     master_password = tmp_path / "master_password"
     master_password.write_text("invalid-safety-config-test-password", encoding="utf-8")
     master_password.chmod(0o600)

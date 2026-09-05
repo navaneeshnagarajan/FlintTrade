@@ -14,9 +14,15 @@ router stays workspace-agnostic.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from flinttrade_core.exceptions import SafetyBypassError
+from flinttrade_core.workspace_migrations import (
+    WorkspaceSnapshot,
+    broker_workspace_version,
+    read_workspace_snapshot,
+)
 from flinttrade_engine.request_context import RequestContext
 
 from .registry import BrokerRegistry
@@ -40,11 +46,29 @@ class AuthenticatingSessionProvider:
         self,
         registry: BrokerRegistry,
         account_acls: dict[str, dict[str, list[str]]],
+        *,
+        workspace_snapshot: WorkspaceSnapshot | None = None,
+        workspace_path: Path | None = None,
     ) -> None:
         self._registry = registry
         self._acls = account_acls
+        if (workspace_snapshot is None) != (workspace_path is None):
+            raise ValueError("workspace binding requires both snapshot and path")
+        if workspace_snapshot is not None and workspace_snapshot.version is None:
+            raise ValueError("workspace sessions require a persisted workspace")
+        # Ditto's pre-cutover local routing deliberately has no workspace binding.
+        self._workspace_path = workspace_path
+        self.workspace_version = workspace_snapshot.version if workspace_snapshot is not None else None
+        self.broker_workspace_version = broker_workspace_version(workspace_snapshot) if workspace_snapshot is not None else None
 
     def __call__(self, request_ctx: RequestContext, adapter_id: str, account_id: str) -> Any:
+        if self._workspace_path is not None:
+            try:
+                current = broker_workspace_version(read_workspace_snapshot(self._workspace_path))
+            except Exception as exc:
+                raise SafetyBypassError("broker workspace authority is unavailable") from exc
+            if current != self.broker_workspace_version:
+                raise SafetyBypassError("broker workspace authority changed; rebuild routing before session use")
         allowed_actors = self._acls.get(adapter_id, {}).get(account_id, [])
         if request_ctx.actor_id not in allowed_actors:
             raise SafetyBypassError(

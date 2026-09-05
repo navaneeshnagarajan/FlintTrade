@@ -56,6 +56,12 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# Refuse before credential checks, restic, directory creation or service changes.
+if [ "$LIST_ONLY" != true ] && [ "$DRY_RUN" != true ]; then
+    printf '%s\n' 'coordinated_restore_unavailable' >&2
+    exit 1
+fi
+
 # ── Preflight checks ──────────────────────────────────────────────────
 command -v restic >/dev/null 2>&1 || die "restic is not installed. Install from https://restic.net"
 

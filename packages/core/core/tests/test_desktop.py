@@ -1349,14 +1349,15 @@ def test_ensure_workspace_does_not_replace_corrupt_existing_config(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from json import JSONDecodeError
+
     config_path = tmp_path / "workspace.json"
     corrupt_content = '{"version": "1.1.0", "safety": '
     config_path.write_text(corrupt_content, encoding="utf-8")
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
 
-    workspace = desktop._ensure_workspace()
-
-    assert workspace.config_path == config_path
+    with pytest.raises(JSONDecodeError):
+        desktop._ensure_workspace()
     assert config_path.read_text(encoding="utf-8") == corrupt_content
 
 
