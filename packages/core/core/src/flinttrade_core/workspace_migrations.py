@@ -294,14 +294,20 @@ def _commit_update_locked(
             if type(candidate.get(field)) is not type(current[field]) or candidate.get(field) != current[field]:
                 raise ValueError("workspace authority fields are server-owned")
         _validate_current(candidate)
+        # Snapshot validation is stricter than JSON encoding (for example,
+        # JSON silently coerces integer mapping keys). Admit it before no-op
+        # comparison or any authority change can become durable.
+        WorkspaceSnapshot(candidate, _version(candidate))
         if json.dumps(candidate, sort_keys=True, allow_nan=False) == json.dumps(current, sort_keys=True, allow_nan=False):
             return WorkspaceSnapshot(current, _version(current))
         candidate["workspace_generation"] = current["workspace_generation"] + 1
         if _broker_authority(candidate) != _broker_authority(current):
             candidate["broker_authority_generation"] = current["broker_authority_generation"] + 1
     _validate_current(candidate)
-    _atomic_write(workspace_dir / "workspace.json", json.dumps(candidate, indent=2, sort_keys=True, allow_nan=False))
-    return WorkspaceSnapshot(candidate, _version(candidate))
+    snapshot = WorkspaceSnapshot(candidate, _version(candidate))
+    payload = json.dumps(snapshot.as_dict(), indent=2, sort_keys=True, allow_nan=False)
+    _atomic_write(workspace_dir / "workspace.json", payload)
+    return snapshot
 
 
 def compare_and_swap_workspace(

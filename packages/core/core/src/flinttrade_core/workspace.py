@@ -81,7 +81,7 @@ def _default_home() -> Path:
     return Path.home() / ".flinttrade"
 
 
-def workspace_dir() -> Path:
+def workspace_dir(*, ensure_exists: bool = True) -> Path:
     """Resolve the active FlintTrade workspace directory and ensure it exists.
 
     Priority order:
@@ -94,21 +94,17 @@ def workspace_dir() -> Path:
     3. Platform default (``~/.flinttrade`` on Linux, ``%APPDATA%/flinttrade``
        on Windows, ``~/Library/Application Support/flinttrade`` on macOS).
 
-    The returned directory is always created (``parents=True, exist_ok=True``)
-    so callers can immediately open files inside it.
+    By default the directory is created (``parents=True, exist_ok=True``).
+    Set ``ensure_exists=False`` for read-only authority/path admission checks.
 
     Returns:
         An absolute :class:`~pathlib.Path` pointing to the workspace root.
     """
     override = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
-    if override:
-        p = Path(override).expanduser().resolve()
+    p = Path(override).expanduser().resolve() if override else _default_home()
+    if ensure_exists:
         p.mkdir(parents=True, exist_ok=True)
         _lock_workspace_perms(p)
-        return p
-    p = _default_home()
-    p.mkdir(parents=True, exist_ok=True)
-    _lock_workspace_perms(p)
     return p
 
 

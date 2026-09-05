@@ -299,6 +299,43 @@ def test_openalgo_key_reload_drains_old_router_before_reconfiguring_and_rebinds(
     assert before_reconfigure == ["old-key"]
     assert reconfigured == [None]
     assert app.config["BROKER_ROUTER"] is replacement
+    assert response.get_json()["status"] == "ok"
+
+
+@pytest.mark.parametrize("capture_failure", [False, True])
+def test_openalgo_config_reports_failed_router_rebuild_without_rolling_back_saved_config(monkeypatch, tmp_path, capture_failure):
+    from flinttrade_core import app as app_module
+    from flinttrade_core.workspace import Workspace
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "fixture-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password")
+    app = app_module.create_flask_app()
+    app.config["EMERGENCY_RUNTIME_READY"] = False
+    if capture_failure:
+        recorder = MagicMock()
+        recorder.reconfigure_connection.side_effect = RuntimeError("fixture capture failure")
+        app.config["TICK_RECORDER"] = recorder
+    before = Workspace(tmp_path).get("workspace_generation")
+    outcomes = []
+    real_rebuild = app_module.configure_broker_router
+
+    def rebuild(*args, **kwargs):
+        outcome = real_rebuild(*args, **kwargs)
+        outcomes.append(outcome)
+        return outcome
+
+    monkeypatch.setattr(app_module, "configure_broker_router", rebuild)
+    response = app.test_client().post("/v1/config/openalgo", json={"api_key": "new-fixture-key"},
+        headers={"X-API-Key": "fixture-backend-key"})
+    assert outcomes == [False]
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "partial"
+    assert response.get_json()["data"]["broker_router_rebuilt"] is False
+    assert app.config.get("BROKER_ROUTER") is None
+    saved = Workspace(tmp_path)
+    assert saved.get("openalgo.api_key") == "new-fixture-key"
+    assert saved.get("workspace_generation") == before + 1
 
 
 def test_openalgo_config_unauthenticated_remote_get_rejected_without_leaking_key(monkeypatch, tmp_path):
@@ -486,7 +523,8 @@ def test_openalgo_config_endpoint_reconfigures_active_capture_and_desktop_redact
     )
 
     assert response.status_code == 200
-    assert response.get_json()["status"] == "ok"
+    assert response.get_json()["status"] == "partial"
+    assert response.get_json()["data"]["broker_router_rebuilt"] is False
     recorder.reconfigure_connection.assert_called_once_with(
         ws_url="wss://openalgo.local:9876",
         api_key="rotated-openalgo-key",
@@ -562,7 +600,8 @@ def test_openalgo_config_endpoint_leaves_disabled_capture_alone(monkeypatch, tmp
     )
 
     assert response.status_code == 200
-    assert response.get_json()["status"] == "ok"
+    assert response.get_json()["status"] == "partial"
+    assert response.get_json()["data"]["broker_router_rebuilt"] is False
     runtime.update_api_key.assert_not_called()
 
 

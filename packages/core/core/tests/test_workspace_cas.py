@@ -53,6 +53,58 @@ def test_snapshot_rejects_non_json_mutable_values():
         persistence.WorkspaceSnapshot({"extension": {1, 2}}, None)
 
 
+@pytest.mark.parametrize("override", ["FLINTTRADE_WORKSPACE_DIR", "FLINTTRADE_HOME"])
+def test_workspace_resolution_can_avoid_directory_creation_and_permission_changes(tmp_path, monkeypatch, override):
+    from flinttrade_core.workspace import workspace_dir
+
+    target = tmp_path / "absent" / "workspace"
+    monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+    monkeypatch.setenv(override, str(target))
+    assert workspace_dir(ensure_exists=False) == target
+    assert not target.parent.exists()
+    target.mkdir(parents=True)
+    if os.name == "posix":
+        target.chmod(0o755)
+    before = stat.S_IMODE(target.stat().st_mode)
+    assert workspace_dir(ensure_exists=False) == target
+    assert stat.S_IMODE(target.stat().st_mode) == before
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("invalid", [{1: "fixture"}, {"nested": [{False: "fixture"}]}, {"nested": {1, 2}}])
+def test_invalid_complete_snapshot_is_rejected_before_any_persisted_change(tmp_path, existing, invalid):
+    first = persistence.compare_and_swap_workspace(tmp_path, None, lambda _cfg: None) if existing else None
+    path = tmp_path / "workspace.json"
+    before = path.read_bytes() if existing else None
+
+    with pytest.raises(TypeError):
+        persistence.compare_and_swap_workspace(
+            tmp_path, first.version if first else None, lambda config: config.update(extension=invalid)
+        )
+
+    if existing:
+        assert path.read_bytes() == before
+        current = persistence.read_workspace_snapshot(tmp_path)
+        assert current.version == first.version
+        assert current.config["broker_authority_generation"] == 1
+    else:
+        assert not path.exists()
+
+
+def test_invalid_mapping_key_cannot_be_accepted_as_a_serialisation_noop(tmp_path):
+    first = persistence.compare_and_swap_workspace(
+        tmp_path, None, lambda config: config.update(extension={"1": "fixture"})
+    )
+    path = tmp_path / "workspace.json"
+    before = path.read_bytes()
+    with pytest.raises(TypeError, match="keys must be strings"):
+        persistence.compare_and_swap_workspace(
+            tmp_path, first.version, lambda config: config.update(extension={1: "fixture"})
+        )
+    assert path.read_bytes() == before
+    assert persistence.read_workspace_snapshot(tmp_path).version == first.version
+
+
 def test_persisted_uninitialised_workspace_can_finish_onboarding_without_replacing_identity(tmp_path):
     config = persistence.default_workspace_config(initialized=False)
     config["extension"] = {"kept": True}

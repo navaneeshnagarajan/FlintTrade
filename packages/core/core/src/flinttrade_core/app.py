@@ -4917,6 +4917,7 @@ def create_flask_app(
         old_settings = getattr(old_client, "settings", None)
         old_api_key_value = getattr(old_settings, "openalgo_api_key", "")
         old_api_key = old_api_key_value if isinstance(old_api_key_value, str) else ""
+        broker_router_rebuilt: bool | None = None
         try:
             new_settings = candidate_settings
             if isinstance(old_client, OpenAlgoClient):
@@ -4926,7 +4927,7 @@ def create_flask_app(
             app.config["CLIENT"] = new_client
             app.config["OPENALGO_CLIENT"] = new_client
             if broker_change_requested or old_client is not new_client:
-                configure_broker_router(app, registry, credential_store, new_client)
+                broker_router_rebuilt = configure_broker_router(app, registry, credential_store, new_client) is True
         except Exception as exc:
             diagnostic = _sanitise_tick_capture_error(exc, api_key)
             diagnostic = _sanitise_tick_capture_error(diagnostic, old_api_key)
@@ -4975,6 +4976,7 @@ def create_flask_app(
                                 "message": "OpenAlgo config saved and client reloaded, but tick capture reload was incomplete",
                                 "data": {
                                     "client_reloaded": True,
+                                    "broker_router_rebuilt": broker_router_rebuilt,
                                     "tick_capture_reconfigured": False,
                                 },
                             }
@@ -4990,6 +4992,7 @@ def create_flask_app(
                             "message": "OpenAlgo config saved and client reloaded, but tick capture reload was incomplete",
                             "data": {
                                 "client_reloaded": True,
+                                "broker_router_rebuilt": broker_router_rebuilt,
                                 "tick_capture_reconfigured": capture_reconfigured,
                             },
                         }
@@ -5002,10 +5005,20 @@ def create_flask_app(
                         "message": "OpenAlgo config saved and client reloaded, but tick capture requires a restart",
                         "data": {
                             "client_reloaded": True,
+                            "broker_router_rebuilt": broker_router_rebuilt,
                             "tick_capture_reconfigured": False,
                         },
                     }
                 ), 200
+
+        if broker_router_rebuilt is False:
+            return jsonify(
+                {
+                    "status": "partial",
+                    "message": "OpenAlgo config saved and client reloaded, but broker routing is unavailable",
+                    "data": {"client_reloaded": True, "broker_router_rebuilt": False},
+                }
+            ), 200
 
         return jsonify(
             {

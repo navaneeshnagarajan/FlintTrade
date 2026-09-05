@@ -315,3 +315,47 @@ def test_alternate_backup_source_cannot_restore_into_configured_active_workspace
     with pytest.raises(BackupError, match="coordinated_restore_unavailable"):
         WorkspaceBackup(tmp_path / "other" / "workspace").restore_backup(archive, target_dir=active.parent, force=True)
     assert not (active / "data/bhavcopy/equity/cm05SEP2026bhav.csv").exists()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_alternate_backup_source_cannot_publish_inside_active_workspace(tmp_path, monkeypatch, existing):
+    active = tmp_path / "active" / "workspace"
+    if existing:
+        Workspace(active).initialise()
+    target = active / "workspace.json"
+    before = target.read_bytes() if existing else None
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(active))
+    backup = _market_workspace(tmp_path / "source")
+
+    def forbidden_collect(*_args, **_kwargs):
+        pytest.fail("active output reached file collection")
+
+    monkeypatch.setattr(backup, "_collect_files", forbidden_collect)
+    with pytest.raises(BackupError, match="coordinated_restore_unavailable"):
+        backup.create_backup(target)
+    if existing:
+        assert target.read_bytes() == before
+        assert not list(active.glob(".ordinary-backup-*"))
+    else:
+        assert not active.parent.exists()
+
+
+def test_restore_refuses_installation_lineage_input_before_archive_access(tmp_path, monkeypatch):
+    from flinttrade_core import backup as backup_module
+    from flinttrade_core import installation_state
+
+    installation = tmp_path / "installation"
+    installation.mkdir()
+    archive = _archive(installation / "fixture.tar.gz", {"workspace/data/bhavcopy/equity/fixture.csv": b"a,b\n"})
+    before = archive.read_bytes()
+    monkeypatch.setattr(installation_state, "stable_application_state_root", lambda: installation)
+
+    def forbidden_open(*_args, **_kwargs):
+        pytest.fail("installation lineage input reached decompression")
+
+    monkeypatch.setattr(backup_module, "open_backup_archive", forbidden_open)
+    target = tmp_path / "restored"
+    with pytest.raises(BackupError, match="installation state root"):
+        WorkspaceBackup(tmp_path / "workspace").restore_backup(archive, target_dir=target)
+    assert archive.read_bytes() == before
+    assert not target.exists()

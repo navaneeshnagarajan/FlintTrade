@@ -252,9 +252,16 @@ class WorkspaceBackup:
             assert_installation_state_disjoint(output_path, label="backup archive")
         except InstallationStateError as exc:
             raise BackupError(str(exc)) from exc
+        from .workspace import workspace_dir  # noqa: PLC0415
+
+        for authority_root in (self._workspace_dir.resolve(), workspace_dir(ensure_exists=False)):
+            if (
+                output_path == authority_root
+                or authority_root in output_path.parents
+                or output_path in authority_root.parents
+            ):
+                raise CoordinatedRestoreUnavailable
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        if self._workspace_dir.resolve() in output_path.parents:
-            raise CoordinatedRestoreUnavailable
 
         files_to_backup = self._collect_files(
             include_ticks=include_ticks,
@@ -348,7 +355,7 @@ class WorkspaceBackup:
         destination_workspace = target_dir / self._workspace_dir.name
         from .workspace import workspace_dir  # noqa: PLC0415
 
-        for active_workspace in (self._workspace_dir.expanduser().resolve(), workspace_dir()):
+        for active_workspace in (self._workspace_dir.expanduser().resolve(), workspace_dir(ensure_exists=False)):
             if (
                 destination_workspace == active_workspace
                 or destination_workspace in active_workspace.parents
@@ -366,6 +373,7 @@ class WorkspaceBackup:
             # macOS also the installation-state root's parent), so validate the
             # actual extracted workspace tree rather than rejecting that safe
             # sibling container wholesale.
+            assert_installation_state_disjoint(backup_path, label="restore archive")
             assert_installation_state_disjoint(
                 target_dir / self._workspace_dir.name,
                 label="restore tree",
