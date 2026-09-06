@@ -393,6 +393,68 @@ def test_managed_client_cannot_alias_sibling_or_prior_setup(authority):
         prepare(owner, registry, b, authority(b), client=client)
 
 
+@pytest.mark.parametrize("state", ["prepared", "published", "abandoned", "conflicted"])
+def test_managed_client_has_one_owner_until_retirement_claim(authority, state):
+    registry, owner = api.create_owned_registry()
+    _, foreign = api.create_owned_registry()
+    selector = BrokerSelector("openalgo", "Case")
+    auth = authority(selector)
+    client = object()
+    receipt, session = prepare(owner, registry, selector, auth, client=client)
+    retirement = None
+    if state == "published":
+        owner.publish_prepared_candidate(receipt, current_authority=auth)
+    elif state == "abandoned":
+        retirement = owner.abandon_prepared_candidate(receipt)
+    elif state == "conflicted":
+        owner.remove_session_for_exact(selector, expected_registry=registry.snapshot_selector(selector))
+        with pytest.raises(RegistryVersionConflict) as conflict:
+            owner.publish_prepared_candidate(receipt, current_authority=auth)
+        retirement = conflict.value.retirement_receipt
+
+    # Even identical authority cannot make a second owner of a routable client.
+    with pytest.raises(RegistrySessionUnavailable):
+        prepare(owner, registry, selector, auth, client=client)
+    if state == "published":
+        handle = registry.get_connected_session_for(selector, current_authority=api.ManagedLookupAuthority(
+            auth.credential_version, auth.broker_workspace_version))
+        assert registry.client_for_connected_session(handle, current_authority=api.ManagedLookupAuthority(
+            auth.credential_version, auth.broker_workspace_version)) is client
+        retirement = owner.remove_session_for_exact(
+            selector, expected_registry=registry.snapshot_selector(selector)).retired
+    elif state == "prepared":
+        retirement = owner.abandon_prepared_candidate(receipt)
+    with pytest.raises(RegistryCapabilityError):
+        foreign.claim_retired_candidate(retirement)
+    with pytest.raises(RegistrySessionUnavailable):
+        prepare(owner, registry, selector, auth, client=client)
+    transferred = owner.claim_retired_candidate(retirement)
+    assert transferred.client is client
+    assert transferred.session is session
+    # The claimant may transfer the now-unowned resource back explicitly.
+    fresh, _ = prepare(owner, registry, selector, auth, client=transferred.client)
+    owner.publish_prepared_candidate(fresh, current_authority=auth)
+
+
+def test_reserved_default_client_remains_borrowed_during_retirement(tmp_path):
+    registry, owner = api.create_owned_registry()
+    workspace = compare_and_swap_workspace(tmp_path, None, lambda config: None)
+    authority = owner.seal_openalgo_default_compatibility_authority(workspace)
+    selector = BrokerSelector("openalgo", "default")
+    client = object()
+
+    def candidate():
+        return owner.prepare_openalgo_default_compatibility_candidate(
+            Session("synthetic", 4102444800, "raw", "openalgo"),
+            expected_registry=registry.snapshot_selector(selector), authority=authority,
+            client=client, broker=None, label="Synthetic")
+
+    owner.publish_prepared_candidate(candidate(), current_authority=authority)
+    retired = owner.abandon_prepared_candidate(candidate())
+    assert owner.claim_retired_candidate(retired).client is client
+    assert registry.snapshot_exact_state(selector).status == "connected"
+
+
 def test_receipt_seals_do_not_accumulate_on_lookup(tmp_path):
     import gc
     import weakref

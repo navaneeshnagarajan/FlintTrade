@@ -357,6 +357,7 @@ class NativeSessionRefresher:
                         account_id,  # noqa: B023 - invoked before the loop advances
                         registry_generation,  # noqa: B023 - invoked before the loop advances
                         candidate_session,  # noqa: B023 - invoked before the loop advances
+                        final_credential_version=committed_generation,  # noqa: B023 - invoked before the loop advances
                     ),
                 )
                 if not registry_published:

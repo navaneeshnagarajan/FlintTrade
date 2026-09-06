@@ -328,7 +328,9 @@ class BrokerRegistry:
         client_binding = authority if selector != _DEFAULT else _DEFAULT
         if client is not None:
             owned = self._clients.get(id(client))
-            if owned is not None and (owned[1] != selector or owned[2] != client_binding):
+            if owned is not None and (
+                selector != _DEFAULT or owned[1] != selector or owned[2] != client_binding
+            ):
                 raise RegistrySessionUnavailable
         receipt = PreparedRegistryCandidateReceipt()
         self._prepared[receipt] = _Record(selector, session, client, expected, authority, broker, label)

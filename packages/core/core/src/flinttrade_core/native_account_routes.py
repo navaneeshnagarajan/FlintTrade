@@ -807,9 +807,10 @@ def _registry_session_generation_matches(registry: Any, adapter_id: str, account
 
 def _compare_and_put_registry_session(
     registry: Any, adapter_id: str, account_id: str, expected: Any, candidate: Any,
+    *, final_credential_version: CredentialVersion,
 ) -> bool:
-    """Publish a prepared candidate against exact registry and durable authority."""
-    from flinttrade_core.account_mutation_contracts import RegistryVersionConflict
+    """Publish against the caller's final credential version and exact registry CAS."""
+    from flinttrade_core.account_mutation_contracts import RegistryVersionConflict, RegistryVersionValidationError
     from flinttrade_core.workspace_migrations import broker_workspace_version, read_workspace_snapshot
     from flinttrade_gateway.native_login import NativeSessionCandidate
     from flinttrade_gateway.registry import ManagedSessionAuthority
@@ -820,17 +821,28 @@ def _compare_and_put_registry_session(
     owner = registry_publication_owner_for(app, registry)
     store = app.config["CREDENTIAL_STORE"]
     selector = BrokerSelector(adapter_id, account_id)
+    if type(final_credential_version) is not CredentialVersion:
+        raise RegistryVersionValidationError
+    final_credential_version.__post_init__()
+    if final_credential_version.selector != selector or final_credential_version.generation == 0:
+        raise RegistryVersionValidationError
     workspace = read_workspace_snapshot(workspace_dir())
     version_for = credential_version_reader(store)
-    authority = ManagedSessionAuthority(version_for(selector), workspace.version, broker_workspace_version(workspace))
+    if version_for(selector) != final_credential_version:
+        return False
+    authority = ManagedSessionAuthority(final_credential_version, workspace.version, broker_workspace_version(workspace))
     metadata = store.account_for_selector(selector)
     if not isinstance(candidate, NativeSessionCandidate):
         raise TypeError("native_candidate_required")
     receipt = owner.prepare_session_candidate(selector, candidate.session,
         expected_registry=expected, authority=authority, broker=metadata.broker, label=metadata.label)
-    current = read_workspace_snapshot(workspace_dir())
     try:
-        current_authority = ManagedSessionAuthority(version_for(selector), current.version, broker_workspace_version(current))
+        current = read_workspace_snapshot(workspace_dir())
+        if version_for(selector) != final_credential_version:
+            owner.abandon_prepared_candidate(receipt)
+            return False
+        current_authority = ManagedSessionAuthority(
+            final_credential_version, current.version, broker_workspace_version(current))
     except BaseException:
         owner.abandon_prepared_candidate(receipt)
         raise
@@ -1592,6 +1604,7 @@ def _do_connect(
                 account_id,
                 expected_prior_session,
                 candidate_session,
+                final_credential_version=credential_receipt.applied_generation,
             ):
                 raise RuntimeError("registry generation changed before publication")
         except Exception:  # noqa: BLE001
@@ -2171,6 +2184,7 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
                 account_id,
                 expected_prior_session,
                 candidate_session,
+                final_credential_version=credential_receipt.applied_generation,
             ):
                 raise RuntimeError("registry generation changed before publication")
         except Exception:  # noqa: BLE001

@@ -140,6 +140,7 @@ def test_renew_in_place_when_session_live_and_adapter_renewable() -> None:
     # login() ran with the RENEWED token and the registry holds the new session.
     assert adapter.login_calls[0]["access_token"] == "renewed-token"
     assert _session(registry).access_token == "renewed-token"
+    assert _session(registry).version.credential_version == store.selector_state(BrokerSelector("dhan", "111")).version
 
 
 def test_replays_vault_credentials_without_a_live_session() -> None:
@@ -152,6 +153,42 @@ def test_replays_vault_credentials_without_a_live_session() -> None:
     assert adapter.renew_calls == []
     assert adapter.login_calls[0]["access_token"] == "stored-token"
     assert _session(registry).access_token == "stored-token"
+    assert _session(registry).version.credential_version == store.selector_state(BrokerSelector("dhan", "111")).version
+
+
+@pytest.mark.parametrize("renewable", [False, True])
+def test_rotation_refuses_stale_final_version_before_publication(monkeypatch, renewable):
+    from flinttrade_core import native_account_routes as routes
+
+    adapter = _Adapter(renewable=renewable)
+    registry = _Registry()
+    store = _Store({("dhan", "111"): {"access_token": "synthetic"}})
+    if renewable:
+        _publish(registry, _Session("synthetic"))
+    app = _app(adapter, registry, store)
+    selector = BrokerSelector("dhan", "111")
+    compare = routes._compare_and_put_registry_session
+    publish = _CURRENT.owner.publish_prepared_candidate
+    publications = []
+
+    def record_publication(*args, **kwargs):
+        publications.append(1)
+        return publish(*args, **kwargs)
+
+    def change_before_helper(*args, **kwargs):
+        before = store.selector_state(selector).version
+        store.update_credentials(selector, {"access_token": "successor"}, expected=before)
+        return compare(*args, **kwargs)
+
+    monkeypatch.setattr(_CURRENT.owner, "publish_prepared_candidate", record_publication)
+    monkeypatch.setattr(routes, "_compare_and_put_registry_session", change_before_helper)
+    NativeSessionRefresher(app, mutation_admission=lambda: None,
+        registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
+    assert publications == []
+    assert len(adapter.login_calls) == 1
+    assert store.retrieve_credentials(selector) == {"access_token": "successor"}
+    assert store.selector_state(selector).version.generation == (3 if renewable else 2)
+    _unavailable(registry)
 
 
 def test_failure_raises_and_lands_in_the_status_surface() -> None:

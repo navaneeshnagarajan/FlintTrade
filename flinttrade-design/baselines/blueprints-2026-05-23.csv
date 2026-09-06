@@ -1,6 +1,6 @@
 blueprint_name,current_url_prefix,line_number,target_url_prefix,methods,owner_package,duplicate_flag
-service_provider_bp,/v1/services,3371,/v1/services,,core,
-service_connection_bp,/v1/services/connections,3674,/v1/services/connections,,core,
+service_provider_bp,/v1/services,3372,/v1/services,,core,
+service_connection_bp,/v1/services/connections,3675,/v1/services/connections,,core,
 gateway_bp,/v1,3842,/v1,,gateway,
 native_accounts_bp,/api/v1/native,3855,/api/v1/native,,core,
 rotation_bp,,3864,,,?,

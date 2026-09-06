@@ -7,9 +7,9 @@ the Session leaves the provider.
 This is the single enforcement gate for BOTH the read and the write path — the
 BrokerRouter obtains every Session (quotes/historical and place_order alike)
 through this callable, so an unauthorised read is refused with the same
-``SafetyBypassError`` as an unauthorised write and there is no separate code path
-that could be bypassed. The provider owns the workspace.json dependency; the
-router stays workspace-agnostic.
+``SafetyBypassError`` as an unauthorised write. Missing or stale durable authority
+and unavailable registry sessions instead raise ``RegistrySessionUnavailable``.
+The provider owns the workspace.json dependency; the router stays workspace-agnostic.
 """
 
 from __future__ import annotations

@@ -87,6 +87,45 @@ def _owned_registry(app):
     return app.config["TEST_REGISTRY"]
 
 
+@pytest.mark.parametrize("composition", ["internal", "injected"])
+def test_app_constructor_retains_its_matching_publication_owner(tmp_path, monkeypatch, composition):
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_gateway.registry import create_owned_registry, RegistryPublicationOwner
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    registry, owner = create_owned_registry()
+    kwargs = {"registry": registry, "registry_publication_owner": owner} if composition == "injected" else {}
+    app = create_flask_app(**kwargs)
+    retained = app.extensions["flinttrade.registry_publication_owner"]
+    assert type(retained) is RegistryPublicationOwner
+    assert retained.owns(app.config["REGISTRY"])
+    if composition == "injected":
+        assert app.config["REGISTRY"] is registry
+        assert retained is owner
+
+
+@pytest.mark.parametrize("composition", ["missing", "foreign", "wrong_type", "owner_only"])
+def test_app_constructor_refuses_unowned_registry_before_gateway_work(tmp_path, monkeypatch, composition):
+    import flinttrade_core.app as app_module
+    from flinttrade_gateway.registry import create_owned_registry
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    registry, owner = create_owned_registry()
+    _, foreign = create_owned_registry()
+    owners = {"missing": None, "foreign": foreign, "wrong_type": object(), "owner_only": owner}
+    downstream = []
+
+    def forbidden():
+        downstream.append("gateway")
+        raise AssertionError("gateway initialisation before ownership validation")
+
+    monkeypatch.setattr(app_module, "_get_api_key_pepper", forbidden)
+    with pytest.raises(RegistrySessionUnavailable, match="^registry_session_unavailable$"):
+        app_module.create_flask_app(registry=None if composition == "owner_only" else registry,
+            registry_publication_owner=owners[composition])
+    assert downstream == []
+
+
 def _mark_router_prerequisites_ready(app: Flask, *, admission: object | None = None) -> object:
     guard = admission or MagicMock(name="broker_write_admission")
     app.config.update(

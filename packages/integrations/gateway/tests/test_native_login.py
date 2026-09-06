@@ -39,10 +39,11 @@ class Adapter:
 
 
 def establish(exact, adapter, **kwargs):
+    version = exact.store.selector_state(BrokerSelector("dhan", "Case")).version
     return asyncio.run(establish_native_session(adapter, exact.registry,
         exact.store.retrieve_credentials(BrokerSelector("dhan", "Case")), "dhan", "Case",
         exact.store, mutation_admission=lambda: None, registry_publication_owner=exact.owner,
-        workspace_path=exact.path, **kwargs))
+        workspace_path=exact.path, credential_version=version, **kwargs))
 
 
 def test_establish_native_session_registers_final_exact_authority(exact):
@@ -57,6 +58,22 @@ def test_missing_owner_fails_before_login(exact):
         asyncio.run(establish_native_session(adapter, exact.registry, {}, "dhan", "Case",
                                               mutation_admission=lambda: None))
     assert adapter.calls == 0
+
+
+@pytest.mark.parametrize("witness", ["missing", "stale"])
+def test_replay_requires_the_version_captured_before_credentials(exact, witness):
+    selector = BrokerSelector("dhan", "Case")
+    before = exact.store.selector_state(selector).version
+    credentials = exact.store.retrieve_credentials(selector)
+    if witness == "stale":
+        exact.store.update_credentials(selector, {"access_token": "successor"}, expected=before)
+    adapter = Adapter()
+    with pytest.raises(RegistrySessionUnavailable):
+        asyncio.run(establish_native_session(adapter, exact.registry, credentials, "dhan", "Case", exact.store,
+            mutation_admission=lambda: None, registry_publication_owner=exact.owner, workspace_path=exact.path,
+            credential_version=before if witness == "stale" else None))
+    assert adapter.calls == 0
+    assert not exact.registry.snapshot_selector(selector).present
 
 
 def test_login_failure_never_publishes_candidate(exact):
@@ -287,4 +304,84 @@ def test_boot_replay_rejects_real_same_value_credential_aba(exact):
     with pytest.raises(RegistrySessionUnavailable):
         establish(exact, Racing())
     assert exact.store.selector_state(selector).version.generation == before.generation + 1
+    assert not exact.registry.snapshot_selector(selector).present
+
+
+def test_boot_replay_rejects_credentials_changed_during_retrieval(exact, monkeypatch):
+    selector = BrokerSelector("dhan", "Case")
+    before = exact.store.selector_state(selector).version
+    retrieve = exact.store.retrieve_for
+
+    def retrieve_then_replace(adapter_id, account_id):
+        credentials = retrieve(adapter_id, account_id)
+        exact.store.update_credentials(selector, {"access_token": "successor"}, expected=before)
+        return credentials
+
+    monkeypatch.setattr(exact.store, "retrieve_for", retrieve_then_replace)
+    adapter = Adapter()
+    results = asyncio.run(establish_native_sessions({"dhan": adapter}, exact.registry, exact.store,
+        ["dhan:Case"], mutation_admission=lambda: None,
+        registry_publication_owner=exact.owner, workspace_path=exact.path))
+    assert adapter.calls == 0
+    assert results == {"dhan:Case": CREDENTIALS_UNAVAILABLE_MESSAGE}
+    assert not exact.registry.snapshot_selector(selector).present
+    assert exact.store.selector_state(selector).version.generation == before.generation + 1
+
+
+def test_boot_replay_does_not_adopt_post_authentication_credential_version(exact, monkeypatch):
+    selector = BrokerSelector("dhan", "Case")
+    state_for = exact.store.selector_state
+    publications = []
+    publish = exact.owner.publish_prepared_candidate
+
+    def record_publication(*args, **kwargs):
+        publications.append(1)
+        return publish(*args, **kwargs)
+
+    class Racing(Adapter):
+        async def login(self, credentials):
+            # Mutate just after the first post-authentication freshness read.
+            def state_then_replace(key):
+                state = state_for(key)
+                monkeypatch.setattr(exact.store, "selector_state", state_for)
+                exact.store.update_credentials(selector, {"access_token": "successor"}, expected=state.version)
+                return state
+            monkeypatch.setattr(exact.store, "selector_state", state_then_replace)
+            return await super().login(credentials)
+
+    monkeypatch.setattr(exact.owner, "publish_prepared_candidate", record_publication)
+    with pytest.raises(RegistrySessionUnavailable):
+        establish(exact, Racing())
+    assert publications == []
+    assert not exact.registry.snapshot_selector(selector).present
+
+
+def test_boot_replay_retains_its_cas_version_when_another_writer_follows(exact, monkeypatch):
+    selector = BrokerSelector("dhan", "Case")
+    update = exact.store.update_credentials
+    own_versions = []
+    publications = []
+    publish = exact.owner.publish_prepared_candidate
+
+    def update_then_replace(key, credentials, *, expected):
+        committed = update(key, credentials, expected=expected)
+        own_versions.append(committed)
+        update(key, {"access_token": "successor"}, expected=committed)
+        return committed
+
+    def record_publication(*args, **kwargs):
+        publications.append(1)
+        return publish(*args, **kwargs)
+
+    class Replay(Adapter):
+        def replay_credentials(self, credentials, session):
+            return {"access_token": "replayed"}
+
+    monkeypatch.setattr(exact.store, "update_credentials", update_then_replace)
+    monkeypatch.setattr(exact.owner, "publish_prepared_candidate", record_publication)
+    with pytest.raises(RegistrySessionUnavailable):
+        establish(exact, Replay())
+    assert own_versions[0].generation == 2
+    assert exact.store.selector_state(selector).version.generation == 3
+    assert publications == []
     assert not exact.registry.snapshot_selector(selector).present

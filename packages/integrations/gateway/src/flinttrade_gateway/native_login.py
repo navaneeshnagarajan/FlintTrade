@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from flinttrade_core.broker_account_cutover import MutationAdmission, require_broker_account_mutations
+from flinttrade_core.broker_identity import CredentialVersion
 
 logger = logging.getLogger("flinttrade.gateway.native_login")
 
@@ -236,8 +237,13 @@ async def establish_native_session(
     mutation_admission: MutationAdmission = require_broker_account_mutations,
     registry_publication_owner: Any | None = None,
     workspace_path: Any | None = None,
+    credential_version: CredentialVersion | None = None,
 ) -> Any:
-    """Admitted isolated replay binds real final authorities before publication."""
+    """Replay material read under an explicitly captured credential version.
+
+    The caller captures the version before retrieval. Fresh reads only validate
+    that witness; missing authority is refused after the production guard.
+    """
     mutation_admission()
     from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
     from flinttrade_core.broker_identity import BrokerSelector
@@ -250,9 +256,15 @@ async def establish_native_session(
             or workspace_path is None or credential_store is None):
         raise RegistrySessionUnavailable
     selector = BrokerSelector(adapter_id, account_id)
+    if type(credential_version) is not CredentialVersion:
+        raise RegistrySessionUnavailable
+    credential_version.__post_init__()
+    if credential_version.selector != selector or credential_version.generation == 0:
+        raise RegistrySessionUnavailable
     expected = registry.snapshot_selector(selector)
     before = credential_store.selector_state(selector)
-    if not before.present or not before.credential_present or before.origin != "managed":
+    if (not before.present or not before.credential_present or before.origin != "managed"
+            or before.version != credential_version):
         raise RegistrySessionUnavailable
     candidate = None
     try:
@@ -260,25 +272,32 @@ async def establish_native_session(
         if candidate.probe_error is not None:
             from .exceptions import AuthFlowError
             raise AuthFlowError(candidate.probe_error)
-        if credential_store.selector_state(selector).version != before.version:
+        if credential_store.selector_state(selector).version != credential_version:
             raise RegistrySessionUnavailable
+        final_version = credential_version
         if candidate.replay_credentials != credentials:
-            credential_store.update_credentials(selector, candidate.replay_credentials, expected=before.version)
+            final_version = credential_store.update_credentials(
+                selector, candidate.replay_credentials, expected=credential_version)
         state = credential_store.selector_state(selector)
-        if not state.present or not state.credential_present:
+        if (not state.present or not state.credential_present or state.origin != "managed"
+                or state.version != final_version):
             raise RegistrySessionUnavailable
         workspace = read_workspace_snapshot(workspace_path)
-        authority = ManagedSessionAuthority(state.version, workspace.version, broker_workspace_version(workspace))
+        authority = ManagedSessionAuthority(final_version, workspace.version, broker_workspace_version(workspace))
         metadata = credential_store.account_for_selector(selector)
         receipt = owner.prepare_session_candidate(selector, candidate.session, expected_registry=expected,
             authority=authority, broker=metadata.broker, label=metadata.label)
-        current = read_workspace_snapshot(workspace_path)
-        state = credential_store.selector_state(selector)
-        if not state.present or not state.credential_present:
+        try:
+            current = read_workspace_snapshot(workspace_path)
+            state = credential_store.selector_state(selector)
+            if (not state.present or not state.credential_present or state.origin != "managed"
+                    or state.version != final_version):
+                raise RegistrySessionUnavailable
+        except BaseException:
             owner.abandon_prepared_candidate(receipt)
-            raise RegistrySessionUnavailable
+            raise
         result = owner.publish_prepared_candidate(receipt, current_authority=ManagedSessionAuthority(
-            state.version, current.version, broker_workspace_version(current)))
+            final_version, current.version, broker_workspace_version(current)))
         candidate.registry_version = result.version.registry_version
     except BaseException:
         if candidate is not None:
@@ -329,6 +348,8 @@ async def establish_native_sessions(
         BrokerAccountCutoverUnavailable: Before any lookup while cutover is active.
     """
     mutation_admission()
+    from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+    from flinttrade_core.broker_identity import BrokerSelector
     from flinttrade_engine.request_context import parse_selector  # noqa: PLC0415
 
     results: dict[str, Any] = {}
@@ -342,7 +363,15 @@ async def establish_native_sessions(
             # Not an active native (bridge selector, or dormant) — skip quietly.
             continue
         try:
+            exact_selector = BrokerSelector(adapter_id, account_id)
+            before = credential_store.selector_state(exact_selector)
+            if not before.present or not before.credential_present or before.origin != "managed":
+                raise RegistrySessionUnavailable
             credentials = credential_store.retrieve_for(adapter_id, account_id)
+            after = credential_store.selector_state(exact_selector)
+            if (not after.present or not after.credential_present or after.origin != "managed"
+                    or after.version != before.version):
+                raise RegistrySessionUnavailable
         except Exception as exc:  # noqa: BLE001 - a missing/undecryptable row must not brick boot
             logger.info(
                 "No usable vault credentials for %s (%s) — leaving sessionless",
@@ -355,6 +384,7 @@ async def establish_native_sessions(
                 adapter, registry, credentials, adapter_id, account_id,
                 credential_store=credential_store, verify=verify, mutation_admission=mutation_admission,
                 registry_publication_owner=registry_publication_owner, workspace_path=workspace_path,
+                credential_version=before.version,
             )
             results[selector] = "ok"
         except Exception as exc:  # noqa: BLE001 - per-selector isolation

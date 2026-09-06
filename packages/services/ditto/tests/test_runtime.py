@@ -1740,7 +1740,6 @@ def _production_router_owner(
 
 def test_production_ditto_owner_denies_before_client_allocation(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Any,
 ) -> None:
     from flinttrade_core.broker_account_cutover import BrokerAccountCutoverUnavailable
 
@@ -1755,20 +1754,24 @@ def test_production_ditto_owner_denies_before_client_allocation(
     assert allocations == []
 
 
-def test_production_ditto_owner_denies_before_account_enumeration(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_production_ditto_owner_denies_before_account_enumeration() -> None:
     from flinttrade_core.broker_account_cutover import BrokerAccountCutoverUnavailable
 
-    allocations = []
+    accesses = []
     def forbidden(*args, **kwargs):
-        allocations.append("client")
-        raise AssertionError("client allocation before cutover guard")
-    monkeypatch.setattr("flinttrade_core.openalgo_client.OpenAlgoClient", forbidden)
+        accesses.append("accounts")
+        raise AssertionError("account access before cutover guard")
+
+    class Accounts(list):
+        __iter__ = forbidden
+        __len__ = forbidden
+        __getitem__ = forbidden
+        __getattribute__ = forbidden
+
     with pytest.raises(BrokerAccountCutoverUnavailable):
-        DittoRouterOwner([_account("target")], "operator-1",
+        DittoRouterOwner(Accounts(), "operator-1",
             write_admission=lambda *_: None, intent_journal=object(), safety_system=object())
-    assert allocations == []
+    assert accesses == []
 
 
 def test_runtime_exposes_current_owner_reconciliation_targets() -> None:
@@ -1782,17 +1785,12 @@ def test_runtime_exposes_current_owner_reconciliation_targets() -> None:
     assert runtime.reconciliation_targets() == expected
 
 
-def test_production_ditto_emergency_owner_denies_before_runtime_allocation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_production_ditto_owner_denies_before_owner_state_initialisation() -> None:
     from flinttrade_core.broker_account_cutover import BrokerAccountCutoverUnavailable
 
-    allocations = []
-    def forbidden(*args, **kwargs):
-        allocations.append("client")
-        raise AssertionError("client allocation before cutover guard")
-    monkeypatch.setattr("flinttrade_core.openalgo_client.OpenAlgoClient", forbidden)
+    owner = object.__new__(DittoRouterOwner)
+    assert vars(owner) == {}
     with pytest.raises(BrokerAccountCutoverUnavailable):
-        DittoRouterOwner([_account("target")], "operator-1",
+        owner.__init__([_account("target")], "operator-1",
             write_admission=lambda *_: None, intent_journal=object(), safety_system=object())
-    assert allocations == []
+    assert vars(owner) == {}

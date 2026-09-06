@@ -3223,7 +3223,8 @@ def create_flask_app(
         cron: CronManager instance for cron job management endpoints.
         audit: AuditLogger instance for audit log endpoints.
         client: OpenAlgoClient instance for MCP bridge and backtest data.
-        registry: BrokerRegistry for multi-broker account management.
+        registry: BrokerRegistry for multi-broker account management; injection requires its matching publication owner.
+        registry_publication_owner: Exact owner of an injected registry; omit both to create an internal matched pair.
         credential_store: CredentialStore for encrypted credential persistence.
         contract_manager: ContractManager for broker symbol contract data.
         rag: RAGPipeline instance for knowledge base queries.
@@ -3682,13 +3683,12 @@ def create_flask_app(
     app.after_request(apply_quarantine_cache_policy)
 
     # --- Gateway initialization ---
-    if registry is None:
+    if registry is None and registry_publication_owner is None:
         registry, registry_publication_owner = create_owned_registry(mutation_admission=broker_account_mutation_admission)
-    if registry_publication_owner is not None:
-        if type(registry_publication_owner) is not RegistryPublicationOwner or not registry_publication_owner.owns(registry):
-            from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
-            raise RegistrySessionUnavailable
-        app.extensions["flinttrade.registry_publication_owner"] = registry_publication_owner
+    elif type(registry_publication_owner) is not RegistryPublicationOwner or not registry_publication_owner.owns(registry):
+        from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+        raise RegistrySessionUnavailable
+    app.extensions["flinttrade.registry_publication_owner"] = registry_publication_owner
 
     # Ensure API_KEY_PEPPER is set in os.environ BEFORE the OpenAlgo
     # broker modules are imported via the gateway shim. Upstream's

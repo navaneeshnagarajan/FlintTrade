@@ -190,6 +190,56 @@ def test_real_registry_native_read_refuses_without_provider_calls(client, monkey
     assert response.get_json() == {"status": "error", "message": "Native broker session is unavailable."}
 
 
+@pytest.mark.parametrize("operation", ["connect", "login"])
+def test_publication_refuses_credentials_changed_at_helper_entry(client, monkeypatch, operation):
+    from flinttrade_core import native_account_routes as routes
+    from flinttrade_core.broker_identity import BrokerSelector
+
+    c, app, _ = client
+    selector = BrokerSelector("upstox", "Pinned")
+    body = {"adapter_id": "upstox", "account_id": "Pinned", "credentials": {"access_token": "synthetic"}}
+    if operation == "login":
+        assert c.post("/api/v1/native/accounts", headers=_h(), json=body).status_code == 200
+    store = app.config["CREDENTIAL_STORE"]
+    owner = app.extensions["flinttrade.registry_publication_owner"]
+    compare = routes._compare_and_put_registry_session
+    publish = owner.publish_prepared_candidate
+    publications = []
+
+    def record_publication(*args, **kwargs):
+        publications.append(1)
+        return publish(*args, **kwargs)
+
+    def change_before_helper(*args, **kwargs):
+        before = store.selector_state(selector).version
+        store.update_credentials(selector, {"access_token": "successor"}, expected=before)
+        return compare(*args, **kwargs)
+
+    monkeypatch.setattr(owner, "publish_prepared_candidate", record_publication)
+    monkeypatch.setattr(routes, "_compare_and_put_registry_session", change_before_helper)
+    url = "/api/v1/native/accounts" if operation == "connect" else "/api/v1/native/accounts/upstox/Pinned/login"
+    result = c.post(url, headers=_h(), json=body if operation == "connect" else {})
+    assert publications == []
+    assert result.status_code == (502 if operation == "connect" else 500)
+    assert store.retrieve_credentials(selector) == {"access_token": "successor"}
+    _assert_unavailable(app.config["REGISTRY"], "upstox", "Pinned")
+
+
+def test_primary_connect_binds_final_projection_credential_version(client):
+    from flinttrade_core.broker_identity import BrokerSelector
+
+    c, app, _ = client
+    result = c.post("/api/v1/native/accounts", headers=_h(), json={
+        "adapter_id": "upstox", "account_id": "PinnedPrimary", "is_primary": True,
+        "credentials": {"access_token": "synthetic"},
+    })
+    assert result.status_code == 200, result.get_json()
+    selector = BrokerSelector("upstox", "PinnedPrimary")
+    final = app.config["CREDENTIAL_STORE"].selector_state(selector).version
+    assert final.generation > 1  # Credential commit plus the primary projection.
+    assert _test_handle(app.config["REGISTRY"], "upstox", "PinnedPrimary").version.credential_version == final
+
+
 def test_exact_colon_account_connect_relogin_delete_uses_public_authority(client):
     c, app, _tmp_path = client
     real_store = app.config["CREDENTIAL_STORE"]

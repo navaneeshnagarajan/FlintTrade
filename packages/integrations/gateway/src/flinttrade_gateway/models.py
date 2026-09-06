@@ -207,8 +207,10 @@ class BrokerAccountInfo(BaseModel):
     """Runtime state of a single connected broker account.
 
     Args:
-        account_id: Unique identifier for the account within the broker.
-        broker: Canonical broker name matching :attr:`BrokerInfo.name`.
+        adapter_id: Required transport adapter identity, independent of the underlying broker.
+        account_id: Logical account identifier within the transport adapter.
+        broker: Underlying canonical broker name matching :attr:`BrokerInfo.name`,
+            or None when unknown (including legacy bridge metadata).
         label: User-facing label for this account (e.g. ``"Primary Zerodha"``).
         status: Current connection/auth status of the account.
         connected_at: UTC timestamp of the last successful connection.

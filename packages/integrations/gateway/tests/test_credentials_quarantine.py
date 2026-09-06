@@ -3,6 +3,7 @@
 import base64
 import json
 import sqlite3
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from uuid import UUID
@@ -250,6 +251,184 @@ def test_concurrent_open_migrates_once(tmp_path):
     with ThreadPoolExecutor(max_workers=2) as pool:
         one, two = list(pool.map(open_list, range(2)))
     assert len(one) == 1 and one == two
+
+
+@pytest.mark.parametrize("require_hardened", [False, True], ids=["classification", "family"])
+@pytest.mark.parametrize("suffix", ["-wal", "-shm"])
+def test_concurrent_open_survives_last_close_during_sidecar_validation(
+    tmp_path, monkeypatch, require_hardened, suffix,
+):
+    path = source(tmp_path)
+    with closing(sqlite3.connect(path)) as conn:
+        add(conn, "bad%")
+        conn.commit()
+    initial_identity = (path.stat().st_dev, path.stat().st_ino)
+    sidecar = path.with_name(path.name + suffix)
+    first_closing = threading.Event()
+    second_validating = threading.Event()
+    first_closed = threading.Event()
+    second_done = threading.Event()
+    role = threading.local()
+    missing = []
+    real_open = vault.open_sqlite
+    real_validate = vault.validate_owner_owned_regular_file
+
+    class ClosingConnection:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        @property
+        def row_factory(self):
+            return self.connection.row_factory
+
+        @row_factory.setter
+        def row_factory(self, value):
+            self.connection.row_factory = value
+
+        def close(self):
+            if first_closing.is_set():
+                self.connection.close()
+                return
+            assert sidecar.exists()
+            first_closing.set()
+            try:
+                assert second_validating.wait(10), "second constructor did not observe the sidecar"
+            finally:
+                self.connection.close()  # Real last SQLite close removes WAL and SHM.
+                assert not sidecar.exists()
+                first_closed.set()
+            assert second_done.wait(10), "second constructor did not complete"
+
+    def coordinated_open(*args, **kwargs):
+        connection = real_open(*args, **kwargs)
+        return ClosingConnection(connection) if role.first else connection
+
+    def coordinated_validate(member, *args, **kwargs):
+        if (not role.first and member == sidecar and not second_validating.is_set()
+                and kwargs.get("require_hardened", False) == require_hardened):
+            assert sidecar.exists()
+            second_validating.set()
+            assert first_closed.wait(10), "first connection did not close"
+            assert not sidecar.exists()
+            try:
+                return real_validate(member, *args, **kwargs)
+            except FileNotFoundError:
+                missing.append(suffix)
+                raise
+        return real_validate(member, *args, **kwargs)
+
+    def construct(first):
+        role.first = first
+        store = None
+        try:
+            store = vault.CredentialStore(path, "synthetic")
+            return store.list_quarantine(), store.selector_state(BrokerSelector("dhan", "Unseen")).version
+        finally:
+            if store is not None:
+                store.close()
+            if not first:
+                second_done.set()
+
+    monkeypatch.setattr(vault, "open_sqlite", coordinated_open)
+    monkeypatch.setattr(vault, "validate_owner_owned_regular_file", coordinated_validate)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(construct, True)
+        assert first_closing.wait(10), "first constructor did not reach close"
+        second = pool.submit(construct, False)
+        two, two_version = second.result(timeout=15)
+        one, one_version = first.result(timeout=15)
+    assert missing == [suffix]
+    assert len(one) == 1 and one == two
+    assert one_version == two_version
+    assert one[0].ref.source_vault_incarnation == one_version.vault_incarnation
+    assert (path.stat().st_dev, path.stat().st_ino) == initial_identity
+    with closing(sqlite3.connect(path)) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone() == (2,)
+        assert conn.execute("SELECT schema_version,vault_incarnation FROM credential_vault_metadata").fetchone() == (
+            2, str(one_version.vault_incarnation),
+        )
+
+
+@pytest.mark.parametrize("require_hardened", [False, True], ids=["classification", "family"])
+@pytest.mark.parametrize("change", ["reappeared", "unsafe", "main", "parent", "permission_error"])
+def test_sidecar_disappearance_does_not_admit_changed_family(tmp_path, monkeypatch, require_hardened, change):
+    path = source(tmp_path)
+    sidecar = path.with_name(path.name + "-wal")
+    sidecar.write_bytes(b"synthetic-sidecar")
+    harden(sidecar)
+    real_validate = vault.validate_owner_owned_regular_file
+    observed = []
+    opened = []
+
+    def change_during_validation(member, *args, **kwargs):
+        if (member == sidecar and not observed
+                and kwargs.get("require_hardened", False) == require_hardened):
+            observed.append(change)
+            sidecar.unlink()
+            if change == "permission_error":
+                raise PermissionError("synthetic validation refusal")
+            try:
+                real_validate(member, *args, **kwargs)
+            except FileNotFoundError:
+                if change == "reappeared":
+                    sidecar.write_bytes(b"synthetic-replacement")
+                    harden(sidecar)
+                elif change == "unsafe":
+                    sidecar.mkdir()
+                elif change == "main":
+                    replacement = path.with_name("replacement.db")
+                    replacement.write_bytes(path.read_bytes())
+                    harden(replacement)
+                    replacement.replace(path)
+                elif change == "parent":
+                    path.parent.rename(path.parent.with_name("saved"))
+                    path.parent.mkdir()
+                    harden_directory(path.parent)
+                raise
+        return real_validate(member, *args, **kwargs)
+
+    def forbidden_open(*args, **kwargs):
+        opened.append(True)
+        raise AssertionError("unsafe family reached SQLite")
+
+    monkeypatch.setattr(vault, "validate_owner_owned_regular_file", change_during_validation)
+    monkeypatch.setattr(vault, "open_sqlite", forbidden_open)
+    with pytest.raises(vault.CredentialVaultInvalidError):
+        vault.CredentialStore(path, "synthetic")
+    assert observed == [change]
+    assert opened == []
+
+
+def test_sidecar_disappearance_without_initial_main_witness_refuses(tmp_path, monkeypatch):
+    path = source(tmp_path)
+    path.unlink()
+    sidecar = path.with_name(path.name + "-wal")
+    sidecar.write_bytes(b"synthetic-sidecar")
+    harden(sidecar)
+    real_validate = vault.validate_owner_owned_regular_file
+    observed = []
+    opened = []
+
+    def disappear(member, *args, **kwargs):
+        if member == sidecar:
+            observed.append(True)
+            sidecar.unlink()
+        return real_validate(member, *args, **kwargs)
+
+    def forbidden_open(*args, **kwargs):
+        opened.append(True)
+        raise AssertionError("missing main witness reached SQLite")
+
+    monkeypatch.setattr(vault, "validate_owner_owned_regular_file", disappear)
+    monkeypatch.setattr(vault, "open_sqlite", forbidden_open)
+    with pytest.raises(vault.CredentialVaultInvalidError):
+        vault.CredentialStore(path, "synthetic")
+    assert observed == [True]
+    assert opened == []
+    assert not path.exists()
 
 
 @pytest.mark.parametrize("adapter", ["dhan", "upstox"])

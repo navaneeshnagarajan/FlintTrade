@@ -481,10 +481,12 @@ class CredentialStore:
             else:
                 self._parent = HeldOwnerDirectory(parent, require_hardened=False).__enter__()
                 # Classify topology/ownership before a hardening-only refusal.
-                for suffix in ("", "-wal", "-shm", "-journal"):
+                main_identity = None
+                if self._parent.exists(self._db_path.name):
+                    main_identity = validate_owner_owned_regular_file(self._db_path)
+                for suffix in ("-wal", "-shm", "-journal"):
                     member = self._db_path.with_name(self._db_path.name + suffix)
-                    if self._parent.exists(member.name):
-                        validate_owner_owned_regular_file(member)
+                    self._validate_optional_member(member, main_identity, require_hardened=False)
                 self._parent.require_hardened = True
                 self._parent.revalidate()
             fresh = False
@@ -522,6 +524,23 @@ class CredentialStore:
     def __del__(self) -> None:
         self.close()
 
+    def _validate_optional_member(
+        self, path: Path, main_identity: os.stat_result | None, *, require_hardened: bool
+    ) -> None:
+        if not self._parent.exists(path.name):
+            return
+        try:
+            validate_owner_owned_regular_file(path, require_hardened=require_hardened)
+        except FileNotFoundError:
+            # SQLite's last close can remove WAL/SHM after the existence check.
+            self._parent.revalidate()
+            if main_identity is None:
+                raise
+            current = validate_owner_owned_regular_file(self._db_path, require_hardened=require_hardened)
+            if ((current.st_dev, current.st_ino) != (main_identity.st_dev, main_identity.st_ino)
+                    or self._parent.exists(path.name)):
+                raise
+
     def _validate_family(self) -> None:
         if self._poisoned:
             raise CredentialStaleError
@@ -532,8 +551,7 @@ class CredentialStore:
                 raise OSError
             for suffix in ("-wal", "-shm", "-journal"):
                 path = self._db_path.with_name(self._db_path.name + suffix)
-                if self._parent.exists(path.name):
-                    validate_owner_owned_regular_file(path, require_hardened=True)
+                self._validate_optional_member(path, self._identity, require_hardened=True)
         except Exception:
             if self._incarnation is not None:
                 self._poisoned = True
