@@ -105,7 +105,10 @@ def test_app_constructor_retains_its_matching_publication_owner(tmp_path, monkey
 
 
 @pytest.mark.parametrize("composition", ["missing", "foreign", "wrong_type", "owner_only"])
-def test_app_constructor_refuses_unowned_registry_before_gateway_work(tmp_path, monkeypatch, composition):
+@pytest.mark.parametrize("safety_mode", ["default", "injected"])
+def test_app_constructor_refuses_unowned_registry_before_application_work(
+    tmp_path, monkeypatch, composition, safety_mode,
+):
     import flinttrade_core.app as app_module
     from flinttrade_gateway.registry import create_owned_registry
 
@@ -116,14 +119,24 @@ def test_app_constructor_refuses_unowned_registry_before_gateway_work(tmp_path, 
     downstream = []
 
     def forbidden():
-        downstream.append("gateway")
-        raise AssertionError("gateway initialisation before ownership validation")
+        downstream.append("workspace")
+        raise AssertionError("workspace access before ownership validation")
 
-    monkeypatch.setattr(app_module, "_get_api_key_pepper", forbidden)
+    class UninspectedSafety:
+        @property
+        def order_reservations_durable(self):
+            downstream.append("safety")
+            raise AssertionError("safety inspection before ownership validation")
+
+    # These are the first boundaries of the default and injected safety paths,
+    # well before Flask, filesystem hygiene, logging and gateway construction.
+    monkeypatch.setattr(app_module, "_workspace_dir", forbidden)
     with pytest.raises(RegistrySessionUnavailable, match="^registry_session_unavailable$"):
-        app_module.create_flask_app(registry=None if composition == "owner_only" else registry,
+        app_module.create_flask_app(safety=None if safety_mode == "default" else UninspectedSafety(),
+            registry=None if composition == "owner_only" else registry,
             registry_publication_owner=owners[composition])
     assert downstream == []
+    assert list(tmp_path.iterdir()) == []
 
 
 def _mark_router_prerequisites_ready(app: Flask, *, admission: object | None = None) -> object:

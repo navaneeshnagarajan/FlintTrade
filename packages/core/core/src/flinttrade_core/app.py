@@ -3237,6 +3237,12 @@ def create_flask_app(
     Returns:
         Flask application with all FlintTrade API endpoints registered.
     """
+    if registry is None and registry_publication_owner is None:
+        registry, registry_publication_owner = create_owned_registry(mutation_admission=broker_account_mutation_admission)
+    elif type(registry_publication_owner) is not RegistryPublicationOwner or not registry_publication_owner.owns(registry):
+        from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+        raise RegistrySessionUnavailable
+
     if safety is None:
         from flinttrade_engine.safety import SafetyConfig, SafetySystem  # noqa: PLC0415
         from .safety_config import load_workspace_safety_config  # noqa: PLC0415
@@ -3683,11 +3689,6 @@ def create_flask_app(
     app.after_request(apply_quarantine_cache_policy)
 
     # --- Gateway initialization ---
-    if registry is None and registry_publication_owner is None:
-        registry, registry_publication_owner = create_owned_registry(mutation_admission=broker_account_mutation_admission)
-    elif type(registry_publication_owner) is not RegistryPublicationOwner or not registry_publication_owner.owns(registry):
-        from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
-        raise RegistrySessionUnavailable
     app.extensions["flinttrade.registry_publication_owner"] = registry_publication_owner
 
     # Ensure API_KEY_PEPPER is set in os.environ BEFORE the OpenAlgo
