@@ -385,6 +385,12 @@ from the widget registry
   Market Clock, Trade Ideas, Tick Speed, and Journal Entries
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
 
+News Feed loads headlines only through the FlintTrade backend (`GET /api/v1/news`).
+There is no browser-side RSS or CORS-proxy fallback. If the backend cannot
+serve articles, the widget reports that news is unavailable from the
+FlintTrade backend. Publisher profiles are MoneyControl, ET Markets, and
+LiveMint.
+
 ### The 17 workspace presets
 
 A preset is a pre-built layout you can apply instantly from the command
@@ -532,8 +538,8 @@ educational and are not financial advice.
 ### Sentiment
 
 News and social-media sentiment scoring per symbol. Driven by a
-news-scheduler that polls RSS, Twitter (X), and Reddit on a configurable
-interval.
+news-scheduler that polls the static RSS publisher profiles (MoneyControl,
+ET Markets, LiveMint).
 
 ### RAG
 
@@ -593,7 +599,7 @@ sections:
 |---|---|---|
 | **General** | `ui.theme`, `ui.density` | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Workspace** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
-| **AI** | `llm.provider`, `llm.host`, `llm.model` | Managed Ollama runtime plus OpenAI, Anthropic, Groq, Hermes, and custom endpoints. |
+| **AI** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
 | **Notifications** | `telegram.*` | Telegram bot token, chat ID, kill-switch enable. |
 | **Risk** | `risk.daily_pnl_pause_pct`, `risk.daily_pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. |
 | **Order safety** | `sebi.rate_limit_*` | Per-endpoint rate limits and kill-switch settings. (The audit log is append-only with operator-controlled retention — there is no automatic purge.) |
@@ -758,8 +764,8 @@ curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
 & ([scriptblock]::Create((irm https://flinttrade.vercel.app/uninstall.ps1))) -Purge
 ```
 
-Take a backup first if you want your workspace and settings back later — see
-[Backup and restore](setup/backup.md).
+Ordinary backup archives bhavcopy CSVs only. It does not capture workspace
+settings or credentials — see [Backup and restore](setup/backup.md).
 
 ### If the site is unreachable
 

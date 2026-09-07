@@ -212,6 +212,52 @@ not silently fall back to the full catalogue. Broker-hosted MCP trade tools,
 where a broker offers them, remain external to FlintTrade's in-process
 `gate_order` / `BrokerRouter` path.
 
+### Service providers and connections (`/ft-api/v1/services/*`)
+
+Source: `packages/core/core/src/flinttrade_core/service_provider_routes.py`,
+`service_connection_routes.py`, `service_providers.py`, and
+`service_connections.py`.
+
+This is a static, non-invoking control plane. Listing a provider or persisting
+a connection does not resolve, probe, authenticate to, or start that provider.
+
+The catalogue is composed at app startup from the AI, historical, and gateway
+contributor descriptors. Catalogue `service_kinds` values include
+`broker_execution`, `market_data_live`, `market_data_historical`, `news`,
+`llm`, `forecast`, `agent_runtime`, and `embedding`.
+
+| Endpoint | Purpose |
+|---|---|
+| `services/providers` (**GET**) | Static provider catalogue (`catalogue_digest`, `count`, `providers`). Requires `admin.observability.read` on a session JWT; an API-key request with no session token is treated as holding every scope. Returns 503 if the catalogue is unavailable. |
+| `services/connections` (**GET**) | List every redacted inert LLM connection. Loopback only. Session JWT with `admin.services.read`, or `X-API-Key` / Bearer API key for GET/HEAD. |
+| `services/connections` (**POST**) | Persist one inert LLM connection (`provider_id`, `label`, optional `model` / `endpoint` / `auth_mode`, optional `credential`). Does not call the provider. Session JWT with `admin.services.write` required — an API key cannot mutate. |
+| `services/connections/<connection_id>` (**GET**) | One redacted connection by canonical UUID4. Same read auth as the collection. |
+| `services/connections/<connection_id>` (**PATCH**) | Update label / model / endpoint / auth_mode (and optional credential rotation). `provider_id` is immutable. Same write auth as create. |
+| `services/connections/<connection_id>` (**DELETE**) | Delete one inert connection. Same write auth as create. JSON body must be an empty object. |
+
+Connection reads and writes are loopback-only. Non-loopback peers receive 403
+`forbidden` before route dispatch. Mutations require `If-Match` (collection
+ETag) and `Idempotency-Key` (UUID4); missing `If-Match` is 428
+`connection_revision_required`. Mutation endpoints share a 10-per-minute
+limit. Successful public bodies include `schema_version`, `provider_id`,
+`connection_id`, `label`, `model`, `endpoint`, `auth_mode`,
+`credential_configured`, `created_at`, and `updated_at` — never the secret
+material. Every family response is `Cache-Control: no-store`.
+
+The in-process `BrokerReadPort` (quotes, depth, history, account books, and
+related exact reads) is not this HTTP surface. See
+[ARCHITECTURE.md](ARCHITECTURE.md#broker-reads-versus-gated-writes).
+
+### News (`/api/v1/news`)
+
+Source: `packages/core/core/src/flinttrade_core/operations_routes.py`. The
+operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
+`/ft-api/api/v1/news`. The terminal News widget calls this route only.
+
+| Endpoint | Purpose |
+|---|---|
+| `news` (**GET**) | Server-side fetch of the static RSS publisher profiles (MoneyControl, ET Markets, LiveMint). There is no browser-side RSS or CORS-proxy fallback. |
+
 ### AI (`/ft-api/v1/ai/*`, `/ft-api/v1/signals/*`)
 
 Source: `packages/services/ai/`. GET unless noted.
