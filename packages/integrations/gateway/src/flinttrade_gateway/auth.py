@@ -643,9 +643,14 @@ def otp_verify() -> Any:
 
 
 def _live_rate_limiter() -> Any | None:
-    """The running BrokerRouter's rate limiter, or None when unthrottled."""
-    router = current_app.config.get("BROKER_ROUTER")
-    return getattr(router, "rate_limiter", None) if router is not None else None
+    """Return the limiter owned by the active broker dependency generation."""
+    app = current_app._get_current_object()
+    router = app.config.get("BROKER_ROUTER")
+    limiter = getattr(router, "rate_limiter", None) if router is not None else None
+    if limiter is not None:
+        return limiter
+    dependencies = app.extensions.get("flinttrade_broker_dependencies")
+    return getattr(dependencies, "rate_limiter", None)
 
 
 def _parse_rate(value: Any) -> tuple[bool, float | None]:
@@ -712,6 +717,8 @@ def update_rate_limits() -> Any:
 
     # Persist first: a rejected authority update must never alter live limits.
     limiter = _live_rate_limiter()
+    app = current_app._get_current_object()
+    previous_dependencies = app.extensions.get("flinttrade_broker_dependencies")
 
     # Persist as the permanent default in workspace.json.
     try:
@@ -735,9 +742,9 @@ def update_rate_limits() -> Any:
             config["brokers"] = brokers
 
         if "REGISTRY" in current_app.config:
-            from flinttrade_core.app import retire_broker_router_generation  # noqa: PLC0415
+            from flinttrade_core.app import retire_broker_dependencies  # noqa: PLC0415
 
-            if not retire_broker_router_generation(current_app._get_current_object()):
+            if not retire_broker_dependencies(current_app._get_current_object()):
                 return jsonify({"status": "error", "message": "Broker routing is busy"}), 503
         ws.update(update_override)
     except Exception:  # noqa: BLE001 - rejected authority must stay fail-closed
@@ -745,12 +752,25 @@ def update_rate_limits() -> Any:
         return jsonify({"status": "error", "message": "Rate-limit configuration unavailable"}), 503
 
     if "REGISTRY" in current_app.config:
-        from flinttrade_core.app import configure_broker_router  # noqa: PLC0415
+        from flinttrade_core.app import (  # noqa: PLC0415
+            broker_reads_published_without_writes,
+            configure_broker_router,
+        )
 
-        app = current_app._get_current_object()
-        if not configure_broker_router(app, _registry(), app.config.get("CREDENTIAL_STORE"), app.config.get("CLIENT")):
+        registry = _registry()
+        client = app.config.get("CLIENT")
+        rebuilt = configure_broker_router(app, registry, app.config.get("CREDENTIAL_STORE"), client)
+        if not rebuilt and not broker_reads_published_without_writes(
+            app,
+            previous_dependencies=previous_dependencies,
+            registry=registry,
+            openalgo_client=client,
+        ):
             return jsonify({"status": "error", "message": "Broker routing unavailable"}), 503
         limiter = _live_rate_limiter()
+        if limiter is None:
+            dependencies = app.extensions.get("flinttrade_broker_dependencies")
+            limiter = getattr(dependencies, "rate_limiter", None)
     elif limiter is not None:
         limiter.apply_override(broker_id, order=order, data=data)
 

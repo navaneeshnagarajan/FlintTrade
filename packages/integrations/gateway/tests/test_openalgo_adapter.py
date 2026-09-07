@@ -22,7 +22,19 @@ from flinttrade_core.exceptions import (
     SafetyBypassError,
     UnsupportedCapabilityError,
 )
-from flinttrade_core.models import Holding, OrderStatus, Position
+from flinttrade_core.broker_read_port import (
+    BalanceEvidence,
+    BalanceSnapshot,
+    BrokerReadFailure,
+    BrokerReadSuccess,
+    ExactReadTarget,
+    InstrumentRef,
+    LotSizeRequest,
+    PortfolioGreeksRequest,
+    PortfolioPositionRef,
+    QuoteRequest,
+)
+from flinttrade_core.models import Holding, OHLCV, Order, OrderStatus, Position
 from flinttrade_engine.safety import L5_EMERGENCY_POLICY, MTM_EMERGENCY_POLICY
 from flinttrade_gateway.brokers._base import Session
 from flinttrade_gateway.brokers.dhan import _ROUTER_TOKEN
@@ -92,6 +104,30 @@ class _FakeClient:
     async def funds(self):
         return {"available": 50000.0}
 
+    async def balance_snapshot(self):
+        self.calls.append(("balance_snapshot",))
+        return BalanceSnapshot(10.0, BalanceEvidence.DIRECT, None, None, None, None, None, None)
+
+    async def depth(self, symbol, exchange):
+        self.calls.append(("depth", symbol, exchange))
+        return {"symbol": symbol, "exchange": exchange, "bids": [], "asks": []}
+
+    async def instruments(self, exchange):
+        self.calls.append(("instruments", exchange))
+        return {"data": [{"symbol": "NIFTY", "exchange": exchange, "lot_size": 75, "instrument_id": "1"}]}
+
+    async def margin(self, positions):
+        self.calls.append(("margin", positions))
+        return {"required_margin": 100.0}
+
+    async def portfolio_greeks(self, positions):
+        self.calls.append(("portfolio_greeks", positions))
+        return [{"symbol": "NIFTY", "exchange": "NFO", "instrument_id": "1", "delta": 0.5, "vega": 1.0}]
+
+    async def gtt_orderbook(self):
+        self.calls.append(("gtt_orderbook",))
+        return [{"orderid": "G1", "status": "pending"}]
+
     async def multi_quotes(self, payload):
         self.calls.append(("multi_quotes", payload))
         return [{"symbol": p["symbol"], "ltp": 100.0} for p in payload]
@@ -99,6 +135,10 @@ class _FakeClient:
     async def option_chain(self, symbol, exchange="NFO", expiry=""):
         self.calls.append(("option_chain", symbol, exchange, expiry))
         return {}
+
+    async def history(self, **request):
+        self.calls.append(("history", request))
+        return [OHLCV(timestamp="2026-09-05", open=1, high=2, low=0.5, close=1.5)]
 
 
 
@@ -140,6 +180,141 @@ def test_identity_and_capabilities() -> None:
     assert a.broker_id == "openalgo"
     assert a.capabilities.streaming_supported is False  # the REST bridge does not stream
     assert a.capabilities.algo_tag_required is False
+
+
+async def test_fixed_read_wrappers_use_the_exact_connected_client() -> None:
+    client = _FakeClient()
+    adapter = _adapter(client)
+    session = _session()
+    request = QuoteRequest(InstrumentRef("NIFTY", "NSE"))
+
+    assert (await adapter.depth(session, request))["symbol"] == "NIFTY"
+    assert (await adapter.instrument_lot_sizes(session, LotSizeRequest("NSE", ("NIFTY",))))[0]["lot_size"] == 75
+    assert (await adapter.balance_snapshot(session)).available_balance == 10.0
+    assert (await adapter.margin_calculator(session, Order(symbol="NIFTY", exchange="NFO", action="BUY", quantity="75")))["required_margin"] == 100.0
+    assert (await adapter.portfolio_greeks(session, [{"symbol": "NIFTY", "exchange": "NFO"}]))[0]["delta"] == 0.5
+    assert (await adapter.forever_orders(session))[0]["orderid"] == "G1"
+    assert [call[0] for call in client.calls] == [
+        "depth", "instruments", "balance_snapshot", "margin", "portfolio_greeks", "gtt_orderbook"
+    ]
+
+
+async def test_concrete_history_wrapper_builds_one_exact_service_envelope() -> None:
+    from flinttrade_core.broker_identity import BrokerSelector
+    from flinttrade_core.broker_read_port import (
+        BrokerReadFailure,
+        BrokerReadSuccess,
+        ExactReadTarget,
+        HistoricalRequest,
+    )
+    from flinttrade_core.workspace_migrations import read_workspace_snapshot
+    from flinttrade_engine.request_context import RequestContext
+    from flinttrade_gateway.broker_read_service import create_broker_read_owner
+    from flinttrade_gateway.session_provider import AuthenticatingSessionProvider
+
+    client = _FakeClient()
+    adapter = _adapter(client)
+    selector = BrokerSelector("openalgo", "dhan")
+    provider = AuthenticatingSessionProvider(
+        _TEST_FIXTURE.registry,
+        {"openalgo": {"dhan": ["actor"]}},
+        workspace_snapshot=read_workspace_snapshot(_TEST_FIXTURE.path),
+        workspace_path=_TEST_FIXTURE.path,
+        credential_version_for=lambda target: _TEST_FIXTURE.store.selector_state(target).version,
+    )
+    owner = create_broker_read_owner(
+        registry=_TEST_FIXTURE.registry,
+        session_provider=provider,
+        adapters={"openalgo": adapter},
+        workspace_path=_TEST_FIXTURE.path,
+        runtime_accepting_requests=lambda: True,
+    )
+    port = owner.bind(
+        target=ExactReadTarget(selector),
+        verify_current_authority=lambda: RequestContext(
+            "jti",
+            "human",
+            "actor",
+            "practice",
+            selector="openalgo:dhan",
+        ),
+    )
+    assert not isinstance(port, BrokerReadFailure)
+
+    result = await port.historical(
+        HistoricalRequest(InstrumentRef("NIFTY", "NSE"), "D", "2026-09-01", "2026-09-05")
+    )
+
+    assert isinstance(result, BrokerReadSuccess)
+    assert result.value.bars[0].timestamp == "2026-09-05"
+    history_calls = [call for call in client.calls if call[0] == "history"]
+    assert history_calls == [
+        (
+            "history",
+            {
+                "symbol": "NIFTY",
+                "exchange": "NSE",
+                "interval": "D",
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-05",
+            },
+        )
+    ]
+
+
+async def test_service_openalgo_portfolio_greek_without_ids_uses_exact_symbol_exchange_identity(monkeypatch) -> None:
+    from flinttrade_core.broker_identity import BrokerSelector
+    from flinttrade_core.workspace_migrations import read_workspace_snapshot
+    from flinttrade_engine.request_context import RequestContext
+    from flinttrade_gateway.broker_read_service import create_broker_read_owner
+    from flinttrade_gateway.session_provider import AuthenticatingSessionProvider
+
+    client = _FakeClient()
+
+    async def portfolio_greeks(positions):
+        client.calls.append(("portfolio_greeks", positions))
+        return [{"symbol": "NIFTY", "exchange": "NFO", "delta": 0.5, "vega": 1.0}]
+
+    monkeypatch.setattr(client, "portfolio_greeks", portfolio_greeks)
+    adapter = _adapter(client)
+    selector = BrokerSelector("openalgo", "dhan")
+    provider = AuthenticatingSessionProvider(
+        _TEST_FIXTURE.registry,
+        {"openalgo": {"dhan": ["actor"]}},
+        workspace_snapshot=read_workspace_snapshot(_TEST_FIXTURE.path),
+        workspace_path=_TEST_FIXTURE.path,
+        credential_version_for=lambda target: _TEST_FIXTURE.store.selector_state(target).version,
+    )
+    owner = create_broker_read_owner(
+        registry=_TEST_FIXTURE.registry,
+        session_provider=provider,
+        adapters={"openalgo": adapter},
+        workspace_path=_TEST_FIXTURE.path,
+        runtime_accepting_requests=lambda: True,
+    )
+    port = owner.bind(
+        target=ExactReadTarget(selector),
+        verify_current_authority=lambda: RequestContext(
+            "jti",
+            "human",
+            "actor",
+            "practice",
+            selector="openalgo:dhan",
+        ),
+    )
+    assert not isinstance(port, BrokerReadFailure)
+
+    result = await port.portfolio_greeks(
+        PortfolioGreeksRequest(
+            (PortfolioPositionRef("NIFTY", "NFO", "75", "CE", None, None, None, None),)
+        )
+    )
+
+    assert isinstance(result, BrokerReadSuccess)
+    assert result.value[0].symbol == "NIFTY"
+    assert result.value[0].exchange == "NFO"
+    assert result.value[0].instrument_id is None
+    assert [call[0] for call in client.calls] == ["portfolio_greeks"]
 
 
 async def test_login_builds_session_from_api_key() -> None:

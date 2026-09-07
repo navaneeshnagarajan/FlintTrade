@@ -253,66 +253,185 @@ def test_concurrent_open_migrates_once(tmp_path):
     assert len(one) == 1 and one == two
 
 
-@pytest.mark.parametrize("require_hardened", [False, True], ids=["classification", "family"])
-@pytest.mark.parametrize("suffix", ["-wal", "-shm"])
-def test_concurrent_open_survives_last_close_during_sidecar_validation(
-    tmp_path, monkeypatch, require_hardened, suffix,
-):
+def test_family_lock_key_survives_creation_and_lexical_aliases(tmp_path):
+    path = tmp_path / "Owned" / "Caf\u00e9.DB"
+    alias = tmp_path / "OWNED" / "CAFE\u0301.db"
+
+    before_creation = vault._family_lock(path)
+    path.parent.mkdir()
+    path.touch()
+
+    assert vault._family_lock(path) is before_creation
+    assert vault._family_lock(alias) is before_creation
+
+
+def test_family_lock_key_coalesces_an_accepted_symlink_ancestor_alias(tmp_path):
+    real_root = tmp_path / "real"
+    real_root.mkdir()
+    path = source(real_root)
+    alias_root = tmp_path / "alias"
+    try:
+        alias_root.symlink_to(real_root, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+    alias = alias_root / "owned" / path.name
+
+    direct_store = vault.CredentialStore(path, "synthetic")
+    alias_store = vault.CredentialStore(alias, "synthetic")
+    try:
+        assert path.samefile(alias)
+        assert vault._family_lock(path) is vault._family_lock(alias)
+    finally:
+        direct_store.close()
+        alias_store.close()
+
+
+def test_concurrent_constructors_serialise_one_vault_family(tmp_path, monkeypatch):
     path = source(tmp_path)
     with closing(sqlite3.connect(path)) as conn:
         add(conn, "bad%")
         conn.commit()
-    initial_identity = (path.stat().st_dev, path.stat().st_ino)
-    sidecar = path.with_name(path.name + suffix)
-    first_closing = threading.Event()
-    second_validating = threading.Event()
-    first_closed = threading.Event()
-    second_done = threading.Event()
     role = threading.local()
-    missing = []
-    real_open = vault.open_sqlite
-    real_validate = vault.validate_owner_owned_regular_file
+    first_inside = threading.Event()
+    release_first = threading.Event()
+    second_started = threading.Event()
+    second_inside = threading.Event()
+    real_init = vault.CredentialStore._init_db
 
-    class ClosingConnection:
+    def coordinated_init(self, fresh):
+        if role.first:
+            first_inside.set()
+            assert release_first.wait(10), "first constructor was not released"
+        else:
+            second_inside.set()
+        return real_init(self, fresh)
+
+    def construct(first):
+        role.first = first
+        if not first:
+            second_started.set()
+        store = vault.CredentialStore(path, "synthetic")
+        try:
+            return store.list_quarantine()
+        finally:
+            store.close()
+
+    monkeypatch.setattr(vault.CredentialStore, "_init_db", coordinated_init)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(construct, True)
+        assert first_inside.wait(10), "first constructor did not enter initialisation"
+        second = pool.submit(construct, False)
+        assert second_started.wait(10), "second constructor did not start"
+        overlapped = second_inside.wait(0.5)
+        release_first.set()
+        one = first.result(timeout=15)
+        two = second.result(timeout=15)
+    assert not overlapped
+    assert second_inside.is_set()
+    assert len(one) == 1 and one == two
+
+
+def test_concurrent_constructors_keep_different_vault_families_independent(tmp_path, monkeypatch):
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    paths = (source(first_root), source(second_root))
+    both_inside = threading.Barrier(2)
+    real_init = vault.CredentialStore._init_db
+
+    def coordinated_init(self, fresh):
+        assert both_inside.wait(timeout=10) in {0, 1}
+        return real_init(self, fresh)
+
+    def construct(path):
+        store = vault.CredentialStore(path, "synthetic")
+        store.close()
+
+    monkeypatch.setattr(vault.CredentialStore, "_init_db", coordinated_init)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(construct, paths))
+
+
+def test_concurrent_transactions_serialise_one_vault_family(tmp_path, monkeypatch):
+    path = source(tmp_path)
+    first_store = vault.CredentialStore(path, "synthetic")
+    second_store = vault.CredentialStore(path, "synthetic")
+    first_inside = threading.Event()
+    release_first = threading.Event()
+    second_started = threading.Event()
+    second_inside = threading.Event()
+    first_closed = threading.Event()
+    second_close_observations = []
+    real_get_connection = vault.CredentialStore._get_connection
+
+    class CloseObservedConnection:
         def __init__(self, connection):
             self.connection = connection
 
         def __getattr__(self, name):
             return getattr(self.connection, name)
 
-        @property
-        def row_factory(self):
-            return self.connection.row_factory
-
-        @row_factory.setter
-        def row_factory(self, value):
-            self.connection.row_factory = value
-
         def close(self):
-            if first_closing.is_set():
-                self.connection.close()
-                return
-            assert sidecar.exists()
-            first_closing.set()
             try:
-                assert second_validating.wait(10), "second constructor did not observe the sidecar"
+                self.connection.close()
             finally:
-                self.connection.close()  # Real last SQLite close removes WAL and SHM.
-                assert not sidecar.exists()
                 first_closed.set()
-            assert second_done.wait(10), "second constructor did not complete"
 
-    def coordinated_open(*args, **kwargs):
-        connection = real_open(*args, **kwargs)
-        return ClosingConnection(connection) if role.first else connection
+    def observed_get_connection(self):
+        connection = real_get_connection(self)
+        return CloseObservedConnection(connection) if self is first_store else connection
 
-    def coordinated_validate(member, *args, **kwargs):
-        if (not role.first and member == sidecar and not second_validating.is_set()
-                and kwargs.get("require_hardened", False) == require_hardened):
+    def transact(store, first):
+        if not first:
+            second_started.set()
+        with store._transaction():
+            if first:
+                first_inside.set()
+                assert release_first.wait(10), "first transaction was not released"
+            else:
+                second_close_observations.append(first_closed.is_set())
+                second_inside.set()
+
+    monkeypatch.setattr(vault.CredentialStore, "_get_connection", observed_get_connection)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(transact, first_store, True)
+            assert first_inside.wait(10), "first transaction did not enter"
+            second = pool.submit(transact, second_store, False)
+            assert second_started.wait(10), "second transaction did not start"
+            overlapped = second_inside.wait(0.5)
+            release_first.set()
+            first.result(timeout=15)
+            second.result(timeout=15)
+    finally:
+        release_first.set()
+        first_store.close()
+        second_store.close()
+    assert not overlapped
+    assert second_inside.is_set()
+    assert second_close_observations == [True]
+
+
+@pytest.mark.parametrize("require_hardened", [False, True], ids=["classification", "family"])
+@pytest.mark.parametrize("suffix", ["-wal", "-shm"])
+def test_optional_sidecar_disappearance_during_validation_is_tolerated(
+    tmp_path, monkeypatch, require_hardened, suffix,
+):
+    path = source(tmp_path)
+    store = vault.CredentialStore(path, "synthetic")
+    initial_identity = (path.stat().st_dev, path.stat().st_ino)
+    sidecar = path.with_name(path.name + suffix)
+    sidecar.write_bytes(b"synthetic-sidecar")
+    harden(sidecar)
+    main_identity = vault.validate_owner_owned_regular_file(path, require_hardened=require_hardened)
+    missing = []
+    real_validate = vault.validate_owner_owned_regular_file
+
+    def disappear_during_validation(member, *args, **kwargs):
+        if member == sidecar:
             assert sidecar.exists()
-            second_validating.set()
-            assert first_closed.wait(10), "first connection did not close"
-            assert not sidecar.exists()
+            sidecar.unlink()
             try:
                 return real_validate(member, *args, **kwargs)
             except FileNotFoundError:
@@ -320,36 +439,14 @@ def test_concurrent_open_survives_last_close_during_sidecar_validation(
                 raise
         return real_validate(member, *args, **kwargs)
 
-    def construct(first):
-        role.first = first
-        store = None
-        try:
-            store = vault.CredentialStore(path, "synthetic")
-            return store.list_quarantine(), store.selector_state(BrokerSelector("dhan", "Unseen")).version
-        finally:
-            if store is not None:
-                store.close()
-            if not first:
-                second_done.set()
-
-    monkeypatch.setattr(vault, "open_sqlite", coordinated_open)
-    monkeypatch.setattr(vault, "validate_owner_owned_regular_file", coordinated_validate)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(construct, True)
-        assert first_closing.wait(10), "first constructor did not reach close"
-        second = pool.submit(construct, False)
-        two, two_version = second.result(timeout=15)
-        one, one_version = first.result(timeout=15)
+    monkeypatch.setattr(vault, "validate_owner_owned_regular_file", disappear_during_validation)
+    try:
+        store._validate_optional_member(sidecar, main_identity, require_hardened=require_hardened)
+    finally:
+        store.close()
     assert missing == [suffix]
-    assert len(one) == 1 and one == two
-    assert one_version == two_version
-    assert one[0].ref.source_vault_incarnation == one_version.vault_incarnation
+    assert not sidecar.exists()
     assert (path.stat().st_dev, path.stat().st_ino) == initial_identity
-    with closing(sqlite3.connect(path)) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone() == (2,)
-        assert conn.execute("SELECT schema_version,vault_incarnation FROM credential_vault_metadata").fetchone() == (
-            2, str(one_version.vault_incarnation),
-        )
 
 
 @pytest.mark.parametrize("require_hardened", [False, True], ids=["classification", "family"])

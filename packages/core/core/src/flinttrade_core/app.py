@@ -38,7 +38,7 @@ import threading
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import wraps
 from pathlib import Path
 from typing import Any, ContextManager
@@ -1788,7 +1788,7 @@ def _get_master_password() -> str:
 
 
 def _read_openalgo_from_workspace() -> dict[str, Any]:
-    """Read OpenAlgo overrides from ``~/.flinttrade/workspace.json``.
+    """Read OpenAlgo overrides from the active workspace's ``workspace.json``.
 
     Returns a dict with any of ``api_key``, ``host``, ``port``, ``ws_port`` keys that
     are present and non-empty.  Returns an empty dict if the file is
@@ -2148,7 +2148,26 @@ def credential_version_reader(store: CredentialStore) -> Callable:
     return read
 
 
-def build_broker_router(
+@dataclass(slots=True)
+class _BrokerRuntimeDependencies:
+    """One app-owned prepared broker dependency generation."""
+
+    registry: BrokerRegistry
+    config: Any
+    brokers_config: dict[str, Any]
+    session_provider: Any
+    adapters: dict[str, Any]
+    rate_limiter: Any | None
+    lifecycle_store: Any | None
+    workspace_snapshot: Any | None
+    workspace_path: Path | None
+    openalgo_client: Any | None
+    native_adapters: dict[str, Any]
+    registry_publication_owner: RegistryPublicationOwner | None = None
+    read_owner: Any | None = None
+
+
+def _prepare_broker_dependencies(
     registry: BrokerRegistry,
     brokers_config: dict[str, Any],
     *,
@@ -2157,21 +2176,18 @@ def build_broker_router(
     native_attest_ok: Callable[[str], bool] | None = None,
     native_has_credentials: Callable[[str], bool] | None = None,
     native_adapter_kwargs: Callable[[str], dict[str, Any]] | None = None,
-    on_native_activated: Callable[[dict[str, Any]], None] | None = None,
-    on_adapters_activated: Callable[[dict[str, Any]], None] | None = None,
-    write_admission: Callable[[bool, str], ContextManager[None]] | None = None,
     lifecycle_store: Any | None = None,
     workspace_snapshot: Any | None = None,
     workspace_path: Path | None = None,
     registry_publication_owner: RegistryPublicationOwner | None = None,
     credential_version_for: Callable | None = None,
-) -> Any:
-    """Construct a config-driven :class:`BrokerRouter` (contract §13 / §11.4).
+) -> _BrokerRuntimeDependencies:
+    """Prepare the single provider, adapter map and limiter shared by reads and writes.
 
     Parses ``brokers_config`` into a :class:`RoutingConfig` (raising
-    ``RoutingConfigError`` on a malformed block), wires an
-    :class:`AuthenticatingSessionProvider` over the config's ``account_acls`` and
-    a process-local one-shot :class:`SafetyGate`.
+    ``RoutingConfigError`` on a malformed block), and wires an
+    :class:`AuthenticatingSessionProvider` over the config's ``account_acls``.
+    Write-side ``SafetyGate`` construction remains in ``_build_broker_router_from_dependencies``.
 
     When ``openalgo_client`` is supplied, an :class:`OpenAlgoAdapter` is
     registered under the ``openalgo`` adapter id and a Session is put in the
@@ -2190,33 +2206,36 @@ def build_broker_router(
     until the credential-replay login step establishes one; an unauthenticated
     native selector simply has no session to dispatch to.
 
-    ``on_native_activated`` (when supplied) is called once with the final
-    ``broker_id -> adapter`` map of ACTIVE native adapters (factory-built or
-    injected) so the caller can wire engine-side consumers — the reconciliation
-    runner — without reaching into the router's internals. Best-effort: a sink
-    failure is logged and never bricks routing.
-
-    ``write_admission`` is the process safety admission barrier. The router
-    enters it immediately around adapter-write admission so global L5 and
-    account-scoped MTM activation are ordered atomically against normal writes.
-
     Raises:
         RoutingConfigError: If ``brokers_config`` is malformed.
     """
     from flinttrade_engine.request_context import parse_selector  # noqa: PLC0415
-    from flinttrade_engine.safety import SafetyGate  # noqa: PLC0415
     from flinttrade_gateway.adapter import BROKER_CATALOG  # noqa: PLC0415
     from flinttrade_gateway.brokers.native_factory import (  # noqa: PLC0415
         build_native_adapters,
         is_native_broker,
     )
-    from flinttrade_gateway.router import BrokerRouter  # noqa: PLC0415
-    from flinttrade_gateway.routing_config import RoutingConfig  # noqa: PLC0415
+    from flinttrade_gateway.routing_config import RoutingConfig, RoutingConfigError  # noqa: PLC0415
     from flinttrade_gateway.session_provider import (  # noqa: PLC0415
         AuthenticatingSessionProvider, ConnectedSessionClientResolver,
     )
 
-    config = RoutingConfig.from_workspace(brokers_config)
+    execution = brokers_config.get("execution") if isinstance(brokers_config, dict) else None
+    execution_default_disabled = isinstance(execution, dict) and not str(execution.get("default") or "").strip()
+    if execution_default_disabled:
+        data = brokers_config.get("data")
+        if not isinstance(data, dict):
+            raise RoutingConfigError("brokers.data must be a mapping")
+        validation_default = next(
+            (str(data[key]) for key in ("quote", "historical", "option_chains", "ticks") if data.get(key)),
+            "",
+        )
+        validation_brokers = dict(brokers_config)
+        validation_brokers["execution"] = {**execution, "default": validation_default}
+        config = RoutingConfig.from_workspace(validation_brokers)
+        config = replace(config, execution=replace(config.execution, default=""))
+    else:
+        config = RoutingConfig.from_workspace(brokers_config)
     from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
     from flinttrade_core.broker_identity import BrokerSelector, parse_broker_selector
     from flinttrade_core.workspace_migrations import read_workspace_snapshot
@@ -2239,8 +2258,6 @@ def build_broker_router(
             parse_broker_selector(config.execution.default) if config.execution.default else None,
             workspace_version=workspace_snapshot.version,
         )
-    gate = SafetyGate()
-
     resolved_adapters: dict[str, Any] = dict(adapters or {})
 
     # Native-adapter activation (dormant -> live bridge). Only runs when the
@@ -2294,19 +2311,11 @@ def build_broker_router(
             owner.publish_prepared_candidate(receipt,
                 current_authority=owner.seal_openalgo_default_compatibility_authority(current))
 
-    # Report the ACTIVE native adapters (factory-built or injected) to the
-    # caller's sink so the engine-side reconciliation runner can enumerate them
-    # without reaching into the router. The bridge (openalgo) never qualifies.
-    if on_native_activated is not None:
-        try:
-            on_native_activated({aid: adapter for aid, adapter in resolved_adapters.items() if is_native_broker(aid)})
-        except Exception as exc:  # pragma: no cover - observability only
-            logger.warning("Native-adapter activation sink failed (%s)", type(exc).__name__)
-    if on_adapters_activated is not None:
-        try:
-            on_adapters_activated(dict(resolved_adapters))
-        except Exception as exc:  # pragma: no cover - observability only
-            logger.warning("Adapter activation sink failed (%s)", type(exc).__name__)
+    native_adapters = {
+        adapter_id: adapter
+        for adapter_id, adapter in resolved_adapters.items()
+        if is_native_broker(adapter_id)
+    }
 
     # Per-broker API rate limiter (DATA & INFRA: customizable rate limits). Built
     # from each registered adapter's capability metadata, with operator overrides
@@ -2327,6 +2336,36 @@ def build_broker_router(
             "Broker rate limiter not built (%s); dispatch will be unthrottled",
             type(exc).__name__,
         )
+
+    return _BrokerRuntimeDependencies(
+        registry=registry,
+        config=config,
+        brokers_config=dict(brokers_config),
+        session_provider=session_provider,
+        adapters=resolved_adapters,
+        rate_limiter=rate_limiter,
+        lifecycle_store=lifecycle_store,
+        workspace_snapshot=workspace_snapshot,
+        workspace_path=workspace_path,
+        openalgo_client=openalgo_client,
+        native_adapters=native_adapters,
+        registry_publication_owner=registry_publication_owner,
+    )
+
+
+def _build_broker_router_from_dependencies(
+    dependencies: _BrokerRuntimeDependencies,
+    *,
+    write_admission: Callable[[bool, str], ContextManager[None]] | None = None,
+) -> Any:
+    """Build only the gated write router from one prepared dependency record."""
+    from flinttrade_engine.safety import SafetyGate  # noqa: PLC0415
+    from flinttrade_gateway.router import BrokerRouter  # noqa: PLC0415
+
+    gate = SafetyGate()
+    config = dependencies.config
+    resolved_adapters = dependencies.adapters
+    brokers_config = dependencies.brokers_config
 
     # Algo-tag guard (SEBI algo-id relay + per-(broker, exchange) per-second
     # algo-order ceiling) for adapters advertising ``algo_tag_required``
@@ -2388,14 +2427,60 @@ def build_broker_router(
 
     return BrokerRouter(
         resolved_adapters,
-        session_provider,
+        dependencies.session_provider,
         consume_gate=gate.consume,
         config=config,
-        rate_limiter=rate_limiter,
+        rate_limiter=dependencies.rate_limiter,
         algo_tag_guard=algo_tag_guard,
         write_admission=write_admission,
-        lifecycle_store=lifecycle_store,
+        lifecycle_store=dependencies.lifecycle_store,
     )
+
+
+def build_broker_router(
+    registry: BrokerRegistry,
+    brokers_config: dict[str, Any],
+    *,
+    adapters: dict[str, Any] | None = None,
+    openalgo_client: Any | None = None,
+    native_attest_ok: Callable[[str], bool] | None = None,
+    native_has_credentials: Callable[[str], bool] | None = None,
+    native_adapter_kwargs: Callable[[str], dict[str, Any]] | None = None,
+    on_native_activated: Callable[[dict[str, Any]], None] | None = None,
+    on_adapters_activated: Callable[[dict[str, Any]], None] | None = None,
+    write_admission: Callable[[bool, str], ContextManager[None]] | None = None,
+    lifecycle_store: Any | None = None,
+    workspace_snapshot: Any | None = None,
+    workspace_path: Path | None = None,
+    registry_publication_owner: RegistryPublicationOwner | None = None,
+    credential_version_for: Callable | None = None,
+) -> Any:
+    """Construct a router through exactly one shared dependency preparation."""
+    dependencies = _prepare_broker_dependencies(
+        registry,
+        brokers_config,
+        adapters=adapters,
+        openalgo_client=openalgo_client,
+        native_attest_ok=native_attest_ok,
+        native_has_credentials=native_has_credentials,
+        native_adapter_kwargs=native_adapter_kwargs,
+        lifecycle_store=lifecycle_store,
+        workspace_snapshot=workspace_snapshot,
+        workspace_path=workspace_path,
+        registry_publication_owner=registry_publication_owner,
+        credential_version_for=credential_version_for,
+    )
+    if on_native_activated is not None:
+        try:
+            on_native_activated(dict(dependencies.native_adapters))
+        except Exception as exc:  # pragma: no cover - observability only
+            logger.warning("Native-adapter activation sink failed (%s)", type(exc).__name__)
+    if on_adapters_activated is not None:
+        try:
+            on_adapters_activated(dict(dependencies.adapters))
+        except Exception as exc:  # pragma: no cover - observability only
+            logger.warning("Adapter activation sink failed (%s)", type(exc).__name__)
+    return _build_broker_router_from_dependencies(dependencies, write_admission=write_admission)
 
 
 def _broker_router_drain_timeout(app: Flask) -> float:
@@ -2462,23 +2547,299 @@ def retire_broker_router_generation(app: Flask, *, timeout: float | None = None)
         rebuild_lock.release()
 
 
+def retire_broker_dependencies(app: Flask, *, timeout: float | None = None) -> bool:
+    """Invalidate and drain the exact shared read/write dependency generation."""
+    rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    drain_timeout = _broker_router_drain_timeout(app) if timeout is None else max(0.0, timeout)
+    deadline = time.monotonic() + drain_timeout
+    if not rebuild_lock.acquire(timeout=drain_timeout):
+        logger.critical("Broker dependency retirement timed out waiting for the generation lease")
+        return False
+    try:
+        active = app.extensions.get("flinttrade_broker_dependencies")
+        draining = app.extensions.get("flinttrade_broker_dependencies_draining")
+        if active is not None:
+            if draining is not None and draining is not active:
+                app.extensions.pop("flinttrade_broker_dependencies", None)
+                logger.critical("Multiple broker dependency generations require draining")
+                return False
+            app.extensions.pop("flinttrade_broker_dependencies", None)
+            draining = active
+            app.extensions["flinttrade_broker_dependencies_draining"] = active
+
+        active_router = app.config.get("BROKER_ROUTER")
+        draining_router = app.config.get("BROKER_ROUTER_DRAINING")
+        if active_router is not None:
+            if draining_router is not None and draining_router is not active_router:
+                app.config["BROKER_ROUTER"] = None
+                logger.critical("Multiple BrokerRouter generations require draining; routing is disabled")
+                return False
+            app.config["BROKER_ROUTER"] = None
+            draining_router = active_router
+            app.config["BROKER_ROUTER_DRAINING"] = active_router
+
+        # These are borrowed compatibility views of the retired dependency
+        # record, not independent authorities.  Unpublish them immediately;
+        # the retained draining record still owns the exact objects until its
+        # admitted work releases.
+        app.config["NATIVE_ADAPTERS"] = {}
+        app.config["ACTIVE_BROKER_ADAPTERS"] = {}
+        app.config["RECONCILE_TARGETS"] = None
+
+        def close_reads(wait: float) -> bool:
+            try:
+                read_owner = getattr(draining, "read_owner", None)
+                if read_owner is None:
+                    return True
+                close = getattr(read_owner, "close", None)
+                return bool(close(timeout=wait)) if callable(close) else False
+            except Exception as exc:  # noqa: BLE001 - retain the exact generation for retry
+                logger.critical("Broker read generation retirement failed (%s)", type(exc).__name__)
+                return False
+
+        def revoke_writes(wait: float) -> bool:
+            try:
+                if draining_router is None:
+                    return True
+                revoke = getattr(draining_router, "revoke_and_drain", None)
+                return bool(revoke(timeout=wait)) if callable(revoke) else False
+            except Exception as exc:  # noqa: BLE001 - retain the exact generation for retry
+                logger.critical("Broker write generation retirement failed (%s)", type(exc).__name__)
+                return False
+
+        reads_drained = close_reads(0.0)
+        writes_drained = revoke_writes(0.0)
+
+        remaining = max(0.0, deadline - time.monotonic())
+        if not reads_drained and remaining > 0.0:
+            reads_drained = close_reads(remaining)
+            remaining = max(0.0, deadline - time.monotonic())
+        if not writes_drained and remaining > 0.0:
+            writes_drained = revoke_writes(remaining)
+
+        if not reads_drained or not writes_drained:
+            return False
+        if app.extensions.get("flinttrade_broker_dependencies_draining") is draining:
+            app.extensions.pop("flinttrade_broker_dependencies_draining", None)
+        if app.config.get("BROKER_ROUTER_DRAINING") is draining_router:
+            app.config["BROKER_ROUTER_DRAINING"] = None
+        return True
+    finally:
+        rebuild_lock.release()
+
+
+def _publish_broker_dependencies(app: Flask, dependencies: _BrokerRuntimeDependencies) -> bool:
+    """Publish one validated dependency record and borrowed compatibility views."""
+    if app.config.get("RUNTIME_ACCEPTING_REQUESTS", True) is not True:
+        return False
+    if app.extensions.get("flinttrade_broker_dependencies_draining") is not None:
+        return False
+    current = app.extensions.get("flinttrade_broker_dependencies")
+    if current is not None and current is not dependencies:
+        return False
+    owner = dependencies.registry_publication_owner
+    if (
+        type(owner) is not RegistryPublicationOwner
+        or not owner.owns(dependencies.registry)
+        or app.extensions.get("flinttrade.registry_publication_owner") is not owner
+        or app.config.get("REGISTRY") is not dependencies.registry
+    ):
+        return False
+    app.extensions["flinttrade_broker_dependencies"] = dependencies
+    app.config["OPENALGO_CLIENT"] = dependencies.openalgo_client
+    app.config["SMART_ROUTING"] = dict(dependencies.brokers_config.get("smart_routing") or {})
+    app.config["NATIVE_ADAPTERS"] = dependencies.native_adapters
+    app.config["ACTIVE_BROKER_ADAPTERS"] = dependencies.adapters
+    app.config["ORDER_LIFECYCLE_LEDGER"] = dependencies.lifecycle_store
+    app.config["LOCAL_STATE_PROVIDER"] = dependencies.lifecycle_store
+    app.config["RECONCILE_TARGETS"] = None
+    return True
+
+
+def broker_reads_published_without_writes(
+    app: Flask,
+    *,
+    previous_dependencies: Any,
+    registry: Any,
+    openalgo_client: Any,
+) -> bool:
+    """Verify one newly published read generation with writes intentionally off."""
+    rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    if not rebuild_lock.acquire(timeout=_broker_router_drain_timeout(app)):
+        return False
+    try:
+        dependencies = app.extensions.get("flinttrade_broker_dependencies")
+        if (
+            type(dependencies) is not _BrokerRuntimeDependencies
+            or dependencies is previous_dependencies
+            or dependencies.registry is not registry
+            or dependencies.openalgo_client is not openalgo_client
+            or dependencies.read_owner is None
+            or app.config.get("RUNTIME_ACCEPTING_REQUESTS", True) is not True
+            or app.config.get("REGISTRY") is not registry
+            or app.config.get("CLIENT") is not openalgo_client
+            or app.config.get("OPENALGO_CLIENT") is not openalgo_client
+            or app.config.get("ACTIVE_BROKER_ADAPTERS") is not dependencies.adapters
+            or app.config.get("BROKER_ROUTER") is not None
+            or app.config.get("BROKER_ROUTER_DRAINING") is not None
+            or type(dependencies.config.execution.default) is not str
+            or dependencies.config.execution.default != ""
+        ):
+            return False
+        owner = dependencies.registry_publication_owner
+        if (
+            type(owner) is not RegistryPublicationOwner
+            or app.extensions.get("flinttrade.registry_publication_owner") is not owner
+            or not owner.owns(registry)
+        ):
+            return False
+        snapshot = dependencies.workspace_snapshot
+        path = dependencies.workspace_path
+        if snapshot is None or path is None:
+            return False
+        from .workspace_migrations import broker_workspace_version, read_workspace_snapshot  # noqa: PLC0415
+
+        witness = broker_workspace_version(read_workspace_snapshot(path))
+        return (
+            witness == broker_workspace_version(snapshot)
+            and dependencies.session_provider.broker_workspace_version == witness
+        )
+    except Exception:
+        return False
+    finally:
+        rebuild_lock.release()
+
+
+def _broker_write_readiness(app: Flask) -> tuple[Any, Callable[[bool, str], ContextManager[None]]] | None:
+    safety = app.config.get("SAFETY")
+    write_admission = getattr(safety, "broker_write_admission", None)
+    if (
+        app.config.get("EMERGENCY_INTENT_JOURNAL_READY") is not True
+        or app.config.get("DAILY_PNL_STATE_READY") is not True
+        or app.config.get("SAFETY_CONFIG_READY") is not True
+        or app.config.get("EMERGENCY_INTENT_JOURNAL") is None
+        or app.config.get("DAILY_PNL_STATE_STORE") is None
+        or safety is None
+        or not callable(write_admission)
+        or getattr(safety, "order_reservations_durable", False) is not True
+        or app.config.get("EMERGENCY_RUNTIME_READY") is not True
+        or app.config.get("EMERGENCY_DISPATCHER") is None
+    ):
+        return None
+    return safety, write_admission
+
+
+def _configure_broker_writes(app: Flask, dependencies: _BrokerRuntimeDependencies) -> bool:
+    """Retry or publish writes from the exact current prepared dependency record."""
+    rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    rebuild_timeout = _broker_router_drain_timeout(app)
+    if not rebuild_lock.acquire(timeout=rebuild_timeout):
+        logger.critical("BrokerRouter write configuration timed out waiting for the generation lease")
+        return False
+
+    def dependency_authority_is_current() -> bool:
+        try:
+            owner = dependencies.registry_publication_owner
+            registry = dependencies.registry
+            return (
+                type(owner) is RegistryPublicationOwner
+                and owner.owns(registry)
+                and app.extensions.get("flinttrade.registry_publication_owner") is owner
+                and app.config.get("REGISTRY") is registry
+            )
+        except Exception:
+            return False
+
+    def dependency_workspace_is_current() -> bool:
+        snapshot = dependencies.workspace_snapshot
+        path = dependencies.workspace_path
+        if snapshot is None and path is None:
+            return True
+        if snapshot is None or path is None:
+            return False
+        try:
+            from .workspace_migrations import broker_workspace_version, read_workspace_snapshot  # noqa: PLC0415
+
+            return broker_workspace_version(read_workspace_snapshot(path)) == broker_workspace_version(snapshot)
+        except Exception:
+            return False
+
+    def execution_default_is_available() -> bool:
+        try:
+            return bool(dependencies.config.execution.default)
+        except Exception:
+            return False
+
+    def retire_stale_dependency() -> None:
+        if app.extensions.get("flinttrade_broker_dependencies") is dependencies:
+            retire_broker_dependencies(app, timeout=0.0)
+
+    try:
+        if app.extensions.get("flinttrade_broker_dependencies") is not dependencies:
+            return False
+        if (
+            not dependency_authority_is_current()
+            or app.config.get("RUNTIME_ACCEPTING_REQUESTS", True) is not True
+            or not dependency_workspace_is_current()
+        ):
+            retire_stale_dependency()
+            return False
+        if not retire_broker_router_generation(app, timeout=0.0):
+            return False
+        readiness = _broker_write_readiness(app)
+        if readiness is None or not execution_default_is_available():
+            logger.critical(
+                "BrokerRouter not built because durable write readiness or an execution default is unavailable"
+            )
+            return False
+        safety, write_admission = readiness
+        try:
+            router = _build_broker_router_from_dependencies(
+                dependencies,
+                write_admission=write_admission,
+            )
+            reconcile_targets = _build_reconcile_targets_provider(
+                dependencies.registry,
+                dependencies.adapters,
+                [str(selector) for selector in dependencies.config.registered],
+            )
+        except Exception as exc:  # noqa: BLE001 - malformed write routing fails closed
+            logger.critical("BrokerRouter write generation could not be built: %s", type(exc).__name__)
+            return False
+
+        if app.extensions.get("flinttrade_broker_dependencies") is not dependencies:
+            logger.critical("BrokerRouter candidate discarded because the dependency generation changed")
+            return False
+        if (
+            not dependency_authority_is_current()
+            or app.config.get("RUNTIME_ACCEPTING_REQUESTS", True) is not True
+            or not dependency_workspace_is_current()
+        ):
+            logger.critical("BrokerRouter candidate discarded because shared dependency authority changed")
+            retire_stale_dependency()
+            return False
+        final_readiness = _broker_write_readiness(app)
+        if (
+            final_readiness is None
+            or final_readiness[0] is not safety
+            or not execution_default_is_available()
+        ):
+            logger.critical("BrokerRouter candidate discarded because write readiness changed")
+            return False
+        app.config["BROKER_ROUTER"] = router
+        app.config["RECONCILE_TARGETS"] = reconcile_targets
+        return True
+    finally:
+        rebuild_lock.release()
+
+
 def configure_broker_router(
     app: Flask,
     registry: Any,
     credential_store: Any,
     openalgo_client: Any,
 ) -> bool:
-    """Build (or rebuild) the BrokerRouter and store it + friends on app.config.
-
-    Extracted from ``create_flask_app`` so it can be re-invoked at runtime after
-    the credential vault or the ``brokers.registered``/``account_acls`` config
-    changes (an interactive "connect native broker" action) — rebuilding
-    re-reads the vault + config, so a native that just gained credentials
-    activates. A rebuild publishes one complete routing generation atomically.
-    The prior generation is revoked and drained before the candidate becomes
-    reachable, so retained background references cannot dispatch through stale
-    credentials or ACLs. Any failure leaves routing unavailable.
-    """
+    """Refresh shared broker dependencies once, then independently attempt writes."""
     rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
     rebuild_timeout = _broker_router_drain_timeout(app)
     if not rebuild_lock.acquire(timeout=rebuild_timeout):
@@ -2487,51 +2848,13 @@ def configure_broker_router(
     try:
         if not app.config.get("RUNTIME_ACCEPTING_REQUESTS", True):
             logger.warning("BrokerRouter rebuild refused while the runtime is shutting down")
-            retire_broker_router_generation(app)
-            app.config["SMART_ROUTING"] = {}
-            app.config["NATIVE_ADAPTERS"] = {}
-            app.config["ACTIVE_BROKER_ADAPTERS"] = {}
-            app.config["RECONCILE_TARGETS"] = None
+            retire_broker_dependencies(app)
             return False
-        if not retire_broker_router_generation(app):
-            app.config["NATIVE_ADAPTERS"] = {}
-            app.config["ACTIVE_BROKER_ADAPTERS"] = {}
-            app.config["RECONCILE_TARGETS"] = None
-            logger.critical("BrokerRouter rebuild aborted because the prior generation did not drain")
-            return False
-        intent_journal = app.config.get("EMERGENCY_INTENT_JOURNAL")
-        daily_pnl_state_store = app.config.get("DAILY_PNL_STATE_STORE")
-        safety = app.config.get("SAFETY")
-        write_admission = getattr(safety, "broker_write_admission", None)
-        reservations_durable = getattr(safety, "order_reservations_durable", False)
-        if (
-            app.config.get("EMERGENCY_INTENT_JOURNAL_READY") is not True
-            or app.config.get("DAILY_PNL_STATE_READY") is not True
-            or app.config.get("SAFETY_CONFIG_READY") is not True
-            or intent_journal is None
-            or daily_pnl_state_store is None
-            or safety is None
-            or not callable(write_admission)
-            or reservations_durable is not True
-            or app.config.get("EMERGENCY_RUNTIME_READY") is not True
-            or app.config.get("EMERGENCY_DISPATCHER") is None
-        ):
-            app.config["NATIVE_ADAPTERS"] = {}
-            app.config["ACTIVE_BROKER_ADAPTERS"] = {}
-            app.config["RECONCILE_TARGETS"] = None
-            logger.critical(
-                "BrokerRouter not built because durable safety configuration/reservations, emergency journal, "
-                "dispatcher, runtime, or daily P&L state readiness is incomplete; live routing remains disabled"
-            )
+        if not retire_broker_dependencies(app, timeout=rebuild_timeout):
+            logger.critical("Broker dependency refresh aborted because the prior generation did not drain")
             return False
 
-        candidate_router = None
-        candidate_smart_routing: dict[str, Any] = {}
-        candidate_native_adapters: dict[str, Any] = {}
-        candidate_active_adapters: dict[str, Any] = {}
-        candidate_reconcile_targets = None
-        brokers_cfg: dict[str, Any] | None = None
-        build_error: Exception | None = None
+        dependencies: _BrokerRuntimeDependencies | None = None
         try:
             from .workspace_migrations import (  # noqa: PLC0415
                 default_workspace_config,
@@ -2546,7 +2869,6 @@ def configure_broker_router(
             workspace_snapshot = read_workspace_snapshot(target_workspace)
             brokers_cfg = workspace_snapshot.as_dict().get("brokers")
             effective_brokers = brokers_cfg or default_workspace_config()["brokers"]
-            candidate_smart_routing = dict(effective_brokers.get("smart_routing") or {})
             native_attest_ok, native_has_credentials = _native_activation_checks(credential_store)
             local_state_provider = app.config.get("ORDER_LIFECYCLE_LEDGER")
             if local_state_provider is None:
@@ -2564,44 +2886,36 @@ def configure_broker_router(
                     verify_audit_receipt if callable(verify_audit_receipt) else None
                 )
             app.config["ORDER_LIFECYCLE_LEDGER"] = local_state_provider
-            candidate_router = build_broker_router(
+            dependencies = _prepare_broker_dependencies(
                 registry,
                 effective_brokers,
                 openalgo_client=openalgo_client,
                 native_attest_ok=native_attest_ok,
                 native_has_credentials=native_has_credentials,
                 native_adapter_kwargs=_native_adapter_kwargs_for(local_state_provider),
-                on_native_activated=candidate_native_adapters.update,
-                on_adapters_activated=candidate_active_adapters.update,
-                write_admission=write_admission,
                 lifecycle_store=local_state_provider,
                 workspace_snapshot=workspace_snapshot,
                 workspace_path=target_workspace,
                 registry_publication_owner=registry_publication_owner_for(app, registry),
                 credential_version_for=credential_version_reader(credential_store),
             )
-            candidate_reconcile_targets = _build_reconcile_targets_provider(
-                registry,
-                candidate_active_adapters,
-                [str(s) for s in (effective_brokers.get("registered") or [])],
+            from flinttrade_gateway.broker_read_service import create_broker_read_owner  # noqa: PLC0415
+
+            dependencies.read_owner = create_broker_read_owner(
+                registry=dependencies.registry,
+                session_provider=dependencies.session_provider,
+                adapters=dependencies.adapters,
+                workspace_path=target_workspace,
+                rate_limiter=dependencies.rate_limiter,
+                runtime_accepting_requests=lambda: app.config.get("RUNTIME_ACCEPTING_REQUESTS", True) is True,
             )
             if brokers_cfg is not None:
                 _snapshot_brokers_bak(brokers_cfg)
         except Exception as exc:  # noqa: BLE001 - malformed routing fails closed
-            build_error = exc
-
-        if build_error is not None or candidate_router is None:
-            app.config["NATIVE_ADAPTERS"] = {}
-            app.config["ACTIVE_BROKER_ADAPTERS"] = {}
-            app.config["RECONCILE_TARGETS"] = None
-            if build_error is not None:
-                logger.critical(
-                    "BrokerRouter not built — workspace.json brokers routing is invalid: %s. "
-                    "Order routing is unavailable until you fix brokers.routing; the rest of "
-                    "the app is up. Last known-good config: "
-                    "~/.flinttrade/workspace.brokers.bak.json",
-                    build_error,
-                )
+            logger.critical(
+                "Broker dependencies not built — workspace broker routing is invalid: %s",
+                type(exc).__name__,
+            )
             return False
 
         # Every session resolved by the candidate is rebound to this exact global
@@ -2613,45 +2927,20 @@ def configure_broker_router(
             )
         except Exception:
             broker_authority_unchanged = False
-        if not broker_authority_unchanged:
-            logger.warning("BrokerRouter candidate discarded because workspace changed during rebuild")
-            app.config["NATIVE_ADAPTERS"] = {}
-            app.config["ACTIVE_BROKER_ADAPTERS"] = {}
-            app.config["RECONCILE_TARGETS"] = None
+        if not broker_authority_unchanged or dependencies is None:
+            if dependencies is not None and dependencies.read_owner is not None:
+                dependencies.read_owner.close(timeout=0.0)
+            logger.warning("Broker dependencies discarded because workspace changed during rebuild")
             return False
 
         if not app.config.get("RUNTIME_ACCEPTING_REQUESTS", True):
-            logger.warning("BrokerRouter candidate discarded because shutdown began during rebuild")
-            app.config["NATIVE_ADAPTERS"] = {}
-            app.config["ACTIVE_BROKER_ADAPTERS"] = {}
-            app.config["RECONCILE_TARGETS"] = None
+            dependencies.read_owner.close(timeout=0.0)
+            logger.warning("Broker dependencies discarded because shutdown began during rebuild")
             return False
-        if (
-            app.config.get("EMERGENCY_INTENT_JOURNAL_READY") is not True
-            or app.config.get("DAILY_PNL_STATE_READY") is not True
-            or app.config.get("SAFETY_CONFIG_READY") is not True
-            or app.config.get("EMERGENCY_INTENT_JOURNAL") is not intent_journal
-            or app.config.get("DAILY_PNL_STATE_STORE") is not daily_pnl_state_store
-            or app.config.get("SAFETY") is not safety
-            or not callable(getattr(safety, "broker_write_admission", None))
-            or app.config.get("EMERGENCY_RUNTIME_READY") is not True
-            or app.config.get("EMERGENCY_DISPATCHER") is None
-        ):
-            app.config["NATIVE_ADAPTERS"] = {}
-            app.config["ACTIVE_BROKER_ADAPTERS"] = {}
-            app.config["RECONCILE_TARGETS"] = None
-            logger.critical("BrokerRouter candidate discarded because safety readiness changed during rebuild")
+        if not _publish_broker_dependencies(app, dependencies):
+            dependencies.read_owner.close(timeout=0.0)
             return False
-
-        app.config["OPENALGO_CLIENT"] = openalgo_client
-        app.config["SMART_ROUTING"] = candidate_smart_routing
-        app.config["NATIVE_ADAPTERS"] = candidate_native_adapters
-        app.config["ACTIVE_BROKER_ADAPTERS"] = candidate_active_adapters
-        app.config["RECONCILE_TARGETS"] = candidate_reconcile_targets
-        app.config["ORDER_LIFECYCLE_LEDGER"] = local_state_provider
-        app.config["LOCAL_STATE_PROVIDER"] = local_state_provider
-        app.config["BROKER_ROUTER"] = candidate_router
-        return True
+        return _configure_broker_writes(app, dependencies)
     finally:
         rebuild_lock.release()
 
@@ -3993,10 +4282,10 @@ def create_flask_app(
     # yields the routes' 503 branch (never 404s); construction stays
     # best-effort — a storage failure never blocks boot.
     #
-    # Construct with NO base_dir on purpose: the store's own resolver is what
-    # runs the copy-once ``~/.flinttrade/flows`` migration, and passing an
-    # explicit directory (as this call used to) skipped it, leaving the
-    # migration dead in the only production construction there is.
+    # Construct with NO base_dir on purpose: the store's own resolver runs the
+    # copy-once migration from the legacy/pre-workspace ``~/.flinttrade/flows``
+    # source. Passing an explicit directory (as this call used to) skipped it,
+    # leaving the migration dead in the only production construction there is.
     from flinttrade_webhooks.flow_routes import flows_bp, init_flow_routes  # noqa: PLC0415
 
     try:
@@ -4084,11 +4373,11 @@ def create_flask_app(
     # runner only creates its own dirs, and CronStrategyScheduler does not start
     # APScheduler until .start() is called.
     # The directory comes from ``default_strategies_dir()`` rather than being
-    # rebuilt here: that resolver is where the copy-once
-    # ``~/.flinttrade/strategies`` migration lives, and this is the only place
-    # a running backend resolves the strategies directory, so open-coding
-    # ``_workspace_dir() / "strategies"`` (as this call used to) left the
-    # migration unreachable in production.
+    # rebuilt here: that resolver owns the copy-once migration from the
+    # legacy/pre-workspace ``~/.flinttrade/strategies`` source, and this is the
+    # only place a running backend resolves the strategies directory, so
+    # open-coding ``_workspace_dir() / "strategies"`` (as this call used to)
+    # left the migration unreachable in production.
     if "STRATEGY_RUNNER" not in app.config:
         try:
             from flinttrade_engine.strategy_hot_reload import default_strategies_dir  # noqa: PLC0415
@@ -4797,8 +5086,14 @@ def create_flask_app(
         - Static files and SPA HTML fallback (React bundle)
         All other /v1/ endpoints require the same API key auth.
         """
-        # Allow health check, static files, and SPA fallback without auth
-        if request.endpoint in ("health_detail.health_aggregated", "static", "_spa_fallback"):
+        # Allow health checks, static files, and non-API SPA fallback routes
+        # without auth.  The catch-all SPA endpoint also matches unknown API
+        # paths when a frontend build is present; those paths must retain the
+        # same authentication boundary as API-only deployments.
+        if request.endpoint in ("health_detail.health_aggregated", "static") or (
+            request.endpoint == "_spa_fallback"
+            and not any(request.path.startswith(prefix) for prefix in spa_api_prefixes)
+        ):
             return None
         # Allow OPTIONS for CORS preflight
         if request.method == "OPTIONS":
@@ -5161,7 +5456,11 @@ def create_flask_app(
             # re-derives settings under workspace CAS from the latest state.
             update_openalgo(ws.as_dict())
             broker_change_requested = has_api_key or has_host or has_port or has_ws_port
-            if broker_change_requested and not retire_broker_router_generation(app):
+            old_client = app.config.get("CLIENT")
+            client_replacement_required = not isinstance(old_client, OpenAlgoClient)
+            dependency_refresh_requested = broker_change_requested or client_replacement_required
+            prior_dependencies = app.extensions.get("flinttrade_broker_dependencies")
+            if dependency_refresh_requested and not retire_broker_dependencies(app):
                 return jsonify({"status": "error", "message": "Broker routing could not drain"}), 503
             ws.update(update_openalgo)
             candidate_settings = candidate["settings"]
@@ -5191,7 +5490,6 @@ def create_flask_app(
         # Reconfigure the shared client in place. BrokerRouter, schedulers, cron
         # and Telegram all retain this object, so replacing/closing it would
         # strand live callers on stale credentials or a closed HTTP pool.
-        old_client = app.config.get("CLIENT")
         old_settings = getattr(old_client, "settings", None)
         old_api_key_value = getattr(old_settings, "openalgo_api_key", "")
         old_api_key = old_api_key_value if isinstance(old_api_key_value, str) else ""
@@ -5204,8 +5502,16 @@ def create_flask_app(
                 new_client = OpenAlgoClient(new_settings)
             app.config["CLIENT"] = new_client
             app.config["OPENALGO_CLIENT"] = new_client
-            if broker_change_requested or old_client is not new_client:
+            broker_reads_refreshed_without_writes = False
+            if dependency_refresh_requested:
                 broker_router_rebuilt = configure_broker_router(app, registry, credential_store, new_client) is True
+                if broker_router_rebuilt is False:
+                    broker_reads_refreshed_without_writes = broker_reads_published_without_writes(
+                        app,
+                        previous_dependencies=prior_dependencies,
+                        registry=registry,
+                        openalgo_client=new_client,
+                    )
         except Exception as exc:
             diagnostic = _sanitise_tick_capture_error(exc, api_key)
             diagnostic = _sanitise_tick_capture_error(diagnostic, old_api_key)
@@ -5289,7 +5595,7 @@ def create_flask_app(
                     }
                 ), 200
 
-        if broker_router_rebuilt is False:
+        if broker_router_rebuilt is False and not broker_reads_refreshed_without_writes:
             return jsonify(
                 {
                     "status": "partial",
@@ -6474,7 +6780,7 @@ class FlintTradeApp:
             if not await stop_sync(
                 "startup-broker-router",
                 "broker router",
-                lambda: retire_broker_router_generation(
+                lambda: retire_broker_dependencies(
                     flask_app,
                     timeout=deadline.remaining(10.0),
                 ),
@@ -7123,7 +7429,7 @@ class FlintTradeApp:
                 # auth failed.  Don't confuse users with "UNREACHABLE".
                 logger.warning(
                     "FlintTrade %s started — OpenAlgo %s REACHABLE but AUTH FAILED "
-                    "(status %d; %s). Configure the API key in /setup or ~/.flinttrade/workspace.json.",
+                    "(status %d; %s). Configure the API key in /setup or the active workspace's workspace.json.",
                     self.version,
                     self.settings.openalgo_host,
                     exc.status_code,
@@ -7497,7 +7803,7 @@ class FlintTradeApp:
                 await stop_sync(
                     "broker-router-quiesce",
                     "broker router",
-                    lambda: retire_broker_router_generation(
+                    lambda: retire_broker_dependencies(
                         flask_app,
                         timeout=deadline.remaining(10.0),
                     ),
@@ -7652,7 +7958,7 @@ class FlintTradeApp:
                 await stop_sync(
                     "broker-router-drained",
                     "broker router after request drain",
-                    lambda: retire_broker_router_generation(
+                    lambda: retire_broker_dependencies(
                         flask_app,
                         timeout=deadline.remaining(10.0),
                     ),

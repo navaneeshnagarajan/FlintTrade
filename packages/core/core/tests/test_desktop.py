@@ -26,7 +26,7 @@ def _stub_desktop_shutdown_dependencies(monkeypatch: pytest.MonkeyPatch) -> None
         "_close_runtime_request_admission",
         lambda _app: SimpleNamespace(wait_for_idle=lambda _timeout: True),
     )
-    monkeypatch.setattr(desktop, "retire_broker_router_generation", lambda _app: True)
+    monkeypatch.setattr(desktop, "retire_broker_dependencies", lambda _app: True)
     monkeypatch.setattr(
         "flinttrade_core.smart_order_routes.shutdown_smart_order_jobs",
         lambda **_kwargs: True,
@@ -621,7 +621,7 @@ def test_desktop_quiesces_ditto_before_each_router_retirement(
     )
     monkeypatch.setattr(
         desktop,
-        "retire_broker_router_generation",
+        "retire_broker_dependencies",
         lambda _app: events.append("router") or True,
     )
 
@@ -686,7 +686,7 @@ def test_desktop_shutdown_passes_only_one_absolute_deadline_remaining_budget(
         "shutdown_ditto_runtime",
         lambda _app, *, timeout: record_timeout("ditto", timeout),
     )
-    monkeypatch.setattr(desktop, "retire_broker_router_generation", lambda _app: True)
+    monkeypatch.setattr(desktop, "retire_broker_dependencies", lambda _app: True)
     monkeypatch.setattr(
         "flinttrade_core.local_ai_routes.shutdown_local_ai_runtime",
         lambda _app, *, timeout: record_timeout("local-ai", timeout),
@@ -748,7 +748,7 @@ def test_desktop_stops_local_ai_before_and_independently_of_a_later_failure(
     )
     monkeypatch.setattr(desktop, "_shutdown_rotation_scheduler", lambda _app: None)
     monkeypatch.setattr(desktop, "shutdown_ditto_runtime", lambda _app, **_kwargs: True)
-    monkeypatch.setattr(desktop, "retire_broker_router_generation", lambda _app: True)
+    monkeypatch.setattr(desktop, "retire_broker_dependencies", lambda _app: True)
 
     assert owner._shutdown(time.monotonic() + 0.5) is False
     assert events == ["local-ai", "strategy"]
@@ -891,7 +891,7 @@ def test_desktop_shutdown_timeout_retains_exact_owner_and_rejoins_one_worker(
     )
     monkeypatch.setattr(desktop, "_shutdown_rotation_scheduler", lambda _app: None)
     monkeypatch.setattr(desktop, "shutdown_ditto_runtime", lambda _app, **_kwargs: True)
-    monkeypatch.setattr(desktop, "retire_broker_router_generation", lambda _app: True)
+    monkeypatch.setattr(desktop, "retire_broker_dependencies", lambda _app: True)
     monkeypatch.setattr(
         "flinttrade_core.local_ai_routes.shutdown_local_ai_runtime",
         lambda _app, **_kwargs: True,
@@ -1046,7 +1046,7 @@ def test_desktop_startup_rollback_stops_local_ai_before_a_blocking_admission_own
     monkeypatch.setattr(local_ai_routes, "shutdown_local_ai_runtime", stop_local_ai)
     monkeypatch.setattr(desktop, "_close_runtime_request_admission", block_admission)
     monkeypatch.setattr(desktop, "shutdown_ditto_runtime", lambda _app, **_kwargs: True)
-    monkeypatch.setattr(desktop, "retire_broker_router_generation", lambda _app: True)
+    monkeypatch.setattr(desktop, "retire_broker_dependencies", lambda _app: True)
     result: list[bool] = []
     rollback_thread = threading.Thread(
         target=lambda: result.append(owner.attempt_rollback(deadline=time.monotonic() + 1.0)),
@@ -1127,7 +1127,7 @@ def test_desktop_startup_local_ai_retry_does_not_repeat_proved_other_teardown(
     )
     monkeypatch.setattr(
         desktop,
-        "retire_broker_router_generation",
+        "retire_broker_dependencies",
         lambda _app: events.append("router-retire") or True,
     )
 
@@ -1374,6 +1374,7 @@ def test_desktop_safety_wiring_reuses_client_loop_for_nonblocking_native_mtm(
         def __init__(self) -> None:
             self.loop = asyncio.new_event_loop()
             self.ensure_calls = 0
+            self._baseline_threads = frozenset(threading.enumerate())
             self._thread = threading.Thread(target=self.loop.run_forever, name="desktop-owner-loop")
             self._thread.start()
 
@@ -1385,9 +1386,15 @@ def test_desktop_safety_wiring_reuses_client_loop_for_nonblocking_native_mtm(
             return asyncio.run_coroutine_threadsafe(awaitable, self.loop).result(timeout=2)
 
         def close(self) -> None:
+            asyncio.run_coroutine_threadsafe(self.loop.shutdown_default_executor(), self.loop).result(timeout=2)
             self.loop.call_soon_threadsafe(self.loop.stop)
             self._thread.join(timeout=2)
             self.loop.close()
+            assert not [
+                thread
+                for thread in threading.enumerate()
+                if thread not in self._baseline_threads and thread.is_alive() and not thread.daemon
+            ]
 
     class Router:
         def __init__(self) -> None:
@@ -1442,7 +1449,8 @@ def test_desktop_safety_wiring_reuses_client_loop_for_nonblocking_native_mtm(
         )
         return True
 
-    monkeypatch.setattr(desktop, "configure_broker_router", preserve_injected_router)
+    monkeypatch.setattr(desktop, "_configure_broker_writes", preserve_injected_router)
+    app.extensions["flinttrade_broker_dependencies"] = object()
     app.config.update(
         AUTH_SERVICE=SimpleNamespace(get_profile=lambda: {"username": "operator"}),
         BROKER_ROUTER=router,

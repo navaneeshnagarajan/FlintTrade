@@ -1146,7 +1146,7 @@ def _run_bounded_candidate_coroutine(
 
 
 def _disable_broker_routing() -> bool:
-    """Retire the exact current generation before unpublishing its companions.
+    """Retire only the exact current write generation.
 
     ``retire_broker_router_generation`` retains an undrained router under
     ``BROKER_ROUTER_DRAINING``.  That strong reference is deliberate: a timeout
@@ -1168,14 +1168,24 @@ def _disable_broker_routing() -> bool:
             timeout_seconds=_broker_router_drain_timeout(app),
         ):
             retired = retire_broker_router_generation(app)
-            app.config["SMART_ROUTING"] = {}
-            app.config["NATIVE_ADAPTERS"] = {}
             app.config["RECONCILE_TARGETS"] = None
             if not retired:
                 logger.critical("Broker routing remains disabled until the retained generation drains")
             return retired
     except GenerationLeaseUnavailableError:
         logger.critical("Broker routing disable timed out waiting for the routing-generation lease")
+        return False
+
+
+def _invalidate_broker_dependencies() -> bool:
+    """Invalidate shared reads and writes after observed authority conflict."""
+    from .app import retire_broker_dependencies  # noqa: PLC0415
+
+    app = current_app._get_current_object()  # type: ignore[attr-defined]
+    try:
+        return retire_broker_dependencies(app)
+    except Exception as exc:  # noqa: BLE001 - authority conflict stays fail closed
+        logger.warning("Broker dependency invalidation failed (%s)", type(exc).__name__)
         return False
 
 
@@ -1213,22 +1223,58 @@ def _configure_broker_router_checked(store: Any, registry: Any) -> Any:
 
 def _restore_router_from_vault(store: Any, registry: Any) -> bool:
     """Rebuild from durable state, leaving routing unavailable on failure."""
+    app = current_app._get_current_object()  # type: ignore[attr-defined]
+    previous_dependencies = app.extensions.get("flinttrade_broker_dependencies")
     try:
         _configure_broker_router_checked(store, registry)
     except _RouterRebuildError:
-        _disable_broker_routing()
+        # configure_broker_router publishes valid shared reads before its
+        # independent write attempt.  A write-only failure must not revoke that
+        # newly current read authority; invalidate only when preparation never
+        # produced a dependency record.
+        from .app import broker_reads_published_without_writes  # noqa: PLC0415
+
+        if broker_reads_published_without_writes(
+            app,
+            previous_dependencies=previous_dependencies,
+            registry=registry,
+            openalgo_client=app.config.get("CLIENT"),
+        ):
+            return True
+        current_dependencies = app.extensions.get("flinttrade_broker_dependencies")
+        if current_dependencies is None or current_dependencies is previous_dependencies:
+            _invalidate_broker_dependencies()
         logger.warning("Native account transaction could not restore broker routing")
         return False
     return True
 
 
+def _refresh_broker_dependencies_without_writes(store: Any, registry: Any) -> bool:
+    """Publish post-mutation read authority while an execution default is absent."""
+    from .app import broker_reads_published_without_writes, configure_broker_router  # noqa: PLC0415
+
+    app = current_app._get_current_object()  # type: ignore[attr-defined]
+    previous_dependencies = app.extensions.get("flinttrade_broker_dependencies")
+    client = app.config.get("CLIENT")
+    try:
+        configure_broker_router(app, registry, store, client)
+    except Exception:
+        return False
+    return broker_reads_published_without_writes(
+        app,
+        previous_dependencies=previous_dependencies,
+        registry=registry,
+        openalgo_client=client,
+    )
+
+
 def _quiesce_current_router() -> bool:
-    """Retire the current router through the app-owned generation lifecycle."""
-    from .app import retire_broker_router_generation  # noqa: PLC0415
+    """Retire shared broker dependencies before authority mutation."""
+    from .app import retire_broker_dependencies  # noqa: PLC0415
 
     app = current_app._get_current_object()  # type: ignore[attr-defined]
     try:
-        drained = retire_broker_router_generation(app)
+        drained = retire_broker_dependencies(app)
     except Exception as exc:  # noqa: BLE001 - reject without exposing exception text
         logger.warning(
             "Native account mutation refused: broker router retirement raised (%s)",
@@ -1366,7 +1412,7 @@ def _rollback_committed_candidate(
     if rollback_ok:
         _restore_router_from_vault(store, registry)
     else:
-        _disable_broker_routing()
+        _invalidate_broker_dependencies()
 
 
 def _demote_read_only_vault_primary(
@@ -1529,7 +1575,7 @@ def _do_connect(
             credential_receipt.prior_generation,
         ):
             candidate_store.discard()
-            _disable_broker_routing()
+            _invalidate_broker_dependencies()
             return {"status": "error", "message": "Broker account changed during login"}, 409
         expected_prior_session = (
             prior_session
@@ -1541,7 +1587,7 @@ def _do_connect(
             expected_prior_session,
         ):
             candidate_store.discard()
-            _disable_broker_routing()
+            _invalidate_broker_dependencies()
             return {"status": "error", "message": "Broker session changed during login"}, 409
 
         actor_id = _operator_actor_id()
@@ -1635,7 +1681,23 @@ def _do_connect(
             )
 
         if _workspace_execution_default_is_disabled():
-            _disable_broker_routing()
+            if not _refresh_broker_dependencies_without_writes(store, registry):
+                _rollback_committed_candidate(
+                    store,
+                    registry,
+                    adapter_id,
+                    account_id,
+                    credential_receipt,
+                    prior_session,
+                    candidate_session,
+                    workspace_mutation=workspace_mutation,
+                    execution_default_mutation=(
+                        execution_default_mutations[0]
+                        if execution_default_mutations
+                        else None
+                    ),
+                )
+                return {"status": "error", "message": "Could not publish broker reads"}, 500
         else:
             try:
                 _configure_broker_router_checked(store, registry)
@@ -2124,7 +2186,7 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
             credential_receipt.prior_generation,
         ):
             candidate_store.discard()
-            _disable_broker_routing()
+            _invalidate_broker_dependencies()
             return jsonify({
                 "status": "error",
                 "message": "Broker account changed during login.",
@@ -2139,7 +2201,7 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
             expected_prior_session,
         ):
             candidate_store.discard()
-            _disable_broker_routing()
+            _invalidate_broker_dependencies()
             return jsonify({
                 "status": "error",
                 "message": "Broker session changed during login.",
@@ -2213,7 +2275,22 @@ def relogin_native_account(adapter_id: str, account_id: str) -> Any:
             )
 
         if _workspace_execution_default_is_disabled():
-            _disable_broker_routing()
+            if not _refresh_broker_dependencies_without_writes(store, registry):
+                _rollback_committed_candidate(
+                    store,
+                    registry,
+                    adapter_id,
+                    account_id,
+                    credential_receipt,
+                    prior_session,
+                    candidate_session,
+                    execution_default_mutation=(
+                        execution_default_mutations[0]
+                        if execution_default_mutations
+                        else None
+                    ),
+                )
+                return jsonify({"status": "error", "message": "Could not publish broker reads."}), 500
         else:
             try:
                 _configure_broker_router_checked(store, registry)
@@ -2825,6 +2902,13 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
     except Exception:  # noqa: BLE001
         return jsonify({"status": "error", "message": "Could not snapshot primary metadata."}), 500
 
+    if not _quiesce_current_router():
+        _close_primary_rollback_receipt(primary_receipt)
+        return jsonify({
+            "status": "error",
+            "message": "Broker router is still processing writes; account was not changed.",
+        }), 503
+
     workspace_mutation: _SelectorWorkspaceMutation | None = None
     try:
         workspace_mutation = _register_selector_in_workspace(
@@ -2859,7 +2943,7 @@ def set_primary_native_account(adapter_id: str, account_id: str) -> Any:
         if rollback_ok:
             _restore_router_from_vault(store, registry)
         else:
-            _disable_broker_routing()
+            _invalidate_broker_dependencies()
         logger.warning("Could not set native primary broker account")
         return jsonify({"status": "error", "message": "Could not set primary native account."}), 500
 
@@ -2955,7 +3039,7 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
         return jsonify({"status": "error", "message": "Could not remove native account."}), 500
 
     if not deleted_state_is_current():
-        _disable_broker_routing()
+        _invalidate_broker_dependencies()
         return jsonify({"status": "error", "message": "Native account state changed during removal."}), 409
 
     # The old generation is drained and persistent removal is committed. Evict
@@ -2966,7 +3050,13 @@ def remove_native_account(adapter_id: str, account_id: str) -> Any:
     except Exception:  # noqa: BLE001 - no session is fine
         pass
     if _workspace_execution_default_is_disabled():
-        _disable_broker_routing()
+        if not _refresh_broker_dependencies_without_writes(store, registry):
+            _invalidate_broker_dependencies()
+            logger.warning("Native account removed but broker reads are unavailable")
+            return jsonify({
+                "status": "error",
+                "message": "Native account removed; broker reads are unavailable.",
+            }), 500
     else:
         try:
             _configure_broker_router_checked(store, registry)

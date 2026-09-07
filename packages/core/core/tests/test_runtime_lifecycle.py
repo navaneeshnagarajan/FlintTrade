@@ -401,7 +401,7 @@ async def test_shutdown_stops_uploaded_strategies_before_each_router_retirement(
         events.append("registered-stopped")
 
     monkeypatch.setattr(strategy_routes, "shutdown_strategy_runtime", stop_uploaded)
-    monkeypatch.setattr(app_module, "retire_broker_router_generation", retire_router)
+    monkeypatch.setattr(app_module, "retire_broker_dependencies", retire_router)
     runtime.strategy_cron_scheduler.stop.side_effect = lambda: events.append("cron-stopped")
     runtime.scheduler.stop_all.side_effect = stop_registered
 
@@ -540,7 +540,7 @@ async def test_shutdown_retires_router_before_dependencies_close() -> None:
 
     await runtime.stop()
 
-    router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    router.revoke_and_drain.assert_called_once_with(timeout=0.0)
     assert flask_app.config["BROKER_ROUTER"] is None
     assert flask_app.config["BROKER_ROUTER_DRAINING"] is None
     runtime.client.close.assert_awaited_once_with()
@@ -563,7 +563,7 @@ async def test_shutdown_quiesces_smart_jobs_before_router_retirement(
         return True
 
     def retire_router(*, timeout: float) -> bool:
-        assert timeout == 10.0
+        assert timeout == 0.0
         assert events == ["smart-jobs"]
         return True
 
@@ -575,7 +575,7 @@ async def test_shutdown_quiesces_smart_jobs_before_router_retirement(
     await runtime.stop()
 
     assert events == ["smart-jobs"]
-    router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    router.revoke_and_drain.assert_called_once_with(timeout=0.0)
 
 
 @pytest.mark.asyncio
@@ -592,7 +592,7 @@ async def test_shutdown_quiesces_ditto_before_router_retirement() -> None:
             return True
 
     def retire_router(*, timeout: float) -> bool:
-        assert timeout == 10.0
+        assert timeout == 0.0
         assert events == ["ditto"]
         events.append("router")
         return True
@@ -607,7 +607,7 @@ async def test_shutdown_quiesces_ditto_before_router_retirement() -> None:
     await runtime.stop()
 
     assert events == ["ditto", "router", "ditto"]
-    router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    router.revoke_and_drain.assert_called_once_with(timeout=0.0)
 
 
 @pytest.mark.asyncio
@@ -651,8 +651,8 @@ async def test_shutdown_retires_router_published_by_an_admitted_request() -> Non
 
     await runtime.stop()
 
-    first_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
-    replacement_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    first_router.revoke_and_drain.assert_called_once_with(timeout=0.0)
+    replacement_router.revoke_and_drain.assert_called_once_with(timeout=0.0)
     assert flask_app.config["BROKER_ROUTER"] is None
     assert flask_app.config["BROKER_ROUTER_DRAINING"] is None
 
@@ -679,7 +679,7 @@ async def test_shutdown_drains_rotation_before_revoking_router() -> None:
 
     await runtime.stop()
 
-    router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    router.revoke_and_drain.assert_called_once_with(timeout=0.0)
     rotation.shutdown.assert_called_once_with(wait=False)
 
 
@@ -714,7 +714,7 @@ async def test_rotation_drain_timeout_retains_router_and_retries_truthfully() ->
     admission.release(generation)
     await runtime.stop()
 
-    router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    router.revoke_and_drain.assert_called_once_with(timeout=0.0)
     runtime.client.close.assert_awaited_once_with()
     assert runtime._stop_event.is_set() is True
 

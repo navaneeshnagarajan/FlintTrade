@@ -13,6 +13,8 @@ import os
 import re
 import sqlite3
 import sys
+import threading
+import unicodedata
 import weakref
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -134,6 +136,8 @@ class PrimaryProjectionMutation(_OpaqueReceipt):
 
 _KDF_ITERATIONS = 390_000
 _SALT_BYTES = 16
+_FAMILY_LOCKS_GUARD = threading.Lock()
+_FAMILY_LOCKS: weakref.WeakValueDictionary[str, threading.RLock] = weakref.WeakValueDictionary()
 _ORIGINS = ("legacy_pre_workspace_authority", "legacy_interim_candidate", "legacy_interim_writer", "managed")
 # Closed historical evidence: future catalogue additions do not enlarge migration inference.
 _LEGACY_BROKERS = frozenset(
@@ -211,6 +215,41 @@ _ACCOUNT_COLUMNS = (
 )
 _SETUP_COLUMNS = ("adapter_id", "account_id", "present", "setup_json")
 _VERSION_COLUMNS = ("adapter_id", "account_id", "generation", "present", "origin")
+
+
+def _reset_family_locks_after_fork() -> None:
+    """Discard process-local thread locks inherited by a forked child."""
+    global _FAMILY_LOCKS_GUARD, _FAMILY_LOCKS
+
+    _FAMILY_LOCKS_GUARD = threading.Lock()
+    _FAMILY_LOCKS = weakref.WeakValueDictionary()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_family_locks_after_fork)
+
+
+def _family_lock(path: Path) -> threading.RLock:
+    """Return one process-local re-entrant lock for every accepted vault alias."""
+    with _FAMILY_LOCKS_GUARD:
+        absolute = os.path.abspath(os.fspath(path))
+        canonical = os.path.realpath(absolute, strict=False)
+        keys = tuple(
+            dict.fromkeys(
+                unicodedata.normalize("NFC", os.path.normcase(value)).casefold()
+                for value in (absolute, canonical)
+            )
+        )
+        locks = {lock for key in keys if (lock := _FAMILY_LOCKS.get(key)) is not None}
+        if len(locks) > 1:
+            # An active namespace change made two independently locked paths
+            # converge. Refuse rather than pretend the live critical sections
+            # have been merged.
+            raise CredentialVaultInvalidError
+        lock = next(iter(locks), None) or threading.RLock()
+        for key in keys:
+            _FAMILY_LOCKS[key] = lock
+        return lock
 
 
 def _legacy_identity(row: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -473,6 +512,11 @@ class CredentialStore:
         self._parent: HeldOwnerDirectory | None = None
         self._ancestor: HeldOwnerDirectory | None = None
         self._receipts: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+        with _family_lock(self._db_path):
+            self._initialise()
+
+    def _initialise(self) -> None:
+        """Validate and initialise one vault while its process family lock is held."""
         try:
             parent = self._db_path.parent
             if not parent.exists():
@@ -1039,6 +1083,12 @@ class CredentialStore:
 
     @contextmanager
     def _transaction(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+        with _family_lock(self._db_path):
+            with self._transaction_locked(write=write) as conn:
+                yield conn
+
+    @contextmanager
+    def _transaction_locked(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
         conn = None
         try:
             conn = self._get_connection()

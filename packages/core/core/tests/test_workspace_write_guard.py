@@ -115,20 +115,188 @@ def test_services_routing_has_no_production_readers_outside_persistence():
     assert not failures, "Dormant service routing acquired a runtime reader: " + "; ".join(failures)
 
 
+def _call_name(call: ast.Call) -> str:
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr
+    return ""
+
+
+def _expression_is(node: ast.AST, expression: str) -> bool:
+    return ast.unparse(node) == expression
+
+
+def _keyword_matches(call: ast.Call, name: str, expression: str) -> bool:
+    values = [keyword.value for keyword in call.keywords if keyword.arg == name]
+    return len(values) == 1 and _expression_is(values[0], expression)
+
+
+def _broker_dependency_chain_violations(source: str) -> list[str]:
+    """Return deviations from the shared read/write dependency composition."""
+    tree = ast.parse(source)
+    composers = [
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "configure_broker_router"
+    ]
+    if len(composers) != 1:
+        return ["configure_broker_router count"]
+
+    calls = [node for node in ast.walk(composers[0]) if isinstance(node, ast.Call)]
+    violations: list[str] = []
+    prepare_calls = [call for call in calls if _call_name(call) == "_prepare_broker_dependencies"]
+    if len(prepare_calls) != 1:
+        violations.append("prepare call count")
+    else:
+        prepare = prepare_calls[0]
+        if not _keyword_matches(prepare, "workspace_snapshot", "workspace_snapshot"):
+            violations.append("prepare workspace_snapshot")
+        if not _keyword_matches(prepare, "workspace_path", "target_workspace"):
+            violations.append("prepare workspace_path")
+
+    if any(_call_name(call) == "build_broker_router" for call in calls):
+        violations.append("direct build_broker_router")
+
+    owner_calls = [call for call in calls if _call_name(call) == "create_broker_read_owner"]
+    owner_assignments = [
+        node
+        for node in ast.walk(composers[0])
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and _expression_is(node.targets[0], "dependencies.read_owner")
+        and isinstance(node.value, ast.Call)
+        and _call_name(node.value) == "create_broker_read_owner"
+    ]
+    if len(owner_calls) != 1:
+        violations.append("read owner call count")
+    if len(owner_assignments) != 1:
+        violations.append("read owner assignment count")
+    if len(owner_calls) == 1 and len(owner_assignments) == 1:
+        owner = owner_calls[0]
+        for name, expression in (
+            ("registry", "dependencies.registry"),
+            ("session_provider", "dependencies.session_provider"),
+            ("adapters", "dependencies.adapters"),
+            ("rate_limiter", "dependencies.rate_limiter"),
+            ("workspace_path", "target_workspace"),
+        ):
+            if not _keyword_matches(owner, name, expression):
+                violations.append(f"read owner {name}")
+
+    write_calls = [call for call in calls if _call_name(call) == "_configure_broker_writes"]
+    if len(write_calls) != 1:
+        violations.append("write dependency call count")
+    elif (
+        len(write_calls[0].args) != 2
+        or write_calls[0].keywords
+        or not _expression_is(write_calls[0].args[0], "app")
+        or not _expression_is(write_calls[0].args[1], "dependencies")
+    ):
+        violations.append("write dependency binding")
+    return violations
+
+
 def test_app_workspace_router_construction_cannot_omit_snapshot_binding():
     path = ROOT / "packages/core/core/src/flinttrade_core/app.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    composer = next(
-        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "configure_broker_router"
+    violations = _broker_dependency_chain_violations(path.read_text(encoding="utf-8"))
+    assert not violations, "Broken broker dependency composition: " + ", ".join(violations)
+
+
+_VALID_BROKER_DEPENDENCY_CHAIN = """
+def configure_broker_router(app):
+    dependencies = _prepare_broker_dependencies(
+        registry,
+        workspace_snapshot=workspace_snapshot,
+        workspace_path=target_workspace,
     )
-    calls = [
-        node
-        for node in ast.walk(composer)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "build_broker_router"
-    ]
-    assert calls
-    for call in calls:
-        assert {"workspace_snapshot", "workspace_path"} <= {keyword.arg for keyword in call.keywords}
+    dependencies.read_owner = create_broker_read_owner(
+        registry=dependencies.registry,
+        session_provider=dependencies.session_provider,
+        adapters=dependencies.adapters,
+        rate_limiter=dependencies.rate_limiter,
+        workspace_path=target_workspace,
+    )
+    return _configure_broker_writes(app, dependencies)
+"""
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ("        workspace_snapshot=workspace_snapshot,\n", "", "prepare workspace_snapshot"),
+        ("        workspace_path=target_workspace,\n", "", "prepare workspace_path"),
+        (
+            "    dependencies = _prepare_broker_dependencies(\n",
+            "    build_broker_router()\n    dependencies = _prepare_broker_dependencies(\n",
+            "direct build_broker_router",
+        ),
+        (
+            "    dependencies.read_owner = create_broker_read_owner(\n",
+            "    discarded_owner = create_broker_read_owner(\n",
+            "read owner assignment count",
+        ),
+        (
+            "    return _configure_broker_writes(app, dependencies)\n",
+            "    dependencies.read_owner = create_broker_read_owner()\n"
+            "    return _configure_broker_writes(app, dependencies)\n",
+            "read owner call count",
+        ),
+        ("        registry=dependencies.registry,\n", "        registry=registry,\n", "read owner registry"),
+        (
+            "        session_provider=dependencies.session_provider,\n",
+            "        session_provider=session_provider,\n",
+            "read owner session_provider",
+        ),
+        ("        adapters=dependencies.adapters,\n", "        adapters=adapters,\n", "read owner adapters"),
+        (
+            "        rate_limiter=dependencies.rate_limiter,\n",
+            "        rate_limiter=rate_limiter,\n",
+            "read owner rate_limiter",
+        ),
+        (
+            "        rate_limiter=dependencies.rate_limiter,\n"
+            "        workspace_path=target_workspace,\n",
+            "        rate_limiter=dependencies.rate_limiter,\n",
+            "read owner workspace_path",
+        ),
+        (
+            "        rate_limiter=dependencies.rate_limiter,\n"
+            "        workspace_path=target_workspace,\n",
+            "        rate_limiter=dependencies.rate_limiter,\n"
+            "        workspace_path=other_workspace,\n",
+            "read owner workspace_path",
+        ),
+        (
+            "    return _configure_broker_writes(app, dependencies)\n",
+            "    return _configure_broker_writes(app, foreign_dependencies)\n",
+            "write dependency binding",
+        ),
+        (
+            "    return _configure_broker_writes(app, dependencies)\n",
+            "    _configure_broker_writes(app, dependencies)\n"
+            "    return _configure_broker_writes(app, dependencies)\n",
+            "write dependency call count",
+        ),
+    ],
+    ids=[
+        "prepare-omits-snapshot",
+        "prepare-omits-path",
+        "compatibility-wrapper",
+        "discarded-read-owner",
+        "duplicate-read-owner",
+        "foreign-registry",
+        "foreign-session-provider",
+        "foreign-adapters",
+        "foreign-rate-limiter",
+        "read-owner-omits-path",
+        "read-owner-foreign-path",
+        "foreign-write-dependencies",
+        "duplicate-write-dependencies",
+    ],
+)
+def test_broker_dependency_chain_guard_rejects_structural_regressions(old, new, expected):
+    assert old in _VALID_BROKER_DEPENDENCY_CHAIN
+    mutated = _VALID_BROKER_DEPENDENCY_CHAIN.replace(old, new, 1)
+    assert expected in _broker_dependency_chain_violations(mutated)
 
 
 def _nonpython_authority_write(source):

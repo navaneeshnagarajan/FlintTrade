@@ -374,7 +374,7 @@ def test_background_l5_scope_blocks_router_rebuild_until_every_verb_finishes(
 
         def revoke_and_drain(self, *, timeout: float) -> bool:
             self.revoke_calls += 1
-            assert timeout == 1.0
+            assert timeout == 0.0
             assert len(self.calls) == len(L5_EMERGENCY_POLICY.verbs)
             return True
 
@@ -391,6 +391,7 @@ def test_background_l5_scope_blocks_router_rebuild_until_every_verb_finishes(
     safety.bind_emergency_journal(journal)
     app.config.update(
         AUTH_SERVICE=SimpleNamespace(get_profile=lambda: {"username": "operator"}),
+        REGISTRY=registry,
         BROKER_ROUTER=old_router,
         BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=1.0,
         BROKER_ROUTER_REBUILD_LOCK=threading.RLock(),
@@ -413,9 +414,9 @@ def test_background_l5_scope_blocks_router_rebuild_until_every_verb_finishes(
         "_read_workspace_brokers",
         lambda: default_workspace_config()["brokers"],
     )
-    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: ({}, {}))
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
     monkeypatch.setattr(app_module, "_build_reconcile_targets_provider", lambda *_args: None)
-    monkeypatch.setattr(app_module, "build_broker_router", lambda *_args, **_kwargs: candidate_router)
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", lambda *_args, **_kwargs: candidate_router)
     monkeypatch.setattr(app_module, "_snapshot_brokers_bak", lambda _config: None)
 
     activation: dict[str, Any] = {}
@@ -426,7 +427,7 @@ def test_background_l5_scope_blocks_router_rebuild_until_every_verb_finishes(
 
     def rebuild_router() -> None:
         rebuild_started.set()
-        rebuild["result"] = app_module.configure_broker_router(app, registry, object(), object())
+        rebuild["result"] = app_module.configure_broker_router(app, registry, object(), None)
         rebuild_finished.set()
 
     activation_thread.start()

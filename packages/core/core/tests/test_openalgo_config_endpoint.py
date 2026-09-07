@@ -145,6 +145,71 @@ def test_openalgo_config_telegram_save_keeps_env_bridge_endpoint(monkeypatch, tm
     assert app.config["CLIENT"]._base == "http://bridge.example:5000/api/v1"
 
 
+def test_openalgo_config_telegram_save_preserves_shared_broker_dependency_generation(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_core.config import Settings
+    from flinttrade_core.openalgo_client import OpenAlgoClient
+    from flinttrade_core.workspace import Workspace
+    from flinttrade_core.workspace_migrations import broker_workspace_version, read_workspace_snapshot
+
+    workspace = Workspace(tmp_path)
+    workspace.initialise()
+
+    def configure_account(config):
+        config["openalgo"]["api_key"] = "fixture-openalgo-key"
+        config["brokers"]["account_acls"] = {"openalgo": {"default": ["operator"]}}
+
+    workspace.update(configure_account)
+    app = create_flask_app(client=OpenAlgoClient(Settings.from_workspace_data(workspace.as_dict())))
+    app.config["TESTING"] = True
+    before_workspace = read_workspace_snapshot(tmp_path)
+    dependencies = app.extensions["flinttrade_broker_dependencies"]
+    identities = (
+        dependencies,
+        dependencies.read_owner,
+        dependencies.session_provider,
+        dependencies.adapters,
+        dependencies.rate_limiter,
+        dependencies.registry_publication_owner,
+        app.extensions["flinttrade.registry_publication_owner"],
+        dependencies.openalgo_client,
+        app.config["CLIENT"],
+        app.config["OPENALGO_CLIENT"],
+        app.config["REGISTRY"],
+    )
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json={"telegram_username": "linked-trader"},
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+
+    assert response.status_code == 200
+    current = app.extensions["flinttrade_broker_dependencies"]
+    after_workspace = read_workspace_snapshot(tmp_path)
+    current_identities = (
+        current,
+        current.read_owner,
+        current.session_provider,
+        current.adapters,
+        current.rate_limiter,
+        current.registry_publication_owner,
+        app.extensions["flinttrade.registry_publication_owner"],
+        current.openalgo_client,
+        app.config["CLIENT"],
+        app.config["OPENALGO_CLIENT"],
+        app.config["REGISTRY"],
+    )
+    assert all(after is before for after, before in zip(current_identities, identities, strict=True))
+    assert after_workspace.version != before_workspace.version
+    assert broker_workspace_version(after_workspace) == broker_workspace_version(before_workspace)
+
+
 def test_openalgo_config_endpoint_initialises_fresh_workspace(monkeypatch, tmp_path):
     """A native first run can save OpenAlgo settings without a pre-existing workspace.json."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
@@ -336,6 +401,106 @@ def test_openalgo_config_reports_failed_router_rebuild_without_rolling_back_save
     saved = Workspace(tmp_path)
     assert saved.get("openalgo.api_key") == "new-fixture-key"
     assert saved.get("workspace_generation") == before + 1
+
+
+def test_openalgo_config_refreshes_reads_when_execution_default_is_blank(monkeypatch, tmp_path):
+    from flinttrade_core import app as app_module
+    from flinttrade_core.config import Settings
+    from flinttrade_core.openalgo_client import OpenAlgoClient
+    from flinttrade_core.workspace import Workspace
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "fixture-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    workspace.initialise()
+
+    def configure_reads_only(config):
+        config["openalgo"]["api_key"] = "old-key"
+        config["brokers"]["execution"]["default"] = ""
+        config["brokers"]["account_acls"] = {"openalgo": {"default": ["operator"]}}
+
+    workspace.update(configure_reads_only)
+    shared = OpenAlgoClient(Settings.from_workspace_data(workspace.as_dict()))
+    app = app_module.create_flask_app(client=shared)
+    prior = app.extensions["flinttrade_broker_dependencies"]
+    assert app.config.get("BROKER_ROUTER") is None
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        json={"api_key": "new-key"},
+        headers={"X-API-Key": "fixture-backend-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "ok"
+    current = app.extensions["flinttrade_broker_dependencies"]
+    assert current is not prior
+    assert current.registry is app.config["REGISTRY"]
+    assert current.read_owner is not prior.read_owner
+    assert current.rate_limiter is not prior.rate_limiter
+    assert current.openalgo_client is shared
+    assert app.config["CLIENT"] is app.config["OPENALGO_CLIENT"] is shared
+    assert app.config.get("BROKER_ROUTER") is None
+
+
+def test_openalgo_telegram_save_refuses_busy_client_replacement_before_workspace_mutation(monkeypatch, tmp_path):
+    from flinttrade_core import app as app_module
+    from flinttrade_core.workspace import Workspace
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "fixture-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+    app = app_module.create_flask_app()
+    prior_dependencies = app.extensions["flinttrade_broker_dependencies"]
+    replacement_source = object()
+    app.config["CLIENT"] = replacement_source
+    before = Workspace(tmp_path).as_dict()
+    monkeypatch.setattr(app_module, "retire_broker_dependencies", lambda *_args, **_kwargs: False)
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        json={"telegram_username": "linked-trader"},
+        headers={"X-API-Key": "fixture-backend-key"},
+    )
+
+    assert response.status_code == 503
+    assert Workspace(tmp_path).as_dict() == before
+    assert app.config["CLIENT"] is replacement_source
+    assert app.extensions["flinttrade_broker_dependencies"] is prior_dependencies
+
+
+def test_openalgo_telegram_save_drains_before_client_replacement(monkeypatch, tmp_path):
+    from flinttrade_core import app as app_module
+    from flinttrade_core.workspace import Workspace
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "fixture-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    workspace.initialise()
+    workspace.set("openalgo.api_key", "fixture-key")
+    workspace.set("brokers.execution.default", "")
+    app = app_module.create_flask_app()
+    prior_dependencies = app.extensions["flinttrade_broker_dependencies"]
+    replacement_source = object()
+    app.config["CLIENT"] = replacement_source
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        json={"telegram_username": "linked-trader"},
+        headers={"X-API-Key": "fixture-backend-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "ok"
+    current = app.extensions["flinttrade_broker_dependencies"]
+    assert current is not prior_dependencies
+    assert current.read_owner is not prior_dependencies.read_owner
+    assert current.openalgo_client is app.config["CLIENT"] is app.config["OPENALGO_CLIENT"]
+    assert app.config["CLIENT"] is not replacement_source
+    assert Workspace(tmp_path).get("openalgo.telegram_username") == "linked-trader"
+    assert app.config.get("BROKER_ROUTER") is None
 
 
 def test_openalgo_config_unauthenticated_remote_get_rejected_without_leaking_key(monkeypatch, tmp_path):

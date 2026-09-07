@@ -61,6 +61,7 @@ def _bridge_fixture(path, app=None):
         openalgo_port=int(config["port"]), openalgo_ws_port=int(config["ws_port"])))
     if app is not None:
         app.extensions["flinttrade.registry_publication_owner"] = fixture.owner
+        app.config["REGISTRY"] = fixture.registry
     _BRIDGE_FIXTURES.append((fixture, client))
     return fixture, client
 
@@ -84,6 +85,7 @@ def _owned_registry(app):
         registry, owner = create_owned_registry()
         app.config["TEST_REGISTRY"] = registry
         app.extensions["flinttrade.registry_publication_owner"] = owner
+    app.config["REGISTRY"] = app.config["TEST_REGISTRY"]
     return app.config["TEST_REGISTRY"]
 
 
@@ -246,6 +248,49 @@ def test_rate_limit_endpoint_invalidates_managed_siblings(tmp_path, monkeypatch)
     assert rebound._session_provider.broker_workspace_version.generation == 3
 
 
+def test_rate_limit_endpoint_refreshes_reads_when_execution_default_is_blank(tmp_path, monkeypatch):
+    import flinttrade_core.app as app_module
+    from flinttrade_core.workspace import Workspace
+    from flinttrade_gateway.auth import gateway_bp
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    workspace = Workspace(tmp_path)
+    workspace.initialise()
+
+    def configure_reads_only(config):
+        config["openalgo"]["api_key"] = "initial-key"
+        config["brokers"]["execution"]["default"] = ""
+        config["brokers"]["account_acls"] = {"openalgo": {"default": ["operator"]}}
+
+    workspace.update(configure_reads_only)
+    app = Flask("rate-limit-read-refresh")
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
+    app.register_blueprint(gateway_bp)
+    _mark_router_prerequisites_ready(app)
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
+    exact, client = _bridge_fixture(tmp_path, app)
+    app.config.update(REGISTRY=exact.registry, CREDENTIAL_STORE=exact.store, CLIENT=client)
+    assert app_module.configure_broker_router(app, exact.registry, exact.store, client) is False
+    prior = app.extensions["flinttrade_broker_dependencies"]
+
+    read_response = app.test_client().get("/v1/rate-limits")
+
+    assert read_response.status_code == 200
+    assert read_response.get_json()["limits"] == prior.rate_limiter.snapshot()
+    assert read_response.get_json()["limits"]
+
+    response = app.test_client().put("/v1/rate-limits", json={"broker_id": "openalgo", "data": 7})
+
+    assert response.status_code == 200
+    current = app.extensions["flinttrade_broker_dependencies"]
+    assert current is not prior
+    assert current.registry is exact.registry
+    assert current.read_owner is not prior.read_owner
+    assert current.rate_limiter is not prior.rate_limiter
+    assert current.rate_limiter.snapshot()["openalgo"]["data"] == 7.0
+    assert app.config.get("BROKER_ROUTER") is None
+
+
 @pytest.mark.parametrize("race,expected", [("service", True), ("broker", False), ("corrupt", False), ("removed", False)])
 def test_router_rebuild_rechecks_only_broker_authority_and_contains_read_failures(tmp_path, monkeypatch, race, expected):
     import flinttrade_core.app as app_module
@@ -257,9 +302,9 @@ def test_router_rebuild_rechecks_only_broker_authority_and_contains_read_failure
     app = Flask("rebuild-interleave")
     _mark_router_prerequisites_ready(app)
     monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
-    original_build = app_module.build_broker_router
-    def racing_build(*args, **kwargs):
-        candidate = original_build(*args, **kwargs)
+    original_prepare = app_module._prepare_broker_dependencies
+    def racing_prepare(*args, **kwargs):
+        candidate = original_prepare(*args, **kwargs)
         if race == "service":
             workspace.set("services.connection_epoch", 1)
         elif race == "broker":
@@ -269,7 +314,7 @@ def test_router_rebuild_rechecks_only_broker_authority_and_contains_read_failure
         else:
             workspace.config_path.unlink()
         return candidate
-    monkeypatch.setattr(app_module, "build_broker_router", racing_build)
+    monkeypatch.setattr(app_module, "_prepare_broker_dependencies", racing_prepare)
     assert app_module.configure_broker_router(app, _owned_registry(app), None, None) is expected
     assert (app.config.get("BROKER_ROUTER") is not None) is expected
 
@@ -327,13 +372,13 @@ def test_configure_broker_router_revokes_old_generation_before_publish(
         "_read_workspace_brokers",
         lambda: default_workspace_config()["brokers"],
     )
-    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: ({}, {}))
-    monkeypatch.setattr(app_module, "build_broker_router", lambda *_args, **_kwargs: candidate)
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", lambda *_args, **_kwargs: candidate)
     monkeypatch.setattr(app_module, "_snapshot_brokers_bak", lambda _config: None)
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is True
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is True
 
-    old_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    old_router.revoke_and_drain.assert_called_once_with(timeout=0.0)
     assert app.config["BROKER_ROUTER"] is candidate
     provider = app.config["LOCAL_STATE_PROVIDER"]
     assert callable(provider)
@@ -359,23 +404,23 @@ def test_configure_broker_router_forwards_composite_safety_admission_to_every_ge
         "_read_workspace_brokers",
         lambda: default_workspace_config()["brokers"],
     )
-    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: ({}, {}))
-    monkeypatch.setattr(app_module, "build_broker_router", build)
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
     monkeypatch.setattr(app_module, "_snapshot_brokers_bak", lambda _config: None)
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is True
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is True
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is True
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is True
 
     assert build.call_count == 2
     assert all(
         call.kwargs["write_admission"] is guard
         for call in build.call_args_list
     )
-    lifecycle_stores = [call.kwargs["lifecycle_store"] for call in build.call_args_list]
+    lifecycle_stores = [call.args[0].lifecycle_store for call in build.call_args_list]
     assert lifecycle_stores[0] is lifecycle_stores[1]
     assert app.config["ORDER_LIFECYCLE_LEDGER"] is lifecycle_stores[0]
     assert app.config["LOCAL_STATE_PROVIDER"] is lifecycle_stores[0]
-    first.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    first.revoke_and_drain.assert_called_once_with(timeout=0.0)
     assert app.config["BROKER_ROUTER"] is second
 
 
@@ -396,11 +441,11 @@ def test_configure_broker_router_binds_lifecycle_audit_receipt_verifier(
         "_read_workspace_brokers",
         lambda: default_workspace_config()["brokers"],
     )
-    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: ({}, {}))
-    monkeypatch.setattr(app_module, "build_broker_router", MagicMock(return_value=router))
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", MagicMock(return_value=router))
     monkeypatch.setattr(app_module, "_snapshot_brokers_bak", lambda _config: None)
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is True
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is True
 
     lifecycle_store.set_audit_receipt_verifier.assert_called_once_with(
         audit.verify_event_receipt
@@ -420,13 +465,13 @@ def test_configure_broker_router_build_failure_revokes_and_fails_closed(
     _mark_router_prerequisites_ready(app)
     monkeypatch.setattr(
         app_module,
-        "build_broker_router",
+        "_build_broker_router_from_dependencies",
         MagicMock(side_effect=ValueError("invalid routing")),
     )
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is False
 
-    old_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    old_router.revoke_and_drain.assert_called_once_with(timeout=0.0)
     assert app.config["BROKER_ROUTER"] is None
 
 
@@ -450,12 +495,12 @@ def test_configure_broker_router_refuses_an_unhealthy_emergency_journal(
         "_read_workspace_brokers",
         lambda: default_workspace_config()["brokers"],
     )
-    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: ({}, {}))
-    monkeypatch.setattr(app_module, "build_broker_router", build)
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is False
 
-    old_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    old_router.revoke_and_drain.assert_called_once_with(timeout=0.0)
     build.assert_not_called()
     assert app.config["BROKER_ROUTER"] is None
 
@@ -481,11 +526,11 @@ def test_configure_broker_router_refuses_an_unhealthy_daily_pnl_store(
         EMERGENCY_RUNTIME_READY=True,
         SAFETY=SimpleNamespace(broker_write_admission=MagicMock()),
     )
-    monkeypatch.setattr(app_module, "build_broker_router", build)
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is False
 
-    old_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    old_router.revoke_and_drain.assert_called_once_with(timeout=0.0)
     build.assert_not_called()
     assert app.config["BROKER_ROUTER"] is None
 
@@ -503,11 +548,11 @@ def test_configure_broker_router_refuses_invalid_durable_safety_config(
     app.config["BROKER_ROUTER"] = old_router
     _mark_router_prerequisites_ready(app)
     app.config["SAFETY_CONFIG_READY"] = False
-    monkeypatch.setattr(app_module, "build_broker_router", build)
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is False
 
-    old_router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    old_router.revoke_and_drain.assert_called_once_with(timeout=0.0)
     build.assert_not_called()
     assert app.config["BROKER_ROUTER"] is None
 
@@ -525,9 +570,9 @@ def test_configure_broker_router_refuses_non_durable_order_reservations(
         broker_write_admission=MagicMock(),
         order_reservations_durable=False,
     )
-    monkeypatch.setattr(app_module, "build_broker_router", build)
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is False
 
     build.assert_not_called()
     assert app.config.get("BROKER_ROUTER") is None
@@ -546,9 +591,9 @@ def test_configure_broker_router_refuses_publication_without_emergency_runtime(
         SAFETY=SimpleNamespace(broker_write_admission=MagicMock()),
     )
     build = MagicMock(return_value=object())
-    monkeypatch.setattr(app_module, "build_broker_router", build)
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is False
 
     build.assert_not_called()
     assert app.config.get("BROKER_ROUTER") is None
@@ -594,9 +639,9 @@ def test_configure_broker_router_requires_explicit_journal_and_safety_readiness(
     app = Flask("router-explicit-readiness")
     app.config.update(config)
     build = MagicMock(return_value=object())
-    monkeypatch.setattr(app_module, "build_broker_router", build)
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is False
 
     build.assert_not_called()
     assert app.config.get("BROKER_ROUTER") is None
@@ -616,8 +661,8 @@ def test_configure_broker_router_snapshots_before_publication_and_fails_closed(
         "_read_workspace_brokers",
         lambda: default_workspace_config()["brokers"],
     )
-    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: ({}, {}))
-    monkeypatch.setattr(app_module, "build_broker_router", lambda *_args, **_kwargs: candidate)
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", lambda *_args, **_kwargs: candidate)
 
     def fail_snapshot(_config: object) -> None:
         assert app.config.get("BROKER_ROUTER") is None
@@ -625,7 +670,7 @@ def test_configure_broker_router_snapshots_before_publication_and_fails_closed(
 
     monkeypatch.setattr(app_module, "_snapshot_brokers_bak", fail_snapshot)
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is False
     assert app.config.get("BROKER_ROUTER") is None
 
 
@@ -643,11 +688,12 @@ def test_configure_broker_router_drain_timeout_never_publishes_candidate(
         BROKER_ROUTER=old_router,
         BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.25,
     )
-    monkeypatch.setattr(app_module, "build_broker_router", lambda *_args, **_kwargs: candidate)
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", lambda *_args, **_kwargs: candidate)
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is False
 
-    old_router.revoke_and_drain.assert_called_once_with(timeout=0.25)
+    assert old_router.revoke_and_drain.call_count == 2
+    assert old_router.revoke_and_drain.call_args_list[0].kwargs == {"timeout": 0.0}
     assert app.config["BROKER_ROUTER"] is None
     assert app.config["BROKER_ROUTER_DRAINING"] is old_router
 
@@ -691,10 +737,10 @@ def test_configure_broker_router_times_out_waiting_for_rebuild_lease(
         BROKER_ROUTER_REBUILD_LOCK=lock,
         BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.01,
     )
-    monkeypatch.setattr(app_module, "build_broker_router", build)
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
     completed, results = _call_while_lock_is_held(
         lock,
-        lambda: app_module.configure_broker_router(app, _owned_registry(app), object(), object()),
+        lambda: app_module.configure_broker_router(app, _owned_registry(app), object(), None),
     )
 
     assert completed is True
@@ -724,16 +770,16 @@ def test_configure_broker_router_retries_retained_generation_before_build(
         "_read_workspace_brokers",
         lambda: default_workspace_config()["brokers"],
     )
-    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: ({}, {}))
-    monkeypatch.setattr(app_module, "build_broker_router", build)
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
     monkeypatch.setattr(app_module, "_snapshot_brokers_bak", lambda _config: None)
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is False
     build.assert_not_called()
     assert app.config["BROKER_ROUTER"] is None
     assert app.config["BROKER_ROUTER_DRAINING"] is old_router
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is True
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is True
 
     assert old_router.revoke_and_drain.call_count == 2
     assert app.config["BROKER_ROUTER_DRAINING"] is None
@@ -754,14 +800,625 @@ def test_configure_broker_router_refuses_and_retires_during_shutdown(
         BROKER_ROUTER=router,
         RUNTIME_ACCEPTING_REQUESTS=False,
     )
-    monkeypatch.setattr(app_module, "build_broker_router", build)
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
 
-    assert app_module.configure_broker_router(app, _owned_registry(app), object(), object()) is False
+    assert app_module.configure_broker_router(app, _owned_registry(app), object(), None) is False
 
-    router.revoke_and_drain.assert_called_once_with(timeout=10.0)
+    router.revoke_and_drain.assert_called_once_with(timeout=0.0)
     build.assert_not_called()
     assert app.config["BROKER_ROUTER"] is None
     assert app.config["BROKER_ROUTER_DRAINING"] is None
+
+
+@pytest.mark.unit
+def test_configure_publishes_reads_before_independent_write_readiness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.app as app_module
+    from flinttrade_core.workspace import Workspace
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    workspace = Workspace(tmp_path)
+    workspace.initialise()
+    app = Flask("read-before-write-readiness")
+    registry = _owned_registry(app)
+    monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
+
+    assert app_module.configure_broker_router(app, registry, object(), None) is False
+    dependencies = app.extensions["flinttrade_broker_dependencies"]
+    assert dependencies.registry is registry
+    assert dependencies.registry_publication_owner is app.extensions["flinttrade.registry_publication_owner"]
+    assert dependencies.read_owner is not None
+    assert dependencies.read_owner._adapters is dependencies.adapters
+    assert app.config.get("BROKER_ROUTER") is None
+    assert app.config["ACTIVE_BROKER_ADAPTERS"] is dependencies.adapters
+
+    _mark_router_prerequisites_ready(app)
+    assert app_module._configure_broker_writes(app, dependencies) is True
+    assert app.config["BROKER_ROUTER"]._adapters is dependencies.adapters
+
+
+@pytest.mark.parametrize(
+    "composition",
+    [
+        "missing_dependency_owner",
+        "foreign_dependency_owner",
+        "missing_app_owner",
+        "replaced_app_owner",
+        "registry_mismatch",
+        "missing_app_registry",
+        "foreign_app_registry",
+    ],
+)
+def test_dependency_publication_refuses_owner_or_registry_mismatch_without_partial_publication(composition) -> None:
+    import flinttrade_core.app as app_module
+    from flinttrade_gateway.registry import create_owned_registry
+
+    registry, owner = create_owned_registry()
+    foreign_registry, foreign_owner = create_owned_registry()
+    dependency_registry = foreign_registry if composition == "registry_mismatch" else registry
+    dependency_owner = (
+        None
+        if composition == "missing_dependency_owner"
+        else foreign_owner
+        if composition == "foreign_dependency_owner"
+        else owner
+    )
+    app = Flask(f"publication-{composition}")
+    if composition != "missing_app_owner":
+        app.extensions["flinttrade.registry_publication_owner"] = (
+            foreign_owner if composition == "replaced_app_owner" else owner
+        )
+    if composition != "missing_app_registry":
+        app.config["REGISTRY"] = foreign_registry if composition == "foreign_app_registry" else registry
+    dependencies = app_module._BrokerRuntimeDependencies(
+        registry=dependency_registry,
+        registry_publication_owner=dependency_owner,
+        config=SimpleNamespace(execution=SimpleNamespace(default=""), registered=()),
+        brokers_config={},
+        session_provider=object(),
+        adapters={},
+        rate_limiter=None,
+        lifecycle_store=None,
+        workspace_snapshot=None,
+        workspace_path=None,
+        openalgo_client=None,
+        native_adapters={},
+        read_owner=object(),
+    )
+
+    assert app_module._publish_broker_dependencies(app, dependencies) is False
+    assert "flinttrade_broker_dependencies" not in app.extensions
+    for key in (
+        "OPENALGO_CLIENT",
+        "SMART_ROUTING",
+        "NATIVE_ADAPTERS",
+        "ACTIVE_BROKER_ADAPTERS",
+        "ORDER_LIFECYCLE_LEDGER",
+        "LOCAL_STATE_PROVIDER",
+        "RECONCILE_TARGETS",
+    ):
+        assert key not in app.config
+
+
+def _published_write_dependency_fixture(app: Flask, app_module, *, ready: bool = True):
+    registry = _owned_registry(app)
+    if ready:
+        _mark_router_prerequisites_ready(app)
+    read_owner = MagicMock()
+    read_owner.close.return_value = True
+    borrowed_client = MagicMock()
+    dependencies = app_module._BrokerRuntimeDependencies(
+        registry=registry,
+        registry_publication_owner=app.extensions["flinttrade.registry_publication_owner"],
+        config=SimpleNamespace(execution=SimpleNamespace(default="openalgo:default"), registered=()),
+        brokers_config={},
+        session_provider=object(),
+        adapters={},
+        rate_limiter=None,
+        lifecycle_store=object(),
+        workspace_snapshot=None,
+        workspace_path=None,
+        openalgo_client=borrowed_client,
+        native_adapters={},
+        read_owner=read_owner,
+    )
+    old_router = MagicMock()
+    old_router.revoke_and_drain.return_value = True
+    app.extensions["flinttrade_broker_dependencies"] = dependencies
+    app.config.update(
+        BROKER_ROUTER=old_router,
+        BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.1,
+        BROKER_ROUTER_REBUILD_LOCK=threading.RLock(),
+        ACTIVE_BROKER_ADAPTERS=dependencies.adapters,
+        NATIVE_ADAPTERS=dependencies.native_adapters,
+    )
+    return dependencies, read_owner, borrowed_client, old_router
+
+
+@pytest.mark.parametrize("replacement", ["owner", "registry"])
+def test_write_configuration_retires_exact_stale_dependency_before_build(
+    monkeypatch: pytest.MonkeyPatch,
+    replacement,
+) -> None:
+    import flinttrade_core.app as app_module
+    from flinttrade_gateway.registry import create_owned_registry
+
+    app = Flask(f"write-stale-before-{replacement}")
+    dependencies, read_owner, borrowed_client, old_router = _published_write_dependency_fixture(app, app_module)
+    foreign_registry, foreign_owner = create_owned_registry()
+    if replacement == "owner":
+        app.extensions["flinttrade.registry_publication_owner"] = foreign_owner
+    else:
+        app.config["REGISTRY"] = foreign_registry
+    build = MagicMock()
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
+
+    assert app_module._configure_broker_writes(app, dependencies) is False
+
+    build.assert_not_called()
+    old_router.revoke_and_drain.assert_called_once_with(timeout=0.0)
+    read_owner.close.assert_called_once_with(timeout=0.0)
+    assert "flinttrade_broker_dependencies" not in app.extensions
+    assert app.config["BROKER_ROUTER"] is None
+    assert app.config["ACTIVE_BROKER_ADAPTERS"] == {}
+    assert app.config["NATIVE_ADAPTERS"] == {}
+    borrowed_client.close.assert_not_called()
+
+
+@pytest.mark.parametrize("replacement", ["owner", "registry"])
+def test_write_configuration_rechecks_dependency_authority_after_candidate_build(
+    monkeypatch: pytest.MonkeyPatch,
+    replacement,
+) -> None:
+    import flinttrade_core.app as app_module
+    from flinttrade_gateway.registry import create_owned_registry
+
+    app = Flask(f"write-stale-during-{replacement}")
+    dependencies, read_owner, borrowed_client, old_router = _published_write_dependency_fixture(app, app_module)
+    foreign_registry, foreign_owner = create_owned_registry()
+    candidate = object()
+
+    def build(*_args, **_kwargs):
+        if replacement == "owner":
+            app.extensions["flinttrade.registry_publication_owner"] = foreign_owner
+        else:
+            app.config["REGISTRY"] = foreign_registry
+        return candidate
+
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
+
+    assert app_module._configure_broker_writes(app, dependencies) is False
+
+    old_router.revoke_and_drain.assert_called_once_with(timeout=0.0)
+    read_owner.close.assert_called_once_with(timeout=0.0)
+    assert "flinttrade_broker_dependencies" not in app.extensions
+    assert app.config["BROKER_ROUTER"] is None
+    assert app.config["BROKER_ROUTER"] is not candidate
+    borrowed_client.close.assert_not_called()
+
+
+def test_write_configuration_holds_rebuild_lock_through_build_and_both_publications(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.app as app_module
+
+    app = Flask("write-transaction-lock")
+    dependencies, _read_owner, _borrowed_client, _old_router = _published_write_dependency_fixture(app, app_module)
+    rebuild_lock = app.config["BROKER_ROUTER_REBUILD_LOCK"]
+    candidate = object()
+    reconcile = object()
+
+    def build(*_args, **_kwargs):
+        assert rebuild_lock._is_owned()
+        return candidate
+
+    def build_reconcile(*_args, **_kwargs):
+        assert rebuild_lock._is_owned()
+        assert app.config["BROKER_ROUTER"] is None
+        return reconcile
+
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
+    monkeypatch.setattr(app_module, "_build_reconcile_targets_provider", build_reconcile)
+
+    assert app_module._configure_broker_writes(app, dependencies) is True
+
+    assert app.config["BROKER_ROUTER"] is candidate
+    assert app.config["RECONCILE_TARGETS"] is reconcile
+
+
+def test_stale_supplied_dependency_cannot_retire_a_newer_current_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.app as app_module
+
+    app = Flask("write-stale-supplied-record")
+    current, read_owner, _borrowed_client, current_router = _published_write_dependency_fixture(app, app_module)
+    stale = app_module._BrokerRuntimeDependencies(
+        registry=current.registry,
+        registry_publication_owner=current.registry_publication_owner,
+        config=current.config,
+        brokers_config=current.brokers_config,
+        session_provider=current.session_provider,
+        adapters=current.adapters,
+        rate_limiter=current.rate_limiter,
+        lifecycle_store=current.lifecycle_store,
+        workspace_snapshot=current.workspace_snapshot,
+        workspace_path=current.workspace_path,
+        openalgo_client=current.openalgo_client,
+        native_adapters=current.native_adapters,
+        read_owner=MagicMock(),
+    )
+    build = MagicMock()
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
+
+    assert app_module._configure_broker_writes(app, stale) is False
+
+    assert app.extensions["flinttrade_broker_dependencies"] is current
+    assert app.config["BROKER_ROUTER"] is current_router
+    current_router.revoke_and_drain.assert_not_called()
+    read_owner.close.assert_not_called()
+    build.assert_not_called()
+
+
+def test_runtime_staleness_retires_reads_but_readiness_only_failure_preserves_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.app as app_module
+
+    stale_app = Flask("write-runtime-stale")
+    stale, stale_reads, _client, stale_router = _published_write_dependency_fixture(stale_app, app_module)
+    stale_app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
+    build = MagicMock()
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
+
+    assert app_module._configure_broker_writes(stale_app, stale) is False
+    assert "flinttrade_broker_dependencies" not in stale_app.extensions
+    stale_reads.close.assert_called_once_with(timeout=0.0)
+    stale_router.revoke_and_drain.assert_called_once_with(timeout=0.0)
+    build.assert_not_called()
+
+    readiness_app = Flask("write-readiness-only")
+    valid, valid_reads, _client, valid_router = _published_write_dependency_fixture(
+        readiness_app,
+        app_module,
+        ready=False,
+    )
+
+    assert app_module._configure_broker_writes(readiness_app, valid) is False
+    assert readiness_app.extensions["flinttrade_broker_dependencies"] is valid
+    valid_reads.close.assert_not_called()
+    valid_router.revoke_and_drain.assert_called_once_with(timeout=0.0)
+
+
+@pytest.mark.unit
+def test_write_only_retry_reuses_the_published_dependency_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.app as app_module
+
+    app = Flask("write-only-retry")
+    _mark_router_prerequisites_ready(app)
+    dependencies = app_module._BrokerRuntimeDependencies(
+        registry=_owned_registry(app),
+        registry_publication_owner=app.extensions["flinttrade.registry_publication_owner"],
+        config=SimpleNamespace(execution=SimpleNamespace(default="openalgo:default"), registered=()),
+        brokers_config={},
+        session_provider=object(),
+        adapters={},
+        rate_limiter=None,
+        lifecycle_store=object(),
+        workspace_snapshot=None,
+        workspace_path=None,
+        openalgo_client=object(),
+        native_adapters={},
+        read_owner=object(),
+    )
+    app.extensions["flinttrade_broker_dependencies"] = dependencies
+    router = object()
+    build = MagicMock(return_value=router)
+    monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
+
+    assert app_module._configure_broker_writes(app, dependencies) is True
+    build.assert_called_once_with(
+        dependencies,
+        write_admission=app.config["SAFETY"].broker_write_admission,
+    )
+    assert app.extensions["flinttrade_broker_dependencies"] is dependencies
+    assert app.config["BROKER_ROUTER"] is router
+
+
+@pytest.mark.unit
+def test_combined_retirement_retains_and_retries_the_exact_timed_out_record() -> None:
+    import flinttrade_core.app as app_module
+
+    app = Flask("combined-retirement")
+    read_owner = MagicMock()
+    read_owner.close.side_effect = [False, True, True]
+    router = MagicMock()
+    router.revoke_and_drain.side_effect = [False, True, True]
+    dependencies = SimpleNamespace(read_owner=read_owner)
+    app.extensions["flinttrade_broker_dependencies"] = dependencies
+    active_adapters = {"openalgo": object()}
+    native_adapters = {"dhan": object()}
+    reconcile_targets = object()
+    app.config.update(
+        BROKER_ROUTER=router,
+        BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0,
+        ACTIVE_BROKER_ADAPTERS=active_adapters,
+        NATIVE_ADAPTERS=native_adapters,
+        RECONCILE_TARGETS=reconcile_targets,
+    )
+
+    assert app_module.retire_broker_dependencies(app) is False
+    assert "flinttrade_broker_dependencies" not in app.extensions
+    assert app.extensions["flinttrade_broker_dependencies_draining"] is dependencies
+    assert app.config["BROKER_ROUTER_DRAINING"] is router
+    assert app.config["ACTIVE_BROKER_ADAPTERS"] == {}
+    assert app.config["NATIVE_ADAPTERS"] == {}
+    assert app.config["RECONCILE_TARGETS"] is None
+
+    assert app_module.retire_broker_dependencies(app) is True
+    assert "flinttrade_broker_dependencies_draining" not in app.extensions
+    assert app.config["BROKER_ROUTER_DRAINING"] is None
+
+
+@pytest.mark.parametrize("failure_stage", ["read_lookup", "read_close", "write_lookup", "write_revoke"])
+def test_combined_retirement_contains_each_ordinary_invalidation_exception_and_attempts_both_sides(
+    failure_stage,
+) -> None:
+    import flinttrade_core.app as app_module
+
+    events: list[str] = []
+
+    class ReadOwner:
+        def close(self, *, timeout: float) -> bool:
+            events.append(f"read_close:{timeout}")
+            if failure_stage == "read_close":
+                raise RuntimeError("private read failure")
+            return True
+
+    class Dependencies:
+        @property
+        def read_owner(self):
+            events.append("read_lookup")
+            if failure_stage == "read_lookup":
+                raise RuntimeError("private read lookup failure")
+            return ReadOwner()
+
+    class Router:
+        @property
+        def revoke_and_drain(self):
+            events.append("write_lookup")
+            if failure_stage == "write_lookup":
+                raise RuntimeError("private write lookup failure")
+
+            def revoke(*, timeout: float) -> bool:
+                events.append(f"write_revoke:{timeout}")
+                if failure_stage == "write_revoke":
+                    raise RuntimeError("private write failure")
+                return True
+
+            return revoke
+
+    app = Flask(f"combined-retirement-{failure_stage}")
+    dependencies = Dependencies()
+    router = Router()
+    app.extensions["flinttrade_broker_dependencies"] = dependencies
+    app.config.update(BROKER_ROUTER=router, BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.0)
+
+    assert app_module.retire_broker_dependencies(app) is False
+
+    assert "read_lookup" in events
+    assert "write_lookup" in events
+    if failure_stage not in {"read_lookup", "read_close"}:
+        assert any(event.startswith("read_close:") for event in events)
+    if failure_stage != "write_lookup":
+        assert any(event.startswith("write_revoke:") for event in events)
+    assert app.extensions["flinttrade_broker_dependencies_draining"] is dependencies
+    assert app.config["BROKER_ROUTER_DRAINING"] is router
+
+
+def test_combined_retirement_retries_contained_exceptions_with_one_remaining_budget() -> None:
+    import flinttrade_core.app as app_module
+
+    app = Flask("combined-retirement-exception-retry")
+    read_owner = MagicMock()
+    read_owner.close.side_effect = [RuntimeError("private read failure"), True]
+    router = MagicMock()
+    router.revoke_and_drain.side_effect = [RuntimeError("private write failure"), True]
+    dependencies = SimpleNamespace(read_owner=read_owner)
+    app.extensions["flinttrade_broker_dependencies"] = dependencies
+    app.config.update(BROKER_ROUTER=router, BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.1)
+
+    assert app_module.retire_broker_dependencies(app) is True
+
+    assert read_owner.close.call_count == 2
+    assert router.revoke_and_drain.call_count == 2
+    assert read_owner.close.call_args_list[0].kwargs == {"timeout": 0.0}
+    assert router.revoke_and_drain.call_args_list[0].kwargs == {"timeout": 0.0}
+    assert "flinttrade_broker_dependencies_draining" not in app.extensions
+    assert app.config["BROKER_ROUTER_DRAINING"] is None
+
+
+@pytest.mark.unit
+def test_combined_retirement_retries_the_real_read_owner_until_provider_work_releases(
+    tmp_path: Path,
+) -> None:
+    import asyncio
+
+    import flinttrade_core.app as app_module
+    from flinttrade_core.broker_read_port import (
+        BrokerReadErrorCode,
+        BrokerReadFailure,
+        ExactReadTarget,
+        InstrumentRef,
+        QuoteRequest,
+    )
+    from flinttrade_core.workspace import Workspace
+    from flinttrade_engine.request_context import RequestContext
+    from flinttrade_gateway.broker_read_service import create_broker_read_owner
+
+    class BlockingAdapter:
+        started: asyncio.Event
+        release: asyncio.Event
+
+        async def quotes(self, _session, _symbols):
+            self.started.set()
+            await self.release.wait()
+            return [{"symbol": "NIFTY", "exchange": "NSE", "ltp": 100.0}]
+
+    class BorrowedClient:
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+        def close_sync(self) -> None:
+            self.close_calls += 1
+
+    class TrackingRouter:
+        def __init__(self) -> None:
+            self.revoke_calls: list[float] = []
+
+        def revoke_and_drain(self, *, timeout: float) -> bool:
+            self.revoke_calls.append(timeout)
+            return True
+
+    workspace = Workspace(tmp_path)
+    workspace.initialise()
+
+    def configure(config):
+        selector = "dhan:Synthetic"
+        config["brokers"]["registered"] = [selector]
+        config["brokers"]["execution"]["default"] = selector
+        config["brokers"]["account_acls"] = {"dhan": {"Synthetic": ["actor"]}}
+        for role in config["brokers"]["data"]:
+            config["brokers"]["data"][role] = selector
+
+    workspace.update(configure)
+    fixture = RegistryFixture(tmp_path)
+    fixture.publish(
+        "dhan",
+        "Synthetic",
+        Session("synthetic", 4_102_444_800.0, "Synthetic", "dhan"),
+    )
+    snapshot = read_workspace_snapshot(tmp_path)
+    adapter = BlockingAdapter()
+    dependencies = app_module._prepare_broker_dependencies(
+        fixture.registry,
+        snapshot.as_dict()["brokers"],
+        adapters={"dhan": adapter},
+        workspace_snapshot=snapshot,
+        workspace_path=tmp_path,
+        registry_publication_owner=fixture.owner,
+        credential_version_for=lambda selector: fixture.store.selector_state(selector).version,
+    )
+    dependencies.read_owner = create_broker_read_owner(
+        registry=dependencies.registry,
+        session_provider=dependencies.session_provider,
+        adapters=dependencies.adapters,
+        workspace_path=tmp_path,
+        rate_limiter=dependencies.rate_limiter,
+        runtime_accepting_requests=lambda: True,
+    )
+    borrowed_client = BorrowedClient()
+    dependencies.openalgo_client = borrowed_client
+    router = TrackingRouter()
+    app = Flask("real-combined-retirement")
+    app.extensions["flinttrade.registry_publication_owner"] = fixture.owner
+    app.config.update(
+        REGISTRY=fixture.registry,
+        BROKER_ROUTER=router,
+        BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.0,
+    )
+    assert app_module._publish_broker_dependencies(app, dependencies) is True
+    assert app.config["REGISTRY"] is fixture.registry
+    assert app.config["OPENALGO_CLIENT"] is borrowed_client
+    assert app.config["ACTIVE_BROKER_ADAPTERS"] is dependencies.adapters
+    assert app.config["NATIVE_ADAPTERS"] is dependencies.native_adapters
+    port = dependencies.read_owner.bind(
+        target=ExactReadTarget(BrokerSelector("dhan", "Synthetic")),
+        verify_current_authority=lambda: RequestContext(
+            "jti",
+            "human",
+            "actor",
+            "practice",
+            selector="dhan:Synthetic",
+        ),
+    )
+    assert not isinstance(port, BrokerReadFailure)
+
+    async def scenario() -> None:
+        adapter.started = asyncio.Event()
+        adapter.release = asyncio.Event()
+        read = asyncio.create_task(port.quote(QuoteRequest(InstrumentRef("NIFTY", "NSE"))))
+        await adapter.started.wait()
+
+        assert await asyncio.to_thread(app_module.retire_broker_dependencies, app, timeout=0.0) is False
+        assert app.extensions["flinttrade_broker_dependencies_draining"] is dependencies
+        assert app.config["BROKER_ROUTER_DRAINING"] is router
+        assert router.revoke_calls == [0.0]
+        assert app.config["ACTIVE_BROKER_ADAPTERS"] == {}
+        assert app.config["NATIVE_ADAPTERS"] == {}
+        assert app.config["RECONCILE_TARGETS"] is None
+        assert borrowed_client.close_calls == 0
+        assert await asyncio.to_thread(app_module.retire_broker_dependencies, app, timeout=0.0) is False
+        assert app.extensions["flinttrade_broker_dependencies_draining"] is dependencies
+        assert app.config["BROKER_ROUTER_DRAINING"] is router
+        assert router.revoke_calls == [0.0, 0.0]
+        assert app.config["ACTIVE_BROKER_ADAPTERS"] == {}
+        assert app.config["NATIVE_ADAPTERS"] == {}
+        assert app.config["RECONCILE_TARGETS"] is None
+        assert borrowed_client.close_calls == 0
+        adapter.release.set()
+        assert await read == BrokerReadFailure(BrokerReadErrorCode.REVOKED)
+        assert await asyncio.to_thread(app_module.retire_broker_dependencies, app, timeout=0.0) is True
+        assert "flinttrade_broker_dependencies_draining" not in app.extensions
+        assert app.config["BROKER_ROUTER_DRAINING"] is None
+        assert router.revoke_calls == [0.0, 0.0, 0.0]
+        assert borrowed_client.close_calls == 0
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        fixture.close()
+
+
+@pytest.mark.unit
+def test_no_execution_default_still_refreshes_reads_and_two_apps_never_share_owners(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flinttrade_core.app as app_module
+    from flinttrade_core.workspace import Workspace
+
+    records = []
+    for name in ("first", "second"):
+        workspace_path = tmp_path / name
+        workspace = Workspace(workspace_path)
+        workspace.initialise()
+        workspace.set("brokers.execution.default", "")
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace_path))
+        app = Flask(f"no-default-{name}")
+        registry = _owned_registry(app)
+        monkeypatch.setattr(
+            app_module,
+            "_native_activation_checks",
+            lambda _store: (lambda _aid: False, lambda _aid: False),
+        )
+
+        assert app_module.configure_broker_router(app, registry, object(), None) is False
+        record = app.extensions["flinttrade_broker_dependencies"]
+        assert record.registry is registry
+        assert record.read_owner is not None
+        assert app.config.get("BROKER_ROUTER") is None
+        records.append(record)
+
+    assert records[0] is not records[1]
+    assert records[0].read_owner is not records[1].read_owner
 
 
 def test_build_broker_router_from_default_config() -> None:

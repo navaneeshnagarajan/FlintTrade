@@ -365,6 +365,72 @@ def test_disable_broker_routing_times_out_before_mutating_under_generation_conte
     assert router.calls == 0
 
 
+def test_restore_router_preserves_new_reads_when_only_write_publication_fails(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _test_client, app, _tmp_path = client
+    import flinttrade_core.native_account_routes as routes
+
+    dependencies = object()
+
+    def fail_after_read_publication(_store, _registry):
+        app.extensions["flinttrade_broker_dependencies"] = dependencies
+        raise routes._RouterRebuildError("write-only failure")
+
+    invalidations = []
+    monkeypatch.setattr(routes, "_configure_broker_router_checked", fail_after_read_publication)
+    monkeypatch.setattr(routes, "_invalidate_broker_dependencies", lambda: invalidations.append(True))
+    with app.app_context():
+        assert routes._restore_router_from_vault(object(), object()) is False
+
+    assert invalidations == []
+    assert app.extensions["flinttrade_broker_dependencies"] is dependencies
+
+
+def test_restore_router_invalidates_preexisting_reads_when_rebuild_publishes_nothing(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _test_client, app, _tmp_path = client
+    import flinttrade_core.native_account_routes as routes
+
+    previous_dependencies = object()
+    app.extensions["flinttrade_broker_dependencies"] = previous_dependencies
+    invalidations = []
+
+    def fail_without_publication(_store, _registry):
+        raise routes._RouterRebuildError("no publication")
+
+    monkeypatch.setattr(routes, "_configure_broker_router_checked", fail_without_publication)
+    monkeypatch.setattr(routes, "_invalidate_broker_dependencies", lambda: invalidations.append(True))
+
+    with app.app_context():
+        assert routes._restore_router_from_vault(object(), object()) is False
+
+    assert invalidations == [True]
+
+
+def test_restore_router_accepts_new_current_reads_when_execution_default_is_blank(client, monkeypatch):
+    _test_client, app, tmp_path = client
+    import flinttrade_core.native_account_routes as routes
+    from flinttrade_core.workspace import Workspace
+
+    Workspace(tmp_path).set("brokers.execution.default", "")
+    prior = app.extensions["flinttrade_broker_dependencies"]
+    store = app.config["CREDENTIAL_STORE"]
+    registry = app.config["REGISTRY"]
+
+    with app.app_context():
+        assert routes._restore_router_from_vault(store, registry) is True
+
+    current = app.extensions["flinttrade_broker_dependencies"]
+    assert current is not prior
+    assert current.registry is registry
+    assert current.read_owner is not prior.read_owner
+    assert app.config.get("BROKER_ROUTER") is None
+
+
 def test_connect_upstox_stores_registers_and_establishes_session(client):
     c, app, tmp_path = client
     resp = c.post(
@@ -4150,6 +4216,93 @@ def test_remove_fails_closed_when_router_rebuild_returns_false(client, monkeypat
     assert router.calls >= 1
     with pytest.raises(Exception):
         _test_handle(app.config["REGISTRY"], "upstox", "REMOVEFALSE")
+
+
+def test_connect_rolls_back_when_read_generation_refresh_returns_false(client, monkeypatch):
+    c, app, tmp_path = client
+    import flinttrade_core.native_account_routes as routes
+
+    workspace_before = _workspace_brokers(tmp_path)
+    monkeypatch.setattr(routes, "_workspace_execution_default_is_disabled", lambda: True)
+    monkeypatch.setattr(routes, "_refresh_broker_dependencies_without_writes", lambda *_args: False)
+
+    response = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "READREFRESHCONNECT",
+            "credentials": {"access_token": "candidate"},
+        },
+    )
+
+    assert response.status_code == 502
+    assert _workspace_brokers(tmp_path) == workspace_before
+    assert not any(
+        row["account_id"] == "READREFRESHCONNECT"
+        for row in app.config["CREDENTIAL_STORE"].list_accounts()
+    )
+    assert _assert_unavailable(app.config["REGISTRY"], "upstox", "READREFRESHCONNECT")
+
+
+def test_relogin_rolls_back_when_read_generation_refresh_returns_false(client, monkeypatch):
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "READREFRESHRELOGIN",
+            "credentials": {"access_token": "prior"},
+        },
+    )
+    assert connected.status_code == 200
+    _test_handle(app.config["REGISTRY"], "upstox", "READREFRESHRELOGIN")
+    import flinttrade_core.native_account_routes as routes
+
+    monkeypatch.setattr(routes, "_workspace_execution_default_is_disabled", lambda: True)
+    monkeypatch.setattr(routes, "_refresh_broker_dependencies_without_writes", lambda *_args: False)
+
+    response = c.post(
+        "/api/v1/native/accounts/upstox/READREFRESHRELOGIN/login",
+        headers=_h(),
+        json={"credentials": {"access_token": "candidate"}},
+    )
+
+    assert response.status_code == 500
+    assert app.config["CREDENTIAL_STORE"].retrieve_for("upstox", "READREFRESHRELOGIN") == {
+        "access_token": "prior"
+    }
+    assert _assert_unavailable(app.config["REGISTRY"], "upstox", "READREFRESHRELOGIN")
+
+
+def test_remove_reports_committed_runtime_failure_when_read_generation_refresh_returns_false(client, monkeypatch):
+    c, app, _tmp_path = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "READREFRESHREMOVE",
+            "credentials": {"access_token": "prior"},
+        },
+    )
+    assert connected.status_code == 200
+    import flinttrade_core.native_account_routes as routes
+
+    monkeypatch.setattr(routes, "_workspace_execution_default_is_disabled", lambda: True)
+    monkeypatch.setattr(routes, "_refresh_broker_dependencies_without_writes", lambda *_args: False)
+
+    response = c.delete("/api/v1/native/accounts/upstox/READREFRESHREMOVE", headers=_h())
+
+    assert response.status_code == 500
+    assert "removed" in response.get_json()["message"].lower()
+    assert "unavailable" in response.get_json()["message"].lower()
+    assert not any(
+        row["account_id"] == "READREFRESHREMOVE"
+        for row in app.config["CREDENTIAL_STORE"].list_accounts()
+    )
+    assert _assert_unavailable(app.config["REGISTRY"], "upstox", "READREFRESHREMOVE")
 
 
 def test_failed_reconnect_restores_label_and_is_primary(client, monkeypatch):

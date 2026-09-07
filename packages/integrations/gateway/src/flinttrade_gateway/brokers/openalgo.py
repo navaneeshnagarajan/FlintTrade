@@ -25,6 +25,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
+from flinttrade_core.broker_read_port import BrokerLotSizeResponseInvalid
 from flinttrade_core.exceptions import (
     APIError,
     BrokerError,
@@ -54,7 +55,7 @@ from ._base import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
+    from flinttrade_core.models import OptionChain, Order, Position, Quote, Trade
     from flinttrade_core.openalgo_client import OpenAlgoClient
     from flinttrade_gateway.reconciliation import LocalStateSnapshot, ReconciliationReport
 
@@ -83,6 +84,19 @@ _TERMINAL_ORDER_STATUSES = frozenset(
         "traded",
     }
 )
+
+
+def _lot_record(value: object) -> dict[str, object]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerLotSizeResponseInvalid
+    return value
+
+
+def _lot_alias(row: dict[str, object], *names: str) -> object:
+    for name in names:
+        if name in row:
+            return row[name]
+    return None
 
 OPENALGO_CAPABILITIES = Capabilities(
     segments=Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO | Segments.CDS | Segments.MCX,
@@ -511,6 +525,86 @@ class OpenAlgoAdapter(BrokerAdapter):
             funds = await self._client(session).funds()
         return funds if isinstance(funds, dict) else getattr(funds, "__dict__", {"funds": funds})
 
+    async def balance_snapshot(self, session: AdapterSessionView):
+        """Return the client's evidence-preserving one-request funds snapshot."""
+        with self._mapped("balance_snapshot"):
+            return await self._client(session).balance_snapshot()
+
+    async def depth(self, session: AdapterSessionView, request: Any) -> object:
+        """Read fixed market depth for one typed instrument request."""
+        with self._mapped("depth"):
+            return await self._client(session).depth(request.instrument.symbol, request.instrument.exchange)
+
+    async def instrument_lot_sizes(self, session: AdapterSessionView, request: Any) -> list[dict[str, object]]:
+        """Return only requested exchange/symbol/lot-size instrument evidence."""
+        with self._mapped("instrument_lot_sizes"):
+            raw = await self._client(session).instruments(request.exchange)
+        outer = _lot_record(raw)
+        data = outer["data"] if "data" in outer else outer
+        if type(data) is dict:
+            data = _lot_record(data)
+            rows = _lot_alias(data, "instruments", "data")
+        else:
+            rows = data
+        if type(rows) is not list:
+            raise BrokerLotSizeResponseInvalid
+        requested = set(request.symbols)
+        result: list[dict[str, object]] = []
+        for row in rows:
+            row = _lot_record(row)
+            symbol = _lot_alias(row, "symbol", "tradingsymbol", "trading_symbol")
+            exchange = _lot_alias(row, "exchange")
+            lot_size = _lot_alias(row, "lot_size", "lotsize")
+            if type(symbol) is not str or not symbol or type(exchange) is not str or exchange != request.exchange:
+                raise BrokerLotSizeResponseInvalid
+            if requested and symbol not in requested:
+                continue
+            if isinstance(lot_size, bool) or type(lot_size) not in (int, str):
+                raise BrokerLotSizeResponseInvalid
+            try:
+                numeric_lot = int(lot_size)
+            except ValueError:
+                raise BrokerLotSizeResponseInvalid from None
+            if str(numeric_lot) != str(lot_size).strip() or not 1 <= numeric_lot <= 1_000_000:
+                raise BrokerLotSizeResponseInvalid
+            instrument_id = _lot_alias(row, "instrument_id", "token")
+            if instrument_id is not None and type(instrument_id) is not str:
+                raise BrokerLotSizeResponseInvalid
+            result.append({
+                "symbol": symbol,
+                "exchange": exchange,
+                "lot_size": numeric_lot,
+                "instrument_id": instrument_id,
+            })
+        return result
+
+    async def margin_calculator(self, session: AdapterSessionView, order: Any) -> dict[str, Any]:
+        """Project one fixed order into the existing OpenAlgo margin endpoint."""
+        payload = {
+            "symbol": str(order.symbol),
+            "exchange": str(getattr(order.exchange, "value", order.exchange)),
+            "action": str(getattr(order.action, "value", order.action)),
+            "quantity": str(order.quantity),
+            "product": str(getattr(order.product, "value", order.product)),
+            "pricetype": str(getattr(order.pricetype, "value", order.pricetype)),
+            "price": str(order.price),
+            "trigger_price": str(order.trigger_price),
+        }
+        with self._mapped("margin_calculator"):
+            return await self._client(session).margin([payload])
+
+    async def portfolio_greeks(
+        self, session: AdapterSessionView, positions: list[dict[str, str | float | None]]
+    ) -> list[dict[str, Any]]:
+        """Read the existing exact portfolio-Greek batch."""
+        with self._mapped("portfolio_greeks"):
+            return await self._client(session).portfolio_greeks(positions)
+
+    async def forever_orders(self, session: AdapterSessionView) -> object:
+        """Read the existing bounded OpenAlgo GTT order family."""
+        with self._mapped("forever_orders"):
+            return await self._client(session).gtt_orderbook()
+
     # ---------- market data: rest ----------
 
     async def quotes(self, session: AdapterSessionView, symbols: list[str]) -> list[Quote]:
@@ -518,9 +612,15 @@ class OpenAlgoAdapter(BrokerAdapter):
         with self._mapped("quotes"):
             return await self._client(session).multi_quotes(payload)
 
-    async def historical(self, session: AdapterSessionView, req: dict) -> Candles:
+    async def historical(self, session: AdapterSessionView, req: dict) -> dict[str, object]:
         with self._mapped("historical"):
-            return await self._client(session).history(**req)  # type: ignore[return-value]
+            bars = await self._client(session).history(**req)
+        return {
+            "symbol": req["symbol"],
+            "exchange": req["exchange"],
+            "interval": req["interval"],
+            "bars": bars,
+        }
 
     async def option_chain(self, session: AdapterSessionView, req: dict) -> OptionChain:
         symbol = str(req.get("symbol", ""))
