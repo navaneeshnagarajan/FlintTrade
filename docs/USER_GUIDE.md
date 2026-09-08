@@ -537,10 +537,11 @@ educational and are not financial advice.
 
 ### Sentiment
 
-News and social-media sentiment scoring per symbol. Each sentiment request
-synchronously analyses the configured static RSS publisher profiles
-(MoneyControl, ET Markets, LiveMint). A scheduler implementation exists, but
-production composition does not start it automatically.
+The Sentiment Analysis view scores submitted text for a symbol through the
+configured LLM or rule-based fallback. Separate summary and ticker endpoints
+synchronously analyse the static RSS publisher profiles (MoneyControl,
+ET Markets, LiveMint). Production composition starts neither a background news
+scheduler nor a social-media source.
 
 ### RAG
 

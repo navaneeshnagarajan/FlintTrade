@@ -228,7 +228,7 @@ contributor descriptors. Catalogue `service_kinds` values include
 
 | Endpoint | Purpose |
 |---|---|
-| `services/providers` (**GET**) | Static provider catalogue (`catalogue_digest`, `count`, `providers`). Requires `admin.observability.read` on a session JWT; an API-key request with no session token is treated as holding every scope. Returns 503 if the catalogue is unavailable. |
+| `services/providers` (**GET**) | Static provider catalogue, returned as `{"status": "success", "data": {"catalogue_digest": …, "count": …, "providers": […]}}`. Requires `admin.observability.read` on a session JWT; an API-key request with no session token is treated as holding every scope. Returns 503 if the catalogue is unavailable. |
 | `services/connections` (**GET**) | List every redacted inert LLM connection. Loopback only. Session JWT with `admin.services.read`, or `X-API-Key` / Bearer API key for GET/HEAD. |
 | `services/connections` (**POST**) | Persist one inert LLM connection (`provider_id`, `label`, optional `model`, and provider-dependent `endpoint` / `auth_mode` / `credential`). Authenticated profiles require a supported `auth_mode`; host-based profiles require `endpoint`, while fixed or managed profiles reject endpoint overrides. Unauthenticated profiles reject credentials. Does not call the provider. Session JWT with `admin.services.write` required — an API key cannot mutate. |
 | `services/connections/<connection_id>` (**GET**) | One redacted connection by canonical UUID4. Same read auth as the collection. |

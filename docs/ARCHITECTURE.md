@@ -374,8 +374,10 @@ inside `packages/services/engine/`:
 
 `BrokerReadPort` in
 `packages/core/core/src/flinttrade_core/broker_read_port.py` defines the exact
-broker-read contract. The gateway composes and retains an owner for that port
-in `packages/integrations/gateway/src/flinttrade_gateway/broker_read_service.py`.
+broker-read contract. The gateway implementation and owner factory are defined in
+`packages/integrations/gateway/src/flinttrade_gateway/broker_read_service.py`.
+Application startup constructs the factory result and retains the dependency
+record in `packages/core/core/src/flinttrade_core/app.py`.
 The port is an in-process contract, not a new public HTTP family. Its methods
 are `quote`, `depth`, `historical`, `batch_quotes`, `option_chain`,
 `lot_sizes`, `balance`, `portfolio_greeks`, `positions`, `holdings`,
