@@ -32,7 +32,7 @@ def _fact(basis: RightsBasis, *, identifier: str, subject_kind: str = "service")
 
 def _contains_restricted_identifier(line: str) -> bool:
     return (
-        any(_is_restricted_identifier_chain(chain) for chain in _IDENTIFIER_CHAIN_PATTERN.findall(line))
+        _RESTRICTED_IDENTIFIER_PATTERN.search(line) is not None
         or _TIMESFM_PHRASE_PATTERN.search(line) is not None
         or _static_literal_chain_contains_restricted_identifier(line)
         or _static_literal_contains_restricted_identifier(line)
@@ -40,8 +40,8 @@ def _contains_restricted_identifier(line: str) -> bool:
 
 
 _STATIC_LITERAL_PATTERN = r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`'
-_GUARD_STRUCTURE_DIGEST = "3cc7a4d293f7f3d3010234ba9d853063a534145f8dd7f5b227c184303fa5c1df"
-_IDENTIFIER_CHAIN_PATTERN = re.compile(r"[a-z0-9]+(?:[._-]+[a-z0-9]+)*", flags=re.IGNORECASE)
+_GUARD_STRUCTURE_DIGEST = "c59f6d2d5c2dd8a77ca7f05f5c80d678b4ce973abfbd34d9e53f5a3a291f559b"
+_RESTRICTED_IDENTIFIER_PATTERN = re.compile(r"times[ _.-]*fm", flags=re.IGNORECASE)
 _TIMESFM_PHRASE_PATTERN = re.compile(
     r"(?<![a-z0-9])times(?:[ _.-]+)fm",
     flags=re.IGNORECASE,
@@ -70,8 +70,7 @@ def _guard_file_structure_digest(source: str) -> str:
         '_GUARD_STRUCTURE_DIGEST = "<guard-structure>"',
         source,
     )
-    tree = ast.parse(normalised)
-    return hashlib.sha256(ast.dump(tree, annotate_fields=True, include_attributes=False).encode("utf-8")).hexdigest()
+    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 
 def _decode_static_literal(literal: str) -> str:
@@ -275,13 +274,11 @@ def test_timesfm_has_no_runtime_artifact_or_dependency() -> None:
     content_matches: set[str] = set()
     for path in tracked_files:
         content = (repository_root / path).read_bytes()
-        lines = content.decode("utf-8", errors="ignore").splitlines()
+        text = content.decode("utf-8", errors="ignore")
         if (
             b"timesfm" in content.lower()
-            or any(_contains_restricted_identifier(line) for line in lines)
-            or (path.endswith(".py") and _python_source_contains_restricted_identifier(content.decode("utf-8", errors="ignore")))
-            or _static_literal_chain_contains_restricted_identifier(content.decode("utf-8", errors="ignore"))
-            or _static_literal_contains_restricted_identifier(content.decode("utf-8", errors="ignore"))
+            or _contains_restricted_identifier(text)
+            or (path.endswith(".py") and _python_source_contains_restricted_identifier(text))
         ):
             content_matches.add(path)
 

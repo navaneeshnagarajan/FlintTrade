@@ -16,7 +16,7 @@ allowlist:
   # than the fix that actually shipped — not deferred convenience. Everything
   # that had a real patched version was fixed instead, via the pnpm overrides
   # block in pnpm-workspace.yaml (js-yaml 4.3.0, postcss 8.5.23,
-  # fast-uri 4.1.1, sharp 0.35.3, brace-expansion 2.1.4) and direct bumps of
+  # fast-uri 4.1.4, sharp 0.35.3, brace-expansion 2.1.4) and direct bumps of
   # next (16.2.12) and react-router-dom (7.18.1).
   # ---------------------------------------------------------------------------
 
