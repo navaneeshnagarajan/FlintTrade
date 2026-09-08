@@ -537,9 +537,10 @@ educational and are not financial advice.
 
 ### Sentiment
 
-News and social-media sentiment scoring per symbol. Driven by a
-news-scheduler that polls the static RSS publisher profiles (MoneyControl,
-ET Markets, LiveMint).
+News and social-media sentiment scoring per symbol. Each sentiment request
+synchronously analyses the configured static RSS publisher profiles
+(MoneyControl, ET Markets, LiveMint). A scheduler implementation exists, but
+production composition does not start it automatically.
 
 ### RAG
 

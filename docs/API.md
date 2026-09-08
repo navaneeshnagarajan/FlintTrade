@@ -230,7 +230,7 @@ contributor descriptors. Catalogue `service_kinds` values include
 |---|---|
 | `services/providers` (**GET**) | Static provider catalogue (`catalogue_digest`, `count`, `providers`). Requires `admin.observability.read` on a session JWT; an API-key request with no session token is treated as holding every scope. Returns 503 if the catalogue is unavailable. |
 | `services/connections` (**GET**) | List every redacted inert LLM connection. Loopback only. Session JWT with `admin.services.read`, or `X-API-Key` / Bearer API key for GET/HEAD. |
-| `services/connections` (**POST**) | Persist one inert LLM connection (`provider_id`, `label`, optional `model` / `endpoint` / `auth_mode`, optional `credential`). Does not call the provider. Session JWT with `admin.services.write` required — an API key cannot mutate. |
+| `services/connections` (**POST**) | Persist one inert LLM connection (`provider_id`, `label`, optional `model`, and provider-dependent `endpoint` / `auth_mode` / `credential`). Authenticated profiles require a supported `auth_mode`; host-based profiles require `endpoint`, while fixed or managed profiles reject endpoint overrides. Unauthenticated profiles reject credentials. Does not call the provider. Session JWT with `admin.services.write` required — an API key cannot mutate. |
 | `services/connections/<connection_id>` (**GET**) | One redacted connection by canonical UUID4. Same read auth as the collection. |
 | `services/connections/<connection_id>` (**PATCH**) | Update label / model / endpoint / auth_mode (and optional credential rotation). `provider_id` is immutable. Same write auth as create. |
 | `services/connections/<connection_id>` (**DELETE**) | Delete one inert connection. Same write auth as create. JSON body must be an empty object. |
@@ -239,10 +239,12 @@ Connection reads and writes are loopback-only. Non-loopback peers receive 403
 `forbidden` before route dispatch. Mutations require `If-Match` (collection
 ETag) and `Idempotency-Key` (UUID4); missing `If-Match` is 428
 `connection_revision_required`. Mutation endpoints share a 10-per-minute
-limit. Successful public bodies include `schema_version`, `provider_id`,
-`connection_id`, `label`, `model`, `endpoint`, `auth_mode`,
+limit. Individual redacted connection objects include `schema_version`,
+`provider_id`, `connection_id`, `label`, `model`, `endpoint`, `auth_mode`,
 `credential_configured`, `created_at`, and `updated_at` — never the secret
-material. Every family response is `Cache-Control: no-store`.
+material. The collection read wraps those objects in `connections`; a delete
+returns only `{"deleted": true}`. Every service-connection-family response is
+`Cache-Control: no-store`.
 
 The in-process `BrokerReadPort` (quotes, depth, history, account books, and
 related exact reads) is not this HTTP surface. See

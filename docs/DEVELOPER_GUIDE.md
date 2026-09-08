@@ -329,8 +329,10 @@ through the `BrokerRouter`; OpenAlgo is represented by its own bridge adapter
 (`brokers/openalgo.py`) alongside the native ones. Do not model a new native
 broker as an OpenAlgo shim. The `shims/` directory holds only OpenAlgo
 infrastructure shims, not broker adapters. Exact **reads** use
-`BrokerReadPort` (composed in `flinttrade_gateway.broker_read_service`); they
-do not traverse `gate_order` / `BrokerRouter`. Writes still must.
+the contract defined by `BrokerReadPort`; the gateway composes its owner in
+`flinttrade_gateway.broker_read_service`, although existing HTTP read routes
+still invoke adapters directly. Reads do not traverse `gate_order` /
+`BrokerRouter`. Writes still must.
 
 1. Add a native adapter under
    `packages/integrations/gateway/src/flinttrade_gateway/brokers/<broker>.py`

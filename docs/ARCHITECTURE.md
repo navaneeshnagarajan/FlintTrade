@@ -372,20 +372,21 @@ inside `packages/services/engine/`:
 
 ### Broker reads versus gated writes
 
-Exact broker **reads** use `BrokerReadPort` in
-`packages/core/core/src/flinttrade_core/broker_read_port.py`. The gateway
-composes that port in
-`packages/integrations/gateway/src/flinttrade_gateway/broker_read_service.py`.
+`BrokerReadPort` in
+`packages/core/core/src/flinttrade_core/broker_read_port.py` defines the exact
+broker-read contract. The gateway composes and retains an owner for that port
+in `packages/integrations/gateway/src/flinttrade_gateway/broker_read_service.py`.
 The port is an in-process contract, not a new public HTTP family. Its methods
 are `quote`, `depth`, `historical`, `batch_quotes`, `option_chain`,
 `lot_sizes`, `balance`, `portfolio_greeks`, `positions`, `holdings`,
 `margin`, `order_states`, and `trades`. Existing HTTP account and market-data
 routes (native `/api/v1/native/…` kinds, OpenAlgo passthrough) remain the
-operator-facing read surfaces.
+operator-facing read surfaces and currently resolve and invoke adapters
+directly; migrating those consumers onto the port is separate work.
 
 Live **writes** still mint a `SafetyContext` through `gate_order` /
-`gate_broker_write` and dispatch through `BrokerRouter`. Reads do not go
-through the write router.
+`gate_broker_write` and dispatch through `BrokerRouter`. Read operations do
+not go through the write router.
 
 ### Mode-system state machine
 
