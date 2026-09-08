@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 import time
 
@@ -1193,6 +1194,86 @@ def test_native_postback_accepts_without_operator_jwt(client):
     assert event["payload"]["nested"]["primary_ip"] == "[redacted]"
     assert event["payload"]["nested"]["note"] == "filled by user [redacted] from [redacted]"
     assert event["payload"]["status"] == "complete"
+
+
+def test_native_postback_secret_envelope_never_reaches_observability(tmp_path, monkeypatch, caplog):
+    from flinttrade_core import app as app_module
+    from flinttrade_core import native_account_routes as native_routes
+    from flinttrade_core.secure_file import harden_directory
+
+    harden_directory(tmp_path)
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("ENABLE_ANALYZER", "true")
+    monkeypatch.setenv("GLITCHTIP_DSN", "https://public@example.invalid/1")
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    sentry_options: dict[str, object] = {}
+    monkeypatch.setattr(app_module.sentry_sdk, "init", lambda **options: sentry_options.update(options))
+
+    app = app_module.create_flask_app(broker_account_mutation_admission=lambda: None)
+    app.config["TESTING"] = True
+    analysed: list[dict[str, object]] = []
+    real_analyser = app.config["API_ANALYZER"].log_call
+
+    def record_analyser(**fields):
+        analysed.append(fields)
+        return real_analyser(**fields)
+
+    monkeypatch.setattr(app.config["API_ANALYZER"], "log_call", record_analyser)
+    client = app.test_client()
+    secret = "private_postback_sentinel_1234567890"
+    payload = {
+        "update_type": f"{secret}\nforged-log-line",
+        "access_token": secret,
+        "order_id": "private-order-id",
+    }
+
+    with caplog.at_level(logging.INFO):
+        accepted = client.post("/api/v1/native/postbacks/upstox", json=payload)
+
+    assert accepted.status_code == 200
+    assert analysed[-1]["request_body"] is None
+    safe_request = analysed[-1]["safe_request"]
+    assert safe_request is not None
+    assert safe_request.route_template == "/api/v1/native/postbacks/{adapter_id}"
+    event = app.config["NATIVE_POSTBACK_EVENTS"]["upstox"][-1]
+    assert secret not in event["update_type"]
+    assert "\n" not in event["update_type"]
+    assert len(event["update_type"]) <= 64
+    assert secret not in caplog.text
+
+    stored_call = app.config["API_ANALYZER"].recent(limit=1)[0]
+    assert stored_call["route"] == "/api/v1/native/postbacks/{adapter_id}"
+    assert stored_call["request_body"] == safe_request.to_dict()
+    assert secret not in repr(stored_call)
+
+    sentry_event = {
+        "request": {
+            "method": "POST",
+            "url": "http://localhost/api/v1/native/postbacks/upstox",
+            "env": {"PATH_INFO": "/api/v1/native/postbacks/upstox"},
+        },
+        "extra": {"private": secret},
+    }
+    assert sentry_options["before_send"](sentry_event, {}) is None
+    assert sentry_options["before_send_transaction"](sentry_event, {}) is None
+    assert sentry_options["traces_sampler"](
+        {"wsgi_environ": {"REQUEST_METHOD": "POST", "PATH_INFO": "/api/v1/native/postbacks/upstox"}}
+    ) == 0.0
+
+    def fail_snapshot(_payload):
+        raise RuntimeError("synthetic postback failure")
+
+    monkeypatch.setattr(native_routes, "_redacted_postback_snapshot", fail_snapshot)
+    failed = client.post("/api/v1/native/postbacks/upstox", json=payload)
+
+    assert failed.status_code == 500
+    error = app.config["ERROR_LOG"].recent(limit=1)[0]
+    assert error["route"] == "/api/v1/native/postbacks/{adapter_id}"
+    assert error["request_body"]["route_template"] == "/api/v1/native/postbacks/{adapter_id}"
+    assert error["error_class"] is None
+    assert error["error_message"] is None
+    assert secret not in repr(error)
 
 
 def test_native_postback_raw_field_is_redacted(client):

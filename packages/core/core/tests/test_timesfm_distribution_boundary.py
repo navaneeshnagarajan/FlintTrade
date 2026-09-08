@@ -40,8 +40,11 @@ def _contains_restricted_identifier(line: str) -> bool:
 
 
 _STATIC_LITERAL_PATTERN = r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`'
-_GUARD_STRUCTURE_DIGEST = "c59f6d2d5c2dd8a77ca7f05f5c80d678b4ce973abfbd34d9e53f5a3a291f559b"
-_RESTRICTED_IDENTIFIER_PATTERN = re.compile(r"times[ _.-]*fm", flags=re.IGNORECASE)
+_GUARD_STRUCTURE_DIGEST = "d59343c54643176e5aadf4fffff96ed60182c2d1dc345f34433a8eefb51a989a"
+_RESTRICTED_IDENTIFIER_PATTERN = re.compile(
+    r"t[._-]*i[._-]*m[._-]*e[._-]*s[._-]*f[._-]*m",
+    flags=re.IGNORECASE,
+)
 _TIMESFM_PHRASE_PATTERN = re.compile(
     r"(?<![a-z0-9])times(?:[ _.-]+)fm",
     flags=re.IGNORECASE,
@@ -154,6 +157,9 @@ def test_timesfm_guard_detects_static_concatenated_identifier() -> None:
     assert _contains_restricted_identifier("class GoogleTimesFM3Forecaster:")
     assert _contains_restricted_identifier("googleTimes_FM3Worker = object()")
     assert _contains_restricted_identifier("from googleTimes.FM3 import Forecaster")
+    assert _contains_restricted_identifier("import t_i_m_e_s_f_m")
+    assert _contains_restricted_identifier("from t.i.m.e.s.f.m import Forecaster")
+    assert _contains_restricted_identifier("class T_i_m_e_s_F_m_Adapter: pass")
     assert _contains_restricted_identifier('restricted = "times" + "fm"')
     assert _contains_restricted_identifier('restricted = "times" "fm"')
     assert not _contains_restricted_identifier("for times, fm in measurements:")

@@ -58,6 +58,8 @@ def classify_secret_envelope(method: object, path: object) -> str | None:
             return "/api/v1/ditto/accounts"
         case ("DELETE", ["", "api", "v1", "ditto", "accounts", account_id]) if account_id:
             return "/api/v1/ditto/accounts/{account_id}"
+        case ("POST", ["", "api", "v1", "native", "postbacks", adapter_id]) if adapter_id:
+            return "/api/v1/native/postbacks/{adapter_id}"
         case ("POST", ["", "admin", "credentials", "rotation", broker, action]) if (
             broker and action in {"schedule", "rotate-now"}
         ):

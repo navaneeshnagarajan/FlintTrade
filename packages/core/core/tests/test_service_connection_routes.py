@@ -117,6 +117,11 @@ def test_service_connection_imports_are_inert_under_transport_and_credential_poi
         ("GET", "/v1/auth/oauth/callback?code=private", "/v1/auth/oauth/callback"),
         ("POST", "/v1/auth/otp/verify", "/v1/auth/otp/verify"),
         ("POST", "/api/v1/native/accounts/dhan/operator/login", "/api/v1/native/accounts/{adapter_id}/{account_id}/login"),
+        (
+            "POST",
+            "/ft-api/api/v1/native/postbacks/upstox?token=private",
+            "/api/v1/native/postbacks/{adapter_id}",
+        ),
         ("GET", "/ft-api/api/v1/native/oauth/callback?code=private", "/api/v1/native/oauth/callback"),
         ("POST", "/v1/auth/setup/regenerate-2fa", "/v1/auth/setup/regenerate-2fa"),
         ("POST", "/v1/auth/reset-password-otp", "/v1/auth/reset-password-otp"),
@@ -147,6 +152,7 @@ def test_secret_envelope_classifier_returns_fixed_templates_for_untrusted_paths(
         "/v1/auth/status",
         "/v1/config/llm-extra",
         "/api/v1/native/account",
+        "/api/v1/native/postbacks/upstox/extra",
         "/api/v1/ditto/accounts-extra",
         "/api/v1/ditto/accounts/private/enable",
         "/api/v1/ditto/accounts/private/disable",
@@ -164,7 +170,15 @@ def test_secret_envelope_classifier_leaves_lookalike_non_secret_routes_useful(pa
     assert classify("POST", path) is None
 
 
-@pytest.mark.parametrize("path", ["/api/v1/ditto/accounts", "/admin/credentials/rotation/status", "/v1/rate-limits"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/ditto/accounts",
+        "/api/v1/native/postbacks/upstox",
+        "/admin/credentials/rotation/status",
+        "/v1/rate-limits",
+    ],
+)
 def test_cutover_metadata_reads_keep_ordinary_observability(path):
     from flinttrade_core.request_observability import classify_secret_envelope
 

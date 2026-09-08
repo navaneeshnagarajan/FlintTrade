@@ -318,6 +318,8 @@ _POSTBACK_VALUE_PATTERNS = (
     re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"),
     re.compile(r"\b[A-Za-z0-9_-]{20,}\b"),
 )
+_POSTBACK_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]+")
+_POSTBACK_UPDATE_TYPE_MAX_LENGTH = 64
 
 
 def _normalise_postback_key(key: Any) -> str:
@@ -331,6 +333,17 @@ def _redact_postback_string(value: str) -> str:
     for pattern in _POSTBACK_VALUE_PATTERNS:
         redacted = pattern.sub("[redacted]", redacted)
     return redacted
+
+
+def _safe_postback_update_type(payload: Any) -> str:
+    """Return a bounded, single-line diagnostic label from a postback."""
+    if not isinstance(payload, dict):
+        return "unknown"
+    candidate = payload.get("update_type") or payload.get("type")
+    if type(candidate) is not str:
+        return "unknown"
+    projected = _POSTBACK_CONTROL_CHARACTERS.sub(" ", _redact_postback_string(candidate)).strip()
+    return projected[:_POSTBACK_UPDATE_TYPE_MAX_LENGTH] or "unknown"
 
 
 def _redacted_postback_snapshot(payload: Any) -> Any:
@@ -2082,9 +2095,7 @@ def native_broker_postback(adapter_id: str) -> Any:
     event = {
         "adapter_id": adapter_id,
         "received_at": time.time(),
-        "update_type": str(payload.get("update_type") or payload.get("type") or "unknown")
-        if isinstance(payload, dict)
-        else "unknown",
+        "update_type": _safe_postback_update_type(payload),
         "payload": _redacted_postback_snapshot(payload),
     }
     bucket = current_app.config.setdefault("NATIVE_POSTBACK_EVENTS", {}).setdefault(adapter_id, [])
