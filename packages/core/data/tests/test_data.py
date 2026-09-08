@@ -3562,14 +3562,16 @@ class TestTickRecorder:
             async def __aexit__(self, _exc_type, _exc, _tb):
                 return False
 
+        flush_observed = asyncio.Event()
         storage = MagicMock()
+        storage.insert_ticks_batch.side_effect = lambda _batch: flush_observed.set()
         recorder = TickRecorder(storage=storage, flush_interval=0.01)
         recorder.add_symbols([{"exchange": "NSE", "symbol": "RELIANCE"}], mode="quote")
         monkeypatch.setattr(module.websockets, "connect", lambda _url: WebSocketContext())
 
         task = asyncio.create_task(recorder.run())
         try:
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(flush_observed.wait(), timeout=1.0)
             assert storage.insert_ticks_batch.call_count == 1
             assert recorder.pending_tick_count == 0
         finally:
@@ -3581,7 +3583,9 @@ class TestTickRecorder:
         from flinttrade_data import tick_recorder as module
         from flinttrade_data.tick_recorder import TickRecorder
 
+        flush_observed = asyncio.Event()
         storage = MagicMock()
+        storage.insert_ticks_batch.side_effect = lambda _batch: flush_observed.set()
         recorder = TickRecorder(
             storage=storage,
             flush_interval=0.01,
@@ -3599,13 +3603,13 @@ class TestTickRecorder:
 
         task = asyncio.create_task(recorder.run())
         try:
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(flush_observed.wait(), timeout=1.0)
             assert task.done() is False
             assert storage.insert_ticks_batch.call_count == 1
             assert recorder.pending_tick_count == 0
         finally:
             recorder.stop()
-            await asyncio.wait_for(task, timeout=0.2)
+            await asyncio.wait_for(task, timeout=1.0)
 
     def test_connection_reconfiguration_is_idempotent(self):
         from flinttrade_data.tick_recorder import TickRecorder
