@@ -29,6 +29,18 @@ MAX_ENVELOPE_BYTES = 64 * 1024
 MAX_JOURNAL_BYTES = 256 * 1024
 MAX_CONNECTIONS = 128
 
+_BOOTSTRAP_KEY_NAMES = ("encryption.key", "recovery.key", "idempotency.key")
+_BOOTSTRAP_DIRECTORY_NAMES = {
+    "receipts": "receipts",
+    "operation_keys": "operation-keys",
+    "outbox": "outbox",
+    "candidates": "candidates",
+}
+_BOOTSTRAP_PUBLICATION_SEQUENCE = (*_BOOTSTRAP_KEY_NAMES, *_BOOTSTRAP_DIRECTORY_NAMES.values())
+_BOOTSTRAP_WRITE_TARGETS = ("bootstrap.json", *_BOOTSTRAP_KEY_NAMES)
+_WINDOWS_TEMPFILE_CHARACTERS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
+_DELETE_PENDING_SUFFIX = ".delete-pending"
+
 
 def canonical(value: object) -> str:
     """Encode bounded private structures without ambiguous JSON values."""
@@ -61,6 +73,36 @@ def uuid_text(value: object) -> UUID:
     if str(result) != value or result.version != 4:
         raise ValueError("invalid canonical UUID4")
     return result
+
+
+def _bootstrap_writer_temporary(name: str, targets: tuple[str, ...]) -> str | None:
+    """Return the writer's original temporary name for an exact bootstrap target."""
+    if name.endswith(_DELETE_PENDING_SUFFIX):
+        if not name.startswith("."):
+            return None
+        original = name[1 : -len(_DELETE_PENDING_SUFFIX)]
+    else:
+        original = name
+    for target in targets:
+        prefix = f".{target}."
+        if not original.startswith(prefix) or not original.endswith(".tmp"):
+            continue
+        nonce = original[len(prefix) : -len(".tmp")]
+        try:
+            uuid_text(nonce)
+        except (TypeError, ValueError, AttributeError):
+            windows_nonce = len(nonce) == 8 and all(character in _WINDOWS_TEMPFILE_CHARACTERS for character in nonce)
+            if not windows_nonce:
+                return None
+        return original
+    return None
+
+
+def _bootstrap_writer_target(temporary: str) -> str:
+    for target in _BOOTSTRAP_WRITE_TARGETS:
+        if temporary.startswith(f".{target}."):
+            return target
+    raise ValueError("invalid bootstrap writer temporary")
 
 
 def version_dict(version: ServiceSecretVersion | None) -> dict[str, object] | None:
@@ -333,14 +375,25 @@ class TransactionFiles:
                 self.path.mkdir(mode=0o700, parents=True)
                 harden_directory(self.path)
             self.root = self.stack.enter_context(HeldOwnerDirectory(self.path, require_hardened=False))
-            self.control = self.stack.enter_context(self.root.child("service-connections-state", create=True))
+            self.control = self.stack.enter_context(
+                self.root.child("service-connections-state", create=True, recover_empty=True)
+            )
             self.stack.enter_context(OwnerSafeFileLock(self.control.path / "service.lock", mode=0o600))
             self.control.revalidate()
             if self.control.exists("bootstrap.json"):
                 self.bootstrap = self.read(self.control, "bootstrap.json")
-                self._open_private()
-            elif set(os.listdir(self.control.path)) != {"service.lock"}:
-                raise ValueError("unrecognised bootstrap state")
+                if self.bootstrap.get("ready") is False:
+                    self._resume_incomplete_bootstrap()
+                else:
+                    self._open_private()
+            else:
+                observed = set(os.listdir(self.control.path))
+                temporaries = self._bootstrap_temporaries(("bootstrap.json",), observed)
+                if len(temporaries) > 1 or observed - temporaries.keys() != {"service.lock"}:
+                    raise ValueError("unrecognised bootstrap state")
+                self._discard_bootstrap_temporaries(temporaries)
+                if set(os.listdir(self.control.path)) != {"service.lock"}:
+                    raise ValueError("unrecognised bootstrap state")
             return self
         except BaseException:
             self.stack.close()
@@ -355,8 +408,8 @@ class TransactionFiles:
             return
         if set(os.listdir(self.control.path)) != {"service.lock"}:
             raise ValueError("unrecognised bootstrap artefacts")
-        self.secrets = self.stack.enter_context(self.root.child("secrets", create=True))
-        self.secret_root = self.stack.enter_context(self.secrets.child("services", create=True))
+        self.secrets = self.stack.enter_context(self.root.child("secrets", create=True, recover_empty=True))
+        self.secret_root = self.stack.enter_context(self.secrets.child("services", create=True, recover_empty=True))
         if os.listdir(self.secret_root.path):
             raise ValueError("unrecognised secret authority")
         self.bootstrap = {
@@ -367,26 +420,162 @@ class TransactionFiles:
             "ready": False,
         }
         self.write(self.control, "bootstrap.json", self.bootstrap)
-        for name in ("encryption.key", "recovery.key", "idempotency.key"):
+        for name in _BOOTSTRAP_KEY_NAMES:
             self.control.write_text(name, Fernet.generate_key().decode("ascii"))
-        self.receipts = self.stack.enter_context(self.control.child("receipts", create=True))
-        self.operation_keys = self.stack.enter_context(self.control.child("operation-keys", create=True))
-        self.outbox = self.stack.enter_context(self.control.child("outbox", create=True))
-        self.candidates = self.stack.enter_context(self.control.child("candidates", create=True))
+        self.receipts = self.stack.enter_context(self.control.child("receipts", create=True, recover_empty=True))
+        self.operation_keys = self.stack.enter_context(
+            self.control.child("operation-keys", create=True, recover_empty=True)
+        )
+        self.outbox = self.stack.enter_context(self.control.child("outbox", create=True, recover_empty=True))
+        self.candidates = self.stack.enter_context(self.control.child("candidates", create=True, recover_empty=True))
         self.bootstrap["ready"] = True
         self.write(self.control, "bootstrap.json", self.bootstrap)
         self._load_keys()
 
-    def _open_private(self) -> None:
+    def _validate_bootstrap(self, *, ready: bool) -> None:
         if set(self.bootstrap) != {"schema", "incarnation", "state_pin", "secret_pin", "ready"}:
             raise ValueError("invalid bootstrap")
         if (
             type(self.bootstrap["schema"]) is not int
             or self.bootstrap["schema"] != 1
-            or self.bootstrap["ready"] is not True
+            or self.bootstrap["ready"] is not ready
         ):
             raise ValueError("incomplete bootstrap")
         uuid_text(self.bootstrap["incarnation"])
+
+    @staticmethod
+    def _bootstrap_temporaries(targets: tuple[str, ...], observed: set[str]) -> dict[str, str]:
+        return {
+            name: original
+            for name in observed
+            if (original := _bootstrap_writer_temporary(name, targets)) is not None
+        }
+
+    def _discard_bootstrap_temporaries(self, temporaries: dict[str, str]) -> None:
+        """Delete only bounded writer residues for an admitted bootstrap phase."""
+        for name in sorted(set(temporaries.values())):
+            self.control.unlink(name, recover_empty_unhardened=True)
+        self.control.revalidate()
+
+    @staticmethod
+    def _bootstrap_prefix_length(stable_observed: set[str]) -> int:
+        published = stable_observed - {"service.lock", "bootstrap.json"}
+        for length in range(len(_BOOTSTRAP_PUBLICATION_SEQUENCE) + 1):
+            if published == set(_BOOTSTRAP_PUBLICATION_SEQUENCE[:length]):
+                return length
+        raise ValueError("incomplete bootstrap publication prefix")
+
+    @staticmethod
+    def _validate_bootstrap_temporary_target(temporaries: dict[str, str], prefix_length: int) -> None:
+        if len(temporaries) > 1:
+            raise ValueError("invalid bootstrap temporary set")
+        if not temporaries:
+            return
+        if prefix_length < len(_BOOTSTRAP_KEY_NAMES):
+            expected = _BOOTSTRAP_KEY_NAMES[prefix_length]
+        elif prefix_length == len(_BOOTSTRAP_PUBLICATION_SEQUENCE):
+            expected = "bootstrap.json"
+        else:
+            raise ValueError("invalid bootstrap temporary target")
+        if _bootstrap_writer_target(next(iter(temporaries.values()))) != expected:
+            raise ValueError("invalid bootstrap temporary target")
+
+    def _resume_incomplete_bootstrap(self) -> None:
+        """Finish a recognised first-run bootstrap under the retained lock.
+
+        ``ready: false`` is durably published before any owner keys or private
+        transaction directories. A process exit after one of those completed
+        publications therefore leaves a safe, finite prefix to resume. Unknown
+        members, non-empty authority directories and malformed retained keys
+        remain untouched and fail closed.
+        """
+        self._validate_bootstrap(ready=False)
+        self.secrets = self.stack.enter_context(self.root.child("secrets"))
+        self.secret_root = self.stack.enter_context(self.secrets.child("services"))
+        self.revalidate()
+
+        allowed = {
+            "service.lock",
+            "bootstrap.json",
+            *_BOOTSTRAP_KEY_NAMES,
+            *_BOOTSTRAP_DIRECTORY_NAMES.values(),
+        }
+        observed = set(os.listdir(self.control.path))
+        temporaries = self._bootstrap_temporaries(_BOOTSTRAP_WRITE_TARGETS, observed)
+        stable_observed = observed - temporaries.keys()
+        if (
+            not {"service.lock", "bootstrap.json"}.issubset(stable_observed)
+            or stable_observed - allowed
+        ):
+            raise ValueError("incomplete bootstrap artefacts")
+        prefix_length = self._bootstrap_prefix_length(stable_observed)
+        self._validate_bootstrap_temporary_target(temporaries, prefix_length)
+        if os.listdir(self.secret_root.path):
+            raise ValueError("incomplete bootstrap secret authority")
+
+        retained_keys: dict[str, str] = {}
+        for name in _BOOTSTRAP_KEY_NAMES:
+            if self.control.exists(name):
+                retained_keys[name] = self.control.read_text(name, max_bytes=64)
+        if "encryption.key" in retained_keys:
+            Fernet(retained_keys["encryption.key"].encode("ascii"))
+        for name in ("recovery.key", "idempotency.key"):
+            if name in retained_keys:
+                try:
+                    encoded = retained_keys[name].encode("ascii")
+                except UnicodeEncodeError:
+                    raise ValueError("invalid independent owner keys") from None
+                if len(encoded) != 44:
+                    raise ValueError("invalid independent owner keys")
+        if (
+            "recovery.key" in retained_keys
+            and "idempotency.key" in retained_keys
+            and retained_keys["recovery.key"] == retained_keys["idempotency.key"]
+        ):
+            raise ValueError("invalid independent owner keys")
+
+        missing_directories: list[tuple[str, str]] = []
+        for attribute, name in _BOOTSTRAP_DIRECTORY_NAMES.items():
+            if not self.control.exists(name):
+                missing_directories.append((attribute, name))
+                continue
+            directory = self.stack.enter_context(self.control.child(name, create=True, recover_empty=True))
+            if os.listdir(directory.path):
+                raise ValueError("incomplete bootstrap authority")
+            setattr(self, attribute, directory)
+
+        self._discard_bootstrap_temporaries(temporaries)
+        observed = set(os.listdir(self.control.path))
+        if not {"service.lock", "bootstrap.json"}.issubset(observed) or observed - allowed:
+            raise ValueError("incomplete bootstrap artefacts")
+
+        generated = {
+            name: Fernet.generate_key().decode("ascii") for name in _BOOTSTRAP_KEY_NAMES if name not in retained_keys
+        }
+        key_material = {**retained_keys, **generated}
+        while key_material["recovery.key"] == key_material["idempotency.key"]:
+            generated = {
+                name: Fernet.generate_key().decode("ascii")
+                for name in _BOOTSTRAP_KEY_NAMES
+                if name not in retained_keys
+            }
+            key_material = {**retained_keys, **generated}
+        for name in _BOOTSTRAP_KEY_NAMES:
+            if name in generated:
+                self.control.write_text(name, generated[name])
+        for attribute, name in missing_directories:
+            directory = self.stack.enter_context(self.control.child(name, create=True, recover_empty=True))
+            if os.listdir(directory.path):
+                raise ValueError("incomplete bootstrap authority")
+            setattr(self, attribute, directory)
+
+        self._load_keys()
+        self.revalidate()
+        self.bootstrap["ready"] = True
+        self.write(self.control, "bootstrap.json", self.bootstrap)
+
+    def _open_private(self) -> None:
+        self._validate_bootstrap(ready=True)
         self.secrets = self.stack.enter_context(self.root.child("secrets"))
         self.secret_root = self.stack.enter_context(self.secrets.child("services"))
         self.receipts = self.stack.enter_context(self.control.child("receipts"))

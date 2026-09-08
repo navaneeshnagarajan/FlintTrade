@@ -35,6 +35,49 @@ def test_exclusive_member_move_never_overwrites_a_destination(tmp_path):
         assert directory.read_text("candidate") == "candidate"
 
 
+@pytest.mark.skipif(_IS_WIN, reason="POSIX mode-bit fixture for cross-platform recovery logic")
+def test_opt_in_child_recovery_hardens_an_empty_owner_directory(tmp_path):
+    child = tmp_path / "interrupted"
+    child.mkdir(mode=0o700)
+    child.chmod(0o755)
+
+    with secure_file.HeldOwnerDirectory(tmp_path) as parent:
+        with parent.child("interrupted", create=True, recover_empty=True) as recovered:
+            assert recovered.revalidate()
+
+    assert child.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX mode-bit fixture for cross-platform recovery logic")
+def test_opt_in_child_recovery_refuses_a_nonempty_unhardened_directory(tmp_path):
+    child = tmp_path / "foreign"
+    child.mkdir(mode=0o700)
+    child.chmod(0o755)
+    retained = child / "retain"
+    retained.write_text("unchanged")
+
+    with secure_file.HeldOwnerDirectory(tmp_path) as parent:
+        with pytest.raises(secure_file.InsecureFilePermissionsError):
+            parent.child("foreign", create=True, recover_empty=True)
+
+    assert child.stat().st_mode & 0o777 == 0o755
+    assert retained.read_text() == "unchanged"
+
+
+@pytest.mark.skipif(not _IS_WIN, reason="native Windows inherited-DACL recovery")
+def test_windows_opt_in_child_recovery_replaces_an_inherited_directory_dacl(tmp_path):
+    secure_file.harden_directory(tmp_path)
+    child = tmp_path / "interrupted"
+    child.mkdir()
+
+    with secure_file.HeldOwnerDirectory(tmp_path) as parent:
+        with pytest.raises(secure_file.InsecureFilePermissionsError):
+            with parent.child("interrupted"):
+                pass
+        with parent.child("interrupted", create=True, recover_empty=True) as recovered:
+            assert recovered.revalidate()
+
+
 @pytest.mark.skipif(_IS_WIN, reason="POSIX descriptor barriers")
 def test_exclusive_move_preserves_member_identity_and_flushes_both_namespaces(tmp_path, monkeypatch):
     with secure_file.HeldOwnerDirectory(tmp_path) as parent:

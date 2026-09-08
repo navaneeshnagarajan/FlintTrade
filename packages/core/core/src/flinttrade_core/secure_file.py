@@ -174,10 +174,24 @@ class HeldOwnerDirectory:
                 raise InsecureFilePermissionsError("directory is not hardened")
         return opened
 
-    def child(self, name: str, *, create: bool = False) -> HeldOwnerDirectory:
-        """Return a child scope; create only a previously absent directory."""
+    def child(
+        self,
+        name: str,
+        *,
+        create: bool = False,
+        recover_empty: bool = False,
+    ) -> HeldOwnerDirectory:
+        """Return a child scope; optionally recover an interrupted empty creation.
+
+        Recovery is deliberately opt-in. It only tightens an owner-owned,
+        non-reparse directory which still has no members, covering a process
+        exit between Windows ``mkdir`` and DACL installation without admitting
+        a populated or foreign directory.
+        """
         self.revalidate()
         name = self._name(name)
+        if recover_empty and not create:
+            raise ValueError("empty child recovery requires creation authority")
         if create:
             try:
                 if _is_windows():
@@ -187,8 +201,39 @@ class HeldOwnerDirectory:
                     os.mkdir(name, 0o700, dir_fd=self._descriptor)
                     os.fsync(self._descriptor)
             except FileExistsError:
-                pass
+                if recover_empty:
+                    self._recover_empty_child(name)
         return HeldOwnerDirectory(self.path / name, _parent=self)
+
+    def _recover_empty_child(self, name: str) -> None:
+        candidate = HeldOwnerDirectory(self.path / name, _parent=self)
+        try:
+            with candidate:
+                return
+        except InsecureFilePermissionsError:
+            pass
+
+        candidate = HeldOwnerDirectory(
+            self.path / name,
+            require_hardened=False,
+            _parent=self,
+        )
+        with candidate:
+            members = os.listdir(candidate.path if _is_windows() else candidate._descriptor)
+            if members:
+                raise InsecureFilePermissionsError("interrupted directory creation is not empty")
+            if _is_windows():
+                # The retained handle denies delete sharing, so the admitted
+                # path cannot be substituted while its DACL is repaired.
+                harden_directory(candidate.path)
+            else:
+                os.fchmod(candidate._descriptor, 0o700)
+                os.fsync(candidate._descriptor)
+                os.fsync(self._descriptor)
+            candidate.require_hardened = True
+            candidate.revalidate()
+            if os.listdir(candidate.path if _is_windows() else candidate._descriptor):
+                raise OSError("interrupted directory creation changed during recovery")
 
     def exists(self, name: str) -> bool:
         self.revalidate()
@@ -382,13 +427,25 @@ class HeldOwnerDirectory:
         self.revalidate()
         destination.revalidate()
 
-    def unlink(self, name: str) -> None:
-        """Durably remove a validated member; transaction ownership is caller policy."""
+    def unlink(self, name: str, *, recover_empty_unhardened: bool = False) -> None:
+        """Durably remove a validated member; transaction ownership is caller policy.
+
+        The opt-in recovery path exists for a writer-owned temporary which can
+        be left between Windows file creation and DACL installation. Only an
+        empty, stable, current-user-owned regular file is hardened and admitted
+        for deletion; partial payloads must already carry the exact secret ACL.
+        """
         name = self._name(name)
         actual = self.existing_member(name)
         if actual is None:
             raise FileNotFoundError("directory member is absent")
-        self.read_text(actual, max_bytes=1024 * 1024)
+        try:
+            self.read_text(actual, max_bytes=1024 * 1024)
+        except InsecureFilePermissionsError:
+            if not recover_empty_unhardened:
+                raise
+            self._harden_empty_member(actual)
+            self.read_text(actual, max_bytes=1024 * 1024)
         if _is_windows():
             if actual != name:
                 cleanup_pending_unlink(self.path / name)
@@ -398,6 +455,55 @@ class HeldOwnerDirectory:
             os.unlink(actual, dir_fd=self._descriptor)
             os.fsync(self._descriptor)
         self.revalidate()
+
+    def _harden_empty_member(self, name: str) -> None:
+        """Harden one retained zero-byte member without accepting its contents."""
+        self.revalidate()
+        before = self._entry_stat(name)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or stat.S_ISLNK(before.st_mode)
+            or _is_reparse_point(before)
+            or before.st_nlink != 1
+            or before.st_size != 0
+        ):
+            raise OSError("interrupted temporary is not an empty regular file")
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+        if _is_windows():
+            descriptor = os.open(self.path / name, flags)
+        else:
+            descriptor = os.open(name, flags | os.O_NOFOLLOW, dir_fd=self._descriptor)
+        try:
+            if _is_windows():
+                descriptor = _reopen_windows_descriptor_for_security(
+                    descriptor,
+                    allow_delete_sharing=False,
+                    write_dacl=True,
+                )
+            opened = os.fstat(descriptor)
+            if (
+                not _same_file_identity(before, opened)
+                or not stat.S_ISREG(opened.st_mode)
+                or _is_reparse_point(opened)
+                or opened.st_nlink != 1
+                or opened.st_size != 0
+            ):
+                raise OSError("interrupted temporary changed while opened")
+            _assert_current_user_owns(descriptor, opened)
+            if _is_windows():
+                _install_exact_windows_descriptor_dacl(descriptor)
+            else:
+                os.fchmod(descriptor, 0o600)
+            os.fsync(descriptor)
+            _assert_hardened_descriptor(descriptor, os.fstat(descriptor), path=self.path / name)
+            current = self._entry_stat(name)
+            if not _same_file_identity(opened, current) or current.st_size != 0:
+                raise OSError("interrupted temporary changed during hardening")
+            if not _is_windows():
+                os.fsync(self._descriptor)
+            self.revalidate()
+        finally:
+            os.close(descriptor)
 
 
 def _posix_move_no_replace(source_fd: int, source: str, target_fd: int, target: str) -> None:

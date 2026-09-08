@@ -1,6 +1,7 @@
 """Observable persistence and admission contracts for inert connections."""
 
 import json
+import os
 import shutil
 from uuid import uuid4
 
@@ -407,6 +408,560 @@ def test_unknown_control_state_without_bootstrap_is_not_an_absent_store(tmp_path
     (tmp_path / "service-connections-state" / "unknown").write_text("retained")
     with pytest.raises(ConnectionStoreUnavailable):
         store.read_snapshot()
+
+
+@pytest.mark.parametrize("suffix", ["00000000-0000-4000-8000-000000000001", "abc123_z"])
+def test_interrupted_bootstrap_marker_temporary_is_discarded_before_initialise(tmp_path, suffix):
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import write_secret_text
+
+    with transactions.TransactionFiles(tmp_path):
+        pass
+    control = tmp_path / "service-connections-state"
+    temporary = control / f".bootstrap.json.{suffix}.tmp"
+    write_secret_text(temporary, "partial marker")
+
+    with transactions.TransactionFiles(tmp_path) as files:
+        assert files.bootstrap is None
+        files.initialise()
+
+    assert temporary.exists() is False
+    assert json.loads((control / "bootstrap.json").read_text())["ready"] is True
+
+
+def test_interrupted_bootstrap_marker_unlink_tombstone_is_finished(tmp_path):
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import pending_unlink_path, write_secret_text
+
+    with transactions.TransactionFiles(tmp_path):
+        pass
+    control = tmp_path / "service-connections-state"
+    temporary = control / f".bootstrap.json.{uuid4()}.tmp"
+    tombstone = pending_unlink_path(temporary)
+    write_secret_text(tombstone, "partial marker")
+
+    with transactions.TransactionFiles(tmp_path) as files:
+        assert files.bootstrap is None
+
+    assert tombstone.exists() is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode-bit fixture for the Windows pre-DACL state")
+def test_empty_unhardened_bootstrap_unlink_tombstone_is_safely_recovered(tmp_path):
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import pending_unlink_path
+
+    with transactions.TransactionFiles(tmp_path):
+        pass
+    control = tmp_path / "service-connections-state"
+    temporary = control / f".bootstrap.json.{uuid4()}.tmp"
+    tombstone = pending_unlink_path(temporary)
+    tombstone.touch(mode=0o600)
+    tombstone.chmod(0o644)
+
+    with transactions.TransactionFiles(tmp_path) as files:
+        assert files.bootstrap is None
+
+    assert tombstone.exists() is False
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows pre-DACL temporary recovery")
+@pytest.mark.parametrize("pending", [False, True])
+def test_windows_bootstrap_removes_an_inherited_dacl_temporary(tmp_path, pending):
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import (
+        HeldOwnerDirectory,
+        InsecureFilePermissionsError,
+        pending_unlink_path,
+    )
+
+    with transactions.TransactionFiles(tmp_path):
+        pass
+    control = tmp_path / "service-connections-state"
+    temporary = control / f".bootstrap.json.{uuid4()}.tmp"
+    residue = pending_unlink_path(temporary) if pending else temporary
+    residue.touch()
+    with HeldOwnerDirectory(control) as directory:
+        with pytest.raises(InsecureFilePermissionsError):
+            directory.read_text(residue.name)
+
+    with transactions.TransactionFiles(tmp_path) as files:
+        assert files.bootstrap is None
+
+    assert residue.exists() is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode-bit fixture for the Windows pre-DACL state")
+def test_empty_unhardened_bootstrap_writer_temporary_is_safely_recovered(tmp_path):
+    from flinttrade_core import service_connection_transactions as transactions
+
+    with transactions.TransactionFiles(tmp_path):
+        pass
+    temporary = tmp_path / "service-connections-state" / f".bootstrap.json.{uuid4()}.tmp"
+    temporary.touch(mode=0o600)
+    temporary.chmod(0o644)
+
+    with transactions.TransactionFiles(tmp_path) as files:
+        assert files.bootstrap is None
+
+    assert temporary.exists() is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode-bit fixture for the Windows pre-DACL state")
+def test_nonempty_unhardened_bootstrap_writer_temporary_fails_closed(tmp_path):
+    from flinttrade_core import service_connection_transactions as transactions
+
+    with transactions.TransactionFiles(tmp_path):
+        pass
+    temporary = tmp_path / "service-connections-state" / f".bootstrap.json.{uuid4()}.tmp"
+    temporary.write_text("retain me")
+    temporary.chmod(0o644)
+
+    with pytest.raises(OSError, match="empty regular file"):
+        with transactions.TransactionFiles(tmp_path):
+            pass
+
+    assert temporary.read_text() == "retain me"
+    assert temporary.stat().st_mode & 0o777 == 0o644
+
+
+def test_oversized_bootstrap_writer_temporary_fails_closed(tmp_path):
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import write_secret_text
+
+    with transactions.TransactionFiles(tmp_path):
+        pass
+    temporary = tmp_path / "service-connections-state" / f".bootstrap.json.{uuid4()}.tmp"
+    write_secret_text(temporary, "x" * (1024 * 1024 + 1))
+
+    with pytest.raises(OSError, match="bounded|exceeds"):
+        with transactions.TransactionFiles(tmp_path):
+            pass
+
+    assert temporary.stat().st_size == 1024 * 1024 + 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode-bit fixture for the Windows mkdir-to-DACL state")
+@pytest.mark.parametrize(
+    "relative",
+    [
+        ("service-connections-state",),
+        ("secrets",),
+        ("secrets", "services"),
+    ],
+)
+def test_initial_bootstrap_recovers_an_empty_unhardened_directory(tmp_path, relative):
+    from flinttrade_core import service_connection_transactions as transactions
+
+    parent = tmp_path
+    for part in relative:
+        parent = parent / part
+        parent.mkdir(mode=0o700)
+    parent.chmod(0o755)
+
+    with transactions.TransactionFiles(tmp_path) as files:
+        if relative != ("service-connections-state",):
+            files.initialise()
+
+    assert parent.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode-bit fixture for the Windows mkdir-to-DACL state")
+def test_incomplete_bootstrap_recovers_an_empty_unhardened_authority_directory(tmp_path, monkeypatch):
+    from cryptography.fernet import Fernet
+
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import HeldOwnerDirectory, write_secret_text
+
+    class Crash(BaseException):
+        pass
+
+    real_write = HeldOwnerDirectory.write_text
+
+    def interrupt_after_marker(directory, name, value):
+        real_write(directory, name, value)
+        if name == "bootstrap.json" and json.loads(value).get("ready") is False:
+            raise Crash
+
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", interrupt_after_marker)
+    with pytest.raises(Crash):
+        with transactions.TransactionFiles(tmp_path) as files:
+            files.initialise()
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", real_write)
+
+    control = tmp_path / "service-connections-state"
+    for name in ("encryption.key", "recovery.key", "idempotency.key"):
+        write_secret_text(control / name, Fernet.generate_key().decode("ascii"))
+    receipts = control / "receipts"
+    receipts.mkdir(mode=0o700)
+    receipts.chmod(0o755)
+
+    with transactions.TransactionFiles(tmp_path) as files:
+        assert files.bootstrap["ready"] is True
+
+    assert receipts.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize(
+    "target,prefix",
+    [
+        ("encryption.key", ()),
+        ("recovery.key", ("encryption.key",)),
+        ("idempotency.key", ("encryption.key", "recovery.key")),
+        (
+            "bootstrap.json",
+            (
+                "encryption.key",
+                "recovery.key",
+                "idempotency.key",
+                "receipts",
+                "operation-keys",
+                "outbox",
+                "candidates",
+            ),
+        ),
+    ],
+)
+def test_incomplete_bootstrap_discards_recognised_writer_temporary(tmp_path, monkeypatch, target, prefix):
+    from cryptography.fernet import Fernet
+
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import HeldOwnerDirectory, harden_directory, write_secret_text
+
+    class Crash(BaseException):
+        pass
+
+    real_write = HeldOwnerDirectory.write_text
+
+    def interrupt_after_marker(directory, name, value):
+        real_write(directory, name, value)
+        if name == "bootstrap.json" and json.loads(value).get("ready") is False:
+            raise Crash
+
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", interrupt_after_marker)
+    with pytest.raises(Crash):
+        with transactions.TransactionFiles(tmp_path) as files:
+            files.initialise()
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", real_write)
+
+    control = tmp_path / "service-connections-state"
+    for member in prefix:
+        published = control / member
+        if member.endswith(".key"):
+            write_secret_text(published, Fernet.generate_key().decode("ascii"))
+        else:
+            published.mkdir(mode=0o700)
+            harden_directory(published)
+    temporary = control / f".{target}.{uuid4()}.tmp"
+    write_secret_text(temporary, "partial publication")
+
+    with transactions.TransactionFiles(tmp_path) as files:
+        assert files.bootstrap["ready"] is True
+
+    assert temporary.exists() is False
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        ".bootstrap.json.not.valid.tmp",
+        ".encryption.key.012345678.tmp",
+        ".unrelated.12345678.tmp",
+    ],
+)
+def test_bootstrap_temporary_with_unrecognised_name_fails_closed(tmp_path, name):
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import write_secret_text
+
+    with transactions.TransactionFiles(tmp_path):
+        pass
+    temporary = tmp_path / "service-connections-state" / name
+    write_secret_text(temporary, "retain me")
+
+    with pytest.raises(ValueError, match="unrecognised bootstrap state"):
+        with transactions.TransactionFiles(tmp_path):
+            pass
+
+    assert temporary.read_text() == "retain me"
+
+
+def test_unknown_bootstrap_state_preserves_a_recognised_temporary(tmp_path):
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import write_secret_text
+
+    with transactions.TransactionFiles(tmp_path):
+        pass
+    control = tmp_path / "service-connections-state"
+    temporary = control / f".bootstrap.json.{uuid4()}.tmp"
+    unknown = control / "unknown"
+    write_secret_text(temporary, "retain temporary")
+    unknown.write_text("retain unknown")
+
+    with pytest.raises(ValueError, match="unrecognised bootstrap state"):
+        with transactions.TransactionFiles(tmp_path):
+            pass
+
+    assert temporary.read_text() == "retain temporary"
+    assert unknown.read_text() == "retain unknown"
+
+
+@pytest.mark.parametrize("member", ["idempotency.key", "operation-keys"])
+def test_incomplete_bootstrap_rejects_a_nonprefix_publication_without_cleanup(tmp_path, monkeypatch, member):
+    from cryptography.fernet import Fernet
+
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import HeldOwnerDirectory, harden_directory, write_secret_text
+
+    class Crash(BaseException):
+        pass
+
+    real_write = HeldOwnerDirectory.write_text
+
+    def interrupt_after_marker(directory, name, value):
+        real_write(directory, name, value)
+        if name == "bootstrap.json" and json.loads(value).get("ready") is False:
+            raise Crash
+
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", interrupt_after_marker)
+    with pytest.raises(Crash):
+        with transactions.TransactionFiles(tmp_path) as files:
+            files.initialise()
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", real_write)
+
+    control = tmp_path / "service-connections-state"
+    published = control / member
+    if member.endswith(".key"):
+        write_secret_text(published, Fernet.generate_key().decode("ascii"))
+    else:
+        published.mkdir(mode=0o700)
+        harden_directory(published)
+    temporary = control / f".encryption.key.{uuid4()}.tmp"
+    write_secret_text(temporary, "retain recovery evidence")
+
+    before = {
+        str(path.relative_to(tmp_path)): ("directory" if path.is_dir() else path.read_bytes())
+        for path in sorted(tmp_path.rglob("*"), key=str)
+    }
+    with pytest.raises(ValueError, match="publication prefix"):
+        with transactions.TransactionFiles(tmp_path):
+            pass
+    after = {
+        str(path.relative_to(tmp_path)): ("directory" if path.is_dir() else path.read_bytes())
+        for path in sorted(tmp_path.rglob("*"), key=str)
+    }
+    assert after == before
+
+
+def test_incomplete_bootstrap_rejects_a_temporary_for_any_target_but_the_next(tmp_path, monkeypatch):
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import HeldOwnerDirectory, write_secret_text
+
+    class Crash(BaseException):
+        pass
+
+    real_write = HeldOwnerDirectory.write_text
+
+    def interrupt_after_marker(directory, name, value):
+        real_write(directory, name, value)
+        if name == "bootstrap.json" and json.loads(value).get("ready") is False:
+            raise Crash
+
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", interrupt_after_marker)
+    with pytest.raises(Crash):
+        with transactions.TransactionFiles(tmp_path) as files:
+            files.initialise()
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", real_write)
+
+    temporary = tmp_path / "service-connections-state" / f".idempotency.key.{uuid4()}.tmp"
+    write_secret_text(temporary, "retain me")
+
+    with pytest.raises(ValueError, match="temporary target"):
+        with transactions.TransactionFiles(tmp_path):
+            pass
+    assert temporary.read_text() == "retain me"
+
+
+@pytest.mark.parametrize(
+    "boundary",
+    [
+        "bootstrap.json",
+        "encryption.key",
+        "recovery.key",
+        "idempotency.key",
+        "receipts",
+        "operation-keys",
+        "outbox",
+        "candidates",
+    ],
+)
+def test_interrupted_first_bootstrap_resumes_without_manual_cleanup(tmp_path, monkeypatch, boundary):
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import HeldOwnerDirectory
+
+    class Crash(BaseException):
+        pass
+
+    real_write = HeldOwnerDirectory.write_text
+    real_child = HeldOwnerDirectory.child
+    crashed = False
+
+    def interrupted_write(directory, name, value):
+        nonlocal crashed
+        real_write(directory, name, value)
+        if not crashed and name == boundary and (name != "bootstrap.json" or json.loads(value).get("ready") is False):
+            crashed = True
+            raise Crash
+
+    def interrupted_child(directory, name, *, create=False, recover_empty=False):
+        nonlocal crashed
+        child = real_child(directory, name, create=create, recover_empty=recover_empty)
+        if not crashed and create and directory.path.name == "service-connections-state" and name == boundary:
+            crashed = True
+            raise Crash
+        return child
+
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", interrupted_write)
+    monkeypatch.setattr(HeldOwnerDirectory, "child", interrupted_child)
+    with pytest.raises(Crash):
+        with transactions.TransactionFiles(tmp_path) as files:
+            files.initialise()
+    assert crashed
+    control = tmp_path / "service-connections-state"
+    retained_keys = {
+        name: (control / name).read_bytes()
+        for name in ("encryption.key", "recovery.key", "idempotency.key")
+        if (control / name).exists()
+    }
+
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", real_write)
+    monkeypatch.setattr(HeldOwnerDirectory, "child", real_child)
+    with transactions.TransactionFiles(tmp_path) as files:
+        assert files.bootstrap["ready"] is True
+    assert all((control / name).read_bytes() == value for name, value in retained_keys.items())
+
+    store = ServiceConnectionStore(tmp_path)
+    before = store.read_snapshot()
+    result = store.mutate(
+        "create",
+        PAYLOAD,
+        connection_id=None,
+        expected_etag=before.etag,
+        idempotency_key=str(uuid4()),
+        actor_context=ACTOR,
+    )
+    assert result.status == 201
+    assert ServiceConnectionStore(tmp_path).read_snapshot().epoch == 1
+
+
+def test_incomplete_bootstrap_with_unknown_state_fails_closed_without_cleanup(tmp_path, monkeypatch):
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import HeldOwnerDirectory
+
+    class Crash(BaseException):
+        pass
+
+    real_write = HeldOwnerDirectory.write_text
+
+    def interrupt_after_marker(directory, name, value):
+        real_write(directory, name, value)
+        if name == "bootstrap.json" and json.loads(value).get("ready") is False:
+            raise Crash
+
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", interrupt_after_marker)
+    with pytest.raises(Crash):
+        with transactions.TransactionFiles(tmp_path) as files:
+            files.initialise()
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", real_write)
+
+    unknown = tmp_path / "service-connections-state" / "unknown"
+    unknown.write_text("retain me")
+    before = unknown.read_bytes()
+    with pytest.raises(ValueError, match="incomplete bootstrap artefacts"):
+        with transactions.TransactionFiles(tmp_path):
+            pass
+    assert unknown.read_bytes() == before
+    assert json.loads((tmp_path / "service-connections-state" / "bootstrap.json").read_text())["ready"] is False
+
+
+@pytest.mark.parametrize(
+    "corruption,message",
+    [
+        ("malformed_encryption", "Fernet key"),
+        ("malformed_mac", "invalid independent owner keys"),
+        ("bad_pin", "authority root changed"),
+        ("secret_authority", "incomplete bootstrap secret authority"),
+        ("receipt_authority", "incomplete bootstrap authority"),
+    ],
+)
+def test_incomplete_bootstrap_rejects_tampered_or_published_authority(tmp_path, monkeypatch, corruption, message):
+    from cryptography.fernet import Fernet
+
+    from flinttrade_core import service_connection_transactions as transactions
+    from flinttrade_core.secure_file import HeldOwnerDirectory, harden_directory, write_secret_text
+
+    class Crash(BaseException):
+        pass
+
+    real_write = HeldOwnerDirectory.write_text
+
+    def interrupt_after_marker(directory, name, value):
+        real_write(directory, name, value)
+        if name == "bootstrap.json" and json.loads(value).get("ready") is False:
+            raise Crash
+
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", interrupt_after_marker)
+    with pytest.raises(Crash):
+        with transactions.TransactionFiles(tmp_path) as files:
+            files.initialise()
+    monkeypatch.setattr(HeldOwnerDirectory, "write_text", real_write)
+
+    control = tmp_path / "service-connections-state"
+    if corruption == "malformed_encryption":
+        retained = control / "encryption.key"
+        write_secret_text(retained, "not-a-fernet-key")
+        temporary_target = "recovery.key"
+    elif corruption == "malformed_mac":
+        write_secret_text(control / "encryption.key", Fernet.generate_key().decode("ascii"))
+        retained = control / "recovery.key"
+        write_secret_text(retained, "a" * 43 + "é")
+        temporary_target = "idempotency.key"
+    elif corruption == "bad_pin":
+        retained = control / "bootstrap.json"
+        bootstrap = json.loads(retained.read_text())
+        bootstrap["state_pin"]["object"] += 1
+        retained.write_text(json.dumps(bootstrap, separators=(",", ":")))
+        temporary_target = "encryption.key"
+    elif corruption == "secret_authority":
+        retained = tmp_path / "secrets" / "services" / "unexpected"
+        retained.mkdir(mode=0o700)
+        temporary_target = "encryption.key"
+    else:
+        for name in ("encryption.key", "recovery.key", "idempotency.key"):
+            write_secret_text(control / name, Fernet.generate_key().decode("ascii"))
+        for name in ("receipts", "operation-keys", "outbox", "candidates"):
+            directory = control / name
+            directory.mkdir(mode=0o700)
+            harden_directory(directory)
+        receipts = control / "receipts"
+        retained = receipts / "unexpected.json"
+        write_secret_text(retained, "retain me")
+        temporary_target = "bootstrap.json"
+    temporary = control / f".{temporary_target}.{uuid4()}.tmp"
+    write_secret_text(temporary, "retain recovery evidence")
+
+    def private_tree():
+        return {
+            str(path.relative_to(tmp_path)): ("directory" if path.is_dir() else path.read_bytes())
+            for path in sorted(tmp_path.rglob("*"), key=str)
+        }
+
+    before = private_tree()
+
+    with pytest.raises(ValueError, match=message):
+        with transactions.TransactionFiles(tmp_path):
+            pass
+    assert private_tree() == before
+    assert json.loads((control / "bootstrap.json").read_text())["ready"] is False
 
 
 def test_audit_export_is_bounded_and_repeated_reads_drain_pending(tmp_path):
