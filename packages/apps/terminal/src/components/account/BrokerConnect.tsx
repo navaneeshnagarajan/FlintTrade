@@ -60,6 +60,7 @@ import {
   type NativeBroker,
 } from "@/services/ftApi.native";
 import { isDesktopShell, openExternalUrl } from "@/lib/desktopShell";
+import { cancelAccountAction, runAccountAction } from "@/services/accountMutationActions";
 
 const BROKERS_KEY = ["native", "brokers"] as const;
 const MCP_KEY = ["broker", "mcp"] as const;
@@ -275,6 +276,8 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   );
 
   function resetForm() {
+    cancelAccountAction(`native:${selectedBroker}:${accountId.trim()}:connect`);
+    cancelAccountAction(`native:${selectedBroker}:${accountId.trim()}:oauth`);
     setFields({});
     setAccountId("");
     setAccountLabel("");
@@ -529,7 +532,8 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
           api_secret: fields.api_secret ?? "",
           ...(label ? { label } : {}),
         };
-        const started = await oauthStartNativeAccount(payload);
+        const started = await runAccountAction(`native:${broker.adapter_id}:${accountId.trim()}:oauth`,
+          (key) => oauthStartNativeAccount(payload, key));
         if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return null;
         // The Electron bridge routes OAuth through the operator's system
         // browser instead of navigating the protected desktop renderer.
@@ -550,7 +554,8 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
           ),
         };
       }
-      const result = await connectNativeAccount({
+      const result = await runAccountAction(`native:${broker.adapter_id}:${accountId.trim()}:connect`,
+        (key) => connectNativeAccount({
         adapter_id: broker.adapter_id,
         account_id: accountId.trim(),
         ...(label ? { label } : {}),
@@ -558,7 +563,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
           ...(method.credential_defaults ?? {}),
           ...Object.fromEntries(method.fields.map((f) => [f.name, fields[f.name] ?? ""])),
         },
-      });
+        }, key));
       if (!mountedRef.current || !isAuthSessionFenceCurrent(sessionFence)) return null;
       // A failed connect is a non-2xx that already threw the backend message
       // inside connectNativeAccount; a 2xx always carries connected:true.
@@ -611,7 +616,8 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
 
   const removeMutation = useMutation({
     mutationFn: (sel: { adapter: string; account: string }) =>
-      removeBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }),
+      runAccountAction(`native:${sel.adapter}:${sel.account}:remove`,
+        (key) => removeBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }, key)),
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`${sel.adapter} account ${sel.account} disconnected.`);
@@ -631,7 +637,8 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
 
   const setPrimaryMutation = useMutation({
     mutationFn: (sel: { adapter: string; account: string }) =>
-      setPrimaryBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }),
+      runAccountAction(`native:${sel.adapter}:${sel.account}:primary`,
+        (key) => setPrimaryBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }, key)),
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`${sel.adapter} account ${sel.account} set as primary.`);
@@ -651,7 +658,8 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
     // Replay the stored (replayable) material first — a one-click morning
     // re-auth for accounts whose vault token is still valid (G5).
     mutationFn: (sel: { adapter: string; account: string }) =>
-      reconnectBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }),
+      runAccountAction(`native:${sel.adapter}:${sel.account}:reconnect`,
+        (key) => reconnectBrokerAccount({ source: "native", broker: sel.adapter, account_id: sel.account }, key)),
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`${sel.adapter} account ${sel.account} re-authenticated.`);
@@ -677,7 +685,8 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
 
   const gatewayRemoveMutation = useMutation({
     mutationFn: (sel: { accountId: string; broker: string }) =>
-      removeBrokerAccount({ source: "gateway", broker: sel.broker, account_id: sel.accountId }),
+      runAccountAction(`gateway:${sel.broker}:${sel.accountId}:remove`,
+        (key) => removeBrokerAccount({ source: "gateway", broker: sel.broker, account_id: sel.accountId }, key)),
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`Gateway account ${sel.accountId} disconnected.`);
@@ -696,7 +705,8 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
 
   const gatewayReconnectMutation = useMutation({
     mutationFn: (sel: { accountId: string; broker: string }) =>
-      reconnectBrokerAccount({ source: "gateway", broker: sel.broker, account_id: sel.accountId }),
+      runAccountAction(`gateway:${sel.broker}:${sel.accountId}:reconnect`,
+        (key) => reconnectBrokerAccount({ source: "gateway", broker: sel.broker, account_id: sel.accountId }, key)),
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`Gateway account ${sel.accountId} reconnected.`);
@@ -710,7 +720,8 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
 
   const gatewaySetPrimaryMutation = useMutation({
     mutationFn: (sel: { accountId: string; broker: string }) =>
-      setPrimaryBrokerAccount({ source: "gateway", broker: sel.broker, account_id: sel.accountId }),
+      runAccountAction(`gateway:${sel.broker}:${sel.accountId}:primary`,
+        (key) => setPrimaryBrokerAccount({ source: "gateway", broker: sel.broker, account_id: sel.accountId }, key)),
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`Gateway account ${sel.accountId} set as primary.`);

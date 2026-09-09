@@ -135,19 +135,20 @@ describe("brokerAccountsApi", () => {
     const nativeRef = { source: "native" as const, broker: "upstox", account_id: "UPX1" };
     const gatewayRef = { source: "gateway" as const, broker: "zerodha", account_id: "GW1" };
 
-    await removeBrokerAccount(nativeRef);
-    await reconnectBrokerAccount(nativeRef);
-    await setPrimaryBrokerAccount(nativeRef);
-    expect(mocks.removeNative).toHaveBeenCalledWith("upstox", "UPX1");
-    expect(mocks.reloginNative).toHaveBeenCalledWith("upstox", "UPX1");
-    expect(mocks.setNativePrimary).toHaveBeenCalledWith("upstox", "UPX1");
+    const actionKey = "00000000-0000-4000-8000-000000000001";
+    await removeBrokerAccount(nativeRef, actionKey);
+    await reconnectBrokerAccount(nativeRef, actionKey);
+    await setPrimaryBrokerAccount(nativeRef, actionKey);
+    expect(mocks.removeNative).toHaveBeenCalledWith("upstox", "UPX1", actionKey);
+    expect(mocks.reloginNative).toHaveBeenCalledWith("upstox", "UPX1", undefined, actionKey);
+    expect(mocks.setNativePrimary).toHaveBeenCalledWith("upstox", "UPX1", actionKey);
 
-    await removeBrokerAccount(gatewayRef);
-    await reconnectBrokerAccount(gatewayRef);
-    await setPrimaryBrokerAccount(gatewayRef);
-    expect(mocks.removeGateway).toHaveBeenCalledWith("GW1");
-    expect(mocks.reconnectGateway).toHaveBeenCalledWith("GW1");
-    expect(mocks.setGatewayPrimary).toHaveBeenCalledWith("GW1");
+    await removeBrokerAccount(gatewayRef, actionKey);
+    await reconnectBrokerAccount(gatewayRef, actionKey);
+    await setPrimaryBrokerAccount(gatewayRef, actionKey);
+    expect(mocks.removeGateway).toHaveBeenCalledWith("GW1", actionKey);
+    expect(mocks.reconnectGateway).toHaveBeenCalledWith("GW1", actionKey);
+    expect(mocks.setGatewayPrimary).toHaveBeenCalledWith("GW1", actionKey);
   });
 
   it("lists only live native read accounts in the shared account client", async () => {

@@ -616,6 +616,7 @@ describe("BrokersSection", () => {
     await waitFor(() =>
       expect(removeBrokerAccount).toHaveBeenCalledWith(
         expect.objectContaining({ source: "gateway", broker: "zerodha", account_id: "GW1" }),
+        expect.any(String),
       ),
     );
   });
@@ -634,6 +635,7 @@ describe("BrokersSection", () => {
     await waitFor(() =>
       expect(setPrimaryBrokerAccount).toHaveBeenCalledWith(
         expect.objectContaining({ source: "gateway", broker: "zerodha", account_id: "GW1" }),
+        expect.any(String),
       ),
     );
   });
@@ -686,6 +688,7 @@ describe("BrokersSection", () => {
     await waitFor(() =>
       expect(removeBrokerAccount).toHaveBeenCalledWith(
         expect.objectContaining({ source: "gateway", broker: "upstox", account_id: "SHARED" }),
+        expect.any(String),
       ),
     );
     await waitFor(() => {
@@ -719,6 +722,7 @@ describe("BrokersSection", () => {
     await waitFor(() =>
       expect(removeBrokerAccount).toHaveBeenCalledWith(
         expect.objectContaining({ source: "native", broker: "dhan", account_id: "D1" }),
+        expect.any(String),
       ),
     );
     await waitFor(() => expect(useBrokerStore.getState().accounts).toHaveLength(0));
@@ -879,6 +883,7 @@ describe("BrokersSection", () => {
           label: "Dhan swing",
           credentials: { client_id: "1234567890", access_token: "TOK" },
         }),
+        expect.any(String),
       ),
     );
     expect(await screen.findByText(/Dhan account 1234567890 connected/i)).toBeInTheDocument();
@@ -984,6 +989,7 @@ describe("BrokersSection", () => {
           api_key: "APPID",
           api_secret: "SECRET",
         }),
+        expect.any(String),
       ),
     );
     expect(openSpy).toHaveBeenCalledWith(expect.stringContaining("auth.dhan.co"), "_blank", "noopener");
@@ -1464,10 +1470,29 @@ describe("BrokersSection", () => {
     await waitFor(() =>
       expect(oauthStartNativeAccount).toHaveBeenCalledWith(
         expect.objectContaining({ adapter_id: "upstox", account_id: "UPX1", api_key: "K", api_secret: "SEC" }),
+        expect.any(String),
       ),
     );
     expect(openSpy).toHaveBeenCalledWith(expect.stringContaining("api.upstox.com"), "_blank", "noopener");
     expect(screen.getByText(/Postback .* is optional/i)).toBeInTheDocument();
+  });
+
+  it("reuses the logical connect key after a lost response and component remount", async () => {
+    const connect = connectNativeAccount as ReturnType<typeof vi.fn>;
+    connect.mockRejectedValueOnce(new TypeError("Lost connection response"))
+      .mockResolvedValueOnce({ connected: true, login: "ok" });
+    const first = renderSection(false);
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+    await submitDhanAccessToken("RETRY-FIXTURE");
+    expect(await screen.findByText("Lost connection response")).toBeInTheDocument();
+    const originalKey = connect.mock.calls[0][1];
+    first.unmount();
+    renderSection(false);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /broker/i })).toBeInTheDocument());
+    await submitDhanAccessToken("RETRY-FIXTURE");
+    expect(await screen.findByText(/RETRY-FIXTURE connected/)).toBeInTheDocument();
+    expect(connect.mock.calls).toHaveLength(2);
+    expect(connect.mock.calls[1][1]).toBe(originalKey);
   });
 
   it("connects Upstox analytics tokens as read-only native sessions", async () => {
@@ -1497,6 +1522,7 @@ describe("BrokersSection", () => {
             access_token: "ANALYTICS-TOK",
           },
         }),
+        expect.any(String),
       ),
     );
     expect(await screen.findByText(/Upstox account UPX1 connected/i)).toBeInTheDocument();
@@ -1563,6 +1589,7 @@ describe("BrokersSection — re-authentication (G5/G7)", () => {
     await waitFor(() =>
       expect(reconnectBrokerAccount).toHaveBeenCalledWith(
         expect.objectContaining({ source: "native", broker: "dhan", account_id: "1234567890" }),
+        expect.any(String),
       ),
     );
     await waitFor(() =>
@@ -1613,6 +1640,7 @@ describe("BrokersSection — primary account selection", () => {
     await waitFor(() =>
       expect(setPrimaryBrokerAccount).toHaveBeenCalledWith(
         expect.objectContaining({ source: "native", broker: "upstox", account_id: "UPX1" }),
+        expect.any(String),
       ),
     );
     await waitFor(() => expect(screen.getByText(/set as primary/i)).toBeInTheDocument());
@@ -1658,6 +1686,7 @@ describe("BrokersSection — disconnect feedback", () => {
     await waitFor(() =>
       expect(removeBrokerAccount).toHaveBeenCalledWith(
         expect.objectContaining({ source: "native", broker: "upstox", account_id: "UPX1" }),
+        expect.any(String),
       ),
     );
     expect(await screen.findByText(/upstox account UPX1 disconnected/i)).toBeInTheDocument();
