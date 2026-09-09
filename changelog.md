@@ -45,6 +45,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
+  Tester finding (Blocker/Major). After creating an account on the
+  installed app (`/setup`), Step 2/7 mandatory TOTP has no skip for
+  Explore/Practice. Once account creation starts, `/welcome` and
+  `/trade` redirect back to incomplete setup, so sample-data Explore is
+  unreachable until 2FA is finished. This Unreleased note tracks an
+  Explore/Practice escape hatch (or making that path obvious from
+  Setup) before mandatory TOTP. Product fix is not in this commit —
+  implement on this PR.
+
 - **Strategy Lab stays empty after AI Deploy (FT-DEMO-002).**
   Deploying a suggestion from `/demo-app/ai` (for example “Trend EMA
   Crossover”) opens `/demo-app/lab?strategy=TrendEMACrossover`. Strategy
