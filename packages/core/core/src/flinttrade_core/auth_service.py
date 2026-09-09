@@ -267,6 +267,13 @@ class AuthService:
             return {}
         return {"username": row["username"], "email": row["email"]}
 
+    def get_created_at(self) -> str:
+        """Return the account ``created_at`` stamp, or ``""`` if none exists."""
+        row = self._db.execute("SELECT created_at FROM account WHERE id = 1").fetchone()
+        if not row:
+            return ""
+        return str(row["created_at"] or "")
+
     def verify_password(self, password: str) -> bool:
         """Verify password and cache decrypted TOTP secret. Returns False if locked out."""
         if self.is_locked():

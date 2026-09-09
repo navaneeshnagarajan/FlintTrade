@@ -653,14 +653,47 @@ class TestSetupSessionReset:
 
     def test_session_reset_wipes_unfinished_account(self, client):
         c, svc = client
+        created = self._setup(c)
+        setup_token = created.get_json()["data"]["token"]
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {setup_token}"},
+        )
+        assert resp.status_code == 200
+        assert svc.is_setup() is False
+
+    def test_session_reset_rejects_ordinary_session_token(self, client):
+        c, svc = client
         self._setup(c)
         resp = c.post(
             "/v1/auth/setup/reset",
             json={},
             headers=_session_headers(),
         )
-        assert resp.status_code == 200
-        assert svc.is_setup() is False
+        assert resp.status_code == 401
+        assert svc.is_setup() is True
+
+    def test_session_reset_rejects_stale_setup_token_after_recreate(self, client):
+        c, svc = client
+        first = self._setup(c)
+        stale = first.get_json()["data"]["token"]
+        assert svc.reset_account("StrongP@ss123!") is True
+        second = c.post("/v1/auth/setup", json={
+            "username": "bob",
+            "email": "bob@example.com",
+            "password": "AnotherP@ss123!",
+            "pin": "654321",
+        }, headers={"Content-Type": "application/json"})
+        assert second.status_code == 201
+        resp = c.post(
+            "/v1/auth/setup/reset",
+            json={},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {stale}"},
+        )
+        assert resp.status_code == 401
+        assert svc.is_setup() is True
+        assert svc.get_profile()["username"] == "bob"
 
     def test_session_reset_rejects_reset_token(self, client):
         c, svc = client
@@ -697,6 +730,8 @@ class TestSetupMintsSession:
         assert payload["type"] == "session"
         assert payload["mode"] == "explore"
         assert payload["live_mode_unlocked"] is False
+        assert payload["setup_session"] is True
+        assert payload["setup_bound"]
         # And that token satisfies the G9 write guard (proves the wizard's
         # broker-connect step is authenticated).
         w = c.post(

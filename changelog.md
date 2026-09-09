@@ -53,8 +53,9 @@ changelog rebuilds itself from the first release cut after this baseline.
   refresh and a `/welcome` remount instead of bouncing to the
   password+TOTP wall. Sign-in still requires TOTP. Daily login still
   requires password + TOTP, and Live still requires the PIN, as
-  designed. **Start over** wipes the unfinished account via the setup
-  session so a lost QR seed is recoverable without the TOTP secret.
+  designed. **Start over** wipes the unfinished account via the
+  account-create setup JWT so a lost QR seed is recoverable without the
+  TOTP secret. Daily-login session tokens cannot wipe the account.
 
 - **Strategy Lab stays empty after AI Deploy (FT-DEMO-002).**
   Deploying a suggestion from `/demo-app/ai` (for example “Trend EMA

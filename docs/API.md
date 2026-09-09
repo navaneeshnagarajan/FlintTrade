@@ -391,7 +391,7 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 |---|---|
 | `GET auth/status` | Whether the operator account exists and whether TOTP / PIN are configured. |
 | `POST auth/setup` | First-run enrolment. Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri` plus backup codes and an Explore JWT. It does not accept a caller-supplied TOTP secret. |
-| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Body `{ "password" }`, or a valid setup/login session JWT (lost-QR start-over). |
+| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Body `{ "password" }`, or the account-create setup JWT (lost-QR start-over). Daily-login session JWTs are rejected. |
 | `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret (password re-confirm). |
 | `POST auth/login` | Sign in with password and `totp_code` (argon2id-hashed password). Issues a JWT. |
 | `POST auth/pin` | Re-authenticate with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin", "mode"? }`. `mode: "live"` mints a Live JWT with `live_mode_unlocked=true`. There is no `/auth/me`. |

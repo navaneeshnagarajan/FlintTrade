@@ -308,6 +308,8 @@ def _create_token(
     *,
     live_mode_unlocked: bool = False,
     mode: str = "explore",
+    setup_session: bool = False,
+    setup_bound: str = "",
 ) -> str:
     """Create a JWT that expires at next 8:00 AM IST.
 
@@ -323,6 +325,10 @@ def _create_token(
         mode: Trading mode at token-issue time: ``"explore"``,
             ``"practice"``, or ``"live"``.  Defaults to ``"explore"`` so
             that freshly issued (non-PIN) tokens cannot place live orders.
+        setup_session: If ``True``, mark this as the one-shot account-create
+            JWT. Passwordless ``/setup/reset`` accepts only this claim.
+        setup_bound: Account ``created_at`` stamp bound into a setup JWT so
+            a stale token cannot wipe a later replacement account.
     """
     from .auth_scopes import DEFAULT_SESSION_SCOPES  # noqa: PLC0415 — avoid import cycle
 
@@ -339,6 +345,9 @@ def _create_token(
         # to every admin/observability surface; require_scope() enforces it per route.
         "scopes": list(DEFAULT_SESSION_SCOPES),
     }
+    if setup_session:
+        payload["setup_session"] = True
+        payload["setup_bound"] = setup_bound
     return jwt.encode(payload, _get_jwt_secret(), algorithm=_JWT_ALGORITHM)
 
 
@@ -527,7 +536,12 @@ def auth_setup() -> tuple[Any, int]:
     # separate TOTP step. It is non-live (mode=explore, live_mode_unlocked
     # false); arming Live still requires the PIN. Subsequent logins after this
     # session ends require password + TOTP as usual.
-    token = _create_token(username, mode="explore")
+    token = _create_token(
+        username,
+        mode="explore",
+        setup_session=True,
+        setup_bound=svc.get_created_at(),
+    )
     return jsonify({
         "status": "success",
         "data": {
@@ -549,7 +563,12 @@ def _session_token_from_request() -> str:
 
 
 def _verify_setup_session_token(token: str) -> dict[str, Any] | tuple[Any, int]:
-    """Accept only a full login/setup session JWT for wizard recovery writes."""
+    """Accept only the account-create setup JWT for passwordless wipe.
+
+    Daily-login, PIN-issued, and password-reset tokens are rejected even when
+    they carry ``type: "session"``. The setup JWT is also bound to this
+    account's ``created_at`` so a stale token cannot wipe a replacement.
+    """
     try:
         payload = decode_token(token)
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
@@ -557,10 +576,30 @@ def _verify_setup_session_token(token: str) -> dict[str, Any] | tuple[Any, int]:
             "status": "error",
             "message": "Session expired or invalid — confirm with your password instead.",
         }), 401
-    if payload.get("type") != "session":
+    if payload.get("type") != "session" or payload.get("setup_session") is not True:
         return jsonify({
             "status": "error",
-            "message": "A full login session is required.",
+            "message": "A setup session is required.",
+        }), 401
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    profile = svc.get_profile()
+    subject = str(payload.get("sub") or "")
+    expected_user = str(profile.get("username") or "")
+    bound = str(payload.get("setup_bound") or "")
+    created = svc.get_created_at()
+    if (
+        not subject
+        or not expected_user
+        or not hmac.compare_digest(subject, expected_user)
+        or not bound
+        or not created
+        or not hmac.compare_digest(bound, created)
+    ):
+        return jsonify({
+            "status": "error",
+            "message": "Session expired or invalid — confirm with your password instead.",
         }), 401
     return payload
 
@@ -570,9 +609,9 @@ def _verify_setup_session_token(token: str) -> dict[str, Any] | tuple[Any, int]:
 def auth_setup_reset() -> tuple[Any, int]:
     """Wipe the account during the setup wizard.
 
-    Body: ``{"password": "…"}`` (password-confirmed wipe) **or** a valid
-    setup/login session JWT with an empty body (lost-QR start-over). A
-    password-reset token is never enough — that only proves email possession.
+    Body: ``{"password": "…"}`` (password-confirmed wipe) **or** the
+    account-create setup JWT with an empty body (lost-QR start-over). A
+    daily-login session or password-reset token is never enough.
     """
     svc = _get_auth_service()
     if svc is None:
