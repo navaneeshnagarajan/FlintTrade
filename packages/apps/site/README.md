@@ -40,6 +40,53 @@ support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 
+## Hostinger / VPS Node hosting
+
+This package is a Next.js app, not a static export. Shared PHP-only Hostinger
+hosting cannot serve it. Use a VPS (or any generic Node host) that can run
+`next start`.
+
+Requirements:
+
+- Node.js >= 22.22.2 (the monorepo engine floor)
+- A clone of this repository (the site build reads generated docs and, on
+  `prebuild`, the terminal demo under `packages/apps/terminal`)
+- `pnpm` at the version pinned in the root `packageManager` field
+
+Build and run from the repository root:
+
+```bash
+pnpm install
+pnpm --filter @flinttrade/site build
+pnpm --filter @flinttrade/site start
+```
+
+`next start` honours `PORT` when the host sets it.
+
+### Environment
+
+| Variable | Purpose |
+| --- | --- |
+| `FLINTTRADE_SITE_URL` | Public https origin for metadata, install one-liners, and the hosted MCP snippet. No trailing slash. Example: the custom domain this VPS will serve. |
+| `NEXT_PUBLIC_SITE_URL` | Accepted alias for the same origin if `FLINTTRADE_SITE_URL` is unset. |
+| `FLINTTRADE_SITE_SOURCE_SHA` | 40-character commit SHA for `/web-install.sh` and sibling redirect routes. Without it those routes answer 503. |
+| `FLINTTRADE_SITE_ORIGIN` | Optional CSP-report allow-origin; defaults to the configured site URL, then loopback. |
+
+`FLINTTRADE_SITE_URL` is the name to set on Hostinger. When it is unset, the
+app uses the request origin if that host is trusted, then the current Vercel
+production origin.
+
+Vercel-only install/build scripts (`scripts/vercel-install.sh`,
+`scripts/vercel-build.sh`, `vercel.json`) stay for the current Vercel deploy.
+They are not required for `next build` / `next start`. `@vercel/speed-insights`
+is a no-op unless the process is running on Vercel.
+
+### Docs MCP
+
+`/api/mcp` is a Node route. It will not work on static-only shared hosting.
+Keep this app on a Node server if contributors should use the hosted MCP
+endpoint.
+
 ## How this fits in
 
 This package's role in the wider FlintTrade architecture is documented in

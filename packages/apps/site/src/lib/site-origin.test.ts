@@ -3,7 +3,12 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { CANONICAL_SITE_ORIGIN, hostedMcpUrl, siteOriginFrom } from './site-origin';
+import {
+  CANONICAL_SITE_ORIGIN,
+  hostedMcpUrl,
+  siteMetadataOrigin,
+  siteOriginFrom,
+} from './site-origin';
 
 describe('site origin', () => {
   it('prefers the forwarded host and proto from the request', () => {
@@ -25,6 +30,41 @@ describe('site origin', () => {
       'https://preview.vercel.app',
     );
     expect(siteOriginFrom()).toBe(CANONICAL_SITE_ORIGIN);
+  });
+
+  it('prefers FLINTTRADE_SITE_URL over request host, VERCEL_URL, and the canonical fallback', () => {
+    const configured = 'https://hosted.example';
+    expect(
+      siteOriginFrom(
+        { host: 'localhost:3000' },
+        { FLINTTRADE_SITE_URL: configured, VERCEL_URL: 'preview.vercel.app' },
+      ),
+    ).toBe(configured);
+    expect(siteMetadataOrigin({ FLINTTRADE_SITE_URL: `${configured}/` })).toBe(configured);
+  });
+
+  it('accepts NEXT_PUBLIC_SITE_URL when FLINTTRADE_SITE_URL is unset', () => {
+    const configured = 'https://hosted.example';
+    expect(siteOriginFrom(undefined, { NEXT_PUBLIC_SITE_URL: configured })).toBe(configured);
+    expect(siteMetadataOrigin({ NEXT_PUBLIC_SITE_URL: configured })).toBe(configured);
+  });
+
+  it('ignores an env origin that is not a bare https origin', () => {
+    expect(
+      siteOriginFrom({ host: 'localhost:3000' }, { FLINTTRADE_SITE_URL: 'https://hosted.example/docs' }),
+    ).toBe('http://localhost:3000');
+    expect(siteMetadataOrigin({ FLINTTRADE_SITE_URL: 'http://hosted.example' })).toBe(
+      CANONICAL_SITE_ORIGIN,
+    );
+  });
+
+  it('allows a request host that matches the configured public origin', () => {
+    expect(
+      siteOriginFrom(
+        { host: 'hosted.example', forwardedProto: 'https' },
+        { FLINTTRADE_SITE_URL: 'https://hosted.example' },
+      ),
+    ).toBe('https://hosted.example');
   });
 
   it('builds a copy-pasteable MCP URL', () => {

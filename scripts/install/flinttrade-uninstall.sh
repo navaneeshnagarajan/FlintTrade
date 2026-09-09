@@ -10,6 +10,10 @@
 #
 #   curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash
 #   curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
+#
+# The origin above is the last-resort public site. On a custom domain set
+# FLINTTRADE_SITE_URL to that https origin, or fetch the script from the
+# hosted /uninstall.sh redirect.
 
 set -euo pipefail
 

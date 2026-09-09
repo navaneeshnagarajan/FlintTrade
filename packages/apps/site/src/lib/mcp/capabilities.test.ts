@@ -99,11 +99,13 @@ describe('docs index generation', () => {
     expect(pageSource).toContain('Install the web app');
     expect(pageSource).toContain('WEB_INSTALL_COMMANDS');
     expect(downloadSource).toContain('WEB_INSTALL_COMMANDS');
+    expect(downloadSource).toContain('webInstallCommands');
+    expect(downloadSource).toContain('desktopInstallCommands');
     expect(webInstallSource).toContain('web-install.sh');
     expect(webInstallSource).toContain('web-install.ps1');
+    expect(webInstallSource).toContain('install.sh | bash');
+    expect(webInstallSource).toContain('install.ps1 | iex');
     expect(pageSource).not.toContain('Download desktop app');
-    expect(downloadSource).toContain('install.sh | bash');
-    expect(downloadSource).toContain('install.ps1 | iex');
     // The desktop guide stays reachable from the homepage, footer, and docs.
     expect(pageSource).toContain('href="/docs/desktop"');
     expect(footerSource).toContain('href="/docs/desktop"');

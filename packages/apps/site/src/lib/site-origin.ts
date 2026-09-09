@@ -1,12 +1,20 @@
 /**
- * Public site origin for copy-paste snippets (MCP URL, and similar).
+ * Public site origin for copy-paste snippets (MCP URL, install commands).
  *
- * Request Host / X-Forwarded-Host are only used when they are an explicit
- * allow-listed host. Anything else falls back to VERCEL_URL, then the
- * canonical production origin.
+ * Precedence:
+ *   1. FLINTTRADE_SITE_URL, then NEXT_PUBLIC_SITE_URL, when either is a bare
+ *      https origin (the Hostinger / custom-domain override)
+ *   2. Request Host / X-Forwarded-Host, only when the host is allow-listed
+ *   3. VERCEL_URL
+ *   4. The canonical production origin (https://flinttrade.vercel.app)
+ *
+ * Request hosts are only trusted when they are loopback, the canonical host,
+ * the exact VERCEL_URL host, or the host from a configured site URL.
  */
 
 export const CANONICAL_SITE_ORIGIN = 'https://flinttrade.vercel.app';
+
+export const SITE_URL_ENV_KEYS = ['FLINTTRADE_SITE_URL', 'NEXT_PUBLIC_SITE_URL'] as const;
 
 export interface SiteOriginRequestHints {
   host?: string | null;
@@ -16,6 +24,8 @@ export interface SiteOriginRequestHints {
 
 export interface SiteOriginEnvHints {
   VERCEL_URL?: string;
+  FLINTTRADE_SITE_URL?: string;
+  NEXT_PUBLIC_SITE_URL?: string;
 }
 
 interface ParsedHost {
@@ -75,12 +85,68 @@ function isLoopback(hostname: string): boolean {
   return host === 'localhost' || host === '127.0.0.1' || host === '::1';
 }
 
+/**
+ * Parse an operator-configured public origin.
+ *
+ * Accepts a bare `https://host` (optional trailing slash). HTTP is allowed only
+ * for loopback. Paths, query strings, credentials, and hashes are rejected so a
+ * mistyped env var cannot leak into copy-paste install or MCP URLs.
+ */
+export function configuredSiteOriginFromEnv(env?: SiteOriginEnvHints): string | null {
+  for (const key of SITE_URL_ENV_KEYS) {
+    const raw = env?.[key]?.trim();
+    if (!raw) {
+      continue;
+    }
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      continue;
+    }
+    if (url.username || url.password) {
+      continue;
+    }
+    if (url.search !== '' || url.hash !== '') {
+      continue;
+    }
+    if (url.pathname !== '/' && url.pathname !== '') {
+      continue;
+    }
+    if (!url.hostname) {
+      continue;
+    }
+    const loopback = isLoopback(url.hostname);
+    if (loopback) {
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        continue;
+      }
+    } else if (url.protocol !== 'https:') {
+      continue;
+    }
+    return url.origin;
+  }
+  return null;
+}
+
+function configuredEnvHost(env?: SiteOriginEnvHints): string | null {
+  const origin = configuredSiteOriginFromEnv(env);
+  if (!origin) {
+    return null;
+  }
+  return new URL(origin).hostname.toLowerCase();
+}
+
 function isAllowedHost(hostname: string, env?: SiteOriginEnvHints): boolean {
   const host = hostname.toLowerCase();
   if (isLoopback(host)) {
     return true;
   }
   if (host === canonicalHostname()) {
+    return true;
+  }
+  const configuredHost = configuredEnvHost(env);
+  if (configuredHost && host === configuredHost) {
     return true;
   }
   const vercelHost = vercelEnvHost(env)?.hostname.toLowerCase();
@@ -99,10 +165,34 @@ function originFromParsed(parsed: ParsedHost, protoHint?: string | null): string
   return `https://${parsed.authority}`;
 }
 
+export function processEnvSiteHints(
+  environment: NodeJS.ProcessEnv = process.env,
+): SiteOriginEnvHints {
+  return {
+    VERCEL_URL: environment.VERCEL_URL,
+    FLINTTRADE_SITE_URL: environment.FLINTTRADE_SITE_URL,
+    NEXT_PUBLIC_SITE_URL: environment.NEXT_PUBLIC_SITE_URL,
+  };
+}
+
+/**
+ * Build-time / metadata origin: env override, then the canonical fallback.
+ *
+ * There is no request at `metadataBase` evaluation, so this never consults Host.
+ */
+export function siteMetadataOrigin(env?: SiteOriginEnvHints): string {
+  return configuredSiteOriginFromEnv(env ?? processEnvSiteHints()) ?? CANONICAL_SITE_ORIGIN;
+}
+
 export function siteOriginFrom(
   request?: SiteOriginRequestHints,
   env?: SiteOriginEnvHints,
 ): string {
+  const configured = configuredSiteOriginFromEnv(env);
+  if (configured) {
+    return configured;
+  }
+
   const directHop = firstHop(request?.host);
   const directHost = directHop ? parseRequestHost(directHop) : null;
   const forwardedHop = firstHop(request?.forwardedHost);
@@ -131,6 +221,7 @@ export function hostedMcpUrl(origin: string): string {
 }
 
 export async function resolveSiteOrigin(): Promise<string> {
+  const env = processEnvSiteHints();
   try {
     const { headers } = await import('next/headers');
     const requestHeaders = await headers();
@@ -140,9 +231,9 @@ export async function resolveSiteOrigin(): Promise<string> {
         forwardedHost: requestHeaders.get('x-forwarded-host'),
         forwardedProto: requestHeaders.get('x-forwarded-proto'),
       },
-      { VERCEL_URL: process.env.VERCEL_URL },
+      env,
     );
   } catch {
-    return siteOriginFrom(undefined, { VERCEL_URL: process.env.VERCEL_URL });
+    return siteOriginFrom(undefined, env);
   }
 }

@@ -16,7 +16,12 @@ import {
   selectDesktopRelease,
 } from '@/lib/desktop-release';
 import { siteSourceSha } from '@/lib/install-script-routes';
-import { WEB_INSTALL_COMMANDS } from '@/lib/web-install-commands';
+import { resolveSiteOrigin } from '@/lib/site-origin';
+import {
+  desktopInstallCommands,
+  uninstallCommands,
+  webInstallCommands,
+} from '@/lib/web-install-commands';
 
 export const revalidate = 300;
 
@@ -46,22 +51,8 @@ const repoDirectCommands = [
   },
 ] as const;
 
-const uninstallCommands = [
-  {
-    platform: 'macOS / Linux',
-    command: 'curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash',
-    purgeLabel: '# add --purge to also delete the workspace and its data',
-    purge: 'curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge',
-    needs: 'Removes the app, launcher, and managed tools. Your workspace and its data are kept unless you add --purge.',
-  },
-  {
-    platform: 'Windows 10/11',
-    command: 'irm https://flinttrade.vercel.app/uninstall.ps1 | iex',
-    purgeLabel: '# add -Purge to also delete the workspace and its data',
-    purge: '& ([scriptblock]::Create((irm https://flinttrade.vercel.app/uninstall.ps1))) -Purge',
-    needs: 'Removes the app, launcher, and managed tools. Your workspace and its data are kept unless you add -Purge.',
-  },
-] as const;
+// Canonical fallback https://flinttrade.vercel.app is applied by the
+// origin-aware command helpers when FLINTTRADE_SITE_URL is unset.
 
 const guarantees = [
   {
@@ -86,23 +77,6 @@ const guarantees = [
   },
 ];
 
-const platforms = [
-  {
-    platform: 'macOS (Apple Silicon & Intel)',
-    command: 'curl -fsSL https://flinttrade.vercel.app/install.sh | bash',
-    needs: 'Downloads and verifies the universal DMG, installs FlintTrade.app, and launches the shell.',
-  },
-  {
-    platform: 'Linux (x64 & arm64)',
-    command: 'curl -fsSL https://flinttrade.vercel.app/install.sh | bash',
-    needs: 'Downloads and verifies the matching AppImage, with an automatic no-FUSE fallback.',
-  },
-  {
-    platform: 'Windows 10/11 (x64)',
-    command: 'irm https://flinttrade.vercel.app/install.ps1 | iex',
-    needs: 'Downloads and verifies the x64 NSIS setup before running the per-user installer.',
-  },
-];
 
 function primaryDownloadsFor(manifest: DesktopReleaseManifest) {
   return [
@@ -212,6 +186,10 @@ export default async function DownloadPage() {
   const primaryDownloads = primaryDownloadsFor(manifest);
   const releaseChannel = releaseChannelLabel(manifest);
   const sourceSha = siteSourceSha();
+  const origin = await resolveSiteOrigin();
+  const WEB_INSTALL_COMMANDS = webInstallCommands(origin);
+  const uninstallCommandList = uninstallCommands(origin);
+  const platforms = desktopInstallCommands(origin);
   const installScriptSourceUrl = sourceSha === null
     ? null
     : `https://github.com/navaneeshnagarajan/FlintTrade/blob/${sourceSha}/scripts/install/flinttrade-install.sh`;
@@ -264,7 +242,7 @@ export default async function DownloadPage() {
             default; the purge form deletes them too, and that deletion cannot be undone.
           </p>
           <div className="stack">
-            {uninstallCommands.map((entry) => (
+            {uninstallCommandList.map((entry) => (
               <div className="code-panel" key={entry.platform}>
                 <header>
                   <span>{entry.platform}</span>

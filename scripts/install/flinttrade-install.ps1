@@ -6,6 +6,10 @@
 #
 #   irm https://flinttrade.vercel.app/install.ps1 | iex
 #
+# The origin above is the last-resort public site. On a custom domain set
+# FLINTTRADE_SITE_URL to that https origin, or fetch the script from the
+# hosted /install.ps1 redirect.
+#
 # Parameters:
 #   -Channel beta|stable  Release channel to install (default: beta)
 #   -Ref <tag>            Install an exact release tag

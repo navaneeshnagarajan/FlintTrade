@@ -11,7 +11,7 @@ import { SiteHeader } from '@/components/site-header';
 import { listPackages } from '@/lib/mcp/capabilities';
 import { flinttradeAsset } from '@/lib/site-assets';
 import { hostedMcpUrl, resolveSiteOrigin } from '@/lib/site-origin';
-import { WEB_INSTALL_COMMANDS } from '@/lib/web-install-commands';
+import { webInstallCommands } from '@/lib/web-install-commands';
 
 const featureCards = [
   {
@@ -65,7 +65,9 @@ const impactDebris = Array.from({ length: 8 }, (_, i) => i);
 
 export default async function HomePage() {
   const packages = listPackages().slice(0, 8);
-  const mcpUrl = hostedMcpUrl(await resolveSiteOrigin());
+  const origin = await resolveSiteOrigin();
+  const mcpUrl = hostedMcpUrl(origin);
+  const WEB_INSTALL_COMMANDS = webInstallCommands(origin);
 
   return (
     <main className="site-shell">

@@ -14,6 +14,15 @@ describe('site production build script', () => {
     expect(pkg.scripts?.build).toContain('--webpack');
   });
 
+  it('exposes next start for a generic Node host without requiring Vercel scripts', () => {
+    const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+
+    expect(pkg.scripts?.start).toMatch(/next start/);
+    expect(pkg.scripts?.start).not.toContain('vercel');
+  });
+
   it('declares explicit portable repository-root turbopack.root (three levels above site config)', () => {
     const configSource = readFileSync(
       path.resolve(process.cwd(), 'next.config.mjs'),

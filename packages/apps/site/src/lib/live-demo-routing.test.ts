@@ -12,13 +12,16 @@ describe('site sandbox demo routing', () => {
     const homePage = readSiteFile('src/app/page.tsx');
     const siteHeader = readSiteFile('src/components/site-header.tsx');
     const demoPage = readSiteFile('src/app/demo/page.tsx');
+    const explorePage = readSiteFile('src/app/explore/page.tsx');
 
     expect(homePage).toContain('href="/demo-app/welcome"');
     expect(homePage).toContain('target="_blank"');
     expect(siteHeader).toContain("href: '/demo-app/welcome'");
     expect(siteHeader).toContain("target={item.newWindow ? '_blank' : undefined}");
     expect(demoPage).toContain("redirect('/demo-app/welcome')");
+    expect(explorePage).toContain("redirect('/demo-app/welcome')");
     expect(demoPage).not.toContain('<iframe');
+    expect(explorePage).not.toContain('<iframe');
   });
 
   it('keeps the demo app out of frames now that it launches as its own page', () => {

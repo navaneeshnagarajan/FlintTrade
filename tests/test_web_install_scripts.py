@@ -212,6 +212,25 @@ def test_web_installers_exist_at_the_canonical_paths(script: Path) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("script", [SH, PS1], ids=["web-install.sh", "web-install.ps1"])
+def test_web_installers_derive_the_public_site_origin(script: Path) -> None:
+    """Help/uninstall examples follow the public site, not a hardcoded host.
+
+    The one-liners still name flinttrade.vercel.app as the last-resort fallback
+    (``flint.toml`` / the site-URL rewrite require that literal). A Hostinger
+    or custom-domain deploy sets ``FLINTTRADE_SITE_URL``, and a piped
+    ``curl`` / ``irm`` can recover the origin it was fetched from.
+    """
+    source = _read(script)
+    assert "FLINTTRADE_SITE_URL" in source
+    assert "flinttrade.vercel.app" in source
+    if script.suffix == ".sh":
+        assert "flinttrade_site_origin" in source
+    else:
+        assert "Get-FlintTradeSiteOrigin" in source
+
+
+@pytest.mark.unit
 @pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
 def test_posix_web_installer_is_valid_bash() -> None:
     result = subprocess.run([BASH, "-n", str(SH)], cwd=_REPO_ROOT, text=True, capture_output=True)

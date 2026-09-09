@@ -4,15 +4,20 @@ import { RootProvider } from 'fumadocs-ui/provider/next';
 import { headers } from 'next/headers';
 import type { ReactNode } from 'react';
 
+import { OptionalSpeedInsights } from '@/components/optional-speed-insights';
+import { siteMetadataOrigin } from '@/lib/site-origin';
+
 import './globals.css';
 
+// Canonical fallback https://flinttrade.vercel.app is applied inside
+// siteMetadataOrigin() when FLINTTRADE_SITE_URL / NEXT_PUBLIC_SITE_URL are unset.
 export const metadata: Metadata = {
   title: {
     default: 'FlintTrade',
     template: '%s | FlintTrade',
   },
   description: 'Open-source self-hosted trading software built with Python, React, TypeScript, and Rust.',
-  metadataBase: new URL('https://flinttrade.vercel.app'),
+  metadataBase: new URL(siteMetadataOrigin()),
   icons: {
     icon: '/flinttrade/logo.svg',
   },
@@ -33,6 +38,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     >
       <body>
         <RootProvider theme={{ nonce }}>{children}</RootProvider>
+        <OptionalSpeedInsights />
       </body>
     </html>
   );

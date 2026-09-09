@@ -8,6 +8,10 @@
 #
 #   curl -fsSL https://flinttrade.vercel.app/install.sh | bash
 #   curl -fsSL https://flinttrade.vercel.app/install.sh | bash -s -- --build-from-source
+#
+# The origin above is the last-resort public site. On a custom domain set
+# FLINTTRADE_SITE_URL to that https origin, or fetch the script from the
+# hosted /install.sh redirect.
 
 set -euo pipefail
 
