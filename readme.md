@@ -356,7 +356,7 @@ and 1 Rust/PyO3 tick engine.
 | `packages/integrations/webhooks` | Python | Generic HMAC-signed custom webhooks, visual flow builder |
 | `packages/services/ai` | Python | LLM client, RAG, ML signals, sentiment, MCP bridge, advisor workflows |
 | `packages/services/automation` | Python | Cron jobs, Telegram bot, post-market analysis, voice-order intent extraction |
-| `packages/services/backtest` | Python | Event-driven simulator, 95 strategy template modules, walk-forward optimiser |
+| `packages/services/backtest` | Python | Event-driven simulator, 94 strategy template modules, walk-forward optimiser |
 | `packages/services/ditto` | Python | Multi-account mirroring, margin calculator, trailing stop-loss |
 | `packages/services/engine` | Python | 5-layer safety system, order router, scheduler, strategy registry |
 | `packages/services/journal` | Python | Trade journal, execution-quality analytics, realised P&L tracking |

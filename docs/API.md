@@ -332,14 +332,14 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 | Endpoint | Purpose |
 |---|---|
 | `GET auth/status` | Whether the operator account exists and whether TOTP / PIN are configured. |
-| `POST auth/setup` | First-run enrolment: password + TOTP secret. Issues an Explore JWT. |
-| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. |
+| `POST auth/setup` | First-run enrolment. Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri` plus backup codes and an Explore JWT. It does not accept a caller-supplied TOTP secret. |
+| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Body `{ "password" }`. |
 | `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret (password re-confirm). |
 | `POST auth/login` | Sign in with password and `totp_code` (argon2id-hashed password). Issues a JWT. |
-| `POST auth/pin` | Re-authenticate with the 6-digit PIN. Body `{ "pin", "mode"? }`. `mode: "live"` mints a Live JWT with `live_mode_unlocked=true`. There is no `/auth/me`. |
-| `POST auth/pin/set` | Set or change the PIN (password re-confirm). |
-| `POST auth/mode` | **Downgrade only** to `practice` or `explore`. Issues a fresh JWT and revokes the old `jti`. Live upgrades must use `POST /v1/auth/pin`. |
-| `POST auth/logout` | Revoke the current JWT by `jti`. |
+| `POST auth/pin` | Re-authenticate with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin", "mode"? }`. `mode: "live"` mints a Live JWT with `live_mode_unlocked=true`. There is no `/auth/me`. |
+| `POST auth/pin/set` | Set or change the PIN (password re-confirm). Requires an existing session JWT. |
+| `POST auth/mode` | **Downgrade only** to `practice` or `explore`. Requires an existing session JWT. Issues a fresh JWT and revokes the old `jti`. Live upgrades must use `POST /v1/auth/pin`. |
+| `POST auth/logout` | Revoke the current JWT by `jti`. Requires an existing session JWT. |
 
 ### Monitoring And Observability
 
@@ -463,11 +463,20 @@ fallback). When neither key is configured, loopback-only requests are
 allowed so a fresh install can reach Setup and sandbox reads. Broker
 account-management writes still require the operator's session JWT.
 
-Public prefixes (no Bearer required) include `/v1/auth/*`, `/v1/errors`,
-`/api/v1/errors`, `/v1/changelog`, `/api/v1/ping`, and the other
-entries in `_PUBLIC_V1_PREFIXES` in `app.py`. Health probes
-(`/health`, `/healthz`, `/readyz`) are also exempt. Coverage is not
-limited to `/ft-api/v1/*` — many operator routes live under `/api/v1`.
+`/v1/auth/*` is exempt from the global API-key check so login and first-run
+setup can run without `X-API-Key`. That is not session-free auth: `POST
+/v1/auth/pin`, `/pin/set`, `/mode`, and `/logout` still decode an existing
+session JWT and return 401 without one. Truly unauthenticated prefixes
+include `/v1/auth/setup`, `/v1/auth/login`, `/v1/auth/status`,
+`/v1/errors`, `/api/v1/errors`, `/v1/changelog`, `/api/v1/ping`, and the
+other entries in `_PUBLIC_V1_PREFIXES` in `app.py`.
+
+When an API key is configured, the only unauthenticated health surface
+is `GET /api/v1/health` (`health_detail.health_aggregated`). `/health`,
+`/health/detail`, `/healthz`, and `/readyz` then return 401 unless a
+session JWT or API key is supplied — do not point Kubernetes or
+load-balancer probes at those four paths. Coverage is not limited to
+`/ft-api/v1/*` — many operator routes live under `/api/v1`.
 
 ```
 Authorization: Bearer <jwt>

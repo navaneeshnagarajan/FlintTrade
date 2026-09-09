@@ -451,9 +451,10 @@ Open `/lab`. The Strategy Lab is split into three sub-tools:
 
 ### Backtest
 
-1. **Pick a template.** 95 template modules ship under
+1. **Pick a template.** 94 ready-to-run template modules ship under
    `packages/services/backtest/src/flinttrade_backtest/strategies/` — ranging
-   from simple EMA crossover to complex options-spreads strategies.
+   from simple EMA crossover to complex options-spreads strategies
+   (`_indicators.py` and `_mixin.py` are shared helpers, not templates).
 2. **Configure parameters.** Each template exposes a parameter form
    (built with `react-hook-form` + `zod`).
 3. **Pick a date range.** Historical OHLCV data is sourced from your

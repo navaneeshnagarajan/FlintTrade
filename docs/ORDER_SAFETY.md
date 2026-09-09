@@ -91,16 +91,18 @@ archive.
 
 ## Safety Layers
 
-`SafetySystem` runs five layers in order (L1–L5). Rate limits are a
-separate HTTP/`OpenAlgoClient` control, not a sixth safety layer.
+`SafetySystem` has five layers (L1–L5). Rate limits are a separate
+HTTP/`OpenAlgoClient` control, not a sixth safety layer.
+`_check_order_locked` fail-fasts in runtime order **L5 → L4 → L1 → L2 →
+L3**: the first failing layer is the refusal the operator sees.
 
 | Layer | Purpose | Examples |
 |---|---|---|
+| L5 Kill switch | Stop order-capable workflows, cancel open orders, and request position flattening where supported. | Explicit UI button, API endpoint, or Telegram command. Checked first. |
+| L4 Daily P&L | Pause or hard-stop subsequent new orders when daily loss thresholds are hit. | Default pause at 3 % and hard stop at 15 %; no broker-side cancel or flatten. |
 | L1 Order validation | Reject malformed or disallowed orders before routing. | Symbol, exchange, side, quantity, order type, price, and market-session checks. |
 | L2 Position limits | Prevent local workflows from exceeding configured exposure. | Default max five open positions and 60 % margin-use guard. |
 | L3 Portfolio risk | Cap book-level Greek exposure. | Net delta and net vega guards. |
-| L4 Daily P&L | Pause or hard-stop subsequent new orders when daily loss thresholds are hit. | Default pause at 3 % and hard stop at 15 %; no broker-side cancel or flatten. |
-| L5 Kill switch | Stop order-capable workflows, cancel open orders, and request position flattening where supported. | Explicit UI button, API endpoint, or Telegram command. |
 
 ## Kill Switch
 

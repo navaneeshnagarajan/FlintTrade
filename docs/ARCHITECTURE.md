@@ -356,19 +356,21 @@ deployment can split that state.
 
 ### Safety layers
 
-Every order placed through FlintTrade passes five safety layers in order
-inside `packages/services/engine/`:
+Every order placed through FlintTrade is checked by five safety layers
+inside `packages/services/engine/`. `_check_order_locked` fail-fasts in
+this runtime order (not L1–L5 numerical order), so the first refusal an
+operator sees is the earliest of:
 
-1. **Order validation** — price within ±5 % of LTP, quantity multiple of
-   lot size.
-2. **Position limits** — max five simultaneous positions, no single
-   position over 60 % of free margin.
-3. **Portfolio risk** — net delta and net vega caps across the book.
-4. **Daily P&L** — pause new orders at 3 % drawdown and latch a new-order
-   hard stop at 15 % drawdown. Layer 4 does not cancel or flatten.
-5. **Kill switch** — an explicit operator action (UI button, API, or Telegram)
+1. **L5 Kill switch** — an explicit operator action (UI button, API, or Telegram)
    that cancels open orders and requests position flattening through the gated
    broker path. The account MTM circuit breaker is a separate automatic path.
+2. **L4 Daily P&L** — pause new orders at 3 % drawdown and latch a new-order
+   hard stop at 15 % drawdown. Layer 4 does not cancel or flatten.
+3. **L1 Order validation** — price within ±5 % of LTP, quantity multiple of
+   lot size.
+4. **L2 Position limits** — max five simultaneous positions, no single
+   position over 60 % of free margin.
+5. **L3 Portfolio risk** — net delta and net vega caps across the book.
 
 ### Mode-system state machine
 
