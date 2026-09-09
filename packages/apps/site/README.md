@@ -70,11 +70,12 @@ pnpm --filter @flinttrade/site start
 | `FLINTTRADE_SITE_URL` | Public https origin for metadata, install one-liners, and the hosted MCP snippet. No trailing slash. Example: the custom domain this VPS will serve. |
 | `NEXT_PUBLIC_SITE_URL` | Accepted alias for the same origin if `FLINTTRADE_SITE_URL` is unset. |
 | `FLINTTRADE_SITE_SOURCE_SHA` | 40-character commit SHA for `/web-install.sh` and sibling redirect routes. Without it those routes answer 503. |
-| `FLINTTRADE_SITE_ORIGIN` | Optional CSP-report allow-origin; defaults to the configured site URL, then loopback. |
+| `FLINTTRADE_SITE_ORIGIN` | Optional CSP-report allow-origin used only when `FLINTTRADE_SITE_URL` / `NEXT_PUBLIC_SITE_URL` are unset; otherwise those win. Defaults to loopback. |
 
-`FLINTTRADE_SITE_URL` is the name to set on Hostinger. When it is unset, the
-app uses the request origin if that host is trusted, then the current Vercel
-production origin.
+`FLINTTRADE_SITE_URL` is the name to set on Hostinger. A custom hostname is
+not trusted from the Host header alone — without this variable, install and
+MCP copy stay on the current Vercel production origin. Loopback request
+hosts are trusted during local `next dev`.
 
 Vercel-only install/build scripts (`scripts/vercel-install.sh`,
 `scripts/vercel-build.sh`, `vercel.json`) stay for the current Vercel deploy.

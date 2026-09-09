@@ -237,8 +237,10 @@ Environment overrides:
   FLINTTRADE_DRY_RUN, FLINTTRADE_NO_LAUNCH, FLINTTRADE_SITE_URL
 
   FLINTTRADE_SITE_URL is the public https origin used in help/uninstall
-  examples on a custom domain. When unset, the installer tries to recover
-  the URL it was fetched from, then falls back to $CanonicalSiteOrigin.
+  examples on a custom domain. A piped irm|iex cannot always see the
+  URL it was fetched from; set this on the machine running the installer
+  if the printed uninstall command should use that origin. Otherwise it
+  falls back to $CanonicalSiteOrigin.
 
   FLINTTRADE_SRC_DIR is a deprecated fallback for FLINTTRADE_WEB_SRC_DIR here.
   flinttrade-install.ps1 reads it as the contributor source-build checkout, so

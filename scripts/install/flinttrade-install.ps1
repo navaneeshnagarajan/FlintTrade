@@ -6,9 +6,9 @@
 #
 #   irm https://flinttrade.vercel.app/install.ps1 | iex
 #
-# The origin above is the last-resort public site. On a custom domain set
-# FLINTTRADE_SITE_URL to that https origin, or fetch the script from the
-# hosted /install.ps1 redirect.
+# The origin above is the last-resort public site. The hosted /install.ps1
+# redirect stays valid on a custom domain; this desktop installer does not
+# read FLINTTRADE_SITE_URL (the web installer does).
 #
 # Parameters:
 #   -Channel beta|stable  Release channel to install (default: beta)

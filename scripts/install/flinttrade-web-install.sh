@@ -44,23 +44,36 @@ flinttrade_normalise_site_origin() {
   printf '%s' "$raw"
 }
 
+flinttrade_first_site_script_url() {
+  local token
+  for token in $1; do
+    case "$token" in
+      https://*/web-install.sh|https://*/web-install.ps1|https://*/install.sh|https://*/install.ps1|https://*/uninstall.sh|https://*/uninstall.ps1)
+        printf '%s' "$token"
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
 flinttrade_infer_site_origin_from_parent() {
-  local cmd="" token url="" host_part
+  local cmd="" url="" host_part pgid
   if [ -r "/proc/${PPID}/cmdline" ]; then
     cmd="$(tr '\0' ' ' < "/proc/${PPID}/cmdline" 2>/dev/null || true)"
   fi
   if [ -z "$cmd" ] && command -v ps >/dev/null 2>&1; then
     cmd="$(ps -o command= -p "${PPID}" 2>/dev/null || true)"
   fi
-  [ -n "$cmd" ] || return 1
-  for token in $cmd; do
-    case "$token" in
-      https://*/web-install.sh|https://*/web-install.ps1|https://*/install.sh|https://*/install.ps1|https://*/uninstall.sh|https://*/uninstall.ps1)
-        url="$token"
-        break
-        ;;
-    esac
-  done
+  url="$(flinttrade_first_site_script_url "$cmd" || true)"
+  # curl|bash puts curl in the same process group as this shell, not as PPID.
+  if [ -z "$url" ] && command -v ps >/dev/null 2>&1; then
+    pgid="$(ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ' || true)"
+    if [ -n "$pgid" ]; then
+      cmd="$(ps -ao pgid=,args= 2>/dev/null | awk -v pgid="$pgid" '$1==pgid { $1=""; print substr($0,2) }' || true)"
+      url="$(flinttrade_first_site_script_url "$cmd" || true)"
+    fi
+  fi
   [ -n "$url" ] || return 1
   host_part="${url#https://}"
   host_part="${host_part%%/*}"
@@ -190,7 +203,9 @@ need() { command -v "$1" >/dev/null 2>&1; }
 lowercase() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 usage() {
-  cat <<'USAGE'
+  local origin
+  origin="$(flinttrade_site_origin)"
+  cat <<USAGE
 FlintTrade one-line web-app installer (macOS + Linux)
 
 Provisions a verified uv + Node toolchain, builds FlintTrade from a managed
@@ -221,8 +236,10 @@ Environment overrides:
   FLINTTRADE_DRY_RUN, FLINTTRADE_NO_LAUNCH, FLINTTRADE_SITE_URL
 
   FLINTTRADE_SITE_URL is the public https origin used in help/uninstall
-  examples on a custom domain. When unset, the installer tries to recover
-  the URL it was fetched from, then falls back to $CANONICAL_SITE_ORIGIN.
+  examples on a custom domain. A piped curl|bash cannot always see the
+  URL it was fetched from; set this on the machine running the installer
+  if the printed uninstall command should use that origin. Otherwise it
+  falls back to ${CANONICAL_SITE_ORIGIN}.
 
   FLINTTRADE_SRC_DIR is a deprecated fallback for FLINTTRADE_WEB_SRC_DIR here.
   flinttrade-install.sh reads it as the contributor source-build checkout, so
@@ -230,7 +247,7 @@ Environment overrides:
   that only that variable supplied.
 
 Uninstall:
-  curl -fsSL $(flinttrade_site_origin)/uninstall.sh | bash
+  curl -fsSL ${origin}/uninstall.sh | bash
 USAGE
 }
 

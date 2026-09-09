@@ -212,6 +212,32 @@ def test_web_installers_exist_at_the_canonical_paths(script: Path) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+def test_posix_web_installer_help_uses_the_configured_site_origin() -> None:
+    """``--help`` must print a pasteable uninstall command, not a shell call.
+
+    The usage banner is a quoted-looking document; if the origin helper is
+    left unexpanded, a reader copies ``$(flinttrade_site_origin)`` into a
+    shell and nothing useful happens.
+    """
+    origin = "https://hosted.example"
+    env = os.environ.copy()
+    env["FLINTTRADE_SITE_URL"] = origin
+    result = subprocess.run(
+        [BASH, str(SH), "--help"],
+        cwd=_REPO_ROOT,
+        text=True,
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert f"curl -fsSL {origin}/uninstall.sh | bash" in output
+    assert "$(flinttrade_site_origin)" not in output
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("script", [SH, PS1], ids=["web-install.sh", "web-install.ps1"])
 def test_web_installers_derive_the_public_site_origin(script: Path) -> None:
     """Help/uninstall examples follow the public site, not a hardcoded host.
