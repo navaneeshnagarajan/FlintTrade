@@ -7,10 +7,11 @@
  *   3. VERCEL_URL
  *   4. The canonical production origin (https://flinttrade.vercel.app)
  *
- * Request hosts are trusted when they are loopback, the canonical host, the
- * exact VERCEL_URL host, or a host from FLINTTRADE_SITE_URL /
- * NEXT_PUBLIC_SITE_URL / FLINTTRADE_SITE_ORIGINS. The last of those is an
- * extra allow-list only — it never becomes the fallback origin.
+ * Request hosts (and CSP-report Origin headers) are trusted when they are
+ * loopback, the canonical host, the exact VERCEL_URL host, or a host from
+ * FLINTTRADE_SITE_URL / NEXT_PUBLIC_SITE_URL / FLINTTRADE_SITE_ORIGINS. The
+ * last of those is an extra allow-list only — it never becomes the fallback
+ * origin. FLINTTRADE_SITE_ORIGIN remains a legacy extra CSP allow-origin.
  */
 
 export const CANONICAL_SITE_ORIGIN = 'https://flinttrade.vercel.app';
@@ -28,6 +29,7 @@ export interface SiteOriginEnvHints {
   FLINTTRADE_SITE_URL?: string;
   NEXT_PUBLIC_SITE_URL?: string;
   FLINTTRADE_SITE_ORIGINS?: string;
+  FLINTTRADE_SITE_ORIGIN?: string;
 }
 
 interface ParsedHost {
@@ -205,7 +207,60 @@ export function processEnvSiteHints(
     FLINTTRADE_SITE_URL: environment.FLINTTRADE_SITE_URL,
     NEXT_PUBLIC_SITE_URL: environment.NEXT_PUBLIC_SITE_URL,
     FLINTTRADE_SITE_ORIGINS: environment.FLINTTRADE_SITE_ORIGINS,
+    FLINTTRADE_SITE_ORIGIN: environment.FLINTTRADE_SITE_ORIGIN,
   };
+}
+
+/**
+ * Whether a browser Origin header is on the site allow-list.
+ *
+ * Used by `/api/csp-report` so a documented cutover alias
+ * (`FLINTTRADE_SITE_ORIGINS`) is not 403'd while `FLINTTRADE_SITE_URL` stays
+ * the apex fallback. The legacy `FLINTTRADE_SITE_ORIGIN` remains an extra
+ * accepted origin when set.
+ */
+export function isAllowedSiteOrigin(origin: string, env?: SiteOriginEnvHints): boolean {
+  const trimmed = origin.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return false;
+  }
+  if (url.username || url.password) {
+    return false;
+  }
+  if (url.search !== '' || url.hash !== '') {
+    return false;
+  }
+  if (url.pathname !== '/' && url.pathname !== '') {
+    return false;
+  }
+
+  const loopback = isLoopback(url.hostname);
+  if (loopback) {
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  }
+  if (url.protocol !== 'https:') {
+    return false;
+  }
+  if (isAllowedHost(url.hostname, env)) {
+    return true;
+  }
+
+  const legacyRaw = env?.FLINTTRADE_SITE_ORIGIN?.trim().replace(/\/+$/, '');
+  if (!legacyRaw) {
+    return false;
+  }
+  const legacyParsed = parseConfiguredOrigin(legacyRaw);
+  if (legacyParsed && legacyParsed.toLowerCase() === url.origin.toLowerCase()) {
+    return true;
+  }
+  return legacyRaw === url.origin || legacyRaw === trimmed.replace(/\/+$/, '');
 }
 
 /**

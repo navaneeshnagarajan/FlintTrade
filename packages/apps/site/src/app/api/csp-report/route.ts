@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { logger } from "@/lib/logger";
-import { configuredSiteOriginFromEnv, processEnvSiteHints } from "@/lib/site-origin";
+import { isAllowedSiteOrigin, processEnvSiteHints } from "@/lib/site-origin";
 
 const MAX_REPORT_BYTES = 4 * 1024; // 4 KB upper bound
 
@@ -43,11 +43,7 @@ export async function POST(req: Request) {
   // 1) Authenticate via Origin — CSP reports come from the same-origin browser. Reject
   //    cross-origin posts to prevent external pollution of the violation log (H9).
   const origin = req.headers.get("origin");
-  const siteOrigin =
-    configuredSiteOriginFromEnv(processEnvSiteHints()) ??
-    process.env.FLINTTRADE_SITE_ORIGIN ??
-    "http://127.0.0.1:3000";
-  if (origin && origin !== siteOrigin) {
+  if (origin && !isAllowedSiteOrigin(origin, processEnvSiteHints())) {
     return NextResponse.json({ ok: false, reason: "origin-mismatch" }, { status: 403 });
   }
 

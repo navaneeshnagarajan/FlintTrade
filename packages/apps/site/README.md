@@ -69,9 +69,9 @@ pnpm --filter @flinttrade/site start
 | --- | --- |
 | `FLINTTRADE_SITE_URL` | Public https origin for metadata, install one-liners, and the hosted MCP snippet. Also allow-lists that host on incoming requests. No trailing slash. |
 | `NEXT_PUBLIC_SITE_URL` | Accepted alias for the same origin if `FLINTTRADE_SITE_URL` is unset. |
-| `FLINTTRADE_SITE_ORIGINS` | Optional comma-separated extra https origins to trust on the request Host (for example apex and `www` during a cutover). Allow-list only — not the fallback origin. |
+| `FLINTTRADE_SITE_ORIGINS` | Optional comma-separated extra https origins to trust on the request Host and on `/api/csp-report` `Origin` (for example apex and `www` during a cutover). Allow-list only — not the fallback origin. |
 | `FLINTTRADE_SITE_SOURCE_SHA` | 40-character commit SHA for `/web-install.sh` and sibling redirect routes. Without it those routes answer 503. |
-| `FLINTTRADE_SITE_ORIGIN` | Optional CSP-report allow-origin used only when `FLINTTRADE_SITE_URL` / `NEXT_PUBLIC_SITE_URL` are unset; otherwise those win. Defaults to loopback. |
+| `FLINTTRADE_SITE_ORIGIN` | Optional extra CSP-report `Origin`. Still accepted when `FLINTTRADE_SITE_URL` is set. Reports are also accepted from loopback, the canonical host, `VERCEL_URL`, and every origin on the configured allow-list. |
 
 Set `FLINTTRADE_SITE_URL` to the custom domain on Hostinger. That host is then
 trusted on the request, so MCP and install snippets use it. Add any extra

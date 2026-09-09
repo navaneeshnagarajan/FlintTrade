@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CANONICAL_SITE_ORIGIN,
   hostedMcpUrl,
+  isAllowedSiteOrigin,
   siteMetadataOrigin,
   siteOriginFrom,
 } from './site-origin';
@@ -201,5 +202,42 @@ describe('hosted MCP snippet copy', () => {
     expect(mcp).toContain('hostedMcpUrl');
     expect(home).toContain('resolveSiteOrigin');
     expect(mcp).toContain('resolveSiteOrigin');
+  });
+});
+
+describe('isAllowedSiteOrigin', () => {
+  const hosted = {
+    FLINTTRADE_SITE_URL: 'https://hosted.example',
+    FLINTTRADE_SITE_ORIGINS: 'https://www.hosted.example, https://cdn.hosted.example',
+  };
+
+  it('accepts every configured allow-list origin, not only the primary fallback', () => {
+    expect(isAllowedSiteOrigin('https://hosted.example', hosted)).toBe(true);
+    expect(isAllowedSiteOrigin('https://www.hosted.example', hosted)).toBe(true);
+    expect(isAllowedSiteOrigin('https://cdn.hosted.example', hosted)).toBe(true);
+  });
+
+  it('accepts the canonical host, loopback, and the exact VERCEL_URL origin', () => {
+    expect(isAllowedSiteOrigin(CANONICAL_SITE_ORIGIN)).toBe(true);
+    expect(isAllowedSiteOrigin('http://127.0.0.1:3000')).toBe(true);
+    expect(isAllowedSiteOrigin('http://localhost:3001')).toBe(true);
+    expect(
+      isAllowedSiteOrigin('https://preview-abc.vercel.app', { VERCEL_URL: 'preview-abc.vercel.app' }),
+    ).toBe(true);
+  });
+
+  it('still accepts the legacy FLINTTRADE_SITE_ORIGIN when a primary URL is also set', () => {
+    expect(
+      isAllowedSiteOrigin('https://legacy.example', {
+        FLINTTRADE_SITE_URL: 'https://hosted.example',
+        FLINTTRADE_SITE_ORIGIN: 'https://legacy.example',
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects foreign origins and http on a public host', () => {
+    expect(isAllowedSiteOrigin('https://evil.example', hosted)).toBe(false);
+    expect(isAllowedSiteOrigin('http://hosted.example', hosted)).toBe(false);
+    expect(isAllowedSiteOrigin('https://attacker-project.vercel.app')).toBe(false);
   });
 });
