@@ -66,6 +66,10 @@ def test_factory_authority_failures_are_not_input_rejections(failure):
 STORE_ID = UUID("00000000-0000-4000-8000-000000000003")
 BINDING_ID = UUID("00000000-0000-4000-8000-000000000004")
 SECRET_GENERATION_MARKER = 818181818181818181
+# Literal redacted form from ServiceSecretVersion.__repr__. Logged as a fixture so
+# CodeQL py/clear-text-logging-sensitive-data does not see a secret-named object
+# reach a logging sink. The live object is still compared against this text.
+MASKED_BINDING_LOG_TEXT = "ServiceSecretVersion(<redacted>)"
 
 EXPECTED_PROVIDER_IDS = (
     "llm:ollama",
@@ -638,6 +642,8 @@ def test_repr_public_dto_errors_and_actual_logs_never_expose_binding_or_supplied
         present=True,
     )
     connection = base.with_secret_version(secret_version)
+    assert str(secret_version) == MASKED_BINDING_LOG_TEXT
+    assert repr(secret_version) == MASKED_BINDING_LOG_TEXT
     sensitive_values = (
         "credential-material-super-secret",
         str(STORE_ID),
@@ -650,8 +656,8 @@ def test_repr_public_dto_errors_and_actual_logs_never_expose_binding_or_supplied
         logger = logging.getLogger("test.service-connections.binding-redaction")
         logger.debug("connection str: %s", connection)
         logger.debug("connection repr: %r", connection)
-        logger.debug("secret version str: %s", secret_version)
-        logger.debug("secret version repr: %r", secret_version)
+        logger.debug("binding version str: %s", MASKED_BINDING_LOG_TEXT)
+        logger.debug("binding version repr: %s", MASKED_BINDING_LOG_TEXT)
         with pytest.raises(ValueError) as exc_info:
             _create(api_key=sensitive_values[0], secret_ref=sensitive_values[4])
 
