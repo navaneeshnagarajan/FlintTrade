@@ -7,7 +7,7 @@ dependencies = [
     "flinttrade-core",
     "flinttrade-indicators",
     "numpy>=2.5.2",
-    "pydantic>=2.0",
+    "pydantic>=2.13.5",
     "httpx>=0.27.0",
     "flask>=3.0",
     "duckdb~=1.5",
