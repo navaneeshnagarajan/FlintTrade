@@ -268,14 +268,26 @@ export function importLegacySavedChats(): Promise<number> {
 // Persist config — messages + route, not the streaming flag (transient)
 // ---------------------------------------------------------------------------
 
+/** Drop in-flight empty assistant placeholders so a reload cannot restore a blank bubble. */
+function persistableMessages(messages: Message[]): Message[] {
+  return messages.filter((message) => message.role !== "assistant" || message.content.trim().length > 0);
+}
+
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:ai-conversation",
-  version: 2,
+  version: 3,
   partialize: (state) => ({
-    messages: state.messages,
+    messages: persistableMessages(state.messages),
     currentRoute: state.currentRoute,
     conversationId: state.conversationId,
   }),
+  migrate: (persisted) => {
+    const state = persisted as { messages?: Message[] };
+    return {
+      ...state,
+      messages: persistableMessages(state.messages ?? []),
+    };
+  },
 });
 
 // ---------------------------------------------------------------------------

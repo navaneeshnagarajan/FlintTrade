@@ -14,8 +14,8 @@
  */
 
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent, memo } from "react";
-import { safeParse, sseTokenSchema, wsMessageSchema } from "@/lib/safeParse";
-import { AdvisorStatusResponseSchema, AdvisorResponseSchema } from "@/lib/schemas/ftApi";
+import { safeParse, wsMessageSchema } from "@/lib/safeParse";
+import { AdvisorStatusResponseSchema } from "@/lib/schemas/ftApi";
 import { Send, Bot, User, Loader2, Settings, Trash2, History, ChevronLeft } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -31,6 +31,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
 import { useAuthStore } from "@/stores/authStore";
 import { getAdvisorBase } from "@/services/advisorApi";
+import { requestAdvisorReply } from "@/services/advisorChat";
 import { placeOrder } from "@/services/api";
 import { checkOrderEntryMode, checkPriceForOrderType, type GuardedOrderType } from "@/lib/orderGuards";
 import { useModeStore } from "@/stores/modeStore";
@@ -75,13 +76,7 @@ export interface ChatMessage {
   toolStatus?: "pending" | "approved" | "rejected" | "failed";
 }
 
-// AdvisorResponse and AdvisorStatusResponse are validated via ftApi schemas;
-// keep local type aliases for the inferred shapes used below.
-type AdvisorResponse = {
-  status: "success" | "error";
-  data?: { response: string };
-  message?: string;
-};
+// AdvisorStatusResponse is validated via the ftApi schema.
 type AdvisorStatusResponse = {
   status: "success" | "error";
   data?: { configured: boolean; provider: string; model: string };
@@ -294,8 +289,6 @@ function useIsAIConfigured(): boolean {
  */
 async function fetchAdvisorStatus(): Promise<void> {
   try {
-    const token = useAuthStore.getState().token;
-    if (!token || token === "demo-user" || token === "dev-bypass") return;
     const base = getAdvisorBase();
     const resp = await fetch(`${base}/api/v1/advisor/status`);
     if (!resp.ok) return;
@@ -329,117 +322,6 @@ function advisorRequestContext(
     : "";
 }
 
-/**
- * POST full conversation to the streaming endpoint (SSE).
- * Calls onToken for each chunk. Returns full assembled text.
- * Throws if the endpoint is not available (404 triggers fallback).
- */
-async function streamAdvisorMessage(
-  messages: Array<{ role: string; content: string }>,
-  onToken: (token: string, fullText: string) => void,
-  signal?: AbortSignal,
-  sessionId?: string,
-  analysisContext?: AISymbolContext,
-): Promise<string> {
-  const base = getAdvisorBase();
-  const resp = await fetch(`${base}/api/v1/advisor/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    // session_id enables server-side session capture (AI2 recall); omitted
-    // for demo sessions so fabricated chats never persist.
-    body: JSON.stringify({
-      messages,
-      context: advisorRequestContext(analysisContext),
-      ...(sessionId ? { session_id: sessionId } : {}),
-    }),
-    signal,
-  });
-
-  if (resp.status === 404) {
-    throw new Error("STREAMING_NOT_AVAILABLE");
-  }
-
-  if (!resp.ok) {
-    throw new Error(`Advisor API: HTTP ${resp.status}`);
-  }
-
-  const reader = resp.body?.getReader();
-  if (!reader) {
-    throw new Error("No readable stream in response");
-  }
-
-  const decoder = new TextDecoder();
-  let assistantText = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      let streamDone = false;
-      for (const line of chunk.split("\n")) {
-        if (!line.startsWith("data: ")) continue;
-        const raw = line.slice(6).trim();
-        if (!raw || raw === "[DONE]") continue;
-        const data = safeParse(raw, sseTokenSchema);
-        if (!data) continue;
-        if (data.done) { streamDone = true; break; }
-        if (data.token) {
-          assistantText += data.token;
-          onToken(data.token, assistantText);
-        }
-      }
-      if (streamDone) break;
-    }
-  } finally {
-    try { await reader.cancel(); } catch { /* already cancelled */ }
-    reader.releaseLock();
-  }
-
-  return assistantText;
-}
-
-/**
- * POST full conversation to the non-streaming advisor endpoint (fallback).
- */
-async function postAdvisorMessage(
-  messages: Array<{ role: string; content: string }>,
-  signal?: AbortSignal,
-  sessionId?: string,
-  analysisContext?: AISymbolContext,
-): Promise<string> {
-  const base = getAdvisorBase();
-  const resp = await fetch(`${base}/api/v1/advisor`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      messages,
-      // Legacy single-message field for backwards compat
-      message: messages[messages.length - 1]?.content ?? "",
-      context: advisorRequestContext(analysisContext),
-      ...(sessionId ? { session_id: sessionId } : {}),
-    }),
-    signal,
-  });
-
-  if (!resp.ok) {
-    throw new Error(`Advisor API: HTTP ${resp.status}`);
-  }
-
-  const raw: unknown = await resp.json();
-  const result = AdvisorResponseSchema.safeParse(raw);
-  if (!result.success) {
-    console.error("[AIAdvisorWidget] /advisor response shape mismatch:", result.error.issues);
-    return "Unexpected response format from advisor.";
-  }
-  const json = result.data as AdvisorResponse;
-
-  if (json.status === "error") {
-    return json.message ?? "Unknown error from advisor.";
-  }
-
-  return json.data?.response ?? "No response from advisor.";
-}
 
 // ---------------------------------------------------------------------------
 // Tool Confirmation Card
@@ -596,7 +478,6 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
   // Shared conversation store (synced with AITutorPill)
   // ---------------------------------------------------------------------------
   const storeMessages = useAIConversationStore((s) => s.messages);
-  const storeIsStreaming = useAIConversationStore((s) => s.isStreaming);
   const addMessage = useAIConversationStore((s) => s.addMessage);
   const setStreaming = useAIConversationStore((s) => s.setStreaming);
   const clearMessages = useAIConversationStore((s) => s.clearMessages);
@@ -741,19 +622,19 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
     let replyContent = "";
 
     try {
-      replyContent = await streamAdvisorMessage(
-        conversationPayload,
-        (_token, fullText) => {
+      replyContent = await requestAdvisorReply({
+        messages: conversationPayload,
+        context: advisorRequestContext(analysisContext),
+        sessionId: captureSessionId,
+        signal: controller.signal,
+        onToken: (_token, fullText) => {
           useAIConversationStore.setState((state) => ({
             messages: state.messages.map((m) =>
               m.id === assistantId ? { ...m, content: fullText } : m,
             ),
           }));
         },
-        controller.signal,
-        captureSessionId,
-        analysisContext,
-      );
+      });
 
       // Detect tool calls in the final reply and store in local meta
       const toolCall = parseToolCall(replyContent);
@@ -772,52 +653,15 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
         ),
       }));
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-
-      if (errMsg === "STREAMING_NOT_AVAILABLE") {
-        // Remove empty placeholder, fall back to non-streaming
+      const aborted =
+        controller.signal.aborted ||
+        (err instanceof DOMException && err.name === "AbortError");
+      if (aborted) {
         useAIConversationStore.setState((state) => ({
-          messages: state.messages.filter((m) => m.id !== assistantId),
+          messages: state.messages.filter((m) => m.id !== assistantId || Boolean(m.content.trim())),
         }));
-        setStreaming(false);
-
-        try {
-          replyContent = await postAdvisorMessage(
-            conversationPayload,
-            controller.signal,
-            captureSessionId,
-            analysisContext,
-          );
-        } catch (fallbackErr: unknown) {
-          const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-          replyContent = `Error: ${fallbackMsg}`;
-        }
-
-        const toolCall = parseToolCall(replyContent);
-        const newId = generateId();
-        useAIConversationStore.setState((state) => ({
-          messages: [
-            ...state.messages,
-            {
-              id: newId,
-              role: "assistant" as const,
-              content: replyContent,
-              timestamp: Date.now(),
-              route: state.currentRoute,
-            },
-          ],
-        }));
-        if (toolCall) {
-          setToolMeta((prev) => {
-            const next = new Map(prev);
-            next.set(newId, { toolCall, toolStatus: "pending" });
-            return next;
-          });
-        }
-      } else if (controller.signal.aborted) {
-        // Component unmounted — do nothing
       } else {
-        // Real error — replace empty placeholder with error text
+        const errMsg = err instanceof Error ? err.message : String(err);
         useAIConversationStore.setState((state) => ({
           messages: state.messages.map((m) =>
             m.id === assistantId ? { ...m, content: `Error: ${errMsg}` } : m,
@@ -1041,7 +885,9 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
                   onReject={handleReject}
                 />
               ))}
-              {sending && !storeIsStreaming && (
+              {sending &&
+                (messages[messages.length - 1]?.role !== "assistant" ||
+                  !messages[messages.length - 1]?.content.trim()) && (
                 <div className="flex gap-2 px-3 py-2">
                   <div className="w-5 h-5 rounded-full bg-surface-hover flex items-center justify-center shrink-0 mt-0.5">
                     <Bot size={10} className="text-text-secondary" />

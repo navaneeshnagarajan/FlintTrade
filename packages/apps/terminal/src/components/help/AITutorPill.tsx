@@ -36,7 +36,6 @@
  */
 
 import { useState, useRef, useEffect, useCallback, KeyboardEvent } from "react";
-import { safeParse, sseTokenSchema } from "@/lib/safeParse";
 import { useLocation } from "react-router";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sparkles, X, Send, Bot, Settings } from "lucide-react";
@@ -52,6 +51,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { motionConfig, EASE_ENTER, EASE_EXIT, DURATION } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { getAdvisorBase } from "@/services/advisorApi";
+import { requestAdvisorReply } from "@/services/advisorChat";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -69,20 +69,13 @@ interface AdvisorStatusResponse {
   data?: { configured: boolean; provider: string; model: string };
 }
 
-interface AdvisorResponse {
-  status: "success" | "error";
-  data?: { response: string };
-  message?: string;
-}
-
 /**
  * Fetch advisor status from the backend and sync LLM settings into the store.
- * Silently no-ops if the backend is not running.
+ * Silently no-ops if the backend is not running. Explore/sample-data is
+ * included so the pill reflects the real configured state.
  */
 async function fetchAdvisorStatus(): Promise<void> {
   try {
-    const token = useAuthStore.getState().token;
-    if (!token || token === "demo-user" || token === "dev-bypass") return;
     const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/status`);
     if (!resp.ok) return;
     const json = (await resp.json()) as AdvisorStatusResponse;
@@ -95,104 +88,6 @@ async function fetchAdvisorStatus(): Promise<void> {
   } catch {
     // Backend not running — leave settings as-is
   }
-}
-
-/**
- * POST conversation history to the SSE streaming endpoint.
- * Calls onToken for each incremental chunk. Returns the full assembled text.
- * Throws "STREAMING_NOT_AVAILABLE" (string) on 404 so the caller can fall back.
- */
-async function streamAdvisorMessage(
-  messages: Array<{ role: string; content: string }>,
-  route: string,
-  onToken: (token: string, fullText: string) => void,
-  signal?: AbortSignal,
-  activeWidget?: string | null,
-  sessionId?: string,
-): Promise<string> {
-  const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    // session_id enables server-side session capture (AI2 recall); omitted
-    // for demo sessions so fabricated chats never persist.
-    body: JSON.stringify({
-      messages,
-      context: { route, activeWidget: activeWidget ?? null },
-      ...(sessionId ? { session_id: sessionId } : {}),
-    }),
-    signal,
-  });
-
-  if (resp.status === 404) {
-    throw new Error("STREAMING_NOT_AVAILABLE");
-  }
-
-  if (!resp.ok) {
-    throw new Error(`Advisor API: HTTP ${resp.status}`);
-  }
-
-  const reader = resp.body?.getReader();
-  if (!reader) throw new Error("No readable stream in response");
-
-  const decoder = new TextDecoder();
-  let assistantText = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      let streamDone = false;
-      for (const line of chunk.split("\n")) {
-        if (!line.startsWith("data: ")) continue;
-        const raw = line.slice(6).trim();
-        if (!raw || raw === "[DONE]") continue;
-        const data = safeParse(raw, sseTokenSchema);
-        if (!data) continue;
-        if (data.done) { streamDone = true; break; }
-        if (data.token) {
-          assistantText += data.token;
-          onToken(data.token, assistantText);
-        }
-      }
-      if (streamDone) break;
-    }
-  } finally {
-    try { await reader.cancel(); } catch { /* already cancelled */ }
-    reader.releaseLock();
-  }
-
-  return assistantText;
-}
-
-/**
- * POST conversation history to the non-streaming advisor endpoint.
- * Used as fallback when streaming returns 404.
- */
-async function postAdvisorMessage(
-  messages: Array<{ role: string; content: string }>,
-  route: string,
-  signal?: AbortSignal,
-  activeWidget?: string | null,
-  sessionId?: string,
-): Promise<string> {
-  const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      messages,
-      message: messages[messages.length - 1]?.content ?? "",
-      context: { route, activeWidget: activeWidget ?? null },
-      ...(sessionId ? { session_id: sessionId } : {}),
-    }),
-    signal,
-  });
-
-  if (!resp.ok) throw new Error(`Advisor API: HTTP ${resp.status}`);
-
-  const json = (await resp.json()) as AdvisorResponse;
-  if (json.status === "error") return json.message ?? "Unknown error from advisor.";
-  return json.data?.response ?? "No response from advisor.";
 }
 
 // ---------------------------------------------------------------------------
@@ -487,43 +382,28 @@ function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured, activeW
     }));
 
     try {
-      await streamAdvisorMessage(
-        conversationPayload,
-        currentRoute,
-        (_token, fullText) => {
+      const reply = await requestAdvisorReply({
+        messages: conversationPayload,
+        context: { route: currentRoute, activeWidget: activeWidget ?? null },
+        sessionId: captureSessionId,
+        signal: controller.signal,
+        onToken: (_token, fullText) => {
           updateMessageContent(placeholderId, fullText);
         },
-        controller.signal,
-        activeWidget,
-        captureSessionId,
-      );
+      });
+      updateMessageContent(placeholderId, reply);
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-
-      if (errMsg === "STREAMING_NOT_AVAILABLE") {
-        // Remove the empty placeholder, then call the non-streaming fallback
+      const aborted =
+        controller.signal.aborted ||
+        (err instanceof DOMException && err.name === "AbortError");
+      if (aborted) {
         useAIConversationStore.setState((state) => ({
-          messages: state.messages.filter((m) => m.id !== placeholderId),
+          messages: state.messages.filter((m) => m.id !== placeholderId || Boolean(m.content.trim())),
         }));
-
-        try {
-          const reply = await postAdvisorMessage(
-            conversationPayload,
-            currentRoute,
-            controller.signal,
-            activeWidget,
-            captureSessionId,
-          );
-          addMessage("assistant", reply);
-        } catch (fallbackErr: unknown) {
-          const msg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-          addMessage("assistant", `Error: ${msg}`);
-        }
-      } else if (!controller.signal.aborted) {
-        // Real streaming error — replace empty placeholder with error text
+      } else {
+        const errMsg = err instanceof Error ? err.message : String(err);
         updateMessageContent(placeholderId, `Error: ${errMsg}`);
       }
-      // If aborted the component is unmounting — do nothing
     } finally {
       streamingIdRef.current = null;
       abortRef.current = null;

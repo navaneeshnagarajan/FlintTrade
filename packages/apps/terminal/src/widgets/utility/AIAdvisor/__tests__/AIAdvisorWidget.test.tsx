@@ -229,6 +229,110 @@ describe("AIAdvisorWidget", () => {
       context: analysisContext,
     });
   });
+
+  it("surfaces the backend LLM-not-configured message instead of a blank assistant", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation(async (_input, init) => {
+      if (init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            status: "error",
+            message: "LLM not configured. Set provider in Settings → AI.",
+          }),
+          { status: 503, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({
+        status: "success",
+        data: { configured: false, provider: "", model: "" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+    fireEvent.change(screen.getByPlaceholderText("Ask the AI advisor..."), {
+      target: { value: "What is NIFTY?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+    await waitFor(() => {
+      const assistant = conversationStoreMock.useStore.getState().messages.find(
+        (m) => m.role === "assistant",
+      );
+      expect(assistant?.content).toMatch(/LLM not configured/i);
+    });
+    const assistant = conversationStoreMock.useStore.getState().messages.find(
+      (m) => m.role === "assistant",
+    );
+    expect(assistant?.content).toBeTruthy();
+    expect(String(assistant?.content)).not.toMatch(/HTTP 503/);
+  });
+
+  it("surfaces an error when the SSE stream ends with no tokens", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "POST" && url.endsWith("/api/v1/advisor/stream")) {
+        return new Response('data: {"done":true}\n\n', {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }
+      return new Response(JSON.stringify({
+        status: "success",
+        data: { configured: true, provider: "openai", model: "test" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+    fireEvent.change(screen.getByPlaceholderText("Ask the AI advisor..."), {
+      target: { value: "What is NIFTY?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+    await waitFor(() => {
+      const assistant = conversationStoreMock.useStore.getState().messages.find(
+        (m) => m.role === "assistant",
+      );
+      expect(assistant?.content).toMatch(/no reply|not configured|unavailable|timed out/i);
+    });
+  });
+
+  it("surfaces an SSE error event instead of leaving a blank assistant", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "POST" && url.endsWith("/api/v1/advisor/stream")) {
+        return new Response('data: {"error":"Internal server error"}\n\n', {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }
+      return new Response(JSON.stringify({
+        status: "success",
+        data: { configured: true, provider: "openai", model: "test" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+    fireEvent.change(screen.getByPlaceholderText("Ask the AI advisor..."), {
+      target: { value: "What is NIFTY?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+    await waitFor(() => {
+      const assistant = conversationStoreMock.useStore.getState().messages.find(
+        (m) => m.role === "assistant",
+      );
+      expect(assistant?.content).toMatch(/Internal server error|Error:/i);
+    });
+    const assistant = conversationStoreMock.useStore.getState().messages.find(
+      (m) => m.role === "assistant",
+    );
+    expect(String(assistant?.content).trim()).not.toBe("");
+  });
 });
 
 describe("normaliseToolEndpoint", () => {

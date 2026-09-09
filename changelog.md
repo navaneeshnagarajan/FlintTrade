@@ -53,6 +53,19 @@ changelog rebuilds itself from the first release cut after this baseline.
   Practice still use the journal/tradebook path; only the shared IST
   format and range helpers changed there.
 
+- **Explore /ai chat produces no assistant reply (FT-AI-001).**
+  `/ai` and the floating tutor now share one advisor chat path:
+  a short status probe (including Explore/sample-data), SSE
+  streaming, then the non-streaming fallback. A missing LLM, an
+  unreachable backend, an empty completion, or an SSE error
+  becomes a visible assistant error instead of a blank bubble.
+  Empty assistant placeholders are no longer persisted, so a
+  reload cannot restore the silent blank. The 45-second stream
+  budget is first-token only: once a token arrives, a longer
+  healthy completion is not aborted mid-reply. Native broker
+  freeze is excluded. MF Optimizer and AI suggestions + deploy
+  are unchanged.
+
 - **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
   Setup Step 2/7 now has an obvious **Explore first — continue without
   2FA** path so sample-data Explore/Practice is reachable without
