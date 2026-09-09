@@ -58,7 +58,7 @@ peerDependencyRules:
     '@napi-rs/wasm-runtime>@emnapi/core': '1'
     '@napi-rs/wasm-runtime>@emnapi/runtime': '1'
 
-# These fifteen entries are now the only copy: the duplicate "pnpm.overrides"
+# These seventeen entries are now the only copy: the duplicate "pnpm.overrides"
 # block in package.json was removed in the pnpm 10 migration, so this block is
 # what pnpm actually resolves against. Nothing cross-checks it any more - the
 # lockfile's own `overrides:` header is the audit trail, and an entry deleted
@@ -113,12 +113,24 @@ overrides:
   browserslist: 4.28.8
   esbuild: 0.28.1
   # GHSA-5jgf-p345-68v8 / GHSA-f65p-4m7j-42xc / GHSA-fph4-wmhf-6fwf /
-  # GHSA-jqff-g426-hqxp / GHSA-58mr-gqgx-xq4g / GHSA-qw65-cvwx-89v3:
-  # URI authority confusion and injection flaws, all patched on the 4.x line in 4.1.4.
+  # GHSA-jqff-g426-hqxp: host-confusion and SSRF fixes, patched in 4.1.3.
+  # Pin the current 4.1.4 line so ajv cannot keep 4.1.2.
   fast-uri: 4.1.4
   hono: 4.12.27
   ip-address: 10.3.1
-  js-yaml: 4.3.1
+  # GHSA-2883-xcg3-v3hh / CVE-2026-84375: empty merge-source CPU bypass,
+  # patched in 4.3.2 (and 3.15.2). The tree is already on the 4.x line.
+  js-yaml: 4.3.2
+  # GHSA-jrc7-96c5-q579 / CVE-2026-85061: XSS sanitizer bypass, patched in
+  # 6.4.1. plotly.js 3.7.0 (and 4.1.0) still request 4.x/5.x, both inside
+  # the advisory range. The terminal renders through plotly.js-dist-min, so
+  # this override is lockfile hygiene for the unused source tree.
+  maplibre-gl: 6.8.0
   postcss: 8.5.23
-  sharp: 0.35.3
+  # GHSA-rgj7-g3m4-5g8c: inherited libheif RCEs, patched in 0.35.4.
+  sharp: 0.35.4
   undici: 7.29.0
+  # Eight HIGH name-injection / ReDoS advisories on the 0.8 line that
+  # electron-builder's plist@3.1.0 still requests. 0.8.15 is the patched
+  # release for that line (0.9.12 is the 0.9 equivalent).
+  '@xmldom/xmldom': 0.8.15
