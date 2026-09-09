@@ -295,17 +295,20 @@ def test_root_mode_broadening_and_binding_replacement_fail_readiness(tmp_path):
         state.assert_mutation_ready()
 
     state.root.chmod(0o700)
-    state._binding_path.unlink()
     original_binding = {
         "installation_id": str(state.installation_id),
         "identity_device": state._identity_stat.st_dev,
         "identity_inode": state._identity_stat.st_ino,
     }
-    state._binding_path.write_text(
+    # Replace via a sibling inode. unlink()+create can reuse the original
+    # inode on tmpfs under load, which would miss the replacement check.
+    replacement = state.root / "binding.replacement"
+    replacement.write_text(
         __import__("json").dumps(original_binding, sort_keys=True, separators=(",", ":")) + "\n",
         encoding="utf-8",
     )
-    state._binding_path.chmod(0o600)
+    replacement.chmod(0o600)
+    os.replace(replacement, state._binding_path)
     with pytest.raises(InstallationStateError, match="binding was replaced"):
         state.assert_mutation_ready()
 
