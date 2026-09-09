@@ -1381,7 +1381,7 @@ def test_ensure_workspace_does_not_replace_corrupt_existing_config(
 
 @pytest.mark.unit
 def test_desktop_safety_wiring_reuses_client_loop_for_nonblocking_native_mtm(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory
 ) -> None:
     """Native MTM reaches the desktop-owned breaker without creating another loop."""
     from flinttrade_core.l2_state import PortfolioSafetyState
@@ -1454,6 +1454,7 @@ def test_desktop_safety_wiring_reuses_client_loop_for_nonblocking_native_mtm(
 
     client = ClientLoopOwner()
     router = Router()
+    router.backend_lease_proof = backend_lease_factory()
     safety = SafetySystem()
     app = Flask("desktop-mtm-wiring")
     rebuild_readiness: list[tuple[bool, object | None]] = []

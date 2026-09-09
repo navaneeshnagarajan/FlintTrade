@@ -48,7 +48,7 @@ def _ctx(**over) -> RequestContext:
     return RequestContext(**base)
 
 
-def _mint(order=None, **over) -> SafetyContext:
+def _mint(order=None, *, backend_lease_factory, **over) -> SafetyContext:
     kwargs = dict(
         mode="live",
         user_jti="jti-123",
@@ -56,7 +56,7 @@ def _mint(order=None, **over) -> SafetyContext:
         actor_type="human",
     )
     kwargs.update(over)
-    return SafetyContext.mint(order or _order(), **kwargs)
+    return SafetyContext.mint(order or _order(), **kwargs, backend_lease_proof=backend_lease_factory())
 
 
 # ---------------------------------------------------------------------------
@@ -64,9 +64,9 @@ def _mint(order=None, **over) -> SafetyContext:
 # ---------------------------------------------------------------------------
 
 
-def test_minted_context_verifies_for_matching_request() -> None:
+def test_minted_context_verifies_for_matching_request(*, backend_lease_factory) -> None:
     order = _order()
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     assert ctx.verify(order, _ctx(), "dhan") is True
 
 
@@ -75,79 +75,80 @@ def test_minted_context_verifies_for_matching_request() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_order_substitution_rejected() -> None:
+def test_order_substitution_rejected(*, backend_lease_factory) -> None:
     """Context minted for order A must not verify against order B."""
-    ctx = _mint(_order(symbol="RELIANCE"))
+    ctx = _mint(_order(symbol="RELIANCE"), backend_lease_factory=backend_lease_factory)
     assert ctx.verify(_order(symbol="TCS"), _ctx(), "dhan") is False
 
 
-def test_adapter_mismatch_rejected() -> None:
+def test_adapter_mismatch_rejected(*, backend_lease_factory) -> None:
     """S1: context bound to adapter 'dhan' must not verify when routed to 'upstox'."""
     order = _order()
-    ctx = _mint(order, adapter_id="dhan")
+    ctx = _mint(order, adapter_id="dhan", backend_lease_factory=backend_lease_factory)
     assert ctx.verify(order, _ctx(), "upstox") is False
 
 
-def test_mode_mismatch_rejected() -> None:
+def test_mode_mismatch_rejected(*, backend_lease_factory) -> None:
     order = _order()
-    ctx = _mint(order, mode="live")
+    ctx = _mint(order, mode="live", backend_lease_factory=backend_lease_factory)
     assert ctx.verify(order, _ctx(mode="practice"), "dhan") is False
 
 
-def test_jti_mismatch_rejected() -> None:
+def test_jti_mismatch_rejected(*, backend_lease_factory) -> None:
     order = _order()
-    ctx = _mint(order, user_jti="jti-123")
+    ctx = _mint(order, user_jti="jti-123", backend_lease_factory=backend_lease_factory)
     assert ctx.verify(order, _ctx(jti="jti-999"), "dhan") is False
 
 
-def test_actor_type_mismatch_rejected() -> None:
+def test_actor_type_mismatch_rejected(*, backend_lease_factory) -> None:
     """A webhook-minted (external_intent) context must not verify from a human session."""
     order = _order()
     ctx = _mint(
         order,
         actor_type="external_intent",
         intent_source="webhook",
-        external_nonce_hash="nonce-abc",
+        external_nonce_hash="nonce-abc", backend_lease_factory=backend_lease_factory
     )
     human = _ctx(actor_type="human", intent_source=None, external_nonce_hash=None)
     assert ctx.verify(order, human, "dhan") is False
 
 
-def test_intent_source_mismatch_rejected() -> None:
+def test_intent_source_mismatch_rejected(*, backend_lease_factory) -> None:
     order = _order()
     ctx = _mint(
         order,
         actor_type="external_intent",
         intent_source="webhook",
-        external_nonce_hash="nonce-abc",
+        external_nonce_hash="nonce-abc", backend_lease_factory=backend_lease_factory
     )
     other = _ctx(actor_type="external_intent", intent_source="telegram", external_nonce_hash="nonce-abc")
     assert ctx.verify(order, other, "dhan") is False
 
 
-def test_external_nonce_mismatch_rejected() -> None:
+def test_external_nonce_mismatch_rejected(*, backend_lease_factory) -> None:
     """external_nonce_hash binds the ctx to one webhook payload (no payload swap)."""
     order = _order()
     ctx = _mint(
         order,
         actor_type="external_intent",
         intent_source="webhook",
-        external_nonce_hash="nonce-abc",
+        external_nonce_hash="nonce-abc", backend_lease_factory=backend_lease_factory
     )
     swapped = _ctx(actor_type="external_intent", intent_source="webhook", external_nonce_hash="nonce-xyz")
     assert ctx.verify(order, swapped, "dhan") is False
 
 
-def test_expired_context_rejected() -> None:
+def test_expired_context_rejected(*, backend_lease_factory) -> None:
     order = _order()
-    ctx = _mint(order, ttl_seconds=-5)  # already expired at mint
+    ctx = _mint(order, ttl_seconds=-5, backend_lease_factory=backend_lease_factory)  # already expired at mint
     assert ctx.verify(order, _ctx(), "dhan") is False
 
 
-def test_signature_tamper_rejected() -> None:
+def test_signature_tamper_rejected(*, backend_lease_factory) -> None:
     order = _order()
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     forged = SafetyContext(
+        backend_incarnation=ctx.backend_incarnation,
         gate_id=ctx.gate_id,
         order_hash=ctx.order_hash,
         mode=ctx.mode,
@@ -164,10 +165,10 @@ def test_signature_tamper_rejected() -> None:
     assert forged.verify(order, _ctx(), "dhan") is False
 
 
-def test_wrong_secret_rejected() -> None:
+def test_wrong_secret_rejected(*, backend_lease_factory) -> None:
     """A context signed under secret A must not verify after a key rotation to B."""
     order = _order()
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     set_safety_gate_secret(OTHER_SECRET)
     assert ctx.verify(order, _ctx(), "dhan") is False
 
@@ -203,8 +204,8 @@ def test_set_secret_rejects_short_key() -> None:
         set_safety_gate_secret(b"tooshort")
 
 
-def test_failover_allowed_adapters_is_immutable_tuple() -> None:
-    ctx = _mint(_order(), failover_allowed_adapters=("upstox", "kotak"))
+def test_failover_allowed_adapters_is_immutable_tuple(*, backend_lease_factory) -> None:
+    ctx = _mint(_order(), failover_allowed_adapters=("upstox", "kotak"), backend_lease_factory=backend_lease_factory)
     assert isinstance(ctx.failover_allowed_adapters, tuple)
 
 
@@ -213,31 +214,32 @@ def test_failover_allowed_adapters_is_immutable_tuple() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_failover_to_authorised_candidate_passes() -> None:
+def test_failover_to_authorised_candidate_passes(*, backend_lease_factory) -> None:
     order = _order()
-    ctx = _mint(order, adapter_id="dhan", failover_allowed_adapters=("upstox", "kotak"))
+    ctx = _mint(order, adapter_id="dhan", failover_allowed_adapters=("upstox", "kotak"), backend_lease_factory=backend_lease_factory)
     assert ctx.verify_for_failover(order, _ctx(), "upstox") is True
 
 
-def test_failover_to_unauthorised_candidate_raises() -> None:
+def test_failover_to_unauthorised_candidate_raises(*, backend_lease_factory) -> None:
     order = _order()
-    ctx = _mint(order, adapter_id="dhan", failover_allowed_adapters=("upstox",))
+    ctx = _mint(order, adapter_id="dhan", failover_allowed_adapters=("upstox",), backend_lease_factory=backend_lease_factory)
     with pytest.raises(SafetyBypassError, match="candidate_not_in_failover_allowlist"):
         ctx.verify_for_failover(order, _ctx(), "zerodha")
 
 
-def test_failover_empty_allowlist_raises() -> None:
+def test_failover_empty_allowlist_raises(*, backend_lease_factory) -> None:
     """Empty allowlist means 'no failover authorised' — every candidate is rejected."""
     order = _order()
-    ctx = _mint(order, adapter_id="dhan", failover_allowed_adapters=())
+    ctx = _mint(order, adapter_id="dhan", failover_allowed_adapters=(), backend_lease_factory=backend_lease_factory)
     with pytest.raises(SafetyBypassError, match="candidate_not_in_failover_allowlist"):
         ctx.verify_for_failover(order, _ctx(), "upstox")
 
 
-def test_failover_with_forged_signature_raises_signature_mismatch() -> None:
+def test_failover_with_forged_signature_raises_signature_mismatch(*, backend_lease_factory) -> None:
     order = _order()
-    ctx = _mint(order, adapter_id="dhan", failover_allowed_adapters=("upstox",))
+    ctx = _mint(order, adapter_id="dhan", failover_allowed_adapters=("upstox",), backend_lease_factory=backend_lease_factory)
     forged = SafetyContext(
+        backend_incarnation=ctx.backend_incarnation,
         gate_id=ctx.gate_id,
         order_hash=ctx.order_hash,
         mode=ctx.mode,

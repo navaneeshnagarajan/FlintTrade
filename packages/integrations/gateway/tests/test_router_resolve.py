@@ -47,7 +47,7 @@ def _config() -> RoutingConfig:
     )
 
 
-def test_authorised_selectors_returns_every_registered_actor_account_in_config_order() -> None:
+def test_authorised_selectors_returns_every_registered_actor_account_in_config_order(*, backend_lease_factory) -> None:
     config = RoutingConfig.from_workspace(
         {
             "registered": ["dhan:primary", "upstox:secondary", "dhan:read-only"],
@@ -69,7 +69,7 @@ def test_authorised_selectors_returns_every_registered_actor_account_in_config_o
             "cost_aware": {"enabled": False, "tasks": []},
         }
     )
-    router = _router(_FakeAdapter(), config=config)
+    router = _router(_FakeAdapter(), config=config, backend_lease_factory=backend_lease_factory)
 
     assert router.authorised_selectors("user-1") == (
         "dhan:primary",
@@ -78,16 +78,16 @@ def test_authorised_selectors_returns_every_registered_actor_account_in_config_o
     assert router.authorised_selectors("unknown") == ()
 
 
-def test_registered_selectors_is_an_immutable_config_snapshot() -> None:
+def test_registered_selectors_is_an_immutable_config_snapshot(*, backend_lease_factory) -> None:
     config = _config()
-    router = _router(_FakeAdapter(), config=config)
+    router = _router(_FakeAdapter(), config=config, backend_lease_factory=backend_lease_factory)
 
     assert router.registered_selectors == ("dhan:personal",)
     assert isinstance(router.registered_selectors, tuple)
-    assert _router(_FakeAdapter()).registered_selectors == ()
+    assert _router(_FakeAdapter(), backend_lease_factory=backend_lease_factory).registered_selectors == ()
 
 
-def test_registered_selectors_excludes_adapters_absent_from_the_generation() -> None:
+def test_registered_selectors_excludes_adapters_absent_from_the_generation(*, backend_lease_factory) -> None:
     config = RoutingConfig.from_workspace(
         {
             "registered": ["dhan:personal", "indmoney:family"],
@@ -106,7 +106,7 @@ def test_registered_selectors_excludes_adapters_absent_from_the_generation() -> 
             "cost_aware": {"enabled": False, "tasks": []},
         }
     )
-    router = _router(_FakeAdapter(), config=config)
+    router = _router(_FakeAdapter(), config=config, backend_lease_factory=backend_lease_factory)
 
     assert router.registered_selectors == ("dhan:personal",)
 
@@ -139,32 +139,32 @@ def _ctx() -> RequestContext:
     return RequestContext(jti="jti-1", actor_type="human", actor_id="user-1", mode="live")
 
 
-def _router(adapter: _FakeAdapter, *, config: RoutingConfig | None = None) -> BrokerRouter:
+def _router(adapter: _FakeAdapter, *, config: RoutingConfig | None = None, backend_lease_factory) -> BrokerRouter:
     return BrokerRouter(
         {"dhan": adapter},
         lambda _ctx, _aid, _acct: _session(),
-        config=config,
+        config=config, backend_lease_proof=backend_lease_factory()
     )
 
 
 # --- _resolve unit behaviour --------------------------------------------
 
 
-def test_resolve_hint_overrides_both() -> None:
-    router = _router(_FakeAdapter())  # no config needed: hint supplies both
+def test_resolve_hint_overrides_both(*, backend_lease_factory) -> None:
+    router = _router(_FakeAdapter(), backend_lease_factory=backend_lease_factory)  # no config needed: hint supplies both
     assert router._resolve(
         "execution", _order(), RoutingHint(adapter_id="dhan", account_id="personal")
     ) == ("dhan", "personal")
 
 
-def test_resolve_from_config_when_no_hint() -> None:
-    router = _router(_FakeAdapter(), config=_config())
+def test_resolve_from_config_when_no_hint(*, backend_lease_factory) -> None:
+    router = _router(_FakeAdapter(), config=_config(), backend_lease_factory=backend_lease_factory)
     assert router._resolve("data.ticks", None, None) == ("dhan", "personal")
     assert router._resolve("execution", _order(), None) == ("dhan", "personal")
 
 
-def test_resolve_hint_account_overrides_parsed() -> None:
-    router = _router(_FakeAdapter(), config=_config())
+def test_resolve_hint_account_overrides_parsed(*, backend_lease_factory) -> None:
+    router = _router(_FakeAdapter(), config=_config(), backend_lease_factory=backend_lease_factory)
     # config resolves account 'personal'; the hint forces 'family'.
     assert router._resolve("execution", _order(), RoutingHint(account_id="family")) == (
         "dhan",
@@ -172,20 +172,20 @@ def test_resolve_hint_account_overrides_parsed() -> None:
     )
 
 
-def test_resolve_unknown_routing_key_raises() -> None:
-    router = _router(_FakeAdapter(), config=_config())
+def test_resolve_unknown_routing_key_raises(*, backend_lease_factory) -> None:
+    router = _router(_FakeAdapter(), config=_config(), backend_lease_factory=backend_lease_factory)
     with pytest.raises(ValueError, match="unknown routing key"):
         router._resolve("data.bogus", None, None)
 
 
-def test_resolve_without_config_or_hint_raises() -> None:
-    router = _router(_FakeAdapter())  # no config
+def test_resolve_without_config_or_hint_raises(*, backend_lease_factory) -> None:
+    router = _router(_FakeAdapter(), backend_lease_factory=backend_lease_factory)  # no config
     with pytest.raises(ValueError, match="no RoutingConfig"):
         router._resolve("execution", _order(), None)
 
 
-def test_resolve_account_defaults_when_absent() -> None:
-    router = _router(_FakeAdapter())
+def test_resolve_account_defaults_when_absent(*, backend_lease_factory) -> None:
+    router = _router(_FakeAdapter(), backend_lease_factory=backend_lease_factory)
     # adapter override only, no config, no account hint -> account defaults.
     assert router._resolve("execution", _order(), RoutingHint(adapter_id="dhan")) == (
         "dhan",
@@ -196,12 +196,12 @@ def test_resolve_account_defaults_when_absent() -> None:
 # --- place_order through the resolved path -------------------------------
 
 
-async def test_place_order_via_hint_resolves_and_dispatches() -> None:
+async def test_place_order_via_hint_resolves_and_dispatches(*, backend_lease_factory) -> None:
     adapter = _FakeAdapter()
-    router = _router(adapter, config=_config())
+    router = _router(adapter, config=_config(), backend_lease_factory=backend_lease_factory)
     order = _order()
     ctx = SafetyContext.mint(
-        order, mode="live", user_jti="jti-1", adapter_id="dhan", account_id="personal", actor_type="human"
+        order, mode="live", user_jti="jti-1", adapter_id="dhan", account_id="personal", actor_type="human", backend_lease_proof=backend_lease_factory()
     )
     result = await router.place_order(
         _ctx(), order=order, safety_ctx=ctx, hint=RoutingHint(adapter_id="dhan", account_id="personal")
@@ -210,13 +210,13 @@ async def test_place_order_via_hint_resolves_and_dispatches() -> None:
     assert adapter.placed == [order]
 
 
-async def test_place_order_via_hint_still_enforces_safety() -> None:
+async def test_place_order_via_hint_still_enforces_safety(*, backend_lease_factory) -> None:
     # A ctx minted for 'upstox' must not fire when the hint resolves to 'dhan'.
     adapter = _FakeAdapter()
-    router = _router(adapter, config=_config())
+    router = _router(adapter, config=_config(), backend_lease_factory=backend_lease_factory)
     order = _order()
     ctx = SafetyContext.mint(
-        order, mode="live", user_jti="jti-1", adapter_id="upstox", account_id="personal", actor_type="human"
+        order, mode="live", user_jti="jti-1", adapter_id="upstox", account_id="personal", actor_type="human", backend_lease_proof=backend_lease_factory()
     )
     with pytest.raises(SafetyBypassError, match="verification failed"):
         await router.place_order(

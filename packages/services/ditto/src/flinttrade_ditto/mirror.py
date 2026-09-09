@@ -941,6 +941,7 @@ class PositionMirror:
                 safety_ctx = gate_order(
                     mirror_order,
                     request_ctx,
+                    backend_lease_proof=self._broker_router.backend_lease_proof,
                     adapter_id="openalgo",
                     account_id=account.account_id,
                 )

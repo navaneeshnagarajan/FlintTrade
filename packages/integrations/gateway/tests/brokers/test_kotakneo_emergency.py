@@ -963,7 +963,7 @@ async def test_reducing_plan_binds_exact_position_and_uses_a_deterministic_tag()
     ]
 
 
-def test_full_emergency_dispatch_reduces_kotak_position_through_router_token() -> None:
+def test_full_emergency_dispatch_reduces_kotak_position_through_router_token(*, backend_lease_factory) -> None:
     class FlatteningClient(FakeKotakNeoEmergencyClient):
         def __init__(self, position: dict[str, Any]) -> None:
             super().__init__()
@@ -1012,7 +1012,7 @@ def test_full_emergency_dispatch_reduces_kotak_position_through_router_token() -
     router = BrokerRouter(
         {"kotakneo": adapter},
         lambda _ctx, _adapter_id, _account_id: session,
-        consume_gate=gate.consume,
+        consume_gate=gate.consume, backend_lease_proof=backend_lease_factory()
     )
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
@@ -1130,7 +1130,7 @@ async def test_concrete_emergency_writes_require_the_router_token() -> None:
     assert not any(call[0].startswith("cancel") or call[0] == "place_order" for call in client.calls)
 
 
-def test_real_dispatcher_path_mints_one_shot_context_and_crosses_router_token_boundary() -> None:
+def test_real_dispatcher_path_mints_one_shot_context_and_crosses_router_token_boundary(*, backend_lease_factory) -> None:
     class RecordingAdapter(KotakNeoAdapter):
         def __init__(self, client: FakeKotakNeoEmergencyClient) -> None:
             super().__init__(client_factory=lambda _session: client)
@@ -1183,7 +1183,7 @@ def test_real_dispatcher_path_mints_one_shot_context_and_crosses_router_token_bo
     router = RecordingRouter(
         {"kotakneo": adapter},
         provide_session,
-        consume_gate=gate.consume,
+        consume_gate=gate.consume, backend_lease_proof=backend_lease_factory()
     )
     target_context = RequestContext(
         jti="fake-emergency-jti",

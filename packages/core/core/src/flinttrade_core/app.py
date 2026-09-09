@@ -330,6 +330,56 @@ def _close_runtime_request_admission(app: Flask) -> Any:
     return tracker
 
 
+class _BackendLeaseRuntimeWatch:
+    """App-owned liveness relay; entrypoints own the controlled shutdown callback."""
+
+    def __init__(self, app: Flask, proof: BackendLeaseProof, on_revoked: Callable[[], None]) -> None:
+        self._proof = require_backend_lease_proof(proof)
+        self._app = app
+        self._on_revoked = on_revoked
+        self._stopped = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="backend-runtime-watch", daemon=True)
+
+    def start(self) -> None:
+        self._app.extensions["flinttrade.backend_lease_watch"] = self
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stopped.is_set():
+            if not self._proof.wait_revoked(0.05):
+                continue
+            if self._stopped.is_set():
+                return
+            self._app.config["BACKEND_LEASE_READY"] = False
+            self._app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
+            try:
+                router = self._app.config.get("BROKER_ROUTER")
+                if router is not None:
+                    router.revoke_and_drain(timeout=0.0)
+                _close_runtime_request_admission(self._app)
+            except Exception as exc:  # noqa: BLE001 - refusal must still reach lifecycle cleanup
+                logger.error("Backend lease admission retirement failed (%s)", type(exc).__name__)
+            try:
+                self._on_revoked()
+            except BaseException as exc:  # noqa: BLE001 - retain app-owned recovery state
+                logger.critical("Backend lease shutdown remains incomplete (%s)", type(exc).__name__)
+            return
+
+    def stop(self, *, timeout: float) -> bool:
+        """Disarm normal teardown; never join the callback's own watcher thread."""
+        self._stopped.set()
+        if self._thread is threading.current_thread():
+            return True
+        if self._thread.ident is not None:
+            self._thread.join(timeout=max(0.0, timeout))
+        return not self._thread.is_alive()
+
+
+def _stop_backend_lease_watch(app: Flask, *, timeout: float) -> bool:
+    watch = app.extensions.get("flinttrade.backend_lease_watch")
+    return watch is None or watch.stop(timeout=timeout)
+
+
 def _rag_auto_index_enabled() -> bool:
     """Return whether startup should auto-index docs into the RAG store."""
     raw = os.environ.get("FLINTTRADE_RAG_AUTO_INDEX", "")
@@ -2361,6 +2411,7 @@ def _build_broker_router_from_dependencies(
     dependencies: _BrokerRuntimeDependencies,
     *,
     write_admission: Callable[[bool, str], ContextManager[None]] | None = None,
+    backend_lease_proof: BackendLeaseProof | None = None,
 ) -> Any:
     """Build only the gated write router from one prepared dependency record."""
     from flinttrade_engine.safety import SafetyGate  # noqa: PLC0415
@@ -2432,6 +2483,7 @@ def _build_broker_router_from_dependencies(
     return BrokerRouter(
         resolved_adapters,
         dependencies.session_provider,
+        backend_lease_proof=backend_lease_proof,
         consume_gate=gate.consume,
         config=config,
         rate_limiter=dependencies.rate_limiter,
@@ -2458,8 +2510,10 @@ def build_broker_router(
     workspace_path: Path | None = None,
     registry_publication_owner: RegistryPublicationOwner | None = None,
     credential_version_for: Callable | None = None,
+    backend_lease_proof: BackendLeaseProof | None = None,
 ) -> Any:
     """Construct a router through exactly one shared dependency preparation."""
+    require_backend_lease_proof(backend_lease_proof)
     dependencies = _prepare_broker_dependencies(
         registry,
         brokers_config,
@@ -2484,7 +2538,9 @@ def build_broker_router(
             on_adapters_activated(dict(dependencies.adapters))
         except Exception as exc:  # pragma: no cover - observability only
             logger.warning("Adapter activation sink failed (%s)", type(exc).__name__)
-    return _build_broker_router_from_dependencies(dependencies, write_admission=write_admission)
+    return _build_broker_router_from_dependencies(
+        dependencies, write_admission=write_admission, backend_lease_proof=backend_lease_proof,
+    )
 
 
 def _broker_router_drain_timeout(app: Flask) -> float:
@@ -2805,6 +2861,7 @@ def _configure_broker_writes(app: Flask, dependencies: _BrokerRuntimeDependencie
             router = _build_broker_router_from_dependencies(
                 dependencies,
                 write_admission=write_admission,
+                backend_lease_proof=app.config.get("BACKEND_LEASE_PROOF"),
             )
             reconcile_targets = _build_reconcile_targets_provider(
                 dependencies.registry,
@@ -6809,6 +6866,8 @@ class FlintTradeApp:
             return stopped
 
         if flask_app is not None:
+            if not _stop_backend_lease_watch(flask_app, timeout=deadline.remaining()):
+                return False
             tracker = flask_app.config.get("RUNTIME_REQUEST_TRACKER")
             wait_for_idle = getattr(tracker, "wait_for_idle", None)
             if callable(wait_for_idle) and not await stop_sync(
@@ -7067,6 +7126,13 @@ class FlintTradeApp:
             telegram=self.telegram,
         )
         self._flask_app = flask_app
+        def request_lease_shutdown() -> None:
+            def schedule_stop() -> None:
+                task = runtime_loop.create_task(self.stop())
+                self._shutdown_request_task = task
+            runtime_loop.call_soon_threadsafe(schedule_stop)
+
+        _BackendLeaseRuntimeWatch(flask_app, self._backend_lease_proof, request_lease_shutdown).start()
         from .local_ai_routes import (  # noqa: PLC0415
             shutdown_local_ai_runtime,
             start_configured_local_ai_runtime,
@@ -7652,6 +7718,8 @@ class FlintTradeApp:
         deadline = getattr(self, "_active_shutdown_deadline", None)
         if deadline is None:
             deadline = _LifecycleDeadline.after(60.0)
+        if flask_app is not None and not _stop_backend_lease_watch(flask_app, timeout=deadline.remaining()):
+            raise RuntimeError("backend lease watcher did not stop")
         if getattr(self, "_startup_recovery_pending", False):
             if not await self._recover_startup_rollback(deadline):
                 raise RuntimeError("shutdown encountered errors: startup rollback incomplete")
@@ -8395,7 +8463,12 @@ class _ProcessBoundWSGIApp:
         return self._inner(environ, start_response)
 
 
-def _get_wsgi_app() -> Flask:
+def _request_wsgi_shutdown() -> None:
+    """Ask the WSGI host to terminate this worker, after app-owned cleanup."""
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+def _get_wsgi_app(*, shutdown_callback: Callable[[], None] | None = None) -> Flask:
     """Lazily construct (and cache) the WSGI Flask app."""
     global _APP_CACHE, _APP_CACHE_PID, _WSGI_BACKEND_LEASE
     current_pid = os.getpid()
@@ -8435,6 +8508,19 @@ def _get_wsgi_app() -> Flask:
                         owner_pid=current_pid,
                         backend_lease=backend_lease,
                     )
+                    from .desktop import _DesktopShutdownRecoveryOwner  # noqa: PLC0415
+
+                    def stop_revoked_worker() -> None:
+                        recovery_owner = candidate.extensions.get("flinttrade.wsgi_shutdown_owner")
+                        if recovery_owner is None:
+                            recovery_owner = _DesktopShutdownRecoveryOwner(candidate)
+                            candidate.extensions["flinttrade.wsgi_shutdown_owner"] = recovery_owner
+                        recovery_owner.release(deadline=time.monotonic() + 60.0)
+                        (shutdown_callback or _request_wsgi_shutdown)()
+
+                    watch = _BackendLeaseRuntimeWatch(candidate, backend_lease.proof, stop_revoked_worker)
+                    watch.start()
+                    atexit.register(watch.stop, timeout=1.0)
                 except BaseException:
                     recovery = _WSGIStartupRecovery(candidate, backend_lease)
                     recovery.retain()

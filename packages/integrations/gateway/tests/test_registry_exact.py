@@ -567,7 +567,7 @@ def test_forged_foreign_and_replayed_handles_never_resolve_client(authority):
 
 
 @pytest.mark.asyncio
-async def test_distinct_concrete_clients_ignore_raw_identity_and_setup_aba(tmp_path, monkeypatch):
+async def test_distinct_concrete_clients_ignore_raw_identity_and_setup_aba(tmp_path, monkeypatch, *, backend_lease_factory):
     import importlib.util
     from pathlib import Path
     from flinttrade_core.config import Settings
@@ -610,7 +610,7 @@ async def test_distinct_concrete_clients_ignore_raw_identity_and_setup_aba(tmp_p
             {"openalgo": {f"account-{i}": ["test-actor"] for i in (0, 1)}},
             workspace_snapshot=fixture.workspace, workspace_path=tmp_path,
             credential_version_for=lambda exact: fixture.store.selector_state(exact).version)
-        router = BrokerRouter({"openalgo": adapters[0]}, provider, consume_gate=safety.SafetyGate().consume)
+        router = BrokerRouter({"openalgo": adapters[0]}, provider, consume_gate=safety.SafetyGate().consume, backend_lease_proof=backend_lease_factory())
         for i, client in enumerate(clients):
             async def place(order, index=i):
                 calls.append(("order", index))
@@ -618,7 +618,7 @@ async def test_distinct_concrete_clients_ignore_raw_identity_and_setup_aba(tmp_p
             monkeypatch.setattr(client, "place_order", place)
             context = RequestContext(jti=f"synthetic-{i}", actor_type="human", actor_id="test-actor", mode="live")
             order = SimpleNamespace(symbol="SYNTHETIC", exchange="NSE", action="BUY", quantity=1, pricetype="MARKET")
-            permit = safety.gate_order(order, context, "openalgo", account_id=f"account-{i}")
+            permit = safety.gate_order(order, context, "openalgo", account_id=f"account-{i}", backend_lease_proof=backend_lease_factory())
             assert await router.place_order(context, adapter_id="openalgo", account_id=f"account-{i}",
                 order=order, safety_ctx=permit) == f"synthetic-{i}"
         selector = handles[0].selector

@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import time
+import threading
 from contextlib import suppress
 from pathlib import Path
 from types import MethodType, SimpleNamespace
@@ -13,6 +14,105 @@ from typing import Any
 
 import pytest
 from flask import Flask
+
+
+def test_live_proof_watch_closes_admission_before_lifecycle_callback(backend_lease_proof):
+    from flinttrade_core.app import _BackendLeaseRuntimeWatch
+    from flinttrade_core.backend_instance import BackendLeaseUnavailable, require_backend_lease_proof
+
+    app = Flask("synthetic-revocation")
+    events = []
+    stopped = threading.Event()
+
+    def revoke(*, timeout):
+        with pytest.raises(BackendLeaseUnavailable):
+            require_backend_lease_proof(backend_lease_proof)
+        assert app.config["RUNTIME_ACCEPTING_REQUESTS"] is False
+        events.append("router-revoked")
+        return True
+
+    def shutdown():
+        assert events == ["router-revoked"]
+        assert app.config["BACKEND_LEASE_READY"] is False
+        events.append("lifecycle-shutdown")
+        stopped.set()
+
+    app.config["BROKER_ROUTER"] = SimpleNamespace(revoke_and_drain=revoke)
+    watch = _BackendLeaseRuntimeWatch(app, backend_lease_proof, shutdown)
+    watch.start()
+    try:
+        backend_lease_proof.revoke()
+        assert stopped.wait(1)
+        assert events == ["router-revoked", "lifecycle-shutdown"]
+    finally:
+        assert watch.stop(timeout=1)
+
+
+def test_stopped_proof_watch_cannot_request_late_shutdown(backend_lease_proof):
+    from flinttrade_core.app import _BackendLeaseRuntimeWatch
+
+    called = threading.Event()
+    watch = _BackendLeaseRuntimeWatch(Flask("synthetic-stop"), backend_lease_proof, called.set)
+    watch.start()
+    assert watch.stop(timeout=1)
+    backend_lease_proof.revoke()
+    assert not called.is_set()
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_wsgi_revocation_snapshots_current_owners_then_requests_host_shutdown(
+    monkeypatch, backend_lease_proof, cleanup_fails,
+):
+    import flinttrade_core.app as app_module
+    import flinttrade_core.desktop as desktop_module
+
+    app = Flask("synthetic-wsgi-revocation")
+    events = []
+    terminated = threading.Event()
+    cleanup_attempted = threading.Event()
+
+    class RecoveryOwner:
+        def __init__(self, candidate):
+            assert candidate is app
+            events.append("snapshot-current-owners")
+
+        def release(self, *, deadline):
+            assert app.config["RUNTIME_ACCEPTING_REQUESTS"] is False
+            assert app.config["BACKEND_LEASE_READY"] is False
+            if cleanup_fails:
+                events.append("owners-retained")
+                cleanup_attempted.set()
+                raise desktop_module.DesktopBackendShutdownIncomplete(
+                    "Synthetic retained cleanup", recovery_owner=self,
+                )
+            events.append("owners-drained")
+
+    def shutdown():
+        assert events == ["snapshot-current-owners", "owners-drained"]
+        events.append("host-shutdown")
+        terminated.set()
+
+    monkeypatch.setattr(app_module, "_APP_CACHE", None)
+    monkeypatch.setattr(app_module, "_APP_CACHE_PID", None)
+    monkeypatch.setattr(app_module, "_WSGI_BACKEND_LEASE", None)
+    monkeypatch.setattr(app_module, "acquire_backend_instance_lease", lambda: _FakeLease([], backend_lease_proof))
+    monkeypatch.setattr(app_module, "create_flask_app", lambda **_: app)
+    monkeypatch.setattr(desktop_module, "_DesktopShutdownRecoveryOwner", RecoveryOwner)
+    try:
+        assert app_module._get_wsgi_app(shutdown_callback=shutdown) is app
+        assert events == []
+        backend_lease_proof.revoke()
+        if cleanup_fails:
+            assert cleanup_attempted.wait(1)
+            assert app_module._stop_backend_lease_watch(app, timeout=1)
+            assert not terminated.is_set()
+            assert events == ["snapshot-current-owners", "owners-retained"]
+            assert isinstance(app.extensions["flinttrade.wsgi_shutdown_owner"], RecoveryOwner)
+        else:
+            assert terminated.wait(1)
+            assert events[-1] == "host-shutdown"
+    finally:
+        assert app_module._stop_backend_lease_watch(app, timeout=1)
 
 
 @pytest.mark.skipif(os.name != "posix", reason="actual POSIX flock failure contract")
@@ -535,7 +635,7 @@ app_module._APP_CACHE = None
 app_module._APP_CACHE_PID = None
 app_module._WSGI_BACKEND_LEASE = None
 app_module.create_flask_app = lambda **kwargs: flask_app
-preloaded_app = app_module._get_wsgi_app()
+preloaded_app = app_module._get_wsgi_app(shutdown_callback=lambda: None)
 owner_response = preloaded_app.test_client().get("/probe")
 if owner_response.status_code != 200 or route_calls != [os.getpid()]:
     app_module._WSGI_BACKEND_LEASE.release()
@@ -1023,8 +1123,9 @@ def test_wsgi_retains_one_lease_for_the_cached_app(monkeypatch: pytest.MonkeyPat
         lambda **kwargs: events.append("factory") or flask_app,
     )
 
-    assert app_module._get_wsgi_app() is flask_app
-    assert app_module._get_wsgi_app() is flask_app
+    assert app_module._get_wsgi_app(shutdown_callback=lambda: None) is flask_app
+    assert app_module._get_wsgi_app(shutdown_callback=lambda: None) is flask_app
+    assert app_module._stop_backend_lease_watch(flask_app, timeout=1)
     assert app_module._WSGI_BACKEND_LEASE is lease
     assert events == ["acquire", "factory"]
 

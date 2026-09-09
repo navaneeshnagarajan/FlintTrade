@@ -66,7 +66,7 @@ def _bridge_fixture(path, app=None):
     return fixture, client
 
 
-def _build_bridge(path, **kwargs):
+def _build_bridge(path, *, backend_lease_factory, **kwargs):
     from flinttrade_core.workspace import Workspace
     workspace = Workspace(path)
     workspace.initialise()
@@ -75,7 +75,7 @@ def _build_bridge(path, **kwargs):
     snapshot = read_workspace_snapshot(path)
     router = build_broker_router(fixture.registry, snapshot.as_dict()["brokers"],
         openalgo_client=client, workspace_snapshot=snapshot, workspace_path=path,
-        registry_publication_owner=fixture.owner, **kwargs)
+        registry_publication_owner=fixture.owner, **kwargs, backend_lease_proof=backend_lease_factory())
     return router, fixture
 
 
@@ -1153,6 +1153,7 @@ def test_write_only_retry_reuses_the_published_dependency_identity(
     build.assert_called_once_with(
         dependencies,
         write_admission=app.config["SAFETY"].broker_write_admission,
+        backend_lease_proof=app.config["BACKEND_LEASE_PROOF"],
     )
     assert app.extensions["flinttrade_broker_dependencies"] is dependencies
     assert app.config["BROKER_ROUTER"] is router
@@ -1455,8 +1456,8 @@ def test_no_execution_default_still_refreshes_reads_and_two_apps_never_share_own
     assert records[0].read_owner is not records[1].read_owner
 
 
-def test_build_broker_router_from_default_config() -> None:
-    router = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"])
+def test_build_broker_router_from_default_config(*, backend_lease_factory) -> None:
+    router = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"], backend_lease_proof=backend_lease_factory())
     assert isinstance(router, BrokerRouter)
     assert isinstance(router._config, RoutingConfig)
     assert isinstance(router._session_provider, AuthenticatingSessionProvider)
@@ -1465,25 +1466,25 @@ def test_build_broker_router_from_default_config() -> None:
     assert router.default_selector == "openalgo:default"
 
 
-def test_build_broker_router_forwards_write_admission_guard() -> None:
+def test_build_broker_router_forwards_write_admission_guard(*, backend_lease_factory) -> None:
     guard = MagicMock(name="write_admission")
 
     router = build_broker_router(
         BrokerRegistry(),
         default_workspace_config()["brokers"],
-        write_admission=guard,
+        write_admission=guard, backend_lease_proof=backend_lease_factory()
     )
 
     assert router._write_admission is guard
 
 
-def test_build_broker_router_invalid_config_raises() -> None:
+def test_build_broker_router_invalid_config_raises(*, backend_lease_factory) -> None:
     bad = {**default_workspace_config()["brokers"], "execution": {"default": "dhan"}}  # no colon
     with pytest.raises(RoutingConfigError):
-        build_broker_router(BrokerRegistry(), bad)
+        build_broker_router(BrokerRegistry(), bad, backend_lease_proof=backend_lease_factory())
 
 
-def test_build_broker_router_threads_account_acls() -> None:
+def test_build_broker_router_threads_account_acls(*, backend_lease_factory) -> None:
     brokers = {
         "registered": ["dhan:personal"],
         "account_acls": {"dhan": {"personal": ["nava@flinttrade.local"]}},
@@ -1497,7 +1498,7 @@ def test_build_broker_router_threads_account_acls() -> None:
         "failover": {"enabled": False, "order": []},
         "cost_aware": {"enabled": False, "tasks": []},
     }
-    router = build_broker_router(BrokerRegistry(), brokers)
+    router = build_broker_router(BrokerRegistry(), brokers, backend_lease_proof=backend_lease_factory())
     assert router._session_provider._acls == {"dhan": {"personal": ["nava@flinttrade.local"]}}
 
 
@@ -1538,16 +1539,16 @@ def test_safety_gate_prune_does_not_evict_live_marker() -> None:
     assert gate.consume("live") is False
 
 
-def test_openalgo_client_registers_bridge_adapter_and_session(tmp_path) -> None:
-    router, fixture = _build_bridge(tmp_path)
+def test_openalgo_client_registers_bridge_adapter_and_session(tmp_path, *, backend_lease_factory) -> None:
+    router, fixture = _build_bridge(tmp_path, backend_lease_factory=backend_lease_factory)
     assert "openalgo" in router._adapters
     assert type(router._adapters["openalgo"]).__name__ == "OpenAlgoAdapter"
     assert fixture.registry.snapshot_exact_state(BrokerSelector("openalgo", "default")).status == "connected"
 
 
-def test_no_openalgo_client_leaves_adapters_empty() -> None:
+def test_no_openalgo_client_leaves_adapters_empty(*, backend_lease_factory) -> None:
     # Back-compat: the create_flask_app path passes client=None in most tests.
-    router = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"])
+    router = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"], backend_lease_proof=backend_lease_factory())
     assert router._adapters == {}
 
 
@@ -1585,25 +1586,26 @@ def _all_native_brokers_cfg() -> dict:
     }
 
 
-def test_natives_stay_dormant_without_activation_checks() -> None:
+def test_natives_stay_dormant_without_activation_checks(*, backend_lease_factory) -> None:
     # Default: no native_* callables → no native adapter constructed.
-    router = build_broker_router(BrokerRegistry(), _native_brokers_cfg())
+    router = build_broker_router(BrokerRegistry(), _native_brokers_cfg(), backend_lease_proof=backend_lease_factory())
     assert router._adapters == {}
 
 
-def test_native_activates_only_when_attested_and_credentialled() -> None:
+def test_native_activates_only_when_attested_and_credentialled(*, backend_lease_factory) -> None:
     router = build_broker_router(
         BrokerRegistry(),
         _native_brokers_cfg(),
         native_attest_ok=lambda b: b in {"dhan", "upstox"},
         native_has_credentials=lambda b: b == "dhan",  # only dhan has creds
+        backend_lease_proof=backend_lease_factory(),
     )
     # dhan passes both gates; upstox is attested but has no creds → dormant.
     assert set(router._adapters) == {"dhan"}
     assert type(router._adapters["dhan"]).__name__ == "DhanAdapter"
 
 
-def test_only_connectable_natives_activate_from_registered_selectors() -> None:
+def test_only_connectable_natives_activate_from_registered_selectors(*, backend_lease_factory) -> None:
     """Boot activation follows the activation-cleared native set, not stale rows.
 
     Kotak Neo, INDmoney, and Groww are built/catalogued but still
@@ -1616,7 +1618,7 @@ def test_only_connectable_natives_activate_from_registered_selectors() -> None:
         BrokerRegistry(),
         _all_native_brokers_cfg(),
         native_attest_ok=lambda _b: True,
-        native_has_credentials=lambda _b: True,
+        native_has_credentials=lambda _b: True, backend_lease_proof=backend_lease_factory()
     )
     assert set(router._adapters) == {"dhan", "upstox"}
     assert "indmoney" not in router._adapters
@@ -1624,24 +1626,24 @@ def test_only_connectable_natives_activate_from_registered_selectors() -> None:
     assert "groww" not in router._adapters
 
 
-def test_native_activation_gates_fail_closed() -> None:
+def test_native_activation_gates_fail_closed(*, backend_lease_factory) -> None:
     router = build_broker_router(
         BrokerRegistry(),
         _native_brokers_cfg(),
         native_attest_ok=lambda _b: False,
-        native_has_credentials=lambda _b: True,
+        native_has_credentials=lambda _b: True, backend_lease_proof=backend_lease_factory()
     )
     assert router._adapters == {}
 
 
-def test_injected_adapter_wins_over_factory() -> None:
+def test_injected_adapter_wins_over_factory(*, backend_lease_factory) -> None:
     sentinel = object()
     router = build_broker_router(
         BrokerRegistry(),
         _native_brokers_cfg(),
         adapters={"dhan": sentinel},
         native_attest_ok=lambda _b: True,
-        native_has_credentials=lambda _b: True,
+        native_has_credentials=lambda _b: True, backend_lease_proof=backend_lease_factory()
     )
     # Explicit injection takes precedence; the factory does not overwrite it.
     assert router._adapters["dhan"] is sentinel
@@ -1683,7 +1685,7 @@ def test_native_activation_checks_no_vault_fails_closed() -> None:
     assert has_credentials("indmoney") is False
 
 
-def test_dhan_activates_end_to_end_when_sdk_present() -> None:
+def test_dhan_activates_end_to_end_when_sdk_present(*, backend_lease_factory) -> None:
     """Real bridge: with dhanhq installed (pin match) + creds in the vault, the
     router registers a live DhanAdapter via the activation factory.
 
@@ -1705,7 +1707,7 @@ def test_dhan_activates_end_to_end_when_sdk_present() -> None:
         BrokerRegistry(),
         _native_brokers_cfg(),
         native_attest_ok=attest_ok,
-        native_has_credentials=has_credentials,
+        native_has_credentials=has_credentials, backend_lease_proof=backend_lease_factory()
     )
     assert "dhan" in router._adapters
     assert type(router._adapters["dhan"]).__name__ == "DhanAdapter"
@@ -1715,7 +1717,7 @@ def test_dhan_activates_end_to_end_when_sdk_present() -> None:
 
 
 @pytest.mark.unit
-def test_native_adapter_kwargs_thread_local_state_provider() -> None:
+def test_native_adapter_kwargs_thread_local_state_provider(*, backend_lease_factory) -> None:
     """The §14 wiring: adapter_kwargs reaches the native constructor, so the
     journal-backed ``local_state_provider`` lands on the adapter."""
     sentinel_provider = lambda _session: None  # noqa: E731 - shape only; never called
@@ -1725,7 +1727,7 @@ def test_native_adapter_kwargs_thread_local_state_provider() -> None:
         _native_brokers_cfg(),
         native_attest_ok=lambda b: b == "dhan",
         native_has_credentials=lambda b: b == "dhan",
-        native_adapter_kwargs=lambda _b: {"local_state_provider": sentinel_provider},
+        native_adapter_kwargs=lambda _b: {"local_state_provider": sentinel_provider}, backend_lease_proof=backend_lease_factory()
     )
     assert router._adapters["dhan"]._local_state_provider is sentinel_provider
 
@@ -1768,7 +1770,7 @@ def test_native_adapter_kwargs_adds_cached_dhan_security_resolver(monkeypatch) -
 
 
 @pytest.mark.unit
-def test_on_native_activated_sink_receives_active_natives_only() -> None:
+def test_on_native_activated_sink_receives_active_natives_only(*, backend_lease_factory) -> None:
     """The sink sees exactly the ACTIVE native map — bridge excluded, injected
     natives included — so the reconciliation runner can enumerate them."""
 
@@ -1783,7 +1785,7 @@ def test_on_native_activated_sink_receives_active_natives_only() -> None:
         openalgo_client=object(),
         native_attest_ok=lambda b: b == "dhan",
         native_has_credentials=lambda b: b == "dhan",
-        on_native_activated=activated.update,
+        on_native_activated=activated.update, backend_lease_proof=backend_lease_factory()
     )
     assert set(activated) == {"dhan", "upstox"}
     assert "openalgo" not in activated  # bridge never qualifies
@@ -1791,21 +1793,21 @@ def test_on_native_activated_sink_receives_active_natives_only() -> None:
 
 
 @pytest.mark.unit
-def test_all_adapter_sink_includes_openalgo_for_reconciliation(tmp_path) -> None:
+def test_all_adapter_sink_includes_openalgo_for_reconciliation(tmp_path, *, backend_lease_factory) -> None:
     active = {}
-    router, fixture = _build_bridge(tmp_path, on_adapters_activated=active.update)
+    router, fixture = _build_bridge(tmp_path, on_adapters_activated=active.update, backend_lease_factory=backend_lease_factory)
     assert set(active) == {"openalgo"}
     assert active["openalgo"] is router._adapters["openalgo"]
 
 
 @pytest.mark.unit
-def test_on_native_activated_sink_empty_when_dormant() -> None:
+def test_on_native_activated_sink_empty_when_dormant(*, backend_lease_factory) -> None:
     activated: dict[str, object] = {}
     build_broker_router(
         BrokerRegistry(),
         _native_brokers_cfg(),
         openalgo_client=object(),
-        on_native_activated=activated.update,
+        on_native_activated=activated.update, backend_lease_proof=backend_lease_factory()
     )
     assert activated == {}
 
@@ -1982,11 +1984,11 @@ def test_configure_ditto_runtime_forwards_complete_safety_dependencies(
     }
 
 
-def test_authorise_default_actor_trust_on_first_use(tmp_path) -> None:
+def test_authorise_default_actor_trust_on_first_use(tmp_path, *, backend_lease_factory) -> None:
     """A freshly authenticated operator claims the default execution selector once."""
     from flinttrade_engine.request_context import RequestContext
 
-    router, fixture = _build_bridge(tmp_path)
+    router, fixture = _build_bridge(tmp_path, backend_lease_factory=backend_lease_factory)
     # Default execution selector is openalgo:default with an empty ACL.
     assert router._config.execution.default == "openalgo:default"
 
@@ -1999,7 +2001,7 @@ def test_authorise_default_actor_trust_on_first_use(tmp_path) -> None:
     assert router.authorise_default_actor("someone-else") is None
 
 
-def test_build_broker_router_builds_algo_tag_guard_from_config() -> None:
+def test_build_broker_router_builds_algo_tag_guard_from_config(*, backend_lease_factory) -> None:
     """workspace brokers.algo_tags builds an engine AlgoTagGuard on the router
     (G10 — algo-id relay + per-exchange per-second ceiling for algo_tag_required
     natives). Without the block the router stays untagged (retail defaults)."""
@@ -2009,17 +2011,17 @@ def test_build_broker_router_builds_algo_tag_guard_from_config() -> None:
         **default_workspace_config()["brokers"],
         "algo_tags": {"dhan": {"algo_id": "ALGO-REG-1", "max_orders_per_sec": 8}},
     }
-    router = build_broker_router(BrokerRegistry(), brokers)
+    router = build_broker_router(BrokerRegistry(), brokers, backend_lease_proof=backend_lease_factory())
     guard = router._algo_tag_guard
     assert isinstance(guard, AlgoTagGuard)
     assert guard.algo_id_for("dhan") == "ALGO-REG-1"
 
-    untagged = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"])
+    untagged = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"], backend_lease_proof=backend_lease_factory())
     assert untagged._algo_tag_guard is None
 
 
 @pytest.mark.unit
-def test_build_broker_router_malformed_algo_tags_are_dropped_not_fatal() -> None:
+def test_build_broker_router_malformed_algo_tags_are_dropped_not_fatal(*, backend_lease_factory) -> None:
     """A malformed algo_tags entry is DROPPED (loud error log), never raised —
     a bad compliance-config block must not brick broker reads/reconciliation/
     dispatch (audit finding: over-broad blast radius). The adapter/mapping
@@ -2034,12 +2036,12 @@ def test_build_broker_router_malformed_algo_tags_are_dropped_not_fatal() -> None
         {"dhan": "not-an-object"},
         {"dhan": {"algo_id": "A", "max_orders_per_sec": "not-an-int"}},
     ):
-        router = build_broker_router(BrokerRegistry(), {**base, "algo_tags": bad})
+        router = build_broker_router(BrokerRegistry(), {**base, "algo_tags": bad}, backend_lease_proof=backend_lease_factory())
         assert isinstance(router, BrokerRouter)
         assert router._algo_tag_guard is None  # the only entry was dropped
 
     mixed = {"dhan": {"algo_id": "OK", "max_orders_per_sec": 5}, "indmoney": "bad"}
-    router = build_broker_router(BrokerRegistry(), {**base, "algo_tags": mixed})
+    router = build_broker_router(BrokerRegistry(), {**base, "algo_tags": mixed}, backend_lease_proof=backend_lease_factory())
     assert isinstance(router._algo_tag_guard, AlgoTagGuard)
     assert router._algo_tag_guard.algo_id_for("dhan") == "OK"
     assert router._algo_tag_guard.algo_id_for("indmoney") is None

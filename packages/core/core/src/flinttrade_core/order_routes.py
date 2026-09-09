@@ -966,6 +966,7 @@ def _admit_and_route_live_order(
         safety_ctx = gate_order(
             typed_order,
             request_ctx,
+            backend_lease_proof=router.backend_lease_proof,
             adapter_id=adapter_id,
             account_id=account_id,
         )
@@ -1322,7 +1323,10 @@ def _gated_write_dispatch(
     safe_order = log_ref(order_id, kind="order")
 
     try:
-        safety_ctx = gate_order(canonical_order, request_ctx, adapter_id=adapter_id, account_id=account_id)
+        safety_ctx = gate_order(
+            canonical_order, request_ctx, adapter_id=adapter_id, account_id=account_id,
+            backend_lease_proof=router.backend_lease_proof,
+        )
         reservation = None
         if exposure_order is not None:
             if admission_lease is None:
@@ -2451,7 +2455,10 @@ def _gated_verb_write(
 
     canonical: dict[str, Any] = {"_op": verb, **fields}
     try:
-        safety_ctx = gate_broker_write(verb, canonical, request_ctx, adapter_id, account_id=account_id)
+        safety_ctx = gate_broker_write(
+            verb, canonical, request_ctx, adapter_id, account_id=account_id,
+            backend_lease_proof=router.backend_lease_proof,
+        )
         reservations = []
         if exposure_orders:
             if admission_lease is None or len(exposure_orders) != len(exposure_positions):

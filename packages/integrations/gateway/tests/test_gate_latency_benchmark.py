@@ -77,16 +77,16 @@ def _ctx() -> RequestContext:
 
 
 @pytest.mark.unit
-async def test_gated_order_path_overhead_under_ceiling() -> None:
+async def test_gated_order_path_overhead_under_ceiling(*, backend_lease_factory) -> None:
     """Mint + route N orders through the gate; assert mean overhead < ceiling."""
     adapter = _NoIoAdapter()
-    router = BrokerRouter({"dhan": adapter}, _session)
+    router = BrokerRouter({"dhan": adapter}, _session, backend_lease_proof=backend_lease_factory())
     ctx = _ctx()
 
     start = time.perf_counter()
     for i in range(_ITERATIONS):
         order = _order(i)
-        sc = gate_order(order, ctx, "dhan", account_id="acct-1")
+        sc = gate_order(order, ctx, "dhan", account_id="acct-1", backend_lease_proof=backend_lease_factory())
         result = await router.place_order(
             ctx, adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=sc
         )

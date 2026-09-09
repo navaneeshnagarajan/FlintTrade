@@ -48,6 +48,7 @@ from typing import Any, Protocol
 
 # Importing the app module first applies its UTF-8 stdout configuration.
 from .app import (
+    _BackendLeaseRuntimeWatch,
     _bind_runtime_emergency_dispatcher,
     _build_tick_recorder,
     _close_runtime_request_admission,
@@ -60,6 +61,7 @@ from .app import (
     _set_tick_capture_intent,
     _shutdown_rotation_scheduler,
     _start_rotation_scheduler,
+    _stop_backend_lease_watch,
     _tick_capture_enabled,
     _tick_capture_lifecycle_lock,
     _tick_capture_mode,
@@ -1531,6 +1533,8 @@ class _DesktopShutdownRecoveryOwner:
         return _external_exception_context(error)
 
     def _shutdown(self, deadline: float) -> bool:
+        if not _stop_backend_lease_watch(self.app, timeout=_remaining_shutdown_budget(deadline)):
+            return False
         app = self.app
         app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
 
@@ -2070,6 +2074,7 @@ def _serve_owned(
         )
         waitress_dispatcher.set_thread_count(8)
         bound_port = server.effective_port
+        _BackendLeaseRuntimeWatch(app, backend_lease_proof, _thread.interrupt_main).start()
 
         # Rotation is a process-owned credential lifecycle service. A desktop
         # backend is not ready until its configured 08:05 jobs are armed.
