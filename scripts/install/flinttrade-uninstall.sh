@@ -4,9 +4,10 @@
 # Ordinary uninstall removes only the shell and launch integration. The trading
 # workspace, Electron profile, managed source/toolchain, the contributor
 # source-build checkout, the pre-workspace data directories and legacy desktop
-# data are all retained. --purge lists every resolved path and requires explicit
-# confirmation before deleting them, because for an upgraded install the
-# pre-workspace directories still hold real trading state.
+# data and the stable installation identity/migration tombstones are all
+# retained. --purge lists every resolved path and requires explicit confirmation
+# before deleting them; installation lineage is the platform-default path only
+# and is removed last, after every earlier data target was removed successfully.
 #
 #   curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash
 #   curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
@@ -29,6 +30,8 @@ PURGE_COMPLETED=0
 PURGED_DATA_ANY=0
 DATA_FOUND_ANY=0
 DATA_RETAINED_ANY=0
+LINEAGE_OVERLAP_FOUND=0
+INSTALLATION_STATE_CANONICAL=""
 DATA_TARGETS=()
 SHELL_RECEIPT_DIR="$HOME/.local/state/flinttrade"
 SHELL_RECEIPT_PATH="$SHELL_RECEIPT_DIR/shell-install.receipt"
@@ -98,6 +101,14 @@ default_workspace() {
   fi
 }
 
+default_installation_state() {
+  if [ "$OS" = "Darwin" ]; then
+    printf '%s' "$HOME/Library/Application Support/flinttrade-installation"
+  else
+    printf '%s' "$HOME/.flinttrade-installation"
+  fi
+}
+
 expand_tilde() {
   case "$1" in
     "~") printf '%s' "$HOME" ;;
@@ -120,6 +131,10 @@ absolute_path() {
 }
 
 WORKSPACE_DIR="$(expand_tilde "${FLINTTRADE_WORKSPACE_DIR:-${FLINTTRADE_HOME:-$(default_workspace)}}")"
+# Ambient overrides are intentionally not deletion authority.  A custom state
+# root may be an arbitrary owner directory; only the platform default is known
+# to be installer-owned and purgeable here.
+INSTALLATION_STATE_ROOT="$(default_installation_state)"
 MANAGED_ROOT="$HOME/.flinttrade"
 SOURCE_ROOT="$MANAGED_ROOT/src"
 TOOLS_ROOT="$MANAGED_ROOT/tools"
@@ -676,6 +691,23 @@ collect_data_targets() {
   add_data_target "$MANAGED_ROOT"
   local candidate
   for candidate in "$@"; do add_data_target "$candidate"; done
+  local installation_canonical target_canonical
+  installation_canonical="$(canonical_existing_path "$INSTALLATION_STATE_ROOT")" || installation_canonical="$INSTALLATION_STATE_ROOT"
+  INSTALLATION_STATE_CANONICAL="${installation_canonical%/}"
+  if [ "${#DATA_TARGETS[@]}" -gt 0 ]; then
+    for candidate in "${DATA_TARGETS[@]}"; do
+      target_canonical="$(canonical_existing_path "$candidate")" || target_canonical="$candidate"
+      case "${target_canonical%/}/" in
+        "${installation_canonical%/}/"* ) LINEAGE_OVERLAP_FOUND=1 ;;
+      esac
+      case "${installation_canonical%/}/" in
+        "${target_canonical%/}/"* ) LINEAGE_OVERLAP_FOUND=1 ;;
+      esac
+    done
+  fi
+  # Irreversible installation lineage is retained by ordinary uninstall and
+  # removed last only after the explicit purge confirmation.
+  add_data_target "$INSTALLATION_STATE_ROOT"
   [ "${#DATA_TARGETS[@]}" -eq 0 ] || DATA_FOUND_ANY=1
 }
 
@@ -750,6 +782,23 @@ safe_purge_targets() {
     fi
     canonical="$(cd -P "$(dirname "$target")" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$(basename "$target")")" \
       || canonical="$target"
+    if [ "$LINEAGE_OVERLAP_FOUND" = "1" ]; then
+      local installation_canonical="$INSTALLATION_STATE_CANONICAL"
+      case "${canonical%/}/" in
+        "${installation_canonical%/}/"* )
+          say "Refusing to purge $target — an earlier data target overlaps installation lineage."
+          FAILED_ANY=1
+          continue
+          ;;
+      esac
+      case "${installation_canonical%/}/" in
+        "${canonical%/}/"* )
+          say "Refusing to purge $target — an earlier data target overlaps installation lineage."
+          FAILED_ANY=1
+          continue
+          ;;
+      esac
+    fi
     case "$canonical" in
       ""|"/"|"$home_canonical"|"${home_canonical%/}")
         say "Refusing to purge $target — not a FlintTrade data directory."
@@ -800,6 +849,23 @@ safe_purge_targets() {
   if [ "${#safe[@]}" -gt 0 ]; then DATA_TARGETS=("${safe[@]}"); fi
 }
 
+path_still_present() {
+  [ -e "$1" ] || [ -L "$1" ]
+}
+
+verify_purge_targets_absent() {
+  local target
+  for target in "$@"; do
+    if path_still_present "$target"; then
+      say "Keeping installation lineage because earlier data still exists at $target."
+      FAILED_ANY=1
+      DATA_RETAINED_ANY=1
+      return 1
+    fi
+  done
+  return 0
+}
+
 purge_all_data() {
   collect_data_targets "$@"
   safe_purge_targets
@@ -839,8 +905,31 @@ purge_all_data() {
     say "Purge explicitly confirmed with --yes; deleting every path listed above."
   fi
 
-  local target
-  for target in "${DATA_TARGETS[@]}"; do remove_path "$target"; done
+  local target is_lineage keep_lineage earlier_targets=()
+  for target in "${DATA_TARGETS[@]}"; do
+    is_lineage=0
+    [ "${target%/}" != "${INSTALLATION_STATE_CANONICAL%/}" ] || is_lineage=1
+    if [ "$is_lineage" = "1" ]; then
+      keep_lineage=0
+      [ "$FAILED_ANY" != "1" ] || keep_lineage=1
+      if [ "$keep_lineage" = "0" ] && [ "${#earlier_targets[@]}" -gt 0 ] \
+        && ! verify_purge_targets_absent "${earlier_targets[@]}"; then
+        keep_lineage=1
+      fi
+      if [ "$keep_lineage" = "1" ]; then
+        say "Keeping installation lineage at $target because an earlier data target could not be removed."
+        DATA_RETAINED_ANY=1
+        continue
+      fi
+    fi
+    remove_path "$target"
+    if path_still_present "$target"; then
+      say "Could not verify removal of $target; retaining installation lineage."
+      FAILED_ANY=1
+      DATA_RETAINED_ANY=1
+    fi
+    if [ "$is_lineage" != "1" ]; then earlier_targets+=("$target"); fi
+  done
   if [ "$FAILED_ANY" != "1" ]; then
     PURGE_COMPLETED=1
     PURGED_DATA_ANY=1
@@ -862,6 +951,8 @@ announce_purge_targets() {
   say "pre-workspace storage that the backend still reads: the DuckDB store, the append-only"
   say "audit chain and the encrypted broker-credential vault live there, so an upgraded"
   say "install loses real trading state here — not just a cache."
+  say "The installation identity and consumed migration tombstones are listed last and are"
+  say "retained by ordinary uninstall; confirmed purge removes that lineage last."
 }
 
 keep_notice() {
@@ -877,6 +968,7 @@ keep_notice() {
   say "models and strategies state included), any pre-workspace ~/.flinttrade"
   say "data/archive/sandbox storage (including the encrypted broker-credential vault) and any"
   say "legacy desktop storage."
+  say "The stable installation identity and consumed migration tombstones are retained too."
   say "To delete it too, re-run with --purge and confirm explicitly."
 }
 

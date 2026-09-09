@@ -570,7 +570,13 @@ def _live_option_chain(
     native_adapters = current_app.config.get("NATIVE_ADAPTERS") or {}
     connected_sessions = getattr(registry, "list_connected_adapter_sessions", None)
     if registry is not None and callable(connected_sessions):
-        for adapter_id, _account_id, session in connected_sessions():
+        from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+
+        try:
+            exact_sessions = connected_sessions()
+        except RegistrySessionUnavailable:
+            return None
+        for adapter_id, _account_id, session in exact_sessions:
             adapter = native_adapters.get(adapter_id)
             reader = getattr(adapter, "option_chain", None)
             if not callable(reader):

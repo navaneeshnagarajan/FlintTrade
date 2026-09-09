@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 
+from .broker_read_port import BalanceEvidence, BalanceSnapshot, BrokerBalanceResponseInvalid
 from .config import Settings, openalgo_rest_base_url
 from .exceptions import APIError, OpenAlgoAuthError, OpenAlgoRateLimitError
 from .models import (
@@ -599,6 +600,38 @@ class OpenAlgoClient:
         self._config_guard = threading.RLock()
         self._closing = False
         self._closed = False
+
+    def matches_workspace_openalgo(self, snapshot: Any) -> bool:
+        """Privately compare authoritative configuration without env or provider work."""
+        from .config import DEFAULT_OPENALGO_HOST, DEFAULT_OPENALGO_PORT, DEFAULT_OPENALGO_WS_PORT
+        from .workspace_migrations import WorkspaceSnapshot, legacy_openalgo_broker_projection
+
+        if type(snapshot) is not WorkspaceSnapshot or snapshot.version is None:
+            return False
+        config = legacy_openalgo_broker_projection(snapshot.as_dict())
+        if type(config) is not dict or type(config.get("api_key")) is not str or not config["api_key"].strip():
+            return False
+        try:
+            host = config.get("host", DEFAULT_OPENALGO_HOST)
+            key = config["api_key"].strip()
+            if type(host) is not str or not host.strip():
+                return False
+            ports = [config.get("port", DEFAULT_OPENALGO_PORT), config.get("ws_port", DEFAULT_OPENALGO_WS_PORT)]
+            if any(type(port) not in (str, int) or not str(port).isdigit() for port in ports):
+                return False
+            expected = Settings(openalgo_host=host.strip(), openalgo_api_key=key,
+                                openalgo_port=int(ports[0]), openalgo_ws_port=int(ports[1]))
+        except (ValueError, TypeError):
+            return False
+        with self._config_guard:
+            return (
+                self.settings.openalgo_host == expected.openalgo_host
+                and self.settings.openalgo_api_key == expected.openalgo_api_key
+                and self.settings.openalgo_port == expected.openalgo_port
+                and self.settings.openalgo_ws_port == expected.openalgo_ws_port
+                and self._base == f"{openalgo_rest_base_url(expected)}/api/v1"
+                and self._api_key == expected.openalgo_api_key
+            )
 
     def reconfigure(self, settings: Settings) -> OpenAlgoClient:
         """Atomically update endpoint and credentials without replacing this client.
@@ -1449,6 +1482,73 @@ class OpenAlgoClient:
                 extra={k: v for k, v in data.items() if k not in known},
             )
         return Fund()
+
+    async def balance_snapshot(self) -> BalanceSnapshot:
+        """Read one funds response without erasing direct/missing evidence."""
+        raw = await self._post("funds", self._body())
+
+        def record(value: object) -> dict[str, object]:
+            if type(value) is not dict or any(type(key) is not str for key in value):
+                raise BrokerBalanceResponseInvalid
+            return value
+
+        raw = record(raw)
+        data = record(self._unwrap(raw))
+
+        def number(value: object) -> float:
+            if isinstance(value, bool) or type(value) not in (int, float, str):
+                raise BrokerBalanceResponseInvalid
+            if type(value) is str and not value.strip():
+                raise BrokerBalanceResponseInvalid
+            try:
+                converted = float(value)
+            except (TypeError, ValueError, OverflowError):
+                raise BrokerBalanceResponseInvalid from None
+            if not math.isfinite(converted):
+                raise BrokerBalanceResponseInvalid
+            return converted
+
+        def selected(*names: str) -> float | None:
+            for name in names:
+                if name in data:
+                    return number(data[name])
+            return None
+
+        available = selected("availablecash", "available_balance")
+        used = selected("utiliseddebits", "usedmargin", "used_margin")
+        total_key = "totalbalance" if "totalbalance" in data else "total_balance" if "total_balance" in data else None
+        total_value = data.get(total_key) if total_key is not None else None
+        total_missing = total_value is None or (type(total_value) is str and total_value == "")
+        if total_key is not None and not total_missing:
+            total = number(total_value)
+            total_evidence = BalanceEvidence.DIRECT
+        elif available is not None and used is not None:
+            total = available + used
+            if not math.isfinite(total):
+                raise BrokerBalanceResponseInvalid
+            total_evidence = BalanceEvidence.DERIVED_FROM_DIRECT_COMPONENTS
+        else:
+            total = None
+            total_evidence = None
+        opening = None
+        for field in _OPENING_RISK_CAPITAL_FIELDS:
+            if field not in data:
+                continue
+            value = data[field]
+            if value is None or (type(value) is str and value == ""):
+                continue
+            opening = number(value)
+            break
+        return BalanceSnapshot(
+            available,
+            BalanceEvidence.DIRECT if available is not None else None,
+            used,
+            BalanceEvidence.DIRECT if used is not None else None,
+            total,
+            total_evidence,
+            opening,
+            BalanceEvidence.DIRECT if opening is not None else None,
+        )
 
     async def margin(self, positions: list[dict[str, Any]]) -> dict[str, Any]:
         """POST /api/v1/margin"""

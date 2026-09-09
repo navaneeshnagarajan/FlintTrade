@@ -165,6 +165,29 @@ def test_log_call_all_fields_stored(az: APIAnalyzer) -> None:
     assert r["response_body"]["orderid"] == "ORD001"
 
 
+def test_safe_request_summary_suppresses_request_response_and_user_values(az: APIAnalyzer) -> None:
+    """Catch classified API analysis retaining arbitrary envelope values."""
+    from flinttrade_core.request_observability import SafeRequestSummary
+
+    summary = SafeRequestSummary("/v1/services/connections/{connection_id}", "PATCH", 99, True)
+    az.log_call(
+        route="/v1/services/connections/private-id",
+        method="PATCH",
+        request_body={"opaque": "private request sentinel"},
+        response_status=500,
+        response_body={"opaque": "private response sentinel"},
+        duration_ms=8.5,
+        user_id="private actor",
+        safe_request=summary,
+    )
+    record = az.recent(limit=1)[0]
+    assert record["route"] == "/v1/services/connections/{connection_id}"
+    assert record["method"] == "PATCH"
+    assert record["request_body"] == summary.to_dict()
+    assert record["response_body"] is None
+    assert record["user_id"] is None
+
+
 # ---------------------------------------------------------------------------
 # recent()
 # ---------------------------------------------------------------------------

@@ -8,12 +8,11 @@ FlintTrade exposes two HTTP surfaces and one WebSocket channel.
 | FlintTrade backend | `http://<flinttrade-host>:5100/v1/` and `http://<flinttrade-host>:5100/api/v1/` | `/ft-api/v1/` and `/ft-api/api/v1/` | FlintTrade-specific endpoints. Blueprints mount at `/v1` *or* `/api/v1` — match the prefix the frontend uses. Operations, native brokers, and orders live under `/api/v1`. |
 | WebSocket | `ws://<openalgo-host>:8765` | `/ws` | Streaming market data (LTP, Quote, Depth). |
 
-> **WSGI prefix strip.** The FlintTrade backend mounts its blueprints at
-> `/v1/*` internally. The Vite dev proxy and the production reverse proxy
-> add the `/ft-api` prefix before forwarding to the backend, and WSGI
-> middleware strips it before URL dispatch. Routes documented below as
-> `/ft-api/v1/X` are how clients see them; routes documented as `/v1/X`
-> are the same endpoint as the backend sees them.
+> **WSGI prefix strip.** Blueprints mount at `/v1/*` *or* `/api/v1/*` —
+> match the prefix the frontend uses. The Vite dev proxy and a production
+> reverse proxy add `/ft-api` before forwarding, and WSGI middleware strips
+> that prefix before URL dispatch. A client path `/ft-api/v1/X` is `/v1/X`
+> inside the backend; `/ft-api/api/v1/X` is `/api/v1/X`. Never double-prefix.
 
 ---
 
@@ -129,71 +128,88 @@ internally blueprints are registered at `/v1/…` (or `/api/v1/…` for the
 OpenAlgo-style paths). Both shapes route to the same handler thanks to
 the WSGI prefix-strip.
 
-### Analysis (`/ft-api/v1/gex` etc.)
+### Analysis (`/api/v1/*`; Vite proxy `/ft-api/api/v1/*`)
 
-GET endpoints unless marked otherwise. Powered by `packages/services/screener/`.
+Powered by `packages/services/screener/`. The analysis blueprint mounts at
+`/api/v1`, not `/v1`. POST endpoints expect a JSON body (`symbol`,
+`exchange`, and `expiry` / `expiry_date` for option-chain tools). GET
+endpoints are marked.
 
 | Endpoint | Purpose |
 |---|---|
-| `gex` | Gamma Exposure dashboard data (alternative to the OpenAlgo passthrough; computed locally on historical chains). |
-| `volsurface` | Volatility surface across strikes and expiries. |
-| `ivsmile` | IV smile curve. |
-| `straddlepnl` | Live straddle P&L for an at-the-money pair. |
-| `oiprofile` | OI profile data. |
-| `maxpain` | Max-pain calculation. |
+| `gex` (**POST**) | Gamma Exposure dashboard data (alternative to the OpenAlgo passthrough; computed locally on historical chains). |
+| `volsurface` (**POST**) | Volatility surface across strikes and expiries. |
+| `ivsmile` (**POST**) | IV smile curve. |
+| `straddlepnl` (**POST**) | Live straddle P&L for an at-the-money pair. |
+| `oiprofile` (**POST**) | OI profile data. |
+| `maxpain` (**POST**) | Max-pain calculation. |
 | `gammadensity` (**POST**) | Gamma density surface across strikes and expiries. |
-| `screener/fii-long-short` | FII long/short ratio from participant-wise derivative positions. |
+| `screener/fii-long-short` (**GET**) | FII long/short ratio from participant-wise derivative positions. |
+| `screener/fii-dii` (**GET**) | FII/DII cash-market activity summary. |
 | `screener/arbitrage` (**POST**) | Cash-future and cross-exchange arbitrage scan. |
 | `candlestick-patterns` (**POST**) | Candlestick pattern detection over OHLCV history. |
-| `index-contribution` | Index constituent contribution decomposition. |
+| `/v1/index-contribution` (**GET**) | Index constituent contribution — `breadth_bp` at `/v1`, not `analysis_bp`. |
 
-### Gateway (`/ft-api/v1/broker/*`)
+### Legacy gateway accounts (`/v1/*`; Vite proxy `/ft-api/v1/*`)
 
-POST endpoints. Powered by `packages/integrations/gateway/`. Used by the
-canonical `/setup` wizard (`/setup-account` is a compatibility alias) and by
-the connection-status indicator.
+Source: `packages/integrations/gateway/src/flinttrade_gateway/auth.py`.
+The gateway blueprint mounts at `/v1` — there is no `/v1/broker/` segment.
+Native-broker ids are rejected here and redirected to `/api/v1/native/*`.
+Used by older OpenAlgo-bridge account flows. Catalogue and account-list
+**GET**s remain metadata reads. Every production account-authority
+**mutation** is frozen: authenticated callers receive a stable `503`
+`{error: broker_account_cutover_unavailable}` from
+`guard_broker_account_http` until Task 9D migrates the handlers and
+removes that guard atomically. The terminal still calls these routes;
+they do not create sessions. This is an accepted product decision —
+native broker UX stays down on `main` until Task 9D and Task 7C.2.
 
-| Endpoint | Purpose |
+| Endpoint | Current behaviour |
 |---|---|
-| `broker/catalog` | Enumerate every supported broker with capability flags. |
-| `broker/accounts` | List linked accounts. |
-| `broker/connect` | Create a new broker session. |
-| `broker/disconnect` | Tear down an existing session. |
-| `broker/auth/apikey` | Submit API-key + secret authentication. |
-| `broker/auth/totp` | Submit TOTP code for two-factor brokers. |
-| `broker/auth/oauth` | Initiate the OAuth flow. |
-| `broker/auth/otp` | Submit a one-time-password challenge. |
-| `broker/auth/callback` | Receive an OAuth callback. |
-| `broker/reconnect` | Re-authenticate an existing session that has expired. |
+| `GET /v1/brokers` | Enumerate catalogued brokers with capability flags. |
+| `GET /v1/accounts` | List linked (non-native) accounts (metadata only; not a restored native session). |
+| `POST /v1/accounts` | Frozen. Returns `503` until Task 9D. |
+| `DELETE /v1/accounts/<account_id>` | Frozen. Returns `503` until Task 9D. |
+| `POST /v1/auth/credentials` | Frozen. Returns `503` until Task 9D. |
+| `POST /v1/auth/otp/request` | Frozen. Returns `503` until Task 9D. |
+| `POST /v1/auth/otp/verify` | Frozen. Returns `503` until Task 9D. |
+| `POST /v1/auth/oauth/start` | Frozen. Returns `503` until Task 9D. |
+| `GET /v1/auth/oauth/callback` | Frozen before state consumption. Returns `503` until Task 9D. |
+| `POST /v1/accounts/<account_id>/reconnect` | Frozen. Returns `503` until Task 9D. |
+| `POST /v1/accounts/<account_id>/set-primary` | Frozen. Returns `503` until Task 9D. |
+| `GET /v1/rate-limits` | Read adapter rate-limit configuration. |
+| `PUT /v1/rate-limits` | Frozen. Returns `503` until Task 9D. |
 
 ### Native broker connect and reads (`/api/v1/native/*`)
 
 Source: `packages/core/core/src/flinttrade_core/native_account_routes.py`.
 
-These endpoints are the first-party native broker path used by Setup →
-Brokers and Settings → Brokers. Connect writes store credentials in the
-encrypted gateway vault, register a workspace selector, rebuild the broker
-router, and attempt login transactionally. Brokers that are built but not
-cleared for activation stay `connectable=false` while any declared
-`native_connect_blocker` remains; their connect/re-login routes return "coming
-soon" rather than creating sessions. Account and market-data reads
-require a live native session but do not create an order safety context.
-Legacy gateway `/v1` account/auth routes reject native broker ids and include
-the same `data.native_connect_blockers` payload when a catalogued native broker
-is still evidence-gated.
+These endpoints are the first-party native broker HTTP surface the terminal
+still calls from Setup → Brokers and Settings → Brokers. **They are not a working operator path
+on this unreleased line.** Account-management writes
+(POST / DELETE / PUT / PATCH, plus the GET OAuth callback) return `503`
+`broker_account_cutover_unavailable` until Task 9D. Account and market-data reads
+return `409` with zero provider calls until the Task 7C.2 / 8B
+read-port cutover onto the in-process `BrokerReadPort`. Exact broker reads
+that already exist are that in-process port, not this HTTP family and not
+terminal UX. Brokers that are built but not cleared for activation stay
+`connectable=false` while any declared `native_connect_blocker` remains.
+Legacy gateway `/v1` account/auth mutations are likewise frozen (`503`) and
+still reject native broker ids with `data.native_connect_blockers` when a
+catalogued native broker is evidence-gated.
 
-| Endpoint | Purpose |
+| Endpoint | Current behaviour |
 |---|---|
 | `native/brokers` (**GET**) | Native broker catalogue with connectability, native-connect blocker reasons, static-outbound-IP requirement, login-method schemas, OAuth/postback URLs, and MCP metadata. |
-| `native/accounts` (**GET**) | Vault-backed native account list with live session status, expiry, read-only flag, and `needs_relogin` / retryable login state. |
-| `native/accounts` (**POST**) | Direct native connect: `{adapter_id, account_id, label?, credentials, is_primary?}`. |
-| `native/oauth/start` (**POST**) | Start an OAuth/app-consent login and return the broker authorisation URL, loopback redirect URI, state, and optional postback URI. |
-| `native/oauth/callback` (**GET**) | Loopback OAuth callback that exchanges a broker `code` or Dhan `tokenId` and then runs the native connect transaction. |
-| `native/postbacks/<adapter_id>` (**POST**) | Bounded, redacted broker postback intake for diagnostics/order-update evidence; not an order execution path. |
-| `native/accounts/<adapter>/<account>/login` (**POST**) | Re-authenticate a native account, optionally with fresh credentials; stale single-use material surfaces `needs_relogin`. |
-| `native/accounts/<adapter>/<account>/<kind>` (**GET**) | Read account or market data from a live native session. Supported kinds include `funds`, `limits`, `positions`, `holdings`, `profile`, `orders`, `orderstatus`, `orderhistory`, `ordertrades`, `trades`, `ltp`, `quotes`, `quote_details`, `ohlc`, `depth`, `margin`, `scrip_master`, `holidays`, `timings`, `optiongreeks`, `history`, `expiry`, `optionchain`, `search`, and `search_scrip`. |
-| `native/accounts/<adapter>/<account>/set-primary` (**POST**) | Promote a connected, non-read-only native session to the live write default. |
-| `native/accounts/<adapter>/<account>` (**DELETE**) | Remove a native account, drop its session, delete credentials, deregister the workspace selector, and stop stale refresh state. |
+| `native/accounts` (**GET**) | Vault-backed native account list (metadata only). Not a live session refresh. |
+| `native/accounts` (**POST**) | Frozen connect. Returns `503` until Task 9D. Body shape remains `{adapter_id, account_id, label?, credentials, is_primary?}`. |
+| `native/oauth/start` (**POST**) | Frozen. Returns `503` until Task 9D. |
+| `native/oauth/callback` (**GET**) | Frozen before state consumption. Returns `503` until Task 9D. |
+| `native/postbacks/<adapter_id>` (**POST**) | Bounded, redacted broker postback intake for diagnostics/order-update evidence; not an order execution path. Not an account-mutation cutover route. |
+| `native/accounts/<adapter>/<account>/login` (**POST**) | Frozen re-authentication. Returns `503` until Task 9D. |
+| `native/accounts/<adapter>/<account>/<kind>` (**GET**) | Frozen native HTTP read. Returns `409` with zero provider calls until Task 7C.2. Documented kinds (`funds`, `limits`, `positions`, `holdings`, `profile`, `orders`, `orderstatus`, `orderhistory`, `ordertrades`, `trades`, `ltp`, `quotes`, `quote_details`, `ohlc`, `depth`, `margin`, `scrip_master`, `holidays`, `timings`, `optiongreeks`, `history`, `expiry`, `optionchain`, `search`, `search_scrip`) are the intended post-cutover surface, not a current live-session API. |
+| `native/accounts/<adapter>/<account>/set-primary` (**POST**) | Frozen. Returns `503` until Task 9D. After Task 9D this remains the write-default gate for a connected, non-read-only native session. |
+| `native/accounts/<adapter>/<account>` (**DELETE**) | Frozen removal. Returns `503` until Task 9D. |
 
 ### Broker capability metadata (`/api/v1/broker/*`, GET)
 
@@ -212,9 +228,60 @@ not silently fall back to the full catalogue. Broker-hosted MCP trade tools,
 where a broker offers them, remain external to FlintTrade's in-process
 `gate_order` / `BrokerRouter` path.
 
-### AI (`/ft-api/v1/ai/*`, `/ft-api/v1/signals/*`)
+### Service providers and connections (`/ft-api/v1/services/*`)
 
-Source: `packages/services/ai/`. GET unless noted.
+Source: `packages/core/core/src/flinttrade_core/service_provider_routes.py`,
+`service_connection_routes.py`, `service_providers.py`, and
+`service_connections.py`.
+
+This is a static, non-invoking control plane. Listing a provider or persisting
+a connection does not resolve, probe, authenticate to, or start that provider.
+
+The catalogue is composed at app startup from the AI, historical, and gateway
+contributor descriptors. Catalogue `service_kinds` values include
+`broker_execution`, `market_data_live`, `market_data_historical`, `news`,
+`llm`, `forecast`, `agent_runtime`, and `embedding`.
+
+| Endpoint | Purpose |
+|---|---|
+| `services/providers` (**GET**) | Static provider catalogue, returned as `{"status": "success", "data": {"catalogue_digest": …, "count": …, "providers": […]}}`. Requires `admin.observability.read` on a session JWT; an API-key request with no session token is treated as holding every scope. Returns 503 if the catalogue is unavailable. |
+| `services/connections` (**GET**) | List every redacted inert LLM connection. Loopback only. Session JWT with `admin.services.read`, or `X-API-Key` / Bearer API key for GET/HEAD. |
+| `services/connections` (**POST**) | Persist one inert LLM connection (`provider_id`, `label`, optional `model`, and provider-dependent `endpoint` / `auth_mode` / `credential`). Authenticated profiles require a supported `auth_mode`; host-based profiles require `endpoint`, while fixed or managed profiles reject endpoint overrides. Unauthenticated profiles reject credentials. Does not call the provider. Session JWT with `admin.services.write` required — an API key cannot mutate. |
+| `services/connections/<connection_id>` (**GET**) | One redacted connection by canonical UUID4. Same read auth as the collection. |
+| `services/connections/<connection_id>` (**PATCH**) | Update label / model / endpoint / auth_mode (and optional credential rotation). `provider_id` is immutable. Same write auth as create. |
+| `services/connections/<connection_id>` (**DELETE**) | Delete one inert connection. Same write auth as create. JSON body must be an empty object. |
+
+Connection reads and writes are loopback-only. Non-loopback peers receive 403
+`forbidden` before route dispatch. Mutations require `If-Match` (collection
+ETag) and `Idempotency-Key` (UUID4); missing `If-Match` is 428
+`connection_revision_required`. Mutation endpoints share a 10-per-minute
+limit. Individual redacted connection objects include `schema_version`,
+`provider_id`, `connection_id`, `label`, `model`, `endpoint`, `auth_mode`,
+`credential_configured`, `created_at`, and `updated_at` — never the secret
+material. The collection read wraps those objects in `connections`; a delete
+returns only `{"deleted": true}`. Every service-connection-family response is
+`Cache-Control: no-store`.
+
+The in-process `BrokerReadPort` (quotes, depth, history, account books, and
+related exact reads) is not this HTTP surface and is not terminal UX. Native
+HTTP reads stay `409` until Task 7C.2 migrates callers onto that port. See
+[ARCHITECTURE.md](ARCHITECTURE.md#broker-reads-versus-gated-writes).
+
+### News (`/api/v1/news`)
+
+Source: `packages/core/core/src/flinttrade_core/operations_routes.py`. The
+operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
+`/ft-api/api/v1/news`. The terminal News widget calls this route only.
+
+| Endpoint | Purpose |
+|---|---|
+| `news` (**GET**) | Server-side fetch of the static RSS publisher profiles (MoneyControl, ET Markets, LiveMint). There is no browser-side RSS or CORS-proxy fallback. |
+
+### AI (`/api/v1/ai/*`, `/api/v1/signals/*`; Vite proxy `/ft-api/api/v1/…`)
+
+Source: `packages/services/ai/`. Blueprints mount at `/api/v1`. GET unless
+noted. Managed local inference (`/v1/ai/local-runtime`) is the exception —
+that blueprint stays under `/v1`.
 
 | Endpoint | Purpose |
 |---|---|
@@ -276,9 +343,10 @@ Native virtual-capital paper trading. Source: `packages/core/data/src/flinttrade
 | `sandbox/reset` (**POST**) | Clear all paper data (returns a backup). |
 | `sandbox/export` (**GET**) · `sandbox/import` (**POST**) | Export / import sandbox state. |
 
-### Strategies (`/ft-api/v1/strategies/*`)
+### Strategies (`/api/v1/strategies/*`; Vite proxy `/ft-api/api/v1/strategies/*`)
 
-Source: `packages/services/engine/src/flinttrade_engine/strategy_routes.py`. Backed by the
+Source: `packages/services/engine/src/flinttrade_engine/strategy_routes.py`.
+The blueprint mounts at `/api/v1/strategies`. Backed by the
 `STRATEGY_RUNNER` + `CRON_SCHEDULER` wired at app creation.
 
 | Endpoint | Purpose |
@@ -321,12 +389,15 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 
 | Endpoint | Purpose |
 |---|---|
-| `auth/login` | Sign in with username + password (argon2id-hashed) and receive a JWT. |
-| `auth/logout` | Revoke the current JWT by `jti`. |
-| `auth/mode` | Switch mode (Explore / Practice / Live) — issues a fresh JWT with the new mode claim and revokes the old `jti`. |
-| `auth/me` | Decode the current JWT and return user info. |
-| `auth/setup-2fa` | Enrol TOTP for the FlintTrade login (separate from broker TOTP). |
-| `auth/verify-2fa` | Verify a TOTP code during login. |
+| `GET auth/status` | Whether the operator account exists and whether TOTP / PIN are configured. |
+| `POST auth/setup` | First-run enrolment. Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri` plus backup codes and an Explore JWT. It does not accept a caller-supplied TOTP secret. |
+| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Body `{ "password" }`. |
+| `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret (password re-confirm). |
+| `POST auth/login` | Sign in with password and `totp_code` (argon2id-hashed password). Issues a JWT. |
+| `POST auth/pin` | Re-authenticate with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin", "mode"? }`. `mode: "live"` mints a Live JWT with `live_mode_unlocked=true`. There is no `/auth/me`. |
+| `POST auth/pin/set` | Set or change the PIN (password re-confirm). Requires an existing session JWT. |
+| `POST auth/mode` | **Downgrade only** to `practice` or `explore`. Requires an existing session JWT. Issues a fresh JWT and revokes the old `jti`. Live upgrades must use `POST /v1/auth/pin`. |
+| `POST auth/logout` | Revoke the current JWT by `jti`. Requires an existing session JWT. |
 
 ### Monitoring And Observability
 
@@ -347,10 +418,12 @@ The terminal has two development proxy namespaces:
 | `/api/v1/latency/stats` | Per-broker order latency percentiles. Fed by the gated order dispatch, which records each order's round-trip latency. |
 | `/api/v1/latency/recent` | Recent latency records. |
 | `/api/v1/reconciliation/outcomes` | Unresolved broker-write outcomes, including the exact selector, business date, non-secret persisted intent, fresh-snapshot evidence and any retryable `PENDING_AUDIT` or `PENDING_ROUTER_CLEAR` decision. Requires an authenticated session with `admin.observability.read`; results and remaining-outcome counts are filtered through the current router's account ACL. |
-| `/api/v1/reconciliation/outcomes/<attempt_id>/resolve` (**POST**) | Record `confirmed_applied`, `confirmed_not_applied`, or basket-only `confirmed_partial` after broker verification. Requires an authenticated, PIN-unlocked Live JWT, current-router selector ACL, exact `CONFIRM <APPLIED\|NOT_APPLIED\|PARTIAL> <broker>:<account>:<attempt>` confirmation, a newly adopted exact-selector reconciliation generation, and a durable hash-chained audit receipt. Snapshots are monotonic; same-time conflicts and malformed reports fail closed, and historical observations remain evidence. Applied placement IDs must be first observed after invocation and match every persisted material identity field; basket requests map applied IDs to `broker_order_item_indexes` and partition all remaining children in `not_applied_item_indexes`. Modify and cancel recovery require operation-specific evidence. A `PENDING_AUDIT` retry requires newer evidence, archives the prior revision and receives a new resolution ID; a `PENDING_ROUTER_CLEAR` retry resumes the committed decision without another broker read. Success and structured-error responses carry the exact attempt and canonical decision; the terminal runtime-validates identity, status and primitive types before updating state. Ambiguous and unsupported cases remain blocked; this route performs no broker write. |
+| `/api/v1/reconciliation/outcomes/<attempt_id>/resolve` (**POST**) | Record `confirmed_applied`, `confirmed_not_applied`, or basket-only `confirmed_partial` after broker verification. Requires an authenticated, PIN-unlocked Live JWT, session scope `admin.observability.run`, current-router selector ACL, exact `CONFIRM <APPLIED\|NOT_APPLIED\|PARTIAL> <broker>:<account>:<attempt>` confirmation, a newly adopted exact-selector reconciliation generation, and a durable hash-chained audit receipt. Snapshots are monotonic; same-time conflicts and malformed reports fail closed, and historical observations remain evidence. Applied placement IDs must be first observed after invocation and match every persisted material identity field; basket requests map applied IDs to `broker_order_item_indexes` and partition all remaining children in `not_applied_item_indexes`. Modify and cancel recovery require operation-specific evidence. A `PENDING_AUDIT` retry requires newer evidence, archives the prior revision and receives a new resolution ID; a `PENDING_ROUTER_CLEAR` retry resumes the committed decision without another broker read. Success and structured-error responses carry the exact attempt and canonical decision; the terminal runtime-validates identity, status and primitive types before updating state. Ambiguous and unsupported cases remain blocked; this route performs no broker write. |
 | `/health`, `/health/detail`, `/healthz`, `/readyz`, `/api/v1/ping` | Process health and compatibility probes. |
 | `/v1/admin/system` | CPU, memory, disk, network, uptime, and process metrics for the Admin system panel. |
-| `/v1/audit/*`, `/v1/activity/*`, `/v1/operations/audit/logs` | Scoped audit/activity views; admin audit endpoints require `admin.audit.read`. |
+| `/v1/audit/*` | Scoped audit trail (`admin.audit.read` where required). |
+| `/api/v1/admin/activity` | Operator activity feed. |
+| `/api/v1/audit/logs` | Audit-log read on the operations blueprint (not `/v1/operations/…`). |
 
 ### Errors (`/ft-api/v1/errors`, `/ft-api/v1/changelog`)
 
@@ -429,10 +502,12 @@ The server responds with `{"status":"ok"}` on success.
 
 ### Heartbeat
 
-The client sends a `ping` frame every 30 seconds and expects a `pong`
-within five seconds. The FlintTrade client (`openalgo_client.py`)
-auto-reconnects with exponential back-off if either side stops
-responding.
+The terminal WebSocket client
+(`packages/apps/terminal/src/services/websocket.ts`) sends a `ping`
+every 30 seconds and treats the connection as dead if no `pong` arrives
+within **10 seconds**, then reconnects with exponential back-off. The
+Python `OpenAlgoClient` is REST-only and does not implement this
+heartbeat.
 
 ---
 
@@ -440,8 +515,27 @@ responding.
 
 ### JWT (FlintTrade backend)
 
-Every `/ft-api/v1/*` endpoint (except `/auth/login` and `/health`)
-requires a Bearer token in the `Authorization` header:
+`require_auth` accepts a session JWT **or** an `X-API-Key` header
+(`FLINTTRADE_API_KEY`, with `OPENALGO_API_KEY` as a compatibility
+fallback). When neither key is configured, loopback-only requests are
+allowed so a fresh install can reach Setup and sandbox reads. Broker
+account-management writes still require the operator's session JWT.
+
+`/v1/auth/*` is exempt from the global API-key check so login and first-run
+setup can run without `X-API-Key`. That is not session-free auth: `POST
+/v1/auth/pin`, `/pin/set`, `/mode`, and `/logout` still decode an existing
+session JWT and return 401 without one. Truly unauthenticated prefixes
+include `/v1/auth/setup`, `/v1/auth/login`, `/v1/auth/status`,
+`/v1/errors`, `/api/v1/errors`, `/v1/changelog`, `/api/v1/ping`, and the
+other entries in `_PUBLIC_V1_PREFIXES` in `app.py`.
+
+When an API key is configured, the unauthenticated health surfaces are
+`GET /api/v1/health` (`health_detail.health_aggregated`) and
+`GET /api/v1/ping` (listed in `_PUBLIC_V1_PREFIXES`). `/health`,
+`/health/detail`, `/healthz`, and `/readyz` then return 401 unless a
+session JWT or API key is supplied — do not point Kubernetes or
+load-balancer probes at those four paths. Coverage is not limited to
+`/ft-api/v1/*` — many operator routes live under `/api/v1`.
 
 ```
 Authorization: Bearer <jwt>
@@ -456,6 +550,7 @@ The JWT carries three claims you care about:
 | `sub` | User identifier. |
 | `exp` | Expiry timestamp. **Every token expires at 8 AM IST the next day.** Refresh by signing in again. |
 | `mode` | One of `explore`, `practice`, `live`. Server-enforced on every order path. |
+| `live_mode_unlocked` | `true` only after `POST /v1/auth/pin` with `mode: "live"`. Required for live order paths. |
 
 A `jti` (JWT ID) is included so the server can revoke individual tokens
 when the user logs out or switches mode. The revocation blocklist lives
@@ -471,8 +566,10 @@ desktop/dev install can reach read-only setup and sandbox endpoints. Broker
 account-management **writes** (connect/remove/re-authenticate a broker,
 credential capture, OAuth start, rate-limit and rotation config) additionally
 require the operator's logged-in session JWT — the loopback allowance alone is
-not sufficient for them. The PIN quick-unlock likewise requires an existing
-session (the PIN is a re-authentication factor, never a standalone login).
+not sufficient for them. After that JWT check, production mutations still
+return `503` `broker_account_cutover_unavailable` until Task 9D. The PIN
+quick-unlock likewise requires an existing session (the PIN is a
+re-authentication factor, never a standalone login).
 
 The OpenAlgo-compatible passthrough still uses OpenAlgo's own API key. The app
 reads that key from Setup/Settings-backed workspace config first, with
@@ -509,15 +606,16 @@ the guard returns one of three verdicts:
 |---|---|
 | `explore` | Reject order placement with HTTP 403. Explore is for reading, learning, and demo data only. |
 | `practice` | Route supported single-leg order flows to FlintTrade's native `SandboxEngine`; never touch OpenAlgo or a broker. Advanced executor-direct routes that do not yet have sandbox parity fail closed with `practice_unsupported`. |
-| `live` | Require a JWT with `live_mode_unlocked=true`. The core `/orders/place`, modify, and cancel paths go through the gated `BrokerRouter`; remaining legacy-compatible live actions forward to the configured OpenAlgo-compatible endpoint until native parity is complete. |
+| `live` | Require a JWT with `live_mode_unlocked=true`. The core `/orders/place`, modify, cancel, and `cancel-all` paths go through the gated `BrokerRouter`. Other legacy write verbs (`open-position`, `close-position`, and similar) return HTTP 501 until they have a gated `BrokerRouter` verb — they do not forward ungated to OpenAlgo. |
 
-Mode switching is a deliberate, audited step. `/ft-api/v1/auth/mode`
-issues a fresh JWT with the new mode and revokes the previous `jti`,
-so the old token cannot be replayed.
+`POST /v1/auth/mode` issues a fresh JWT and revokes the previous `jti`,
+but it accepts **only** downgrades to `practice` or `explore`. Upgrading
+to Live is `POST /v1/auth/pin` with the 6-digit PIN (`mode: "live"`).
+There is no `/auth/mode {mode:live}` shortcut.
 
 Authoritative coverage: `packages/core/core/tests/test_order_routes.py` asserts
-Explore rejection, Practice sandbox routing, and Live gate/forward behaviour.
-Engine routes that bypass the core order proxy use
+Explore rejection, Practice sandbox routing, and Live gate / fail-closed
+behaviour. Engine routes that bypass the core order proxy use
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.
 
 ---
@@ -669,34 +767,30 @@ containing LTP, OI, volume, IV, and Greeks.
 ### 7.5 Compute Gamma Exposure (FlintTrade-side)
 
 ```bash
-curl "http://127.0.0.1:5100/ft-api/v1/gex?symbol=NIFTY&expiry=2026-05-28" \
-  -H "Authorization: Bearer $FLINTTRADE_JWT"
+curl -X POST http://127.0.0.1:5100/api/v1/gex \
+  -H "Authorization: Bearer $FLINTTRADE_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"NIFTY","exchange":"NFO","expiry":"28MAY26"}'
 ```
 
 ```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:5100/ft-api/v1/gex?symbol=NIFTY&expiry=2026-05-28" -Headers @{ Authorization = "Bearer $env:FLINTTRADE_JWT" }
-```
-
-Response:
-
-```json
-{
-  "status": "success",
-  "data": {
-    "symbol": "NIFTY",
-    "expiry": "2026-05-28",
-    "spot": 24850.55,
-    "gex_total": 1.24e9,
-    "gex_by_strike": [
-      { "strike": 24700, "gex": -3.1e8 },
-      { "strike": 24800, "gex":  4.8e8 },
-      { "strike": 24900, "gex":  9.4e8 },
-      { "strike": 25000, "gex": -2.3e8 }
-    ],
-    "zero_gamma": 24820.5
-  }
+$params = @{
+  Method      = "Post"
+  Uri         = "http://127.0.0.1:5100/api/v1/gex"
+  Headers     = @{ Authorization = "Bearer $env:FLINTTRADE_JWT" }
+  ContentType = "application/json"
+  Body        = '{"symbol":"NIFTY","exchange":"NFO","expiry":"28MAY26"}'
 }
+Invoke-RestMethod @params
 ```
+
+Successful responses include `status`, `symbol`, `exchange`, `expiry`,
+`spot`, `lot_size`, `is_sample_data`, and a `data` object with
+`underlying`, `spot_price`, `atm_strike`, `strikes`, `net_gex`,
+`total_call_gex`, `total_put_gex`, `dealer_zone`, and
+`gamma_flip_strike` (the last is `null` unless a true flip level was
+computed). Via the Vite proxy the same route is
+`POST /ft-api/api/v1/gex`.
 
 ---
 
@@ -713,20 +807,27 @@ Every endpoint returns one of two shapes.
 **Error:**
 
 ```json
-{ "status": "error", "message": "Human-readable explanation.", "code": "ENUM_CODE" }
+{ "status": "error", "message": "Human-readable explanation.", "code": "optional_code" }
 ```
 
-Common error codes:
+Most handlers return only `status` + `message`. The core
+`/api/v1/orders/*` proxy is message-only: Explore is HTTP 403 with
+"Orders are not available in Explore mode…", and a Live JWT without PIN
+unlock is HTTP 403 with "Live mode not unlocked — verify PIN first". A
+`code` field is emitted on `mode_guard`-decorated engine routes (brackets
+and other executor-direct paths), not on that core proxy:
 
-| Code | Meaning |
+| Code or status | Meaning |
 |---|---|
-| `AUTH_TOKEN_EXPIRED` | JWT past its `exp`. Sign in again. |
-| `AUTH_TOKEN_REVOKED` | `jti` is on the revocation list. |
-| `MODE_NOT_ALLOWED` | Caller tried a live action while in Explore. |
-| `RATE_LIMIT_EXCEEDED` | Request rate exceeded the bucket for this category. |
-| `BROKER_SESSION_EXPIRED` | OpenAlgo says the broker session is gone. Re-authenticate at the OpenAlgo dashboard. |
-| `SAFETY_LAYER_BLOCK` | One of the 5 safety layers rejected the order. The `message` field names the layer. |
-| `VALIDATION_ERROR` | Request body failed schema validation. |
+| `mode_blocked` | Explore (or another blocked mode) tried a `mode_guard` order-capable action — HTTP 403. |
+| `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
+| `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true` (PIN unlock). |
+| HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |
+| Safety `message` | A safety layer rejected the order; the message names the layer. There is no `SAFETY_LAYER_BLOCK` code. |
+
+Auth failures are typically HTTP 401 with a `message` (expired, revoked,
+or missing token). Broker-session expiry arrives as the upstream
+OpenAlgo/broker error text, not a FlintTrade enum.
 
 ---
 

@@ -70,7 +70,7 @@ def create_backup_blueprint(
     Returns:
         Configured Flask :class:`~flask.Blueprint`.
     """
-    from flinttrade_core.backup import BackupError, WorkspaceBackup  # noqa: PLC0415
+    from flinttrade_core.backup import BackupError, CoordinatedRestoreUnavailable, WorkspaceBackup  # noqa: PLC0415
 
     bp = Blueprint("backup_admin", __name__, url_prefix="/v1/admin")
 
@@ -115,7 +115,6 @@ def create_backup_blueprint(
             from datetime import datetime  # noqa: PLC0415
 
             ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-            backup_dir.mkdir(parents=True, exist_ok=True)
             output_path = backup_dir / f"flint_backup_{ts}.tar.gz"
 
         try:
@@ -132,6 +131,8 @@ def create_backup_blueprint(
                     "size_mb": size_mb,
                 }
             )
+        except CoordinatedRestoreUnavailable as exc:
+            return jsonify({"status": "error", "code": exc.code, "message": exc.code}), 503
         except BackupError as exc:
             logger.warning("Workspace backup creation failed: %s", exc.message)
             return jsonify({"status": "error", "message": "Backup creation failed"}), 500  # type: ignore[return-value]
@@ -178,6 +179,8 @@ def create_backup_blueprint(
                 backup_path, target_dir=target_dir, force=force
             )
             return jsonify({"status": "ok", **result})  # type: ignore[return-value]
+        except CoordinatedRestoreUnavailable as exc:
+            return jsonify({"status": "error", "code": exc.code, "message": exc.code}), 503
         except BackupError as exc:
             logger.warning("Workspace backup restore failed: %s", exc.message)
             return jsonify({"status": "error", "message": "Backup restore failed"}), 500  # type: ignore[return-value]

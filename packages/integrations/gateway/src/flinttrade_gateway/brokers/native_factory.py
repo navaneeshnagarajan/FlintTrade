@@ -23,25 +23,44 @@ unit-testable without any broker SDK installed.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Callable
 
 from flinttrade_gateway.adapter import BROKER_CATALOG
+from flinttrade_gateway.capabilities import Capabilities
 
 from ._base import BrokerAdapter
-from .dhan import DhanAdapter
-from .groww import GrowwAdapter
-from .indmoney import IndMoneyAdapter
-from .kotakneo import KotakNeoAdapter
-from .upstox import UpstoxAdapter
+from .dhan import DHAN_CAPABILITIES, DhanAdapter
+from .groww import GROWW_CAPABILITIES, GrowwAdapter
+from .indmoney import INDMONEY_CAPABILITIES, IndMoneyAdapter
+from .kotakneo import KOTAKNEO_CAPABILITIES, KotakNeoAdapter
+from .upstox import UPSTOX_CAPABILITIES, UpstoxAdapter
+
+
+@dataclass(frozen=True, slots=True)
+class NativeAdapterSpec:
+    """Static native adapter identity and its authoritative capabilities."""
+
+    adapter_class: type[BrokerAdapter]
+    capabilities: Capabilities
+
+
+NATIVE_ADAPTER_SPECS: MappingProxyType[str, NativeAdapterSpec] = MappingProxyType(
+    {
+        "dhan": NativeAdapterSpec(DhanAdapter, DHAN_CAPABILITIES),
+        "upstox": NativeAdapterSpec(UpstoxAdapter, UPSTOX_CAPABILITIES),
+        "kotakneo": NativeAdapterSpec(KotakNeoAdapter, KOTAKNEO_CAPABILITIES),
+        "indmoney": NativeAdapterSpec(IndMoneyAdapter, INDMONEY_CAPABILITIES),
+        "groww": NativeAdapterSpec(GrowwAdapter, GROWW_CAPABILITIES),
+    }
+)
 
 # broker_id -> native adapter class. ``openalgo`` is intentionally absent: it is
-# the bridge adapter, wired separately in ``build_broker_router``.
+# the bridge adapter, wired separately in ``build_broker_router``. This stays
+# mutable because the emergency-planner gate test deliberately monkeypatches it.
 NATIVE_ADAPTER_CLASSES: dict[str, type[BrokerAdapter]] = {
-    "dhan": DhanAdapter,
-    "upstox": UpstoxAdapter,
-    "kotakneo": KotakNeoAdapter,
-    "indmoney": IndMoneyAdapter,
-    "groww": GrowwAdapter,
+    broker_id: spec.adapter_class for broker_id, spec in NATIVE_ADAPTER_SPECS.items()
 }
 
 # broker_id -> the ``brokers.lock`` SDK pin name that gates native activation.

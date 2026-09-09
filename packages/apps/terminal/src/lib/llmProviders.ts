@@ -1,10 +1,12 @@
-/**
- * llmProviders — shared LLM provider configuration.
- * Used by LLMSection (Settings) and LlmStep (setup wizard).
- */
+/** Shared UI projections of generated, canonical LLM provider profiles. */
+
+import { LLM_PROVIDER_PROFILES } from "@/generated/serviceProviders";
+import type { LlmProviderId } from "@/generated/serviceProviders";
+
+export type { LlmProviderId } from "@/generated/serviceProviders";
 
 export interface LLMProviderConfig {
-  id: string;
+  id: LlmProviderId | typeof CLAUDE_CODE_OAUTH_PROVIDER;
   name: string;
   requiresApiKey: boolean;
   requiresHost: boolean;
@@ -16,25 +18,33 @@ export type LlmAuthMode = "api-key" | "claude-code-oauth";
 
 export const CLAUDE_CODE_OAUTH_PROVIDER = "claude-code-oauth";
 
-export const LLM_PROVIDERS: readonly LLMProviderConfig[] = [
-  { id: "ollama",     name: "Ollama (Managed)", requiresApiKey: false, requiresHost: false, defaultModel: "qwen3:8b"                             },
-  { id: "hermes",     name: "Hermes (Nous)",  requiresApiKey: false, requiresHost: true,  defaultModel: "hermes-3"                             },
-  { id: "openai",     name: "OpenAI",         requiresApiKey: true,  requiresHost: false, defaultModel: "gpt-4o-mini"                          },
-  { id: "anthropic",  name: "Anthropic",      requiresApiKey: true,  requiresHost: false, defaultModel: "claude-3-5-haiku-20241022"            },
-  // This is a UI auth choice over the Anthropic provider, not a backend provider.
-  { id: CLAUDE_CODE_OAUTH_PROVIDER, name: "Claude Code (OAuth)", requiresApiKey: true, requiresHost: false, defaultModel: "claude-3-5-haiku-20241022" },
-  { id: "gemini",     name: "Google Gemini",  requiresApiKey: true,  requiresHost: false, defaultModel: "gemini-2.0-flash"                      },
-  { id: "deepseek",   name: "DeepSeek",       requiresApiKey: true,  requiresHost: false, defaultModel: "deepseek-chat"                         },
-  { id: "groq",       name: "Groq",           requiresApiKey: true,  requiresHost: false, defaultModel: "llama-3.3-70b-versatile"              },
-  { id: "grok",       name: "Grok (xAI)",     requiresApiKey: true,  requiresHost: false, defaultModel: "grok-3-mini"                           },
-  { id: "mistral",    name: "Mistral",        requiresApiKey: true,  requiresHost: false, defaultModel: "mistral-small-latest"                 },
-  { id: "cerebras",   name: "Cerebras",       requiresApiKey: true,  requiresHost: false, defaultModel: "llama-3.3-70b"                        },
-  { id: "together",   name: "Together AI",    requiresApiKey: true,  requiresHost: false, defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo" },
-  { id: "openrouter", name: "OpenRouter",     requiresApiKey: true,  requiresHost: false, defaultModel: "openai/gpt-4o-mini"                   },
-  { id: "custom",     name: "Custom Endpoint",requiresApiKey: true,  requiresHost: true,  defaultModel: ""                                      },
-] as const;
+function requiresApiKey(profile: (typeof LLM_PROVIDER_PROFILES)[number]): boolean {
+  return (profile.authModes as readonly string[]).includes("api_key");
+}
 
-export const LOCAL_PROVIDERS = new Set(["ollama", "hermes"]);
+export const LLM_PROVIDERS: readonly LLMProviderConfig[] = [
+  ...LLM_PROVIDER_PROFILES.map((profile) => ({
+    id: profile.providerId,
+    name: profile.displayName,
+    requiresApiKey: requiresApiKey(profile),
+    requiresHost: profile.requiresHost,
+    defaultHost: profile.defaultHost || undefined,
+    defaultModel: profile.defaultModel,
+  })),
+  {
+    id: CLAUDE_CODE_OAUTH_PROVIDER,
+    name: "Claude Code (OAuth)",
+    requiresApiKey: true,
+    requiresHost: false,
+    defaultModel: LLM_PROVIDER_PROFILES.find((profile) => profile.providerId === "anthropic")?.defaultModel ?? "",
+  },
+];
+
+export const LOCAL_PROVIDERS = new Set<string>(
+  LLM_PROVIDER_PROFILES
+    .filter((profile) => profile.managedRuntime || (profile.requiresHost && !requiresApiKey(profile)))
+    .map((profile) => profile.providerId),
+);
 
 export function normaliseLlmHost(provider: string, host: string | null | undefined): string {
   return provider.trim().toLowerCase() === "ollama" ? "" : String(host ?? "");

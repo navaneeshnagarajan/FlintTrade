@@ -11,7 +11,7 @@ dependencies = [
     "flinttrade-indicators",
     "numpy>=2.5.2",
     "pandas>=2.0.0",
-    "pydantic>=2.0",
+    "pydantic>=2.13.5",
     "flask>=3.0",
     "scipy>=1.18.1",
     "quantstats>=0.0.62",

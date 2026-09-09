@@ -350,7 +350,7 @@ site serves — see [`scripts/install/`](../scripts/install/).
 
 ## Build and verify locally
 
-Shell development requires Git and Node 22.12 or newer. Use the repository's
+Shell development requires Git and Node 22.22.2 or newer. Use the repository's
 pinned pnpm 10.34.5; Rust is needed only for the optional `core/ticks` package,
 not for Electron packaging.
 

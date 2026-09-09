@@ -9,6 +9,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   symlinkSync,
@@ -74,7 +75,7 @@ describe("packaged bootstrap entrypoints", () => {
   it.runIf(process.platform !== "win32")(
     "rebuilds a validated POSIX virtual environment without executing its old contents",
     () => {
-      const root = mkdtempSync(path.join(tmpdir(), "flinttrade-bootstrap-entrypoint-"));
+      const root = realpathSync(mkdtempSync(path.join(tmpdir(), "flinttrade-bootstrap-entrypoint-")));
       try {
         const poisonedUvTarget = path.join(root, "outside-uv-target");
         mkdirSync(poisonedUvTarget);
@@ -283,7 +284,7 @@ exit 0
   it.runIf(process.platform === "win32")(
     "rebuilds a validated Windows virtual environment without executing its old contents",
     async () => {
-      const root = mkdtempSync(path.join(tmpdir(), "flinttrade-bootstrap-entrypoint-"));
+      const root = realpathSync(mkdtempSync(path.join(tmpdir(), "flinttrade-bootstrap-entrypoint-")));
       let lockedNestedExecutableProcess: ReturnType<typeof spawn> | undefined;
       try {
         const poisonedUvTarget = path.join(root, "outside-uv-target");
@@ -730,7 +731,7 @@ exit /b 0
   ] as const)(
     "refuses an unsafe %s virtual environment before invoking managed tools",
     (scenario) => {
-      const root = mkdtempSync(path.join(tmpdir(), "flinttrade-bootstrap-linked-venv-"));
+      const root = realpathSync(mkdtempSync(path.join(tmpdir(), "flinttrade-bootstrap-linked-venv-")));
       try {
         const candidate = path.join(root, "candidate.[brackets]");
         const outside = path.join(root, "outside");
@@ -1049,7 +1050,7 @@ exit /b 0
   );
 
   it("refuses a managed Python link escape created during a fresh install before creating the venv", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "flinttrade-bootstrap-python-postcheck-"));
+    const root = realpathSync(mkdtempSync(path.join(tmpdir(), "flinttrade-bootstrap-python-postcheck-")));
     try {
       const candidate = path.join(root, "candidate");
       const outside = path.join(root, "outside-python");

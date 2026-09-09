@@ -48,6 +48,11 @@ def client(tmp_path, monkeypatch):
 
 
 class TestBackupCreate:
+    def test_authority_backup_returns_stable_503(self, client):
+        response = client.post("/v1/admin/backup/create", json={"include_credentials": True})
+        assert response.status_code == 503
+        assert response.get_json()["code"] == "coordinated_restore_unavailable"
+
     def test_create_backup_success(self, client, tmp_path) -> None:
         """Successful backup creation returns path and size_mb.
 
@@ -109,6 +114,14 @@ class TestBackupCreate:
 
 
 class TestBackupRestore:
+    def test_active_restore_returns_stable_503(self, client, tmp_path):
+        archive = tmp_path / "home" / "flint-backups" / "ordinary.tar.gz"
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        archive.write_bytes(b"archive must not be opened")
+        response = client.post("/v1/admin/backup/restore", json={"path": "ordinary.tar.gz", "force": True})
+        assert response.status_code == 503
+        assert response.get_json()["code"] == "coordinated_restore_unavailable"
+
     def test_restore_missing_path_returns_400(self, client) -> None:
         """Restore without a path field returns HTTP 400.
 

@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 import pytest
 
 from flinttrade_ai.llm_client import (
+    _PROVIDER_API_KEY_ENV,
     _PROVIDER_URLS,
     _environment_only_config,
     LLMClient,
@@ -21,6 +22,7 @@ from flinttrade_ai.llm_client import (
     LLMProvider,
     resolve_endpoint,
 )
+from flinttrade_core.llm_provider_profiles import LLM_PROVIDER_PROFILES, LLMProvider as CoreLLMProvider
 
 pytestmark = pytest.mark.unit
 
@@ -45,6 +47,18 @@ def _owned_managed_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_hermes_is_a_first_class_provider():
     assert LLMProvider.HERMES.value == "hermes"
     assert "hermes" in _PROVIDER_URLS
+
+
+def test_llm_client_reexports_the_core_provider_enum_and_profile_maps() -> None:
+    assert LLMProvider is CoreLLMProvider
+    assert _PROVIDER_URLS == {
+        profile.provider_id: profile.endpoint_template for profile in LLM_PROVIDER_PROFILES
+    }
+    assert _PROVIDER_API_KEY_ENV == {
+        profile.provider_id: profile.api_key_env
+        for profile in LLM_PROVIDER_PROFILES
+        if profile.api_key_env
+    }
 
 
 def test_hermes_resolves_to_a_host_based_openai_compatible_url():
@@ -101,9 +115,10 @@ def test_resolve_endpoint_cloud_provider_ignores_host():
 
 
 def test_resolve_endpoint_edge_cases():
-    # Custom and unknown providers retain operator-supplied OpenAI-compatible
-    # endpoints; managed Ollama is admitted through its runtime owner instead.
-    assert resolve_endpoint("somethingnew", "http://h:9999") == "http://h:9999/v1/chat/completions"
+    # Custom retains the operator-supplied OpenAI-compatible endpoint. Unknown
+    # names must fail closed so a typo cannot bypass the provider catalogue.
+    with pytest.raises(ValueError, match="Unknown LLM provider"):
+        resolve_endpoint("somethingnew", "http://h:9999")
     assert resolve_endpoint("custom", "http://h:1") == "http://h:1/v1/chat/completions"
 
 

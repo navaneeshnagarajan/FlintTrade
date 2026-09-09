@@ -5,7 +5,7 @@ description = "Technical analysis indicators — pure-NumPy batch (110 exports),
 requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.5.2",
-    "pydantic>=2.0",
+    "pydantic>=2.13.5",
     "numba>=0.66.0; extra == 'numba'",
 ]
 

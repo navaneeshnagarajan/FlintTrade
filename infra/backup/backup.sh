@@ -16,6 +16,14 @@
 
 set -euo pipefail
 
+# Whole-workspace restic snapshots lack the coordinated authority transaction.
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    printf '%s\n' 'Authority backup is temporarily unavailable: coordinated_restore_unavailable'
+    exit 0
+fi
+printf '%s\n' 'coordinated_restore_unavailable' >&2
+exit 1
+
 # ── Configuration ──────────────────────────────────────────────────────
 # Resolve the REAL per-OS workspace rather than assuming ~/.flinttrade, which is
 # only correct on Linux. Overrides in precedence order:

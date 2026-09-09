@@ -11,17 +11,46 @@ regulatory responsibilities remain with the operator and their broker.
 
 ## Order-Gating Model
 
-Every order-capable path must pass through the same safety gate before it can
-reach a broker adapter or the OpenAlgo-compatible bridge:
+Every reachable live write must mint a one-shot HMAC `SafetyContext` and
+dispatch through `BrokerRouter`. A route, widget, automation, webhook, agent,
+or script must not call a broker adapter or `OpenAlgoClient.place_order`
+directly. Placement, regular modify/cancel, and extended verbs use different
+gates — pick the matching one.
 
-1. The caller builds a `SafetyContext` for the intended order.
-2. `gate_order` validates the context against local limits and mode settings.
-3. `BrokerRouter` receives only gated requests.
-4. Broker adapters and `OpenAlgoClient.place_order` remain downstream of the
+**Placement** (new orders, including webhook, strategy, and smart-order
+place):
+
+1. `SafetySystem.check_order` runs the L5 → L4 → L1 → L2 → L3 layers
+   against the intended order (kill switch, daily P&L, field validation,
+   position limits, portfolio risk).
+2. `gate_order` then mints the `SafetyContext` bound to that order and the
+   selector-bound principal. It does not re-run the layer checks.
+3. `BrokerRouter.place_order` re-HMACs, matches fields, applies the account
+   ACL, and consumes the one-shot gate.
+
+**Regular modify and cancel:**
+
+1. Ordinary modify and cancel are blocked while Layer 5 is latched. A
+   cancellation can remove a protective exit, so it is not exempt.
+2. A risk-increasing modify also runs `SafetySystem.check_order` on the
+   proposed order. A proven no-increase modify and a cancel skip that chain.
+3. `gate_order` mints the `SafetyContext` over the canonical fingerprint
+   (`_op` is `modify` or `cancel`).
+4. `BrokerRouter.modify_order` / `cancel_order` re-verify and consume the
    gate.
 
-New integrations must preserve this flow. A route, widget, automation, webhook,
-agent, or script must not call a broker adapter directly.
+**Extended verbs** (forever/GTT, super-order, conditional trigger, convert,
+exit-all, reducing, multi, cancel-all, smart-cancel):
+
+1. Risk-increasing legs still run `SafetySystem.check_order` where the
+   route admits exposure.
+2. `gate_broker_write` mints the `SafetyContext` (it delegates to
+   `gate_order`, which remains the sole mint). The verb must be listed in
+   `GATED_WRITE_VERBS` and `payload["_op"]` must equal the verb.
+3. `BrokerRouter.execute_gated` re-verifies and dispatches.
+
+New integrations must preserve this split. Do not invent a third path, and
+do not send an extended verb through `gate_order` alone.
 
 ## Unknown Broker Outcomes
 
@@ -91,13 +120,18 @@ archive.
 
 ## Safety Layers
 
+`SafetySystem` has five layers (L1–L5). Rate limits are a separate
+HTTP/`OpenAlgoClient` control, not a sixth safety layer.
+`_check_order_locked` fail-fasts in runtime order **L5 → L4 → L1 → L2 →
+L3**: the first failing layer is the refusal the operator sees.
+
 | Layer | Purpose | Examples |
 |---|---|---|
-| Order validation | Reject malformed or disallowed orders before routing. | Symbol, exchange, side, quantity, order type, price, and market-session checks. |
-| Rate limits | Keep local order operations bounded. | Per-second order caps and lower smart-order caps. |
-| Position limits | Prevent local workflows from exceeding configured exposure. | Max open positions, per-symbol limits, and margin-use guards. |
-| Daily risk limits | Pause or hard-stop subsequent new orders when daily loss thresholds are hit. | Configured pause and hard-stop thresholds; no broker-side cancel or flatten. |
-| Kill switch | Stop order-capable workflows, cancel open orders, and request position flattening where supported. | Explicit UI button, API endpoint, or Telegram command. |
+| L5 Kill switch | Stop order-capable workflows, cancel open orders, and request position flattening where supported. | Explicit UI button, API endpoint, or Telegram command. Checked first. |
+| L4 Daily P&L | Pause or hard-stop subsequent new orders when daily loss thresholds are hit. | Default pause at 3 % and hard stop at 15 %; no broker-side cancel or flatten. |
+| L1 Order validation | Reject malformed or disallowed orders before routing. | Symbol, exchange, side, quantity, order type, price, and market-session checks. |
+| L2 Position limits | Prevent local workflows from exceeding configured exposure. | Default max five open positions and 60 % margin-use guard. |
+| L3 Portfolio risk | Cap book-level Greek exposure. | Net delta and net vega guards. |
 
 ## Kill Switch
 
@@ -148,9 +182,9 @@ debugging and personal records; they are not a legal or regulatory attestation.
 
 | Category | Default local limit | Enforced by |
 |---|---|---|
-| Orders | 10 per second | Engine safety gate plus adapter-level checks. |
-| Smart orders | 2 per second | Engine safety gate plus adapter-level checks. |
-| General API | 50 per second | OpenAlgo-compatible bridge when enabled. |
+| Orders | 10 per second | FlintTrade order proxy: HTTP 429 `"Rate limit exceeded"` from `@rate_limit`. The OpenAlgo client additionally blocks in-process (`_RateLimiter.acquire`) before a bridge request leaves. |
+| Smart orders | 2 per second | Same split: proxy 429 plus client-side throttle. |
+| General API | 50 per second | OpenAlgo-compatible client throttle when the bridge is enabled. |
 
 Limits apply across configured exchanges for the running FlintTrade instance.
 Operators should also configure any limits available in their broker dashboard.
@@ -164,8 +198,10 @@ Operators should also configure any limits available in their broker dashboard.
 - Secrets should be file-backed under your platform workspace directory
   (`~/.flinttrade/` on Linux, `~/Library/Application Support/flinttrade/` on
   macOS, `%APPDATA%\flinttrade\` on Windows; overridden by
-  `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME`) or stored in the OS
-  keyring. Do not commit credentials or personal network details.
+  `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME`). Telegram and LLM
+  credentials live as hardened files under `<workspace>/secrets/` with a
+  `secret://` reference in `workspace.json`. Do not commit credentials or
+  personal network details.
 
 ## Market Metadata
 
@@ -183,6 +219,7 @@ Before enabling live-mode order routing:
 3. Configure broker-side safeguards such as order limits, account limits, and
    manual approval controls where available.
 4. Keep broker credentials, API keys, and personal network details out of Git.
-5. Confirm that every enabled automation still routes through `gate_order`.
+5. Confirm that every enabled automation still routes through `gate_order`
+   or `gate_broker_write`.
 6. Treat FlintTrade as local software for your own account, not as an investment
    service for others.

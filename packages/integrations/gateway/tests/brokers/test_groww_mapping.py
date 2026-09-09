@@ -14,6 +14,8 @@ def test_order_mapping_keeps_requested_and_filled_quantities_separate() -> None:
         {
             "groww_order_id": "G1",
             "order_status": "OPEN",
+            "exchange": "NSE",
+            "segment": "CASH",
             "quantity": 10,
             "filled_quantity": 4,
         }
@@ -28,6 +30,8 @@ def test_order_mapping_does_not_invent_requested_quantity_from_fills() -> None:
         {
             "groww_order_id": "G1",
             "order_status": "EXECUTED",
+            "exchange": "NSE",
+            "segment": "CASH",
             "filled_quantity": 4,
         }
     )
@@ -41,6 +45,8 @@ def test_cancellation_requested_stays_non_terminal() -> None:
         {
             "groww_order_id": "G1",
             "order_status": "CANCELLATION_REQUESTED",
+            "exchange": "NSE",
+            "segment": "CASH",
             "quantity": 10,
             "filled_quantity": 4,
         }

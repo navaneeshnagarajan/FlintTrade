@@ -22,7 +22,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | `terminal` | TypeScript / React | User-facing single-page application; FlexLayout workspace, home widgets, routes, and tools | `packages/apps/terminal/**/*.test.ts(x)` |
 | `desktop` | TypeScript / Electron 43 | Sandboxed native shell; verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin | `packages/apps/desktop/electron/*.test.ts` |
 | `design-system` | TypeScript / React | Shared brand tokens, layers, motion, primitives, and FlintTrade UI contracts | type-checked by app builds |
-| `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions | `packages/core/core/tests/` |
+| `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions, service-provider catalogue, inert service connections, and the `BrokerReadPort` contract | `packages/core/core/tests/` |
 | `data` | Python | Tick recorder, audit logger, trade logger, SQLite sandbox state, DuckDB analytics storage | `packages/core/data/tests/` |
 | `historical` | Python | OHLCV downloader (OpenChart, yfinance), DuckDB pipeline, expiry manager, instrument metadata | `packages/core/historical/tests/` |
 | `indicators` | Python | Pure-NumPy batch indicators (110 exports; no TA-Lib) + streaming classes (optional Numba on 3 kernels) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
@@ -31,7 +31,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | `webhooks` | Python | Generic HMAC-signed custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
 | `ai` | Python | LLM client (multi-provider), optional RAG/vector store, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
 | `automation` | Python | Cron manager, Telegram bot with kill-switch, post-market analysis, voice-order intent extraction | `packages/services/automation/tests/` |
-| `backtest` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 94 strategy templates | `packages/services/backtest/tests/` |
+| `backtest` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 94 strategy template modules | `packages/services/backtest/tests/` |
 | `ditto` | Python | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager | `packages/services/ditto/tests/` |
 | `engine` | Python | 5-layer safety system, order router, scheduler, base strategy, strategy registry, mode guard | `packages/services/engine/tests/` |
 | `journal` | Python | Journal entries, trade logging, execution-quality analytics, and realised P&L tracking | `packages/services/journal/tests/` |
@@ -328,7 +328,12 @@ SDK/HTTP adapter that implements the `BrokerAdapter` Protocol and is routed
 through the `BrokerRouter`; OpenAlgo is represented by its own bridge adapter
 (`brokers/openalgo.py`) alongside the native ones. Do not model a new native
 broker as an OpenAlgo shim. The `shims/` directory holds only OpenAlgo
-infrastructure shims, not broker adapters.
+infrastructure shims, not broker adapters. Exact **reads** use
+the contract defined by `BrokerReadPort`; `flinttrade_gateway.broker_read_service`
+defines its owner factory, while application composition constructs and retains
+the resulting dependency record. Native HTTP read routes currently return
+`409` with zero provider calls until Task 7C.2 cuts them over to that port.
+Reads do not traverse `gate_order` / `BrokerRouter`. Writes still must.
 
 1. Add a native adapter under
    `packages/integrations/gateway/src/flinttrade_gateway/brokers/<broker>.py`
@@ -465,18 +470,19 @@ gated-session model; never add plaintext credential storage.
 ### Safety layers
 
 The 5-layer safety system lives in `packages/services/engine/`. Every order
-placed through FlintTrade passes five safety layers in order:
+placed through FlintTrade is checked by those layers. Runtime fail-fast
+order in `_check_order_locked` is **L5 → L4 → L1 → L2 → L3**:
 
-1. **Order validation** — price within ±5 % of LTP, quantity within
-   lot-multiple bounds.
-2. **Position limits** — maximum five simultaneous positions, no
-   single position exceeding 60 % of available margin.
-3. **Portfolio risk** — net delta and net vega caps.
-4. **Daily P&L** — pause subsequent new orders at 3 % daily drawdown and
-   latch a new-order hard stop at 15 %. Layer 4 does not cancel or flatten.
-5. **Kill switch** — explicit operator activation through Telegram, the UI,
+1. **L5 Kill switch** — explicit operator activation through Telegram, the UI,
    or the API cancels open orders and requests position flattening. Automatic
    account-scoped flattening belongs to the separate rupee MTM circuit breaker.
+2. **L4 Daily P&L** — pause subsequent new orders at 3 % daily drawdown and
+   latch a new-order hard stop at 15 %. Layer 4 does not cancel or flatten.
+3. **L1 Order validation** — price within ±5 % of LTP, quantity within
+   lot-multiple bounds.
+4. **L2 Position limits** — maximum five simultaneous positions, no
+   single position exceeding 60 % of available margin.
+5. **L3 Portfolio risk** — net delta and net vega caps.
 
 Do not bypass any layer. If you need a fast-path for high-frequency
 orders, add the path inside the layers, not around them.

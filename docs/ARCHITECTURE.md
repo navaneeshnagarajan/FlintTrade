@@ -242,7 +242,7 @@ llms files.
 ## 3. Frontend architecture (terminal)
 
 The terminal is a single React 19 + TypeScript application built with
-Vite 6. Layout is managed by [FlexLayout 0.10](https://github.com/caplin/FlexLayout),
+Vite 8. Layout is managed by [FlexLayout 0.10](https://github.com/caplin/FlexLayout),
 which provides drag-and-drop panels, tabs, floating windows, and
 serialisable layouts. Users compose their workspace from 71 widgets
 (18 trading + 31 analysis + 22 utility) split across 12 routes.
@@ -272,9 +272,9 @@ duplicated:
 
 | Category | Library | Why it's pinned |
 |---|---|---|
-| Language | TypeScript 5 (strict) | No `any`, no `@ts-ignore`. |
-| Framework | React 19 | Server Actions, `use()`, the new compiler. |
-| Build | Vite 6.4 | Fast HMR, ESM-first. |
+| Language | TypeScript 7 (strict) | No `any`, no `@ts-ignore`. |
+| Framework | React 19 | Current React release for the terminal SPA. |
+| Build | Vite 8 | Fast HMR, ESM-first. |
 | CSS | Tailwind CSS v4 | `@tailwindcss/vite` plugin, no `tailwind.config.js` for tokens. |
 | Components | shadcn/ui | Copy-paste ownership, Radix accessibility primitives. |
 | Layout | FlexLayout 0.10 | Tabs, splits, drag-dock, JSON-serialisable. |
@@ -341,9 +341,9 @@ documented, and limited to analysis modules.
 FlintTrade's backend is a single Flask application registered as
 `packages/core/core/src/flinttrade_core/app.py`. Source/browser mode defaults to
 port 5100; the Electron source guardian explicitly selects a dynamic loopback
-port instead. The application mounts every package's blueprints behind
-`/v1/*`, and exposes them externally under `/ft-api/v1/*` thanks to the WSGI
-prefix-strip middleware (see §6).
+port instead. Blueprints mount at `/v1/*` *or* `/api/v1/*` (match the
+prefix the frontend uses). The Vite/dev proxy exposes them under
+`/ft-api/…` and WSGI middleware strips that prefix (see §6).
 
 **One backend process per workspace.** In-memory job/runner state (scheduler
 jobs, download queues, sandbox runtime, session registries) assumes a single
@@ -356,19 +356,44 @@ deployment can split that state.
 
 ### Safety layers
 
-Every order placed through FlintTrade passes five safety layers in order
-inside `packages/services/engine/`:
+Every order placed through FlintTrade is checked by five safety layers
+inside `packages/services/engine/`. `_check_order_locked` fail-fasts in
+this runtime order (not L1–L5 numerical order), so the first refusal an
+operator sees is the earliest of:
 
-1. **Order validation** — price within ±5 % of LTP, quantity multiple of
-   lot size.
-2. **Position limits** — max five simultaneous positions, no single
-   position over 60 % of free margin.
-3. **Portfolio risk** — net delta and net vega caps across the book.
-4. **Daily P&L** — pause new orders at 3 % drawdown and latch a new-order
-   hard stop at 15 % drawdown. Layer 4 does not cancel or flatten.
-5. **Kill switch** — an explicit operator action (UI button, API, or Telegram)
+1. **L5 Kill switch** — an explicit operator action (UI button, API, or Telegram)
    that cancels open orders and requests position flattening through the gated
    broker path. The account MTM circuit breaker is a separate automatic path.
+2. **L4 Daily P&L** — pause new orders at 3 % drawdown and latch a new-order
+   hard stop at 15 % drawdown. Layer 4 does not cancel or flatten.
+3. **L1 Order validation** — price within ±5 % of LTP, quantity multiple of
+   lot size.
+4. **L2 Position limits** — max five simultaneous positions, no single
+   position over 60 % of free margin.
+5. **L3 Portfolio risk** — net delta and net vega caps across the book.
+
+### Broker reads versus gated writes
+
+`BrokerReadPort` in
+`packages/core/core/src/flinttrade_core/broker_read_port.py` defines the exact
+broker-read contract. The gateway implementation and owner factory are defined in
+`packages/integrations/gateway/src/flinttrade_gateway/broker_read_service.py`.
+Application startup constructs the factory result and retains the dependency
+record in `packages/core/core/src/flinttrade_core/app.py`.
+The port is an in-process contract, not a new public HTTP family. Its methods
+are `quote`, `depth`, `historical`, `batch_quotes`, `option_chain`,
+`lot_sizes`, `balance`, `portfolio_greeks`, `positions`, `holdings`,
+`margin`, `order_states`, and `trades`. Native HTTP account and market-data
+routes (`/api/v1/native/…` kinds) currently return `409` with zero provider
+calls; migrating those consumers onto the port is Task 7C.2 / 8B. OpenAlgo
+passthrough remains the working operator-facing read surface. Exact broker
+reads in this work are the in-process port, not terminal UX. Broker-account
+mutations return `503` until Task 9D. Native broker UX stays down on `main`
+until both tasks land — that is the accepted product decision.
+
+Live **writes** still mint a `SafetyContext` through `gate_order` /
+`gate_broker_write` and dispatch through `BrokerRouter`. Read operations do
+not go through the write router.
 
 ### Mode-system state machine
 
@@ -376,14 +401,14 @@ inside `packages/services/engine/`:
 stateDiagram-v2
     [*] --> Explore
     Explore --> Practice: /auth/mode {mode:practice}
-    Practice --> Live: /auth/mode {mode:live} + password\nconfirm
+    Practice --> Live: /auth/pin {mode:live} +\n6-digit PIN
     Live --> Practice: /auth/mode {mode:practice}
     Practice --> Explore: /auth/mode {mode:explore}
-    Live --> Explore: /auth/mode {mode:explore}\n(forces kill-switch)
+    Live --> Explore: /auth/mode {mode:explore}\n(JWT downgrade only;\nno kill-switch)
 
     state Explore {
         [*] --> noOrders
-        noOrders: All order paths return\nsimulated success without\ntouching OpenAlgo
+        noOrders: All order paths rejected\nHTTP 403 mode_blocked;\nno broker call
     }
     state Practice {
         [*] --> sandbox
@@ -396,7 +421,11 @@ stateDiagram-v2
 ```
 
 Each transition issues a fresh JWT with the new `mode` claim and revokes
-the old token's `jti`. The guard lives at
+the old token's `jti`. Practice → Live is `POST /v1/auth/pin` (PIN
+re-auth). `/v1/auth/mode` accepts only downgrades to `practice` or
+`explore` and does not latch the kill switch. The ModeIndicator UI
+toggles Explore → Practice and Practice ↔ Live; a Live → Explore
+downgrade is available on the API. The guard lives at
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.
 
 ---
@@ -435,27 +464,33 @@ the tick stream and reconcile with the REST cache via
 
 ## 6. WSGI prefix strip
 
-The terminal calls `/ft-api/v1/X`. The Vite dev proxy and the production
-reverse proxy forward that to the FlintTrade backend on port 5100. The
-WSGI middleware in `packages/core/core/src/flinttrade_core/app.py` strips the `/ft-api`
-prefix before URL dispatch:
+The terminal calls FlintTrade through the `/ft-api` prefix. The Vite
+dev proxy and the production reverse proxy forward that to the FlintTrade
+backend on port 5100. The WSGI middleware in
+`packages/core/core/src/flinttrade_core/app.py` strips `/ft-api` before
+URL dispatch.
+
+A blueprint at `url_prefix="/v1"` answers `/ft-api/v1/…`:
 
 ```
-External:  GET /ft-api/v1/gex?symbol=NIFTY
+External:  GET /ft-api/v1/auth/status
             │
             ▼  (Vite proxy or reverse proxy)
-Backend:   GET /v1/gex?symbol=NIFTY
+Backend:   GET /v1/auth/status
             │
             ▼  (Flask URL map)
-Handler:   screener.analysis_routes:gex_handler
+Handler:   flinttrade_core.auth_routes:auth_status
 ```
 
-This means a blueprint registered at `url_prefix="/v1"` (or
-`url_prefix="/api/v1"`, depending on the route family) answers requests
-at the external `/ft-api/v1/…` path automatically. **Never
-double-prefix.** Routes documented in [API.md](API.md) as
-`/ft-api/v1/X` are the external view; routes documented as `/v1/X` are
-the internal view of the same endpoint.
+A blueprint at `url_prefix="/api/v1"` answers `/ft-api/api/v1/…` after
+the same strip — for example `POST /ft-api/api/v1/gex` reaches
+`screener.analysis_routes:gex_endpoint`. **Never double-prefix** a `/v1`
+blueprint as `/api/v1` (or the reverse): a handler registered at `/v1/X`
+will 404 if the terminal calls `/api/v1/X`. Match the prefix the
+frontend helper actually uses.
+
+Routes documented in [API.md](API.md) as `/ft-api/…` are the external
+view; the path after `/ft-api` is the Flask URL.
 
 ---
 
@@ -472,7 +507,7 @@ Lives in a platform-specific workspace directory:
 | Linux | `~/.flinttrade/` |
 | macOS | `~/Library/Application Support/flinttrade/` |
 | Windows | `%APPDATA%/flinttrade/` |
-| Override | `FLINTTRADE_HOME` env var |
+| Override | `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME` (in that precedence order) |
 
 `workspace.json` contains:
 
@@ -484,9 +519,14 @@ Lives in a platform-specific workspace directory:
 - **Storage paths** — `storage.fast` (SSD) and `storage.archive` (HDD).
 - **Enabled modules** — which packages are active.
 - **UI preferences** — theme, default exchange, time zone, density.
-- **LLM config** — provider and model; the managed Ollama endpoint is owned
-  internally and is not persisted, while custom OpenAI-compatible providers
-  retain an editable host.
+- **LLM config** — provider and model from the catalogue-driven profiles in
+  `llm_provider_profiles.py` (generated into the terminal as
+  `serviceProviders.ts`). The managed Ollama endpoint is owned internally and
+  is not persisted; custom OpenAI-compatible providers retain an editable
+  host. NVIDIA NIM is in the catalogue with an intentionally blank unpinned
+  default model. Inert LLM connection records can also be stored through
+  `GET`/`POST`/`PATCH`/`DELETE` `/v1/services/connections` without invoking
+  the provider; the static provider catalogue is `GET /v1/services/providers`.
 - **Notification config** — Telegram bot settings.
 - **Order-safety settings** — rate limits, audit retention, kill-switch.
 
@@ -571,8 +611,11 @@ python scripts/ft.py clean      # remove build artefacts
 `make <target>` is the POSIX alias for each of those. A few targets are
 POSIX-only because they are bash recipes rather than `ft.py` delegators —
 `make health`, `make update`, `make full-check`, `make start-openalgo`,
-`make backup` and `make restore` among them. The Makefile header lists the full
-split.
+`make backup` and `make restore` among them. `make backup` and `make restore`
+call `infra/backup/` and currently fail closed with
+`coordinated_restore_unavailable`. Ordinary bhavcopy archives use
+`python -m scripts.backup` — see [setup/backup.md](setup/backup.md). The
+Makefile header lists the full split.
 
 OpenAlgo is an external service; it is NOT a git submodule and is NOT
 bundled. For local development, run `scripts/setup-test-deps.sh` (a bash

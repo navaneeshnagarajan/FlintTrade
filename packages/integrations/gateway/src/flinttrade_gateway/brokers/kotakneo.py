@@ -51,10 +51,17 @@ verified end to end.
 from __future__ import annotations
 
 import hashlib
+import math
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
+from flinttrade_core.broker_read_port import (
+    BalanceEvidence,
+    BalanceSnapshot,
+    BrokerBalanceResponseInvalid,
+    BrokerReadResponseInvalid,
+)
 from flinttrade_core.exceptions import BrokerError
 from flinttrade_engine.safety import EmergencyBrokerWrite, EmergencyReductionPlan, EmergencyWritePolicy
 from flinttrade_gateway.capabilities import (
@@ -68,6 +75,47 @@ from flinttrade_gateway.capabilities import (
 
 from . import kotakneo_mapping as M
 from ._base import BrokerAdapter, Session, run_blocking_sdk_call
+
+
+def _balance_number(value: object) -> float:
+    if isinstance(value, bool) or type(value) not in (int, float, str) or (type(value) is str and not value.strip()):
+        raise BrokerBalanceResponseInvalid
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise BrokerBalanceResponseInvalid from None
+    if not math.isfinite(number):
+        raise BrokerBalanceResponseInvalid
+    return number
+
+
+def _balance_record(value: object) -> dict[str, object]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerBalanceResponseInvalid
+    return value
+
+
+def _balance_snapshot_from_kotak(response: object) -> BalanceSnapshot:
+    response = _balance_record(response)
+    data = _balance_record(response.get("data", response))
+
+    def selected(*names: str) -> float | None:
+        for name in names:
+            if name in data:
+                return _balance_number(data[name])
+        return None
+
+    available = selected("Net", "avlCash", "avlMrgn")
+    used = selected("MarginUsed", "totMrgnUsd", "mrgnUsd")
+    total = available + used if available is not None and used is not None else None
+    if total is not None and not math.isfinite(total):
+        raise BrokerBalanceResponseInvalid
+    return BalanceSnapshot(
+        available, BalanceEvidence.DIRECT if available is not None else None,
+        used, BalanceEvidence.DIRECT if used is not None else None,
+        total, BalanceEvidence.DERIVED_FROM_DIRECT_COMPONENTS if total is not None else None,
+        None, None,
+    )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
@@ -452,6 +500,8 @@ class KotakNeoAdapter(BrokerAdapter):
             the journal-backed provider.
     """
 
+    _BROKER_READ_UNSUPPORTED = frozenset({"historical", "option_chain"})
+
     def __init__(
         self,
         *,
@@ -532,6 +582,49 @@ class KotakNeoAdapter(BrokerAdapter):
     def _rows(resp: Any) -> list[dict[str, Any]]:
         data = resp.get("data", []) if isinstance(resp, dict) else []
         return data if isinstance(data, list) else []
+
+    @staticmethod
+    def _fixed_rows(resp: object, *, allow_data_only_holdings: bool = False) -> list[dict[str, Any]]:
+        """Validate the documented fixed book envelope without filtering rows."""
+        if type(resp) is not dict or any(type(key) is not str for key in resp):
+            raise BrokerReadResponseInvalid
+        for error_key in ("Error", "Error Message", "error"):
+            if error_key not in resp:
+                continue
+            error_value = resp[error_key]
+            if (
+                (type(error_value) is str and bool(error_value))
+                or (type(error_value) is list and bool(error_value))
+                or (type(error_value) is dict and bool(error_value))
+                or isinstance(error_value, BaseException)
+            ):
+                raise M.KotakNeoMappingError("Kotak Neo fixed read was rejected by the provider")
+            raise BrokerReadResponseInvalid
+        data_only_holdings = allow_data_only_holdings and set(resp) == {"data"}
+        if not data_only_holdings:
+            if "status" in resp:
+                provider_status = resp["status"]
+                if type(provider_status) is not str or not provider_status:
+                    raise BrokerReadResponseInvalid
+                if provider_status.lower() not in {"success", "ok"}:
+                    raise M.KotakNeoMappingError("Kotak Neo fixed read was rejected by the provider")
+            status = resp.get("stat")
+            if type(status) is not str or not status:
+                raise BrokerReadResponseInvalid
+            if status.lower() != "ok":
+                raise M.KotakNeoMappingError("Kotak Neo fixed read was rejected by the provider")
+            if "stCode" in resp:
+                status_code = resp["stCode"]
+                if type(status_code) is not int:
+                    raise BrokerReadResponseInvalid
+                if status_code != 200:
+                    raise M.KotakNeoMappingError("Kotak Neo fixed read returned a non-success status code")
+        if "data" not in resp or type(resp["data"]) is not list:
+            raise BrokerReadResponseInvalid
+        rows = resp["data"]
+        if any(type(row) is not dict or any(type(key) is not str for key in row) for row in rows):
+            raise BrokerReadResponseInvalid
+        return rows
 
     @staticmethod
     def _emergency_identifier(value: Any, *, label: str) -> str:
@@ -1353,7 +1446,7 @@ class KotakNeoAdapter(BrokerAdapter):
 
     async def order_book(self, session: Session) -> list[Order]:
         resp = await self._call(self._client(session).order_book)
-        return [M.from_kotak_order(r) for r in self._rows(resp)]  # type: ignore[misc]
+        return [M.from_kotak_order(r) for r in self._fixed_rows(resp)]  # type: ignore[misc]
 
     async def order_history(self, session: Session, order_id: str) -> list[dict]:
         """Per-order state history (NEO ``order_history`` — a read).
@@ -1367,7 +1460,7 @@ class KotakNeoAdapter(BrokerAdapter):
 
     async def trade_book(self, session: Session) -> list[Trade]:
         resp = await self._call(self._client(session).trade_book)
-        return [M.from_kotak_trade(r) for r in self._rows(resp)]  # type: ignore[misc]
+        return [M.from_kotak_trade(r) for r in self._fixed_rows(resp)]  # type: ignore[misc]
 
     async def order_trades(self, session: Session, order_id: str) -> list[dict]:
         """Fills for ONE order (NEO ``trade_report(order_id)`` — a read).
@@ -1385,15 +1478,19 @@ class KotakNeoAdapter(BrokerAdapter):
 
     async def positions(self, session: Session) -> list[Position]:
         resp = await self._call(self._client(session).positions)
-        return [M.from_kotak_position(r) for r in self._rows(resp)]  # type: ignore[misc]
+        return [M.from_kotak_position(r) for r in self._fixed_rows(resp)]  # type: ignore[misc]
 
     async def holdings(self, session: Session) -> list[dict]:
         resp = await self._call(self._client(session).holdings)
-        return [M.from_kotak_holding(r) for r in self._rows(resp)]
+        return [M.from_kotak_holding(r) for r in self._fixed_rows(resp, allow_data_only_holdings=True)]
 
     async def funds(self, session: Session) -> dict:
         resp = await self._call(self._client(session).funds)
         return M.from_kotak_funds(resp)
+
+    async def balance_snapshot(self, session: Session) -> BalanceSnapshot:
+        """Read the existing limits endpoint without mapper defaults."""
+        return _balance_snapshot_from_kotak(await self._call(self._client(session).funds))
 
     async def limits(self, session: Session, segment: str = "ALL", exchange: str = "ALL", product: str = "ALL") -> dict:
         """Filtered RMS limits (NEO ``limits(segment, exchange, product)``).
@@ -1442,11 +1539,149 @@ class KotakNeoAdapter(BrokerAdapter):
             rows = [r for r in resp if isinstance(r, dict)]
         return rows
 
+    @staticmethod
+    def _quote_identity_text(
+        row: dict[str, Any],
+        *names: str,
+        integer: bool = False,
+    ) -> str | None:
+        for name in names:
+            if name not in row:
+                continue
+            value = row[name]
+            if type(value) is str and value.strip():
+                return value.encode("utf-8").decode("utf-8")
+            if integer and type(value) is int:
+                return str(value)
+            raise BrokerReadResponseInvalid from None
+        return None
+
+    async def _fetch_bound_quote_rows(
+        self,
+        session: Session,
+        symbols: list[str],
+    ) -> list[tuple[dict[str, Any], str, str]]:
+        """Bind every full-quote row to the exact requested token/segment ledger."""
+        targets: list[tuple[str, str, str, str, str | None]] = []
+        for raw in symbols:
+            exchange, name = _split_symbol(raw)
+            segment = M.EXCHANGE_TO_KOTAK.get(exchange.upper(), exchange.lower())
+            expected_symbol: str | None = None
+            if M.is_index_name(name):
+                token = M.canonical_index_name(name)
+            elif self._token_resolver is not None:
+                resolved_token = self._token_resolver(name, exchange)
+                if type(resolved_token) not in (str, int) or type(resolved_token) is bool:
+                    raise BrokerReadResponseInvalid from None
+                token = str(resolved_token).strip()
+                if self._symbol_resolver is not None:
+                    resolved_symbol = self._symbol_resolver(name, exchange)
+                    if type(resolved_symbol) is not str or not resolved_symbol.strip():
+                        raise BrokerReadResponseInvalid from None
+                    expected_symbol = resolved_symbol
+            else:
+                if self._symbol_resolver is not None:
+                    resolved_symbol = self._symbol_resolver(name, exchange)
+                    if type(resolved_symbol) is not str or not resolved_symbol.strip():
+                        raise BrokerReadResponseInvalid from None
+                    expected_symbol = resolved_symbol
+                scrips = await self.search_scrip(session, name, exchange)
+                candidates = [
+                    row
+                    for row in scrips
+                    if type(row) is dict
+                    and row.get("exchange") == exchange
+                    and (
+                        expected_symbol is not None
+                        and row.get("trading_symbol") == expected_symbol
+                        or expected_symbol is None
+                        and row.get("name") == name
+                    )
+                ]
+                if len(candidates) != 1:
+                    raise BrokerReadResponseInvalid from None
+                candidate = candidates[0]
+                token_value = candidate.get("token")
+                symbol_value = candidate.get("trading_symbol")
+                if type(token_value) is not str or not token_value.strip():
+                    raise BrokerReadResponseInvalid from None
+                if type(symbol_value) is not str or not symbol_value.strip():
+                    raise BrokerReadResponseInvalid from None
+                token = token_value
+                expected_symbol = symbol_value
+            if not token:
+                raise BrokerReadResponseInvalid from None
+            targets.append((name, exchange, token, segment, expected_symbol))
+
+        resolved_keys = [(token, segment) for _, _, token, segment, _ in targets]
+        if len(resolved_keys) != len(set(resolved_keys)):
+            raise BrokerReadResponseInvalid from None
+        tokens = M.to_quote_tokens([(token, exchange) for _, exchange, token, _, _ in targets])
+        resp = await self._call(self._client(session).quotes, tokens)
+        if type(resp) is dict:
+            if any(type(key) is not str for key in resp) or "data" not in resp or type(resp["data"]) is not list:
+                raise BrokerReadResponseInvalid from None
+            raw_rows = resp["data"]
+        elif type(resp) is list:
+            raw_rows = resp
+        else:
+            raise BrokerReadResponseInvalid from None
+        if len(raw_rows) != len(targets):
+            raise BrokerReadResponseInvalid from None
+
+        bound: dict[int, dict[str, Any]] = {}
+        for raw_row in raw_rows:
+            if type(raw_row) is not dict or any(type(key) is not str for key in raw_row):
+                raise BrokerReadResponseInvalid from None
+            row = raw_row
+            returned_token = self._quote_identity_text(
+                row,
+                "instrument_token",
+                "exchange_token",
+                "tk",
+                integer=True,
+            )
+            returned_symbol = self._quote_identity_text(row, "trading_symbol", "display_symbol", "ts")
+            returned_segment = self._quote_identity_text(row, "exchange_segment", "exchange", "e")
+            returned_provider_segment = (
+                None
+                if returned_segment is None
+                else M.EXCHANGE_TO_KOTAK.get(returned_segment.upper(), returned_segment.lower())
+            )
+            matches: list[int] = []
+            for index, (_name, _exchange, token, segment, expected_symbol) in enumerate(targets):
+                if returned_token is not None:
+                    if returned_token != token:
+                        continue
+                    if returned_provider_segment is not None and returned_provider_segment != segment:
+                        continue
+                    if expected_symbol is not None and returned_symbol is not None and returned_symbol != expected_symbol:
+                        continue
+                    matches.append(index)
+                elif (
+                    expected_symbol is not None
+                    and returned_symbol == expected_symbol
+                    and returned_provider_segment == segment
+                ):
+                    matches.append(index)
+            if len(matches) != 1:
+                raise BrokerReadResponseInvalid from None
+            target_index = matches[0]
+            if target_index in bound:
+                raise BrokerReadResponseInvalid from None
+            bound[target_index] = row
+        if len(bound) != len(targets):
+            raise BrokerReadResponseInvalid from None
+        return [(bound[index], name, exchange) for index, (name, exchange, *_rest) in enumerate(targets)]
+
     async def quotes(self, session: Session, symbols: list[str]) -> list[Quote]:
         from flinttrade_core.models import Quote  # noqa: PLC0415
 
-        rows = await self._fetch_quote_rows(session, symbols, "all")
-        return [Quote(**M.from_kotak_quote(r)) for r in rows]
+        rows = await self._fetch_bound_quote_rows(session, symbols)
+        return [
+            Quote(**M.from_kotak_quote(row, strict=True, expected_symbol=symbol, expected_exchange=exchange))
+            for row, symbol, exchange in rows
+        ]
 
     async def quote_details(self, session: Session, symbols: list[str], quote_type: str = "all") -> list[dict]:
         """Typed quote snapshot (read) — the full NEO quote_type surface.

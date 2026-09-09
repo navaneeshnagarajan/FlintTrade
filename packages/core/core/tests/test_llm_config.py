@@ -1272,6 +1272,8 @@ def test_default_lmstudio_workspace_migrates_to_managed_ollama(monkeypatch, tmp_
 
     workspace = Workspace()
     legacy = workspace.as_dict()
+    for field in ("workspace_instance_id", "workspace_generation", "broker_authority_generation", "services"):
+        legacy.pop(field)
     legacy["version"] = "1.1.0"
     legacy["llm"] = {
         "provider": "lmstudio",
@@ -1295,6 +1297,8 @@ def test_non_default_lmstudio_host_migrates_to_managed_ollama(monkeypatch, tmp_p
 
     workspace = Workspace()
     legacy = workspace.as_dict()
+    for field in ("workspace_instance_id", "workspace_generation", "broker_authority_generation", "services"):
+        legacy.pop(field)
     legacy["version"] = "1.1.0"
     legacy["llm"] = {
         "provider": "lmstudio",
@@ -1322,6 +1326,8 @@ def test_non_default_lmstudio_migration_retires_a_destination_bound_secret(
     workspace = Workspace()
     host = "http://10.0.0.8:9000"
     legacy = workspace.as_dict()
+    for field in ("workspace_instance_id", "workspace_generation", "broker_authority_generation", "services"):
+        legacy.pop(field)
     legacy["version"] = "1.1.0"
     legacy["llm"] = {
         "provider": "lmstudio",
@@ -1361,6 +1367,8 @@ def test_ref_only_remote_lmstudio_migration_retires_secret_before_a_later_model_
     workspace = Workspace()
     host = "HTTPS://Models.Example.INVALID:443/API"
     legacy = workspace.as_dict()
+    for field in ("workspace_instance_id", "workspace_generation", "broker_authority_generation", "services"):
+        legacy.pop(field)
     legacy["version"] = "1.1.0"
     legacy["llm"] = {
         "provider": "lmstudio",

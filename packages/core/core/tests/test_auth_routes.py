@@ -703,3 +703,50 @@ class TestModeSwitchRejectsResetToken:
         )
         assert resp.status_code == 200
         assert resp.get_json()["data"]["mode"] == "practice"
+
+
+def test_verified_operator_session_derives_bounded_opaque_identity_without_raw_claims(monkeypatch):
+    """Catch raw username/JTI publication or actor/session domain reuse."""
+    from types import SimpleNamespace
+    from flinttrade_core import auth_routes
+
+    monkeypatch.setattr(
+        auth_routes,
+        "_decode_token_with_signing_key",
+        lambda token, signing_key: {
+            "type": "session",
+            "sub": "Nava+நவ",
+            "jti": "private-jti",
+            "scopes": ["admin.services.read", "admin.services.write"],
+        },
+    )
+    monkeypatch.setattr(auth_routes, "_get_jwt_secret", lambda: "test-signing-key")
+    verify = getattr(auth_routes, "verify_operator_session_token", lambda token: SimpleNamespace())
+    principal = verify("signed.jwt.value")
+
+    assert principal.actor_ref == "operator:685a1f30a3b5970c37588cb9d3b852415558a0026182484c35c400faba4c3aa7"
+    assert principal.session_binding == "session:a431817ca10eb3719e198fb8df304b0ec9ed0365fc1a7e0185dea48e9cc2c485"
+    assert principal.scopes == ("admin.services.read", "admin.services.write")
+    assert not hasattr(principal, "claims")
+    assert not hasattr(principal, "jti")
+    assert not hasattr(principal, "token")
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {"type": "reset", "sub": "nav", "jti": "j1"},
+        {"type": "session", "sub": " ", "jti": "j1"},
+        {"type": "session", "sub": "nav", "jti": ""},
+        {"type": "session", "sub": "x" * 1025, "jti": "j1"},
+        {"type": "session", "sub": "nav", "jti": "x" * 257},
+    ],
+)
+def test_verified_operator_session_rejects_non_full_or_invalid_identity(monkeypatch, claims):
+    """Catch reset or malformed signed identity becoming a connection principal."""
+    from flinttrade_core import auth_routes
+
+    monkeypatch.setattr(auth_routes, "_decode_token_with_signing_key", lambda token, signing_key: claims)
+    verify = getattr(auth_routes, "verify_operator_session_token", lambda token: None)
+    with pytest.raises(Exception):
+        verify("signed.jwt.value")

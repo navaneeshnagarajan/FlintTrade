@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hmac
 import os
+from collections.abc import Mapping
 from functools import wraps
 from typing import Any, Callable
 
@@ -25,7 +26,7 @@ from flask import jsonify, request
 
 # v1.0 default session scopes — the operator's own session is granted read access to every
 # admin/observability surface. Narrower sessions are minted with an explicit subset.
-DEFAULT_SESSION_SCOPES: tuple[str, ...] = (
+LEGACY_NO_SCOPE_SESSION_SCOPES: tuple[str, ...] = (
     "admin.observability.read",
     "admin.observability.run",
     "admin.audit.read",
@@ -36,6 +37,27 @@ DEFAULT_SESSION_SCOPES: tuple[str, ...] = (
     "admin.logs.read.operational",
     "admin.state.read",
 )
+
+DEFAULT_SESSION_SCOPES: tuple[str, ...] = LEGACY_NO_SCOPE_SESSION_SCOPES + (
+    "admin.services.read",
+    "admin.services.write",
+    "admin.accounts.read",
+    "admin.accounts.write",
+    "admin.config.openalgo.read",
+    "admin.config.openalgo.write",
+    "admin.backup.read",
+    "admin.backup.write",
+)
+
+
+def resolve_session_scopes(payload: Mapping[str, object]) -> tuple[str, ...]:
+    """Resolve an immutable scope claim without widening malformed sessions."""
+    if "scopes" not in payload:
+        return LEGACY_NO_SCOPE_SESSION_SCOPES
+    scopes = payload["scopes"]
+    if type(scopes) not in {list, tuple} or any(type(scope) is not str for scope in scopes):
+        return ()
+    return tuple(scopes)
 
 
 def _session_token() -> str | None:
@@ -79,11 +101,7 @@ def require_scope(scope: str) -> Callable[[Callable[..., Any]], Callable[..., An
                     jsonify({"status": "error", "message": "invalid or expired session token"}),
                     401,
                 )
-            scopes = payload.get("scopes")
-            if scopes is None:
-                # Legacy tokens minted before the scopes claim existed are operator
-                # sessions and therefore carry the full default scope set.
-                scopes = DEFAULT_SESSION_SCOPES
+            scopes = resolve_session_scopes(payload)
             if scope not in scopes:
                 return (
                     jsonify({"status": "error", "message": f"missing required scope: {scope}"}),

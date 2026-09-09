@@ -102,12 +102,14 @@ def test_scheduled_pipeline_publishes_completed_cycle() -> None:
 def test_scheduled_pipeline_emits_once_when_same_source_candle_runs_concurrently() -> None:
     from flinttrade_ai.pipeline import SignalPipeline
 
-    source_bars = _bars()
+    now = datetime(2026, 7, 9, 18, 35, tzinfo=timezone.utc)
+    source_bars = _bars(end=now - timedelta(minutes=5))
     both_fetches_started = threading.Barrier(2)
     sink = MagicMock()
     pipeline = SignalPipeline(
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
         signal_sink=sink,
+        clock=lambda: now,
         market_session_provider=_full_day_session,
     )
     pipeline._generator = MagicMock(is_trained=False)
@@ -379,9 +381,11 @@ def test_failed_ml_prediction_uses_fallback_provenance() -> None:
 def test_scheduled_pipeline_preserves_validated_latest_bar_timestamp() -> None:
     from flinttrade_ai.pipeline import SignalPipeline
 
-    bars = _bars()
+    now = datetime(2026, 7, 9, 18, 35, tzinfo=timezone.utc)
+    bars = _bars(end=now - timedelta(minutes=5))
     pipeline = SignalPipeline(
         instruments=[{"symbol": "NIFTY", "exchange": "NSE_INDEX"}],
+        clock=lambda: now,
         market_session_provider=_full_day_session,
     )
     pipeline.fetch_bars = MagicMock(return_value=bars)

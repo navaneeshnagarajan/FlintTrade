@@ -186,6 +186,17 @@ class TestStripHtml:
 
 
 class TestNewsScraper:
+    def test_default_scraper_is_constructed_lazily(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import flinttrade_ai.sentiment as sentiment
+
+        sentinel = MagicMock()
+        monkeypatch.setattr(sentiment, "_DEFAULT_NEWS_SCRAPER", None)
+        monkeypatch.setattr(sentiment, "NewsScraper", MagicMock(return_value=sentinel))
+
+        assert sentiment._default_news_scraper() is sentinel
+        assert sentiment._default_news_scraper() is sentinel
+        sentiment.NewsScraper.assert_called_once_with()
+
     """Integration tests for NewsScraper with mocked HTTP."""
 
     def _make_scraper(self) -> NewsScraper:

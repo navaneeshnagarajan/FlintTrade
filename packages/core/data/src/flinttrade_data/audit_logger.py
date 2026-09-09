@@ -45,12 +45,15 @@ import gzip
 import hashlib
 import json
 import logging
+import math
 import os
 import shutil
 import threading
+from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import RFC_4122, UUID
 
 from flinttrade_core.owner_file_lock import OwnerSafeFileLock
 
@@ -58,6 +61,9 @@ logger = logging.getLogger("flinttrade.data.audit")
 
 # Genesis link for the first record of a fresh chain (no predecessor).
 GENESIS_HASH = "0" * 64
+MAX_IDEMPOTENT_EVENT_INPUT_BYTES = 64 * 1024
+_IDEMPOTENT_EVENT_RESERVED_FIELDS = frozenset({"ts", "event_type", "event_id", "seq", "prev_hash", "hash"})
+
 
 def _default_audit_dir() -> str:
     """Resolve the audit directory through the canonical workspace helper."""
@@ -301,6 +307,44 @@ class AuditLogger:
             raise RuntimeError(f"audit chain verification failed before append: {reason}")
         self._resolve_chain_tail()
 
+    def _append_prepared(self, event: dict[str, Any], *, sync_namespace: bool = False) -> str:
+        """Append one event after the caller has prepared the chain under both locks."""
+        today = datetime.now(IST).strftime("%Y-%m-%d")
+        path = self._audit_dir / f"audit_{today}.jsonl"
+        self._seq += 1
+        record = {**event, "seq": self._seq, "prev_hash": self._last_hash}
+        record["hash"] = self._record_hash(record)
+        f = self._get_file(today)
+        if sync_namespace:
+            self._require_canonical_handle(f, path)
+        line = json.dumps(record, default=str, ensure_ascii=False)
+        f.write(line + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+        if sync_namespace:
+            self._fsync_dir(required=True)
+            self._require_canonical_handle(f, path)
+        self._last_hash = record["hash"]
+        return str(record["hash"])
+
+    def _require_canonical_handle(self, handle: Any, path: Path) -> None:
+        """Fail if a cached handle no longer names the canonical daily file."""
+        try:
+            current = path.stat()
+            opened = os.fstat(handle.fileno())
+        except (OSError, ValueError) as error:
+            self._discard_current_file()
+            raise RuntimeError("canonical audit file is unavailable") from error
+        if not os.path.samestat(current, opened):
+            self._discard_current_file()
+            raise RuntimeError("canonical audit file binding changed")
+
+    def _discard_current_file(self) -> None:
+        if self._current_file is not None:
+            self._current_file.close()
+        self._current_file = None
+        self._current_date = ""
+
     def _write(self, event: dict[str, Any]) -> str:
         """Append one hash-chained JSON record to today's audit file.
 
@@ -310,20 +354,10 @@ class AuditLogger:
         restarts, so the whole log verifies as one tamper-evident chain.
         """
         with self._lock, self._chain_lock:
-            today = datetime.now(IST).strftime("%Y-%m-%d")
             # A different process can leave a partial write after this instance
             # has opened its file, so prepare under the shared lock every time.
             self._prepare_append()
-            self._seq += 1
-            record = {**event, "seq": self._seq, "prev_hash": self._last_hash}
-            record["hash"] = self._record_hash(record)
-            f = self._get_file(today)
-            line = json.dumps(record, default=str, ensure_ascii=False)
-            f.write(line + "\n")
-            f.flush()
-            os.fsync(f.fileno())  # force to disk — flush() only reaches the OS cache
-            self._last_hash = record["hash"]
-            return str(record["hash"])
+            return self._append_prepared(event)
 
     def _make_event(self, event_type: str, **fields: Any) -> dict[str, Any]:
         """Build a timestamped audit event."""
@@ -429,6 +463,98 @@ class AuditLogger:
     def log_event(self, event_type: str, **fields: Any) -> str:
         """Log an arbitrary audit event and return its durable record hash."""
         return self._write(self._make_event(event_type, **fields))
+
+    @staticmethod
+    def _canonical_event_fields(fields: object) -> tuple[dict[str, Any], str]:
+        """Validate and detach one bounded exact JSON object."""
+        if type(fields) is not dict or any(type(key) is not str for key in fields):
+            raise ValueError("idempotent event fields must be a JSON object")
+        values = dict(fields)
+        if _IDEMPOTENT_EVENT_RESERVED_FIELDS.intersection(values):
+            raise ValueError("idempotent event fields contain a reserved name")
+
+        def validate(value: object) -> None:
+            if value is None or type(value) in {bool, int, str}:
+                return
+            if type(value) is float:
+                if not math.isfinite(value):
+                    raise ValueError("idempotent event fields must be finite JSON")
+                return
+            if type(value) is list:
+                for item in value:
+                    validate(item)
+                return
+            if type(value) is dict and all(type(key) is str for key in value):
+                for item in value.values():
+                    validate(item)
+                return
+            raise ValueError("idempotent event fields must contain exact JSON values")
+
+        validate(values)
+        canonical = json.dumps(values, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+        return json.loads(canonical), canonical
+
+    def log_idempotent_event(
+        self,
+        event_type: str,
+        *,
+        event_id: str,
+        fields: Mapping[str, object],
+    ) -> str:
+        """Append or durably re-acknowledge one stable-ID audit event."""
+        if type(event_type) is not str or not event_type:
+            raise ValueError("invalid idempotent event type")
+        try:
+            identifier = UUID(event_id)
+        except (AttributeError, TypeError, ValueError):
+            raise ValueError("invalid idempotent event ID") from None
+        if identifier.version != 4 or identifier.variant != RFC_4122 or str(identifier) != event_id:
+            raise ValueError("invalid idempotent event ID")
+        detached, canonical_fields = self._canonical_event_fields(fields)
+        identity = json.dumps(
+            {"event_type": event_type, "event_id": event_id, "fields": detached},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        if len(identity.encode("utf-8")) > MAX_IDEMPOTENT_EVENT_INPUT_BYTES:
+            raise ValueError("idempotent event is too large")
+
+        with self._lock, self._chain_lock:
+            self._prepare_append()
+            matches: list[tuple[Path, dict[str, Any]]] = []
+            for path in self._iter_files():
+                for line in self._read_lines(path):
+                    record = json.loads(line)
+                    if isinstance(record, dict) and record.get("event_id") == event_id:
+                        matches.append((path, record))
+            if matches:
+                if len(matches) != 1 or not matches[0][1].get("hash"):
+                    raise RuntimeError("idempotent audit event identity is ambiguous")
+                path, record = matches[0]
+                stored_fields = {
+                    key: value
+                    for key, value in record.items()
+                    if key not in _IDEMPOTENT_EVENT_RESERVED_FIELDS
+                }
+                _, stored_canonical = self._canonical_event_fields(stored_fields)
+                if record.get("event_type") != event_type or stored_canonical != canonical_fields:
+                    raise RuntimeError("idempotent audit event identity conflicts")
+                with open(path, "rb") as durable_file:
+                    before = path.stat()
+                    if not os.path.samestat(before, os.fstat(durable_file.fileno())):
+                        raise RuntimeError("canonical audit file binding changed")
+                    os.fsync(durable_file.fileno())
+                    self._fsync_dir(required=True)
+                    after = path.stat()
+                    if not os.path.samestat(after, os.fstat(durable_file.fileno())):
+                        raise RuntimeError("canonical audit file binding changed")
+                return event_id
+
+            event = self._make_event(event_type, event_id=event_id, **detached)
+            self._append_prepared(event, sync_namespace=True)
+            return event_id
 
     def verify_event_receipt(
         self,
