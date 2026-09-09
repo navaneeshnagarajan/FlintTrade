@@ -45,6 +45,15 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Strategy Lab stays empty after AI Deploy (FT-DEMO-002).**
+  Deploying a suggestion from `/demo-app/ai` (for example “Trend EMA
+  Crossover”) opens `/demo-app/lab?strategy=TrendEMACrossover`. Strategy
+  Lab now hydrates the Backtest selector from `?strategy=`, keeps a
+  linked registry key in the catalogue when the loaded list does not
+  include it, and enables Run Backtest once a strategy is selected.
+  Sample demo backtests are unchanged; a Lab opened without the query
+  is unchanged.
+
 - **Invest dashboard holdings count vs listed sample stocks (FT-DEMO-001).**
   On `/demo-app/invest` the sample dashboard header now uses the Explore
   demo holdings book (`getDemoHoldings`) as its count source, so the

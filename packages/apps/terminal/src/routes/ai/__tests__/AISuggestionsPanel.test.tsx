@@ -109,6 +109,19 @@ describe("AISuggestionsPanel", () => {
     expect(mockNavigate).toHaveBeenCalledWith(expect.stringContaining("/lab?strategy="));
   });
 
+  it("deploys Trend EMA Crossover with its registry query key", () => {
+    render(<AISuggestionsPanel />);
+    fireEvent.click(screen.getByText("Trending"));
+    const heading = screen.getByText("Trend EMA Crossover");
+    const card = heading.closest("div.space-y-3") ?? heading.parentElement?.parentElement;
+    expect(card).toBeTruthy();
+    fireEvent.click(
+      card!.querySelector("button") ??
+        screen.getAllByText("Deploy to Strategy Lab").find((btn) => card!.contains(btn))!,
+    );
+    expect(mockNavigate).toHaveBeenCalledWith("/lab?strategy=TrendEMACrossover");
+  });
+
   it("shows Win Rate, Return, and Max DD stats", () => {
     render(<AISuggestionsPanel />);
     // Check for stat labels

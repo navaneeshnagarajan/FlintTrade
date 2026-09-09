@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router";
 import { FlaskConical, Loader2 } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { GlassCard } from "@/components/ui/GlassCard";
@@ -11,6 +12,11 @@ import {
 } from "@/services/ftApi";
 import { BacktestConfigPanel } from "./BacktestConfigPanel";
 import { BacktestResultDisplay } from "./BacktestResultDisplay";
+import {
+  mergeQueryStrategy,
+  readStrategyQuery,
+  resolveSelectedStrategy,
+} from "./labStrategyQuery";
 
 export interface BacktestSectionProps {
   /** Called with the result AND the strategy it ran, so the parent can keep a
@@ -27,12 +33,25 @@ export function BacktestSection({ onResult, lastResult }: BacktestSectionProps) 
   const [endDate, setEndDate] = useState("2024-12-31");
   const [initialCapital, setInitialCapital] = useState(100000);
   const [positionSizePct, setPositionSizePct] = useState(10);
-  const [selectedStrategy, setSelectedStrategy] = useState("");
+  const [searchParams] = useSearchParams();
+  const strategyQuery = readStrategyQuery(searchParams.get("strategy"));
+  const [strategyOverride, setStrategyOverride] = useState<string | null>(null);
 
   const strategiesQuery = useQuery<StrategyInfo[], Error>({
     queryKey: ["strategies"],
     queryFn: getStrategies,
   });
+
+  const catalogue = useMemo(
+    () => mergeQueryStrategy(strategiesQuery.data ?? [], strategyQuery),
+    [strategiesQuery.data, strategyQuery],
+  );
+
+  const selectedStrategy = strategyOverride ?? resolveSelectedStrategy(strategyQuery, catalogue);
+
+  useEffect(() => {
+    setStrategyOverride(null);
+  }, [strategyQuery]);
 
   const backtestMutation = useMutation<BacktestResult, Error, BacktestConfig>({
     mutationFn: runBacktest,
@@ -82,8 +101,10 @@ export function BacktestSection({ onResult, lastResult }: BacktestSectionProps) 
           positionSizePct={positionSizePct}
           onPositionSizePct={setPositionSizePct}
           selectedStrategy={selectedStrategy}
-          onStrategy={setSelectedStrategy}
+          onStrategy={setStrategyOverride}
           strategiesQuery={strategiesQuery}
+          strategies={catalogue}
+          linkedStrategy={strategyQuery}
           isRunning={isRunning}
           runError={runError}
           onRun={handleRun}

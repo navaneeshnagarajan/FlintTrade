@@ -42,6 +42,10 @@ export interface BacktestConfigPanelProps {
   selectedStrategy: string;
   onStrategy: (v: string) => void;
   strategiesQuery: ReturnType<typeof useQuery<StrategyInfo[], Error>>;
+  /** Catalogue to render — may include a linked `?strategy=` key. */
+  strategies: StrategyInfo[];
+  /** Registry key from the page query; lets the selector render before the list loads. */
+  linkedStrategy: string | null;
   isRunning: boolean;
   runError: Error | null;
   onRun: () => void;
@@ -67,6 +71,8 @@ export function BacktestConfigPanel({
   selectedStrategy,
   onStrategy,
   strategiesQuery,
+  strategies,
+  linkedStrategy,
   isRunning,
   runError,
   onRun,
@@ -75,7 +81,7 @@ export function BacktestConfigPanel({
 }: BacktestConfigPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
 
-  const strategiesByCategory = (strategiesQuery.data ?? []).reduce<
+  const strategiesByCategory = strategies.reduce<
     Record<string, StrategyInfo[]>
   >((acc, s) => {
     const cat = s.category || "Other";
@@ -122,12 +128,12 @@ export function BacktestConfigPanel({
             <div className="p-4 space-y-3">
               <div className="space-y-1.5">
                 <Label className="text-xs text-text-secondary">Strategy</Label>
-                {strategiesQuery.isLoading ? (
+                {strategiesQuery.isLoading && !linkedStrategy ? (
                   <div className="flex items-center gap-2 text-xs text-text-muted h-9">
                     <Loader2 className="w-3 h-3 animate-spin" />
                     Loading…
                   </div>
-                ) : strategiesQuery.isError ? (
+                ) : strategiesQuery.isError && !linkedStrategy ? (
                   <div className="flex items-center gap-2 text-xs text-loss h-9">
                     <AlertCircle className="w-3 h-3" />
                     Failed
