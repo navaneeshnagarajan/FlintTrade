@@ -59,8 +59,21 @@ vi.mock("@/services/ftApi", () => ({
 // the tool wiring (the range handed over) without dragging in the Fills data
 // planes, which have their own suite.
 vi.mock("@/widgets/trading/Fills/FillsTable", () => ({
-  FillsTable: ({ startDate, endDate }: { startDate?: string; endDate?: string }) => (
-    <div data-testid="fills-table" data-start={startDate} data-end={endDate} />
+  FillsTable: ({
+    startDate,
+    endDate,
+    exploreJournalTrades,
+  }: {
+    startDate?: string;
+    endDate?: string;
+    exploreJournalTrades?: { symbol: string }[];
+  }) => (
+    <div
+      data-testid="fills-table"
+      data-start={startDate}
+      data-end={endDate}
+      data-explore-count={exploreJournalTrades?.length ?? ""}
+    />
   ),
 }));
 
@@ -118,7 +131,9 @@ vi.mock("@/lib/formatters", () => ({
 // ---------------------------------------------------------------------------
 
 import TradeJournalTool from "../TradeJournalTool";
+import { getSampleJournalTrades } from "../sampleJournal";
 import { istDayKey, sevenDaysAgoISO, todayISO } from "../utils";
+import { toIstIsoDate } from "@/lib/ist";
 import { useModeStore } from "@/stores/modeStore";
 
 beforeAll(() => {
@@ -138,6 +153,10 @@ describe("TradeJournalTool (Trade Review)", () => {
     vi.clearAllMocks();
     tradeJournalMocks.queryOptions = undefined;
     useModeStore.setState({ mode: "live" });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("renders without crashing", () => {
@@ -206,6 +225,35 @@ describe("TradeJournalTool (Trade Review)", () => {
     expect(screen.getByText("0 trades")).toBeInTheDocument();
   });
 
+  it("REGRESSION: committed date range filters explore sample trades and the Log", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-09T04:30:00Z")); // 10:00 IST on 9 September
+    useModeStore.setState({ mode: "explore" });
+
+    render(<TradeJournalTool />);
+
+    // Default last-7 IST days (3–9 Sep) covers every relative sample row.
+    expect(screen.getByText("12 trades")).toBeInTheDocument();
+    expect(screen.getByTestId("fills-table")).toHaveAttribute("data-explore-count", "12");
+
+    fireEvent.change(screen.getByLabelText("Start date"), {
+      target: { value: "2026-09-04" },
+    });
+    fireEvent.change(screen.getByLabelText("End date"), {
+      target: { value: "2026-09-10" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    // daysAgo=6 is 3 Sep — outside 4–10 Sep — so two Opening Range rows drop.
+    expect(screen.getByText("10 trades")).toBeInTheDocument();
+    const fills = screen.getByTestId("fills-table");
+    expect(fills).toHaveAttribute("data-start", "2026-09-04");
+    expect(fills).toHaveAttribute("data-end", "2026-09-10");
+    expect(fills).toHaveAttribute("data-explore-count", "10");
+
+    vi.useRealTimers();
+  });
+
   it("mounts the Session tab with its provenance badge", async () => {
     render(<TradeJournalTool />);
     const user = userEvent.setup();
@@ -232,6 +280,29 @@ describe("TradeJournalTool (Trade Review)", () => {
     expect(screen.getByText("Daily P&L Calendar")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /previous month/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /next month/i })).toBeInTheDocument();
+  });
+});
+
+describe("getSampleJournalTrades — IST dates", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stamps relative sample rows on the IST calendar, not the host-local clock", () => {
+    vi.useFakeTimers();
+    // 01:00 IST on 4 September 2026; UTC is still 3 September.
+    vi.setSystemTime(new Date("2026-09-03T19:30:00Z"));
+
+    const trades = getSampleJournalTrades();
+    const days = new Set(trades.map((t) => toIstIsoDate(new Date(t.timestamp))));
+    expect(days.has("2026-09-03")).toBe(true);
+    expect([...days].every((d) => d <= "2026-09-04")).toBe(true);
+
+    const third = getSampleJournalTrades("2026-09-03", "2026-09-03");
+    expect(third.length).toBeGreaterThan(0);
+    for (const trade of third) {
+      expect(toIstIsoDate(new Date(trade.timestamp))).toBe("2026-09-03");
+    }
   });
 });
 

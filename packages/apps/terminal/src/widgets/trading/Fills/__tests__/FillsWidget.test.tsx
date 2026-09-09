@@ -100,6 +100,9 @@ import {
   fillsToCsv,
   journalToFills,
   SAMPLE_FILLS,
+  filterFillsByIstRange,
+  formatFillDateTime,
+  parseFillTime,
   stableTradeKey,
   type RawFillSource,
 } from "../fillsModel";
@@ -384,6 +387,34 @@ describe("fillsToCsv", () => {
   });
 });
 
+describe("parseFillTime", () => {
+  it("REGRESSION: date and time stay separable — year must not glue onto HH:MM:SS", () => {
+    const parsed = parseFillTime("2026-04-13T14:55:42+05:30");
+    expect(parsed.dateDisplay).toBe("13 Apr 2026");
+    expect(parsed.timeDisplay).toBe("14:55:42");
+    const rendered = formatFillDateTime(parsed.dateDisplay, parsed.timeDisplay);
+    expect(rendered).toBe("13 Apr 2026 14:55:42");
+    expect(rendered).not.toMatch(/2614:55:42/);
+    expect(rendered).not.toMatch(/202614:55:42/);
+  });
+
+  it("formats an IST early-morning fill on the IST calendar day", () => {
+    const parsed = parseFillTime("2026-09-03T19:30:00Z");
+    expect(parsed.dateDisplay).toBe("4 Sep 2026");
+    expect(parsed.timeDisplay).toBe("01:00:00");
+    expect(formatFillDateTime(parsed.dateDisplay, parsed.timeDisplay)).toBe("4 Sep 2026 01:00:00");
+  });
+});
+
+describe("filterFillsByIstRange", () => {
+  it("drops SAMPLE_FILLS whose IST day sits outside the committed window", () => {
+    expect(filterFillsByIstRange([...SAMPLE_FILLS], "2026-09-04", "2026-09-10")).toEqual([]);
+    expect(filterFillsByIstRange([...SAMPLE_FILLS], "2026-04-13", "2026-04-13")).toHaveLength(
+      SAMPLE_FILLS.length,
+    );
+  });
+});
+
 describe("SAMPLE_FILLS", () => {
   it("has at least 5 entries with unique ids", () => {
     expect(SAMPLE_FILLS.length).toBeGreaterThanOrEqual(5);
@@ -633,6 +664,51 @@ describe("FillsTable (embedded, date-ranged)", () => {
   it("shows a period-scoped empty message", async () => {
     renderFills(<FillsTable startDate="2026-06-01" endDate="2026-06-07" />);
     expect(await screen.findByText("No fills in this period")).toBeInTheDocument();
+  });
+
+  it("REGRESSION: Explore date range hides SAMPLE_FILLS outside the IST window", () => {
+    runtime.mode = "explore";
+    renderFills(<FillsTable startDate="2026-09-04" endDate="2026-09-10" />);
+    expect(screen.queryByText("NIFTY 22200 CE")).not.toBeInTheDocument();
+    expect(screen.getByText("No fills in this period")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/2614:55:42/);
+  });
+
+  it("keeps Explore SAMPLE_FILLS whose IST day falls inside the window", () => {
+    runtime.mode = "explore";
+    renderFills(<FillsTable startDate="2026-04-13" endDate="2026-04-13" />);
+    expect(screen.getAllByText("NIFTY 22200 CE")).toHaveLength(2);
+    expect(screen.getByText("13 Apr 2026 14:55:42")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/2614:55:42/);
+  });
+
+  it("renders supplied explore journal trades instead of the frozen April blotter", () => {
+    runtime.mode = "explore";
+    const trades: JournalTrade[] = [
+      {
+        timestamp: "2026-09-05T10:03:00+05:30",
+        symbol: "RELIANCE",
+        exchange: "NSE",
+        action: "SELL",
+        quantity: 50,
+        price: 1038,
+        pnl: 700,
+        strategy: "Gap Fade",
+        entry_price: 1038,
+        exit_price: 1024,
+        fees: 64,
+      },
+    ];
+    renderFills(
+      <FillsTable
+        startDate="2026-09-04"
+        endDate="2026-09-10"
+        exploreJournalTrades={trades}
+      />,
+    );
+    expect(screen.getByText("RELIANCE")).toBeInTheDocument();
+    expect(screen.queryByText("NIFTY 22200 CE")).not.toBeInTheDocument();
+    expect(screen.getByText("5 Sep 2026 10:03:00")).toBeInTheDocument();
   });
 });
 

@@ -12,7 +12,9 @@ import {
   IST_OFFSET_MINUTES,
   fmtDuration,
   fmtIstClock,
+  fmtIstDate,
   fromIstParts,
+  isIstDateInRange,
   istMinutes,
   istNow,
   istParts,
@@ -261,6 +263,39 @@ describe("fmtIstClock", () => {
 
   it("renders IST midnight as 00, not 24", () => {
     expect(fmtIstClock(new Date("2026-07-25T18:30:00Z"))).toBe("00:00:00");
+  });
+});
+
+describe("fmtIstDate", () => {
+  it("renders an IST calendar day as day + short month + four-digit year", () => {
+    // 14:55 IST on 13 April 2026 — the Trade Review glue case.
+    expect(fmtIstDate(new Date("2026-04-13T09:25:42Z"))).toBe("13 Apr 2026");
+  });
+
+  it("uses the IST calendar, not the UTC day, before 05:30 IST", () => {
+    // 01:00 IST on 4 September 2026; UTC is still 3 September.
+    expect(fmtIstDate(new Date("2026-09-03T19:30:00Z"))).toBe("4 Sep 2026");
+  });
+});
+
+describe("isIstDateInRange", () => {
+  it("includes an instant whose IST day sits inside the inclusive YYYY-MM-DD window", () => {
+    expect(isIstDateInRange(new Date("2026-09-05T10:00:00+05:30"), "2026-09-04", "2026-09-10")).toBe(true);
+    expect(isIstDateInRange(new Date("2026-04-13T14:55:42+05:30"), "2026-09-04", "2026-09-10")).toBe(false);
+  });
+
+  it("keys the predicate on the IST day, not the UTC calendar", () => {
+    // 01:00 IST on 4 September — UTC date is still 3 September.
+    const earlyIst = new Date("2026-09-03T19:30:00Z");
+    expect(isIstDateInRange(earlyIst, "2026-09-04", "2026-09-04")).toBe(true);
+    expect(isIstDateInRange(earlyIst, "2026-09-03", "2026-09-03")).toBe(false);
+  });
+
+  it("treats a missing bound as open", () => {
+    const fill = new Date("2026-04-13T14:55:42+05:30");
+    expect(isIstDateInRange(fill, "2026-04-13")).toBe(true);
+    expect(isIstDateInRange(fill, undefined, "2026-04-13")).toBe(true);
+    expect(isIstDateInRange(fill)).toBe(true);
   });
 });
 

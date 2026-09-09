@@ -45,6 +45,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Trade Review date filter and mangled timestamps in Explore (FT-TRADE-001).**
+  Explore `/trade` Trade Review now clips the Log to the committed IST
+  date range (the same predicate as the sample-journal badge) and
+  renders fill timestamps as `D Mon YYYY HH:MM:SS` with a literal
+  space, so `13 Apr 26` can no longer glue onto `14:55:42`. Live and
+  Practice still use the journal/tradebook path; only the shared IST
+  format and range helpers changed there.
+
 - **Explore /ai chat produces no assistant reply (FT-AI-001).**
   `/ai` and the floating tutor now share one advisor chat path:
   a short status probe (including Explore/sample-data), SSE

@@ -1,3 +1,4 @@
+import { fromIstParts, isIstDateInRange, istParts } from "@/lib/ist";
 import { type JournalTrade } from "@/services/ftApi";
 
 const SAMPLE_LIMIT = 200;
@@ -9,10 +10,8 @@ type SampleTradeInput = Omit<JournalTrade, "timestamp"> & {
 };
 
 function timestampFor(daysAgo: number, hour: number, minute: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() - daysAgo);
-  date.setHours(hour, minute, 0, 0);
-  return date.toISOString();
+  const { year, month, day } = istParts();
+  return fromIstParts(year, month, day - daysAgo, hour, minute).toISOString();
 }
 
 function makeTrade(input: SampleTradeInput): JournalTrade {
@@ -211,10 +210,7 @@ function buildSampleJournalTrades(): JournalTrade[] {
 }
 
 function isWithinDateRange(trade: JournalTrade, startDate?: string, endDate?: string): boolean {
-  const tradeDate = trade.timestamp.slice(0, 10);
-  if (startDate && tradeDate < startDate) return false;
-  if (endDate && tradeDate > endDate) return false;
-  return true;
+  return isIstDateInRange(new Date(trade.timestamp), startDate, endDate);
 }
 
 export function getSampleJournalTrades(
