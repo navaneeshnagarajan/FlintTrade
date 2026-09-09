@@ -34,7 +34,7 @@ export const ADVISOR_STREAM_TIMEOUT_MS = 45_000;
 
 export type AdvisorAvailability = "configured" | "unconfigured" | "unknown" | "unreachable";
 
-export type AdvisorChatContext = string | Record<string, unknown>;
+export type AdvisorChatContext = string | object;
 
 export interface AdvisorChatRequest {
   messages: Array<{ role: string; content: string }>;
