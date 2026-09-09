@@ -6,9 +6,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -80,7 +81,14 @@ vi.mock("@/routes/lab/PineEditor", () => ({
 
 vi.mock("@/services/ftApi", () => ({
   runBacktest: vi.fn(),
-  getStrategies: vi.fn().mockResolvedValue([]),
+  getStrategies: vi.fn().mockResolvedValue([
+    {
+      name: "sma_crossover",
+      description: "Simple moving average crossover starter strategy",
+      category: "Trend",
+      parameters: [],
+    },
+  ]),
   getRunningStrategies: vi.fn().mockResolvedValue([]),
   getForwardTrades: vi.fn().mockResolvedValue([]),
   startStrategy: vi.fn(),
@@ -101,12 +109,14 @@ import {
 // Tests
 // ---------------------------------------------------------------------------
 
-function renderLab() {
+function renderLab(path = "/lab") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={qc}>
-      <LabRoute />
-    </QueryClientProvider>,
+    <MemoryRouter initialEntries={[path]}>
+      <QueryClientProvider client={qc}>
+        <LabRoute />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -146,6 +156,23 @@ describe("LabRoute", () => {
     renderLab();
 
     expect(screen.getByRole("tab", { name: /options builder/i })).toBeInTheDocument();
+  });
+
+  it("leaves Run Backtest disabled when the Lab opens without a strategy query", async () => {
+    renderLab("/lab");
+
+    const run = await screen.findByRole("button", { name: /run backtest/i });
+    expect(run).toBeDisabled();
+    expect(screen.queryByText("TrendEMACrossover")).not.toBeInTheDocument();
+  });
+
+  it("hydrates the Backtest selector from ?strategy= even when the catalogue omits that key", async () => {
+    renderLab("/lab?strategy=TrendEMACrossover");
+
+    expect(await screen.findByText("TrendEMACrossover")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /run backtest/i })).toBeEnabled();
+    });
   });
 
   it("lands on the Options Builder when a template was stashed by the widget", () => {
