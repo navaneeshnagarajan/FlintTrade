@@ -1,4 +1,4 @@
-import { expect, test } from "./fixture-registry";
+import { expect, registerExploreAdvisorStatusProbe, test } from "./fixture-registry";
 import { seedExploreDemoSession } from "./helpers";
 
 interface PersistedWorkspaceState {
@@ -17,10 +17,17 @@ interface PersistedLayoutState {
   state: PersistedWorkspaceState["layouts"];
 }
 
-test("creates, clones, switches, and restores two canonical workspaces", async ({ page }) => {
+test("creates, clones, switches, and restores two canonical workspaces", async ({
+  page,
+  syntheticApi,
+}) => {
   await seedExploreDemoSession(page);
-  // No API handlers are registered intentionally: the automatic fail-closed
-  // fixture proves Explore workspace lifecycle makes no /ft-api request.
+  // Explore now probes advisor status (FT-AI-001). No other /ft-api traffic
+  // is expected. `/trade` plus a reload remount `AITutorPill`; React Strict
+  // Mode may invoke the logged-in status effect twice per mount.
+  registerExploreAdvisorStatusProbe(syntheticApi, {
+    expectedCalls: { minimum: 1, maximum: 8 },
+  });
   await page.goto("/trade");
 
   const workspace = page.locator('[data-tour-target="workspace"]');

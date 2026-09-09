@@ -106,6 +106,40 @@ function sseResponse(): Response {
   });
 }
 
+function statusResponse(configured = true): Response {
+  return new Response(
+    JSON.stringify({
+      status: "success",
+      data: { configured, provider: configured ? "ollama" : "", model: configured ? "llama3" : "" },
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+function advisorFetchMock(
+  onPost?: (url: string) => Response | Promise<Response>,
+): ReturnType<typeof vi.fn> {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (init?.method === "POST") {
+      if (onPost) return onPost(url);
+      return sseResponse();
+    }
+    return statusResponse(true);
+  });
+}
+
+function postCall(
+  fetchMock: ReturnType<typeof vi.fn>,
+  predicate: (url: string) => boolean,
+): [string, RequestInit] {
+  const match = fetchMock.mock.calls.find(
+    ([url, init]) => init?.method === "POST" && predicate(String(url)),
+  ) as [string, RequestInit] | undefined;
+  if (!match) throw new Error("expected a matching advisor POST");
+  return match;
+}
+
 async function openAndSend(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.click(screen.getByRole("button", { name: "Open AI Tutor" }));
   await user.type(screen.getByLabelText("Message input"), "What is a lot size?");
@@ -115,7 +149,7 @@ async function openAndSend(user: ReturnType<typeof userEvent.setup>): Promise<vo
 }
 
 function requestBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown> {
-  const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+  const [, init] = postCall(fetchMock, (url) => url.endsWith("/api/v1/advisor/stream"));
   return JSON.parse(String(init.body)) as Record<string, unknown>;
 }
 
@@ -136,7 +170,7 @@ describe("AITutorPill", () => {
       currentRoute: "/",
       conversationId: null,
     });
-    fetchMock = vi.fn().mockResolvedValue(sseResponse());
+    fetchMock = advisorFetchMock();
     vi.stubGlobal("fetch", fetchMock);
   });
 
@@ -159,7 +193,7 @@ describe("AITutorPill", () => {
 
     await openAndSend(user);
 
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url] = postCall(fetchMock, (url) => url.endsWith("/api/v1/advisor/stream"));
     expect(String(url)).toMatch(/\/api\/v1\/advisor\/stream$/);
     const body = requestBody(fetchMock);
     expect(body.session_id).toBe("tutor-conv-1");
@@ -180,14 +214,16 @@ describe("AITutorPill", () => {
   it("passes session_id to the non-streaming fallback when streaming is unavailable", async () => {
     authState.token = "real-jwt";
     useAIConversationStore.setState({ conversationId: "tutor-conv-1" });
-    fetchMock
-      .mockResolvedValueOnce(new Response("Not found", { status: 404 }))
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ status: "success", data: { response: "Fallback reply" } }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
+    fetchMock = advisorFetchMock((url) => {
+      if (url.endsWith("/api/v1/advisor/stream")) {
+        return new Response("Not found", { status: 404 });
+      }
+      return new Response(
+        JSON.stringify({ status: "success", data: { response: "Fallback reply" } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
       );
+    });
+    vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     renderPill();
 
@@ -196,7 +232,7 @@ describe("AITutorPill", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByText("Fallback reply")).toBeInTheDocument();
-    const [fallbackUrl, fallbackInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const [fallbackUrl, fallbackInit] = postCall(fetchMock, (url) => url.endsWith("/api/v1/advisor"));
     expect(String(fallbackUrl)).toMatch(/\/api\/v1\/advisor$/);
     const body = JSON.parse(String(fallbackInit.body)) as Record<string, unknown>;
     expect(body.session_id).toBe("tutor-conv-1");

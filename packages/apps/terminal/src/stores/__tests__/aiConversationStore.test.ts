@@ -367,7 +367,7 @@ describe("aiConversationStore — persistence", () => {
     const raw = localStorage.getItem("flinttrade:ai-conversation");
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw as string) as { version: number };
-    expect(parsed.version).toBe(2);
+    expect(parsed.version).toBe(3);
   });
 
   it("partializes to only messages and currentRoute (no isStreaming)", () => {
@@ -419,6 +419,29 @@ describe("aiConversationStore — persistence", () => {
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw as string) as { state: { messages: Message[] } };
     expect(parsed.state.messages).toEqual([]);
+  });
+
+  it("does not persist a blank assistant placeholder across reload", () => {
+    useAIConversationStore.getState().addMessage("user", "What is NIFTY?");
+    useAIConversationStore.setState((state) => ({
+      messages: [
+        ...state.messages,
+        {
+          id: "blank-assistant",
+          role: "assistant",
+          content: "",
+          timestamp: Date.now(),
+          route: state.currentRoute,
+        },
+      ],
+    }));
+
+    const raw = localStorage.getItem("flinttrade:ai-conversation");
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw as string) as { state: { messages: Message[] } };
+    expect(parsed.state.messages.some((m) => m.role === "assistant" && m.content === "")).toBe(false);
+    expect(parsed.state.messages).toHaveLength(1);
+    expect(parsed.state.messages[0].content).toBe("What is NIFTY?");
   });
 });
 
