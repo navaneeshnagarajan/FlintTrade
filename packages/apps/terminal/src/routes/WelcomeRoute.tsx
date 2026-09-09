@@ -380,21 +380,6 @@ export default function WelcomeRoute() {
   }, [authStatus, navigate]);
 
   useEffect(() => {
-    if (authStatus !== "logged-out") return;
-
-    try {
-      const raw = localStorage.getItem("flinttrade:setup-progress");
-      if (!raw) return;
-      const saved = JSON.parse(raw) as { accountCreated?: boolean; currentStep?: number };
-      if (saved?.accountCreated && typeof saved.currentStep === "number" && saved.currentStep < 6) {
-        navigate("/setup", { replace: true });
-      }
-    } catch {
-      // Ignore corrupt progress and continue to sign-in.
-    }
-  }, [authStatus, navigate]);
-
-  useEffect(() => {
     if (authStatus !== "logged-out" && authStatus !== "pin-required") return;
     if (flowStep !== "cinematic") return;
 
@@ -431,7 +416,7 @@ export default function WelcomeRoute() {
   }
 
   if (authStatus === "logged-out" && flowStep === "login") {
-    return <LoginRoute onSuccess={handleLoginSuccess} mode="full" />;
+    return <LoginRoute onSuccess={handleLoginSuccess} onExplore={handleExplore} mode="full" />;
   }
 
   if (authStatus === "pin-required" && flowStep === "login") {

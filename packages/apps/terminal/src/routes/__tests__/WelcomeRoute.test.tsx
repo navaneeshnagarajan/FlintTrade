@@ -165,6 +165,19 @@ describe("WelcomeRoute", () => {
     expect(screen.getByRole("heading", { name: "FlintTrade" })).toBeInTheDocument();
   });
 
+  it("does not redirect incomplete setup back to /setup from Welcome", () => {
+    authState.status = "logged-out";
+    localStorage.setItem(
+      "flinttrade:setup-progress",
+      JSON.stringify({ accountCreated: true, currentStep: 1 }),
+    );
+
+    render(<WelcomeRoute />);
+
+    expect(mockNavigate).not.toHaveBeenCalledWith("/setup", { replace: true });
+    localStorage.removeItem("flinttrade:setup-progress");
+  });
+
   it("shows Get Started and Explore CTAs for setup-required users", () => {
     render(<WelcomeRoute />);
 

@@ -46,14 +46,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
-  Tester finding (Blocker/Major). After creating an account on the
-  installed app (`/setup`), Step 2/7 mandatory TOTP has no skip for
-  Explore/Practice. Once account creation starts, `/welcome` and
-  `/trade` redirect back to incomplete setup, so sample-data Explore is
-  unreachable until 2FA is finished. This Unreleased note tracks an
-  Explore/Practice escape hatch (or making that path obvious from
-  Setup) before mandatory TOTP. Product fix is not in this commit —
-  implement on this PR.
+  Setup Step 2/7 now has an obvious **Explore first — continue without
+  2FA** path. New accounts start with TOTP unenrolled, so password-only
+  login can mint an Explore session until the operator saves the QR
+  (or resets 2FA). `/welcome` no longer traps an unfinished wizard back
+  onto Setup; sign-in also offers **Try with sample data**. Live still
+  requires TOTP enrolment plus the PIN. **Start over** wipes the
+  unfinished account via the setup session so a lost QR seed is
+  recoverable without the TOTP secret.
 
 - **Strategy Lab stays empty after AI Deploy (FT-DEMO-002).**
   Deploying a suggestion from `/demo-app/ai` (for example “Trend EMA

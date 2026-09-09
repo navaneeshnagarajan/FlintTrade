@@ -492,6 +492,9 @@ def auth_status() -> tuple[Any, int]:
             "is_setup": svc.is_setup(),
             "is_locked": svc.is_locked(),
             "has_pin": svc.has_pin(),
+            "totp_enrolled": bool(
+                svc.is_totp_enrolled() if hasattr(svc, "is_totp_enrolled") else False
+            ),
         },
     }), 200
 
@@ -539,25 +542,88 @@ def auth_setup() -> tuple[Any, int]:
     }), 201
 
 
+def _session_token_from_request() -> str:
+    """Return the Bearer / X-FlintTrade-Token value, or an empty string."""
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip()
+    if token:
+        return token
+    return request.headers.get("X-FlintTrade-Token", "").strip()
+
+
+def _verify_setup_session_token(token: str) -> dict[str, Any] | tuple[Any, int]:
+    """Accept only a full login/setup session JWT for wizard recovery writes."""
+    try:
+        payload = decode_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return jsonify({
+            "status": "error",
+            "message": "Session expired or invalid — confirm with your password instead.",
+        }), 401
+    if payload.get("type") != "session":
+        return jsonify({
+            "status": "error",
+            "message": "A full login session is required.",
+        }), 401
+    return payload
+
+
 @auth_bp.route("/setup/reset", methods=["POST"])
 @_rate_limit("3 per hour")
 def auth_setup_reset() -> tuple[Any, int]:
     """Wipe the account during the setup wizard.
 
-    Body: ``{"password": "…"}``. Requires the password the user just set so
-    a casual shoulder-surfer cannot destroy an account. Used by the "Delete
-    account & start over" escape hatch on the 2FA screen.
+    Body: ``{"password": "…"}`` (password-confirmed wipe) **or** a valid
+    setup/login session JWT with an empty body (lost-QR start-over). A
+    password-reset token is never enough — that only proves email possession.
     """
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
     body = request.get_json(silent=True) or {}
     password = str(body.get("password", ""))
-    if not password:
+    if password:
+        if not svc.reset_account(password):
+            return jsonify({"status": "error", "message": "Invalid password."}), 401
+        return jsonify({"status": "success", "data": {}}), 200
+
+    token = _session_token_from_request()
+    if not token:
         return jsonify({"status": "error", "message": "Password required to confirm reset."}), 400
-    if not svc.reset_account(password):
-        return jsonify({"status": "error", "message": "Invalid password."}), 401
+    verified = _verify_setup_session_token(token)
+    if not isinstance(verified, dict):
+        return verified
+    svc.wipe_account()
+    old_jti = str(verified.get("jti", ""))
+    old_exp = float(verified.get("exp", 0) or 0)
+    if old_jti:
+        try:
+            _revoke_jti(old_jti, old_exp)
+        except Exception:
+            logger.debug("Setup reset could not revoke the spent session", exc_info=True)
     return jsonify({"status": "success", "data": {}}), 200
+
+
+@auth_bp.route("/setup/confirm-2fa", methods=["POST"])
+@_rate_limit("10 per minute")
+def auth_setup_confirm_2fa() -> tuple[Any, int]:
+    """Mark TOTP as enrolled after the operator saves the QR and backup codes.
+
+    Requires the Explore session minted by ``/auth/setup``. Live unlock then
+    becomes available; subsequent password logins require a TOTP code.
+    """
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    token = _session_token_from_request()
+    if not token:
+        return jsonify({"status": "error", "message": "Authentication required."}), 401
+    verified = _verify_setup_session_token(token)
+    if not isinstance(verified, dict):
+        return verified
+    if not svc.confirm_totp_enrolment():
+        return jsonify({"status": "error", "message": "No account exists to enrol."}), 409
+    return jsonify({"status": "success", "data": {"totp_enrolled": True}}), 200
 
 
 @auth_bp.route("/setup/regenerate-2fa", methods=["POST"])
@@ -633,10 +699,16 @@ def auth_login() -> tuple[Any, int]:
     if not svc.verify_password(password):
         return jsonify({"status": "error", "message": "Invalid credentials."}), 401
 
-    if not svc.verify_totp(totp_code):
-        # Try backup code as fallback
-        if not svc.verify_backup_code(totp_code):
-            return jsonify({"status": "error", "message": "Invalid TOTP code."}), 401
+    if svc.is_totp_enrolled():
+        if not totp_code:
+            return jsonify({"status": "error", "message": "2FA code required."}), 401
+        if not svc.verify_totp(totp_code):
+            # Try backup code as fallback
+            if not svc.verify_backup_code(totp_code):
+                return jsonify({"status": "error", "message": "Invalid TOTP code."}), 401
+    elif totp_code:
+        if svc.verify_totp(totp_code) or svc.verify_backup_code(totp_code):
+            svc.confirm_totp_enrolment()
 
     profile = svc.get_profile()
     username = str(profile.get("username") or "user")
@@ -717,6 +789,16 @@ def auth_pin_verify() -> tuple[Any, int]:
             "status": "error",
             "message": "mode must be one of 'explore', 'practice', 'live'.",
         }), 400
+
+    if target_mode == "live" and not svc.is_totp_enrolled():
+        return jsonify({
+            "status": "error",
+            "code": "totp_required",
+            "message": (
+                "Authenticator 2FA must be enrolled before Live mode. "
+                "Finish Setup 2FA, or reset 2FA from the sign-in screen, then retry."
+            ),
+        }), 403
 
     if not svc.verify_pin(pin):
         # Distinguish "no PIN exists" from "wrong PIN" — with the optional PIN

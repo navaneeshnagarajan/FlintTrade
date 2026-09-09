@@ -38,6 +38,8 @@ import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 interface LoginRouteProps {
   onSuccess: () => void;
   mode: "full" | "pin";
+  /** Installed-app escape to sample-data Explore without finishing 2FA. */
+  onExplore?: () => void;
 }
 
 /** Pull the base32 secret out of an ``otpauth://`` URI for manual entry. */
@@ -46,7 +48,7 @@ function extractTotpSecret(uri: string): string {
   return match ? decodeURIComponent(match[1]) : "";
 }
 
-export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
+export default function LoginRoute({ onSuccess, mode, onExplore }: LoginRouteProps) {
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
   const [pin, setPin] = useState("");
@@ -186,7 +188,7 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
           <p className="text-sm text-text-muted">
             {mode === "pin"
               ? "Enter your PIN to continue"
-              : "Enter your password and 2FA code"}
+              : "Enter your password. Authenticator 2FA is required after you enrol it, and always before Live."}
           </p>
         </div>
 
@@ -271,7 +273,7 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
             </div>
             <Button
               onClick={handlePasswordLogin}
-              disabled={!password || totpCode.length < 6 || isLoading}
+              disabled={!password || isLoading}
               className="w-full"
             >
               <ShieldCheck className="size-4" />
@@ -291,6 +293,16 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
             >
               Lost your authenticator?
             </button>
+            {onExplore && (
+              <button
+                type="button"
+                onClick={onExplore}
+                className="w-full text-xs text-text-muted hover:text-text-primary transition-colors"
+                aria-label="Try with sample data without signing in"
+              >
+                Try with sample data →
+              </button>
+            )}
           </div>
         )}
       </div>
