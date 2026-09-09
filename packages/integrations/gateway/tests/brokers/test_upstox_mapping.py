@@ -15,6 +15,7 @@ import json
 
 import pytest
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.exceptions import (
     BrokerError,
     InsufficientFunds,
@@ -28,6 +29,71 @@ from flinttrade_core.models import Order
 from flinttrade_gateway.brokers import upstox_mapping as m
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize(
+    ("mapper", "row", "field", "value"),
+    [
+        (
+            m.from_upstox_order,
+            {
+                "order_id": "OID-1", "status": "open", "trading_symbol": "TCS", "exchange": "NSE",
+                "transaction_type": "BUY", "order_type": "LIMIT", "product": "D", "quantity": 1,
+                "filled_quantity": 0,
+            },
+            "order_id",
+            123,
+        ),
+        (
+            m.from_upstox_order,
+            {
+                "order_id": "OID-1", "status": "open", "trading_symbol": "TCS", "exchange": "NSE",
+                "transaction_type": "BUY", "order_type": "LIMIT", "product": "D", "quantity": 1,
+                "filled_quantity": 0,
+            },
+            "price",
+            object(),
+        ),
+        (
+            m.from_upstox_trade,
+            {
+                "order_id": "OID-1", "trading_symbol": "TCS", "exchange": "NSE",
+                "transaction_type": "BUY", "product": "D", "quantity": 1, "average_price": 3500,
+                "exchange_timestamp": "2026-09-07T09:20:00+05:30",
+            },
+            "exchange_timestamp",
+            123,
+        ),
+        (
+            m.from_upstox_gtt_order,
+            {
+                "gtt_order_id": "GTT-1", "status": "PENDING", "type": "SINGLE", "trading_symbol": "TCS",
+                "exchange": "NSE", "product": "D", "quantity": 1, "rules": [],
+            },
+            "gtt_order_id",
+            123,
+        ),
+        (
+            m.from_upstox_holding,
+            {
+                "trading_symbol": "TCS", "instrument_token": "NSE_EQ|INE467B01029",
+                "exchange": "NSE", "product": "D", "quantity": 1,
+            },
+            "instrument_token",
+            object(),
+        ),
+    ],
+)
+def test_upstox_fixed_mappers_reject_coerced_true_text_and_optional_values(
+    mapper,
+    row: dict[str, object],
+    field: str,
+    value: object,
+) -> None:
+    row[field] = value
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        mapper(row)
 
 
 class _StandInApiException(Exception):
@@ -501,10 +567,10 @@ def test_from_upstox_gtt_order_normalises_rules():
     assert out["orderid"] == out["gtt_order_id"] == "GTT-CU1"
     assert out["exchange"] == "NSE" and out["product"] == "CNC"  # equity D -> CNC
     assert out["action"] == "BUY" and out["status"] == "TRIGGERED"
-    assert out["filled_quantity"] == "0" and out["pricetype"] == "LIMIT"
+    assert "filled_quantity" not in out and out["pricetype"] == "LIMIT"
     assert out["trigger_price"] == "7.7" and out["stop_loss_price"] == "7.6"
     assert out["stop_loss_trailing_gap"] == "0.5"
-    assert out["target_price"] == ""
+    assert "target_price" not in out
     assert out["rules"][0]["trigger_type"] == "BELOW"
     assert out["rules"][0]["order_id"] == "250228010168535"
     assert out["rules"][1]["strategy"] == "STOPLOSS" and out["rules"][1]["order_id"] == ""
@@ -578,7 +644,7 @@ def test_upstox_cds_position_preserves_multiplier_and_previous_close():
     assert position["close_price"] == 0.0025
     assert position["instrument_id"] == "NCD_FO|USDINR23OCT85.5CE"
     assert position["accounting_complete"] is True
-    assert position["cross_currency"] is False
+    assert "cross_currency" not in position
     assert position["previous_close_trusted"] is True
 
 
@@ -620,11 +686,11 @@ def test_upstox_holding_preserves_delivery_ledger_identity_and_close():
     assert holding["product"] == "CNC"
     assert holding["close_price"] == 17.0
     assert holding["instrument_id"] == "NSE_EQ|INE528G01035"
-    assert holding["accounting_complete"] is True
+    assert "accounting_complete" not in holding
 
 
 def test_upstox_rejects_inconsistent_complete_position_accounting() -> None:
-    with pytest.raises(m.UpstoxMappingError, match="position accounting is inconsistent"):
+    with pytest.raises(BrokerReadResponseInvalid):
         m.from_upstox_position({
             "trading_symbol": "TCS",
             "exchange": "NSE",
@@ -650,6 +716,79 @@ def test_upstox_trade_prefers_exchange_execution_timestamp() -> None:
     })
 
     assert trade["timestamp"] == "2026-07-13T09:21:00+05:30"
+
+
+def test_upstox_response_rows_omit_absent_optional_evidence_and_preserve_zero() -> None:
+    position = m.from_upstox_position({
+        "trading_symbol": "TCS",
+        "instrument_token": "NSE_EQ|INE467B01029",
+        "product": "D",
+        "quantity": 0,
+    })
+    holding = m.from_upstox_holding({
+        "trading_symbol": "TCS",
+        "instrument_token": "NSE_EQ|INE467B01029",
+        "product": "D",
+        "quantity": 0,
+    })
+
+    assert position["quantity"] == "0"
+    assert holding["quantity"] == "0"
+    for field in (
+        "average_price",
+        "ltp",
+        "pnl",
+        "overnight_quantity",
+        "day_buy_quantity",
+        "day_sell_quantity",
+        "accounting_complete",
+        "cross_currency",
+        "previous_close_trusted",
+    ):
+        assert field not in position
+    for field in (
+        "average_price",
+        "ltp",
+        "pnl",
+        "t1_quantity",
+        "accounting_complete",
+        "cross_currency",
+        "previous_close_trusted",
+    ):
+        assert field not in holding
+
+
+def test_upstox_trade_required_numeric_alias_is_presence_first() -> None:
+    base = {
+        "order_id": "1",
+        "trading_symbol": "TCS",
+        "instrument_token": "NSE_EQ|INE467B01029",
+        "transaction_type": "BUY",
+        "product": "D",
+        "quantity": 1,
+        "exchange_timestamp": "2026-09-07T09:20:00+05:30",
+    }
+    with pytest.raises(BrokerReadResponseInvalid):
+        m.from_upstox_trade(base)
+    with pytest.raises(BrokerReadResponseInvalid):
+        m.from_upstox_trade({**base, "average_price": "invalid", "price": 1})
+
+
+def test_upstox_order_and_gtt_preserve_instrument_identity_without_fabricated_fill() -> None:
+    token = "NSE_EQ|INE467B01029"
+    regular = m.from_upstox_order({"instrument_token": token})
+    gtt = m.from_upstox_gtt_order({
+        "gtt_order_id": "GTT-1",
+        "instrument_token": token,
+        "exchange": "NSE",
+        "product": "D",
+        "quantity": 1,
+        "rules": [],
+    })
+
+    assert regular["instrument_id"] == token
+    assert gtt["instrument_id"] == token
+    assert "filled_quantity" not in gtt
 
 
 def test_upstox_v3_funds_map_opening_cash_without_margin_inference():
@@ -995,7 +1134,7 @@ def test_from_upstox_option_greeks():
     ],
 )
 def test_from_upstox_option_greeks_requires_success_and_broker_identity(payload) -> None:
-    with pytest.raises(m.UpstoxMappingError):
+    with pytest.raises(BrokerReadResponseInvalid):
         m.from_upstox_option_greeks(payload)
 
 

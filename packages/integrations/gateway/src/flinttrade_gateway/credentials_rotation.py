@@ -25,6 +25,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from flinttrade_core.broker_account_cutover import (
+    CUTOVER_UNAVAILABLE,
+    BrokerAccountCutoverUnavailable,
+    MutationAdmission,
+    require_broker_account_mutations,
+)
+
 logger = logging.getLogger("flinttrade.gateway.credentials_rotation")
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -88,7 +95,10 @@ class CredentialsRotator:
         self,
         credentials_manager: Any,
         scheduler: Any,
+        *,
+        mutation_admission: MutationAdmission = require_broker_account_mutations,
     ) -> None:
+        self._mutation_admission = mutation_admission
         self._manager = credentials_manager
         self._scheduler = scheduler
         self._lock = threading.Lock()
@@ -116,6 +126,7 @@ class CredentialsRotator:
             time_ist: Time of day in ``"HH:MM"`` 24-hour format (IST).
                 Defaults to ``"08:00"``.
         """
+        self._mutation_admission()
         try:
             hour, minute = self._parse_time(time_ist)
         except ValueError as exc:
@@ -127,7 +138,9 @@ class CredentialsRotator:
 
         def _refresh() -> None:
             result = self._do_refresh(broker)
-            if result.success:
+            if result.error == CUTOVER_UNAVAILABLE:
+                logger.info("%s", CUTOVER_UNAVAILABLE)
+            elif result.success:
                 logger.info(
                     "Daily credential refresh succeeded for broker=%s", broker
                 )
@@ -182,6 +195,7 @@ class CredentialsRotator:
         Raises:
             ValueError: If *day* is out of range or *time_ist* is malformed.
         """
+        self._mutation_admission()
         if not 0 <= day <= 6:
             raise ValueError(f"day must be 0–6 (Mon–Sun), got {day}")
 
@@ -196,7 +210,9 @@ class CredentialsRotator:
 
         def _rotate() -> None:
             result = self._do_rotation(broker)
-            if result.success:
+            if result.error == CUTOVER_UNAVAILABLE:
+                logger.info("%s", CUTOVER_UNAVAILABLE)
+            elif result.success:
                 logger.info(
                     "Weekly API-key rotation succeeded for broker=%s", broker
                 )
@@ -259,7 +275,9 @@ class CredentialsRotator:
             :class:`RotationResult` describing the outcome.
         """
         result = self._do_refresh(broker)
-        if result.success:
+        if result.error == CUTOVER_UNAVAILABLE:
+            logger.info("%s", CUTOVER_UNAVAILABLE)
+        elif result.success:
             logger.info("Manual rotation succeeded for broker=%s", broker)
         else:
             logger.warning(
@@ -344,6 +362,10 @@ class CredentialsRotator:
         Returns:
             :class:`RotationResult` with ``rotation_type="refresh"``.
         """
+        try:
+            self._mutation_admission()
+        except BrokerAccountCutoverUnavailable as exc:
+            return RotationResult(broker=broker, success=False, error=str(exc))
         now = datetime.now(IST)
         try:
             # Hook: try to call a ``refresh_token`` method if the manager
@@ -382,6 +404,10 @@ class CredentialsRotator:
         Returns:
             :class:`RotationResult` with ``rotation_type="rotate"``.
         """
+        try:
+            self._mutation_admission()
+        except BrokerAccountCutoverUnavailable as exc:
+            return RotationResult(broker=broker, success=False, error=str(exc), rotation_type="rotate")
         now = datetime.now(IST)
         try:
             if hasattr(self._manager, "rotate_api_key"):

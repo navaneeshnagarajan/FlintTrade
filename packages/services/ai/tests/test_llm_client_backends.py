@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from flinttrade_ai.llm_client import (
+    _PROVIDER_API_KEY_ENV,
     _PROVIDER_URLS,
     LLMClient,
     LLMConfig,
@@ -22,6 +23,7 @@ from flinttrade_ai.llm_client import (
     is_anthropic_oauth_token,
     resolve_endpoint,
 )
+from flinttrade_core.llm_provider_profiles import LLM_PROVIDER_PROFILES, LLMProvider as CoreLLMProvider
 
 pytestmark = pytest.mark.unit
 
@@ -70,6 +72,18 @@ class _FakeStream:
 def test_cerebras_is_a_first_class_provider() -> None:
     assert LLMProvider.CEREBRAS.value == "cerebras"
     assert "cerebras" in _PROVIDER_URLS
+
+
+def test_llm_client_backend_maps_are_core_profile_projections() -> None:
+    assert LLMProvider is CoreLLMProvider
+    assert _PROVIDER_URLS == {
+        profile.provider_id: profile.endpoint_template for profile in LLM_PROVIDER_PROFILES
+    }
+    assert _PROVIDER_API_KEY_ENV == {
+        profile.provider_id: profile.api_key_env
+        for profile in LLM_PROVIDER_PROFILES
+        if profile.api_key_env
+    }
 
 
 def test_cerebras_resolves_to_the_fixed_cloud_endpoint() -> None:

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers.dhan import DhanAdapter, _ROUTER_TOKEN
@@ -1308,7 +1309,6 @@ async def test_order_readback_accepts_terminal_quiet_window_after_transient_orde
     "leg_details",
     [
         None,
-        "malformed",
         [{"legName": "TARGET_LEG"}],
         [{"legName": "TARGET_LEG", "orderStatus": "TRADED"}],
     ],
@@ -1344,6 +1344,34 @@ async def test_traded_super_order_with_untrusted_legs_remains_unresolved(leg_det
 
 
 @pytest.mark.asyncio
+async def test_traded_super_order_rejects_malformed_leg_container():
+    class MalformedSuperOrderDhan(MockDhan):
+        def get_order_list(self):
+            return {"status": "success", "data": []}
+
+        def get_forever(self):
+            return {"status": "success", "data": []}
+
+        def get_super_order_list(self):
+            return {
+                "status": "success",
+                "data": [{
+                    "orderId": "SUPER-MALFORMED",
+                    "orderStatus": "TRADED",
+                    "legDetails": "malformed",
+                }],
+            }
+
+    mock = MalformedSuperOrderDhan()
+    mock.dhan_http.responses[("GET", "/alerts/orders")] = {"status": "success", "data": []}
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        await adapter._active_order_targets(session)
+
+
+@pytest.mark.asyncio
 async def test_reads_map_correctly():
     adapter = _adapter(MockDhan())
     session = await _session(adapter)
@@ -1360,7 +1388,7 @@ async def test_reads_map_correctly():
 
 
 @pytest.mark.asyncio
-async def test_holdings_empty_broker_response_returns_empty_list():
+async def test_holdings_provider_declared_failure_is_not_empty_success():
     class EmptyHoldingsDhan(MockDhan):
         def get_holdings(self):
             return {"status": "failure", "remarks": {"error_message": "No holdings available"}}
@@ -1368,7 +1396,8 @@ async def test_holdings_empty_broker_response_returns_empty_list():
     adapter = _adapter(EmptyHoldingsDhan())
     session = await _session(adapter)
 
-    assert await adapter.holdings(session) == []
+    with pytest.raises(Exception, match="No holdings available"):
+        await adapter.holdings(session)
 
 
 @pytest.mark.asyncio
@@ -1703,8 +1732,6 @@ async def test_portfolio_greeks_resolves_new_contract_through_scrip_master() -> 
 
 @pytest.mark.asyncio
 async def test_portfolio_greeks_rejects_a_chain_leg_for_another_security_id() -> None:
-    from flinttrade_core.exceptions import BrokerError
-
     class MismatchedGreeksDhan(MockDhan):
         def option_chain(self, under_security_id, under_exchange_segment, expiry):
             return {
@@ -1729,7 +1756,7 @@ async def test_portfolio_greeks_rejects_a_chain_leg_for_another_security_id() ->
     adapter = _adapter(MismatchedGreeksDhan())
     session = await _session(adapter)
 
-    with pytest.raises(BrokerError, match="security identity"):
+    with pytest.raises(BrokerReadResponseInvalid):
         await adapter.portfolio_greeks(session, [{
             "symbol": "NIFTY-Jul2026-25000-CE",
             "instrument_id": "49081",
@@ -1790,8 +1817,6 @@ async def test_portfolio_greeks_rejects_a_complete_symbol_security_id_mismatch()
 
 @pytest.mark.asyncio
 async def test_portfolio_greeks_rejects_empty_string_greeks_as_incomplete() -> None:
-    from flinttrade_core.exceptions import BrokerError
-
     class EmptyGreeksDhan(MockDhan):
         def option_chain(self, under_security_id, under_exchange_segment, expiry):
             return {
@@ -1811,7 +1836,7 @@ async def test_portfolio_greeks_rejects_empty_string_greeks_as_incomplete() -> N
     adapter = _adapter(EmptyGreeksDhan())
     session = await _session(adapter)
 
-    with pytest.raises(BrokerError, match="complete Greek"):
+    with pytest.raises(BrokerReadResponseInvalid):
         await adapter.portfolio_greeks(session, [{
             "symbol": "NIFTY-Jul2026-25000-CE",
             "instrument_id": "49081",
@@ -1826,8 +1851,6 @@ async def test_portfolio_greeks_rejects_empty_string_greeks_as_incomplete() -> N
 
 @pytest.mark.asyncio
 async def test_portfolio_greeks_rejects_missing_iv_as_incomplete() -> None:
-    from flinttrade_core.exceptions import BrokerError
-
     class MissingIvDhan(MockDhan):
         def option_chain(self, under_security_id, under_exchange_segment, expiry):
             return {
@@ -1841,7 +1864,7 @@ async def test_portfolio_greeks_rejects_missing_iv_as_incomplete() -> None:
     adapter = _adapter(MissingIvDhan())
     session = await _session(adapter)
 
-    with pytest.raises(BrokerError, match="complete Greek"):
+    with pytest.raises(BrokerReadResponseInvalid):
         await adapter.portfolio_greeks(session, [{
             "symbol": "NIFTY-Jul2026-25000-CE",
             "instrument_id": "49081",
@@ -2078,8 +2101,8 @@ async def test_option_greeks_uses_trading_symbol_underlying_for_bfo_stock_option
 
 
 @pytest.mark.asyncio
-async def test_option_chain_wraps_malformed_structures_as_broker_error() -> None:
-    from flinttrade_core.exceptions import BrokerError
+async def test_option_chain_preserves_malformed_response_signal() -> None:
+    from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 
     class MalformedChainDhan(MockDhan):
         def option_chain(self, under_security_id, under_exchange_segment, expiry):
@@ -2088,7 +2111,7 @@ async def test_option_chain_wraps_malformed_structures_as_broker_error() -> None
     adapter = _adapter(MalformedChainDhan())
     session = await _session(adapter)
 
-    with pytest.raises(BrokerError, match="option-chain response is invalid"):
+    with pytest.raises(BrokerReadResponseInvalid):
         await adapter.option_chain(
             session,
             {"symbol": "NIFTY", "exchange": "NSE_INDEX", "expiry": "2026-07-30"},

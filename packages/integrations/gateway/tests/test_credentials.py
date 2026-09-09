@@ -6,10 +6,27 @@ never touch ``~/.flinttrade/``.
 
 from __future__ import annotations
 
+import sqlite3
+
+from flinttrade_core.broker_identity import BrokerSelector
+from flinttrade_core.secure_file import harden_directory
+
 import pytest
+from flinttrade_gateway.credentials import CredentialError, CredentialStore
 from pathlib import Path
 
-from flinttrade_gateway.credentials import CredentialError, CredentialStore
+# Per-package pytest binds 'tests' locally; load the shared opt-in fixture by path.
+import importlib.util as _fixture_import
+from pathlib import Path as _FixturePath
+
+_fixture_spec = _fixture_import.spec_from_file_location(
+    "_credential_fixtures", _FixturePath(__file__).resolve().parents[4] / "tests" / "credential_fixtures.py",
+)
+_fixture_module = _fixture_import.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(_fixture_module)
+seed_credentials = _fixture_module.seed_credentials
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -37,15 +54,16 @@ CREDS_C: dict[str, str] = {
 @pytest.fixture()
 def store(tmp_path: Path) -> CredentialStore:
     """Fresh CredentialStore backed by a temporary SQLite file."""
+    harden_directory(tmp_path)
     return CredentialStore(tmp_path / "creds.db", MASTER_PW)
 
 
 @pytest.fixture()
 def populated_store(store: CredentialStore) -> CredentialStore:
     """Store pre-loaded with three accounts."""
-    store.store("acc_A", "zerodha", "Primary Zerodha", CREDS_A)
-    store.store("acc_B", "upstox", "Upstox Derivatives", CREDS_B)
-    store.store("acc_C", "angel", "Angel Broking", CREDS_C)
+    seed_credentials(store, "acc_A", "zerodha", "Primary Zerodha", CREDS_A)
+    seed_credentials(store, "acc_B", "upstox", "Upstox Derivatives", CREDS_B)
+    seed_credentials(store, "acc_C", "angel", "Angel Broking", CREDS_C)
     return store
 
 
@@ -54,10 +72,39 @@ def populated_store(store: CredentialStore) -> CredentialStore:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("reject_collision", [False, True])
+def test_vault_operation_closes_connection_on_success_and_failure(store, monkeypatch, reject_collision):
+    seed_credentials(store, "fixture", "zerodha", "Original", CREDS_A)
+    opened = []
+    real_open = store._get_connection
+
+    def retain_real_connection():
+        connection = real_open()
+        opened.append(connection)
+        return connection
+
+    collision_selector = BrokerSelector("upstox", "fixture")
+    expected = store.selector_state(collision_selector).version
+    monkeypatch.setattr(store, "_get_connection", retain_real_connection)
+    if reject_collision:
+        with pytest.raises(CredentialError):
+            store.put_credentials(collision_selector, "upstox", "Rejected", CREDS_B, expected=expected)
+    else:
+        store.store("fixture", "zerodha", "Updated", CREDS_B)
+    operation_connection = opened[0]
+    try:
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            operation_connection.execute("SELECT 1")
+        assert store.retrieve("fixture") == (CREDS_A if reject_collision else CREDS_B)
+    finally:
+        for connection in opened:
+            connection.close()
+
+
 class TestStoreAndRetrieve:
     def test_store_and_retrieve_round_trip(self, store: CredentialStore) -> None:
         """Credentials stored must be byte-for-byte identical when retrieved."""
-        store.store("acc1", "zerodha", "My Account", CREDS_A)
+        seed_credentials(store, "acc1", "zerodha", "My Account", CREDS_A)
         result = store.retrieve("acc1")
         assert result == CREDS_A
 
@@ -68,36 +115,37 @@ class TestStoreAndRetrieve:
             "meta": {"env": "prod", "scopes": ["orders", "holdings"]},
             "flags": {"sandbox": False},
         }
-        store.store("acc_nested", "broker_x", "Test", complex_creds)
+        seed_credentials(store, "acc_nested", "broker_x", "Test", complex_creds)
         assert store.retrieve("acc_nested") == complex_creds
 
 
 class TestErrorHandling:
     def test_retrieve_nonexistent_raises(self, store: CredentialStore) -> None:
         """Retrieving an account that was never stored raises CredentialError."""
-        with pytest.raises(CredentialError, match="not found"):
+        with pytest.raises(CredentialError, match="credential_not_found"):
             store.retrieve("ghost_account")
 
     def test_wrong_master_password_raises(self, tmp_path: Path) -> None:
         """Opening an existing DB with a different password must raise on retrieve."""
+        harden_directory(tmp_path)
         db = tmp_path / "creds.db"
         store1 = CredentialStore(db, MASTER_PW)
-        store1.store("acc1", "zerodha", "Label", CREDS_A)
+        seed_credentials(store1, "acc1", "zerodha", "Label", CREDS_A)
 
         store2 = CredentialStore(db, ALT_PW)
-        with pytest.raises(CredentialError, match="Decryption failed"):
+        with pytest.raises(CredentialError, match="credential_operation_failed"):
             store2.retrieve("acc1")
 
     def test_set_primary_nonexistent_raises(self, store: CredentialStore) -> None:
         """set_primary on a missing account raises CredentialError."""
-        with pytest.raises(CredentialError, match="not found"):
+        with pytest.raises(CredentialError, match="credential_not_found"):
             store.set_primary("ghost")
 
 
 class TestRemoveAccount:
     def test_remove_account(self, store: CredentialStore) -> None:
         """After removal the account must no longer be retrievable."""
-        store.store("acc1", "zerodha", "Label", CREDS_A)
+        seed_credentials(store, "acc1", "zerodha", "Label", CREDS_A)
         assert store.account_exists("acc1")
         store.remove("acc1")
         assert not store.account_exists("acc1")
@@ -139,9 +187,9 @@ class TestListAccounts:
         self, store: CredentialStore
     ) -> None:
         """Accounts are returned oldest-first (creation order)."""
-        store.store("first", "b", "L1", {"k": "v"})
-        store.store("second", "b", "L2", {"k": "v"})
-        store.store("third", "b", "L3", {"k": "v"})
+        seed_credentials(store, "first", "b", "L1", {"k": "v"})
+        seed_credentials(store, "second", "b", "L2", {"k": "v"})
+        seed_credentials(store, "third", "b", "L3", {"k": "v"})
         ids = [a["account_id"] for a in store.list_accounts()]
         assert ids == ["first", "second", "third"]
 
@@ -170,7 +218,7 @@ class TestSetPrimary:
 
 class TestAccountExists:
     def test_account_exists_true_when_stored(self, store: CredentialStore) -> None:
-        store.store("acc1", "zerodha", "Label", CREDS_A)
+        seed_credentials(store, "acc1", "zerodha", "Label", CREDS_A)
         assert store.account_exists("acc1") is True
 
     def test_account_exists_false_when_not_stored(
@@ -179,7 +227,7 @@ class TestAccountExists:
         assert store.account_exists("missing") is False
 
     def test_account_exists_false_after_remove(self, store: CredentialStore) -> None:
-        store.store("acc1", "zerodha", "Label", CREDS_A)
+        seed_credentials(store, "acc1", "zerodha", "Label", CREDS_A)
         store.remove("acc1")
         assert store.account_exists("acc1") is False
 
@@ -204,11 +252,12 @@ class TestPerAccountSalt:
         This verifies per-account salting: same plaintext + different salt =>
         different Fernet token (probabilistic but guaranteed by random IV and salt).
         """
+        harden_directory(tmp_path)
         db = tmp_path / "creds.db"
         store = CredentialStore(db, MASTER_PW)
         same_creds = {"api_key": "identical", "secret": "identical"}
-        store.store("acc_X", "broker", "Label X", same_creds)
-        store.store("acc_Y", "broker", "Label Y", same_creds)
+        seed_credentials(store, "acc_X", "broker", "Label X", same_creds)
+        seed_credentials(store, "acc_Y", "broker", "Label Y", same_creds)
 
         # Read the raw encrypted blobs directly from SQLite
         import sqlite3
@@ -236,7 +285,7 @@ class TestPerAccountSalt:
 class TestOverwrite:
     def test_store_overwrites_existing(self, store: CredentialStore) -> None:
         """Storing the same account_id twice replaces the credentials."""
-        store.store("acc1", "zerodha", "Old Label", {"api_key": "old"})
+        seed_credentials(store, "acc1", "zerodha", "Old Label", {"api_key": "old"})
         store.store("acc1", "zerodha", "New Label", {"api_key": "new"})
 
         result = store.retrieve("acc1")
@@ -250,7 +299,7 @@ class TestOverwrite:
         self, store: CredentialStore
     ) -> None:
         """Overwriting an account respects the is_primary flag in the new call."""
-        store.store("acc1", "zerodha", "L", {"k": "v1"}, is_primary=False)
+        seed_credentials(store, "acc1", "zerodha", "L", {"k": "v1"}, is_primary=False)
         store.store("acc1", "zerodha", "L", {"k": "v2"}, is_primary=True)
         accounts = store.list_accounts()
         assert accounts[0]["is_primary"] is True
@@ -260,7 +309,7 @@ class TestUpdateCredentialsFor:
     """G7 — the write-back API swaps the payload without touching metadata."""
 
     def test_update_replaces_payload_and_preserves_metadata(self, store: CredentialStore) -> None:
-        store.store("111", "dhan", "My Dhan", {"pin": "1234", "totp": "000111"},
+        seed_credentials(store, "111", "dhan", "My Dhan", {"pin": "1234", "totp": "000111"},
                     is_primary=True, adapter_id="dhan")
         store.update_credentials_for("dhan", "111", {"pin": "1234", "access_token": "minted"})
 
@@ -279,7 +328,7 @@ class TestStagedCredentials:
     """Candidate auth material must stay outside the durable vault until commit."""
 
     def test_existing_candidate_is_not_persisted_until_commit(self, store: CredentialStore) -> None:
-        store.store(
+        seed_credentials(store,
             "acc1",
             "upstox",
             "Original label",
@@ -288,9 +337,8 @@ class TestStagedCredentials:
             adapter_id="upstox",
         )
 
-        candidate = store.stage_credentials_for(
-            "upstox",
-            "acc1",
+        candidate = store.stage_credentials(
+            BrokerSelector("upstox", "acc1"),
             {"access_token": "candidate-token"},
         )
 
@@ -318,13 +366,11 @@ class TestStagedCredentials:
     def test_new_candidate_is_activation_visible_but_discarded_without_a_row(
         self, store: CredentialStore
     ) -> None:
-        candidate = store.stage_credentials_for(
-            "upstox",
-            "new-account",
+        candidate = store.stage_credentials(
+            BrokerSelector("upstox", "new-account"),
             {"access_token": "candidate-token"},
             broker="upstox",
             label="New account",
-            is_primary=False,
         )
 
         assert store.list_accounts() == []
@@ -346,13 +392,11 @@ class TestStagedCredentials:
             candidate.retrieve_for("upstox", "new-account")
 
     def test_candidate_rejects_writes_for_an_unrelated_selector(self, store: CredentialStore) -> None:
-        candidate = store.stage_credentials_for(
-            "upstox",
-            "acc1",
+        candidate = store.stage_credentials(
+            BrokerSelector("upstox", "acc1"),
             {"access_token": "candidate-token"},
             broker="upstox",
             label="Candidate",
-            is_primary=False,
         )
 
         with pytest.raises(CredentialError):
@@ -364,13 +408,11 @@ class TestStagedCredentials:
         assert store.list_accounts() == []
 
     def test_candidate_repr_does_not_expose_credentials(self, store: CredentialStore) -> None:
-        candidate = store.stage_credentials_for(
-            "upstox",
-            "acc1",
+        candidate = store.stage_credentials(
+            BrokerSelector("upstox", "acc1"),
             {"access_token": "credential-value-that-must-not-leak"},
             broker="upstox",
             label="Candidate",
-            is_primary=False,
         )
 
         assert "credential-value-that-must-not-leak" not in repr(candidate)
@@ -381,21 +423,21 @@ class TestPrimaryMetadataSnapshot:
         self, populated_store: CredentialStore
     ) -> None:
         populated_store.set_primary("acc_A")
-        snapshot = populated_store.snapshot_primary_metadata()
-        populated_store.set_primary("acc_B")
+        snapshot = populated_store.snapshot_primary_projection(BrokerSelector("upstox", "acc_B"), True)
+        mutation = populated_store.apply_primary_projection(snapshot)
 
-        populated_store.restore_primary_metadata(snapshot)
+        populated_store.restore_primary_projection(mutation)
 
         accounts = {row["account_id"]: row["is_primary"] for row in populated_store.list_accounts()}
         assert accounts == {"acc_A": True, "acc_B": False, "acc_C": False}
 
     def test_restore_primary_metadata_can_restore_no_primary(self, store: CredentialStore) -> None:
-        store.store("acc_A", "upstox", "A", {"token": "a"}, adapter_id="upstox")
-        store.store("acc_B", "dhan", "B", {"token": "b"}, adapter_id="dhan")
-        snapshot = store.snapshot_primary_metadata()
-        store.set_primary("acc_B")
+        seed_credentials(store, "acc_A", "upstox", "A", {"token": "a"}, adapter_id="upstox")
+        seed_credentials(store, "acc_B", "dhan", "B", {"token": "b"}, adapter_id="dhan")
+        snapshot = store.snapshot_primary_projection(BrokerSelector("dhan", "acc_B"), True)
+        mutation = store.apply_primary_projection(snapshot)
 
-        store.restore_primary_metadata(snapshot)
+        store.restore_primary_projection(mutation)
 
         assert all(row["is_primary"] is False for row in store.list_accounts())
 
@@ -406,14 +448,14 @@ class TestCrossAdapterCollisionGuard:
     reusing an account_id rather than silently overwriting the first's creds."""
 
     def test_second_adapter_same_account_id_is_rejected(self, store: CredentialStore) -> None:
-        store.store("SHARED", "dhan", "Dhan", {"access_token": "dhan-tok"}, adapter_id="dhan")
-        with pytest.raises(CredentialError, match="already used by adapter"):
-            store.store("SHARED", "upstox", "Upstox", {"access_token": "upx-tok"}, adapter_id="upstox")
+        seed_credentials(store, "SHARED", "dhan", "Dhan", {"access_token": "dhan-tok"}, adapter_id="dhan")
+        with pytest.raises(CredentialError, match="credential_conflict"):
+            seed_credentials(store, "SHARED", "upstox", "Upstox", {"access_token": "upx-tok"}, adapter_id="upstox")
         # The first adapter's credentials survive intact.
         assert store.retrieve_for("dhan", "SHARED")["access_token"] == "dhan-tok"
 
     def test_same_adapter_update_still_allowed(self, store: CredentialStore) -> None:
-        store.store("A1", "dhan", "Dhan", {"access_token": "old"}, adapter_id="dhan")
+        seed_credentials(store, "A1", "dhan", "Dhan", {"access_token": "old"}, adapter_id="dhan")
         store.store("A1", "dhan", "Dhan", {"access_token": "new"}, adapter_id="dhan")
         assert store.retrieve_for("dhan", "A1")["access_token"] == "new"
 
@@ -426,7 +468,7 @@ class TestUnschedule:
 
         from flinttrade_gateway.credentials_rotation import CredentialsRotator
 
-        rot = CredentialsRotator(MagicMock(), MagicMock())
+        rot = CredentialsRotator(MagicMock(), MagicMock(), mutation_admission=lambda: None)
         rot.schedule_daily_refresh("dhan", "08:05")  # must not raise regardless of today's date
         rot.unschedule("dhan")
         rot.unschedule("dhan")  # second call is a no-op

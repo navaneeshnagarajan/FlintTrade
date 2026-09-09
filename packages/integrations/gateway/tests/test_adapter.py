@@ -298,12 +298,12 @@ class TestBootstrap:
 
     def test_bootstrap_adds_openalgo_to_sys_path(self):
         """After bootstrap, the openalgo root path must appear in sys.path."""
-        from adapter import _OPENALGO_ROOT_STR
+        import adapter as adapter_module
 
         _bootstrap_openalgo_imports()
 
-        assert _OPENALGO_ROOT_STR in sys.path, (
-            f"Expected '{_OPENALGO_ROOT_STR}' in sys.path after bootstrap"
+        assert adapter_module._OPENALGO_ROOT_STR in sys.path, (
+            f"Expected '{adapter_module._OPENALGO_ROOT_STR}' in sys.path after bootstrap"
         )
 
 
@@ -317,18 +317,20 @@ class TestOpenAlgoRootPath:
 
     def test_openalgo_root_path(self):
         """_OPENALGO_ROOT must point to the openalgo external test-dep root."""
-        from adapter import _OPENALGO_ROOT
+        import adapter as adapter_module
 
-        assert _OPENALGO_ROOT.name == "openalgo"
+        openalgo_root = adapter_module._get_openalgo_root()
+
+        assert openalgo_root.name == "openalgo"
         # openalgo lives under .local/external/openalgo; previously it was a
         # submodule at infra/openalgo. Adapter must resolve to whichever path
         # exists.
-        assert _OPENALGO_ROOT.parent.name in {"external", "infra"}
+        assert openalgo_root.parent.name in {"external", "infra"}
 
         if not _OPENALGO_AVAILABLE:
             pytest.skip("openalgo external test-dep not available; skipping existence check")
 
-        assert _OPENALGO_ROOT.is_dir(), f"Expected directory at {_OPENALGO_ROOT}"
+        assert openalgo_root.is_dir(), f"Expected directory at {openalgo_root}"
 
 
 # ---------------------------------------------------------------------------

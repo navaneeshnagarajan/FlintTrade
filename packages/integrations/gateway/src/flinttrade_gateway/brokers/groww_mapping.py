@@ -8,10 +8,13 @@ logic here so the adapter stays a thin orchestration layer.
 from __future__ import annotations
 
 import csv
+import math
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from io import StringIO
 from typing import Any
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.exceptions import (
     BrokerError,
     DataError,
@@ -29,6 +32,175 @@ from flinttrade_gateway.reconciliation import normalise_order_status
 
 BASE_URL = "https://api.groww.in"
 _MISSING = object()
+
+
+def _response_record(value: object) -> dict[str, Any]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerReadResponseInvalid
+    return value
+
+
+def _response_text(
+    row: dict[str, Any],
+    *names: str,
+    required: bool = False,
+) -> str | object:
+    for name in names:
+        if name not in row:
+            continue
+        value = row[name]
+        if value is None and not required:
+            continue
+        if type(value) is not str or not value:
+            raise BrokerReadResponseInvalid
+        return value.encode("utf-8").decode("utf-8")
+    if required:
+        raise BrokerReadResponseInvalid
+    return _MISSING
+
+
+def _response_number(
+    row: dict[str, Any],
+    *names: str,
+    required: bool = False,
+    empty_absent: bool = False,
+) -> int | float | str | object:
+    for name in names:
+        if name not in row:
+            continue
+        value = row[name]
+        if value is None and not required:
+            continue
+        if type(value) is int:
+            return value
+        if type(value) is float:
+            if not math.isfinite(value):
+                raise BrokerReadResponseInvalid
+            return value
+        if type(value) is str and not value.strip():
+            if empty_absent and not required:
+                continue
+            raise BrokerReadResponseInvalid
+        if type(value) is str:
+            try:
+                number = Decimal(value)
+            except InvalidOperation:
+                raise BrokerReadResponseInvalid from None
+            if number.is_finite():
+                return value.encode("utf-8").decode("utf-8")
+        raise BrokerReadResponseInvalid
+    if required:
+        raise BrokerReadResponseInvalid
+    return _MISSING
+
+
+def _response_exchange(row: dict[str, Any], *, strict_pair: bool = False) -> str | object:
+    exchange = _response_text(row, "exchange")
+    if not strict_pair and exchange is _MISSING:
+        return _MISSING
+    segment = _response_text(row, "segment")
+    if strict_pair:
+        if exchange is _MISSING or segment is _MISSING:
+            raise BrokerReadResponseInvalid
+        pair = (exchange.upper(), segment.upper())
+        mapped = {
+            ("NSE", "CASH"): "NSE",
+            ("BSE", "CASH"): "BSE",
+            ("NSE", "FNO"): "NFO",
+            ("BSE", "FNO"): "BFO",
+            ("MCX", "COMMODITY"): "MCX",
+        }.get(pair)
+        if mapped is None:
+            raise BrokerReadResponseInvalid
+        return mapped
+    ex = exchange.upper()
+    seg = "" if segment is _MISSING else segment.upper()
+    if ex not in {"NSE", "BSE", "MCX"} or seg not in {"", "CASH", "FNO", "COMMODITY"}:
+        raise BrokerReadResponseInvalid
+    if seg == "COMMODITY" or ex == "MCX":
+        return "MCX"
+    if seg == "FNO":
+        return "BFO" if ex == "BSE" else "NFO"
+    return ex
+
+
+def _response_trade_id(row: dict[str, Any]) -> str | object:
+    if "groww_trade_id" in row:
+        primary = row["groww_trade_id"]
+        if type(primary) is not str:
+            raise BrokerReadResponseInvalid
+        if primary:
+            if not primary.strip():
+                raise BrokerReadResponseInvalid
+            return primary.encode("utf-8").decode("utf-8")
+    secondary = _response_text(row, "exchange_trade_id")
+    if secondary is not _MISSING and not secondary.strip():
+        raise BrokerReadResponseInvalid
+    return secondary
+
+
+def _response_product(row: dict[str, Any]) -> str | object:
+    value = _response_text(row, "product")
+    if value is _MISSING:
+        return _MISSING
+    product_name = value.upper()
+    try:
+        return {"MIS": "MIS", "CNC": "CNC", "NRML": "NRML", "MARGIN": "NRML"}[product_name]
+    except KeyError:
+        raise BrokerReadResponseInvalid from None
+
+
+def _put_present(target: dict[str, Any], name: str, value: object) -> None:
+    if value is not _MISSING:
+        target[name] = value
+
+
+def _market_number(
+    row: dict[str, Any],
+    *names: str,
+    integer: bool = False,
+) -> float | int | object:
+    """Copy the first present market-data alias after exact primitive validation."""
+    for name in names:
+        if name not in row:
+            continue
+        value = _response_number(row, name, required=True)
+        number = Decimal(str(value))
+        converted = float(number)
+        if not math.isfinite(converted):
+            raise BrokerReadResponseInvalid from None
+        if integer:
+            if number < 0 or number != number.to_integral_value():
+                raise BrokerReadResponseInvalid from None
+            return int(number)
+        return converted
+    return _MISSING
+
+
+def _market_text(row: dict[str, Any], *names: str) -> str | object:
+    for name in names:
+        if name not in row:
+            continue
+        return _response_text(row, name, required=True)
+    return _MISSING
+
+
+def _market_timestamp(value: object) -> str:
+    if type(value) is str:
+        if not value.strip():
+            raise BrokerReadResponseInvalid from None
+        return value.encode("utf-8").decode("utf-8")
+    if type(value) is int:
+        return str(value)
+    if type(value) is float and math.isfinite(value):
+        return str(value)
+    raise BrokerReadResponseInvalid from None
+
+
+def _required_response(value: object) -> Any:
+    if value is _MISSING:
+        raise BrokerReadResponseInvalid
+    return value
 
 
 def _text(value: Any) -> str:
@@ -138,6 +310,20 @@ def unwrap(payload: Any) -> Any:
     if _upper(payload.get("status")) and _upper(payload.get("status")) != "SUCCESS":
         raise map_error(200, payload)
     return payload.get("payload", payload)
+
+
+def unwrap_fixed_read(payload: Any) -> Any:
+    """Strictly unwrap a fixed broker-read response envelope."""
+    if type(payload) is not dict or any(type(key) is not str for key in payload):
+        raise BrokerReadResponseInvalid from None
+    status = payload.get("status")
+    if type(status) is not str or not status.strip():
+        raise BrokerReadResponseInvalid from None
+    if status.strip().upper() != "SUCCESS":
+        raise map_error(200, payload)
+    if "payload" not in payload:
+        raise BrokerReadResponseInvalid from None
+    return payload["payload"]
 
 
 def exchange_segment(exchange: Any) -> tuple[str, str]:
@@ -256,80 +442,120 @@ def extract_order_id(payload: Any) -> str:
 
 
 def from_order(row: dict[str, Any]) -> dict[str, Any]:
-    exchange = openalgo_exchange(row.get("exchange"), row.get("segment"))
-    quantity = _present_order_number(row, "quantity", integral=True)
-    filled_quantity = _present_order_number(row, "filled_quantity", integral=True)
-    order = {
-        "orderid": _text(row.get("groww_order_id") or row.get("order_id")),
-        "symbol": _text(row.get("trading_symbol")),
-        "exchange": exchange,
-        "action": _upper(row.get("transaction_type")) or "BUY",
-        "transaction_type": _upper(row.get("transaction_type")) or "BUY",
-        "pricetype": reverse_order_type(row.get("order_type")),
-        "order_type": reverse_order_type(row.get("order_type")),
-        "product": reverse_product(row.get("product")),
+    row = _response_record(row)
+    quantity = _response_number(row, "quantity", empty_absent=True)
+    filled_quantity = _response_number(row, "filled_quantity", empty_absent=True)
+    status = _response_text(row, "order_status", "status", required=True)
+    order: dict[str, Any] = {
         "status": _status(
-            row.get("order_status") or row.get("status"),
-            quantity=_int(quantity) if quantity is not _MISSING else 0,
-            filled_quantity=_int(filled_quantity) if filled_quantity is not _MISSING else 0,
-        ),
-        "order_timestamp": _text(row.get("created_at") or row.get("order_date_time")),
-        "order_reference_id": _text(row.get("order_reference_id")),
-        "raw": row,
+            status,
+            quantity=float(quantity) if quantity is not _MISSING else 0.0,
+            filled_quantity=float(filled_quantity) if filled_quantity is not _MISSING else 0.0,
+        )
     }
     for field, value in {
+        "orderid": _response_text(row, "groww_order_id", "order_id"),
+        "symbol": _response_text(row, "trading_symbol"),
+        "exchange": _response_exchange(row, strict_pair=True),
         "quantity": quantity,
         "filled_quantity": filled_quantity,
-        "price": _present_order_number(row, "price"),
-        "trigger_price": _present_order_number(row, "trigger_price"),
-        "average_price": _present_order_number(row, "average_price"),
+        "price": _response_number(row, "price", empty_absent=True),
+        "trigger_price": _response_number(row, "trigger_price", empty_absent=True),
+        "average_price": _response_number(
+            row,
+            "average_fill_price",
+            "average_price",
+            empty_absent=True,
+        ),
+        "order_timestamp": _response_text(row, "created_at", "order_date_time"),
+        "order_reference_id": _response_text(row, "order_reference_id"),
     }.items():
-        if value is not _MISSING:
-            order[field] = value
+        _put_present(order, field, value)
+    action = _response_text(row, "transaction_type")
+    if action is not _MISSING:
+        order["action"] = order["transaction_type"] = action.upper()
+    order_kind = _response_text(row, "order_type")
+    if order_kind is not _MISSING:
+        mapped_kind = {
+            "MARKET": "MARKET",
+            "LIMIT": "LIMIT",
+            "SL": "SL",
+            "SL-M": "SL-M",
+            "SLM": "SL-M",
+            "STOP_LOSS_LIMIT": "SL",
+            "STOP_LOSS_MARKET": "SL-M",
+        }.get(order_kind.upper())
+        if mapped_kind is None:
+            raise BrokerReadResponseInvalid
+        order["pricetype"] = order["order_type"] = mapped_kind
+    mapped_product = _response_product(row)
+    _put_present(order, "product", mapped_product)
     return order
 
 
 def from_trade(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "orderid": _text(row.get("groww_order_id")),
-        "tradeid": _text(row.get("groww_trade_id") or row.get("exchange_trade_id")),
-        "symbol": _text(row.get("trading_symbol")),
-        "exchange": openalgo_exchange(row.get("exchange"), row.get("segment")),
-        "action": _upper(row.get("transaction_type")) or "BUY",
-        "quantity": _int(row.get("quantity")),
-        "price": _float(row.get("price")),
-        "product": reverse_product(row.get("product")),
-        "timestamp": _text(row.get("trade_date_time") or row.get("created_at")),
-        "raw": row,
+    row = _response_record(row)
+    trade = {
+        "tradeid": _response_trade_id(row),
+        "symbol": _response_text(row, "trading_symbol", required=True),
+        "exchange": _required_response(_response_exchange(row, strict_pair=True)),
+        "action": _response_text(row, "transaction_type", required=True).upper(),
+        "quantity": _response_number(row, "quantity", required=True),
+        "price": _response_number(row, "price", "average_price", required=True),
+        "product": _required_response(_response_product(row)),
+        "timestamp": _response_text(row, "trade_date_time", "created_at", required=True),
     }
+    _put_present(trade, "orderid", _response_text(row, "groww_order_id"))
+    return trade
 
 
 def from_position(row: dict[str, Any]) -> dict[str, Any]:
-    credit_qty = _float(row.get("credit_quantity"))
-    debit_qty = _float(row.get("debit_quantity"))
-    net_qty = _float(row.get("quantity"), credit_qty - debit_qty)
-    return {
-        "symbol": _text(row.get("trading_symbol")),
-        "exchange": openalgo_exchange(row.get("exchange"), row.get("segment")),
-        "product": reverse_product(row.get("product")),
-        "quantity": net_qty,
-        "average_price": _float(row.get("average_price") or row.get("net_price")),
-        "ltp": _float(row.get("ltp") or row.get("last_price")),
-        "pnl": _float(row.get("pnl") or row.get("realised_pnl") or row.get("unrealised_pnl")),
-        "raw": row,
-    }
+    row = _response_record(row)
+    if "quantity" in row:
+        quantity = _response_number(row, "quantity", required=True)
+    else:
+        credit = _response_number(row, "credit_quantity", required=True)
+        debit = _response_number(row, "debit_quantity", required=True)
+        try:
+            result = Decimal(str(credit)) - Decimal(str(debit))
+        except InvalidOperation:
+            raise BrokerReadResponseInvalid from None
+        if not result.is_finite():
+            raise BrokerReadResponseInvalid
+        if type(credit) is int and type(debit) is int:
+            quantity = int(result)
+        elif type(credit) is float or type(debit) is float:
+            quantity = float(result)
+            if not math.isfinite(quantity):
+                raise BrokerReadResponseInvalid
+        else:
+            quantity = str(result)
+    position: dict[str, Any] = {"quantity": quantity}
+    for field, value in {
+        "symbol": _response_text(row, "trading_symbol"),
+        "exchange": _response_exchange(row, strict_pair=True),
+        "product": _response_product(row),
+        "average_price": _response_number(row, "average_price", "net_price"),
+        "ltp": _response_number(row, "ltp", "last_price"),
+        "pnl": _response_number(row, "pnl", "realised_pnl", "unrealised_pnl"),
+    }.items():
+        _put_present(position, field, value)
+    return position
 
 
 def from_holding(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "symbol": _text(row.get("trading_symbol")),
-        "exchange": openalgo_exchange(row.get("exchange", "NSE"), "CASH"),
-        "quantity": _float(row.get("quantity")),
-        "average_price": _float(row.get("average_price")),
-        "ltp": _float(row.get("ltp") or row.get("last_price")),
-        "isin": _text(row.get("isin")),
-        "raw": row,
-    }
+    row = _response_record(row)
+    holding: dict[str, Any] = {"quantity": _response_number(row, "quantity", required=True)}
+    for field, value in {
+        "symbol": _response_text(row, "trading_symbol"),
+        "exchange": _response_exchange(row),
+        "product": _response_product(row),
+        "average_price": _response_number(row, "average_price"),
+        "ltp": _response_number(row, "ltp", "last_price"),
+        "isin": _response_text(row, "isin"),
+    }.items():
+        _put_present(holding, field, value)
+    return holding
 
 
 def from_funds(row: dict[str, Any]) -> dict[str, Any]:
@@ -356,30 +582,56 @@ def groww_exchange_symbol(exchange: str, symbol: str) -> str:
     return f"{ex}_{symbol}"
 
 
-def from_quote(symbol: str, exchange: str, row: dict[str, Any]) -> dict[str, Any]:
+def from_quote(
+    symbol: str,
+    exchange: str,
+    row: dict[str, Any],
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
     # The documented /v1/live-data/quote payload nests OHLC under an "ohlc"
     # object and names the ask "offer_price" (captured official docs:
     # .local/reference-research/2026-07-03/groww-trade-api-docs). Flat keys stay
     # as tolerance fallbacks only — reading them alone rendered every quote's
     # open/high/low/close/ask as fabricated zeros.
-    raw_ohlc = row.get("ohlc")
-    ohlc: dict[str, Any] = raw_ohlc if isinstance(raw_ohlc, dict) else {}
-    return {
-        "symbol": symbol,
-        "exchange": exchange,
-        "ltp": _float(row.get("last_price") or row.get("ltp") or row.get("live_price")),
-        "open": _float(ohlc.get("open") or row.get("open")),
-        "high": _float(ohlc.get("high") or row.get("high")),
-        "low": _float(ohlc.get("low") or row.get("low")),
-        "close": _float(ohlc.get("close") or row.get("close")),
-        "volume": _int(row.get("volume")),
-        "bid": _float(row.get("bid_price")),
-        "ask": _float(row.get("offer_price") or row.get("ask_price")),
-        "prev_close": _float(
-            row.get("previous_close") or row.get("prev_close") or ohlc.get("close")
-        ),
-        "oi": _int(row.get("open_interest") or row.get("oi")),
-    }
+    if not strict:
+        raw_ohlc = row.get("ohlc")
+        ohlc: dict[str, Any] = raw_ohlc if isinstance(raw_ohlc, dict) else {}
+        return {
+            "symbol": symbol,
+            "exchange": exchange,
+            "ltp": _float(row.get("last_price") or row.get("ltp") or row.get("live_price")),
+            "open": _float(ohlc.get("open") or row.get("open")),
+            "high": _float(ohlc.get("high") or row.get("high")),
+            "low": _float(ohlc.get("low") or row.get("low")),
+            "close": _float(ohlc.get("close") or row.get("close")),
+            "volume": _int(row.get("volume")),
+            "bid": _float(row.get("bid_price")),
+            "ask": _float(row.get("offer_price") or row.get("ask_price")),
+            "prev_close": _float(
+                row.get("previous_close") or row.get("prev_close") or ohlc.get("close")
+            ),
+            "oi": _int(row.get("open_interest") or row.get("oi")),
+        }
+
+    record = _response_record(row)
+    ohlc: dict[str, Any] = {}
+    if "ohlc" in record:
+        ohlc = _response_record(record["ohlc"])
+    quote: dict[str, Any] = {"symbol": symbol, "exchange": exchange}
+    _put_present(quote, "ltp", _market_number(record, "last_price", "ltp", "live_price"))
+    for name in ("open", "high", "low", "close"):
+        value = _market_number(ohlc, name) if name in ohlc else _market_number(record, name)
+        _put_present(quote, name, value)
+    _put_present(quote, "volume", _market_number(record, "volume", integer=True))
+    _put_present(quote, "bid", _market_number(record, "bid_price"))
+    _put_present(quote, "ask", _market_number(record, "offer_price", "ask_price"))
+    previous_close = _market_number(record, "previous_close", "prev_close")
+    if previous_close is _MISSING:
+        previous_close = _market_number(ohlc, "close")
+    _put_present(quote, "prev_close", previous_close)
+    _put_present(quote, "oi", _market_number(record, "open_interest", "oi", integer=True))
+    return quote
 
 
 def from_ohlc(symbol: str, exchange: str, row: dict[str, Any]) -> dict[str, Any]:
@@ -409,7 +661,21 @@ def expiry_values(payload: Any) -> list[str]:
     return []
 
 
-def candle_rows(payload: Any) -> list[list[Any]]:
+def candle_rows(payload: Any, *, strict: bool = False) -> list[Any]:
+    if strict:
+        data = unwrap_fixed_read(payload)
+        if type(data) is list:
+            return data
+        record = _response_record(data)
+        if "candles" in record:
+            rows = record["candles"]
+        elif "data" in record:
+            rows = record["data"]
+        else:
+            raise BrokerReadResponseInvalid from None
+        if type(rows) is not list:
+            raise BrokerReadResponseInvalid from None
+        return rows
     data = unwrap(payload)
     if isinstance(data, dict):
         rows = data.get("candles") or data.get("data") or []
@@ -417,7 +683,36 @@ def candle_rows(payload: Any) -> list[list[Any]]:
     return data if isinstance(data, list) else []
 
 
-def from_candle_row(row: Any) -> dict[str, Any]:
+def from_candle_row(row: Any, *, strict: bool = False) -> dict[str, Any]:
+    if strict:
+        if type(row) is list:
+            if len(row) < 5:
+                raise BrokerReadResponseInvalid from None
+            candle = {
+                "timestamp": _market_timestamp(row[0]),
+                "open": _market_number({"value": row[1]}, "value"),
+                "high": _market_number({"value": row[2]}, "value"),
+                "low": _market_number({"value": row[3]}, "value"),
+                "close": _market_number({"value": row[4]}, "value"),
+            }
+            if len(row) > 5:
+                candle["volume"] = _market_number({"value": row[5]}, "value", integer=True)
+            return candle
+        record = _response_record(row)
+        timestamp = _market_text(record, "timestamp", "time")
+        if timestamp is _MISSING:
+            raise BrokerReadResponseInvalid from None
+        candle = {
+            "timestamp": _market_timestamp(timestamp),
+            "open": _market_number(record, "open"),
+            "high": _market_number(record, "high"),
+            "low": _market_number(record, "low"),
+            "close": _market_number(record, "close"),
+        }
+        if any(candle[name] is _MISSING for name in ("open", "high", "low", "close")):
+            raise BrokerReadResponseInvalid from None
+        _put_present(candle, "volume", _market_number(record, "volume", integer=True))
+        return candle
     if isinstance(row, (list, tuple)):
         return {
             "timestamp": str(row[0] if len(row) > 0 else ""),

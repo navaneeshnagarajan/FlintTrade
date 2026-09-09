@@ -15,11 +15,19 @@ Safety: every write requires the router's shared ``_ROUTER_TOKEN``. A direct
 from __future__ import annotations
 
 import hashlib
+import math
 import uuid
 from datetime import UTC, datetime
 from importlib import metadata
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
+from flinttrade_core.broker_read_port import (
+    BalanceEvidence,
+    BalanceSnapshot,
+    BrokerBalanceResponseInvalid,
+    BrokerLotSizeResponseInvalid,
+    BrokerReadResponseInvalid,
+)
 from flinttrade_core.exceptions import BrokerError, UnsupportedCapabilityError
 from flinttrade_gateway.capabilities import (
     AuthModel,
@@ -39,6 +47,113 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_gateway.reconciliation import LocalStateSnapshot, ReconciliationReport
 
 Transport = Callable[..., tuple[int, Any]]
+
+_INSTRUMENTS_URL = "https://growwapi-assets.groww.in/instruments/instrument.csv"
+
+
+def _strict_rows(payload: object, key: str) -> list[dict[str, Any]]:
+    if type(payload) is not dict or any(type(name) is not str for name in payload):
+        raise BrokerReadResponseInvalid
+    if key not in payload or type(payload[key]) is not list:
+        raise BrokerReadResponseInvalid
+    rows = payload[key]
+    if any(type(row) is not dict or any(type(name) is not str for name in row) for row in rows):
+        raise BrokerReadResponseInvalid
+    return rows
+
+
+def _balance_number(value: object) -> float:
+    if isinstance(value, bool) or type(value) not in (int, float, str) or (type(value) is str and not value.strip()):
+        raise BrokerBalanceResponseInvalid
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise BrokerBalanceResponseInvalid from None
+    if not math.isfinite(number):
+        raise BrokerBalanceResponseInvalid
+    return number
+
+
+def _balance_record(value: object) -> dict[str, object]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerBalanceResponseInvalid
+    return value
+
+
+def _lot_record(value: object) -> dict[str, object]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerLotSizeResponseInvalid
+    return value
+
+
+def _lot_alias(row: dict[str, object], *names: str) -> object:
+    for name in names:
+        if name in row:
+            return row[name]
+    return None
+
+
+def _strict_lot_http_error(status: int, payload: object) -> BrokerError:
+    """Map an instruments HTTP error from copied exact-string evidence only."""
+    message: str | None = None
+    code: str | None = None
+    if type(payload) is str:
+        candidate = payload.strip()
+        if candidate:
+            message = candidate
+    elif type(payload) is dict and all(type(key) is str for key in payload):
+        nested_value = payload.get("error")
+        nested = (
+            nested_value
+            if type(nested_value) is dict and all(type(key) is str for key in nested_value)
+            else None
+        )
+        for record, field in (
+            (payload, "message"),
+            (nested, "message"),
+        ):
+            if record is None:
+                continue
+            candidate_value = record.get(field)
+            if type(candidate_value) is str:
+                candidate = candidate_value.strip()
+                if candidate:
+                    message = candidate
+                    break
+        for record, field in (
+            (payload, "error_code"),
+            (payload, "code"),
+            (nested, "code"),
+        ):
+            if record is None:
+                continue
+            candidate_value = record.get(field)
+            if type(candidate_value) is str:
+                candidate = candidate_value.strip()
+                if candidate:
+                    code = candidate
+                    break
+
+    safe_payload = {"message": message or "Groww instrument read failed"}
+    if code is not None:
+        safe_payload["error_code"] = code
+    return M.map_error(status, safe_payload, endpoint="instrument.csv")
+
+
+def _balance_snapshot_from_groww(data: object) -> BalanceSnapshot:
+    data = _balance_record(data)
+    available = _balance_number(data["clear_cash"]) if "clear_cash" in data else None
+    used = _balance_number(data["net_margin_used"]) if "net_margin_used" in data else None
+    collateral = _balance_number(data["collateral_available"]) if "collateral_available" in data else None
+    total = available + collateral if available is not None and collateral is not None else None
+    if total is not None and not math.isfinite(total):
+        raise BrokerBalanceResponseInvalid
+    return BalanceSnapshot(
+        available, BalanceEvidence.DIRECT if available is not None else None,
+        used, BalanceEvidence.DIRECT if used is not None else None,
+        total, BalanceEvidence.DERIVED_FROM_DIRECT_COMPONENTS if total is not None else None,
+        None, None,
+    )
 
 
 def _growwapi_version() -> str:
@@ -165,6 +280,8 @@ def _expiry_from_token_payload(payload: Any) -> float:
 class GrowwAdapter(BrokerAdapter):
     """Native Groww Trade API adapter."""
 
+    _BROKER_READ_UNSUPPORTED = frozenset({"holdings"})
+
     def __init__(
         self,
         *,
@@ -216,6 +333,16 @@ class GrowwAdapter(BrokerAdapter):
         if status >= 400:
             raise M.map_error(status, payload, endpoint=path)
         return payload if raw else M.unwrap(payload)
+
+    async def _fixed_read(
+        self,
+        session: Session,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        payload = await self._request(session, "GET", path, params=params, raw=True)
+        return M.unwrap_fixed_read(payload)
 
     async def _mint_access_token(
         self,
@@ -373,15 +500,31 @@ class GrowwAdapter(BrokerAdapter):
     async def order_book(self, session: Session) -> list[Order]:
         out: list[dict[str, Any]] = []
         for segment in ("CASH", "FNO", "COMMODITY"):
-            payload = await self._request(
+            payload = await self._fixed_read(
                 session,
-                "GET",
                 "/v1/order/list",
                 params={"segment": segment, "page": 0, "page_size": 100},
             )
-            rows = payload.get("order_list") if isinstance(payload, dict) else []
-            out.extend(M.from_order(r) for r in rows or [] if isinstance(r, dict))
+            out.extend(self._listed_order(row, segment=segment) for row in _strict_rows(payload, "order_list"))
         return out  # type: ignore[return-value]
+
+    @staticmethod
+    def _listed_order(row: dict[str, Any], *, segment: str) -> dict[str, Any]:
+        returned_segment = row.get("segment")
+        returned_exchange = row.get("exchange")
+        allowed_exchanges = {
+            "CASH": {"NSE", "BSE"},
+            "FNO": {"NSE", "BSE"},
+            "COMMODITY": {"MCX"},
+        }
+        if (
+            type(returned_segment) is not str
+            or returned_segment.strip().upper() != segment
+            or type(returned_exchange) is not str
+            or returned_exchange.strip().upper() not in allowed_exchanges[segment]
+        ):
+            raise BrokerReadResponseInvalid from None
+        return M.from_order(row)
 
     async def order_details(self, session: Session, order_id: str, *, segment: str = "CASH") -> dict:
         payload = await self._request(session, "GET", f"/v1/order/detail/{order_id}", params={"segment": segment})
@@ -392,42 +535,77 @@ class GrowwAdapter(BrokerAdapter):
         return M.from_order(payload if isinstance(payload, dict) else {})
 
     async def order_trades(self, session: Session, order_id: str, *, segment: str = "CASH") -> list[dict]:
-        payload = await self._request(
+        if type(segment) is not str or segment.strip().upper() not in {"CASH", "FNO", "COMMODITY"}:
+            raise BrokerReadResponseInvalid from None
+        bound_segment = segment.strip().upper()
+        payload = await self._fixed_read(
             session,
-            "GET",
             f"/v1/order/trades/{order_id}",
-            params={"segment": segment, "page": 0, "page_size": 50},
+            params={"segment": bound_segment, "page": 0, "page_size": 50},
         )
-        rows = payload.get("trade_list") if isinstance(payload, dict) else []
-        return [M.from_trade(r) for r in rows or [] if isinstance(r, dict)]
+        return [
+            self._listed_trade(row, segment=bound_segment, order_id=order_id)
+            for row in _strict_rows(payload, "trade_list")
+        ]
+
+    @staticmethod
+    def _listed_trade(row: dict[str, Any], *, segment: str, order_id: str) -> dict[str, Any]:
+        allowed_exchanges = {
+            "CASH": {"NSE", "BSE"},
+            "FNO": {"NSE", "BSE"},
+            "COMMODITY": {"MCX"},
+        }
+        if "groww_order_id" in row:
+            returned_order_id = row["groww_order_id"]
+            if type(returned_order_id) is not str or returned_order_id != order_id:
+                raise BrokerReadResponseInvalid from None
+        if "segment" in row:
+            returned_segment = row["segment"]
+            if type(returned_segment) is not str or returned_segment.strip().upper() != segment:
+                raise BrokerReadResponseInvalid from None
+        returned_exchange = row.get("exchange")
+        if (
+            type(returned_exchange) is not str
+            or returned_exchange.strip().upper() not in allowed_exchanges[segment]
+        ):
+            raise BrokerReadResponseInvalid from None
+        projected = dict(row)
+        projected["segment"] = segment
+        return M.from_trade(projected)
 
     async def trade_book(self, session: Session) -> list[Trade]:
-        orders = await self.order_book(session)
+        listed_orders: list[tuple[str, dict[str, Any]]] = []
+        for segment in ("CASH", "FNO", "COMMODITY"):
+            payload = await self._fixed_read(
+                session,
+                "/v1/order/list",
+                params={"segment": segment, "page": 0, "page_size": 100},
+            )
+            listed_orders.extend((segment, row) for row in _strict_rows(payload, "order_list"))
         out: list[dict[str, Any]] = []
-        for order in orders:  # type: ignore[assignment]
-            oid = str(order.get("orderid") or "")
-            exchange = order.get("exchange")
-            if exchange == "MCX":
-                segment = "COMMODITY"
-            else:
-                segment = "FNO" if exchange in {"NFO", "BFO"} else "CASH"
-            if oid:
-                out.extend(await self.order_trades(session, oid, segment=segment))
+        for segment, row in listed_orders:
+            order = self._listed_order(row, segment=segment)
+            oid = order.get("orderid")
+            if type(oid) is not str or not oid:
+                raise BrokerReadResponseInvalid from None
+            out.extend(await self.order_trades(session, oid, segment=segment))
         return out  # type: ignore[return-value]
 
     async def positions(self, session: Session) -> list[Position]:
-        payload = await self._request(session, "GET", "/v1/positions/user")
-        rows = payload.get("positions") if isinstance(payload, dict) else []
-        return [M.from_position(r) for r in rows or [] if isinstance(r, dict)]  # type: ignore[return-value]
+        payload = await self._fixed_read(session, "/v1/positions/user")
+        return [M.from_position(row) for row in _strict_rows(payload, "positions")]  # type: ignore[return-value]
 
     async def holdings(self, session: Session) -> list[dict]:
-        payload = await self._request(session, "GET", "/v1/holdings/user")
-        rows = payload.get("holdings") if isinstance(payload, dict) else []
-        return [M.from_holding(r) for r in rows or [] if isinstance(r, dict)]
+        payload = await self._fixed_read(session, "/v1/holdings/user")
+        return [M.from_holding(row) for row in _strict_rows(payload, "holdings")]
 
     async def funds(self, session: Session) -> dict:
         payload = await self._request(session, "GET", "/v1/margins/detail/user")
         return M.from_funds(payload if isinstance(payload, dict) else {})
+
+    async def balance_snapshot(self, session: Session) -> BalanceSnapshot:
+        """Read the existing margin-detail endpoint without defaulting evidence."""
+        return _balance_snapshot_from_groww(await self._request(session, "GET", "/v1/margins/detail/user"))
 
     async def profile(self, session: Session) -> dict:
         payload = await self._request(session, "GET", "/v1/user/detail")
@@ -457,7 +635,9 @@ class GrowwAdapter(BrokerAdapter):
                 "/v1/live-data/quote",
                 params={"exchange": groww_exchange, "segment": segment, "trading_symbol": symbol},
             )
-            out.append(Quote(**M.from_quote(symbol, exchange, payload if isinstance(payload, dict) else {})))
+            if type(payload) is not dict:
+                raise BrokerReadResponseInvalid from None
+            out.append(Quote(**M.from_quote(symbol, exchange, payload, strict=True)))
         return out
 
     async def ltp(self, session: Session, symbols: list[str]) -> dict[str, float]:
@@ -535,12 +715,12 @@ class GrowwAdapter(BrokerAdapter):
             },
             raw=True,
         )
-        rows = M.candle_rows(payload)
+        rows = M.candle_rows(payload, strict=True)
         return Candles(
             symbol=symbol,
             exchange=exchange,
             interval=interval,
-            bars=[OHLCV(**M.from_candle_row(r)) for r in rows],
+            bars=[OHLCV(**M.from_candle_row(r, strict=True)) for r in rows],
         )
 
     async def expiry_list(self, session: Session, symbol: str, exchange: str = "NSE_INDEX") -> list[str]:
@@ -594,6 +774,58 @@ class GrowwAdapter(BrokerAdapter):
 
     async def instruments(self, session: Session) -> list[dict[str, str]]:
         return M.parse_instruments_csv(await self.instruments_csv(session))
+
+    async def _strict_lot_size_instruments(self, session: Session) -> list[dict[str, str]]:
+        """Read the instruments asset for lot projection without coercion hooks."""
+        status, payload = await run_blocking_sdk_call(
+            self._transport(session),
+            "GET",
+            _INSTRUMENTS_URL,
+            headers={"Accept": "text/csv"},
+            params=None,
+            json_body=None,
+        )
+        if status >= 400:
+            raise _strict_lot_http_error(status, payload)
+        if type(payload) is not str:
+            raise BrokerLotSizeResponseInvalid
+        try:
+            rows = M.parse_instruments_csv(payload)
+        except Exception:
+            raise BrokerLotSizeResponseInvalid from None
+        if type(rows) is not list:
+            raise BrokerLotSizeResponseInvalid
+        return rows
+
+    async def instrument_lot_sizes(self, session: Session, request: Any) -> list[dict[str, object]]:
+        """Project the existing instrument rows to exact requested lot evidence."""
+        rows = await self._strict_lot_size_instruments(session)
+        if type(rows) is not list:
+            raise BrokerLotSizeResponseInvalid
+        requested = set(request.symbols)
+        result: list[dict[str, object]] = []
+        for row in rows:
+            row = _lot_record(row)
+            symbol = _lot_alias(row, "trading_symbol", "symbol")
+            exchange = _lot_alias(row, "exchange")
+            lot = _lot_alias(row, "lot_size", "lot_size_units")
+            instrument_id = _lot_alias(row, "instrument_token", "instrument_id")
+            if type(symbol) is not str or not symbol or type(exchange) is not str:
+                raise BrokerLotSizeResponseInvalid
+            if exchange != request.exchange or (requested and symbol not in requested):
+                continue
+            if isinstance(lot, bool) or type(lot) not in (int, str):
+                raise BrokerLotSizeResponseInvalid
+            try:
+                numeric = int(lot)
+            except ValueError:
+                raise BrokerLotSizeResponseInvalid from None
+            if str(numeric) != str(lot).strip() or not 1 <= numeric <= 1_000_000:
+                raise BrokerLotSizeResponseInvalid
+            if instrument_id is not None and type(instrument_id) is not str:
+                raise BrokerLotSizeResponseInvalid
+            result.append({"symbol": symbol, "exchange": exchange, "lot_size": numeric, "instrument_id": instrument_id})
+        return result
 
     async def subscribe(self, session: Session, symbols: list[str], mode: str = "FULL") -> None:
         return None

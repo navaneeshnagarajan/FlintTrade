@@ -1150,7 +1150,7 @@ def test_serve_quiesces_background_owners_and_flushes_capture_before_drain(
     )
     monkeypatch.setattr(
         desktop,
-        "retire_broker_router_generation",
+        "retire_broker_dependencies",
         lambda _app: events.append("router-retire") or True,
         raising=False,
     )

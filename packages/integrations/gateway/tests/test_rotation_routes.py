@@ -36,6 +36,7 @@ def _mock_rotator(success: bool = True) -> MagicMock:
 @pytest.fixture()
 def app():
     flask_app = Flask(__name__)
+    flask_app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     flask_app.config["TESTING"] = True
     bp = create_rotation_blueprint(_mock_rotator(success=True))
     flask_app.register_blueprint(bp)
@@ -93,6 +94,7 @@ def test_schedule_error():
     rotator = _mock_rotator()
     rotator.schedule_daily_refresh.side_effect = ValueError("Bad time format")
     flask_app = Flask(__name__)
+    flask_app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     flask_app.config["TESTING"] = True
     flask_app.register_blueprint(create_rotation_blueprint(rotator))
     with flask_app.test_client() as c:
@@ -120,6 +122,7 @@ def test_rotate_now_ok(client):
 def test_rotate_now_failure():
     """500 on rotation failure."""
     flask_app = Flask(__name__)
+    flask_app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     flask_app.config["TESTING"] = True
     flask_app.register_blueprint(
         create_rotation_blueprint(_mock_rotator(success=False))

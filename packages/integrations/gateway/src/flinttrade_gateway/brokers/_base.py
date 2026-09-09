@@ -26,7 +26,7 @@ from contextvars import copy_context
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Protocol
 
 from flinttrade_gateway.capabilities import Capabilities
 
@@ -84,6 +84,23 @@ async def run_blocking_sdk_call(fn: Callable[..., Any], *args: Any, **kwargs: An
     if cancellation is not None:
         raise cancellation
     return result
+
+
+class AdapterSessionView(Protocol):
+    """Explicit adapter fields shared by payloads and sealed registry handles."""
+
+    access_token: str
+    expires_at: float
+    account_id: str
+    adapter_id: str
+    algo_id: str
+    extra: dict[str, Any]
+    read_only_until_at: float | None
+
+    @property
+    def is_read_only(self) -> bool: ...
+
+    def is_expiring_soon(self, leeway_seconds: int = 60) -> bool: ...
 
 
 @dataclass

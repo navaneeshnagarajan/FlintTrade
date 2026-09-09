@@ -15,9 +15,12 @@ LIMIT/MARKET on ``/order``; trigger behaviour lives in the smart-order family).
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.exceptions import (
     AuthError,
     BrokerError,
@@ -168,6 +171,152 @@ class IndMoneyMappingError(ValueError):
 # ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
+
+_MISSING = object()
+
+
+def _response_record(value: object) -> dict[str, Any]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerReadResponseInvalid
+    return value
+
+
+def _response_text(
+    row: dict[str, Any],
+    name: str,
+    *,
+    required: bool = False,
+    empty_absent: bool = False,
+) -> str | object:
+    if name not in row or row[name] is None:
+        if required:
+            raise BrokerReadResponseInvalid
+        return _MISSING
+    value = row[name]
+    if type(value) is not str:
+        raise BrokerReadResponseInvalid
+    if not value:
+        if empty_absent and not required:
+            return _MISSING
+        if required:
+            raise BrokerReadResponseInvalid
+    return value.encode("utf-8").decode("utf-8")
+
+
+def _response_number_text(
+    row: dict[str, Any],
+    name: str,
+    *,
+    required: bool = False,
+    empty_absent: bool = False,
+) -> str | object:
+    if name not in row or row[name] is None:
+        if required:
+            raise BrokerReadResponseInvalid
+        return _MISSING
+    value = row[name]
+    if type(value) is int:
+        return str(value)
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise BrokerReadResponseInvalid
+        return str(value)
+    if type(value) is str:
+        if not value.strip():
+            if empty_absent and not required:
+                return _MISSING
+            raise BrokerReadResponseInvalid
+        try:
+            number = Decimal(value)
+        except InvalidOperation:
+            raise BrokerReadResponseInvalid from None
+        if number.is_finite():
+            return value.encode("utf-8").decode("utf-8")
+    raise BrokerReadResponseInvalid
+
+
+def _response_exchange(row: dict[str, Any]) -> str:
+    exchange = _response_text(row, "exchange", required=True)
+    segment = _response_text(row, "segment", required=True)
+    try:
+        return SEGMENT_REVERSE_MAP[(exchange.upper(), segment.upper())]
+    except KeyError:
+        raise BrokerReadResponseInvalid from None
+
+
+def _response_exchange_segment(row: dict[str, Any]) -> str:
+    segment = _response_text(row, "exchange_segment", required=True)
+    try:
+        return EXCHANGE_SEGMENT_REVERSE_MAP[segment.upper()]
+    except KeyError:
+        raise BrokerReadResponseInvalid from None
+
+
+def _response_product(value: object) -> str:
+    if type(value) is not str or not value:
+        raise BrokerReadResponseInvalid
+    try:
+        return PRODUCT_REVERSE_MAP[value.upper()]
+    except KeyError:
+        raise BrokerReadResponseInvalid from None
+
+
+def _put_present(target: dict[str, Any], name: str, value: object) -> None:
+    if value is not _MISSING:
+        target[name] = value
+
+
+def _market_number(
+    row: dict[str, Any],
+    name: str,
+    *,
+    integer: bool = False,
+    indian: bool = False,
+) -> float | int | object:
+    """Copy present market evidence after validating exact JSON primitives."""
+    if name not in row:
+        return _MISSING
+    value = row[name]
+    if type(value) is str:
+        candidate = value.strip()
+        if not candidate:
+            raise BrokerReadResponseInvalid from None
+        if indian:
+            candidate = candidate.replace(",", "")
+    elif type(value) in (int, float):
+        candidate = str(value)
+    else:
+        raise BrokerReadResponseInvalid from None
+    try:
+        number = Decimal(candidate)
+    except InvalidOperation:
+        raise BrokerReadResponseInvalid from None
+    converted = float(number)
+    if not number.is_finite() or not math.isfinite(converted):
+        raise BrokerReadResponseInvalid from None
+    if integer:
+        if number < 0 or number != number.to_integral_value():
+            raise BrokerReadResponseInvalid from None
+        return int(number)
+    return converted
+
+
+def _quote_depth_price(record: dict[str, Any], side: str) -> float | object:
+    depth = record
+    if "market_depth" in record:
+        depth = _response_record(record["market_depth"])
+    if "depth" not in depth:
+        return _MISSING
+    rows = depth["depth"]
+    if type(rows) is not list:
+        raise BrokerReadResponseInvalid from None
+    if not rows:
+        return _MISSING
+    first = _response_record(rows[0])
+    if side not in first:
+        return _MISSING
+    leg = _response_record(first[side])
+    return _market_number(leg, "price", indian=True)
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -578,6 +727,22 @@ def unwrap(resp: Any) -> Any:
     return resp
 
 
+def unwrap_fixed_read(resp: Any) -> Any:
+    """Strictly unwrap a fixed broker-read response envelope."""
+    if type(resp) is not dict or any(type(key) is not str for key in resp):
+        raise BrokerReadResponseInvalid from None
+    status = resp.get("status")
+    if type(status) is not str or not status.strip():
+        raise BrokerReadResponseInvalid from None
+    if status.strip().lower() != "success":
+        message = resp.get("message")
+        detail = message.strip() if type(message) is str and message.strip() else "provider-declared failure"
+        raise IndMoneyMappingError(f"IndMoney API error: {detail}")
+    if "data" not in resp:
+        raise BrokerReadResponseInvalid from None
+    return resp["data"]
+
+
 def map_error(status_code: int, payload: Any) -> BrokerError:
     """Map an IndMoney HTTP error response to the FlintTrade exception taxonomy.
 
@@ -665,23 +830,28 @@ def _reverse_exchange(d: dict[str, Any]) -> str:
 
 def from_indmoney_order(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise an IndMoney order-book/order-details record."""
+    d = _response_record(d)
+    security_id = _response_text(d, "security_id")
     order = {
-        "orderid": str(d.get("id", "")),
-        "status": str(d.get("status", "")),
-        "symbol": str(d.get("name", "")),
-        "exchange": _reverse_exchange(d),
-        "action": str(d.get("txn_type", "")),
-        "pricetype": str(d.get("order_type", "")),
-        "product": PRODUCT_REVERSE_MAP.get(str(d.get("product", "")), str(d.get("product", ""))),
-        # Smart-order leg prices + forensic context, preserved verbatim.
-        "sl_trigger_price": str(d.get("sl_trigger_price", "")),
-        "sl_limit_price": str(d.get("sl_limit_price", "")),
-        "tgt_trigger_price": str(d.get("tgt_trigger_price", "")),
-        "tgt_limit_price": str(d.get("tgt_limit_price", "")),
-        "extra_info": str(d.get("extra_info", "")),
-        "exchange_order_id": str(d.get("exch_order_id", "")),
-        "security_id": str(d.get("security_id", "")),
+        "orderid": _response_text(d, "id", required=True),
+        "status": _response_text(d, "status", required=True),
+        "symbol": _response_text(d, "name", required=True),
+        "exchange": _response_exchange(d),
+        "action": _response_text(d, "txn_type", required=True),
+        "pricetype": _response_text(d, "order_type", required=True),
+        "product": _response_product(_response_text(d, "product", required=True)),
     }
+    _put_present(order, "instrument_id", security_id)
+    _put_present(order, "security_id", security_id)
+    for field, source_field in {
+        "sl_trigger_price": "sl_trigger_price",
+        "sl_limit_price": "sl_limit_price",
+        "tgt_trigger_price": "tgt_trigger_price",
+        "tgt_limit_price": "tgt_limit_price",
+    }.items():
+        _put_present(order, field, _response_number_text(d, source_field, empty_absent=True))
+    _put_present(order, "extra_info", _response_text(d, "extra_info"))
+    _put_present(order, "exchange_order_id", _response_text(d, "exch_order_id", empty_absent=True))
     for field, source_field in {
         "quantity": "requested_qty",
         "filled_quantity": "traded_qty",
@@ -689,9 +859,7 @@ def from_indmoney_order(d: dict[str, Any]) -> dict[str, Any]:
         "trigger_price": "sl_trigger_price",
         "average_price": "traded_price",
     }.items():
-        value = _present_order_number(d, source_field)
-        if value is not None:
-            order[field] = value
+        _put_present(order, field, _response_number_text(d, source_field, empty_absent=True))
     return order
 
 
@@ -729,34 +897,48 @@ def from_indmoney_tradebook_row(d: dict[str, Any]) -> dict[str, Any]:
 
 def from_indmoney_position(d: dict[str, Any], *, product: str = "") -> dict[str, Any]:
     """Normalise an IndMoney position record (``net_positions``/``day_positions``)."""
-    return {
-        "symbol": str(d.get("trading_symbol", "")),
-        "exchange": EXCHANGE_SEGMENT_REVERSE_MAP.get(
-            str(d.get("exchange_segment", "")).upper(), str(d.get("exchange_segment", ""))
-        ),
-        "product": PRODUCT_REVERSE_MAP.get(str(product).upper(), str(product).upper()),
-        "quantity": str(d.get("net_quantity", 0)),
-        "average_price": str(d.get("average_price", 0)),
-        "ltp": str(d.get("last_traded_price", 0)),
-        "pnl": str(d.get("pnl_absolute", 0)),
+    d = _response_record(d)
+    canonical_product = product.upper() if type(product) is str else ""
+    if canonical_product not in {"CNC", "MIS", "NRML"}:
+        raise BrokerReadResponseInvalid
+    security_id = _response_text(d, "security_id")
+    position = {
+        "symbol": _response_text(d, "trading_symbol", required=True),
+        "exchange": _response_exchange_segment(d),
+        "product": canonical_product,
+        "quantity": _response_number_text(d, "net_quantity", required=True),
     }
+    _put_present(position, "instrument_id", security_id)
+    _put_present(position, "security_id", security_id)
+    for field, source_field in {
+        "average_price": "average_price",
+        "ltp": "last_traded_price",
+        "pnl": "pnl_absolute",
+    }.items():
+        _put_present(position, field, _response_number_text(d, source_field))
+    return position
 
 
 def from_indmoney_holding(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise an IndMoney demat-holding record."""
-    return {
-        "symbol": str(d.get("trading_symbol", "")),
-        "exchange": EXCHANGE_SEGMENT_REVERSE_MAP.get(
-            str(d.get("exchange_segment", "")).upper(), str(d.get("exchange_segment", ""))
-        ),
-        "quantity": str(d.get("quantity", 0)),
-        "average_price": str(d.get("average_price", 0)),
-        "ltp": str(d.get("last_traded_price", 0)),
-        "pnl": str(d.get("pnl_absolute", 0)),
-        "pnl_percent": str(d.get("pnl_percent", 0)),
-        "isin": str(d.get("isin", "")),
-        "security_id": str(d.get("security_id", "")),
+    d = _response_record(d)
+    security_id = _response_text(d, "security_id")
+    holding = {
+        "symbol": _response_text(d, "trading_symbol", required=True),
+        "exchange": _response_exchange_segment(d),
+        "quantity": _response_number_text(d, "quantity", required=True),
     }
+    _put_present(holding, "instrument_id", security_id)
+    _put_present(holding, "security_id", security_id)
+    _put_present(holding, "isin", _response_text(d, "isin", empty_absent=True))
+    for field, source_field in {
+        "average_price": "average_price",
+        "ltp": "last_traded_price",
+        "pnl": "pnl_absolute",
+        "pnl_percent": "pnl_percent",
+    }.items():
+        _put_present(holding, field, _response_number_text(d, source_field))
+    return holding
 
 
 def from_indmoney_funds(resp: Any) -> dict[str, Any]:
@@ -830,26 +1012,50 @@ def from_indmoney_depth(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def from_indmoney_quote(symbol: str, exchange: str, q: dict[str, Any]) -> dict[str, Any]:
+def from_indmoney_quote(
+    symbol: str,
+    exchange: str,
+    q: dict[str, Any],
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
     """Map one full-quote record to a Quote-shaped dict.
 
     The best bid/ask is taken from the first market-depth level when present.
     """
-    depth = from_indmoney_depth(q)
-    bids, asks = depth["bids"], depth["asks"]
-    return {
-        "symbol": symbol,
-        "exchange": exchange,
-        "ltp": _num(q.get("live_price", 0)),
-        "open": _num(q.get("day_open", 0)),
-        "high": _num(q.get("day_high", 0)),
-        "low": _num(q.get("day_low", 0)),
-        "close": _num(q.get("prev_close", 0)),
-        "prev_close": _num(q.get("prev_close", 0)),
-        "volume": int(_num(q.get("volume", 0))),
-        "bid": bids[0]["price"] if bids else 0.0,
-        "ask": asks[0]["price"] if asks else 0.0,
-    }
+    if not strict:
+        depth = from_indmoney_depth(q)
+        bids, asks = depth["bids"], depth["asks"]
+        return {
+            "symbol": symbol,
+            "exchange": exchange,
+            "ltp": _num(q.get("live_price", 0)),
+            "open": _num(q.get("day_open", 0)),
+            "high": _num(q.get("day_high", 0)),
+            "low": _num(q.get("day_low", 0)),
+            "close": _num(q.get("prev_close", 0)),
+            "prev_close": _num(q.get("prev_close", 0)),
+            "volume": int(_num(q.get("volume", 0))),
+            "bid": bids[0]["price"] if bids else 0.0,
+            "ask": asks[0]["price"] if asks else 0.0,
+        }
+
+    record = _response_record(q)
+    quote: dict[str, Any] = {"symbol": symbol, "exchange": exchange}
+    for source, target in (
+        ("live_price", "ltp"),
+        ("day_open", "open"),
+        ("day_high", "high"),
+        ("day_low", "low"),
+    ):
+        _put_present(quote, target, _market_number(record, source))
+    previous_close = _market_number(record, "prev_close")
+    _put_present(quote, "close", previous_close)
+    _put_present(quote, "prev_close", previous_close)
+    _put_present(quote, "volume", _market_number(record, "volume", integer=True))
+    _put_present(quote, "bid", _quote_depth_price(record, "buy"))
+    _put_present(quote, "ask", _quote_depth_price(record, "sell"))
+    return quote
 
 
 # ---------------------------------------------------------------------------

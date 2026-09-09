@@ -100,7 +100,7 @@ services/automation:
     - "src/flinttrade_automation/voice_order_bridge.py — speech-to-intent for hands-free order placement"
 services/backtest:
   language: Python
-  purpose: "Strategy simulator, walk-forward and Monte Carlo testing, portfolio backtester, and 94 strategy templates across 6 categories."
+  purpose: "Strategy simulator, walk-forward and Monte Carlo testing, portfolio backtester, and 94 strategy template modules across 6 categories."
   entry_points:
     - "src/flinttrade_backtest/simulator.py — single-strategy event-driven backtest"
     - "src/flinttrade_backtest/engine.py — entry point used by the Lab route and CLI"

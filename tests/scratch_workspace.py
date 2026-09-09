@@ -596,7 +596,21 @@ def acquire_workspace() -> Path:
         ours = True
 
     base.mkdir(parents=True, exist_ok=True)
+    if ours:
+        from flinttrade_core.secure_file import harden_directory
+
+        harden_directory(base)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
+    # Installation lineage is deliberately outside the mutable workspace in
+    # production.  Tests that build the app must therefore get a second,
+    # independently registered scratch root rather than touching the real
+    # platform default or placing the identity under ``base``.
+    installation_container = register(
+        tempfile.mkdtemp(prefix=f"flinttrade-pytest-installation-{worker or 'main'}-")
+    )
+    os.environ["FLINTTRADE_INSTALLATION_STATE_DIR"] = str(
+        installation_container / "installation-state"
+    )
     # The operator's machine-local .env may pin DUCKDB_PATH at one real, shared
     # DuckDB file (a single-writer engine). Full-app constructions on several
     # xdist workers then contend on that file - the losers boot with

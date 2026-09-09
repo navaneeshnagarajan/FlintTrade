@@ -42,6 +42,18 @@ def _headers() -> dict[str, str]:
 VALID_TOKEN = "123456789:AAf1qwertzuiopasdfghjklyxcvbnm12345"
 
 
+def test_partial_telegram_update_preserves_another_writers_omitted_field(tmp_path):
+    from flinttrade_core.telegram_config import persist_telegram_config
+    from flinttrade_core.workspace import Workspace
+
+    stale = Workspace(tmp_path)
+    Workspace(tmp_path).set("notifications.telegram_chat_id", "42")
+    persist_telegram_config({"enabled": False}, ws=stale)
+    saved = Workspace(tmp_path)
+    assert saved.get("notifications.telegram_chat_id") == "42"
+    assert saved.get("broker_authority_generation") == 1
+
+
 # ---------------------------------------------------------------------------
 # telegram_config module
 # ---------------------------------------------------------------------------

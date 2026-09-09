@@ -17,7 +17,41 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ## [Unreleased]
 
+### Added
+
+- **Service connections and in-process `BrokerReadPort`.** The backend now
+  ships a rights-aware service-provider catalogue, static LLM/data profiles,
+  and an inert persisted service-connection control plane. Listing or saving a
+  connection does not resolve, probe, authenticate to, or start that provider.
+  Exact broker reads in this change are the in-process `BrokerReadPort`
+  contract (quotes, depth, history, balances, books, and related methods) —
+  not a restored terminal Brokers screen or a new public HTTP read family.
+
+### Changed
+
+- **Native broker HTTP freeze (accepted product decision).** Merging this work
+  onto `main` leaves native broker UX down until Task 9D and Task 7C.2. That
+  is accepted. Broker-account mutations — `/v1` account and auth writes, native
+  connect / login / set-primary / delete, OAuth start and callback, and the
+  other guarded account-authority routes — return a stable `503` with
+  `{error: broker_account_cutover_unavailable}` until Task 9D migrates the
+  handlers and removes `guard_broker_account_http` atomically. Native HTTP
+  account and market-data reads return `409` with zero provider calls until
+  the Task 7C.2 / 8B read-port cutover. The terminal still calls those routes,
+  so Setup → Brokers and Settings → Brokers will show the freeze rather than a
+  working native session. Service connections remain inert only. OpenAlgo
+  bridge setup and gated live writes (`SafetySystem` L1–L5 → `gate_order` /
+  `gate_broker_write` → `BrokerRouter`) stay unchanged.
+
 ### Fixed
+
+- **Node audit blockers on main.** Newly disclosed HIGH/CRITICAL advisories
+  against the existing lock (next Windows/AVIF RCE, maplibre-gl XSS,
+  `@xmldom/xmldom` name-injection/ReDoS, sharp libheif, js-yaml merge-key
+  DoS, and four fast-uri host-confusion/SSRF issues) are cleared by real
+  version bumps: next 16.3.4, and overrides for fast-uri 4.1.4, js-yaml
+  4.3.2, sharp 0.35.4, maplibre-gl 6.8.0 and `@xmldom/xmldom` 0.8.15. No
+  new allowlist entries.
 
 - **Production systemd install.** `infra/scripts/setup-production.sh` hardcodes
   `/opt/flinttrade` (the prefix `flinttrade.service` already uses), refuses

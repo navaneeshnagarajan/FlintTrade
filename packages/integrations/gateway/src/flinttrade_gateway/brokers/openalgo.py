@@ -25,6 +25,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
+from flinttrade_core.broker_read_port import BrokerLotSizeResponseInvalid
 from flinttrade_core.exceptions import (
     APIError,
     BrokerError,
@@ -48,12 +49,13 @@ from flinttrade_gateway.capabilities import (
 
 from ._base import (
     ROUTER_TOKEN as _ROUTER_TOKEN,  # the shared per-process router token (§8.0c)
+    AdapterSessionView,
     BrokerAdapter,
     Session,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
+    from flinttrade_core.models import OptionChain, Order, Position, Quote, Trade
     from flinttrade_core.openalgo_client import OpenAlgoClient
     from flinttrade_gateway.reconciliation import LocalStateSnapshot, ReconciliationReport
 
@@ -82,6 +84,19 @@ _TERMINAL_ORDER_STATUSES = frozenset(
         "traded",
     }
 )
+
+
+def _lot_record(value: object) -> dict[str, object]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerLotSizeResponseInvalid
+    return value
+
+
+def _lot_alias(row: dict[str, object], *names: str) -> object:
+    for name in names:
+        if name in row:
+            return row[name]
+    return None
 
 OPENALGO_CAPABILITIES = Capabilities(
     segments=Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO | Segments.CDS | Segments.MCX,
@@ -139,28 +154,19 @@ OPENALGO_CAPABILITIES = Capabilities(
 
 
 class OpenAlgoAdapter(BrokerAdapter):
-    """Bridge :class:`BrokerAdapter` that forwards to OpenAlgo (contract §5).
-
-    Args:
-        default_client: An ``OpenAlgoClient`` used when a session does not select
-            a specific one — the common single-instance case.
-        client_factory: Optional ``Session -> OpenAlgoClient`` for multi-account
-            setups where each OpenAlgo account has its own host/api-key (built
-            from ``session.extra``). Takes precedence over ``default_client``.
-        local_state_provider: ``session -> LocalStateSnapshot`` supplying the
-            FlintTrade-side mirror that ``reconcile`` diffs against. Defaults
-            to empty local state when the engine has not wired a provider.
-    """
+    """Bridge adapter resolved exclusively through sealed connected sessions."""
 
     def __init__(
         self,
-        default_client: OpenAlgoClient | None = None,
         *,
-        client_factory: Callable[[Session], OpenAlgoClient] | None = None,
-        local_state_provider: Callable[[Session], LocalStateSnapshot] | None = None,
+        session_clients: Any,
+        local_state_provider: Callable[[AdapterSessionView], LocalStateSnapshot] | None = None,
     ) -> None:
-        self._default_client = default_client
-        self._client_factory = client_factory
+        from flinttrade_gateway.session_provider import ConnectedSessionClientResolver
+
+        if type(session_clients) is not ConnectedSessionClientResolver:
+            raise TypeError("exact_session_client_resolver_required")
+        self._session_clients = session_clients
         self._local_state_provider = local_state_provider
 
     # ---------- identity + capabilities ----------
@@ -175,14 +181,8 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     # ---------- client resolution ----------
 
-    def _client(self, session: Session) -> OpenAlgoClient:
-        if self._client_factory is not None:
-            return self._client_factory(session)
-        if self._default_client is not None:
-            return self._default_client
-        raise UnsupportedCapabilityError(
-            "OpenAlgoAdapter has no client configured — pass default_client or client_factory"
-        )
+    def _client(self, session: AdapterSessionView) -> OpenAlgoClient:
+        return self._session_clients.openalgo_client(session)
 
     # ---------- auth lifecycle ----------
 
@@ -200,17 +200,17 @@ class OpenAlgoAdapter(BrokerAdapter):
             },
         )
 
-    async def refresh(self, session: Session) -> Session:
+    async def refresh(self, session: AdapterSessionView) -> Session:
         # OpenAlgo api-keys do not expire on a clock; nothing to refresh.
         return session
 
-    async def logout(self, session: Session) -> None:
+    async def logout(self, session: AdapterSessionView) -> None:
         # api-key auth has no server-side session to invalidate. Idempotent no-op.
         return None
 
     # ---------- trading: writes (router-only) ----------
 
-    async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
+    async def place_order(self, session: AdapterSessionView, order: Order, *, _router_token: object | None = None) -> str:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         # Honesty guard (audit HIGH): this bridge forwards a plain order to
         # OpenAlgo's /placeorder, which fires IMMEDIATELY — it has no resting
@@ -232,7 +232,7 @@ class OpenAlgoAdapter(BrokerAdapter):
         return self._order_id_or_raise(resp)
 
     async def modify_order(
-        self, session: Session, order_id: str, changes: dict, *, _router_token: object | None = None
+        self, session: AdapterSessionView, order_id: str, changes: dict, *, _router_token: object | None = None
     ) -> None:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         with self._mapped("order modification"):
@@ -241,7 +241,7 @@ class OpenAlgoAdapter(BrokerAdapter):
         self._order_id_or_raise(resp)
 
     async def cancel_order(
-        self, session: Session, order_id: str, *, _router_token: object | None = None
+        self, session: AdapterSessionView, order_id: str, *, _router_token: object | None = None
     ) -> None:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         strategy = str(session.extra.get("strategy", "Flint"))
@@ -251,7 +251,7 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     async def plan_emergency_reduction(
         self,
-        session: Session,
+        session: AdapterSessionView,
         *,
         policy: EmergencyWritePolicy,
         protected_order_ids: frozenset[str],
@@ -401,7 +401,7 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     async def place_reducing_order(
         self,
-        session: Session,
+        session: AdapterSessionView,
         payload: dict[str, Any],
         *,
         _router_token: object | None = None,
@@ -472,7 +472,7 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     async def cancel_all_orders(
         self,
-        session: Session,
+        session: AdapterSessionView,
         *,
         tag: str | None = None,
         segment: str | None = None,
@@ -488,7 +488,7 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     async def exit_all_positions(
         self,
-        session: Session,
+        session: AdapterSessionView,
         *,
         tag: str | None = None,
         segment: str | None = None,
@@ -504,39 +504,125 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     # ---------- trading: reads ----------
 
-    async def order_book(self, session: Session) -> list[Order]:
+    async def order_book(self, session: AdapterSessionView) -> list[Order]:
         with self._mapped("order_book"):
             return await self._client(session).orderbook()  # type: ignore[return-value]
 
-    async def trade_book(self, session: Session) -> list[Trade]:
+    async def trade_book(self, session: AdapterSessionView) -> list[Trade]:
         with self._mapped("trade_book"):
             return await self._client(session).tradebook()
 
-    async def positions(self, session: Session) -> list[Position]:
+    async def positions(self, session: AdapterSessionView) -> list[Position]:
         with self._mapped("positions"):
             return await self._client(session).positionbook()
 
-    async def holdings(self, session: Session) -> list[dict]:
+    async def holdings(self, session: AdapterSessionView) -> list[dict]:
         with self._mapped("holdings"):
             return await self._client(session).holdings()  # type: ignore[return-value]
 
-    async def funds(self, session: Session) -> dict:
+    async def funds(self, session: AdapterSessionView) -> dict:
         with self._mapped("funds"):
             funds = await self._client(session).funds()
         return funds if isinstance(funds, dict) else getattr(funds, "__dict__", {"funds": funds})
 
+    async def balance_snapshot(self, session: AdapterSessionView):
+        """Return the client's evidence-preserving one-request funds snapshot."""
+        with self._mapped("balance_snapshot"):
+            return await self._client(session).balance_snapshot()
+
+    async def depth(self, session: AdapterSessionView, request: Any) -> object:
+        """Read fixed market depth for one typed instrument request."""
+        with self._mapped("depth"):
+            return await self._client(session).depth(request.instrument.symbol, request.instrument.exchange)
+
+    async def instrument_lot_sizes(self, session: AdapterSessionView, request: Any) -> list[dict[str, object]]:
+        """Return only requested exchange/symbol/lot-size instrument evidence."""
+        with self._mapped("instrument_lot_sizes"):
+            raw = await self._client(session).instruments(request.exchange)
+        outer = _lot_record(raw)
+        data = outer["data"] if "data" in outer else outer
+        if type(data) is dict:
+            data = _lot_record(data)
+            rows = _lot_alias(data, "instruments", "data")
+        else:
+            rows = data
+        if type(rows) is not list:
+            raise BrokerLotSizeResponseInvalid
+        requested = set(request.symbols)
+        result: list[dict[str, object]] = []
+        for row in rows:
+            row = _lot_record(row)
+            symbol = _lot_alias(row, "symbol", "tradingsymbol", "trading_symbol")
+            exchange = _lot_alias(row, "exchange")
+            lot_size = _lot_alias(row, "lot_size", "lotsize")
+            if type(symbol) is not str or not symbol or type(exchange) is not str or exchange != request.exchange:
+                raise BrokerLotSizeResponseInvalid
+            if requested and symbol not in requested:
+                continue
+            if isinstance(lot_size, bool) or type(lot_size) not in (int, str):
+                raise BrokerLotSizeResponseInvalid
+            try:
+                numeric_lot = int(lot_size)
+            except ValueError:
+                raise BrokerLotSizeResponseInvalid from None
+            if str(numeric_lot) != str(lot_size).strip() or not 1 <= numeric_lot <= 1_000_000:
+                raise BrokerLotSizeResponseInvalid
+            instrument_id = _lot_alias(row, "instrument_id", "token")
+            if instrument_id is not None and type(instrument_id) is not str:
+                raise BrokerLotSizeResponseInvalid
+            result.append({
+                "symbol": symbol,
+                "exchange": exchange,
+                "lot_size": numeric_lot,
+                "instrument_id": instrument_id,
+            })
+        return result
+
+    async def margin_calculator(self, session: AdapterSessionView, order: Any) -> dict[str, Any]:
+        """Project one fixed order into the existing OpenAlgo margin endpoint."""
+        payload = {
+            "symbol": str(order.symbol),
+            "exchange": str(getattr(order.exchange, "value", order.exchange)),
+            "action": str(getattr(order.action, "value", order.action)),
+            "quantity": str(order.quantity),
+            "product": str(getattr(order.product, "value", order.product)),
+            "pricetype": str(getattr(order.pricetype, "value", order.pricetype)),
+            "price": str(order.price),
+            "trigger_price": str(order.trigger_price),
+        }
+        with self._mapped("margin_calculator"):
+            return await self._client(session).margin([payload])
+
+    async def portfolio_greeks(
+        self, session: AdapterSessionView, positions: list[dict[str, str | float | None]]
+    ) -> list[dict[str, Any]]:
+        """Read the existing exact portfolio-Greek batch."""
+        with self._mapped("portfolio_greeks"):
+            return await self._client(session).portfolio_greeks(positions)
+
+    async def forever_orders(self, session: AdapterSessionView) -> object:
+        """Read the existing bounded OpenAlgo GTT order family."""
+        with self._mapped("forever_orders"):
+            return await self._client(session).gtt_orderbook()
+
     # ---------- market data: rest ----------
 
-    async def quotes(self, session: Session, symbols: list[str]) -> list[Quote]:
+    async def quotes(self, session: AdapterSessionView, symbols: list[str]) -> list[Quote]:
         payload = [self._split_symbol(s) for s in symbols]
         with self._mapped("quotes"):
             return await self._client(session).multi_quotes(payload)
 
-    async def historical(self, session: Session, req: dict) -> Candles:
+    async def historical(self, session: AdapterSessionView, req: dict) -> dict[str, object]:
         with self._mapped("historical"):
-            return await self._client(session).history(**req)  # type: ignore[return-value]
+            bars = await self._client(session).history(**req)
+        return {
+            "symbol": req["symbol"],
+            "exchange": req["exchange"],
+            "interval": req["interval"],
+            "bars": bars,
+        }
 
-    async def option_chain(self, session: Session, req: dict) -> OptionChain:
+    async def option_chain(self, session: AdapterSessionView, req: dict) -> OptionChain:
         symbol = str(req.get("symbol", ""))
         exchange = str(req.get("exchange", "NFO"))
         expiry = str(req.get("expiry") or req.get("expiry_date") or "").strip()
@@ -547,20 +633,20 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     # ---------- market data: streaming (not exposed by the REST bridge) ----------
 
-    def stream(self, session: Session) -> AsyncIterator[TickEvent]:  # type: ignore[name-defined]  # noqa: F821
+    def stream(self, session: AdapterSessionView) -> AsyncIterator[TickEvent]:  # type: ignore[name-defined]  # noqa: F821
         raise UnsupportedCapabilityError(
             "OpenAlgo bridge adapter does not expose tick streaming; route data.ticks to a native adapter"
         )
 
-    async def subscribe(self, session: Session, symbols: list[str], mode: str = "FULL") -> None:
+    async def subscribe(self, session: AdapterSessionView, symbols: list[str], mode: str = "FULL") -> None:
         raise UnsupportedCapabilityError("OpenAlgo bridge adapter does not expose tick subscription")
 
-    async def unsubscribe(self, session: Session, symbols: list[str]) -> None:
+    async def unsubscribe(self, session: AdapterSessionView, symbols: list[str]) -> None:
         raise UnsupportedCapabilityError("OpenAlgo bridge adapter does not expose tick subscription")
 
     # ---------- reconciliation ----------
 
-    async def reconcile(self, session: Session) -> ReconciliationReport:
+    async def reconcile(self, session: AdapterSessionView) -> ReconciliationReport:
         """Diff canonical OpenAlgo account reads against the local mirror."""
         from flinttrade_gateway.reconciliation import (  # noqa: PLC0415
             EMPTY_LOCAL_STATE,

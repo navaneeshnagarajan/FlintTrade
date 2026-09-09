@@ -24,5 +24,6 @@ mailbox password.
 ## Secret Handling
 
 Do not commit SMTP or SES credentials. Put them in local environment variables
-or the deployment secret store. Backups exclude plain-text secret seed files by
-default; credential stores are included only with explicit backup opt-in.
+or the deployment secret store. Ordinary backups exclude secret seed files and
+credential stores. `--include-credentials` is unavailable
+(`coordinated_restore_unavailable`).

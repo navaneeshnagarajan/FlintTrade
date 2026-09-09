@@ -25,7 +25,7 @@ from flinttrade_engine.safety import (
     SafetyContext,
 )
 
-from .brokers._base import ROUTER_TOKEN as _ROUTER_TOKEN, BrokerAdapter, Session
+from .brokers._base import ROUTER_TOKEN as _ROUTER_TOKEN, AdapterSessionView, BrokerAdapter
 from .routing_config import RoutingConfig, RoutingHint
 
 logger = logging.getLogger("flinttrade.gateway.router")
@@ -42,7 +42,7 @@ logger = logging.getLogger("flinttrade.gateway.router")
 
 _AdapterInvokeCallback = Callable[[], None] | None
 _GatedDispatch = Callable[
-    [BrokerAdapter, Session, Mapping[str, Any], _AdapterInvokeCallback],
+    [BrokerAdapter, AdapterSessionView, Mapping[str, Any], _AdapterInvokeCallback],
     Awaitable[Any],
 ]
 
@@ -173,7 +173,7 @@ def _optional_order_segment(payload: Mapping[str, Any]) -> dict[str, str]:
 
 async def _dispatch_modify_forever(
     adapter: BrokerAdapter,
-    session: Session,
+    session: AdapterSessionView,
     p: Mapping[str, Any],
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
@@ -190,7 +190,7 @@ async def _dispatch_modify_forever(
 
 async def _dispatch_cancel_forever(
     adapter: BrokerAdapter,
-    session: Session,
+    session: AdapterSessionView,
     p: Mapping[str, Any],
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
@@ -202,7 +202,7 @@ async def _dispatch_cancel_forever(
 
 async def _dispatch_modify_super_order(
     adapter: BrokerAdapter,
-    session: Session,
+    session: AdapterSessionView,
     p: Mapping[str, Any],
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
@@ -219,7 +219,7 @@ async def _dispatch_modify_super_order(
 
 async def _dispatch_cancel_super_order(
     adapter: BrokerAdapter,
-    session: Session,
+    session: AdapterSessionView,
     p: Mapping[str, Any],
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
@@ -236,7 +236,7 @@ async def _dispatch_cancel_super_order(
 
 async def _dispatch_place_conditional_trigger(
     adapter: BrokerAdapter,
-    session: Session,
+    session: AdapterSessionView,
     p: Mapping[str, Any],
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
@@ -253,7 +253,7 @@ async def _dispatch_place_conditional_trigger(
 
 async def _dispatch_modify_conditional_trigger(
     adapter: BrokerAdapter,
-    session: Session,
+    session: AdapterSessionView,
     p: Mapping[str, Any],
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
@@ -271,7 +271,7 @@ async def _dispatch_modify_conditional_trigger(
 
 async def _dispatch_cancel_conditional_trigger(
     adapter: BrokerAdapter,
-    session: Session,
+    session: AdapterSessionView,
     p: Mapping[str, Any],
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
@@ -283,7 +283,7 @@ async def _dispatch_cancel_conditional_trigger(
 
 async def _dispatch_convert_position(
     adapter: BrokerAdapter,
-    session: Session,
+    session: AdapterSessionView,
     p: Mapping[str, Any],
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
@@ -295,7 +295,7 @@ async def _dispatch_convert_position(
 
 async def _dispatch_exit_all_positions(
     adapter: BrokerAdapter,
-    session: Session,
+    session: AdapterSessionView,
     p: Mapping[str, Any],
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
@@ -311,7 +311,7 @@ async def _dispatch_exit_all_positions(
 
 async def _dispatch_place_reducing_order(
     adapter: BrokerAdapter,
-    session: Session,
+    session: AdapterSessionView,
     p: Mapping[str, Any],
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
@@ -321,7 +321,7 @@ async def _dispatch_place_reducing_order(
 
 async def _dispatch_place_multi_order(
     adapter: BrokerAdapter,
-    session: Session,
+    session: AdapterSessionView,
     p: Mapping[str, Any],
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
@@ -333,7 +333,7 @@ async def _dispatch_place_multi_order(
 
 async def _dispatch_cancel_all_orders(
     adapter: BrokerAdapter,
-    session: Session,
+    session: AdapterSessionView,
     p: Mapping[str, Any],
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
@@ -349,7 +349,7 @@ async def _dispatch_cancel_all_orders(
 
 async def _dispatch_cancel_smart_order(
     adapter: BrokerAdapter,
-    session: Session,
+    session: AdapterSessionView,
     p: Mapping[str, Any],
     on_adapter_invoke: _AdapterInvokeCallback,
 ) -> Any:
@@ -417,7 +417,7 @@ class BrokerRouter:
     def __init__(
         self,
         adapters: dict[str, BrokerAdapter],
-        session_provider: Callable[[RequestContext, str, str], Session],
+        session_provider: Callable[[RequestContext, str, str], AdapterSessionView],
         *,
         consume_gate: Callable[[str], bool] | None = None,
         config: RoutingConfig | None = None,
@@ -836,7 +836,7 @@ class BrokerRouter:
                         break
         return str(exchange) if exchange else ""
 
-    def _algo_tag(self, adapter_id: str, session: Session, order: Any) -> None:
+    def _algo_tag(self, adapter_id: str, session: AdapterSessionView, order: Any) -> None:
         """Relay the configured algo_id and count this write for algo-tag brokers.
 
         Applies only when a guard is wired AND the resolved adapter advertises

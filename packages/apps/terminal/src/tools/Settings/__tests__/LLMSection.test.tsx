@@ -3152,6 +3152,15 @@ describe("LLMSection provider configuration", () => {
       .toHaveAttribute("placeholder", "gpt-4o-mini");
   });
 
+  it("offers NVIDIA with its intentionally blank unpinned model default", async () => {
+    renderOllama();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "LLM provider" }));
+    fireEvent.click(await screen.findByRole("option", { name: "NVIDIA NIM" }));
+
+    expect(screen.getByRole("textbox", { name: "LLM model name" })).toHaveValue("");
+  });
+
   it("requires a nonblank Custom model and associates the error with its field", async () => {
     const onProviderChange = vi.fn().mockResolvedValue(undefined);
     renderOllama({ onProviderChange });

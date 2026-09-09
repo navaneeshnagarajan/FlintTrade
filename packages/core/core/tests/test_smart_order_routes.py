@@ -585,20 +585,25 @@ def test_status_shows_children_mid_flight(live_auth):
     _wait_done(client, job_id)
 
 
-def test_app_factory_wires_smart_routing_from_workspace(monkeypatch):
+def test_app_factory_wires_smart_routing_from_workspace(monkeypatch, tmp_path):
     """create_flask_app must carry workspace brokers.smart_routing into
     app.config — a wiring typo would leave the feature permanently disabled
     with every route test green (they set the config key directly)."""
     import flinttrade_core.app as app_mod
+    from flinttrade_core.workspace import Workspace
     from flinttrade_core.workspace_migrations import default_workspace_config
 
-    brokers = default_workspace_config()["brokers"]
-    brokers["smart_routing"] = {"enabled": True, "twap_slices": 3, "twap_window_seconds": 60}
-    monkeypatch.setattr(app_mod, "_read_workspace_brokers", lambda: brokers)
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    config = default_workspace_config()
+    smart_routing = {"enabled": True, "twap_slices": 3, "twap_window_seconds": 60}
+    config["brokers"]["smart_routing"] = smart_routing
+    Workspace().initialise(config)
 
     app = app_mod.create_flask_app()
     assert app.config["SMART_ROUTING"]["enabled"] is True
     assert app.config["SMART_ROUTING"]["twap_slices"] == 3
+    dependencies = app.extensions["flinttrade_broker_dependencies"]
+    assert dependencies.brokers_config["smart_routing"] == app.config["SMART_ROUTING"] == smart_routing
 
 
 def test_jobs_list_returns_snapshots(live_auth):

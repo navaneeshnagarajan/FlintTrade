@@ -670,6 +670,174 @@ class TestAuditLogger:
         assert events[0]["event_type"] == "STRATEGY_STARTED"
         assert events[0]["name"] == "Scalper"
 
+    def test_idempotent_event_acknowledges_one_durable_record_across_restart(self, tmp_path):
+        """Catch a sink that acknowledges replay by appending a duplicate event."""
+        from flinttrade_data.audit_logger import AuditLogger
+
+        event_id = "24f523c6-b510-44ab-a80c-da6940438325"
+        fields = {"operation": "create", "after_epoch": 1, "credential_configured": True}
+        first = AuditLogger(str(tmp_path))
+        log_once = getattr(first, "log_idempotent_event", lambda *args, **kwargs: None)
+        assert log_once("SERVICE_CONNECTION_MUTATION", event_id=event_id, fields=fields) == event_id
+        first.close()
+
+        second = AuditLogger(str(tmp_path))
+        assert second.log_idempotent_event(
+            "SERVICE_CONNECTION_MUTATION", event_id=event_id, fields=dict(fields)
+        ) == event_id
+        second.close()
+        events = second.read_day(datetime.now(IST).strftime("%Y-%m-%d"))
+        assert len(events) == 1
+        assert events[0]["event_id"] == event_id
+        assert {key: events[0][key] for key in fields} == fields
+
+    def test_idempotent_event_rejects_reserved_non_json_oversized_and_typed_conflicts(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        audit = AuditLogger(str(tmp_path))
+        event_id = "24f523c6-b510-44ab-a80c-da6940438325"
+        for identifier, fields in (
+            ("not-a-uuid", {}),
+            (event_id, {"hash": "owned-by-logger"}),
+            (event_id, {"bad": object()}),
+            (event_id, {"large": "x" * (64 * 1024)}),
+        ):
+            with pytest.raises(ValueError):
+                audit.log_idempotent_event("SERVICE_CONNECTION_MUTATION", event_id=identifier, fields=fields)
+
+        assert audit.log_idempotent_event(
+            "SERVICE_CONNECTION_MUTATION", event_id=event_id, fields={"value": True}
+        ) == event_id
+        with pytest.raises(RuntimeError, match="conflicts"):
+            audit.log_idempotent_event(
+                "SERVICE_CONNECTION_MUTATION", event_id=event_id, fields={"value": 1}
+            )
+        audit.close()
+
+    def test_idempotent_event_retry_fsyncs_uncertain_complete_append_without_duplicate(
+        self, tmp_path, monkeypatch
+    ):
+        from flinttrade_data import audit_logger
+
+        event_id = "24f523c6-b510-44ab-a80c-da6940438325"
+        audit = audit_logger.AuditLogger(str(tmp_path))
+        real_fsync = audit_logger.os.fsync
+        failed = False
+
+        def fail_first_file_fsync(fd):
+            nonlocal failed
+            if not failed and not os.path.isdir(f"/dev/fd/{fd}"):
+                failed = True
+                raise OSError("synthetic uncertain fsync")
+            return real_fsync(fd)
+
+        monkeypatch.setattr(audit_logger.os, "fsync", fail_first_file_fsync)
+        with pytest.raises(OSError, match="uncertain"):
+            audit.log_idempotent_event("SERVICE_CONNECTION_MUTATION", event_id=event_id, fields={"epoch": 1})
+        audit.close()
+        monkeypatch.setattr(audit_logger.os, "fsync", real_fsync)
+
+        reopened = audit_logger.AuditLogger(str(tmp_path))
+        assert reopened.log_idempotent_event(
+            "SERVICE_CONNECTION_MUTATION", event_id=event_id, fields={"epoch": 1}
+        ) == event_id
+        assert sum(event.get("event_id") == event_id for event in reopened.read_day(
+            datetime.now(IST).strftime("%Y-%m-%d")
+        )) == 1
+        reopened.close()
+
+    def test_idempotent_event_never_acknowledges_append_to_lost_cached_path(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        audit = AuditLogger(str(tmp_path))
+        audit.log_event("SEED")
+        current = next(tmp_path.glob("audit_*.jsonl"))
+        displaced = tmp_path / "displaced.jsonl"
+        current.replace(displaced)
+        current.write_text(displaced.read_text())
+        event_id = "24f523c6-b510-44ab-a80c-da6940438325"
+
+        with pytest.raises(RuntimeError, match="canonical audit file"):
+            audit.log_idempotent_event(
+                "SERVICE_CONNECTION_MUTATION", event_id=event_id, fields={"epoch": 1}
+            )
+        audit.close()
+        canonical = [json.loads(line) for line in current.read_text().splitlines()]
+        assert all(event.get("event_id") != event_id for event in canonical)
+
+    def test_idempotent_event_is_reacknowledged_from_compressed_retained_history(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        event_id = "24f523c6-b510-44ab-a80c-da6940438325"
+        first = AuditLogger(str(tmp_path))
+        assert first.log_idempotent_event(
+            "SERVICE_CONNECTION_MUTATION", event_id=event_id, fields={"epoch": 1}
+        ) == event_id
+        first.close()
+        current = next(tmp_path.glob("audit_*.jsonl"))
+        current.replace(tmp_path / "audit_2020-01-01.jsonl")
+        compressor = AuditLogger(str(tmp_path))
+        assert compressor.compress_old_files(older_than_days=1) == 1
+        assert compressor.log_idempotent_event(
+            "SERVICE_CONNECTION_MUTATION", event_id=event_id, fields={"epoch": 1}
+        ) == event_id
+        assert compressor.verify_chain()["checked"] == 1
+        compressor.close()
+
+    def test_idempotent_event_concurrent_same_id_appends_once(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        event_id = "24f523c6-b510-44ab-a80c-da6940438325"
+        barrier = threading.Barrier(2)
+        results: list[str] = []
+        errors: list[BaseException] = []
+
+        def write() -> None:
+            audit = AuditLogger(str(tmp_path))
+            try:
+                barrier.wait(timeout=2)
+                results.append(audit.log_idempotent_event(
+                    "SERVICE_CONNECTION_MUTATION", event_id=event_id, fields={"epoch": 1}
+                ))
+            except BaseException as error:  # noqa: BLE001 - thread errors are asserted below
+                errors.append(error)
+            finally:
+                audit.close()
+
+        threads = [threading.Thread(target=write) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=3)
+        assert errors == []
+        assert results == [event_id, event_id]
+        reopened = AuditLogger(str(tmp_path))
+        assert reopened.verify_chain()["checked"] == 1
+        reopened.close()
+
+    def test_idempotent_event_rejects_multiple_chained_claims(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        event_id = "24f523c6-b510-44ab-a80c-da6940438325"
+        audit = AuditLogger(str(tmp_path))
+        audit.log_idempotent_event(
+            "SERVICE_CONNECTION_MUTATION", event_id=event_id, fields={"epoch": 1}
+        )
+        current = next(tmp_path.glob("audit_*.jsonl"))
+        first = json.loads(current.read_text().strip())
+        duplicate = {
+            key: value for key, value in first.items() if key not in {"hash", "seq", "prev_hash"}
+        }
+        duplicate.update(seq=1, prev_hash=first["hash"])
+        duplicate["hash"] = AuditLogger._record_hash(duplicate)
+        with current.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(duplicate) + "\n")
+        with pytest.raises(RuntimeError, match="ambiguous"):
+            audit.log_idempotent_event(
+                "SERVICE_CONNECTION_MUTATION", event_id=event_id, fields={"epoch": 1}
+            )
+        audit.close()
+
     def test_read_nonexistent_day_returns_empty(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
 
@@ -3394,14 +3562,16 @@ class TestTickRecorder:
             async def __aexit__(self, _exc_type, _exc, _tb):
                 return False
 
+        flush_observed = asyncio.Event()
         storage = MagicMock()
+        storage.insert_ticks_batch.side_effect = lambda _batch: flush_observed.set()
         recorder = TickRecorder(storage=storage, flush_interval=0.01)
         recorder.add_symbols([{"exchange": "NSE", "symbol": "RELIANCE"}], mode="quote")
         monkeypatch.setattr(module.websockets, "connect", lambda _url: WebSocketContext())
 
         task = asyncio.create_task(recorder.run())
         try:
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(flush_observed.wait(), timeout=1.0)
             assert storage.insert_ticks_batch.call_count == 1
             assert recorder.pending_tick_count == 0
         finally:
@@ -3413,7 +3583,9 @@ class TestTickRecorder:
         from flinttrade_data import tick_recorder as module
         from flinttrade_data.tick_recorder import TickRecorder
 
+        flush_observed = asyncio.Event()
         storage = MagicMock()
+        storage.insert_ticks_batch.side_effect = lambda _batch: flush_observed.set()
         recorder = TickRecorder(
             storage=storage,
             flush_interval=0.01,
@@ -3431,13 +3603,13 @@ class TestTickRecorder:
 
         task = asyncio.create_task(recorder.run())
         try:
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(flush_observed.wait(), timeout=1.0)
             assert task.done() is False
             assert storage.insert_ticks_batch.call_count == 1
             assert recorder.pending_tick_count == 0
         finally:
             recorder.stop()
-            await asyncio.wait_for(task, timeout=0.2)
+            await asyncio.wait_for(task, timeout=1.0)
 
     def test_connection_reconfiguration_is_idempotent(self):
         from flinttrade_data.tick_recorder import TickRecorder

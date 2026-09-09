@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from .llm_provider_profiles import LLM_PROVIDER_BY_ID, LLM_PROVIDER_PROFILES
 from .owner_file_lock import OwnerSafeFileLock, UnsafeFileLockPathError
 from .secure_file import (
     cleanup_pending_unlink,
@@ -37,18 +38,7 @@ _LLM_TRANSACTION_NEW = ".llm_api_key.transaction.new"
 _LLM_TRANSACTION_OLD = ".llm_api_key.transaction.old"
 _LLM_TRANSITION_LOCK = ".llm-config-transition.lock"
 _PROVIDER_API_KEY_ENV = {
-    "anthropic": "ANTHROPIC_API_KEY",
-    "cerebras": "CEREBRAS_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-    "grok": "GROK_API_KEY",
-    "groq": "GROQ_API_KEY",
-    "hermes": "HERMES_API_KEY",
-    "mistral": "MISTRAL_API_KEY",
-    "nvidia": "NVIDIA_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
-    "together": "TOGETHER_API_KEY",
+    profile.provider_id: profile.api_key_env for profile in LLM_PROVIDER_PROFILES if profile.api_key_env
 }
 
 
@@ -123,17 +113,7 @@ class LLMConfigTransition:
 
 
 _PROVIDER_TRUST_DESTINATIONS = {
-    "anthropic": "https://api.anthropic.com",
-    "cerebras": "https://api.cerebras.ai",
-    "deepseek": "https://api.deepseek.com",
-    "gemini": "https://generativelanguage.googleapis.com",
-    "grok": "https://api.x.ai",
-    "groq": "https://api.groq.com",
-    "mistral": "https://api.mistral.ai",
-    "nvidia": "https://integrate.api.nvidia.com",
-    "openai": "https://api.openai.com",
-    "openrouter": "https://openrouter.ai",
-    "together": "https://api.together.xyz",
+    profile.provider_id: profile.trust_destination for profile in LLM_PROVIDER_PROFILES if profile.trust_destination
 }
 
 
@@ -165,6 +145,8 @@ def _validate_configurable_api_base_url(provider: str, host: str) -> str:
     """Reject URL components that may disclose credentials through transport logs."""
     provider_name = (provider or "").strip().lower()
     value = (host or "").strip()
+    if provider_name and provider_name not in LLM_PROVIDER_BY_ID:
+        raise ValueError(f"Unknown LLM provider: {provider_name}")
     if not provider_name or provider_name == "ollama" or provider_name in _PROVIDER_TRUST_DESTINATIONS:
         return value
     try:

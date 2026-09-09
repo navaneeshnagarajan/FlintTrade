@@ -30,11 +30,21 @@ regular one — no parallel order path.
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
+import math
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
+from flinttrade_core.broker_read_port import (
+    BalanceEvidence,
+    BalanceSnapshot,
+    BrokerBalanceResponseInvalid,
+    BrokerLotSizeResponseInvalid,
+    BrokerReadResponseInvalid,
+)
 from flinttrade_core.exceptions import BrokerError
 from flinttrade_engine.safety import EmergencyBrokerWrite, EmergencyReductionPlan, EmergencyWritePolicy
 from flinttrade_gateway.capabilities import (
@@ -49,6 +59,206 @@ from flinttrade_gateway.capabilities import (
 from . import indmoney_mapping as M
 from ._base import BrokerAdapter, Session, run_blocking_sdk_call
 from ._session_expiry import next_6am_ist_timestamp
+
+
+def _balance_number(value: object) -> float:
+    if isinstance(value, bool) or type(value) not in (int, float, str) or (type(value) is str and not value.strip()):
+        raise BrokerBalanceResponseInvalid
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise BrokerBalanceResponseInvalid from None
+    if not math.isfinite(number):
+        raise BrokerBalanceResponseInvalid
+    return number
+
+
+def _balance_record(value: object) -> dict[str, object]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerBalanceResponseInvalid
+    return value
+
+
+def _lot_record(value: object) -> dict[str, object]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerLotSizeResponseInvalid
+    return value
+
+
+_STRICT_JSON_MAX_DEPTH = 64
+_STRICT_INSTRUMENT_SOURCES = frozenset({"equity", "fno", "index"})
+_STRICT_INSTRUMENT_IDENTITY_HEADERS = frozenset({"EXCH", "SEGMENT", "SECURITY_ID"})
+
+
+def _strict_json_copy(value: object) -> object:
+    """Copy an untrusted JSON value without hooks or unbounded recursion."""
+    active: set[int] = set()
+
+    def copy_value(item: object, depth: int) -> object:
+        if depth > _STRICT_JSON_MAX_DEPTH:
+            raise BrokerReadResponseInvalid
+        if item is None or type(item) in (bool, int, str):
+            return item
+        if type(item) is float:
+            if not math.isfinite(item):
+                raise BrokerReadResponseInvalid
+            return item
+        if type(item) not in (list, dict):
+            raise BrokerReadResponseInvalid
+
+        identity = id(item)
+        if identity in active:
+            raise BrokerReadResponseInvalid
+        active.add(identity)
+        try:
+            if type(item) is list:
+                return [copy_value(child, depth + 1) for child in item]
+            if any(type(key) is not str for key in item):
+                raise BrokerReadResponseInvalid
+            return {key: copy_value(child, depth + 1) for key, child in item.items()}
+        finally:
+            active.remove(identity)
+
+    return copy_value(value, 0)
+
+
+def _strict_read_record(value: object) -> dict[str, object]:
+    copied = _strict_json_copy(value)
+    if type(copied) is not dict:
+        raise BrokerReadResponseInvalid
+    return copied
+
+
+def _strict_read_number(value: object, *, integer: bool = False, indian: bool = False) -> None:
+    if type(value) is str:
+        candidate: object = value.strip()
+        if not candidate:
+            raise BrokerReadResponseInvalid
+        if indian:
+            candidate = candidate.replace(",", "")
+    elif type(value) in (int, float):
+        candidate = value
+    else:
+        raise BrokerReadResponseInvalid
+    try:
+        number = float(candidate)
+    except (TypeError, ValueError, OverflowError):
+        raise BrokerReadResponseInvalid from None
+    if not math.isfinite(number) or (integer and not number.is_integer()):
+        raise BrokerReadResponseInvalid
+
+
+def _strict_quote_data(value: object) -> dict[str, object]:
+    data = _strict_read_record(value)
+    for quote_value in data.values():
+        if type(quote_value) is not dict:
+            raise BrokerReadResponseInvalid
+        quote = quote_value
+        for name in ("live_price", "day_open", "day_high", "day_low", "prev_close"):
+            if name in quote:
+                _strict_read_number(quote[name])
+        if "volume" in quote:
+            _strict_read_number(quote["volume"], integer=True)
+
+        depth_value = quote.get("market_depth", quote)
+        if type(depth_value) is not dict:
+            raise BrokerReadResponseInvalid
+        rows = depth_value.get("depth", [])
+        if type(rows) is not list:
+            raise BrokerReadResponseInvalid
+        for row_value in rows:
+            if type(row_value) is not dict:
+                raise BrokerReadResponseInvalid
+            for side in ("buy", "sell"):
+                if side not in row_value:
+                    continue
+                leg = row_value[side]
+                if type(leg) is not dict:
+                    raise BrokerReadResponseInvalid
+                if "price" in leg:
+                    _strict_read_number(leg["price"], indian=True)
+                if "quantity" in leg:
+                    _strict_read_number(leg["quantity"], integer=True, indian=True)
+        aggregate = depth_value.get("aggregate", {})
+        if type(aggregate) is not dict:
+            raise BrokerReadResponseInvalid
+        for name in ("total_buy", "total_sell"):
+            if name in aggregate:
+                _strict_read_number(aggregate[name], indian=True)
+    return data
+
+
+def _strict_historical_data(value: object) -> dict[str, object]:
+    data = _strict_read_record(value)
+    if "candles" not in data or type(data["candles"]) is not list:
+        raise BrokerReadResponseInvalid
+    for row in data["candles"]:
+        if type(row) is not list or len(row) != 6:
+            raise BrokerReadResponseInvalid
+        timestamp = row[0]
+        if type(timestamp) is str:
+            if not timestamp.strip():
+                raise BrokerReadResponseInvalid
+        elif type(timestamp) in (int, float):
+            if type(timestamp) is float and not math.isfinite(timestamp):
+                raise BrokerReadResponseInvalid
+        else:
+            raise BrokerReadResponseInvalid
+        for item in row[1:5]:
+            _strict_read_number(item)
+        _strict_read_number(row[5], integer=True)
+    return data
+
+
+def _strict_margin_data(value: object) -> dict[str, object]:
+    data = _strict_read_record(value)
+    for name in (
+        "total_margin",
+        "span_margin",
+        "exposure_margin",
+        "available_balance",
+        "insufficient_balance",
+        "brokerage",
+        "var_margin",
+        "delivery_margin",
+        "hedge_benefit",
+    ):
+        if name in data:
+            _strict_read_number(data[name])
+    if "charges" in data and type(data["charges"]) is not dict:
+        raise BrokerReadResponseInvalid
+    return data
+
+
+def _strict_fixed_http_error(status_code: int, payload: object) -> BrokerError:
+    """Map a fixed-read HTTP error after copying only exact string evidence."""
+    safe_payload = {"message": "IndMoney fixed read failed"}
+    if type(payload) is dict and all(type(key) is str for key in payload):
+        for field in ("message", "error_type", "error_code"):
+            value = payload.get(field)
+            if type(value) is str:
+                cleaned = value.strip()
+                if cleaned:
+                    safe_payload[field] = cleaned
+    return M.map_error(status_code, safe_payload)
+
+
+def _balance_snapshot_from_indmoney(data: object) -> BalanceSnapshot:
+    data = _balance_record(data)
+    available = _balance_number(data["withdrawal_balance"]) if "withdrawal_balance" in data else None
+    total = _balance_number(data["sod_balance"]) if "sod_balance" in data else None
+    used = None
+    if available is not None and total is not None:
+        difference = total - available
+        if not math.isfinite(difference):
+            raise BrokerBalanceResponseInvalid
+        used = round(max(difference, 0.0), 2)
+    return BalanceSnapshot(
+        available, BalanceEvidence.DIRECT if available is not None else None,
+        used, BalanceEvidence.DERIVED_FROM_DIRECT_COMPONENTS if used is not None else None,
+        total, BalanceEvidence.DIRECT if total is not None else None,
+        None, None,
+    )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
@@ -123,6 +333,22 @@ INDMONEY_CAPABILITIES = Capabilities(
 # (status_code, decoded_payload). Synchronous — the adapter runs it off the
 # event loop via the cancellation-safe blocking-call owner shared by native adapters.
 Transport = Callable[..., tuple[int, Any]]
+
+
+def _strict_rows(value: object) -> list[dict[str, Any]]:
+    if type(value) is not list:
+        raise BrokerReadResponseInvalid
+    if any(type(row) is not dict or any(type(key) is not str for key in row) for row in value):
+        raise BrokerReadResponseInvalid
+    return value
+
+
+def _strict_position_book(value: object) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerReadResponseInvalid
+    if "net_positions" not in value or "day_positions" not in value:
+        raise BrokerReadResponseInvalid
+    return _strict_rows(value["net_positions"]), _strict_rows(value["day_positions"])
 
 _EMERGENCY_BATCH_LIMIT = 10
 _EMERGENCY_EXIT_TAG_PREFIX = "fte-indmoney-"
@@ -200,6 +426,8 @@ class IndMoneyAdapter(BrokerAdapter):
             the journal-backed provider.
     """
 
+    _BROKER_READ_UNSUPPORTED = frozenset({"option_chain", "trade_book"})
+
     def __init__(
         self,
         *,
@@ -257,6 +485,7 @@ class IndMoneyAdapter(BrokerAdapter):
         params: dict[str, Any] | None = None,
         json_body: Any | None = None,
         raw: bool = False,
+        strict_fixed: bool = False,
     ) -> Any:
         """Run one REST call off the event loop; unwrap the envelope or raise.
 
@@ -268,6 +497,8 @@ class IndMoneyAdapter(BrokerAdapter):
             json_body: JSON request body (IndMoney uses bodies on some GETs).
             raw: Return the payload verbatim (CSV endpoints) instead of
                 unwrapping the ``{status, data}`` envelope.
+            strict_fixed: Defer the complete envelope decision to the strict
+                fixed-read validator without inspecting untrusted fields here.
         """
         transport = self._transport(session)
         status, payload = await run_blocking_sdk_call(
@@ -278,9 +509,34 @@ class IndMoneyAdapter(BrokerAdapter):
             params=params,
             json_body=json_body,
         )
-        if status >= 400 or (isinstance(payload, dict) and str(payload.get("status", "")).lower() == "error"):
+        if status >= 400:
+            if strict_fixed:
+                raise _strict_fixed_http_error(status, payload)
+            raise M.map_error(status, payload)
+        if strict_fixed:
+            return payload
+        if isinstance(payload, dict) and str(payload.get("status", "")).lower() == "error":
             raise M.map_error(status, payload)
         return payload if raw else M.unwrap(payload)
+
+    async def _fixed_read(
+        self,
+        session: Session,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: Any | None = None,
+    ) -> Any:
+        payload = await self._request(
+            session,
+            "GET",
+            path,
+            params=params,
+            json_body=json_body,
+            raw=True,
+            strict_fixed=True,
+        )
+        return M.unwrap_fixed_read(payload)
 
     async def _emergency_request(
         self,
@@ -361,7 +617,7 @@ class IndMoneyAdapter(BrokerAdapter):
         return keys
 
     @staticmethod
-    def _row_matches_exchange(row: dict[str, Any], exchange: str) -> bool:
+    def _row_matches_exchange(row: dict[str, Any], exchange: str, *, source: str | None = None) -> bool:
         """True when an instrument row belongs to the requested canonical exchange."""
         canonical = str(exchange).strip().upper()
         expected_exchange = {
@@ -376,6 +632,11 @@ class IndMoneyAdapter(BrokerAdapter):
         if row_exchange and row_exchange.upper() != expected_exchange:
             return False
 
+        # The documented index master uses SEGMENT as the index identity, not
+        # as an equity/derivative-style market classification.
+        if source == "index":
+            return True
+
         segment = IndMoneyAdapter._row_value(row, {"SEGMENT", "EXCHANGE_SEGMENT"}).upper()
         if not segment:
             return True
@@ -389,27 +650,103 @@ class IndMoneyAdapter(BrokerAdapter):
         }.get(canonical)
         return expected_segments is None or segment in expected_segments
 
-    async def _instrument_index(self, session: Session, source: str) -> dict[str, list[tuple[dict[str, Any], str]]]:
+    async def _instrument_index(
+        self,
+        session: Session,
+        source: str,
+        *,
+        strict_read: bool = False,
+        publish: bool = True,
+    ) -> dict[str, list[tuple[dict[str, Any], str]]]:
         """Return a cached symbol -> ``(row, security_id)`` index for ``source``."""
-        cache = session.extra.setdefault("indmoney_instrument_index", {})
-        if source in cache:
-            return cache[source]
+        stored_cache = session.extra.get("indmoney_instrument_index")
+        cache = stored_cache if type(stored_cache) is dict else {}
+        strict_key = ("strict-read", source)
+        cache_key: object = strict_key if strict_read else source
+        if cache_key in cache:
+            return cache[cache_key]
+        if not strict_read and strict_key in cache:
+            return cache[strict_key]
 
-        rows = await self.instruments(session, source)
+        rows = await self._strict_instruments(session, source) if strict_read else await self.instruments(session, source)
         index: dict[str, list[tuple[dict[str, Any], str]]] = {}
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            security_id = self._row_value(row, {"SECURITY_ID", "SECURITYID", "INSTRUMENT_TOKEN", "TOKEN"})
-            if not security_id:
-                continue
-            for field in ("TRADING_SYMBOL", "SYMBOL_NAME", "CUSTOM_SYMBOL"):
-                for key in self._symbol_keys(row.get(field)):
+        if strict_read:
+            validated_rows: list[tuple[dict[str, Any], str]] = []
+            seen_rows: set[tuple[tuple[str, str], ...]] = set()
+            strict_identities: dict[tuple[str, str], str] = {}
+            for row in rows:
+                if type(row) is not dict or any(type(key) is not str or type(value) is not str for key, value in row.items()):
+                    raise BrokerReadResponseInvalid
+                exchange = row.get("EXCH")
+                segment = row.get("SEGMENT")
+                security_id = row.get("SECURITY_ID")
+                trading_symbol = row.get("TRADING_SYMBOL", "")
+                if any(type(value) is not str or not value.strip() for value in (exchange, segment, security_id)):
+                    raise BrokerReadResponseInvalid
+                if source != "index" and (type(trading_symbol) is not str or not trading_symbol.strip()):
+                    raise BrokerReadResponseInvalid
+
+                fingerprint = tuple(sorted(row.items()))
+                if fingerprint in seen_rows:
+                    continue
+                seen_rows.add(fingerprint)
+                security_id = security_id.strip()
+                identity_value = segment if source == "index" else trading_symbol
+                identity = (exchange.strip().casefold(), identity_value.strip().casefold())
+                previous = strict_identities.setdefault(identity, security_id)
+                if previous != security_id:
+                    raise BrokerReadResponseInvalid
+                validated_rows.append((row, security_id))
+
+            for row, security_id in validated_rows:
+                fields = ["TRADING_SYMBOL", "SYMBOL_NAME", "CUSTOM_SYMBOL"]
+                if source == "index":
+                    fields.append("SEGMENT")
+                aliases: set[str] = set()
+                for field in fields:
+                    aliases.update(self._symbol_keys(row.get(field)))
+                for key in aliases:
                     index.setdefault(key, []).append((row, security_id))
-        cache[source] = index
+        else:
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                security_id = self._row_value(row, {"SECURITY_ID", "SECURITYID", "INSTRUMENT_TOKEN", "TOKEN"})
+                if not security_id:
+                    continue
+                for field in ("TRADING_SYMBOL", "SYMBOL_NAME", "CUSTOM_SYMBOL"):
+                    for key in self._symbol_keys(row.get(field)):
+                        index.setdefault(key, []).append((row, security_id))
+        if publish:
+            if stored_cache is not cache:
+                session.extra["indmoney_instrument_index"] = cache
+            cache[cache_key] = index
+            if strict_read:
+                cache[source] = index
         return index
 
-    async def _resolve_security_for_session(self, session: Session, symbol: str, exchange: str) -> str:
+    @staticmethod
+    def _publish_strict_instrument_indexes(
+        session: Session,
+        indexes: dict[str, dict[str, list[tuple[dict[str, Any], str]]]],
+    ) -> None:
+        """Atomically expose validated strict indexes to strict and legacy readers."""
+        stored_cache = session.extra.get("indmoney_instrument_index")
+        cache = dict(stored_cache) if type(stored_cache) is dict else {}
+        for source, index in indexes.items():
+            cache[("strict-read", source)] = index
+            cache[source] = index
+        session.extra["indmoney_instrument_index"] = cache
+
+    async def _resolve_security_for_session(
+        self,
+        session: Session,
+        symbol: str,
+        exchange: str,
+        *,
+        strict_read: bool = False,
+        staged_strict_indexes: dict[str, dict[str, list[tuple[dict[str, Any], str]]]] | None = None,
+    ) -> str:
         """Resolve an INDstocks security id using override, numeric token, or cached instruments CSV."""
         try:
             return self._resolve_security(symbol, exchange)
@@ -417,11 +754,45 @@ class IndMoneyAdapter(BrokerAdapter):
             if self._security_resolver is not None:
                 raise
             source = self._instrument_source_for_exchange(exchange)
-            index = await self._instrument_index(session, source)
+            if strict_read and staged_strict_indexes is not None and source in staged_strict_indexes:
+                index = staged_strict_indexes[source]
+            else:
+                index = await self._instrument_index(
+                    session,
+                    source,
+                    strict_read=strict_read,
+                    publish=not strict_read,
+                )
+                if strict_read and staged_strict_indexes is not None:
+                    staged_strict_indexes[source] = index
             candidates = self._symbol_keys(symbol)
+            if strict_read:
+                matches: dict[tuple[tuple[str, str], ...], tuple[dict[str, Any], str]] = {}
+                for key in candidates:
+                    for row, security_id in index.get(key, []):
+                        if self._row_matches_exchange(row, exchange, source=source):
+                            matches.setdefault(tuple(sorted(row.items())), (row, security_id))
+
+                exact_fields = ("SEGMENT", "TRADING_SYMBOL") if source == "index" else ("TRADING_SYMBOL",)
+                for fields in (exact_fields, ("SYMBOL_NAME", "CUSTOM_SYMBOL")):
+                    security_ids = {
+                        security_id
+                        for row, security_id in matches.values()
+                        if any(self._symbol_keys(row.get(field)) & candidates for field in fields)
+                    }
+                    if len(security_ids) == 1:
+                        if staged_strict_indexes is None:
+                            self._publish_strict_instrument_indexes(session, {source: index})
+                        return next(iter(security_ids))
+                    if len(security_ids) > 1:
+                        raise BrokerReadResponseInvalid
+                raise BrokerError(
+                    f"Cannot resolve IndMoney security_id for {symbol}/{exchange} "
+                    f"from instruments source {source!r}"
+                ) from exc
             for key in candidates:
                 for row, security_id in index.get(key, []):
-                    if self._row_matches_exchange(row, exchange):
+                    if self._row_matches_exchange(row, exchange, source=source):
                         return str(security_id)
             raise BrokerError(
                 f"Cannot resolve IndMoney security_id for {symbol}/{exchange} from instruments source {source!r}"
@@ -690,19 +1061,22 @@ class IndMoneyAdapter(BrokerAdapter):
         for raw in raw_rows:
             if not isinstance(raw, dict):
                 raise BrokerError("INDmoney emergency order book contains a non-object row")
-            row = M.from_indmoney_order(raw)
-            order_id = self._emergency_identifier(row.get("orderid"), label="order id")
+            order_id = self._emergency_identifier(raw.get("id"), label="order id")
             if order_id in seen_ids:
                 raise BrokerError("INDmoney emergency order book contains a duplicate order id")
             seen_ids.add(order_id)
+            raw_status = raw.get("status")
+            if not isinstance(raw_status, str) or not raw_status.strip():
+                raise BrokerError("INDmoney emergency order status is missing or malformed")
+            try:
+                row = M.from_indmoney_order(raw)
+            except BrokerReadResponseInvalid as exc:
+                raise BrokerError("INDmoney emergency order response is malformed") from exc
             segment = self._emergency_identifier(raw.get("segment"), label="order segment").upper()
             if segment not in {"EQUITY", "DERIVATIVE"}:
                 raise BrokerError("INDmoney emergency order segment is unsupported")
             exchange = self._emergency_identifier(row.get("exchange"), label="order exchange").upper()
             product = self._emergency_identifier(row.get("product"), label="order product").upper()
-            raw_status = raw.get("status")
-            if not isinstance(raw_status, str) or not raw_status.strip():
-                raise BrokerError("INDmoney emergency order status is missing or malformed")
             status = raw_status.strip().upper()
             known_family = known_families.get(order_id)
             if known_family not in {None, "regular", "smart"}:
@@ -757,7 +1131,10 @@ class IndMoneyAdapter(BrokerAdapter):
                     continue
                 if position_type != "open":
                     raise BrokerError("INDmoney reports a non-open position with non-zero quantity")
-                mapped = M.from_indmoney_position(raw, product=canonical_product)
+                try:
+                    mapped = M.from_indmoney_position(raw, product=canonical_product)
+                except BrokerReadResponseInvalid as exc:
+                    raise BrokerError("INDmoney emergency position response is malformed") from exc
                 security_id = self._emergency_identifier(raw.get("security_id"), label="security id")
                 symbol = self._emergency_label(mapped.get("symbol"), label="position symbol")
                 exchange = self._emergency_identifier(mapped.get("exchange"), label="position exchange").upper()
@@ -1097,8 +1474,8 @@ class IndMoneyAdapter(BrokerAdapter):
     # ---------- trading: reads (no SafetyContext required) ----------
 
     async def order_book(self, session: Session) -> list[Order]:
-        rows = await self._request(session, "GET", "/order-book") or []
-        return [M.from_indmoney_order(r) for r in rows if isinstance(r, dict)]  # type: ignore[misc]
+        rows = _strict_rows(await self._fixed_read(session, "/order-book"))
+        return [M.from_indmoney_order(row) for row in rows]  # type: ignore[misc]
 
     async def order_details(self, session: Session, order_id: str, *, segment: str | None = None) -> dict:
         """Full details of a single order (``GET /order`` with a JSON body) — a read."""
@@ -1134,46 +1511,62 @@ class IndMoneyAdapter(BrokerAdapter):
         normalised, preserving the broker's day/net distinction.
         """
         params = {"segment": str(segment).lower(), "product": str(product).lower()}
-        data = await self._request(session, "GET", "/portfolio/positions", params=params) or {}
+        data = await self._fixed_read(session, "/portfolio/positions", params=params)
+        net_positions, day_positions = _strict_position_book(data)
         prod = str(product).upper()
         # Map the IndMoney product spelling back to canonical for row tagging.
         canonical = {"MARGIN": "NRML", "INTRADAY": "MIS", "CNC": "CNC"}.get(prod, prod)
+        expected_segments = {
+            "equity": {"NSE_EQ", "BSE_EQ"},
+            "derivative": {"NSE_FNO", "BSE_FNO"},
+        }
+        accepted = expected_segments.get(params["segment"])
+        if accepted is None:
+            raise BrokerReadResponseInvalid from None
+
+        def project(row: dict[str, Any]) -> dict[str, Any]:
+            returned_segment = row.get("exchange_segment")
+            if type(returned_segment) is not str or returned_segment.strip().upper() not in accepted:
+                raise BrokerReadResponseInvalid from None
+            return M.from_indmoney_position(row, product=canonical)
+
         return {
-            "net_positions": [
-                M.from_indmoney_position(r, product=canonical)
-                for r in (data.get("net_positions") or [])
-                if isinstance(r, dict)
-            ],
-            "day_positions": [
-                M.from_indmoney_position(r, product=canonical)
-                for r in (data.get("day_positions") or [])
-                if isinstance(r, dict)
-            ],
+            "net_positions": [project(row) for row in net_positions],
+            "day_positions": [project(row) for row in day_positions],
         }
 
     async def positions(self, session: Session) -> list[Position]:
         # The endpoint is (segment, product)-scoped; the contract wants every
         # open position, so all four documented combos are aggregated and
-        # de-duplicated on (symbol, product).
+        # de-duplicated on exact instrument/exchange/product identity.
         combos = (("derivative", "margin"), ("derivative", "intraday"), ("equity", "cnc"), ("equity", "intraday"))
-        seen: set[tuple[str, str]] = set()
+        seen: set[tuple[str, str, str, str]] = set()
         out: list[dict] = []
         for segment, product in combos:
             split = await self.positions_segment(session, segment, product)
             for row in split["net_positions"]:
-                key = (row.get("symbol", ""), row.get("product", ""))
+                key = (
+                    row.get("symbol", ""),
+                    row.get("exchange", ""),
+                    row.get("product", ""),
+                    row.get("instrument_id", ""),
+                )
                 if key not in seen:
                     seen.add(key)
                     out.append(row)
         return out  # type: ignore[return-value]
 
     async def holdings(self, session: Session) -> list[dict]:
-        rows = await self._request(session, "GET", "/portfolio/holdings") or []
-        return [M.from_indmoney_holding(r) for r in rows if isinstance(r, dict)]
+        rows = _strict_rows(await self._fixed_read(session, "/portfolio/holdings"))
+        return [M.from_indmoney_holding(row) for row in rows]
 
     async def funds(self, session: Session) -> dict:
         data = await self._request(session, "GET", "/funds")
         return M.from_indmoney_funds({"data": data})
+
+    async def balance_snapshot(self, session: Session) -> BalanceSnapshot:
+        """Read the existing funds endpoint without inventing opening capital."""
+        return _balance_snapshot_from_indmoney(await self._fixed_read(session, "/funds"))
 
     async def profile(self, session: Session) -> dict:
         """User profile (``GET /user/profile``) — also a token-validity probe."""
@@ -1187,19 +1580,106 @@ class IndMoneyAdapter(BrokerAdapter):
 
         A read-only estimate — it places nothing, so it needs no gate.
         """
-        security_id = await self._resolve_security_for_session(session, order.symbol, str(order.exchange))
+        security_id = await self._resolve_security_for_session(
+            session,
+            order.symbol,
+            str(order.exchange),
+            strict_read=True,
+        )
         body = M.to_margin_params(order, security_id)
-        data = await self._request(session, "GET", "/margin", json_body=body)
-        return M.from_indmoney_margin({"data": data})
+        data = _strict_margin_data(await self._fixed_read(session, "/margin", json_body=body))
+        try:
+            return M.from_indmoney_margin({"data": data})
+        except BrokerReadResponseInvalid:
+            raise
+        except Exception:
+            raise BrokerReadResponseInvalid from None
 
     async def instruments_csv(self, session: Session, source: str = "equity") -> str:
         """Raw instruments-master CSV (``GET /market/instruments?source=``)."""
         payload = await self._request(session, "GET", "/market/instruments", params={"source": source}, raw=True)
         return payload if isinstance(payload, str) else str(payload)
 
+    async def _strict_instruments(self, session: Session, source: str) -> list[dict[str, str]]:
+        """Read instruments for a fixed broker-read path without coercing broker data."""
+        if type(source) is not str or source not in _STRICT_INSTRUMENT_SOURCES:
+            raise BrokerReadResponseInvalid
+        payload = await self._request(
+            session, "GET", "/market/instruments", params={"source": source}, raw=True, strict_fixed=True
+        )
+        if type(payload) is not str:
+            raise BrokerReadResponseInvalid
+        try:
+            raw_rows = list(csv.reader(io.StringIO(payload)))
+            if len(raw_rows) < 2:
+                raise BrokerReadResponseInvalid
+            headers = raw_rows[0]
+            if not headers or any(type(header) is not str or not header.strip() or header != header.strip() for header in headers):
+                raise BrokerReadResponseInvalid
+            normalised_headers = [header.casefold() for header in headers]
+            if len(set(normalised_headers)) != len(normalised_headers):
+                raise BrokerReadResponseInvalid
+            if not _STRICT_INSTRUMENT_IDENTITY_HEADERS.issubset(headers):
+                raise BrokerReadResponseInvalid
+            if any(len(row) != len(headers) or any(type(value) is not str for value in row) for row in raw_rows[1:]):
+                raise BrokerReadResponseInvalid
+
+            expected = [dict(zip(headers, row, strict=True)) for row in raw_rows[1:]]
+            parsed = M.parse_instruments_csv(payload)
+            if type(parsed) is not list or len(parsed) != len(expected):
+                raise BrokerReadResponseInvalid
+            for row in parsed:
+                if type(row) is not dict or any(
+                    type(key) is not str or type(value) is not str for key, value in row.items()
+                ):
+                    raise BrokerReadResponseInvalid
+            if parsed != expected:
+                raise BrokerReadResponseInvalid
+            return parsed
+        except BrokerReadResponseInvalid:
+            raise
+        except Exception:
+            raise BrokerReadResponseInvalid from None
+
     async def instruments(self, session: Session, source: str = "equity") -> list[dict]:
         """Parsed instruments master for ``source`` (``equity``/``fno``/``index``)."""
         return M.parse_instruments_csv(await self.instruments_csv(session, source))
+
+    async def instrument_lot_sizes(self, session: Session, request: Any) -> list[dict[str, object]]:
+        """Project the existing source-scoped instrument rows to lot evidence."""
+        source = self._instrument_source_for_exchange(request.exchange)
+        rows = await self._strict_instruments(session, source)
+        if type(rows) is not list:
+            raise BrokerLotSizeResponseInvalid
+        requested = set(request.symbols)
+        result: list[dict[str, object]] = []
+        for row in rows:
+            row = _lot_record(row)
+            symbol = row.get("TRADING_SYMBOL")
+            exchange = row.get("EXCH")
+            segment = row.get("SEGMENT")
+            lot = row.get("LOT_UNITS")
+            instrument_id = row.get("SECURITY_ID")
+            if requested and type(symbol) is str and symbol.strip() and symbol not in requested:
+                continue
+            if type(exchange) is str and exchange.strip() and exchange != request.exchange:
+                continue
+            symbol_matches = bool(requested and type(symbol) is str and symbol in requested)
+            exchange_matches = type(exchange) is str and exchange == request.exchange
+            if not symbol_matches and not exchange_matches:
+                continue
+            if any(type(value) is not str or not value.strip() for value in (symbol, exchange, segment, instrument_id)):
+                raise BrokerLotSizeResponseInvalid
+            if isinstance(lot, bool) or type(lot) not in (int, str):
+                raise BrokerLotSizeResponseInvalid
+            try:
+                numeric = int(lot)
+            except ValueError:
+                raise BrokerLotSizeResponseInvalid from None
+            if str(numeric) != str(lot) or not 1 <= numeric <= 1_000_000:
+                raise BrokerLotSizeResponseInvalid
+            result.append({"symbol": symbol, "exchange": exchange, "lot_size": numeric, "instrument_id": instrument_id})
+        return result
 
     async def smart_orders(self, session: Session) -> list[dict]:
         """Smart (GTT-family) rows from the order book — a read.
@@ -1220,20 +1700,41 @@ class IndMoneyAdapter(BrokerAdapter):
     async def quotes(self, session: Session, symbols: list[str]) -> list[Quote]:
         from flinttrade_core.models import Quote  # noqa: PLC0415
 
+        staged_indexes: dict[str, dict[str, list[tuple[dict[str, Any], str]]]] = {}
         resolved: list[tuple[str, str, str]] = []  # (symbol, exchange, scrip)
         for raw in symbols:
             exchange, name = self._split_symbol(raw)
-            scrip = M.to_scrip_code(exchange, await self._resolve_security_for_session(session, name, exchange))
+            scrip = M.to_scrip_code(
+                exchange,
+                await self._resolve_security_for_session(
+                    session,
+                    name,
+                    exchange,
+                    strict_read=True,
+                    staged_strict_indexes=staged_indexes,
+                ),
+            )
             resolved.append((name, exchange, scrip))
-        data = await self._request(
-            session, "GET", "/market/quotes/full",
-            params={"scrip-codes": ",".join(s for _, _, s in resolved)},
-        ) or {}
+        data = _strict_quote_data(
+            await self._fixed_read(
+                session,
+                "/market/quotes/full",
+                params={"scrip-codes": ",".join(s for _, _, s in resolved)},
+            )
+        )
+        if any(scrip not in data for scrip in {scrip for _, _, scrip in resolved}):
+            raise BrokerReadResponseInvalid
         out: list[Quote] = []
         for name, exchange, scrip in resolved:
-            rec = data.get(scrip)
-            if isinstance(rec, dict):
-                out.append(Quote(**M.from_indmoney_quote(name, exchange, rec)))
+            rec = data[scrip]
+            try:
+                out.append(Quote(**M.from_indmoney_quote(name, exchange, rec, strict=True)))
+            except BrokerReadResponseInvalid:
+                raise
+            except Exception:
+                raise BrokerReadResponseInvalid from None
+        if staged_indexes:
+            self._publish_strict_instrument_indexes(session, staged_indexes)
         return out
 
     async def ltp(self, session: Session, symbols: list[str]) -> dict[str, float]:
@@ -1283,18 +1784,29 @@ class IndMoneyAdapter(BrokerAdapter):
         label, max_days = M.interval_to_indmoney(interval)
         start_ms, end_ms = M.to_epoch_ms(start), M.to_epoch_ms(end)
         M.validate_history_range(start_ms, end_ms, max_days)
-        scrip = M.to_scrip_code(exchange, await self._resolve_security_for_session(session, symbol, exchange))
-        data = await self._request(
-            session, "GET", f"/market/historical/{label}",
-            params={"scrip-codes": scrip, "start_time": start_ms, "end_time": end_ms},
+        scrip = M.to_scrip_code(
+            exchange,
+            await self._resolve_security_for_session(session, symbol, exchange, strict_read=True),
         )
-        cd = M.to_candles_dict(symbol, exchange, interval, {"data": data})
-        return Candles(
-            symbol=cd["symbol"],
-            exchange=cd["exchange"],
-            interval=cd["interval"],
-            bars=[OHLCV(**b) for b in cd["bars"]],
+        data = _strict_historical_data(
+            await self._fixed_read(
+                session,
+                f"/market/historical/{label}",
+                params={"scrip-codes": scrip, "start_time": start_ms, "end_time": end_ms},
+            )
         )
+        try:
+            cd = M.to_candles_dict(symbol, exchange, interval, {"data": data})
+            return Candles(
+                symbol=cd["symbol"],
+                exchange=cd["exchange"],
+                interval=cd["interval"],
+                bars=[OHLCV(**b) for b in cd["bars"]],
+            )
+        except BrokerReadResponseInvalid:
+            raise
+        except Exception:
+            raise BrokerReadResponseInvalid from None
 
     # ---------- utility family (documented "Coming Soon" broker-side) ----------
 

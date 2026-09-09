@@ -23,7 +23,11 @@ synthetic frames.
 from __future__ import annotations
 
 import json
+import math
+from decimal import Decimal, InvalidOperation
 from typing import Any
+
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 
 # Exchange -> NEO exchange-segment code (from settings.exchange_segment).
 EXCHANGE_TO_KOTAK = {
@@ -196,6 +200,149 @@ INDEX_FEED_KEYS = {
 
 class KotakNeoMappingError(ValueError):
     """Raised when an order cannot be translated to / from the NEO API."""
+
+
+_MISSING = object()
+
+
+def _response_record(value: object) -> dict[str, Any]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerReadResponseInvalid
+    return value
+
+
+def _response_text(
+    row: dict[str, Any],
+    *names: str,
+    required: bool = False,
+    empty_absent: bool = False,
+) -> str | object:
+    for name in names:
+        if name not in row:
+            continue
+        value = row[name]
+        if value is None and not required:
+            continue
+        if type(value) is not str:
+            raise BrokerReadResponseInvalid
+        if not value:
+            if empty_absent and not required:
+                continue
+            if required:
+                raise BrokerReadResponseInvalid
+        return value.encode("utf-8").decode("utf-8")
+    if required:
+        raise BrokerReadResponseInvalid
+    return _MISSING
+
+
+def _response_decimal(
+    row: dict[str, Any],
+    *names: str,
+    required: bool = False,
+    empty_absent: bool = False,
+) -> Decimal | object:
+    for name in names:
+        if name not in row:
+            continue
+        value = row[name]
+        if value is None and not required:
+            continue
+        if type(value) not in (int, float, str) or type(value) is str and not value.strip():
+            if empty_absent and not required and type(value) is str and not value.strip():
+                continue
+            raise BrokerReadResponseInvalid
+        try:
+            number = Decimal(str(value))
+        except InvalidOperation:
+            raise BrokerReadResponseInvalid from None
+        if not number.is_finite():
+            raise BrokerReadResponseInvalid
+        return number
+    if required:
+        raise BrokerReadResponseInvalid
+    return _MISSING
+
+
+def _response_number_text(
+    row: dict[str, Any],
+    *names: str,
+    required: bool = False,
+    empty_absent: bool = False,
+) -> str | object:
+    number = _response_decimal(row, *names, required=required, empty_absent=empty_absent)
+    if number is _MISSING:
+        return _MISSING
+    for name in names:
+        if name not in row or row[name] is None:
+            continue
+        value = row[name]
+        if empty_absent and type(value) is str and not value.strip():
+            continue
+        return value.encode("utf-8").decode("utf-8") if type(value) is str else str(value)
+    raise BrokerReadResponseInvalid
+
+
+def _response_exchange(row: dict[str, Any], *names: str) -> str:
+    segment = _response_text(row, *names, required=True)
+    try:
+        return KOTAK_TO_EXCHANGE[segment.lower()]
+    except KeyError:
+        raise BrokerReadResponseInvalid from None
+
+
+def _response_product(row: dict[str, Any], name: str = "prod") -> str:
+    value = _response_text(row, name, required=True)
+    try:
+        return KOTAK_TO_PRODUCT[value.upper()]
+    except KeyError:
+        raise BrokerReadResponseInvalid from None
+
+
+def _put_present(target: dict[str, Any], name: str, value: object) -> None:
+    if value is not _MISSING:
+        target[name] = value
+
+
+def _market_number(
+    row: dict[str, Any],
+    *names: str,
+    integer: bool = False,
+) -> float | int | object:
+    """Copy the first present market-data alias after exact primitive validation."""
+    for name in names:
+        if name not in row:
+            continue
+        number = _response_decimal(row, name, required=True)
+        converted = float(number)
+        if not math.isfinite(converted):
+            raise BrokerReadResponseInvalid from None
+        if integer:
+            if number < 0 or number != number.to_integral_value():
+                raise BrokerReadResponseInvalid from None
+            return int(number)
+        return converted
+    return _MISSING
+
+
+def _market_text(row: dict[str, Any], *names: str) -> str | object:
+    for name in names:
+        if name not in row:
+            continue
+        return _response_text(row, name, required=True)
+    return _MISSING
+
+
+def _quote_depth_price(depth: dict[str, Any], side: str) -> float | object:
+    if side not in depth:
+        return _MISSING
+    rows = depth[side]
+    if type(rows) is not list:
+        raise BrokerReadResponseInvalid from None
+    if not rows:
+        return _MISSING
+    level = _response_record(rows[0])
+    return _market_number(level, "price")
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -502,23 +649,36 @@ def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
     ``Order_history.md``); history rows carry ``exchTmstp``+``dclQty`` where the
     report uses ``ordDtTm``+``dscQty``, so each field falls back across both.
     """
+    d = _response_record(d)
+    side = _response_text(d, "trnsTp", required=True).upper()
+    price_type = _response_text(d, "prcTp", required=True).upper()
+    try:
+        action = KOTAK_TO_SIDE[side]
+        canonical_price_type = KOTAK_TO_ORDER_TYPE[price_type]
+    except KeyError:
+        raise BrokerReadResponseInvalid from None
     order = {
-        "orderid": str(d.get("nOrdNo", "")),
-        "status": d.get("ordSt", d.get("stat", "")),
-        "symbol": d.get("trdSym", d.get("sym", "")),
-        "exchange": _exchange_of(d),
-        "action": KOTAK_TO_SIDE.get(str(d.get("trnsTp", "")), str(d.get("trnsTp", ""))),
-        "pricetype": KOTAK_TO_ORDER_TYPE.get(str(d.get("prcTp", "")), str(d.get("prcTp", ""))),
-        "product": KOTAK_TO_PRODUCT.get(str(d.get("prod", "")), str(d.get("prod", ""))),
-        "timestamp": str(d.get("ordDtTm", d.get("exchTmstp", d.get("flDtTm", "")))),
-        "validity": str(d.get("vldt", d.get("ordDur", ""))),
-        "disclosed_quantity": str(d.get("dscQty", d.get("dclQty", 0))),
-        "rejection_reason": "" if str(d.get("rejRsn", "")) in ("--", "NA") else str(d.get("rejRsn", "")),
-        "exchange_order_id": ""
-        if str(d.get("exOrdId", d.get("exchOrdId", ""))) == "NA"
-        else str(d.get("exOrdId", d.get("exchOrdId", ""))),
-        "tag": str(d.get("GuiOrdId", "") or ""),
+        "orderid": _response_text(d, "nOrdNo", required=True),
+        "status": _response_text(d, "ordSt", "stat", required=True),
+        "symbol": _response_text(d, "trdSym", "sym", required=True),
+        "exchange": _response_exchange(d, "exSeg"),
+        "action": action,
+        "pricetype": canonical_price_type,
+        "product": _response_product(d),
     }
+    for field, value in {
+        "timestamp": _response_text(d, "ordDtTm", "exchTmstp", "flDtTm", empty_absent=True),
+        "validity": _response_text(d, "vldt", "ordDur", empty_absent=True),
+        "disclosed_quantity": _response_number_text(d, "dscQty", "dclQty", empty_absent=True),
+        "tag": _response_text(d, "GuiOrdId"),
+    }.items():
+        _put_present(order, field, value)
+    rejection = _response_text(d, "rejRsn")
+    if rejection is not _MISSING:
+        order["rejection_reason"] = "" if rejection in {"--", "NA"} else rejection
+    exchange_order_id = _response_text(d, "exOrdId", "exchOrdId", empty_absent=True)
+    if exchange_order_id is not _MISSING:
+        order["exchange_order_id"] = "" if exchange_order_id == "NA" else exchange_order_id
     for field, source_field in {
         "quantity": "qty",
         "filled_quantity": "fldQty",
@@ -526,9 +686,7 @@ def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
         "trigger_price": "trgPrc",
         "average_price": "avgPrc",
     }.items():
-        value = _present_order_number(d, source_field)
-        if value is not None:
-            order[field] = value
+        _put_present(order, field, _response_number_text(d, source_field, empty_absent=True))
     return order
 
 
@@ -549,16 +707,23 @@ def order_history_rows(resp: Any) -> list[dict[str, Any]]:
 
 def from_kotak_trade(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise a NEO trade-report record."""
-    return {
-        "orderid": str(d.get("nOrdNo", "")),
-        "symbol": d.get("trdSym", d.get("sym", "")),
-        "exchange": _exchange_of(d),
-        "action": KOTAK_TO_SIDE.get(str(d.get("trnsTp", "")), str(d.get("trnsTp", ""))),
-        "quantity": str(d.get("fldQty", d.get("qty", 0))),
-        "price": str(d.get("avgPrc", d.get("flPrc", 0))),
-        "product": KOTAK_TO_PRODUCT.get(str(d.get("prod", "")), str(d.get("prod", ""))),
-        "timestamp": str(d.get("flDtTm", d.get("exTm", ""))),
+    d = _response_record(d)
+    side = _response_text(d, "trnsTp", required=True).upper()
+    try:
+        action = KOTAK_TO_SIDE[side]
+    except KeyError:
+        raise BrokerReadResponseInvalid from None
+    trade = {
+        "symbol": _response_text(d, "trdSym", "sym", required=True),
+        "exchange": _response_exchange(d, "exSeg"),
+        "action": action,
+        "quantity": _response_number_text(d, "fldQty", "qty", required=True),
+        "price": _response_number_text(d, "avgPrc", "flPrc", required=True),
+        "product": _response_product(d),
+        "timestamp": _response_text(d, "flDtTm", "exTm", required=True),
     }
+    _put_present(trade, "orderid", _response_text(d, "nOrdNo"))
+    return trade
 
 
 def _ratio(num: Any, den: Any) -> float:
@@ -597,53 +762,79 @@ def from_kotak_position(d: dict[str, Any]) -> dict[str, Any]:
     ``unit_factor = multiplier * genNum/genDen * prcNum/prcDen`` (the same
     per-unit factor used for the avg, so the value is amount-consistent on
     multiplier≠1 scrips). The open leg's unrealised P&L needs a live LTP not in
-    the record and is left to merge from quotes (``ltp`` is ``0``; none is
-    fabricated). This matches Dhan (realised+unrealised) / Upstox (broker pnl)
-    once a quote is merged.
+    the record and is left to merge from quotes; no LTP is fabricated.
     """
-    ratios = _ratio(d.get("genNum", 1), d.get("genDen", 1)) * _ratio(d.get("prcNum", 1), d.get("prcDen", 1))
-    multiplier = _num(d.get("multiplier", 1), 1.0)
-    # Full per-unit factor (``Positions.md``: multiplier × genNum/genDen ×
-    # prcNum/prcDen). 1.0 for equity; ≠1 for some currency/commodity scrips.
-    unit_factor = (ratios * multiplier) or 1.0
-    # Clamp to a sane decimal-place range: a malformed/negative precision would
-    # otherwise make the avg-price f-string raise ValueError and abort the whole
-    # positions() fetch instead of degrading one row.
-    precision = max(0, min(int(_num(d.get("precision", 2), 2)), 8))
-
-    buy_qty = _num(d.get("cfBuyQty", 0)) + _num(d.get("flBuyQty", 0))
-    sell_qty = _num(d.get("cfSellQty", 0)) + _num(d.get("flSellQty", 0))
-    buy_amt = _num(d.get("cfBuyAmt", 0)) + _num(d.get("buyAmt", 0))
-    sell_amt = _num(d.get("cfSellAmt", 0)) + _num(d.get("sellAmt", 0))
+    d = _response_record(d)
+    quantity_names = ("cfBuyQty", "flBuyQty", "cfSellQty", "flSellQty")
+    quantities = {name: _response_decimal(d, name, required=True) for name in quantity_names}
+    if any(number < 0 or number != number.to_integral_value() for number in quantities.values()):
+        raise BrokerReadResponseInvalid
+    buy_qty = quantities["cfBuyQty"] + quantities["flBuyQty"]
+    sell_qty = quantities["cfSellQty"] + quantities["flSellQty"]
     net_qty = buy_qty - sell_qty
-
-    buy_avg = buy_amt / (buy_qty * unit_factor) if buy_qty else 0.0
-    sell_avg = sell_amt / (sell_qty * unit_factor) if sell_qty else 0.0
-    if buy_qty > sell_qty:
-        avg_price = buy_avg
-    elif sell_qty > buy_qty:
-        avg_price = sell_avg
-    else:
-        avg_price = 0.0
-
-    matched = min(buy_qty, sell_qty)
-    # Realised = closed-leg sell amount − buy amount. Re-multiplying by
-    # ``unit_factor`` recovers the amount-space value the per-unit avgs were
-    # divided out of. `... or 0.0` normalises Python negative zero: an open long
-    # (matched == 0, buy_avg > 0) yields -0.0, which would render as "-0.00".
-    realised_pnl = matched * (sell_avg - buy_avg) * unit_factor or 0.0
-
-    return {
-        "symbol": d.get("trdSym", d.get("sym", "")),
-        "exchange": _exchange_of(d),
-        "product": KOTAK_TO_PRODUCT.get(str(d.get("prod", "")), str(d.get("prod", ""))),
-        "quantity": _fmt_qty(net_qty),
-        "average_price": f"{avg_price:.{precision}f}",
-        "ltp": "0",
-        "pnl": f"{realised_pnl:.2f}",
-        "buy_quantity": _fmt_qty(buy_qty),
-        "sell_quantity": _fmt_qty(sell_qty),
+    position: dict[str, Any] = {
+        "symbol": _response_text(d, "trdSym", "sym", required=True),
+        "exchange": _response_exchange(d, "exSeg"),
+        "product": _response_product(d),
+        "quantity": str(int(net_qty)),
+        "buy_quantity": str(int(buy_qty)),
+        "sell_quantity": str(int(sell_qty)),
+        "day_buy_quantity": str(int(quantities["flBuyQty"])),
+        "day_sell_quantity": str(int(quantities["flSellQty"])),
+        "carry_forward_buy_quantity": str(int(quantities["cfBuyQty"])),
+        "carry_forward_sell_quantity": str(int(quantities["cfSellQty"])),
     }
+    amount_names = ("cfBuyAmt", "buyAmt", "cfSellAmt", "sellAmt")
+    amounts = {name: _response_decimal(d, name) for name in amount_names}
+    if not all(value is not _MISSING for value in amounts.values()):
+        return position
+    quantity_amount_pairs = (
+        (quantities["cfBuyQty"], amounts["cfBuyAmt"]),
+        (quantities["flBuyQty"], amounts["buyAmt"]),
+        (quantities["cfSellQty"], amounts["cfSellAmt"]),
+        (quantities["flSellQty"], amounts["sellAmt"]),
+    )
+    if any(amount < 0 or (quantity == 0 and amount != 0) for quantity, amount in quantity_amount_pairs):
+        raise BrokerReadResponseInvalid
+    factor_names = ("genNum", "genDen", "prcNum", "prcDen", "multiplier", "precision")
+    factors = {name: _response_decimal(d, name) for name in factor_names}
+    if not all(value is not _MISSING for value in factors.values()):
+        return position
+    if any(factors[name] <= 0 for name in ("genNum", "genDen", "prcNum", "prcDen", "multiplier")):
+        raise BrokerReadResponseInvalid
+    precision_value = factors["precision"]
+    if precision_value != precision_value.to_integral_value() or not 0 <= precision_value <= 8:
+        raise BrokerReadResponseInvalid
+    precision = int(precision_value)
+    unit_factor = (
+        factors["multiplier"]
+        * factors["genNum"]
+        / factors["genDen"]
+        * factors["prcNum"]
+        / factors["prcDen"]
+    )
+    if not unit_factor.is_finite() or unit_factor == 0:
+        raise BrokerReadResponseInvalid
+    buy_amount = amounts["cfBuyAmt"] + amounts["buyAmt"]
+    sell_amount = amounts["cfSellAmt"] + amounts["sellAmt"]
+    if (buy_qty == 0 and buy_amount != 0) or (sell_qty == 0 and sell_amount != 0):
+        raise BrokerReadResponseInvalid
+    buy_avg = buy_amount / (buy_qty * unit_factor) if buy_qty else Decimal(0)
+    sell_avg = sell_amount / (sell_qty * unit_factor) if sell_qty else Decimal(0)
+    average = buy_avg if buy_qty > sell_qty else sell_avg if sell_qty > buy_qty else Decimal(0)
+    realised = min(buy_qty, sell_qty) * (sell_avg - buy_avg) * unit_factor
+    if not realised:
+        realised = Decimal(0)
+    position.update(
+        {
+            "average_price": f"{average:.{precision}f}",
+            "pnl": f"{realised:.2f}",
+            "buy_avg": f"{buy_avg:.{precision}f}",
+            "sell_avg": f"{sell_avg:.{precision}f}",
+            "accounting_complete": True,
+        }
+    )
+    return position
 
 
 def from_kotak_holding(d: dict[str, Any]) -> dict[str, Any]:
@@ -651,21 +842,22 @@ def from_kotak_holding(d: dict[str, Any]) -> dict[str, Any]:
 
     The holdings endpoint uses longer keys than the OMS order/position feed
     (``displaySymbol``/``averagePrice``/``closingPrice`` …). ``closingPrice`` is
-    the previous-day close (a per-share price), surfaced as ``ltp`` until a live
-    quote is merged — we do NOT fall back to ``mktValue`` (that is the aggregate
-    market value of the holding, which would be a per-share price inflated by the
-    quantity factor).
+    the previous-day close, so it is surfaced only as ``close_price``. A live
+    quote must supply LTP; aggregate ``mktValue`` is never treated as a price.
     """
-    seg = str(d.get("exchangeSegment", ""))
-    exchange = KOTAK_TO_EXCHANGE.get(seg, seg) if seg else _exchange_of(d)
-    return {
-        "symbol": d.get("displaySymbol", d.get("symbol", d.get("trdSym", ""))),
-        "exchange": exchange,
-        "quantity": str(d.get("quantity", d.get("sellableQuantity", 0))),
-        "average_price": str(d.get("averagePrice", d.get("avgPrc", 0))),
-        "ltp": str(d.get("closingPrice", 0)),
-        "pnl": str(d.get("pnl", 0)),
+    d = _response_record(d)
+    holding = {
+        "symbol": _response_text(d, "displaySymbol", "symbol", "trdSym", required=True),
+        "exchange": _response_exchange(d, "exchangeSegment", "exSeg"),
+        "quantity": _response_number_text(d, "quantity", "sellableQuantity", required=True),
     }
+    for field, value in {
+        "average_price": _response_number_text(d, "averagePrice", "avgPrc"),
+        "close_price": _response_number_text(d, "closingPrice"),
+        "pnl": _response_number_text(d, "unrealisedGainLoss", "pnl"),
+    }.items():
+        _put_present(holding, field, value)
+    return holding
 
 
 def from_kotak_scrip(rec: dict[str, Any]) -> dict[str, Any]:
@@ -782,7 +974,13 @@ def to_quote_tokens(resolved: list[tuple[str, str]]) -> list[dict[str, str]]:
     return tokens
 
 
-def from_kotak_quote(rec: dict[str, Any]) -> dict[str, Any]:
+def from_kotak_quote(
+    rec: dict[str, Any],
+    *,
+    strict: bool = False,
+    expected_symbol: str | None = None,
+    expected_exchange: str | None = None,
+) -> dict[str, Any]:
     """Parse one NEO quote record into a FlintTrade ``Quote`` dict.
 
     NEO quotes share their key vocabulary with the streaming feed
@@ -794,42 +992,91 @@ def from_kotak_quote(rec: dict[str, Any]) -> dict[str, Any]:
     levels; ``total_buy``/``total_sell`` are quantities, not prices.
     """
 
-    def g(*keys: str) -> Any:
-        for k in keys:
-            if k in rec and rec[k] not in (None, ""):
-                return rec[k]
-        return 0
-
-    def nested(container: str, key: str) -> Any:
-        value = rec.get(container)
-        if isinstance(value, dict) and value.get(key) not in (None, ""):
-            return value[key]
-        return 0
-
-    def depth_price(side: str) -> Any:
-        depth = rec.get("depth")
-        if not isinstance(depth, dict):
+    if not strict:
+        def g(*keys: str) -> Any:
+            for k in keys:
+                if k in rec and rec[k] not in (None, ""):
+                    return rec[k]
             return 0
-        rows = depth.get(side)
-        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
-            return rows[0].get("price", 0)
-        return 0
 
-    seg = str(g("exchange_segment", "exchange", "e") or "")
-    return {
-        "symbol": g("trading_symbol", "display_symbol", "exchange_token", "ts", "tk") or "",
-        "exchange": KOTAK_TO_EXCHANGE.get(seg, seg),
-        "ltp": _num(g("last_traded_price", "ltp")),
-        "open": _num(g("open", "op") or nested("ohlc", "open")),
-        "high": _num(g("high", "h") or nested("ohlc", "high")),
-        "low": _num(g("low", "lo") or nested("ohlc", "low")),
-        "close": _num(g("close", "c") or nested("ohlc", "close")),
-        "volume": int(_num(g("volume", "last_volume", "v"))),
-        "bid": _num(g("buy_price", "bp") or depth_price("buy")),
-        "ask": _num(g("sell_price", "sp") or depth_price("sell")),
-        "prev_close": _num(g("close", "c") or nested("ohlc", "close")),
-        "oi": int(_num(g("open_interest", "oi"))),
-    }
+        def nested(container: str, key: str) -> Any:
+            value = rec.get(container)
+            if isinstance(value, dict) and value.get(key) not in (None, ""):
+                return value[key]
+            return 0
+
+        def depth_price(side: str) -> Any:
+            depth = rec.get("depth")
+            if not isinstance(depth, dict):
+                return 0
+            rows = depth.get(side)
+            if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+                return rows[0].get("price", 0)
+            return 0
+
+        seg = str(g("exchange_segment", "exchange", "e") or "")
+        return {
+            "symbol": g("trading_symbol", "display_symbol", "exchange_token", "ts", "tk") or "",
+            "exchange": KOTAK_TO_EXCHANGE.get(seg, seg),
+            "ltp": _num(g("last_traded_price", "ltp")),
+            "open": _num(g("open", "op") or nested("ohlc", "open")),
+            "high": _num(g("high", "h") or nested("ohlc", "high")),
+            "low": _num(g("low", "lo") or nested("ohlc", "low")),
+            "close": _num(g("close", "c") or nested("ohlc", "close")),
+            "volume": int(_num(g("volume", "last_volume", "v"))),
+            "bid": _num(g("buy_price", "bp") or depth_price("buy")),
+            "ask": _num(g("sell_price", "sp") or depth_price("sell")),
+            "prev_close": _num(g("close", "c") or nested("ohlc", "close")),
+            "oi": int(_num(g("open_interest", "oi"))),
+        }
+
+    record = _response_record(rec)
+    ohlc: dict[str, Any] = {}
+    if "ohlc" in record:
+        ohlc = _response_record(record["ohlc"])
+    depth: dict[str, Any] = {}
+    if "depth" in record:
+        depth = _response_record(record["depth"])
+    quote: dict[str, Any] = {}
+    if expected_symbol is not None:
+        quote["symbol"] = expected_symbol
+    else:
+        _put_present(
+            quote,
+            "symbol",
+            _market_text(record, "trading_symbol", "display_symbol", "exchange_token", "ts", "tk"),
+        )
+    if expected_exchange is not None:
+        quote["exchange"] = expected_exchange
+    else:
+        segment = _market_text(record, "exchange_segment", "exchange", "e")
+        if segment is not _MISSING:
+            quote["exchange"] = KOTAK_TO_EXCHANGE.get(segment.lower(), segment)
+
+    _put_present(quote, "ltp", _market_number(record, "last_traded_price", "ltp"))
+    for canonical, aliases in (
+        ("open", ("open", "op")),
+        ("high", ("high", "h")),
+        ("low", ("low", "lo")),
+        ("close", ("close", "c")),
+    ):
+        value = _market_number(record, *aliases)
+        if value is _MISSING:
+            value = _market_number(ohlc, canonical)
+        _put_present(quote, canonical, value)
+    if "close" in quote:
+        quote["prev_close"] = quote["close"]
+    _put_present(quote, "volume", _market_number(record, "volume", "last_volume", "v", integer=True))
+    bid = _market_number(record, "buy_price", "bp")
+    if bid is _MISSING:
+        bid = _quote_depth_price(depth, "buy")
+    _put_present(quote, "bid", bid)
+    ask = _market_number(record, "sell_price", "sp")
+    if ask is _MISSING:
+        ask = _quote_depth_price(depth, "sell")
+    _put_present(quote, "ask", ask)
+    _put_present(quote, "oi", _market_number(record, "open_interest", "oi", integer=True))
+    return quote
 
 
 def from_kotak_scrip_master(resp: Any) -> dict[str, Any]:

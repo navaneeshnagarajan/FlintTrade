@@ -196,21 +196,28 @@ For step-by-step instructions tailored to each operating system, see:
 ## 2. First broker connection
 
 FlintTrade supports two broker paths: the recommended OpenAlgo-compatible bridge
-for users who already run OpenAlgo, and the native FlintTrade gateway for
-currently verified first-party adapters.
+for users who already run OpenAlgo, and a first-party native gateway that is
+**not usable on this unreleased line**. Native broker HTTP is frozen until
+Task 9D (account mutations) and Task 7C.2 (read-port cutover). That is an
+accepted product decision: native broker UX stays down on `main` until those
+tasks land. The terminal still calls the frozen routes, so Setup → Brokers and
+Settings → Brokers will fail rather than connect or refresh a native session.
+
+Use the OpenAlgo-compatible bridge for a working broker session. Do not treat
+the native Brokers screen, `/api/v1/native/*` writes, or native HTTP account
+reads as a working operator path.
 
 ### Steps
 
-1. **Choose a path.** Use OpenAlgo for the recommended community-tested broker
-   path, or use the native gateway only for currently verified native brokers
-   (Dhan and Upstox today). Brokers shown as "coming soon" are
-   catalogued but not yet enabled for native connect.
-2. **Configure your broker in OpenAlgo when using the bridge.** Open `http://localhost:5000`,
+1. **Use the OpenAlgo path.** The community-tested bridge is the working
+   operator path. The native gateway is catalogued (Dhan and Upstox are
+   evidence-gated as connectable; brokers shown as "coming soon" stay
+   disabled) but its HTTP connect and read surfaces are frozen.
+2. **Configure your broker in OpenAlgo.** Open `http://localhost:5000`,
    choose your broker from the dropdown, paste your API key and secret, and
    complete the broker's login flow (TOTP / OAuth / OTP — depends on the
-   broker). OpenAlgo persists the session. Skip this step for Explore mode,
-   Practice mode, and native FlintTrade gateway work that does not use the
-   OpenAlgo-compatible bridge.
+   broker). OpenAlgo persists the session. Skip this step for Explore mode
+   and Practice mode.
 3. **Optional: generate an OpenAlgo API key.** From the OpenAlgo dashboard,
    copy the generated API key. This is the key FlintTrade uses for the
    OpenAlgo-compatible bridge only (not your broker's key).
@@ -223,9 +230,18 @@ currently verified first-party adapters.
    contributors can open `http://localhost:5173/setup`; desktop users use the
    in-app setup window.
 
-For native connect, use Setup → Brokers or Settings → Brokers. Only Dhan and
-Upstox are currently enabled. Upstox Developer Apps analytics tokens connect as
-read-only sessions. INDmoney uses a dashboard-generated token that resets at the
+**Native HTTP freeze.** Broker-account mutations (`/v1` account and auth
+writes, native connect / login / set-primary / delete, and OAuth start /
+callback) return `503` with `broker_account_cutover_unavailable` until Task 9D
+migrates the handlers. Native HTTP account and market-data reads return `409`
+with zero provider calls until the Task 7C.2 / 8B cutover onto the in-process
+`BrokerReadPort`. Exact broker reads that already exist are that in-process
+port, not a working terminal Brokers screen. Service connections are an inert
+control plane only.
+
+When native connect returns, only Dhan and Upstox are evidence-gated as
+enabled. Upstox Developer Apps analytics tokens would connect as read-only
+sessions. INDmoney uses a dashboard-generated token that resets at the
 daily 06:00 IST dashboard cycle, but remains disabled until its smart-parent,
 atomic reduce-only, and live order-safety blockers clear. Kotak Neo and Groww
 retain their displayed activation blockers; Kotak Neo still needs live
@@ -234,18 +250,19 @@ API-key session in Groww Cloud before FlintTrade can mint a token.
 Localhost postback URLs are for diagnostics unless you expose FlintTrade through
 a broker-reachable tunnel or public URL.
 
-The same Brokers screen also shows **Broker MCP assistants** for OpenAlgo, Dhan,
+The Brokers screen also shows **Broker MCP assistants** for OpenAlgo, Dhan,
 Upstox, and Groww when catalogue metadata is available. These cards copy the
 broker-hosted MCP URLs and client configurations, and label read-only surfaces
 such as Upstox MCP. Broker MCP tools run in the external MCP client; FlintTrade
-automation and live order placement still use the normal guarded OpenAlgo or
-native broker path.
+automation and live order placement still use the guarded OpenAlgo path while
+native HTTP remains frozen.
 
 ### Why two layers?
 
 The two-layer design lets existing OpenAlgo users keep their broker setup while
-FlintTrade keeps its own backend, native sandbox, analytics, automation, and
-first-party broker gateway for verified native adapters.
+FlintTrade keeps its own backend, native sandbox, analytics, automation, and a
+first-party broker gateway whose HTTP connect and read surfaces are frozen
+until Task 9D and Task 7C.2.
 
 ---
 
@@ -265,9 +282,11 @@ claim — switching to Live requires a deliberate confirmation step.
 
 ### Walkthrough
 
-1. Open `http://localhost:5173/trade`.
-2. Click the mode badge in the top bar → choose **Practice**. A modal
-   confirms the switch.
+1. Open `/trade` (http://127.0.0.1:5100/trade on the installed web app;
+   http://localhost:5173/trade on the Vite dev server).
+2. If the badge shows **EXPLORE**, click it once to switch to Practice.
+   There is no confirmation dialog. The UI calls `POST /v1/auth/mode`
+   so the JWT matches.
 3. From the dock sidebar, drag the **Order Pad** widget into the workspace
    (or pick a preset that contains it).
 4. Type `NIFTY` into the symbol field; FlintTrade autocompletes the current
@@ -276,7 +295,7 @@ claim — switching to Live requires a deliberate confirmation step.
 6. Click **Place Order**. The order appears in the **Positions** widget
    immediately; the **Orderbook** widget shows it as filled (simulated).
 7. Close the position from the Positions widget. Confirm your simulated
-   P&L is recorded in the **Intraday P&L** widget.
+   P&L is recorded in the **P&L Monitor** widget.
 
 You have just exercised the full FlintTrade order path — front-end → JWT
 guard → mode guard → FlintTrade sandbox → simulated fill →
@@ -306,8 +325,10 @@ software safeguards, prompts, and recovery controls in a local setup.
 
 ### Walkthrough
 
-1. Click the mode badge in the top bar → choose **Live**. A modal warns
-   that real orders will be placed and asks for password re-entry.
+1. Click the **PRACTICE** badge in the top bar. A dialog warns that
+   real orders will be placed and asks for your **6-digit PIN**
+   (`POST /v1/auth/pin`). Set a PIN under Settings → Security first if
+   you have not already.
 2. Cancel the modal unless you are deliberately performing your own broker-side
    test outside this guide.
 3. Confirm the UI clearly shows Live mode, the active account, and the
@@ -346,7 +367,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | Route | Purpose |
 |---|---|
 | `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password + TOTP, or PIN). There is no `/login` URL. |
-| `/explore` | Demo mode with sample data — no broker connection needed. |
+| `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
 | `/setup` | First-time wizard (Quick / Guided / Advanced paths). `/setup-account` is a compatibility alias. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
@@ -385,6 +406,12 @@ from the widget registry
   Market Clock, Trade Ideas, Tick Speed, and Journal Entries
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
 
+News Feed loads headlines only through the FlintTrade backend (`GET /api/v1/news`).
+There is no browser-side RSS or CORS-proxy fallback. If the backend cannot
+serve articles, the widget reports that news is unavailable from the
+FlintTrade backend. Publisher profiles are MoneyControl, ET Markets, and
+LiveMint.
+
 ### The 17 workspace presets
 
 A preset is a pre-built layout you can apply instantly from the command
@@ -411,13 +438,14 @@ preset from Settings → Workspace.
 ## 6. Screener walkthrough
 
 The screener lives under the **Analysis** widget category and shares the
-workspace with everything else — no separate route. The four headline tools:
+workspace with everything else — no separate route. Headline tools:
 
 ### Option Chain
 
 Streaming option-chain widget rendered with
 [Glide Data Grid](https://github.com/glideapps/glide-data-grid) for
-60+ FPS updates even on a 50-strike chain.
+60+ FPS updates even on a 50-strike chain. The header also shows a
+Max Pain badge derived from the same chain.
 
 1. Drag the **Option Chain** widget into the workspace.
 2. Pick a symbol (e.g. `NIFTY`, `BANKNIFTY`, `RELIANCE`).
@@ -425,20 +453,18 @@ Streaming option-chain widget rendered with
 4. Calls on the left, Puts on the right, ATM strike highlighted.
 5. Hover any cell — sparkline shows the last-100-tick history.
 
-### OI Profile
+### OI Analytics
 
-Plots Open Interest changes by strike across CE and PE legs for local analysis
-and UI testing.
+One widget (`oichart`) with several views of the same chain read:
+grouped OI bars, a CE/PE butterfly **OI profile**, a strike heat grid,
+build-up/unwinding signals, and a **Max Pain** view (the strike at
+which option writers lose the least if expiry hit right now). There is
+no standalone Max Pain widget.
 
-### Max Pain
+### IV Smile & Skew
 
-Calculates the strike at which option writers lose the least if expiry hit
-right now. Updates every minute from OpenAlgo's `optionchain` feed.
-
-### IV Smile
-
-Implied-volatility curve across strikes, with skew and term-structure
-indicators. Useful for spotting unusual options activity.
+Implied-volatility curve across strikes, with 25-delta skew and
+term-structure indicators. Useful for spotting unusual options activity.
 
 ---
 
@@ -448,9 +474,10 @@ Open `/lab`. The Strategy Lab is split into three sub-tools:
 
 ### Backtest
 
-1. **Pick a template.** 94 templates ship under
+1. **Pick a template.** 94 ready-to-run template modules ship under
    `packages/services/backtest/src/flinttrade_backtest/strategies/` — ranging
-   from simple EMA crossover to complex options-spreads strategies.
+   from simple EMA crossover to complex options-spreads strategies
+   (`_indicators.py` and `_mixin.py` are shared helpers, not templates).
 2. **Configure parameters.** Each template exposes a parameter form
    (built with `react-hook-form` + `zod`).
 3. **Pick a date range.** Historical OHLCV data is sourced from your
@@ -531,9 +558,11 @@ educational and are not financial advice.
 
 ### Sentiment
 
-News and social-media sentiment scoring per symbol. Driven by a
-news-scheduler that polls RSS, Twitter (X), and Reddit on a configurable
-interval.
+The Sentiment Analysis view scores submitted text for a symbol through the
+configured LLM or rule-based fallback. Separate summary and ticker endpoints
+synchronously analyse the static RSS publisher profiles (MoneyControl,
+ET Markets, LiveMint). Production composition starts neither a background news
+scheduler nor a social-media source.
 
 ### RAG
 
@@ -593,7 +622,7 @@ sections:
 |---|---|---|
 | **General** | `ui.theme`, `ui.density` | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Workspace** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
-| **AI** | `llm.provider`, `llm.host`, `llm.model` | Managed Ollama runtime plus OpenAI, Anthropic, Groq, Hermes, and custom endpoints. |
+| **AI** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
 | **Notifications** | `telegram.*` | Telegram bot token, chat ID, kill-switch enable. |
 | **Risk** | `risk.daily_pnl_pause_pct`, `risk.daily_pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. |
 | **Order safety** | `sebi.rate_limit_*` | Per-endpoint rate limits and kill-switch settings. (The audit log is append-only with operator-controlled retention — there is no automatic purge.) |
@@ -758,8 +787,8 @@ curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
 & ([scriptblock]::Create((irm https://flinttrade.vercel.app/uninstall.ps1))) -Purge
 ```
 
-Take a backup first if you want your workspace and settings back later — see
-[Backup and restore](setup/backup.md).
+Ordinary backup archives bhavcopy CSVs only. It does not capture workspace
+settings or credentials — see [Backup and restore](setup/backup.md).
 
 ### If the site is unreachable
 

@@ -229,10 +229,30 @@ def test_looping_frontend_override_degrades_to_api_only(
 def test_unknown_api_route_remains_rate_limited(built_frontend_app: Flask) -> None:
     """The SPA exemption must not cover unknown paths in an API namespace."""
     client = built_frontend_app.test_client()
+    headers = {"X-API-Key": "spa-static-serving-test-key"}
 
-    statuses = [client.get("/api/not-a-real-route").status_code for _ in range(2)]
+    statuses = [client.get("/api/not-a-real-route", headers=headers).status_code for _ in range(2)]
 
     assert statuses == [404, 429]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/accounts/quarantine-extra/deep",
+        "/api/not-a-real-route",
+        "/ft-api/v1/accounts/quarantine-extra/deep",
+    ],
+)
+def test_unknown_api_route_still_requires_authentication(
+    built_frontend_app: Flask,
+    path: str,
+) -> None:
+    """A built SPA must not make unmatched API routes public."""
+    response = built_frontend_app.test_client().get(path)
+
+    assert response.status_code == 401
 
 
 @pytest.mark.unit

@@ -36,6 +36,7 @@ import {
   selectionForLlmSettings,
 } from "@/lib/llmProviders";
 import type { LlmAuthMode } from "@/lib/llmProviders";
+import type { LlmProviderId } from "@/lib/llmProviders";
 import {
   acceptLocalAiModelDigest,
   createLocalAiAdmissionId,
@@ -66,20 +67,7 @@ import {
 } from "@/services/ftApi.localAi";
 import { testLlmConnection } from "@/services/ftApi.llm";
 
-type LlmProvider =
-  | "ollama"
-  | "hermes"
-  | "openai"
-  | "anthropic"
-  | "gemini"
-  | "deepseek"
-  | "groq"
-  | "grok"
-  | "mistral"
-  | "cerebras"
-  | "together"
-  | "openrouter"
-  | "custom";
+type LlmProvider = LlmProviderId;
 
 const CLAUDE_CODE_OAUTH = CLAUDE_CODE_OAUTH_PROVIDER;
 const BUSY_STATES = new Set(["downloading", "extracting", "starting"]);
