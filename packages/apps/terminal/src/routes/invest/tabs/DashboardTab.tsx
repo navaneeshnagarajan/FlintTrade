@@ -84,16 +84,18 @@ interface TopMover {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function DashboardTab() {
-  const { holdings: liveHoldings, summary: liveSummary, isLoading, isError } = useInvest();
+  const { holdings: liveHoldings, summary: liveSummary, isLoading, isError, isSampleData } = useInvest();
 
-  // Fall back to demo data when API fails or returns empty
-  const isDemo = isError || (!isLoading && liveHoldings.length === 0);
-  const holdings = isDemo ? DEMO_HOLDINGS : liveHoldings;
-  const currentValue = isDemo ? DEMO_NET_WORTH - DEMO_CASH : liveSummary.currentValue;
-  const totalInvested = isDemo ? DEMO_INVESTED : liveSummary.totalInvested;
-  const totalPnl = isDemo ? DEMO_PNL : liveSummary.totalPnl;
-  const totalPnlPercent = isDemo ? DEMO_PNL_PCT : liveSummary.totalPnlPercent;
-  const availableCash = isDemo ? DEMO_CASH : liveSummary.availableCash;
+  // Explore already exposes the labelled sample book via InvestContext.
+  // Live/Practice still fall back to local demo rows when the book is empty.
+  const isEmptyFallback = !isSampleData && (isError || (!isLoading && liveHoldings.length === 0));
+  const isDemo = Boolean(isSampleData) || isEmptyFallback;
+  const holdings = isEmptyFallback ? DEMO_HOLDINGS : liveHoldings;
+  const currentValue = isEmptyFallback ? DEMO_NET_WORTH - DEMO_CASH : liveSummary.currentValue;
+  const totalInvested = isEmptyFallback ? DEMO_INVESTED : liveSummary.totalInvested;
+  const totalPnl = isEmptyFallback ? DEMO_PNL : liveSummary.totalPnl;
+  const totalPnlPercent = isEmptyFallback ? DEMO_PNL_PCT : liveSummary.totalPnlPercent;
+  const availableCash = isEmptyFallback ? DEMO_CASH : liveSummary.availableCash;
   const netWorth = isDemo ? DEMO_NET_WORTH : currentValue + availableCash;
 
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);

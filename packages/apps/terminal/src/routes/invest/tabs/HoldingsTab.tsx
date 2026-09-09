@@ -127,13 +127,15 @@ function buildColumns(): ColumnDef<Holding>[] {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function HoldingsTab() {
-  const { holdings: liveHoldings, isLoading, isError, refetchHoldings } = useInvest();
+  const { holdings: liveHoldings, isLoading, isError, isSampleData, refetchHoldings } = useInvest();
   const [sorting, setSorting] = useState<SortingState>([]);
   const columns = useMemo(() => buildColumns(), []);
 
-  // Fall back to demo data when API fails or returns empty
-  const isDemo = isError || (!isLoading && liveHoldings.length === 0);
-  const holdings = isDemo ? DEMO_HOLDINGS : liveHoldings;
+  // Explore already exposes the labelled sample book via InvestContext.
+  // Live/Practice still fall back to local demo rows when the book is empty.
+  const isEmptyFallback = !isSampleData && (isError || (!isLoading && liveHoldings.length === 0));
+  const isDemo = Boolean(isSampleData) || isEmptyFallback;
+  const holdings = isEmptyFallback ? DEMO_HOLDINGS : liveHoldings;
 
   const table = useReactTable({
     data: holdings,

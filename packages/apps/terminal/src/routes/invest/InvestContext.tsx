@@ -17,7 +17,9 @@ import {
 import { useHoldings } from "@/hooks/useHoldings";
 import { useFunds } from "@/hooks/useFunds";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
+import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
 import { classifySector } from "@/lib/sectors";
+import { useModeStore, type AppMode } from "@/stores/modeStore";
 import type { Holding } from "@/types/api";
 
 // ─── Public shape ─────────────────────────────────────────────────────────────
@@ -33,7 +35,7 @@ export interface PortfolioSummary {
 }
 
 export interface InvestContextValue {
-  /** Raw holdings list from the active broker data source. Empty while loading. */
+  /** Holdings shown on the Invest route (demo book in Explore, live otherwise). */
   holdings: Holding[];
   /** Aggregated portfolio numbers derived from holdings + funds. */
   summary: PortfolioSummary;
@@ -41,8 +43,27 @@ export interface InvestContextValue {
   isLoading: boolean;
   /** True when holdings query has errored. */
   isError: boolean;
+  /** True when the exposed book is the labelled Explore sample feed. */
+  isSampleData: boolean;
   /** Force-refetch holdings from the active broker data source. */
   refetchHoldings: () => void;
+}
+
+/**
+ * Resolve the Invest-route holdings book.
+ *
+ * Explore owns a labelled sample feed (`getDemoHoldings`) so the dashboard
+ * header count matches the listed sample stocks. Practice and Live keep the
+ * live query result — an empty funded book stays at 0.
+ */
+export function resolveInvestHoldings(
+  mode: AppMode,
+  liveHoldings: Holding[],
+): { holdings: Holding[]; isSampleData: boolean } {
+  if (mode === "explore") {
+    return { holdings: getDemoHoldings(), isSampleData: true };
+  }
+  return { holdings: liveHoldings, isSampleData: false };
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -52,9 +73,10 @@ const InvestContext = createContext<InvestContextValue | null>(null);
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function InvestProvider({ children }: { children: ReactNode }) {
+  const mode = useModeStore((s) => s.mode);
   const accountReadsEnabled = useAccountReadsEnabled();
   const {
-    data: holdings = [],
+    data: liveHoldings = [],
     isLoading: holdingsLoading,
     isError: holdingsError,
     refetch: refetchHoldings,
@@ -62,8 +84,9 @@ export function InvestProvider({ children }: { children: ReactNode }) {
 
   const { data: funds, isLoading: fundsLoading } = useFunds({ enabled: accountReadsEnabled });
 
-  const isLoading = holdingsLoading || fundsLoading;
-  const availableCash = funds?.availableCash ?? 0;
+  const { holdings, isSampleData } = resolveInvestHoldings(mode, liveHoldings);
+  const isLoading = mode === "explore" ? false : holdingsLoading || fundsLoading;
+  const availableCash = mode === "explore" ? getDemoFunds().availableCash : (funds?.availableCash ?? 0);
 
   // Derive portfolio totals — memoised so tabs get stable references
   const totalInvested = useMemo(
@@ -107,9 +130,10 @@ export function InvestProvider({ children }: { children: ReactNode }) {
       summary,
       isLoading,
       isError: holdingsError,
+      isSampleData,
       refetchHoldings,
     }),
-    [holdings, summary, isLoading, holdingsError, refetchHoldings],
+    [holdings, summary, isLoading, holdingsError, isSampleData, refetchHoldings],
   );
 
   return <InvestContext.Provider value={value}>{children}</InvestContext.Provider>;

@@ -46,11 +46,11 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Invest dashboard holdings count vs listed sample stocks (FT-DEMO-001).**
-  Tester finding (Medium). On `/demo-app/invest` the sample dashboard
-  header shows “0 holdings” while the page lists 10 stocks; the Holdings
-  tab correctly shows 10. This Unreleased note tracks aligning the
-  header count with the listed sample stocks. Product fix is not in this
-  commit — implement on this PR.
+  On `/demo-app/invest` the sample dashboard header now uses the Explore
+  demo holdings book (`getDemoHoldings`) as its count source, so the
+  badge matches the listed sample stocks and the Holdings tab. Live and
+  Practice still read the live book — an empty funded account stays at
+  0.
 
 - **Docs page summary duplicated as first body paragraph (FT-SITE-002).**
   On `/docs*` routes the page summary no longer appears twice. The
