@@ -331,9 +331,9 @@ broker as an OpenAlgo shim. The `shims/` directory holds only OpenAlgo
 infrastructure shims, not broker adapters. Exact **reads** use
 the contract defined by `BrokerReadPort`; `flinttrade_gateway.broker_read_service`
 defines its owner factory, while application composition constructs and retains
-the resulting dependency record. Existing HTTP read routes still invoke
-adapters directly. Reads do not traverse `gate_order` / `BrokerRouter`. Writes
-still must.
+the resulting dependency record. Native HTTP read routes currently return
+`409` with zero provider calls until Task 7C.2 cuts them over to that port.
+Reads do not traverse `gate_order` / `BrokerRouter`. Writes still must.
 
 1. Add a native adapter under
    `packages/integrations/gateway/src/flinttrade_gateway/brokers/<broker>.py`

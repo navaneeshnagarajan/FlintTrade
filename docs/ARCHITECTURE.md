@@ -381,10 +381,13 @@ record in `packages/core/core/src/flinttrade_core/app.py`.
 The port is an in-process contract, not a new public HTTP family. Its methods
 are `quote`, `depth`, `historical`, `batch_quotes`, `option_chain`,
 `lot_sizes`, `balance`, `portfolio_greeks`, `positions`, `holdings`,
-`margin`, `order_states`, and `trades`. Existing HTTP account and market-data
-routes (native `/api/v1/native/…` kinds, OpenAlgo passthrough) remain the
-operator-facing read surfaces and currently resolve and invoke adapters
-directly; migrating those consumers onto the port is separate work.
+`margin`, `order_states`, and `trades`. Native HTTP account and market-data
+routes (`/api/v1/native/…` kinds) currently return `409` with zero provider
+calls; migrating those consumers onto the port is Task 7C.2 / 8B. OpenAlgo
+passthrough remains the working operator-facing read surface. Exact broker
+reads in this work are the in-process port, not terminal UX. Broker-account
+mutations return `503` until Task 9D. Native broker UX stays down on `main`
+until both tasks land — that is the accepted product decision.
 
 Live **writes** still mint a `SafetyContext` through `gate_order` /
 `gate_broker_write` and dispatch through `BrokerRouter`. Read operations do
