@@ -38,6 +38,10 @@ import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 interface LoginRouteProps {
   onSuccess: () => void;
   mode: "full" | "pin";
+  /** Installed-app escape to sample-data Explore without finishing 2FA. */
+  onExplore?: () => void;
+  /** Open Setup so an unfinished account can be wiped after a hatch bounce. */
+  onUnfinishedSetup?: () => void;
 }
 
 /** Pull the base32 secret out of an ``otpauth://`` URI for manual entry. */
@@ -46,7 +50,7 @@ function extractTotpSecret(uri: string): string {
   return match ? decodeURIComponent(match[1]) : "";
 }
 
-export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
+export default function LoginRoute({ onSuccess, mode, onExplore, onUnfinishedSetup }: LoginRouteProps) {
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
   const [pin, setPin] = useState("");
@@ -291,6 +295,26 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
             >
               Lost your authenticator?
             </button>
+            {onExplore && (
+              <button
+                type="button"
+                onClick={onExplore}
+                className="w-full text-xs text-text-muted hover:text-text-primary transition-colors"
+                aria-label="Try with sample data without signing in"
+              >
+                Try with sample data →
+              </button>
+            )}
+            {onUnfinishedSetup && (
+              <button
+                type="button"
+                onClick={onUnfinishedSetup}
+                className="w-full text-xs text-text-muted hover:text-text-primary transition-colors"
+                aria-label="Start over unfinished setup"
+              >
+                Unfinished setup — start over
+              </button>
+            )}
           </div>
         )}
       </div>

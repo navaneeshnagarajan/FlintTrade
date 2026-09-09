@@ -162,6 +162,28 @@ describe("LoginRoute", () => {
     expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument();
   });
 
+  it("offers unfinished-setup start over so a bounced hatch can wipe the account", () => {
+    const onUnfinishedSetup = vi.fn();
+    render(
+      <LoginRoute
+        onSuccess={vi.fn()}
+        onUnfinishedSetup={onUnfinishedSetup}
+        mode="full"
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Start over unfinished setup"));
+    expect(onUnfinishedSetup).toHaveBeenCalledOnce();
+  });
+
+  it("offers Try with sample data so Explore is reachable without 2FA", () => {
+    const onExplore = vi.fn();
+    render(<LoginRoute onSuccess={vi.fn()} onExplore={onExplore} mode="full" />);
+
+    fireEvent.click(screen.getByLabelText("Try with sample data without signing in"));
+    expect(onExplore).toHaveBeenCalledOnce();
+  });
+
   it("has a Sign In button in full mode", () => {
     render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
 

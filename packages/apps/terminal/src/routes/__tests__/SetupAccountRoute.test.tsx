@@ -224,6 +224,118 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     });
   });
 
+  it("offers Explore first without 2FA on the mandatory TOTP step", () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      totpUri: "otpauth://totp/x?secret=LEGACY",
+      backupCodes: ["LEGACY01"],
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "nav",
+      currentStep: 1,
+    }));
+
+    render(<SetupAccountRoute />);
+
+    expect(screen.getByRole("button", { name: /explore first/i })).toBeEnabled();
+    expect(screen.getByText(/without 2FA/i)).toBeInTheDocument();
+  });
+
+  it("Explore first opens Home in Explore and keeps unfinished setup wipeable", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      totpUri: "",
+      backupCodes: [],
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "nav",
+      currentStep: 1,
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ status: "success", data: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    render(<SetupAccountRoute />);
+    fireEvent.click(screen.getByRole("button", { name: /explore first/i }));
+
+    await waitFor(() =>
+      expect(mocks.navigate).toHaveBeenCalledWith("/home", { replace: true }),
+    );
+    const progress = JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? "null") as {
+      accountCreated?: boolean;
+      currentStep?: number;
+    } | null;
+    expect(progress?.accountCreated).toBe(true);
+    expect(progress?.currentStep).toBe(1);
+    expect(useModeStore.getState().mode).toBe("explore");
+    expect(localStorage.getItem("flinttrade:demo-session")).toBe("active");
+    expect(useAuthStore.getState().token).toBe("demo-user");
+    expect(useAuthStore.getState().status).toBe("logged-in");
+    fetchSpy.mockRestore();
+  });
+
+  it("reopening Setup after Explore first still offers Delete account & start over", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      totpUri: "",
+      backupCodes: [],
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "nav",
+      currentStep: 1,
+    }));
+
+    render(<SetupAccountRoute />);
+
+    expect(screen.getByRole("button", { name: /delete account/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start over" })).toBeInTheDocument();
+  });
+
+  it("Start over wipes the unfinished account so setup can begin again", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      totpUri: "",
+      backupCodes: [],
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "nav",
+      currentStep: 1,
+    }));
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ status: "success", data: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    render(<SetupAccountRoute />);
+    fireEvent.click(screen.getByRole("button", { name: "Start over" }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Choose a username")).toBeInTheDocument(),
+    );
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/auth/setup/reset"))).toBe(true);
+    expect(localStorage.getItem(PROGRESS_KEY)).toBeNull();
+    expect(useAuthStore.getState().status).toBe("setup-required");
+    fetchSpy.mockRestore();
+  });
+
   it("requires password-backed 2FA regeneration after a recovery-step reload", () => {
     localStorage.setItem(PROGRESS_KEY, JSON.stringify({
       accountCreated: true,

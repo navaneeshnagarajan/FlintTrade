@@ -197,6 +197,11 @@ class TestSetupEscapeHatches:
         assert svc.reset_account("StrongP@ss123!") is True
         assert svc.is_setup() is False
 
+    def test_wipe_account_without_password(self, tmp_path: Path):
+        svc = self._fresh(tmp_path)
+        svc.wipe_account()
+        assert svc.is_setup() is False
+
     def test_reset_account_rejects_wrong_password(self, tmp_path: Path):
         svc = self._fresh(tmp_path)
         assert svc.reset_account("WrongPassword") is False

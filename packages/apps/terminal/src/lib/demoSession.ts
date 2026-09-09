@@ -46,8 +46,39 @@ function safeLocalStorage(): Storage | null {
   return window.localStorage ?? null;
 }
 
+function persistExploreMode(storage: Storage): void {
+  try {
+    const raw = storage.getItem(MODE_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { state?: { mode?: unknown }; version?: number };
+      if (parsed?.state && typeof parsed.state === "object") {
+        storage.setItem(
+          MODE_STORAGE_KEY,
+          JSON.stringify({
+            ...parsed,
+            state: { ...parsed.state, mode: "explore" },
+          }),
+        );
+        return;
+      }
+    }
+  } catch {
+    // Corrupt mode records fall through to a clean Explore persist.
+  }
+  storage.setItem(
+    MODE_STORAGE_KEY,
+    JSON.stringify({ state: { mode: "explore" }, version: 2 }),
+  );
+}
+
 export function markDemoSessionActive(): void {
-  safeLocalStorage()?.setItem(DEMO_SESSION_KEY, ACTIVE_VALUE);
+  const storage = safeLocalStorage();
+  if (!storage) return;
+  storage.setItem(DEMO_SESSION_KEY, ACTIVE_VALUE);
+  // setMode("explore") is a no-op when the in-memory default is already
+  // Explore, so Zustand persist may never write flinttrade:mode. Write it
+  // here so a hard refresh can restore the sample-data session.
+  persistExploreMode(storage);
 }
 
 export function clearDemoSession(): void {
@@ -58,12 +89,14 @@ export function isDemoSessionActive(): boolean {
   const storage = safeLocalStorage();
   if (!storage || storage.getItem(DEMO_SESSION_KEY) !== ACTIVE_VALUE) return false;
 
+  const rawMode = storage.getItem(MODE_STORAGE_KEY);
+  if (!rawMode) return true;
+
   try {
-    const rawMode = storage.getItem(MODE_STORAGE_KEY);
-    if (!rawMode) return false;
     const parsed = JSON.parse(rawMode) as { state?: { mode?: unknown } };
-    return parsed?.state?.mode === "explore";
+    const mode = parsed?.state?.mode;
+    return mode !== "practice" && mode !== "live";
   } catch {
-    return false;
+    return true;
   }
 }

@@ -45,6 +45,21 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
+  Setup Step 2/7 now has an obvious **Explore first — continue without
+  2FA** path so sample-data Explore/Practice is reachable without
+  finishing authenticator setup. The hatch marks the durable demo
+  session (same as **Try with sample data**) so `/home` survives
+  refresh and a `/welcome` remount instead of bouncing to the
+  password+TOTP wall. Sign-in still requires TOTP. Daily login still
+  requires password + TOTP, and Live still requires the PIN, as
+  designed. **Start over** wipes the unfinished account via the
+  account-create setup JWT so a lost QR seed is recoverable without the
+  TOTP secret. Daily-login session tokens cannot wipe the account. A
+  hard refresh of `/home` after Explore first restores the sample-data
+  session even when `flinttrade:mode` was never persisted; unfinished
+  setup progress stays so Start over / Delete account remain reachable.
+
 - **Strategy Lab stays empty after AI Deploy (FT-DEMO-002).**
   Deploying a suggestion from `/demo-app/ai` (for example “Trend EMA
   Crossover”) opens `/demo-app/lab?strategy=TrendEMACrossover`. Strategy

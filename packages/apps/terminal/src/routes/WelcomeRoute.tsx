@@ -25,7 +25,7 @@ import LoginRoute from "@/routes/LoginRoute";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
-import { markDemoSessionActive } from "@/lib/demoSession";
+import { isDemoSessionActive, markDemoSessionActive } from "@/lib/demoSession";
 import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThemeStore } from "@/stores/themeStore";
@@ -300,6 +300,14 @@ export default function WelcomeRoute() {
   useEffect(() => {
     if (authStatus !== "unknown") return;
 
+    // Explore-first / Try with sample data persist a demo session. Restore it
+    // before the public auth probe, or is_setup=true logs the operator out
+    // onto the password+TOTP wall and /home bounces back here.
+    if (isDemoSessionActive()) {
+      useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+      return;
+    }
+
     // Time-box the probe so a hung backend can't strand the user on
     // "Checking workspace…" forever.
     const controller = new AbortController();
@@ -309,6 +317,11 @@ export default function WelcomeRoute() {
     fetch(`${getBase()}/v1/auth/status`, { headers: buildHeaders(false), signal: controller.signal })
       .then((response) => (response.ok ? response.json() : Promise.reject(response)))
       .then((data) => {
+        if (cancelled) return;
+        if (isDemoSessionActive()) {
+          useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+          return;
+        }
         if (!data.data?.is_setup) {
           useAuthStore.getState().setSetupRequired();
         } else {
@@ -380,21 +393,6 @@ export default function WelcomeRoute() {
   }, [authStatus, navigate]);
 
   useEffect(() => {
-    if (authStatus !== "logged-out") return;
-
-    try {
-      const raw = localStorage.getItem("flinttrade:setup-progress");
-      if (!raw) return;
-      const saved = JSON.parse(raw) as { accountCreated?: boolean; currentStep?: number };
-      if (saved?.accountCreated && typeof saved.currentStep === "number" && saved.currentStep < 6) {
-        navigate("/setup", { replace: true });
-      }
-    } catch {
-      // Ignore corrupt progress and continue to sign-in.
-    }
-  }, [authStatus, navigate]);
-
-  useEffect(() => {
     if (authStatus !== "logged-out" && authStatus !== "pin-required") return;
     if (flowStep !== "cinematic") return;
 
@@ -431,7 +429,22 @@ export default function WelcomeRoute() {
   }
 
   if (authStatus === "logged-out" && flowStep === "login") {
-    return <LoginRoute onSuccess={handleLoginSuccess} mode="full" />;
+    let unfinishedSetup = false;
+    try {
+      const raw = localStorage.getItem("flinttrade:setup-progress");
+      const saved = raw ? JSON.parse(raw) as { accountCreated?: boolean } : null;
+      unfinishedSetup = saved?.accountCreated === true;
+    } catch {
+      unfinishedSetup = false;
+    }
+    return (
+      <LoginRoute
+        onSuccess={handleLoginSuccess}
+        onExplore={handleExplore}
+        onUnfinishedSetup={unfinishedSetup ? () => navigate("/setup") : undefined}
+        mode="full"
+      />
+    );
   }
 
   if (authStatus === "pin-required" && flowStep === "login") {

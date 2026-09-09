@@ -2,7 +2,7 @@
  * SetupAccountRoute — the authoritative /setup wizard (7 steps, 0-indexed).
  *
  * Step 0: Account Security  — username, email, password, optional PIN (POSTs /v1/auth/setup)
- * Step 1: Two-Factor Auth   — warning → QR + backup codes (forward-only once account exists)
+ * Step 1: Two-Factor Auth   — warning → QR + backup codes, with Explore-first skip
  * Step 2: Persona           — Trader / Investor / Beginner
  * Step 3: Broker Connection — OpenAlgo host + API key (or Direct Connect)
  * Step 4: Trading Defaults  — exchange, product, quantity
@@ -17,8 +17,10 @@
  *
  * Progress is cleared ONLY by explicit user action:
  *   (a) selecting a mode on step 6 (Finish setup)
- *   (b) clicking "Start over" in the header
- *   (c) hitting HTTP 409 on account creation (account already exists → sign in)
+ *   (b) clicking "Start over" in the header (wipes the unfinished account)
+ *   (c) hitting HTTP 409 on account creation (opens the 2FA wipe hatches)
+ *   (d) Explore first on the 2FA step (keeps unfinished-setup progress, marks
+ *       the sample-data Explore session, and opens Home)
  *
  * On completion navigates to /welcome (which shows the sign-in form since an
  * account now exists).
@@ -62,6 +64,7 @@ import {
 } from "@/stores/authStore";
 import { AccountSetupError, setupFlintTradeAccount } from "@/lib/setupAccountApi";
 import { persistSetupChoices } from "@/routes/setup/applySetupChoices";
+import { markDemoSessionActive } from "@/lib/demoSession";
 
 // ---------------------------------------------------------------------------
 // Session-storage progress tracking
@@ -277,16 +280,16 @@ function passwordStrength(password: string): { score: number; label: string; col
 interface AccountSecurityStepProps {
   onComplete: (values: AccountFormValues, totpUri: string, backupCodes: string[]) => void;
   onBack: () => void;
+  /** Account already exists — jump to the 2FA wipe hatches instead of 409. */
+  onAccountAlreadyExists: () => void;
 }
 
-function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
-  const navigate = useNavigate();
+function AccountSecurityStep({ onComplete, onBack, onAccountAlreadyExists }: AccountSecurityStepProps) {
   const setLoggedOut = useAuthStore((s) => s.setLoggedOut);
   const setLoggedInIfCurrent = useAuthStore((s) => s.setLoggedInIfCurrent);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState("");
-  const [accountExists, setAccountExists] = useState(false);
 
   const {
     register,
@@ -303,7 +306,6 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
     const requestFence = captureAuthSessionFence();
     setIsLoading(true);
     setServerError("");
-    setAccountExists(false);
     try {
       const result = await setupFlintTradeAccount({
         username: values.username,
@@ -325,14 +327,9 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
     } catch (error) {
       if (!isAuthSessionFenceCurrent(requestFence)) return;
       if (error instanceof AccountSetupError && error.kind === "account-exists") {
-        // Account already exists — don't wedge. Route the user to login,
-        // which is the only sensible next step. Clear any stale progress
-        // so the next canonical /setup entry won't try to re-submit.
-        clearProgress();
-        setAccountExists(true);
-        setServerError(
-          error.message || "An account already exists on this machine. Sign in to continue.",
-        );
+        // Unfinished first-run: open the 2FA step so Delete / Start over
+        // can wipe the account instead of a dead-end 409.
+        onAccountAlreadyExists();
         return;
       }
       setServerError(
@@ -354,25 +351,12 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
 
       {serverError && (
         <div
-          className={`flex items-start gap-3 p-3 rounded-lg border text-sm ${
-            accountExists
-              ? "bg-accent/10 border-accent/30 text-text-primary"
-              : "bg-loss/10 border-loss/30 text-loss"
-          }`}
+          className="flex items-start gap-3 p-3 rounded-lg border text-sm bg-loss/10 border-loss/30 text-loss"
           role="alert"
         >
-          <AlertTriangle className={`size-4 shrink-0 mt-0.5 ${accountExists ? "text-accent" : ""}`} />
+          <AlertTriangle className="size-4 shrink-0 mt-0.5" />
           <div className="flex-1 space-y-2">
             <div>{serverError}</div>
-            {accountExists && (
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => navigate("/welcome", { replace: true })}
-              >
-                Go to sign-in
-              </Button>
-            )}
           </div>
         </div>
       )}
@@ -541,6 +525,8 @@ interface TotpDisplayProps {
   onTotpRegenerated: (uri: string, codes: string[]) => void;
   /** Called after a successful "Delete account" reset. */
   onAccountDeleted: () => void;
+  /** Leave the 2FA step and continue in Explore / Practice. */
+  onExploreFirst: () => void;
 }
 
 /** "reset-2fa" regenerates the TOTP; "delete-account" wipes the user entirely. */
@@ -552,6 +538,7 @@ function TotpDisplay({
   onConfirmed,
   onTotpRegenerated,
   onAccountDeleted,
+  onExploreFirst,
 }: TotpDisplayProps) {
   const hasRecoveryMaterial = Boolean(totpUri && backupCodes.length > 0);
   // The base32 secret from the otpauth URI, shown as a selectable manual
@@ -766,11 +753,22 @@ function TotpDisplay({
           </div>
         )}
 
-        <div className="flex justify-end items-center mt-6">
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-6">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onExploreFirst}
+          >
+            Explore first — continue without 2FA
+          </Button>
           <Button onClick={() => setPhase("qr")} disabled={!hasRecoveryMaterial}>
             I&apos;m ready — show QR code
           </Button>
         </div>
+        <p className="text-[11px] text-text-muted text-right">
+          Sample-data Explore and Practice do not need authenticator 2FA.
+          Enrol 2FA before using Live.
+        </p>
 
         <EscapeHatches />
       </div>
@@ -873,13 +871,18 @@ function TotpDisplay({
         </div>
       )}
 
-      <div className="flex justify-between items-center mt-6">
+      <div className="flex flex-col-reverse sm:flex-row sm:justify-between sm:items-center gap-2 mt-6">
         <Button variant="ghost" onClick={handleInternalBack} type="button">
           Back
         </Button>
-        <Button onClick={onConfirmed} disabled={!hasRecoveryMaterial}>
-          I have saved my codes — Continue
-        </Button>
+        <div className="flex flex-col-reverse sm:flex-row gap-2">
+          <Button type="button" variant="outline" onClick={onExploreFirst}>
+            Explore first — continue without 2FA
+          </Button>
+          <Button onClick={onConfirmed} disabled={!hasRecoveryMaterial}>
+            I have saved my codes — Continue
+          </Button>
+        </div>
       </div>
 
       <EscapeHatches />
@@ -1025,7 +1028,23 @@ export default function SetupAccountRoute({
   // on the account form. The 409 branch in AccountSecurityStep also clears
   // because at that point the user has confirmed the account already exists
   // server-side and wants to sign in instead.
-  function handleStartOver() {
+  async function handleStartOver() {
+    try {
+      const resp = await fetch(`${getBase()}/v1/auth/setup/reset`, {
+        method: "POST",
+        headers: buildHeaders(true),
+        body: JSON.stringify({}),
+      });
+      if (!resp.ok) {
+        window.alert(
+          "Could not wipe the unfinished account. Use Delete account & start over and confirm your password, or Explore first without 2FA.",
+        );
+        return;
+      }
+    } catch {
+      window.alert("Cannot reach the server to wipe the unfinished account.");
+      return;
+    }
     clearProgress();
     sessionRecoveryMaterial = null;
     setAccountCreated(false);
@@ -1037,6 +1056,30 @@ export default function SetupAccountRoute({
     setTrading(null);
     setRisk(null);
     setDisplayName("");
+    useAuthStore.getState().setSetupRequired();
+  }
+
+  function handleExploreFirst() {
+    // Keep unfinished-setup progress (no TOTP secrets) so /setup still
+    // offers Start over / Delete account after a remount. The setup JWT is
+    // memory-only; the durable sample-data session is the demo marker.
+    saveProgress({
+      accountCreated: true,
+      totpUri: "",
+      backupCodes: [],
+      persona,
+      connection,
+      trading,
+      risk,
+      mode: null,
+      displayName,
+      currentStep: 1,
+    });
+    sessionRecoveryMaterial = null;
+    setMode("explore");
+    markDemoSessionActive();
+    useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+    navigate("/home", { replace: true });
   }
 
   // ---------------------------------------------------------------------------
@@ -1065,13 +1108,32 @@ export default function SetupAccountRoute({
     setCurrentStep(1);
   }
 
-  function handleTotpConfirmed() { setCurrentStep(2); }
+  function handleTotpConfirmed() {
+    setCurrentStep(2);
+  }
 
   function handleTotpRegenerated(uri: string, codes: string[]) {
     sessionRecoveryMaterial = { totpUri: uri, backupCodes: codes };
     setTotpUri(uri);
     setBackupCodes(codes);
     // The persist effect picks this up automatically; no need to save inline.
+  }
+
+  function handleAccountAlreadyExists() {
+    saveProgress({
+      accountCreated: true,
+      totpUri: "",
+      backupCodes: [],
+      persona,
+      connection,
+      trading,
+      risk,
+      mode: null,
+      displayName,
+      currentStep: 1,
+    });
+    setAccountCreated(true);
+    setCurrentStep(1);
   }
 
   function handleAccountDeleted() {
@@ -1219,10 +1281,10 @@ export default function SetupAccountRoute({
               onClick={() => {
                 if (
                   window.confirm(
-                    "Start over from the beginning? Your in-progress entries (persona, broker, trading, risk) will be cleared. The account itself is kept on the server - you will need to sign in to delete it.",
+                    "Start over from the beginning? This deletes the unfinished account on this machine so you can begin again. Saved 2FA is not required.",
                   )
                 ) {
-                  handleStartOver();
+                  void handleStartOver();
                 }
               }}
             >
@@ -1265,6 +1327,7 @@ export default function SetupAccountRoute({
               <AccountSecurityStep
                 onComplete={handleAccountComplete}
                 onBack={handleBack}
+                onAccountAlreadyExists={handleAccountAlreadyExists}
               />
             )}
 
@@ -1275,6 +1338,7 @@ export default function SetupAccountRoute({
                 onConfirmed={handleTotpConfirmed}
                 onTotpRegenerated={handleTotpRegenerated}
                 onAccountDeleted={handleAccountDeleted}
+                onExploreFirst={handleExploreFirst}
               />
             )}
 

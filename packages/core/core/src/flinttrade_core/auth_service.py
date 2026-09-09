@@ -175,6 +175,23 @@ class AuthService:
         row = self._db.execute("SELECT 1 FROM account WHERE id = 1").fetchone()
         return row is not None
 
+    def wipe_account(self) -> None:
+        """Delete the single-user account and related setup state.
+
+        Used by password-confirmed reset and by the setup-wizard session
+        start-over path when the operator lost the TOTP seed mid-enrolment.
+        """
+        with self._write_lock:
+            self._db.execute("DELETE FROM account WHERE id = 1")
+            self._db.execute("DELETE FROM backup_codes")
+            self._db.execute("DELETE FROM login_attempts")
+            self._db.commit()
+
+        if hasattr(self, "_totp_secret_cache"):
+            delattr(self, "_totp_secret_cache")
+
+        logger.info("Account fully reset via setup-wizard escape hatch")
+
     def setup_account(
         self,
         username: str,
@@ -249,6 +266,13 @@ class AuthService:
         if not row:
             return {}
         return {"username": row["username"], "email": row["email"]}
+
+    def get_created_at(self) -> str:
+        """Return the account ``created_at`` stamp, or ``""`` if none exists."""
+        row = self._db.execute("SELECT created_at FROM account WHERE id = 1").fetchone()
+        if not row:
+            return ""
+        return str(row["created_at"] or "")
 
     def verify_password(self, password: str) -> bool:
         """Verify password and cache decrypted TOTP secret. Returns False if locked out."""
@@ -562,16 +586,7 @@ class AuthService:
         if not self.verify_password(password):
             return False
 
-        with self._write_lock:
-            self._db.execute("DELETE FROM account WHERE id = 1")
-            self._db.execute("DELETE FROM backup_codes")
-            self._db.execute("DELETE FROM login_attempts")
-            self._db.commit()
-
-        if hasattr(self, "_totp_secret_cache"):
-            delattr(self, "_totp_secret_cache")
-
-        logger.info("Account fully reset via setup-wizard escape hatch")
+        self.wipe_account()
         return True
 
     def regenerate_totp(self, password: str) -> tuple[str, list[str]] | None:
