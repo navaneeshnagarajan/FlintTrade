@@ -61,7 +61,7 @@ periodic migrations. Two numbers per runtime, and the difference matters:
 
 The **floor** is the lowest version that actually works — set by what the
 dependency tree genuinely needs, never by ambition. Node's floor comes from
-`react-router@8`'s own `engines` field, and the OS floor is derived rather than
+jsdom 30's `engines` field, and the OS floor is derived rather than
 chosen: Ubuntu 24.04 ships Python 3.12, whereas 22.04 ships 3.10 and cannot meet
 the Python floor with its system interpreter.
 

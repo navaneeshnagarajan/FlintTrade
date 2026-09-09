@@ -87,7 +87,7 @@ On Windows, run the checkout copy with
 ### Run from source (contributors)
 
 Use this when you are developing FlintTrade itself. It expects you to supply
-the toolchain yourself: git, Python 3.12+, Node 22+, `uv` and `pnpm`.
+the toolchain yourself: git, Python 3.12+, Node 22.22.2+, `uv` and `pnpm`.
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
@@ -167,7 +167,7 @@ distribution-signing and notarisation secrets.
 ### Terminal dev server (contributors)
 
 When you are changing terminal code, run the Vite dev server alongside the
-backend instead of the built UI. It requires Python 3.12+, Node.js 22+, Git,
+backend instead of the built UI. It requires Python 3.12+, Node.js 22.22.2+, Git,
 and optionally Rust for `core/ticks`.
 
 ```bash
@@ -298,8 +298,8 @@ claim — switching to Live requires a deliberate confirmation step.
    P&L is recorded in the **P&L Monitor** widget.
 
 You have just exercised the full FlintTrade order path — front-end → JWT
-guard → mode guard → FlintTrade sandbox → simulated fill →
-WebSocket back to the front-end. No real money moved.
+guard → mode guard → FlintTrade sandbox → simulated fill → REST
+refresh of Positions and Orderbook. No real money moved.
 
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
