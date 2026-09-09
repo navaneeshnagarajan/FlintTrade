@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 
 import { getMDXComponents } from '@/components/mdx';
 import repoSourceLinks from '@/generated/repo-source-links.json';
+import { shouldRenderDocsDescription } from '@/lib/docs-description';
 import { githubUrlForDocsSlug } from '@/lib/repo-source-links';
 import { source } from '@/lib/source';
 
@@ -39,11 +40,15 @@ export default async function DocsSlugPage({ params }: PageProps) {
   }
 
   const MDXContent = page.data.body;
+  const showDescription = shouldRenderDocsDescription({
+    description: page.data.description,
+    hideDescription: page.data.hideDescription,
+  });
 
   return (
     <DocsPage toc={page.data.toc}>
       <DocsTitle>{page.data.title}</DocsTitle>
-      <DocsDescription>{page.data.description}</DocsDescription>
+      {showDescription ? <DocsDescription>{page.data.description}</DocsDescription> : null}
       <DocsBody>
         <MDXContent components={getMDXComponents()} />
       </DocsBody>

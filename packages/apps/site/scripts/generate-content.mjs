@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { descriptionFromMarkdown, shouldHidePageDescription } from './docs-description.mjs';
 import { repositoryBrowseUrl, rewriteMarkdownRepositoryLinks } from './rewrite-repository-links.mjs';
 
 // Use fileURLToPath (not URL.pathname): on Windows `.pathname` yields "/C:/…",
@@ -180,21 +181,6 @@ function normaliseVersion(value) {
 function tagVersion(value) {
   const normalised = normaliseVersion(value);
   return normalised.startsWith('v') ? normalised : `v${normalised}`;
-}
-
-function descriptionFromMarkdown(markdown, fallback) {
-  const withoutTitle = markdown.replace(/^#\s+.+$/m, '').trim();
-  const paragraph = withoutTitle
-    .split(/\n\s*\n/)
-    .map((part) => part.trim())
-    .find((part) => part && !part.startsWith('```') && !part.startsWith('|') && !part.startsWith('<'));
-
-  if (!paragraph) return fallback;
-  return stripInlineMarkdown(paragraph)
-    .replace(/^>\s*/, '')
-    .replace(/\s+/g, ' ')
-    .slice(0, 180)
-    .trim();
 }
 
 function headingsFromMarkdown(markdown) {
@@ -433,13 +419,14 @@ async function copyRepositoryFile(relativePath, destination) {
   }
 }
 
-async function writeDocPage({ slug, title, description, body }) {
+async function writeDocPage({ slug, title, description, body, hideDescription }) {
   const destination = path.join(contentRoot, `${slug}.mdx`);
   await fs.mkdir(path.dirname(destination), { recursive: true });
   const frontmatter = [
     '---',
     `title: "${escapeFrontmatter(title)}"`,
     `description: "${escapeFrontmatter(description)}"`,
+    `hideDescription: ${hideDescription ? 'true' : 'false'}`,
     '---',
     '',
   ].join('\n');
@@ -472,11 +459,13 @@ async function buildPackageEntries() {
       content: markdown,
     });
 
+    const body = removeFirstH1(normaliseMarkdown(markdown, readmePath));
     await writeDocPage({
       slug,
       title,
       description,
-      body: removeFirstH1(normaliseMarkdown(markdown, readmePath)),
+      body,
+      hideDescription: shouldHidePageDescription(description, body),
     });
   }
 
@@ -568,7 +557,13 @@ async function main() {
       content: markdown,
     });
 
-    await writeDocPage({ slug, title, description, body });
+    await writeDocPage({
+      slug,
+      title,
+      description,
+      body,
+      hideDescription: shouldHidePageDescription(description, body),
+    });
   }
 
   for (const doc of manualDocs) {
@@ -582,6 +577,7 @@ async function main() {
       title: doc.title,
       description: doc.description,
       body: doc.content,
+      hideDescription: shouldHidePageDescription(doc.description, doc.content),
     });
   }
 
