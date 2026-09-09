@@ -19,7 +19,8 @@
  *   (a) selecting a mode on step 6 (Finish setup)
  *   (b) clicking "Start over" in the header (wipes the unfinished account)
  *   (c) hitting HTTP 409 on account creation (account already exists → sign in)
- *   (d) Explore first on the 2FA step (clears wizard progress and opens Home in Explore)
+ *   (d) Explore first on the 2FA step (clears wizard progress, marks the
+ *       sample-data Explore session, and opens Home)
  *
  * On completion navigates to /welcome (which shows the sign-in form since an
  * account now exists).
@@ -63,6 +64,7 @@ import {
 } from "@/stores/authStore";
 import { AccountSetupError, setupFlintTradeAccount } from "@/lib/setupAccountApi";
 import { persistSetupChoices } from "@/routes/setup/applySetupChoices";
+import { markDemoSessionActive } from "@/lib/demoSession";
 
 // ---------------------------------------------------------------------------
 // Session-storage progress tracking
@@ -1077,9 +1079,15 @@ export default function SetupAccountRoute({
   }
 
   function handleExploreFirst() {
+    // The setup JWT is memory-only. Persist the same sample-data Explore
+    // session as Welcome → Try with sample data so /home survives refresh
+    // and a /welcome remount (useAuthGuard + Welcome restore demo-user).
+    // Daily password+TOTP login is unchanged.
     clearProgress();
     sessionRecoveryMaterial = null;
     setMode("explore");
+    markDemoSessionActive();
+    useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
     navigate("/home", { replace: true });
   }
 

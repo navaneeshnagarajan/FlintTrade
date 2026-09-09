@@ -25,7 +25,7 @@ import LoginRoute from "@/routes/LoginRoute";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
-import { markDemoSessionActive } from "@/lib/demoSession";
+import { isDemoSessionActive, markDemoSessionActive } from "@/lib/demoSession";
 import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThemeStore } from "@/stores/themeStore";
@@ -299,6 +299,14 @@ export default function WelcomeRoute() {
 
   useEffect(() => {
     if (authStatus !== "unknown") return;
+
+    // Explore-first / Try with sample data persist a demo session. Restore it
+    // before the public auth probe, or is_setup=true logs the operator out
+    // onto the password+TOTP wall and /home bounces back here.
+    if (isDemoSessionActive()) {
+      useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+      return;
+    }
 
     // Time-box the probe so a hung backend can't strand the user on
     // "Checking workspace…" forever.

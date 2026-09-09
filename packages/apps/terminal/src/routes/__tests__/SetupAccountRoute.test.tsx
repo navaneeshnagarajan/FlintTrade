@@ -272,7 +272,9 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     );
     expect(localStorage.getItem(PROGRESS_KEY)).toBeNull();
     expect(useModeStore.getState().mode).toBe("explore");
-    expect(useAuthStore.getState().token).toBe("setup-explore-token");
+    expect(localStorage.getItem("flinttrade:demo-session")).toBe("active");
+    expect(useAuthStore.getState().token).toBe("demo-user");
+    expect(useAuthStore.getState().status).toBe("logged-in");
     fetchSpy.mockRestore();
   });
 

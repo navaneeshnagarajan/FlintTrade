@@ -48,12 +48,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 - **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
   Setup Step 2/7 now has an obvious **Explore first — continue without
   2FA** path so sample-data Explore/Practice is reachable without
-  finishing authenticator setup. `/welcome` no longer traps an
-  unfinished wizard back onto Setup; sign-in also offers **Try with
-  sample data**. Daily login still requires password + TOTP, and Live
-  still requires the PIN, as designed. **Start over** wipes the
-  unfinished account via the setup session so a lost QR seed is
-  recoverable without the TOTP secret.
+  finishing authenticator setup. The hatch marks the durable demo
+  session (same as **Try with sample data**) so `/home` survives
+  refresh and a `/welcome` remount instead of bouncing to the
+  password+TOTP wall. Sign-in still requires TOTP. Daily login still
+  requires password + TOTP, and Live still requires the PIN, as
+  designed. **Start over** wipes the unfinished account via the setup
+  session so a lost QR seed is recoverable without the TOTP secret.
 
 - **Strategy Lab stays empty after AI Deploy (FT-DEMO-002).**
   Deploying a suggestion from `/demo-app/ai` (for example “Trend EMA

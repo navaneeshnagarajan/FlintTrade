@@ -178,6 +178,27 @@ describe("WelcomeRoute", () => {
     localStorage.removeItem("flinttrade:setup-progress");
   });
 
+  it("restores sample-data Explore on Welcome remount when the hatch session is active", async () => {
+    authState.status = "unknown";
+    localStorage.setItem("flinttrade:demo-session", "active");
+    localStorage.setItem(
+      "flinttrade:mode",
+      JSON.stringify({ state: { mode: "explore" }, version: 2 }),
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    render(<WelcomeRoute />);
+
+    await waitFor(() =>
+      expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Explorer", ""),
+    );
+    expect(mockSetLoggedOut).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+    localStorage.removeItem("flinttrade:demo-session");
+    localStorage.removeItem("flinttrade:mode");
+  });
+
   it("shows Get Started and Explore CTAs for setup-required users", () => {
     render(<WelcomeRoute />);
 
