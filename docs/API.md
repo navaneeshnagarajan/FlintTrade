@@ -529,8 +529,9 @@ include `/v1/auth/setup`, `/v1/auth/login`, `/v1/auth/status`,
 `/v1/errors`, `/api/v1/errors`, `/v1/changelog`, `/api/v1/ping`, and the
 other entries in `_PUBLIC_V1_PREFIXES` in `app.py`.
 
-When an API key is configured, the only unauthenticated health surface
-is `GET /api/v1/health` (`health_detail.health_aggregated`). `/health`,
+When an API key is configured, the unauthenticated health surfaces are
+`GET /api/v1/health` (`health_detail.health_aggregated`) and
+`GET /api/v1/ping` (listed in `_PUBLIC_V1_PREFIXES`). `/health`,
 `/health/detail`, `/healthz`, and `/readyz` then return 401 unless a
 session JWT or API key is supplied — do not point Kubernetes or
 load-balancer probes at those four paths. Coverage is not limited to
@@ -605,7 +606,7 @@ the guard returns one of three verdicts:
 |---|---|
 | `explore` | Reject order placement with HTTP 403. Explore is for reading, learning, and demo data only. |
 | `practice` | Route supported single-leg order flows to FlintTrade's native `SandboxEngine`; never touch OpenAlgo or a broker. Advanced executor-direct routes that do not yet have sandbox parity fail closed with `practice_unsupported`. |
-| `live` | Require a JWT with `live_mode_unlocked=true`. The core `/orders/place`, modify, and cancel paths go through the gated `BrokerRouter`; remaining legacy-compatible live actions forward to the configured OpenAlgo-compatible endpoint until native parity is complete. |
+| `live` | Require a JWT with `live_mode_unlocked=true`. The core `/orders/place`, modify, cancel, and `cancel-all` paths go through the gated `BrokerRouter`. Other legacy write verbs (`open-position`, `close-position`, and similar) return HTTP 501 until they have a gated `BrokerRouter` verb — they do not forward ungated to OpenAlgo. |
 
 `POST /v1/auth/mode` issues a fresh JWT and revokes the previous `jti`,
 but it accepts **only** downgrades to `practice` or `explore`. Upgrading
@@ -613,8 +614,8 @@ to Live is `POST /v1/auth/pin` with the 6-digit PIN (`mode: "live"`).
 There is no `/auth/mode {mode:live}` shortcut.
 
 Authoritative coverage: `packages/core/core/tests/test_order_routes.py` asserts
-Explore rejection, Practice sandbox routing, and Live gate/forward behaviour.
-Engine routes that bypass the core order proxy use
+Explore rejection, Practice sandbox routing, and Live gate / fail-closed
+behaviour. Engine routes that bypass the core order proxy use
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.
 
 ---
@@ -809,14 +810,18 @@ Every endpoint returns one of two shapes.
 { "status": "error", "message": "Human-readable explanation.", "code": "optional_code" }
 ```
 
-Most handlers return only `status` + `message`. A `code` field is
-emitted on some gated paths:
+Most handlers return only `status` + `message`. The core
+`/api/v1/orders/*` proxy is message-only: Explore is HTTP 403 with
+"Orders are not available in Explore mode…", and a Live JWT without PIN
+unlock is HTTP 403 with "Live mode not unlocked — verify PIN first". A
+`code` field is emitted on `mode_guard`-decorated engine routes (brackets
+and other executor-direct paths), not on that core proxy:
 
 | Code or status | Meaning |
 |---|---|
-| `mode_blocked` | Explore (or another blocked mode) tried an order-capable action — HTTP 403. |
+| `mode_blocked` | Explore (or another blocked mode) tried a `mode_guard` order-capable action — HTTP 403. |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
-| `live_locked` | Live path requires `live_mode_unlocked=true` (PIN unlock). |
+| `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true` (PIN unlock). |
 | HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |
 | Safety `message` | A safety layer rejected the order; the message names the layer. There is no `SAFETY_LAYER_BLOCK` code. |
 

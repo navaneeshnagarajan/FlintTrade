@@ -464,27 +464,33 @@ the tick stream and reconcile with the REST cache via
 
 ## 6. WSGI prefix strip
 
-The terminal calls `/ft-api/v1/X`. The Vite dev proxy and the production
-reverse proxy forward that to the FlintTrade backend on port 5100. The
-WSGI middleware in `packages/core/core/src/flinttrade_core/app.py` strips the `/ft-api`
-prefix before URL dispatch:
+The terminal calls FlintTrade through the `/ft-api` prefix. The Vite
+dev proxy and the production reverse proxy forward that to the FlintTrade
+backend on port 5100. The WSGI middleware in
+`packages/core/core/src/flinttrade_core/app.py` strips `/ft-api` before
+URL dispatch.
+
+A blueprint at `url_prefix="/v1"` answers `/ft-api/v1/…`:
 
 ```
-External:  GET /ft-api/v1/gex?symbol=NIFTY
+External:  GET /ft-api/v1/auth/status
             │
             ▼  (Vite proxy or reverse proxy)
-Backend:   GET /v1/gex?symbol=NIFTY
+Backend:   GET /v1/auth/status
             │
             ▼  (Flask URL map)
-Handler:   screener.analysis_routes:gex_handler
+Handler:   flinttrade_core.auth_routes:auth_status
 ```
 
-This means a blueprint registered at `url_prefix="/v1"` (or
-`url_prefix="/api/v1"`, depending on the route family) answers requests
-at the external `/ft-api/v1/…` path automatically. **Never
-double-prefix.** Routes documented in [API.md](API.md) as
-`/ft-api/v1/X` are the external view; routes documented as `/v1/X` are
-the internal view of the same endpoint.
+A blueprint at `url_prefix="/api/v1"` answers `/ft-api/api/v1/…` after
+the same strip — for example `POST /ft-api/api/v1/gex` reaches
+`screener.analysis_routes:gex_endpoint`. **Never double-prefix** a `/v1`
+blueprint as `/api/v1` (or the reverse): a handler registered at `/v1/X`
+will 404 if the terminal calls `/api/v1/X`. Match the prefix the
+frontend helper actually uses.
+
+Routes documented in [API.md](API.md) as `/ft-api/…` are the external
+view; the path after `/ft-api` is the Flask URL.
 
 ---
 
@@ -501,7 +507,7 @@ Lives in a platform-specific workspace directory:
 | Linux | `~/.flinttrade/` |
 | macOS | `~/Library/Application Support/flinttrade/` |
 | Windows | `%APPDATA%/flinttrade/` |
-| Override | `FLINTTRADE_HOME` env var |
+| Override | `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME` (in that precedence order) |
 
 `workspace.json` contains:
 

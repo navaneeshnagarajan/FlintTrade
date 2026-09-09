@@ -242,8 +242,8 @@ update, install and uninstall contracts.
 ### Run from source (contributors)
 
 Use this when you are developing FlintTrade itself. Unlike the one-line
-installer it expects you to supply the toolchain: git, Python 3.12+, Node 22+,
-`uv` and `pnpm`.
+installer it expects you to supply the toolchain: git, Python 3.12+, Node
+22.22.2+, `uv` and `pnpm`.
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git

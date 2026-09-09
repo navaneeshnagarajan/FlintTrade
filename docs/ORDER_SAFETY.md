@@ -14,9 +14,14 @@ regulatory responsibilities remain with the operator and their broker.
 Every order-capable path must pass through the same safety gate before it can
 reach a broker adapter or the OpenAlgo-compatible bridge:
 
-1. The caller builds a `SafetyContext` for the intended order.
-2. `gate_order` validates the context against local limits and mode settings.
-3. `BrokerRouter` receives only gated requests.
+1. `SafetySystem.check_order` runs the L5 → L4 → L1 → L2 → L3 layers
+   against the intended order (kill switch, daily P&L, field validation,
+   position limits, portfolio risk).
+2. `gate_order` then mints the one-shot HMAC `SafetyContext` bound to that
+   order and the selector-bound principal. It does not re-run the layer
+   checks.
+3. `BrokerRouter` receives only gated requests (re-HMAC, field match,
+   account ACL, one-shot consume).
 4. Broker adapters and `OpenAlgoClient.place_order` remain downstream of the
    gate.
 
@@ -169,8 +174,10 @@ Operators should also configure any limits available in their broker dashboard.
 - Secrets should be file-backed under your platform workspace directory
   (`~/.flinttrade/` on Linux, `~/Library/Application Support/flinttrade/` on
   macOS, `%APPDATA%\flinttrade\` on Windows; overridden by
-  `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME`) or stored in the OS
-  keyring. Do not commit credentials or personal network details.
+  `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME`). Telegram and LLM
+  credentials live as hardened files under `<workspace>/secrets/` with a
+  `secret://` reference in `workspace.json`. Do not commit credentials or
+  personal network details.
 
 ## Market Metadata
 

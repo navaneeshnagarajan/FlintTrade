@@ -616,16 +616,15 @@ Lives in your platform-specific workspace directory:
 | Override | `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME` (in that precedence order) |
 
 The Setup and Settings UI write `workspace.json`. Key
-sections:
+Settings panels:
 
-| Section | Maps to | Configures |
+| Settings panel | Maps to | Configures |
 |---|---|---|
-| **General** | `ui.theme`, `ui.density` | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
-| **Workspace** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
-| **AI** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
-| **Notifications** | `telegram.*` | Telegram bot token, chat ID, kill-switch enable. |
-| **Risk** | `risk.daily_pnl_pause_pct`, `risk.daily_pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. |
-| **Order safety** | `sebi.rate_limit_*` | Per-endpoint rate limits and kill-switch settings. (The audit log is append-only with operator-controlled retention — there is no automatic purge.) |
+| **Appearance** | `ui.theme` plus the theme / density stores | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
+| **Data Paths** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
+| **LLM Config** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
+| **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. |
+| **Risk Limits** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. The Settings form posts them as `daily_loss_pause_pct` / `daily_loss_kill_pct`. |
 
 Settings → **Report Bug** prepares a GitHub issue without background telemetry.
 The form keeps runtime/error diagnostics out of the public draft by default;
@@ -642,9 +641,9 @@ Native desktop users do not need `.env`. The repo-root `.env.example` exists
 only for Docker/systemd deployments, CI experiments, and contributor fallback
 testing when a setting cannot be supplied through the app UI.
 
-Secrets are stored as `_ref` fields — references to the OS keyring or to
-environment variables. They are never written to `workspace.json` in clear
-text.
+Secrets are stored as `_ref` fields — `secret://` references to hardened
+files under `<workspace>/secrets/`. They are never written to
+`workspace.json` in clear text.
 
 ![Settings](screenshots/10-settings.png)
 
