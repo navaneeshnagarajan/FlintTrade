@@ -52,6 +52,11 @@ changelog rebuilds itself from the first release cut after this baseline.
   body paragraph. The docs page skips `DocsDescription` unless the page
   opts in with a distinct subtitle (fail-closed if the flag is missing).
 
+- **Primary nav overflow clips Contribute (FT-SITE-001).** The marketing
+  header no longer uses a shrinking `overflow-x: auto` row below 900px.
+  Primary links wrap without shrinking, so Contribute and the other
+  destinations stay fully visible on phones around 390px.
+
 - **Dependabot qs and fflate (medium).** `qs` 6.15.2 (via `http-server` →
   `union`) is overridden to 6.16.0, clearing GHSA-4mjr / GHSA-px8p. `fflate`
   0.6.10 (via `three-stdlib`) is overridden to 0.6.11, clearing GHSA-x5fp.
