@@ -22,6 +22,7 @@ describe('Hostinger / generic Node hosting readiness', () => {
 
     expect(readme).toMatch(/Hostinger|VPS/);
     expect(readme).toContain('FLINTTRADE_SITE_URL');
+    expect(readme).toContain('FLINTTRADE_SITE_ORIGINS');
     expect(readme).toContain('next start');
     expect(readme).toContain('/api/mcp');
     expect(readme).toMatch(/Node\.js >=? ?22|Node >=? ?22|node.+22/i);

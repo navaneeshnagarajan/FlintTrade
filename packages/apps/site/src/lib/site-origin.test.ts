@@ -32,11 +32,11 @@ describe('site origin', () => {
     expect(siteOriginFrom()).toBe(CANONICAL_SITE_ORIGIN);
   });
 
-  it('prefers FLINTTRADE_SITE_URL over request host, VERCEL_URL, and the canonical fallback', () => {
+  it('falls back to FLINTTRADE_SITE_URL when the request host is not allow-listed', () => {
     const configured = 'https://hosted.example';
     expect(
       siteOriginFrom(
-        { host: 'localhost:3000' },
+        { host: 'evil.example' },
         { FLINTTRADE_SITE_URL: configured, VERCEL_URL: 'preview.vercel.app' },
       ),
     ).toBe(configured);
@@ -58,13 +58,40 @@ describe('site origin', () => {
     );
   });
 
-  it('allows a request host that matches the configured public origin', () => {
+  it('trusts a request host that matches FLINTTRADE_SITE_URL instead of forcing the env origin', () => {
     expect(
       siteOriginFrom(
         { host: 'hosted.example', forwardedProto: 'https' },
         { FLINTTRADE_SITE_URL: 'https://hosted.example' },
       ),
     ).toBe('https://hosted.example');
+    expect(
+      siteOriginFrom(
+        { host: 'localhost:3000' },
+        { FLINTTRADE_SITE_URL: 'https://hosted.example' },
+      ),
+    ).toBe('http://localhost:3000');
+  });
+
+  it('allow-lists extra request hosts from FLINTTRADE_SITE_ORIGINS', () => {
+    expect(
+      siteOriginFrom(
+        { host: 'www.hosted.example', forwardedProto: 'https' },
+        {
+          FLINTTRADE_SITE_URL: 'https://hosted.example',
+          FLINTTRADE_SITE_ORIGINS: 'https://www.hosted.example, https://cdn.hosted.example',
+        },
+      ),
+    ).toBe('https://www.hosted.example');
+    expect(
+      siteOriginFrom(
+        { host: 'www.hosted.example' },
+        { FLINTTRADE_SITE_ORIGINS: 'https://www.hosted.example' },
+      ),
+    ).toBe('https://www.hosted.example');
+    expect(
+      siteOriginFrom(undefined, { FLINTTRADE_SITE_ORIGINS: 'https://www.hosted.example' }),
+    ).toBe(CANONICAL_SITE_ORIGIN);
   });
 
   it('builds a copy-pasteable MCP URL', () => {
