@@ -112,7 +112,7 @@
     },
     {
       "name": "cryptography",
-      "version": "50.0.0",
+      "version": "50.0.1",
       "vulns": []
     },
     {
@@ -142,7 +142,7 @@
     },
     {
       "name": "filelock",
-      "version": "3.32.2",
+      "version": "3.32.4",
       "vulns": []
     },
     {
@@ -292,7 +292,7 @@
     },
     {
       "name": "numpy",
-      "version": "2.4.6",
+      "version": "2.5.2",
       "vulns": []
     },
     {
@@ -437,7 +437,7 @@
     },
     {
       "name": "scipy",
-      "version": "1.18.0",
+      "version": "1.18.1",
       "vulns": []
     },
     {
@@ -447,7 +447,7 @@
     },
     {
       "name": "sentry-sdk",
-      "version": "2.66.1",
+      "version": "2.68.0",
       "vulns": []
     },
     {
@@ -492,7 +492,7 @@
     },
     {
       "name": "upstox-python-sdk",
-      "version": "2.28.0",
+      "version": "2.29.0",
       "vulns": []
     },
     {
@@ -522,7 +522,7 @@
     },
     {
       "name": "websockets",
-      "version": "17.0.1",
+      "version": "17.1",
       "vulns": []
     },
     {
@@ -542,7 +542,7 @@
     },
     {
       "name": "yfinance",
-      "version": "1.5.2",
+      "version": "1.7.0",
       "vulns": []
     },
     {
@@ -555,9 +555,9 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-08-23T04:35:04.720127Z",
-    "audited_at": "2026-08-23T04:35:04.720127Z",
-    "requirements_lock_sha256": "10e3fec9abd6caa6b3e1074a77dd193831ae74d1cbdcb9f3f9f6e3c9c8070c0c",
+    "generated_at": "2026-09-06T08:22:31.796407Z",
+    "audited_at": "2026-09-06T08:22:31.796407Z",
+    "requirements_lock_sha256": "1cbe0fb22ba395df734614a3801a779cf3b58e30daf83a3d2e15ab47b5cc7638",
     "pip_audit_exit_code": 0
   }
 }
