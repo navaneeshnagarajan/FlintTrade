@@ -225,8 +225,11 @@ class TestAdvisorStream:
         events = _parse_sse(resp.data)
         assert any(e.get("token") == "OK" for e in events)
 
-    def test_empty_token_stream_still_emits_done(self, client) -> None:
-        """Zero-token stream (LLM returns nothing) must still emit the done event.
+    def test_empty_token_stream_emits_error(self, client) -> None:
+        """Zero-token stream must emit an error event, not a silent done.
+
+        An empty completion used to yield only ``{done: true}``. The frontend
+        treated that as success and persisted a blank assistant bubble.
 
         Args:
             client: Flask test client.
@@ -244,4 +247,8 @@ class TestAdvisorStream:
             )
 
         events = _parse_sse(resp.data)
-        assert events[-1].get("done") is True
+        assert any("error" in event for event in events), (
+            "Expected an SSE error when the LLM yielded no tokens"
+        )
+        error_event = next(event for event in events if "error" in event)
+        assert str(error_event["error"]).strip()

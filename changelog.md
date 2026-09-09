@@ -46,12 +46,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Explore /ai chat produces no assistant reply (FT-AI-001).**
-  After Explore/sample-data, `/ai` accepts a user message such as
-  “What is NIFTY?” but the assistant area stays blank for 15s+ and
-  after reload. The fix tracked here must restore a visible
-  assistant reply, or a clear LLM-not-configured error. Native
-  broker freeze is excluded. MF Optimizer and AI suggestions +
-  deploy were OK elsewhere.
+  `/ai` and the floating tutor now share one advisor chat path:
+  a short status probe (including Explore/sample-data), SSE
+  streaming, then the non-streaming fallback. A missing LLM, an
+  unreachable backend, an empty completion, or an SSE error
+  becomes a visible assistant error instead of a blank bubble.
+  Empty assistant placeholders are no longer persisted, so a
+  reload cannot restore the silent blank. Native broker freeze is
+  excluded. MF Optimizer and AI suggestions + deploy are unchanged.
 
 - **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
   Setup Step 2/7 now has an obvious **Explore first — continue without

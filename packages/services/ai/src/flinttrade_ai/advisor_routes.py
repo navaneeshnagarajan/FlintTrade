@@ -235,9 +235,17 @@ def advisor_stream() -> Response | tuple[Any, int]:
     def _generate():  # type: ignore[no-untyped-def]
         try:
             client = LLMClient()
+            emitted = False
             for token in client.chat_stream(conversation):
+                emitted = True
                 yield f"data: {_json.dumps({'token': token})}\n\n"
-            yield f"data: {_json.dumps({'done': True})}\n\n"
+            if not emitted:
+                # A token-less completion used to emit only ``{done: true}``.
+                # The frontend treated that as success and persisted a blank
+                # assistant bubble — fail closed with a visible error instead.
+                yield f"data: {_json.dumps({'error': 'The LLM returned no reply. Check Settings → AI, or try again.'})}\n\n"
+            else:
+                yield f"data: {_json.dumps({'done': True})}\n\n"
             client.close()
         except Exception:
             logger.exception("Advisor stream error")
