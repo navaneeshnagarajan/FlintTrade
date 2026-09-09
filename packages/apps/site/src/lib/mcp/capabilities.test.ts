@@ -78,10 +78,12 @@ describe('docs index generation', () => {
 
     expect(pageSource).toContain('<strong>71</strong>');
     expect(pageSource).not.toContain('<strong>84</strong>');
-    expect(pageSource).toContain('Native broker contract and routing are safety-gated');
-    expect(pageSource).toContain('adapters stay behind credential, ACL, and SDK checks');
+    expect(pageSource).toContain('OpenAlgo is the working broker path');
+    expect(pageSource).toContain('Native broker HTTP is frozen until Task 9D and Task 7C.2');
+    expect(pageSource).toContain('adapters stay evidence-gated behind credential, ACL, and SDK checks');
     expect(pageSource).not.toContain('<strong>84</strong>');
     expect(pageSource).not.toContain('Native and OpenAlgo broker integrations documented');
+    expect(pageSource).not.toContain('verified native brokers');
   });
 
   it('keeps the web-app install path and desktop guide reachable from the website', () => {

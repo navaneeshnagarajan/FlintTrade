@@ -17,7 +17,7 @@ const featureCards = [
   {
     icon: TerminalSquare,
     title: 'A self-hosted workflow workspace',
-    copy: 'React, FlexLayout, Python services, Rust tick processing, the OpenAlgo-compatible bridge, and evidence-gated native broker contracts in one inspectable workspace.',
+    copy: 'React, FlexLayout, Python services, Rust tick processing, and the OpenAlgo-compatible bridge in one inspectable workspace. Native broker HTTP is evidence-gated and frozen until Task 9D and Task 7C.2.',
   },
   {
     icon: ShieldCheck,
@@ -37,7 +37,7 @@ const docsCards = [
     label: 'Install',
     copy: 'Install the self-hosted web app in one line. Electron installers stay withheld until a checksummed release exists.',
   },
-  { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, connect OpenAlgo or verified native brokers, explore Practice mode, and learn the workspace.' },
+  { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, connect the OpenAlgo-compatible bridge, explore Practice mode, and learn the workspace.' },
   { href: '/docs/developer-guide', label: 'Developer Guide', copy: 'Repo map, tests, coding style, widgets, strategies, and PR flow.' },
   { href: '/docs/disclaimer', label: 'Beta Disclaimer', copy: 'Not production ready, no financial advice, and Live-mode risk notes.' },
   { href: '/api-reference', label: 'API Reference', copy: 'FlintTrade endpoints, auth, WebSocket contracts, and OpenAlgo bridge routes.' },
@@ -54,7 +54,7 @@ const sloganWords = BRAND_SLOGAN_WORDS;
 
 // Same four feature chips as the terminal welcome screen.
 const welcomeFeatures = [
-  'OpenAlgo bridge plus verified native brokers',
+  'OpenAlgo-compatible bridge is the working broker path',
   'Explore, Practice, and Live safety modes',
   'Option chain, Greeks, order flow, and depth',
   'Strategy lab, SIP tracking, and AI context',
@@ -179,7 +179,7 @@ export default async function HomePage() {
         <div className="metric-rail" aria-label="Project facts">
           <div>
             <strong>Gateway</strong>
-            <span>Native broker contract and routing are safety-gated; adapters stay behind credential, ACL, and SDK checks.</span>
+            <span>OpenAlgo is the working broker path. Native broker HTTP is frozen until Task 9D and Task 7C.2; adapters stay evidence-gated behind credential, ACL, and SDK checks.</span>
           </div>
           <div>
             <strong>18</strong>
