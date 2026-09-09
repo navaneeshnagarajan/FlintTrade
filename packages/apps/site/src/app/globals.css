@@ -1345,6 +1345,21 @@ kbd {
   }
 }
 
+@media (max-width: 480px) {
+  .main-nav {
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .main-nav a {
+    flex: 1 1 calc(50% - 4px);
+    padding: 7px 8px;
+    font-size: 13px;
+    text-align: center;
+    white-space: nowrap;
+  }
+}
+
 /* Spark Path / SiteScrollWorld pilot — optional enrichment of Graphite Continuity. */
 .site-scroll-world-host,
 .site-scroll-world-canvas {
