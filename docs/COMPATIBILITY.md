@@ -50,11 +50,21 @@ disagrees. Per-push CI runs the **floor**; nightly
 
 ## Brokers
 
-FlintTrade supports two broker paths: the recommended OpenAlgo-compatible bridge
-and the native FlintTrade gateway. OpenAlgo is the primary/community-tested
-broker path; the native path is beta and connectability is gated per broker by
-live evidence. Dhan and Upstox are currently enabled in the app after
-login/read verification against real accounts and emergency-planner coverage.
+FlintTrade supports two broker paths: the recommended OpenAlgo-compatible
+bridge and a first-party native gateway that is **not usable on this
+unreleased line**. OpenAlgo is the working/community-tested broker path.
+Native broker HTTP is frozen until Task 9D (account mutations return a
+stable `503` `broker_account_cutover_unavailable`) and Task 7C.2 / 8B
+(native HTTP account and market-data reads return `409` with zero
+provider calls until cutover onto the in-process `BrokerReadPort`;
+catalogue and vault-backed account-list GETs stay metadata only). Setup → Brokers and Settings →
+Brokers will fail rather than connect or refresh a native session. Use
+the OpenAlgo-compatible bridge for a working broker session.
+
+Catalogue connectability remains evidence-gated per broker. That is
+catalogue metadata, not a working native HTTP or Brokers UX path on this
+line. Dhan and Upstox are evidence-gated as connectable after login/read
+verification against real accounts and emergency-planner coverage.
 INDmoney is read-verified and its fail-closed emergency planner is locally
 verified, but it remains disabled because INDstocks does not expose an authoritative
 restart-time discriminator for active regular MARKET/LIMIT rows versus smart parents;
@@ -68,19 +78,22 @@ Upstox use native SDK/API clients, Groww has the official
 FlintTrade's tested REST transport, and its approved-key probe now proves native
 login/account reads while market-data/API permission, static IP, and order-safety
 evidence remain pending. INDmoney is REST-only with a dashboard-generated token
-that resets at the daily 06:00 IST dashboard cycle. Upstox Developer Apps
-Analytics Access Tokens are treated as read-only native sessions; trading still
-needs the OAuth/trading-capable token path. INDstocks' FAQ advertises an
+that resets at the daily 06:00 IST dashboard cycle. When native connect
+returns, Upstox Developer Apps Analytics Access Tokens would connect as
+read-only native sessions; trading still needs the OAuth/trading-capable
+token path. INDstocks' FAQ advertises an
 `indstocks-sdk`, but no matching PyPI or npm
 package exists yet, so there is deliberately no SDK pin for it. Kotak Neo has
 adapter/mapping coverage plus a pinned-SDK-grounded emergency planner, but no
 promoted native connect or live order proof yet. `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift` refreshes local SDK
 source mirrors and PyPI artifacts under the gitignored `.local/sdk-audit/` cache
 and fails if a locked SDK is behind upstream metadata; `uv.lock` and
-`brokers.lock` remain the only tracked install/attestation sources. The
-credential-replay login step, in-app credential capture (Settings →
-Brokers), OAuth connect flow, and daily session refresh are built.
-Closed-market/no-funds verification does not prove funded order execution; keep
+`brokers.lock` remain the only tracked install/attestation sources.
+In-app credential capture and OAuth start/callback remain implemented
+behind the frozen HTTP surface (`503` until Task 9D). They are not a
+live operator path. Setup → Brokers and Settings → Brokers will fail
+rather than connect or refresh a native session. Closed-market/no-funds
+verification does not prove funded order execution; keep
 order-placement claims scoped to the evidence collected.
 
 For the OpenAlgo path, whatever broker version OpenAlgo supports is the

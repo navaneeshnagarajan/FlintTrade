@@ -9,6 +9,12 @@ wires the rotator + admin routes + 08:05 IST jobs into the app factory.
 
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+from flinttrade_core.broker_identity import BrokerSelector
+from flinttrade_gateway.brokers._base import Session
+
 import asyncio
 import threading
 import time
@@ -27,11 +33,10 @@ from flinttrade_core.native_rotation import NativeSessionRefresher
 pytestmark = pytest.mark.unit
 
 
-class _Session:
-    def __init__(self, token: str) -> None:
-        self.access_token = token
-        self.expires_at = 4_102_444_800.0
 
+
+def _Session(token):
+    return Session(token, 4102444800.0, "111", "dhan")
 
 class _Adapter:
     """Fake native adapter; renewable when ``renewable=True``."""
@@ -54,66 +59,88 @@ class _Adapter:
         return _Session(str(credentials.get("access_token") or "fresh"))
 
 
-class _Registry:
-    def __init__(self) -> None:
-        self.sessions: dict[tuple[str, str], Any] = {}
 
-    def get_session_for(self, adapter_id: str, account_id: str) -> Any:
-        return self.sessions[(adapter_id, account_id)]
+_fixture_spec = importlib.util.spec_from_file_location("_registry_fixtures", Path(__file__).resolve().parents[4] / "tests" / "registry_fixtures.py")
+_fixture_module = importlib.util.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(_fixture_module)
+RegistryFixture = _fixture_module.RegistryFixture
 
-    def put_session(self, adapter_id: str, account_id: str, session: Any) -> None:
-        self.sessions[(adapter_id, account_id)] = session
-
-    def remove_session_for(self, adapter_id: str, account_id: str) -> None:
-        self.sessions.pop((adapter_id, account_id), None)
+_CURRENT = None
 
 
-class _Store:
-    def __init__(self, rows: dict[tuple[str, str], dict[str, Any]]) -> None:
-        self.rows = rows
-        self.generations = {selector: 1 for selector in rows}
+@pytest.fixture(autouse=True)
+def _real_authorities(tmp_path, monkeypatch):
+    global _CURRENT
+    _CURRENT = RegistryFixture(tmp_path / "exact-registry")
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(_CURRENT.path))
+    yield
+    _CURRENT.close()
+    _CURRENT = None
 
-    def list_accounts(self) -> list[dict[str, Any]]:
-        return [
-            {"adapter_id": aid, "account_id": acc, "broker": aid}
-            for (aid, acc) in self.rows
-        ]
 
-    def retrieve_for(self, adapter_id: str, account_id: str) -> dict[str, Any]:
-        return dict(self.rows[(adapter_id, account_id)])
+def _Registry():
+    return _CURRENT.registry
 
-    def update_credentials_for(self, adapter_id: str, account_id: str, creds: dict[str, Any]) -> None:
-        self.replace(adapter_id, account_id, creds)
 
-    def replace(self, adapter_id: str, account_id: str, creds: dict[str, Any]) -> None:
-        selector = (adapter_id, account_id)
-        self.rows[selector] = dict(creds)
-        self.generations[selector] = self.generations.get(selector, 0) + 1
+def _Store(rows):
+    for (adapter, account), creds in rows.items():
+        selector = BrokerSelector(adapter, account)
+        _CURRENT.store.put_credentials(selector, adapter, "Synthetic", creds, expected=_CURRENT.store.selector_state(selector).version)
+    return _CURRENT.store
 
-    def selector_generation(self, adapter_id: str, account_id: str) -> int | None:
-        return self.generations.get((adapter_id, account_id))
+
+def _publish(registry, session):
+    _CURRENT.publish("dhan", "111", session)
+
+
+def _session(registry):
+    return _CURRENT.session("dhan", "111")
+
+
+def _remove(registry):
+    selector = BrokerSelector("dhan", "111")
+    return _CURRENT.owner.remove_session_for_exact(selector, expected_registry=registry.snapshot_selector(selector))
+
+
+def _delete(store):
+    selector = BrokerSelector("dhan", "111")
+    store.remove_selector(selector, expected=store.selector_state(selector).version)
+
+
+def _replace(store, adapter, account, credentials):
+    selector = BrokerSelector(adapter, account)
+    store.update_credentials(selector, credentials, expected=store.selector_state(selector).version)
+
+
+def _unavailable(registry):
+    with pytest.raises(RegistrySessionUnavailable):
+        _session(registry)
+    return True
 
 
 def _app(adapter: _Adapter, registry: _Registry, store: _Store) -> Flask:
     app = Flask(__name__)
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.config["NATIVE_ADAPTERS"] = {"dhan": adapter}
     app.config["REGISTRY"] = registry
     app.config["CREDENTIAL_STORE"] = store
+    app.extensions["flinttrade.registry_publication_owner"] = _CURRENT.owner
     return app
 
 
 def test_renew_in_place_when_session_live_and_adapter_renewable() -> None:
     adapter = _Adapter(renewable=True)
     registry = _Registry()
-    registry.sessions[("dhan", "111")] = _Session("old-token")
     store = _Store({("dhan", "111"): {"client_id": "111", "access_token": "old-token"}})
+    _publish(registry, _Session("old-token"))
 
-    NativeSessionRefresher(_app(adapter, registry, store)).refresh_token("dhan")
+    NativeSessionRefresher(_app(adapter, registry, store), mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
 
     assert len(adapter.renew_calls) == 1
     # login() ran with the RENEWED token and the registry holds the new session.
     assert adapter.login_calls[0]["access_token"] == "renewed-token"
-    assert registry.sessions[("dhan", "111")].access_token == "renewed-token"
+    assert _session(registry).access_token == "renewed-token"
+    assert _session(registry).version.credential_version == store.selector_state(BrokerSelector("dhan", "111")).version
 
 
 def test_replays_vault_credentials_without_a_live_session() -> None:
@@ -121,11 +148,47 @@ def test_replays_vault_credentials_without_a_live_session() -> None:
     registry = _Registry()
     store = _Store({("dhan", "111"): {"client_id": "111", "access_token": "stored-token"}})
 
-    NativeSessionRefresher(_app(adapter, registry, store)).refresh_token("dhan")
+    NativeSessionRefresher(_app(adapter, registry, store), mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
 
     assert adapter.renew_calls == []
     assert adapter.login_calls[0]["access_token"] == "stored-token"
-    assert registry.sessions[("dhan", "111")].access_token == "stored-token"
+    assert _session(registry).access_token == "stored-token"
+    assert _session(registry).version.credential_version == store.selector_state(BrokerSelector("dhan", "111")).version
+
+
+@pytest.mark.parametrize("renewable", [False, True])
+def test_rotation_refuses_stale_final_version_before_publication(monkeypatch, renewable):
+    from flinttrade_core import native_account_routes as routes
+
+    adapter = _Adapter(renewable=renewable)
+    registry = _Registry()
+    store = _Store({("dhan", "111"): {"access_token": "synthetic"}})
+    if renewable:
+        _publish(registry, _Session("synthetic"))
+    app = _app(adapter, registry, store)
+    selector = BrokerSelector("dhan", "111")
+    compare = routes._compare_and_put_registry_session
+    publish = _CURRENT.owner.publish_prepared_candidate
+    publications = []
+
+    def record_publication(*args, **kwargs):
+        publications.append(1)
+        return publish(*args, **kwargs)
+
+    def change_before_helper(*args, **kwargs):
+        before = store.selector_state(selector).version
+        store.update_credentials(selector, {"access_token": "successor"}, expected=before)
+        return compare(*args, **kwargs)
+
+    monkeypatch.setattr(_CURRENT.owner, "publish_prepared_candidate", record_publication)
+    monkeypatch.setattr(routes, "_compare_and_put_registry_session", change_before_helper)
+    NativeSessionRefresher(app, mutation_admission=lambda: None,
+        registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
+    assert publications == []
+    assert len(adapter.login_calls) == 1
+    assert store.retrieve_credentials(selector) == {"access_token": "successor"}
+    assert store.selector_state(selector).version.generation == (3 if renewable else 2)
+    _unavailable(registry)
 
 
 def test_failure_raises_and_lands_in_the_status_surface() -> None:
@@ -135,22 +198,24 @@ def test_failure_raises_and_lands_in_the_status_surface() -> None:
     app = _app(adapter, registry, store)
 
     with pytest.raises(RuntimeError, match="Broker session expired or invalid") as raised:
-        NativeSessionRefresher(app).refresh_token("dhan")
+        NativeSessionRefresher(app, mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
 
     # The UI surface (G7) records the per-selector reason.
     assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == SESSION_INVALID_RELOGIN_MESSAGE
     assert "dhan:111" not in str(raised.value)
     assert "fresh 2FA required" not in str(raised.value)
-    assert registry.sessions == {}  # fail-closed: no session registered
+    assert not registry.snapshot_selector(BrokerSelector("dhan", "111")).present  # retained tombstone
 
 
 def test_inactive_adapter_raises() -> None:
     app = Flask(__name__)
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.config["NATIVE_ADAPTERS"] = {}
     app.config["REGISTRY"] = _Registry()
     app.config["CREDENTIAL_STORE"] = _Store({})
+    app.extensions["flinttrade.registry_publication_owner"] = _CURRENT.owner
     with pytest.raises(RuntimeError, match="not active"):
-        NativeSessionRefresher(app).refresh_token("dhan")
+        NativeSessionRefresher(app, mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
 
 
 def test_factory_wires_rotator_routes_and_guard(tmp_path, monkeypatch) -> None:
@@ -181,6 +246,7 @@ def test_rotation_schedules_only_active_native_adapters(monkeypatch) -> None:
     from flinttrade_core.native_rotation import configure_session_rotation
 
     app = Flask(__name__)
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.config["NATIVE_ADAPTERS"] = {
         "dhan": object(),
         "upstox": object(),
@@ -214,6 +280,7 @@ def test_rotation_route_auth_runs_before_active_broker_check(monkeypatch) -> Non
     from flinttrade_core.native_rotation import configure_session_rotation
 
     app = Flask(__name__)
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.config["NATIVE_ADAPTERS"] = {}
 
     def guard():
@@ -233,6 +300,7 @@ def test_rotation_route_rejects_inactive_native_after_auth(monkeypatch) -> None:
     from flinttrade_core.native_rotation import configure_session_rotation
 
     app = Flask(__name__)
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.config["NATIVE_ADAPTERS"] = {"dhan": object()}
     app.config["BROKER_MGMT_WRITE_GUARD"] = lambda: None
     monkeypatch.setattr(
@@ -256,6 +324,7 @@ def test_rotation_route_rejects_weekly_native_api_key_rotation(monkeypatch) -> N
     from flinttrade_core.native_rotation import configure_session_rotation
 
     app = Flask(__name__)
+    app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.config["NATIVE_ADAPTERS"] = {"dhan": object()}
     app.config["BROKER_MGMT_WRITE_GUARD"] = lambda: None
     monkeypatch.setattr("flinttrade_core.app._read_workspace_brokers", lambda: {"registered": ["dhan:D1"]})
@@ -279,12 +348,12 @@ def test_renewed_token_is_persisted_to_the_vault() -> None:
     token to be replayed next boot)."""
     adapter = _Adapter(renewable=True)
     registry = _Registry()
-    registry.sessions[("dhan", "111")] = _Session("old-token")
     store = _Store({("dhan", "111"): {"client_id": "111", "access_token": "old-token"}})
+    _publish(registry, _Session("old-token"))
 
-    NativeSessionRefresher(_app(adapter, registry, store)).refresh_token("dhan")
+    NativeSessionRefresher(_app(adapter, registry, store), mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
 
-    assert store.rows[("dhan", "111")]["access_token"] == "renewed-token"
+    assert store.retrieve_for("dhan", "111")["access_token"] == "renewed-token"
 
 
 def test_dead_token_probe_downgrades_to_needs_relogin() -> None:
@@ -301,11 +370,11 @@ def test_dead_token_probe_downgrades_to_needs_relogin() -> None:
 
     import pytest
     with pytest.raises(RuntimeError, match="Broker session expired or invalid") as raised:
-        NativeSessionRefresher(app).refresh_token("dhan")
+        NativeSessionRefresher(app, mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
     assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == SESSION_INVALID_RELOGIN_MESSAGE
     assert "dhan:111" not in str(raised.value)
     assert "401 token expired" not in str(raised.value)
-    assert ("dhan", "111") not in registry.sessions  # dropped
+    assert not registry.snapshot_selector(BrokerSelector("dhan", "111")).present  # dropped
 
 
 def test_live_token_probe_passes() -> None:
@@ -317,7 +386,7 @@ def test_live_token_probe_passes() -> None:
     registry = _Registry()
     store = _Store({("dhan", "111"): {"access_token": "good"}})
     app = _app(adapter, registry, store)
-    NativeSessionRefresher(app).refresh_token("dhan")
+    NativeSessionRefresher(app, mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
     assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == "ok"
 
 
@@ -338,23 +407,23 @@ def test_refresh_and_removal_share_the_native_account_mutation_lock() -> None:
 
     adapter = _BlockingAdapter()
     registry = _Registry()
-    registry.sessions[("dhan", "111")] = _Session("old-token")
     store = _Store({("dhan", "111"): {"access_token": "stored-token"}})
+    _publish(registry, _Session("old-token"))
     app = _app(adapter, registry, store)
     app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "old-status"}
     refresh_errors: list[BaseException] = []
 
     def refresh() -> None:
         try:
-            NativeSessionRefresher(app).refresh_token("dhan")
+            NativeSessionRefresher(app, mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
         except BaseException as exc:  # noqa: BLE001 - asserted below
             refresh_errors.append(exc)
 
     def remove() -> None:
         removal_attempted.set()
         with _CONNECT_LOCK:
-            store.rows.pop(("dhan", "111"), None)
-            registry.remove_session_for("dhan", "111")
+            _delete(store)
+            _remove(registry)
             app.config["NATIVE_SESSION_STATUS"].pop("dhan:111", None)
         removal_finished.set()
 
@@ -373,8 +442,8 @@ def test_refresh_and_removal_share_the_native_account_mutation_lock() -> None:
     assert refresh_thread.is_alive() is False
     assert remove_thread.is_alive() is False
     assert refresh_errors == []
-    assert ("dhan", "111") not in store.rows
-    assert ("dhan", "111") not in registry.sessions
+    assert not store.selector_state(BrokerSelector("dhan", "111")).present
+    assert not registry.snapshot_selector(BrokerSelector("dhan", "111")).present
     assert "dhan:111" not in app.config["NATIVE_SESSION_STATUS"]
 
 
@@ -394,15 +463,15 @@ def test_refresh_revalidates_selector_before_shared_publication() -> None:
 
     adapter = _BlockingRenewableAdapter()
     registry = _Registry()
-    registry.sessions[("dhan", "111")] = _Session("old-token")
     store = _Store({("dhan", "111"): {"access_token": "old-token"}})
+    _publish(registry, _Session("old-token"))
     app = _app(adapter, registry, store)
     app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "old-status"}
     refresh_errors: list[BaseException] = []
 
     def refresh() -> None:
         try:
-            NativeSessionRefresher(app).refresh_token("dhan")
+            NativeSessionRefresher(app, mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
         except BaseException as exc:  # noqa: BLE001 - asserted below
             refresh_errors.append(exc)
 
@@ -412,16 +481,16 @@ def test_refresh_revalidates_selector_before_shared_publication() -> None:
 
     # Model a selector removed after the refresher's initial row snapshot by a
     # separate process, whose in-process threading lock cannot be shared.
-    store.rows.pop(("dhan", "111"))
-    registry.remove_session_for("dhan", "111")
+    _delete(store)
+    _remove(registry)
     app.config["NATIVE_SESSION_STATUS"].pop("dhan:111")
     release_login.set()
     refresh_thread.join(2.0)
 
     assert refresh_thread.is_alive() is False
     assert refresh_errors == []
-    assert ("dhan", "111") not in store.rows
-    assert ("dhan", "111") not in registry.sessions
+    assert not store.selector_state(BrokerSelector("dhan", "111")).present
+    assert not registry.snapshot_selector(BrokerSelector("dhan", "111")).present
     assert "dhan:111" not in app.config["NATIVE_SESSION_STATUS"]
 
 
@@ -442,29 +511,29 @@ def test_refresh_does_not_overwrite_newer_credential_generation() -> None:
     adapter = _BlockingRenewableAdapter()
     registry = _Registry()
     prior_session = _Session("old-token")
-    registry.sessions[("dhan", "111")] = prior_session
     store = _Store({("dhan", "111"): {"access_token": "old-token"}})
+    _publish(registry, prior_session)
     app = _app(adapter, registry, store)
     app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "external-status"}
     errors: list[BaseException] = []
 
     def refresh() -> None:
         try:
-            NativeSessionRefresher(app).refresh_token("dhan")
+            NativeSessionRefresher(app, mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
         except BaseException as exc:  # noqa: BLE001 - asserted below
             errors.append(exc)
 
     thread = threading.Thread(target=refresh)
     thread.start()
     assert login_started.wait(1.0)
-    store.replace("dhan", "111", {"access_token": "newer-external-token"})
+    _replace(store, "dhan", "111", {"access_token": "newer-external-token"})
     release_login.set()
     thread.join(2.0)
 
     assert thread.is_alive() is False
     assert errors == []
-    assert store.rows[("dhan", "111")] == {"access_token": "newer-external-token"}
-    assert registry.sessions[("dhan", "111")] is prior_session
+    assert store.retrieve_for("dhan", "111") == {"access_token": "newer-external-token"}
+    assert _unavailable(registry)
     assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == "external-status"
 
 
@@ -485,21 +554,21 @@ def test_refresh_rejects_same_value_selector_aba() -> None:
     adapter = _BlockingRenewableAdapter()
     registry = _Registry()
     prior_session = _Session("old-token")
-    registry.sessions[("dhan", "111")] = prior_session
     store = _Store({("dhan", "111"): {"access_token": "old-token"}})
+    _publish(registry, prior_session)
     app = _app(adapter, registry, store)
     app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "external-status"}
 
-    thread = threading.Thread(target=NativeSessionRefresher(app).refresh_token, args=("dhan",))
+    thread = threading.Thread(target=NativeSessionRefresher(app, mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token, args=("dhan",))
     thread.start()
     assert login_started.wait(1.0)
-    store.replace("dhan", "111", {"access_token": "old-token"})
+    _replace(store, "dhan", "111", {"access_token": "old-token"})
     release_login.set()
     thread.join(2.0)
 
     assert thread.is_alive() is False
-    assert store.rows[("dhan", "111")] == {"access_token": "old-token"}
-    assert registry.sessions[("dhan", "111")] is prior_session
+    assert store.retrieve_for("dhan", "111") == {"access_token": "old-token"}
+    assert _unavailable(registry)
     assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == "external-status"
 
 
@@ -516,22 +585,22 @@ def test_refresh_does_not_publish_over_newer_read_only_session() -> None:
 
     adapter = _BlockingAdapter()
     registry = _Registry()
-    registry.sessions[("dhan", "111")] = _Session("old-token")
     store = _Store({("dhan", "111"): {"access_token": "old-token"}})
+    _publish(registry, _Session("old-token"))
     app = _app(adapter, registry, store)
     app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "external-status"}
 
-    thread = threading.Thread(target=NativeSessionRefresher(app).refresh_token, args=("dhan",))
+    thread = threading.Thread(target=NativeSessionRefresher(app, mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token, args=("dhan",))
     thread.start()
     assert login_started.wait(1.0)
     read_only_replacement = _Session("external-read-only-token")
-    read_only_replacement.is_read_only = True
-    registry.put_session("dhan", "111", read_only_replacement)
+    read_only_replacement.read_only_until_at = 4102444800.0
+    _publish(registry, read_only_replacement)
     release_login.set()
     thread.join(2.0)
 
     assert thread.is_alive() is False
-    assert registry.sessions[("dhan", "111")] is read_only_replacement
+    assert _session(registry).access_token == read_only_replacement.access_token
     assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == "external-status"
 
 
@@ -552,12 +621,12 @@ def test_shutdown_generation_revokes_blocked_refresh_before_shared_publication()
     adapter = _BlockingRenewableAdapter()
     registry = _Registry()
     prior_session = _Session("old-token")
-    registry.sessions[("dhan", "111")] = prior_session
     store = _Store({("dhan", "111"): {"access_token": "old-token"}})
+    _publish(registry, prior_session)
     app = _app(adapter, registry, store)
     app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "old-status"}
     errors: list[BaseException] = []
-    refresher = NativeSessionRefresher(app)
+    refresher = NativeSessionRefresher(app, mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner)
 
     def refresh() -> None:
         try:
@@ -582,8 +651,8 @@ def test_shutdown_generation_revokes_blocked_refresh_before_shared_publication()
     assert thread.is_alive() is False
     assert len(errors) == 1
     assert "revoked" in str(errors[0])
-    assert store.rows[("dhan", "111")] == {"access_token": "old-token"}
-    assert registry.sessions[("dhan", "111")] is prior_session
+    assert store.retrieve_for("dhan", "111") == {"access_token": "old-token"}
+    assert registry.snapshot_selector(BrokerSelector("dhan", "111")).generation == 1
     assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == "old-status"
     assert admission.close_and_drain(1.0) is True
 
@@ -608,11 +677,11 @@ def test_blocked_rotation_sdk_work_times_out_without_accumulating_workers() -> N
     adapter = _BlockingProbeAdapter()
     registry = _Registry()
     prior_session = _Session("old-token")
-    registry.sessions[("dhan", "111")] = prior_session
     store = _Store({("dhan", "111"): {"access_token": "old-token"}})
+    _publish(registry, prior_session)
     app = _app(adapter, registry, store)
     app.config["NATIVE_CANDIDATE_LOGIN_TIMEOUT_SECONDS"] = 0.02
-    refresher = NativeSessionRefresher(app)
+    refresher = NativeSessionRefresher(app, mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner)
 
     try:
         with pytest.raises(RuntimeError, match="retry"):
@@ -636,8 +705,8 @@ def test_blocked_rotation_sdk_work_times_out_without_accumulating_workers() -> N
             "native-candidate-sdk",
         }
         assert all(thread.daemon for thread in candidate_threads)
-        assert registry.sessions[("dhan", "111")] is prior_session
-        assert store.rows[("dhan", "111")] == {"access_token": "old-token"}
+        assert _unavailable(registry)
+        assert store.retrieve_for("dhan", "111") == {"access_token": "old-token"}
         assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == BROKER_LOGIN_RETRY_MESSAGE
     finally:
         release_probe.set()
@@ -697,22 +766,15 @@ def test_abandoned_candidate_keeps_its_own_selector_credentials(monkeypatch) -> 
 
     seen: list[tuple[dict[str, Any], str]] = []
 
-    async def _establish(
-        adapter_: Any,
-        registry_: Any,
-        credentials: dict[str, Any],
-        broker: str,
-        account_id: str,
-        *,
-        verify: bool = False,
-    ) -> Any:
-        seen.append((dict(credentials), account_id))
-        return _Session("candidate")
+    async def _prepare(adapter_, credentials, *, verify=False, mutation_admission=None):
+        mutation_admission()
+        seen.append(dict(credentials))
+        return native_login.NativeSessionCandidate(_Session("candidate"), dict(credentials))
 
-    monkeypatch.setattr(native_login, "establish_native_session", _establish)
+    monkeypatch.setattr(native_login, "prepare_native_session", _prepare)
 
     with pytest.raises(RuntimeError):
-        NativeSessionRefresher(app).refresh_token("dhan")
+        NativeSessionRefresher(app, mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
 
     assert len(captured) == 2, "both selectors should have started a candidate login"
 
@@ -720,4 +782,4 @@ def test_abandoned_candidate_keeps_its_own_selector_credentials(monkeypatch) -> 
     # past it — the position an abandoned thread actually occupies.
     asyncio.run(captured[0]())
 
-    assert seen == [({"access_token": "token-A"}, "acc-A")]
+    assert seen == [{"access_token": "token-A"}]

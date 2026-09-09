@@ -1,8 +1,7 @@
 /**
  * NewsWidget — live financial news feed for FlintTrade terminal.
  *
- * Fetches real RSS feeds via rss2json public service (no CORS issues, no API key).
- * Sources: MoneyControl, Economic Times Markets, LiveMint Markets.
+ * Fetches publisher feeds only through the FlintTrade backend.
  * Sentiment tagging is rule-based (keyword scan on title) — no AI API key needed.
  * Auto-refreshes every 5 minutes. Handles errors gracefully.
  */
@@ -29,29 +28,6 @@ import { getNews } from "@/services/ftApi";
 // ---------------------------------------------------------------------------
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-
-/** CORS proxy + RSS-to-JSON conversion */
-const CORS_PROXY = "https://corsproxy.io/?url=";
-
-interface FeedSource {
-  name: string;
-  url: string;
-}
-
-const FEEDS: FeedSource[] = [
-  {
-    name: "MoneyControl",
-    url: "https://www.moneycontrol.com/rss/latestnews.xml",
-  },
-  {
-    name: "ET Markets",
-    url: "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
-  },
-  {
-    name: "LiveMint",
-    url: "https://www.livemint.com/rss/markets",
-  },
-];
 
 // ---------------------------------------------------------------------------
 // Sentiment rules (rule-based, no API key)
@@ -160,51 +136,8 @@ type SentimentFilter = "all" | NewsSentiment;
 
 
 // ---------------------------------------------------------------------------
-// RSS fetch helpers
+// Backend news projection
 // ---------------------------------------------------------------------------
-
-function buildFeedUrl(rssUrl: string): string {
-  return `${CORS_PROXY}${encodeURIComponent(rssUrl)}`;
-}
-
-/** Parse RSS XML items from raw text */
-function parseRssXml(xml: string): Array<{ title: string; link: string; pubDate: string }> {
-  const items: Array<{ title: string; link: string; pubDate: string }> = [];
-  const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = itemRegex.exec(xml)) !== null) {
-    const block = match[1];
-    const title = block.match(/<title><!\[CDATA\[(.*?)\]\]>|<title>(.*?)<\/title>/)?.[1] ?? block.match(/<title>(.*?)<\/title>/)?.[1] ?? "";
-    const link = block.match(/<link>(.*?)<\/link>/)?.[1] ?? "";
-    const pubDate = block.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] ?? "";
-    if (title && link) items.push({ title, link, pubDate });
-  }
-  return items;
-}
-
-async function fetchFeed(source: FeedSource): Promise<NewsItem[]> {
-  const url = buildFeedUrl(source.url);
-  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} for ${source.name}`);
-  }
-
-  const xml = await res.text();
-  const parsed = parseRssXml(xml);
-
-  return parsed.slice(0, 20).map((item) => {
-    const ts = item.pubDate ? new Date(item.pubDate).getTime() : Date.now();
-    return {
-      id: `${source.name}-${item.link}`,
-      headline: item.title.trim(),
-      link: item.link,
-      source: source.name,
-      timestamp: isNaN(ts) ? Date.now() : ts,
-      sentiment: classifySentiment(item.title),
-    };
-  });
-}
 
 /**
  * Deduplicate and sort a flat list of NewsItems newest-first.
@@ -223,53 +156,23 @@ function dedupeAndSort(items: NewsItem[]): NewsItem[] {
   return deduped;
 }
 
-/**
- * Try the FlintTrade backend endpoint first (GET /ft-api/api/v1/news).
- * If that fails or returns no articles, fall back to the CORS proxy path.
- *
- * The backend endpoint GET /api/v1/news is implemented in app.py and fetches
- * RSS feeds server-side (avoids CORS entirely). The CORS proxy fallback
- * remains for when the backend is not running.
- */
-/** Where the rendered headlines actually came from. */
-export type NewsOrigin = "backend" | "third-party-proxy";
-
-export interface NewsFetchResult {
-  items: NewsItem[];
-  origin: NewsOrigin;
-}
-
-async function fetchAllFeeds(): Promise<NewsFetchResult> {
-  // Attempt 1: backend server-side RSS proxy
-  try {
-    const result = await getNews();
-    if (result.articles && result.articles.length > 0) {
-      const items: NewsItem[] = result.articles.map((a) => {
-        const ts = a.pub_date ? new Date(a.pub_date).getTime() : Date.now();
-        return {
-          id: `${a.source}-${a.link}`,
-          headline: a.title.trim(),
-          link: a.link,
-          source: a.source,
-          timestamp: isNaN(ts) ? Date.now() : ts,
-          sentiment: classifySentiment(a.title),
-        };
-      });
-      return { items: dedupeAndSort(items), origin: "backend" };
-    }
-  } catch {
-    // Backend not yet available — fall through to CORS proxy
+async function fetchAllFeeds(): Promise<NewsItem[]> {
+  const result = await getNews();
+  if (!result.articles?.length) {
+    throw new Error("News is unavailable from the FlintTrade backend.");
   }
-
-  // Attempt 2: client-side CORS proxy fallback
-  const results = await Promise.allSettled(FEEDS.map(fetchFeed));
-  const items: NewsItem[] = [];
-  for (const r of results) {
-    if (r.status === "fulfilled") {
-      items.push(...r.value);
-    }
-  }
-  return { items: dedupeAndSort(items), origin: "third-party-proxy" };
+  const items: NewsItem[] = result.articles.map((article) => {
+    const timestamp = article.pub_date ? new Date(article.pub_date).getTime() : Date.now();
+    return {
+      id: `${article.source}-${article.link}`,
+      headline: article.title.trim(),
+      link: article.link,
+      source: article.source,
+      timestamp: isNaN(timestamp) ? Date.now() : timestamp,
+      sentiment: classifySentiment(article.title),
+    };
+  });
+  return dedupeAndSort(items);
 }
 
 // ---------------------------------------------------------------------------
@@ -414,29 +317,22 @@ function NewsWidget({ node: _node }: NewsWidgetProps) {
   const [status, setStatus] = useState<FetchStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
-  // When the backend is unreachable the widget falls back to a third-party
-  // CORS proxy, which sees the operator's IP and which feeds they read. That
-  // is a reasonable degraded path but not one to take silently.
-  const [origin, setOrigin] = useState<NewsOrigin>("backend");
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     setStatus("loading");
     try {
-      const { items: data, origin } = await fetchAllFeeds();
+      const data = await fetchAllFeeds();
       setItems(data);
-      setOrigin(origin);
       setLastUpdated(Date.now());
-      setStatus(data.length > 0 ? "success" : "error");
-      if (data.length === 0) {
-        setErrorMsg("No articles returned from feeds.");
-      } else {
-        setErrorMsg("");
-      }
-    } catch (err) {
+      setStatus("success");
+      setErrorMsg("");
+    } catch {
+      setItems([]);
+      setLastUpdated(null);
       setStatus("error");
-      setErrorMsg(err instanceof Error ? err.message : "Unknown error");
+      setErrorMsg("News is unavailable from the FlintTrade backend.");
     }
   }, []);
 
@@ -507,20 +403,6 @@ function NewsWidget({ node: _node }: NewsWidgetProps) {
           </span>
         )}
 
-        {origin === "third-party-proxy" && items.length > 0 && (
-          <span
-            className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-            title={
-              "Your backend was unreachable, so these headlines were fetched "
-              + "through a third-party CORS proxy. That proxy sees your IP "
-              + "address and which feeds you read. Start the FlintTrade "
-              + "backend to fetch them yourself."
-            }
-          >
-            Via proxy
-          </span>
-        )}
-
         <div className="flex-1" />
 
         {/* Manual refresh */}
@@ -582,13 +464,13 @@ function NewsWidget({ node: _node }: NewsWidgetProps) {
 
       {/* CONTENT AREA */}
       {hasError ? (
-        // Error state — feeds unreachable or returned nothing
+        // Error state — the sole backend news boundary is unavailable.
         <div className="flex-1 flex flex-col items-center justify-center gap-3 px-4 text-center">
           <AlertCircle size={24} className="text-loss" />
           <div>
-            <p className="text-xs text-text-secondary">Unable to fetch news</p>
+            <p className="text-xs text-text-secondary">News unavailable</p>
             <p className="text-xs text-text-muted mt-1 leading-relaxed max-w-52">
-              {errorMsg || "Could not reach RSS feeds. Check your internet connection."}
+              {errorMsg || "News is unavailable from the FlintTrade backend."}
             </p>
           </div>
           <Button

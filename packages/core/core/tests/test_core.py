@@ -696,6 +696,239 @@ class TestClientInit:
         assert funds.opening_risk_capital == "1250.00"
         await client.close()
 
+    @pytest.mark.asyncio
+    async def test_balance_snapshot_preserves_direct_zero_absence_and_one_request(self):
+        from flinttrade_core.broker_read_port import BalanceEvidence
+
+        client = self._make_client()
+        client._post = AsyncMock(return_value={
+            "status": "success",
+            "data": {"availablecash": 0, "utiliseddebits": "20", "openingcashlimit": "125"},
+        })
+
+        balance = await client.balance_snapshot()
+
+        assert balance.available_balance == 0.0
+        assert balance.available_balance_evidence is BalanceEvidence.DIRECT
+        assert balance.total_balance == 20.0
+        assert balance.total_balance_evidence is BalanceEvidence.DERIVED_FROM_DIRECT_COMPONENTS
+        assert balance.opening_risk_capital == 125.0
+        assert client._post.await_count == 1
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_balance_snapshot_preserves_alias_precedence_and_refuses_malformed_selected_value(self):
+        client = self._make_client()
+        client._post = AsyncMock(return_value={
+            "status": "success",
+            "data": {"availablecash": "", "available_balance": "100", "utiliseddebits": "20"},
+        })
+        with pytest.raises(ValueError, match="broker_balance_response_invalid"):
+            await client.balance_snapshot()
+        assert client._post.await_count == 1
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_balance_snapshot_refuses_malformed_nonempty_total_instead_of_deriving(self):
+        client = self._make_client()
+        client._post = AsyncMock(return_value={
+            "status": "success",
+            "data": {"availablecash": "100", "utiliseddebits": "20", "totalbalance": "bad"},
+        })
+        with pytest.raises(ValueError, match="broker_balance_response_invalid"):
+            await client.balance_snapshot()
+        assert client._post.await_count == 1
+        await client.close()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("payload", "expected"),
+        [
+            ({"status": "success", "data": {}}, (None, None, None, None)),
+            (
+                {
+                    "status": "success",
+                    "data": {
+                        "availablecash": 0,
+                        "available_balance": 100,
+                        "utiliseddebits": 0,
+                        "usedmargin": 100,
+                        "totalbalance": 0,
+                        "total_balance": 100,
+                        "opening_risk_capital": 0,
+                    },
+                },
+                (0.0, 0.0, 0.0, 0.0),
+            ),
+            (
+                {
+                    "status": "success",
+                    "data": {
+                        "availablecash": 100,
+                        "utiliseddebits": 20,
+                        "totalbalance": None,
+                        "total_balance": 999,
+                        "opening_risk_capital": "",
+                        "openingcashlimit": 125,
+                    },
+                },
+                (100.0, 20.0, 120.0, 125.0),
+            ),
+            (
+                {
+                    "status": "success",
+                    "data": {"availablecash": 100, "totalbalance": ""},
+                },
+                (100.0, None, None, None),
+            ),
+        ],
+    )
+    async def test_balance_snapshot_absence_zero_precedence_and_partial_derivation(self, payload, expected):
+        client = self._make_client()
+        client._post = AsyncMock(return_value=payload)
+
+        balance = await client.balance_snapshot()
+
+        assert (
+            balance.available_balance,
+            balance.used_margin,
+            balance.total_balance,
+            balance.opening_risk_capital,
+        ) == expected
+        assert client._post.await_count == 1
+        await client.close()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "data",
+        [
+            {"availablecash": True},
+            {"utiliseddebits": float("nan")},
+            {"totalbalance": float("inf")},
+            {"availablecash": 1e308, "utiliseddebits": 1e308, "totalbalance": None},
+            {"opening_risk_capital": False},
+        ],
+    )
+    async def test_balance_snapshot_refuses_boolean_nonfinite_and_derived_overflow(self, data):
+        client = self._make_client()
+        client._post = AsyncMock(return_value={"status": "success", "data": data})
+
+        with pytest.raises(ValueError, match="broker_balance_response_invalid"):
+            await client.balance_snapshot()
+
+        assert client._post.await_count == 1
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_balance_snapshot_rejects_hooks_and_dict_subclasses_before_execution(self):
+        calls: list[str] = []
+
+        class Hook:
+            def __bool__(self):
+                calls.append("bool")
+                raise AssertionError("bool executed")
+
+            def __eq__(self, _other):
+                calls.append("eq")
+                raise AssertionError("eq executed")
+
+            def __float__(self):
+                calls.append("float")
+                raise AssertionError("float executed")
+
+            def __str__(self):
+                calls.append("str")
+                raise AssertionError("str executed")
+
+        class DictTrap(dict):
+            def __contains__(self, _key):
+                calls.append("contains")
+                raise AssertionError("contains executed")
+
+            def __getitem__(self, _key):
+                calls.append("getitem")
+                raise AssertionError("getitem executed")
+
+        for payload in (
+            {"status": "success", "data": {"totalbalance": Hook()}},
+            DictTrap(),
+        ):
+            client = self._make_client()
+            client._post = AsyncMock(return_value=payload)
+            with pytest.raises(ValueError, match="broker_balance_response_invalid"):
+                await client.balance_snapshot()
+            assert client._post.await_count == 1
+            await client.close()
+
+        assert calls == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("layer", ["envelope", "data"])
+    async def test_balance_snapshot_rejects_non_string_keys_in_both_maps_without_comparison_hooks(
+        self,
+        layer,
+    ):
+        class CollidingKey:
+            def __init__(self, target: str) -> None:
+                self.target = target
+                self.calls: list[str] = []
+
+            def __hash__(self) -> int:
+                self.calls.append("hash")
+                return hash(self.target)
+
+            def __eq__(self, _other: object) -> bool:
+                self.calls.append("eq")
+                raise AssertionError("OpenAlgo funds mapping key comparison executed")
+
+        target = "data" if layer == "envelope" else "availablecash"
+        trap = CollidingKey(target)
+        payload = {trap: 0} if layer == "envelope" else {"status": "success", "data": {trap: 0}}
+        trap.calls.clear()
+        client = self._make_client()
+        client._post = AsyncMock(return_value=payload)
+
+        with pytest.raises(ValueError, match="broker_balance_response_invalid"):
+            await client.balance_snapshot()
+
+        assert client._post.await_count == 1
+        assert trap.calls == []
+        await client.close()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("field", "slot"),
+        [
+            ("availablecash", "available_balance"),
+            ("available_balance", "available_balance"),
+            ("utiliseddebits", "used_margin"),
+            ("usedmargin", "used_margin"),
+            ("used_margin", "used_margin"),
+            ("totalbalance", "total_balance"),
+            ("total_balance", "total_balance"),
+            ("opening_risk_capital", "opening_risk_capital"),
+            ("openingcashlimit", "opening_risk_capital"),
+            ("opening_balance", "opening_risk_capital"),
+            ("openingbalance", "opening_risk_capital"),
+            ("sod_balance", "opening_risk_capital"),
+            ("sodbalance", "opening_risk_capital"),
+            ("start_of_day_balance", "opening_risk_capital"),
+            ("starting_capital", "opening_risk_capital"),
+        ],
+    )
+    async def test_balance_snapshot_every_allowlisted_alias_is_direct(self, field, slot):
+        from flinttrade_core.broker_read_port import BalanceEvidence
+
+        client = self._make_client()
+        client._post = AsyncMock(return_value={"status": "success", "data": {field: 7}})
+
+        balance = await client.balance_snapshot()
+
+        assert getattr(balance, slot) == 7.0
+        assert getattr(balance, f"{slot}_evidence") is BalanceEvidence.DIRECT
+        assert client._post.await_count == 1
+        await client.close()
+
 
 # ======================================================================
 # Rate limiter tests

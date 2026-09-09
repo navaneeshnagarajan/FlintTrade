@@ -51,6 +51,7 @@ from .app import (
     _bind_runtime_emergency_dispatcher,
     _build_tick_recorder,
     _close_runtime_request_admission,
+    _configure_broker_writes,
     _OrderFlowCheckpointOwner,
     _pending_tick_count,
     _prepare_tick_orderflow_state,
@@ -64,9 +65,8 @@ from .app import (
     _tick_capture_mode,
     _tick_capture_watchlist,
     _workspace_dir,
-    configure_broker_router,
     create_flask_app,
-    retire_broker_router_generation,
+    retire_broker_dependencies,
     shutdown_ditto_runtime,
 )
 from .backend_instance import (
@@ -977,12 +977,9 @@ def _bind_desktop_safety_runtime(flask_app: Any, safety: Any, client: Any) -> An
             raise RuntimeError("desktop broker owner loop did not start")
         safety.bind_runtime_loop(loop)
         dispatcher = _bind_runtime_emergency_dispatcher(flask_app, safety, None, client)
-        configure_broker_router(
-            flask_app,
-            flask_app.config.get("REGISTRY"),
-            flask_app.config.get("CREDENTIAL_STORE"),
-            client,
-        )
+        dependencies = flask_app.extensions.get("flinttrade_broker_dependencies")
+        if dependencies is not None:
+            _configure_broker_writes(flask_app, dependencies)
     except Exception:
         safety.bind_emergency_dispatcher(None)
         unbind_runtime_loop = getattr(safety, "unbind_runtime_loop", None)
@@ -1066,7 +1063,7 @@ def _rollback_desktop_build(
 
     if live_writers_stopped:
         try:
-            if not retire_broker_router_generation(flask_app):
+            if not retire_broker_dependencies(flask_app):
                 complete = False
                 logger.warning("Desktop startup broker-router rollback timed out")
         except Exception as exc:  # noqa: BLE001 - retain routing dependencies for recovery
@@ -1689,7 +1686,7 @@ class _DesktopShutdownRecoveryOwner:
         router_retired = (
             self._run_worker(
                 "broker-router",
-                lambda: retire_broker_router_generation(app),
+                lambda: retire_broker_dependencies(app),
                 deadline=deadline,
                 failure_message="Desktop broker-router retirement failed (%s)",
                 timeout_message="Desktop broker-router retirement timed out",
@@ -1801,7 +1798,7 @@ class _DesktopShutdownRecoveryOwner:
             if post_strategies_stopped and post_ditto_stopped:
                 post_router_retired = self._run_worker(
                     "post-drain-broker-router",
-                    lambda: retire_broker_router_generation(app),
+                    lambda: retire_broker_dependencies(app),
                     deadline=deadline,
                     failure_message="Desktop post-drain broker-router retirement failed (%s)",
                     timeout_message="Desktop post-drain broker-router retirement timed out",

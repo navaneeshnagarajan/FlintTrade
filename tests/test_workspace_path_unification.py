@@ -37,6 +37,7 @@ This file pins both halves of the fix:
 
 from __future__ import annotations
 
+import ast
 import re
 import shutil
 import subprocess
@@ -194,8 +195,6 @@ _KNOWN_DEBT: frozenset[str] = frozenset()
 # would in a file that was never listed. Excusing them outright — which is what
 # folding them into `_EXCUSED` did — regressed coverage they already had.
 #
-#   app.py                  operator-facing log message only; names the wrong
-#                           backup path on macOS/Windows. One-line reword.
 #   expiry_collector.py     live default argument (`data_dir`).
 #   memory.py               live `_DEFAULT_PERSIST_DIR` + a docstring example.
 #   position_tracker.py     docstring examples only; the real default is ":memory:".
@@ -204,7 +203,6 @@ _KNOWN_DEBT: frozenset[str] = frozenset()
 # ---------------------------------------------------------------------------
 _STRING_LITERAL_DEBT: frozenset[str] = frozenset(
     {
-        "packages/core/core/src/flinttrade_core/app.py",
         "packages/core/historical/src/flinttrade_historical/expiry_collector.py",
         "packages/services/ai/src/flinttrade_ai/memory.py",
         "packages/services/engine/src/flinttrade_engine/position_tracker.py",
@@ -259,7 +257,7 @@ _DOC_MENTION_DEBT: frozenset[str] = frozenset(
 # Shrink-only ratchets. Lower a cap in the same commit that empties a wave; never
 # raise one. Raising a cap is the review-visible act that admits new debt.
 _DEBT_CAP: int = 0
-_STRING_LITERAL_DEBT_CAP: int = 6
+_STRING_LITERAL_DEBT_CAP: int = 5
 _DOC_MENTION_DEBT_CAP: int = 9
 
 # Every path the main guard skips ENTIRELY. The two form-scoped debt sets are
@@ -489,6 +487,31 @@ def _violations_in(rel: str, text: str) -> list[str]:
     if rel not in _STRING_LITERAL_DEBT and rel not in _DOC_MENTION_DEBT:
         violations += [f"{rel}:{line}: {matched}" for line, matched in _unqualified_doc_mentions(text)]
     return violations
+
+
+def _logger_dotdir_literals(source: str) -> list[tuple[int, str]]:
+    """Return hardcoded dotdir constants passed to the module logger."""
+    found: list[tuple[int, str]] = []
+    for call in (node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Call)):
+        if not (
+            isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "logger"
+        ):
+            continue
+        for node in ast.walk(call):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and "~/.flinttrade" in node.value:
+                found.append((node.lineno, node.value))
+    return found
+
+
+@pytest.mark.unit
+def test_app_logger_messages_use_platform_neutral_workspace_paths() -> None:
+    """Operator messages must point at the active per-platform workspace."""
+    app_source = (
+        _REPO_ROOT / "packages/core/core/src/flinttrade_core/app.py"
+    ).read_text(encoding="utf-8")
+    assert not _logger_dotdir_literals(app_source)
 
 
 @lru_cache(maxsize=1)

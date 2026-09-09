@@ -28,12 +28,15 @@ _DUCKDB_MAGIC = b"DUCK"
 _RECOVERY_LOCK = threading.Lock()
 
 
-def _connect(path_str: str, sync: str, temp_store: str, cache_size_kb: int) -> sqlite3.Connection:
+def _connect(
+    path_str: str, sync: str, temp_store: str, cache_size_kb: int, *, uri: bool = False,
+) -> sqlite3.Connection:
     conn = sqlite3.connect(
         path_str,
         isolation_level=None,
         check_same_thread=False,
         timeout=10.0,
+        uri=uri,
     )
     try:
         conn.executescript(
@@ -96,16 +99,23 @@ def open_sqlite(
     durability: DurabilityProfile = "normal",
     temp_store: TempStoreProfile = "MEMORY",
     cache_size_kb: int = 65_536,
+    strict_existing: bool = False,
 ) -> sqlite3.Connection:
     """Open a SQLite connection with FlintTrade WAL pragmas applied.
 
     A file in a foreign on-disk format (legacy DuckDB from before the
     v0.6.0 engine migration) is quarantined to ``<name>.pre-sqlite.bak``
     and the database recreated fresh; genuine SQLite corruption still
-    raises :class:`sqlite3.DatabaseError`.
+    raises :class:`sqlite3.DatabaseError`. With ``strict_existing=True``, only
+    an existing filesystem path is opened; no file is created or quarantined.
     """
     path_str = os.fspath(path)
     sync = "FULL" if durability == "full" else "NORMAL"
+    if strict_existing:
+        if not path_str or path_str == ":memory:" or path_str.startswith("file:"):
+            raise ValueError("strict SQLite requires a filesystem path")
+        with _RECOVERY_LOCK:
+            return _connect(Path(path_str).absolute().as_uri() + "?mode=rw", sync, temp_store, cache_size_kb, uri=True)
     with _RECOVERY_LOCK:
         try:
             return _connect(path_str, sync, temp_store, cache_size_kb)

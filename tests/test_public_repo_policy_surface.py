@@ -102,7 +102,7 @@ def test_api_reference_documents_broker_mcp_as_metadata_only() -> None:
 
 
 def test_api_reference_documents_native_broker_surface_boundaries() -> None:
-    """Native broker routes should document connect, reads, and write-default gates."""
+    """Native broker routes must document the 503/409 freeze, not a live session."""
     api_doc = _read(ROOT / "docs/API.md")
 
     assert "Native broker connect and reads (`/api/v1/native/*`)" in api_doc
@@ -115,8 +115,11 @@ def test_api_reference_documents_native_broker_surface_boundaries() -> None:
     assert "`native/accounts/<adapter>/<account>/set-primary` (**POST**)" in api_doc
     assert "connectable=false" in api_doc
     assert "Account and market-data reads" in api_doc
-    assert "require a live native session" in api_doc
+    assert "return `409` with zero provider calls" in api_doc
+    assert "broker_account_cutover_unavailable" in api_doc
     assert "connected, non-read-only native session" in api_doc
+    assert "They are not a working operator path" in api_doc
+    assert "require a live native session" not in api_doc
 
 
 def test_user_guide_documents_indstocks_dashboard_reset_cycle() -> None:
@@ -126,6 +129,22 @@ def test_user_guide_documents_indstocks_dashboard_reset_cycle() -> None:
 
     assert "daily 06:00 IST dashboard cycle" in guide
     assert stale_indstocks_phrase not in guide
+
+
+def test_operator_docs_state_native_broker_http_freeze() -> None:
+    """Operator docs must state the 503/409 freeze, not a working native path."""
+    guide = _read(ROOT / "docs/USER_GUIDE.md")
+    changelog = _read(ROOT / "changelog.md")
+    plan = _read(ROOT / "PLAN.md")
+
+    assert "not usable on this unreleased line" in guide
+    assert "broker_account_cutover_unavailable" in guide
+    assert "native broker UX stays down on `main`" in guide
+    assert "Do not treat" in guide and "as a working operator path" in guide
+    assert "Native broker HTTP freeze (accepted product decision)" in changelog
+    assert "leaves native broker UX down until Task 9D and Task 7C.2" in changelog
+    assert "native broker HTTP UX is frozen on `main` until Task 9D and Task 7C.2" in plan
+    assert "accepted product decision" in plan
 
 
 def test_public_site_labels_demo_as_exploration_not_live() -> None:

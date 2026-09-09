@@ -15,9 +15,11 @@ import json
 import math
 import unicodedata
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urlencode
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.exceptions import (
     BrokerError,
     InsufficientFunds,
@@ -61,6 +63,110 @@ class UpstoxMappingError(ValueError):
     """Raised when an order cannot be translated to / from the Upstox API."""
 
 
+_RESPONSE_MISSING = object()
+
+
+def _response_record(value: Any) -> dict[str, Any]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerReadResponseInvalid from None
+    return value
+
+
+def _response_number(record: dict[str, Any], *keys: str, required: bool = False) -> str | object:
+    for key in keys:
+        if key not in record:
+            continue
+        value = record[key]
+        if value is None or (type(value) is str and not value.strip()):
+            if required:
+                raise BrokerReadResponseInvalid from None
+            continue
+        if type(value) is bool or type(value) not in (int, float, str):
+            raise BrokerReadResponseInvalid from None
+        if type(value) is float and not math.isfinite(value):
+            raise BrokerReadResponseInvalid from None
+        try:
+            number = Decimal(str(value))
+        except InvalidOperation:
+            raise BrokerReadResponseInvalid from None
+        if not number.is_finite():
+            raise BrokerReadResponseInvalid from None
+        return str(value)
+    if required:
+        raise BrokerReadResponseInvalid from None
+    return _RESPONSE_MISSING
+
+
+def _response_text(record: dict[str, Any], *keys: str, required: bool = False) -> str | object:
+    for key in keys:
+        if key not in record:
+            continue
+        value = record[key]
+        if value is None or (type(value) is str and not value.strip()):
+            if required:
+                raise BrokerReadResponseInvalid from None
+            continue
+        if type(value) is not str:
+            raise BrokerReadResponseInvalid from None
+        return value
+    if required:
+        raise BrokerReadResponseInvalid from None
+    return _RESPONSE_MISSING
+
+
+def _response_text_or_empty(record: dict[str, Any], *keys: str) -> str:
+    value = _response_text(record, *keys)
+    return "" if value is _RESPONSE_MISSING else value
+
+
+def _put_response_number(target: dict[str, Any], name: str, value: object) -> None:
+    if value is not _RESPONSE_MISSING:
+        target[name] = value
+
+
+def _market_number(
+    record: dict[str, Any],
+    *keys: str,
+    integer: bool = False,
+) -> float | int | object:
+    """Copy the first present market-data alias without treating null as absent."""
+    for key in keys:
+        if key not in record:
+            continue
+        value = _response_number(record, key, required=True)
+        number = Decimal(value)
+        converted = float(number)
+        if not math.isfinite(converted):
+            raise BrokerReadResponseInvalid from None
+        if integer:
+            if number < 0 or number != number.to_integral_value():
+                raise BrokerReadResponseInvalid from None
+            return int(number)
+        return converted
+    return _RESPONSE_MISSING
+
+
+def _market_text(record: dict[str, Any], *keys: str) -> str | object:
+    """Copy the first present non-empty string market-data alias."""
+    for key in keys:
+        if key not in record:
+            continue
+        return _response_text(record, key, required=True)
+    return _RESPONSE_MISSING
+
+
+def _market_timestamp(value: object) -> str:
+    if type(value) is str:
+        if not value.strip():
+            raise BrokerReadResponseInvalid from None
+        return value.encode("utf-8").decode("utf-8")
+    if type(value) is int:
+        return str(value)
+    if type(value) is float and math.isfinite(value):
+        return str(value)
+    raise BrokerReadResponseInvalid from None
+
+
 def _validated_validity(validity: Any) -> str:
     """Validate an order's validity against the Upstox-accepted set.
 
@@ -92,12 +198,8 @@ def _num(value: Any, default: float = 0.0) -> float:
 
 
 def _present_order_number(record: dict[str, Any], key: str) -> str | None:
-    if key not in record:
-        return None
-    value = record[key]
-    if value is None or (isinstance(value, str) and not value.strip()):
-        return None
-    return str(value)
+    value = _response_number(record, key)
+    return None if value is _RESPONSE_MISSING else value
 
 
 def _norm_pricetype(pricetype: str) -> str:
@@ -315,28 +417,34 @@ def canonical_order_id(value: Any) -> str:
 
 def from_upstox_order(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise an Upstox order-book record."""
-    exchange = d.get("exchange", _exchange_of_token(d.get("instrument_token", "")))
-    quantity = d.get("quantity")
-    filled_quantity = d.get("filled_quantity")
-    pending_quantity = d.get("pending_quantity")
-    if pending_quantity is None:
-        try:
-            pending_quantity = max(int(str(quantity)) - int(str(filled_quantity)), 0)
-        except (TypeError, ValueError, OverflowError):
-            pending_quantity = 0
+    d = _response_record(d)
+    instrument_token = _response_text_or_empty(d, "instrument_token")
+    exchange = _response_text_or_empty(d, "exchange") or _exchange_of_token(instrument_token)
+    quantity = _response_number(d, "quantity")
+    filled_quantity = _response_number(d, "filled_quantity")
+    pending_quantity = _response_number(d, "pending_quantity")
+    if pending_quantity is _RESPONSE_MISSING and all(
+        value is not _RESPONSE_MISSING for value in (quantity, filled_quantity)
+    ):
+        pending_quantity = str(max(Decimal(quantity) - Decimal(filled_quantity), Decimal(0)))
+    order_type = _response_text_or_empty(d, "order_type")
+    product = _response_text_or_empty(d, "product")
     order = {
-        "orderid": str(d.get("order_id", "")),
-        "status": d.get("status", ""),
-        "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
+        "orderid": _response_text_or_empty(d, "order_id"),
+        "status": _response_text_or_empty(d, "status"),
+        "symbol": _response_text_or_empty(d, "trading_symbol", "tradingsymbol"),
         "exchange": exchange,
-        "segment": d.get("segment", ""),
-        "instrument_token": d.get("instrument_token", ""),
-        "tag": d.get("tag", ""),
-        "action": d.get("transaction_type", ""),
-        "pricetype": UPSTOX_TO_ORDER_TYPE.get(d.get("order_type", ""), d.get("order_type", "")),
-        "product": _product_from_upstox(d.get("product", ""), exchange, d.get("segment", "")),
-        "pending_quantity": str(pending_quantity),
+        "segment": _response_text_or_empty(d, "segment"),
+        "instrument_token": instrument_token,
+        "tag": _response_text_or_empty(d, "tag"),
+        "action": _response_text_or_empty(d, "transaction_type"),
+        "pricetype": UPSTOX_TO_ORDER_TYPE.get(order_type, order_type),
+        "product": _product_from_upstox(product, exchange, _response_text_or_empty(d, "segment")),
     }
+    if pending_quantity is not _RESPONSE_MISSING:
+        order["pending_quantity"] = pending_quantity
+    if instrument_token:
+        order["instrument_id"] = instrument_token
     for field in ("quantity", "filled_quantity", "price", "trigger_price", "average_price"):
         value = _present_order_number(d, field)
         if value is not None:
@@ -351,44 +459,53 @@ def from_upstox_order(d: dict[str, Any]) -> dict[str, Any]:
 
 def from_upstox_position(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise an Upstox position record."""
-    exchange = d.get("exchange", _exchange_of_token(d.get("instrument_token", "")))
-    accounting_fields = ("quantity", "overnight_quantity", "day_buy_quantity", "day_sell_quantity")
-    accounting_complete = all(field in d and d[field] is not None for field in accounting_fields)
-    if accounting_complete:
-        try:
-            accounting_matches = int(d["quantity"]) == (
-                int(d["overnight_quantity"]) + int(d["day_buy_quantity"]) - int(d["day_sell_quantity"])
-            )
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise UpstoxMappingError("Upstox position accounting is invalid") from exc
-        if not accounting_matches:
-            raise UpstoxMappingError("Upstox position accounting is inconsistent")
-    return {
-        "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
-        "instrument_id": str(d.get("instrument_token", "")),
+    d = _response_record(d)
+    instrument_token = _response_text_or_empty(d, "instrument_token")
+    exchange = _response_text_or_empty(d, "exchange") or _exchange_of_token(instrument_token)
+    quantity = _response_number(d, "quantity", required=True)
+    product = _response_text_or_empty(d, "product")
+    segment = _response_text_or_empty(d, "segment")
+    option_type = _response_text_or_empty(d, "instrument_type", "option_type").strip().upper()
+    position = {
+        "symbol": _response_text_or_empty(d, "trading_symbol", "tradingsymbol"),
         "exchange": exchange,
-        "segment": d.get("segment", ""),
-        "instrument_token": d.get("instrument_token", ""),
-        "product": _product_from_upstox(d.get("product", ""), exchange, d.get("segment", "")),
-        "quantity": str(d.get("quantity", 0)),
-        "overnight_quantity": str(d.get("overnight_quantity") or 0),
-        "day_buy_quantity": str(d.get("day_buy_quantity") or 0),
-        "day_sell_quantity": str(d.get("day_sell_quantity") or 0),
-        "_emergency_accounting_complete": accounting_complete,
-        "accounting_complete": accounting_complete,
-        "average_price": str(d.get("average_price", d.get("buy_price", 0))),
-        "ltp": str(d.get("last_price", 0)),
-        "pnl": str(d.get("pnl", 0)),
+        "segment": segment,
+        "instrument_token": instrument_token,
+        "product": _product_from_upstox(product, exchange, segment),
+        "quantity": quantity,
         "multiplier": d.get("multiplier"),
         "fx_rate": d.get("fx_rate", d.get("reference_rate")),
         "close_price": d.get("close_price"),
-        "previous_close_trusted": d.get("close_price") not in (None, "", 0, "0"),
-        "cross_currency": False,
-        "option_type": str(d.get("instrument_type") or d.get("option_type") or "").strip().upper(),
-        "expiry": str(d.get("expiry") or d.get("expiry_date") or ""),
-        "strike_price": _num(d.get("strike_price")),
-        "underlying": str(d.get("underlying") or d.get("underlying_symbol") or ""),
+        "option_type": option_type,
+        "expiry": _response_text_or_empty(d, "expiry", "expiry_date"),
+        "underlying": _response_text_or_empty(d, "underlying", "underlying_symbol"),
     }
+    if instrument_token:
+        position["instrument_id"] = instrument_token
+    for field, source_fields in {
+        "overnight_quantity": ("overnight_quantity",),
+        "day_buy_quantity": ("day_buy_quantity",),
+        "day_sell_quantity": ("day_sell_quantity",),
+        "average_price": ("average_price", "buy_price"),
+        "ltp": ("last_price",),
+        "pnl": ("pnl",),
+    }.items():
+        _put_response_number(position, field, _response_number(d, *source_fields))
+    if "strike_price" in d and d["strike_price"] is not None:
+        _response_number(d, "strike_price", required=True)
+        position["strike_price"] = d["strike_price"]
+    if "close_price" in d and d["close_price"] is not None:
+        _response_number(d, "close_price", required=True)
+        position["previous_close_trusted"] = True
+    overnight = _response_number(d, "overnight_quantity")
+    day_buy = _response_number(d, "day_buy_quantity")
+    day_sell = _response_number(d, "day_sell_quantity")
+    if all(value is not _RESPONSE_MISSING for value in (overnight, day_buy, day_sell)):
+        if Decimal(quantity) != Decimal(overnight) + Decimal(day_buy) - Decimal(day_sell):
+            raise BrokerReadResponseInvalid from None
+        position["_emergency_accounting_complete"] = True
+        position["accounting_complete"] = True
+    return position
 
 
 _TERMINAL_ORDER_STATUSES = frozenset({"cancelled", "canceled", "complete", "completed", "filled", "rejected"})
@@ -516,46 +633,59 @@ def to_emergency_reducing_payload(position: dict[str, Any], *, tag: str) -> dict
 
 def from_upstox_holding(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise an Upstox holding record."""
-    exchange = d.get("exchange", _exchange_of_token(d.get("instrument_token", "")))
-    return {
-        "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
-        "instrument_id": str(d.get("instrument_token", "")),
+    d = _response_record(d)
+    instrument_token = _response_text_or_empty(d, "instrument_token")
+    exchange = _response_text_or_empty(d, "exchange") or _exchange_of_token(instrument_token)
+    product = _response_text_or_empty(d, "product")
+    holding = {
+        "symbol": _response_text_or_empty(d, "trading_symbol", "tradingsymbol"),
         "exchange": exchange,
-        "product": _product_from_upstox(d.get("product", ""), exchange, d.get("segment", "")),
-        "quantity": str(d.get("quantity", 0)),
-        "average_price": str(d.get("average_price", 0)),
-        "ltp": str(d.get("last_price", 0)),
-        "pnl": str(d.get("pnl", 0)),
+        "product": _product_from_upstox(product, exchange, _response_text_or_empty(d, "segment")),
+        "quantity": _response_number(d, "quantity", required=True),
         "multiplier": d.get("multiplier"),
         "fx_rate": d.get("fx_rate", d.get("reference_rate")),
         "close_price": d.get("close_price"),
-        "previous_close_trusted": d.get("close_price") not in (None, "", 0, "0"),
-        "cross_currency": False,
-        "t1_quantity": str(d.get("t1_quantity") or 0),
-        "accounting_complete": d.get("quantity") is not None and bool(d.get("instrument_token")),
     }
+    if instrument_token:
+        holding["instrument_id"] = instrument_token
+    for field, source_fields in {
+        "average_price": ("average_price",),
+        "ltp": ("last_price",),
+        "pnl": ("pnl",),
+        "t1_quantity": ("t1_quantity",),
+    }.items():
+        _put_response_number(holding, field, _response_number(d, *source_fields))
+    if "close_price" in d and d["close_price"] is not None:
+        _response_number(d, "close_price", required=True)
+        holding["previous_close_trusted"] = True
+    return holding
 
 
 def from_upstox_trade(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise an Upstox trade record."""
-    return {
-        "orderid": str(d.get("order_id", "")),
-        "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
-        "instrument_id": str(d.get("instrument_token", "")),
-        "exchange": d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
-        "action": d.get("transaction_type", ""),
-        "quantity": str(d.get("quantity", 0)),
-        "price": str(d.get("average_price", d.get("price", 0))),
+    d = _response_record(d)
+    instrument_token = _response_text_or_empty(d, "instrument_token")
+    exchange = _response_text_or_empty(d, "exchange") or _exchange_of_token(instrument_token)
+    product = _response_text_or_empty(d, "product")
+    trade = {
+        "orderid": _response_text_or_empty(d, "order_id"),
+        "symbol": _response_text_or_empty(d, "trading_symbol", "tradingsymbol"),
+        "exchange": exchange,
+        "action": _response_text_or_empty(d, "transaction_type"),
+        "quantity": _response_number(d, "quantity", required=True),
+        "price": _response_number(d, "average_price", "price", required=True),
         "product": _product_from_upstox(
-            d.get("product", ""),
-            d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
-            d.get("segment", ""),
+            product,
+            exchange,
+            _response_text_or_empty(d, "segment"),
         ),
-        "timestamp": str(d.get("exchange_timestamp", d.get("order_timestamp", ""))),
+        "timestamp": _response_text_or_empty(d, "exchange_timestamp", "order_timestamp"),
         "multiplier": d.get("multiplier"),
         "fx_rate": d.get("fx_rate", d.get("reference_rate")),
-        "cross_currency": False,
     }
+    if instrument_token:
+        trade["instrument_id"] = instrument_token
+    return trade
 
 
 def from_upstox_funds(resp: dict[str, Any]) -> dict[str, Any]:
@@ -632,59 +762,124 @@ def to_history_params(req: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def from_upstox_candles(symbol: str, exchange: str, interval: str, resp: dict[str, Any]) -> dict[str, Any]:
+def from_upstox_candles(
+    symbol: str,
+    exchange: str,
+    interval: str,
+    resp: dict[str, Any],
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
     """Parse an Upstox history response into a FlintTrade ``Candles`` dict.
 
     Upstox returns ``data.candles`` as arrays ordered
     ``[timestamp, open, high, low, close, volume, open_interest]`` (newest first).
     """
-    data = resp.get("data", {}) if isinstance(resp, dict) else {}
-    rows = data.get("candles", []) if isinstance(data, dict) else []
+    if strict:
+        envelope = _response_record(resp)
+        if "data" not in envelope:
+            raise BrokerReadResponseInvalid from None
+        data = _response_record(envelope["data"])
+        if "candles" not in data or type(data["candles"]) is not list:
+            raise BrokerReadResponseInvalid from None
+        rows = data["candles"]
+    else:
+        data = resp.get("data", {}) if isinstance(resp, dict) else {}
+        rows = data.get("candles", []) if isinstance(data, dict) else []
     bars: list[dict[str, Any]] = []
     for row in rows:
-        if not isinstance(row, (list, tuple)) or len(row) < 5:
+        if not strict:
+            if not isinstance(row, (list, tuple)) or len(row) < 5:
+                continue
+            bars.append(
+                {
+                    "timestamp": str(row[0]),
+                    "open": _num(row[1]),
+                    "high": _num(row[2]),
+                    "low": _num(row[3]),
+                    "close": _num(row[4]),
+                    "volume": int(_num(row[5])) if len(row) > 5 else 0,
+                }
+            )
             continue
-        bars.append(
-            {
-                "timestamp": str(row[0]),
-                "open": _num(row[1]),
-                "high": _num(row[2]),
-                "low": _num(row[3]),
-                "close": _num(row[4]),
-                "volume": int(_num(row[5])) if len(row) > 5 else 0,
-            }
-        )
+        if type(row) is not list or len(row) < 5:
+            raise BrokerReadResponseInvalid from None
+        bar = {
+            "timestamp": _market_timestamp(row[0]),
+            "open": _market_number({"value": row[1]}, "value"),
+            "high": _market_number({"value": row[2]}, "value"),
+            "low": _market_number({"value": row[3]}, "value"),
+            "close": _market_number({"value": row[4]}, "value"),
+        }
+        if len(row) > 5:
+            bar["volume"] = _market_number({"value": row[5]}, "value", integer=True)
+        bars.append(bar)
     return {"symbol": symbol, "exchange": exchange, "interval": interval, "bars": bars}
 
 
-def from_upstox_quote(rec: dict[str, Any]) -> dict[str, Any]:
+def from_upstox_quote(rec: dict[str, Any], *, strict: bool = False) -> dict[str, Any]:
     """Parse one Upstox full-market-quote record into a FlintTrade ``Quote`` dict.
 
     The full-quote payload keys each instrument by ``"EXCHANGE_SEG:SYMBOL"`` but
     every record also carries its own ``symbol`` + ``instrument_token``, so the
     record alone is enough. Bid/ask come from the top depth level.
     """
-    ohlc = rec.get("ohlc", {}) if isinstance(rec.get("ohlc"), dict) else {}
-    depth = rec.get("depth", {}) if isinstance(rec.get("depth"), dict) else {}
-    buy = depth.get("buy", []) if isinstance(depth.get("buy"), list) else []
-    sell = depth.get("sell", []) if isinstance(depth.get("sell"), list) else []
-    bid = _num(buy[0].get("price")) if buy and isinstance(buy[0], dict) else 0.0
-    ask = _num(sell[0].get("price")) if sell and isinstance(sell[0], dict) else 0.0
-    return {
-        "symbol": rec.get("symbol", ""),
-        "exchange": _exchange_of_token(rec.get("instrument_token", "")),
-        "ltp": _num(rec.get("last_price")),
-        "open": _num(ohlc.get("open")),
-        "high": _num(ohlc.get("high")),
-        "low": _num(ohlc.get("low")),
-        "close": _num(ohlc.get("close")),
-        "volume": int(_num(rec.get("volume"))),
-        "bid": bid,
-        "ask": ask,
-        "prev_close": _num(ohlc.get("close")),
-        "previous_close_trusted": False,
-        "oi": int(_num(rec.get("oi"))),
-    }
+    if not strict:
+        ohlc = rec.get("ohlc", {}) if isinstance(rec.get("ohlc"), dict) else {}
+        depth = rec.get("depth", {}) if isinstance(rec.get("depth"), dict) else {}
+        buy = depth.get("buy", []) if isinstance(depth.get("buy"), list) else []
+        sell = depth.get("sell", []) if isinstance(depth.get("sell"), list) else []
+        bid = _num(buy[0].get("price")) if buy and isinstance(buy[0], dict) else 0.0
+        ask = _num(sell[0].get("price")) if sell and isinstance(sell[0], dict) else 0.0
+        return {
+            "symbol": rec.get("symbol", ""),
+            "exchange": _exchange_of_token(rec.get("instrument_token", "")),
+            "ltp": _num(rec.get("last_price")),
+            "open": _num(ohlc.get("open")),
+            "high": _num(ohlc.get("high")),
+            "low": _num(ohlc.get("low")),
+            "close": _num(ohlc.get("close")),
+            "volume": int(_num(rec.get("volume"))),
+            "bid": bid,
+            "ask": ask,
+            "prev_close": _num(ohlc.get("close")),
+            "previous_close_trusted": False,
+            "oi": int(_num(rec.get("oi"))),
+        }
+
+    record = _response_record(rec)
+    ohlc: dict[str, Any] = {}
+    if "ohlc" in record:
+        ohlc = _response_record(record["ohlc"])
+    depth: dict[str, Any] = {}
+    if "depth" in record:
+        depth = _response_record(record["depth"])
+    quote: dict[str, Any] = {}
+    symbol = _market_text(record, "symbol")
+    if symbol is not _RESPONSE_MISSING:
+        quote["symbol"] = symbol
+    token = _market_text(record, "instrument_token")
+    if token is not _RESPONSE_MISSING:
+        quote["exchange"] = _exchange_of_token(token)
+    _put_response_number(quote, "ltp", _market_number(record, "last_price"))
+    for name in ("open", "high", "low", "close"):
+        _put_response_number(quote, name, _market_number(ohlc, name))
+    if "close" in quote:
+        quote["prev_close"] = quote["close"]
+        quote["previous_close_trusted"] = False
+    _put_response_number(quote, "volume", _market_number(record, "volume", integer=True))
+    _put_response_number(quote, "oi", _market_number(record, "oi", integer=True))
+
+    for side, target in (("buy", "bid"), ("sell", "ask")):
+        if side not in depth:
+            continue
+        levels = depth[side]
+        if type(levels) is not list:
+            raise BrokerReadResponseInvalid from None
+        if levels:
+            level = _response_record(levels[0])
+            _put_response_number(quote, target, _market_number(level, "price"))
+    return quote
 
 
 def _upstox_depth_levels(rows: Any) -> list[dict[str, Any]]:
@@ -972,63 +1167,70 @@ def extract_gtt_order_id(resp: dict[str, Any]) -> str:
 
 def from_upstox_gtt_order(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise one Upstox ``GttOrderDetails`` record."""
-    rules = d.get("rules", []) if isinstance(d.get("rules"), list) else []
+    d = _response_record(d)
+    raw_rules = d.get("rules", [])
+    if type(raw_rules) is not list:
+        raise BrokerReadResponseInvalid from None
+    rules = [_response_record(rule) for rule in raw_rules]
     normalised_rules: list[dict[str, Any]] = []
     for rule in rules:
-        if not isinstance(rule, dict):
-            continue
         normalised_rule = {
-            "strategy": rule.get("strategy", ""),
-            "status": rule.get("status", ""),
-            "trigger_type": rule.get("trigger_type", ""),
-            "trigger_price": str(rule.get("trigger_price", 0)),
-            "transaction_type": rule.get("transaction_type", ""),
-            "order_id": str(rule.get("order_id") or ""),
+            "strategy": _response_text_or_empty(rule, "strategy"),
+            "status": _response_text_or_empty(rule, "status"),
+            "trigger_type": _response_text_or_empty(rule, "trigger_type"),
+            "transaction_type": _response_text_or_empty(rule, "transaction_type"),
+            "order_id": _response_text_or_empty(rule, "order_id"),
         }
+        _put_response_number(normalised_rule, "trigger_price", _response_number(rule, "trigger_price"))
         if rule.get("trailing_gap") not in (None, ""):
-            normalised_rule["trailing_gap"] = str(rule["trailing_gap"])
+            normalised_rule["trailing_gap"] = _response_number(rule, "trailing_gap", required=True)
         normalised_rules.append(normalised_rule)
-    rules_by_strategy = {
-        str(rule["strategy"]).upper(): rule for rule in normalised_rules
-    }
+    rules_by_strategy = {rule["strategy"].upper(): rule for rule in normalised_rules}
     entry = rules_by_strategy.get("ENTRY", {})
     stop_loss = rules_by_strategy.get("STOPLOSS", {})
     target = rules_by_strategy.get("TARGET", {})
-    raw_exchange = str(d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))))
+    instrument_token = _response_text_or_empty(d, "instrument_token")
+    raw_exchange = _response_text_or_empty(d, "exchange") or _exchange_of_token(instrument_token)
     exchange = UPSTOX_TO_EXCHANGE.get(raw_exchange, raw_exchange)
-    quantity = str(d.get("quantity", 0))
-    entry_status = str(d.get("status", entry.get("status", ""))).upper()
-    gtt_order_id = str(d.get("gtt_order_id", ""))
-    return {
+    quantity = _response_number(d, "quantity")
+    status = _response_text(d, "status")
+    entry_status = (entry.get("status", "") if status is _RESPONSE_MISSING else status).upper()
+    gtt_order_id = _response_text_or_empty(d, "gtt_order_id")
+    product = _response_text_or_empty(d, "product")
+    order = {
         "orderid": gtt_order_id,
         "gtt_order_id": gtt_order_id,
-        "type": d.get("type", ""),
-        "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
-        "instrument_token": d.get("instrument_token", ""),
+        "type": _response_text_or_empty(d, "type"),
+        "symbol": _response_text_or_empty(d, "trading_symbol", "tradingsymbol"),
+        "instrument_token": instrument_token,
         "exchange": exchange,
         "product": _product_from_upstox(
-            d.get("product", ""),
+            product,
             exchange,
             raw_exchange,
         ),
-        "quantity": quantity,
-        # OPEN GTT rows do not expose partial-fill quantity. Treating the whole
-        # quantity as filled is conservative, and OPEN modifications separately
-        # require that quantity remain unchanged.
-        "filled_quantity": quantity if entry_status == "OPEN" else "0",
         "pricetype": "LIMIT",
-        "price": entry.get("trigger_price", ""),
         "action": entry.get("transaction_type", ""),
         "status": entry_status,
         "entry_status": entry_status,
-        "trigger_price": entry.get("trigger_price", ""),
-        "stop_loss_price": stop_loss.get("trigger_price", ""),
-        "stop_loss_trailing_gap": stop_loss.get("trailing_gap", "0"),
-        "target_price": target.get("trigger_price", ""),
         "rules": normalised_rules,
-        "created_at": str(d.get("created_at", "")),
-        "expires_at": str(d.get("expires_at", "")),
+        "created_at": d.get("created_at", ""),
+        "expires_at": d.get("expires_at", ""),
     }
+    if quantity is not _RESPONSE_MISSING:
+        order["quantity"] = quantity
+    if instrument_token:
+        order["instrument_id"] = instrument_token
+    for name, value in {
+        "price": entry.get("trigger_price", _RESPONSE_MISSING),
+        "trigger_price": entry.get("trigger_price", _RESPONSE_MISSING),
+        "stop_loss_price": stop_loss.get("trigger_price", _RESPONSE_MISSING),
+        "stop_loss_trailing_gap": stop_loss.get("trailing_gap", _RESPONSE_MISSING),
+        "target_price": target.get("trigger_price", _RESPONSE_MISSING),
+    }.items():
+        if value is not _RESPONSE_MISSING:
+            order[name] = value
+    return order
 
 
 # ---------------------------------------------------------------------------
@@ -1270,31 +1472,35 @@ def from_upstox_ltp_v3(resp: dict[str, Any]) -> list[dict[str, Any]]:
 def from_upstox_option_greeks(resp: dict[str, Any]) -> list[dict[str, Any]]:
     """Parse a v3 option-Greek quote response (``MarketQuoteOptionGreekV3``)."""
 
-    if not isinstance(resp, dict) or str(resp.get("status") or "").lower() != "success":
+    if type(resp) is not dict or any(type(key) is not str for key in resp):
+        raise BrokerReadResponseInvalid from None
+    if "status" not in resp:
+        raise BrokerReadResponseInvalid from None
+    if resp["status"] != "success":
         raise UpstoxMappingError("Upstox option-Greek response was not successful")
 
     def number(record: dict[str, Any], name: str) -> float:
         value = record.get(name)
-        if value is None or isinstance(value, bool):
-            raise UpstoxMappingError(f"Upstox option-Greek response lacks {name}")
+        if value is None or type(value) is bool or type(value) not in (int, float, str):
+            raise BrokerReadResponseInvalid from None
         try:
             parsed = float(value)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise UpstoxMappingError(f"Upstox option-Greek response has invalid {name}") from exc
+        except (TypeError, ValueError, OverflowError):
+            raise BrokerReadResponseInvalid from None
         if not math.isfinite(parsed):
-            raise UpstoxMappingError(f"Upstox option-Greek response has invalid {name}")
+            raise BrokerReadResponseInvalid from None
         return parsed
 
     def count(record: dict[str, Any], name: str) -> int:
         parsed = number(record, name)
         if parsed < 0 or not parsed.is_integer():
-            raise UpstoxMappingError(f"Upstox option-Greek response has invalid {name}")
+            raise BrokerReadResponseInvalid from None
         return int(parsed)
 
     def instrument_token(record: dict[str, Any]) -> str:
         token = record.get("instrument_token")
-        if not isinstance(token, str) or not token.strip():
-            raise UpstoxMappingError("Upstox option-Greek response lacks instrument_token")
+        if type(token) is not str or not token.strip():
+            raise BrokerReadResponseInvalid from None
         return token.strip()
 
     return [
@@ -1310,8 +1516,18 @@ def from_upstox_option_greeks(resp: dict[str, Any]) -> list[dict[str, Any]]:
             "volume": count(rec, "volume"),
             "greeks_complete": True,
         }
-        for _key, rec in _quote_records(resp)
+        for _key, rec in _strict_option_greek_records(resp)
     ]
+
+
+def _strict_option_greek_records(resp: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    data = resp.get("data")
+    if type(data) is not dict or any(type(key) is not str for key in data):
+        raise BrokerReadResponseInvalid from None
+    records: list[tuple[str, dict[str, Any]]] = []
+    for key, value in data.items():
+        records.append((key, _response_record(value)))
+    return records
 
 
 def from_upstox_instrument_rows(resp: dict[str, Any]) -> list[dict[str, Any]]:

@@ -372,6 +372,29 @@ operator sees is the earliest of:
    position over 60 % of free margin.
 5. **L3 Portfolio risk** — net delta and net vega caps across the book.
 
+### Broker reads versus gated writes
+
+`BrokerReadPort` in
+`packages/core/core/src/flinttrade_core/broker_read_port.py` defines the exact
+broker-read contract. The gateway implementation and owner factory are defined in
+`packages/integrations/gateway/src/flinttrade_gateway/broker_read_service.py`.
+Application startup constructs the factory result and retains the dependency
+record in `packages/core/core/src/flinttrade_core/app.py`.
+The port is an in-process contract, not a new public HTTP family. Its methods
+are `quote`, `depth`, `historical`, `batch_quotes`, `option_chain`,
+`lot_sizes`, `balance`, `portfolio_greeks`, `positions`, `holdings`,
+`margin`, `order_states`, and `trades`. Native HTTP account and market-data
+routes (`/api/v1/native/…` kinds) currently return `409` with zero provider
+calls; migrating those consumers onto the port is Task 7C.2 / 8B. OpenAlgo
+passthrough remains the working operator-facing read surface. Exact broker
+reads in this work are the in-process port, not terminal UX. Broker-account
+mutations return `503` until Task 9D. Native broker UX stays down on `main`
+until both tasks land — that is the accepted product decision.
+
+Live **writes** still mint a `SafetyContext` through `gate_order` /
+`gate_broker_write` and dispatch through `BrokerRouter`. Read operations do
+not go through the write router.
+
 ### Mode-system state machine
 
 ```mermaid
@@ -490,9 +513,14 @@ Lives in a platform-specific workspace directory:
 - **Storage paths** — `storage.fast` (SSD) and `storage.archive` (HDD).
 - **Enabled modules** — which packages are active.
 - **UI preferences** — theme, default exchange, time zone, density.
-- **LLM config** — provider and model; the managed Ollama endpoint is owned
-  internally and is not persisted, while custom OpenAI-compatible providers
-  retain an editable host.
+- **LLM config** — provider and model from the catalogue-driven profiles in
+  `llm_provider_profiles.py` (generated into the terminal as
+  `serviceProviders.ts`). The managed Ollama endpoint is owned internally and
+  is not persisted; custom OpenAI-compatible providers retain an editable
+  host. NVIDIA NIM is in the catalogue with an intentionally blank unpinned
+  default model. Inert LLM connection records can also be stored through
+  `GET`/`POST`/`PATCH`/`DELETE` `/v1/services/connections` without invoking
+  the provider; the static provider catalogue is `GET /v1/services/providers`.
 - **Notification config** — Telegram bot settings.
 - **Order-safety settings** — rate limits, audit retention, kill-switch.
 
@@ -577,8 +605,11 @@ python scripts/ft.py clean      # remove build artefacts
 `make <target>` is the POSIX alias for each of those. A few targets are
 POSIX-only because they are bash recipes rather than `ft.py` delegators —
 `make health`, `make update`, `make full-check`, `make start-openalgo`,
-`make backup` and `make restore` among them. The Makefile header lists the full
-split.
+`make backup` and `make restore` among them. `make backup` and `make restore`
+call `infra/backup/` and currently fail closed with
+`coordinated_restore_unavailable`. Ordinary bhavcopy archives use
+`python -m scripts.backup` — see [setup/backup.md](setup/backup.md). The
+Makefile header lists the full split.
 
 OpenAlgo is an external service; it is NOT a git submodule and is NOT
 bundled. For local development, run `scripts/setup-test-deps.sh` (a bash

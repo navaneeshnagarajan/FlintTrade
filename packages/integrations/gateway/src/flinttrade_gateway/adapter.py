@@ -34,9 +34,6 @@ from .models import AuthFlowType, BrokerInfo
 
 logger = logging.getLogger("flinttrade.gateway.adapter")
 
-_REPO_ROOT = discover_source_root()
-
-
 def _resolve_openalgo_root() -> Path:
     """Return the OpenAlgo source tree path, preferring the new location.
 
@@ -46,17 +43,27 @@ def _resolve_openalgo_root() -> Path:
     back to the legacy submodule path if present, and finally return the
     new location even when nothing exists so error messages stay accurate.
     """
-    new = _REPO_ROOT / ".local" / "external" / "openalgo"
+    repo_root = discover_source_root()
+    new = repo_root / ".local" / "external" / "openalgo"
     if (new / "app.py").is_file() or (new / "broker").is_dir():
         return new
-    legacy = _REPO_ROOT / "infra" / "openalgo"
+    legacy = repo_root / "infra" / "openalgo"
     if (legacy / "app.py").is_file() or (legacy / "broker").is_dir():
         return legacy
     return new
 
 
-_OPENALGO_ROOT = _resolve_openalgo_root()
-_OPENALGO_ROOT_STR = str(_OPENALGO_ROOT)
+_OPENALGO_ROOT: Path | None = None
+_OPENALGO_ROOT_STR: str | None = None
+
+
+def _get_openalgo_root() -> Path:
+    """Resolve and cache the external OpenAlgo tree on first runtime use."""
+    global _OPENALGO_ROOT, _OPENALGO_ROOT_STR
+    if _OPENALGO_ROOT is None:
+        _OPENALGO_ROOT = _resolve_openalgo_root()
+        _OPENALGO_ROOT_STR = str(_OPENALGO_ROOT)
+    return _OPENALGO_ROOT
 
 
 def _split_exchange_symbol(raw: Any, default_exchange: str = "NSE") -> tuple[str, str]:
@@ -106,9 +113,12 @@ def _bootstrap_openalgo_imports() -> None:
     # Import shim modules from the installed flinttrade_gateway package.
     from flinttrade_gateway.shims import auth_db_shim, config_shim, logging_shim, token_db_shim
 
-    # Add OpenAlgo root so broker.<name>.* imports resolve correctly.
-    if _OPENALGO_ROOT_STR not in sys.path:
-        sys.path.insert(0, _OPENALGO_ROOT_STR)
+    # Add OpenAlgo root so broker.<name>.* imports resolve correctly. Path
+    # discovery is deliberately deferred until this runtime bootstrap; static
+    # catalogue consumers must remain import-pure.
+    openalgo_root_str = str(_get_openalgo_root())
+    if openalgo_root_str not in sys.path:
+        sys.path.insert(0, openalgo_root_str)
 
     # Patch OpenAlgo's internal modules with our shims.  setdefault ensures
     # we never overwrite a module that was already imported (idempotent).

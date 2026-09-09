@@ -25,8 +25,9 @@ connecting a broker or enabling Live mode.
   broker-gateway orchestration, sandbox data, analytics, and automation.
 - **Gateway integration** — adapter contracts, capability metadata, encrypted
   credential storage, WebSocket bridges, the community-tested
-  OpenAlgo-compatible bridge (the primary execution path until native brokers
-  are evidence-enabled), and evidence-gated native adapter paths.
+  OpenAlgo-compatible bridge (the working operator broker path on this line),
+  and evidence-gated native adapter paths whose HTTP connect and read
+  surfaces are frozen until Task 9D and Task 7C.2.
 - **Safety model** — Explore, Practice, and Live modes with server-side checks,
   audit records, and a kill-switch boundary for order-capable routes.
 - **Data and simulation** — DuckDB/Parquet storage, indicator packages,
@@ -37,11 +38,15 @@ connecting a broker or enabling Live mode.
 
 ## Supported brokers
 
-FlintTrade supports the recommended OpenAlgo-compatible bridge plus a beta
-native broker gateway. Native adapters are implemented as software integrations
-that require local credentials and live-read evidence before they are exposed as
-connectable. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current
-matrix.
+FlintTrade supports the recommended OpenAlgo-compatible bridge plus a first-party
+native broker gateway that is **not usable on this unreleased line**. Native
+adapters remain catalogued and evidence-gated (Dhan and Upstox are marked
+connectable; others stay disabled), but native HTTP mutations return `503`
+until Task 9D and native HTTP account and market-data reads return `409`
+until Task 7C.2. Catalogue and vault-backed account-list GETs stay
+metadata only. Use OpenAlgo for a working broker session. Setup → Brokers
+and Settings → Brokers will fail rather than connect. See
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current matrix.
 
 ## Supported versions
 
@@ -228,9 +233,11 @@ in release CI when its complete Apple secret sets are configured. See
 [docs/DESKTOP.md](docs/DESKTOP.md) for the source-bootstrap,
 update, install and uninstall contracts.
 
-> OpenAlgo is optional. Configure it from the app only if you want the
-> OpenAlgo-compatible integration path; FlintTrade's native gateway and sandbox
-> do not require a separate OpenAlgo process.
+> OpenAlgo is the working operator broker path. Configure it from Setup →
+> OpenAlgo Bridge or Settings → Broker Gateway when you want a live broker
+> session. FlintTrade's sandbox and backend do not require OpenAlgo.
+> Native broker HTTP is frozen until Task 9D and Task 7C.2 — Setup → Brokers
+> and Settings → Brokers will fail rather than start a native session.
 
 ### Run from source (contributors)
 
@@ -332,8 +339,8 @@ flowchart LR
 ```
 
 FlintTrade runs its own backend, native sandbox, and broker gateway contract.
-OpenAlgo remains an optional external integration for users who already rely on
-its broker gateway.
+OpenAlgo remains the working operator broker path. Native HTTP connect and
+reads are frozen until Task 9D and Task 7C.2.
 
 ### Package map
 

@@ -36,6 +36,12 @@ from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 from urllib.parse import urlencode
 
+from flinttrade_core.broker_read_port import (
+    BalanceEvidence,
+    BalanceSnapshot,
+    BrokerBalanceResponseInvalid,
+    BrokerReadResponseInvalid,
+)
 from flinttrade_core.exceptions import BrokerError, UnsupportedCapabilityError
 from flinttrade_engine.safety import EmergencyBrokerWrite, EmergencyReductionPlan, EmergencyWritePolicy
 from flinttrade_gateway.capabilities import (
@@ -75,6 +81,55 @@ _SAFETY_TERMINAL_ORDER_STATUSES = frozenset(
         "TRADED",
     }
 )
+_SAFETY_FOREVER_PRE_TRIGGER_STATUSES = frozenset(
+    {"CONFIRM", "PENDING", "SCHEDULED", "TRIGGER PENDING", "TRIGGER_PENDING"}
+)
+
+
+def _balance_number(value: object) -> float:
+    if isinstance(value, bool) or type(value) not in (int, float, str) or (type(value) is str and not value.strip()):
+        raise BrokerBalanceResponseInvalid
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise BrokerBalanceResponseInvalid from None
+    if not math.isfinite(number):
+        raise BrokerBalanceResponseInvalid
+    return number
+
+
+def _balance_record(value: object) -> dict[str, object]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerBalanceResponseInvalid
+    return value
+
+
+def _balance_snapshot_from_dhan(response: object) -> BalanceSnapshot:
+    response = _balance_record(response)
+    status = response.get("status")
+    if status is not None:
+        if type(status) is not str:
+            raise BrokerBalanceResponseInvalid
+        if status == "failure":
+            raise BrokerError("Dhan funds request failed", broker_id="dhan")
+    data = response["data"] if "data" in response else response
+    data = _balance_record(data)
+
+    def selected(*names: str) -> float | None:
+        for name in names:
+            if name in data:
+                return _balance_number(data[name])
+        return None
+
+    available = selected("availabelBalance", "availableBalance")
+    used = selected("utilizedAmount")
+    sod = selected("sodLimit")
+    return BalanceSnapshot(
+        available, BalanceEvidence.DIRECT if available is not None else None,
+        used, BalanceEvidence.DIRECT if used is not None else None,
+        sod, BalanceEvidence.DIRECT if sod is not None else None,
+        sod, BalanceEvidence.DIRECT if sod is not None else None,
+    )
 _SAFETY_SUPER_NO_CHILD_STATUSES = frozenset({"CANCELED", "CANCELLED", "EXPIRED", "REJECTED"})
 _SAFETY_SUPER_ENTRY_TERMINAL_STATUSES = _SAFETY_TERMINAL_ORDER_STATUSES | {"TRIGGERED"}
 _SAFETY_CONDITIONAL_TERMINAL_STATUSES = frozenset(
@@ -177,7 +232,25 @@ def _download_text(url: str) -> str:
 
 
 def _optional_safety_text(value: Any) -> str:
-    return "" if value in (None, "") else str(value)
+    if value is None or (type(value) is str and not value):
+        return ""
+    if type(value) is not str:
+        raise M.DhanMappingError("Active Dhan text evidence is invalid")
+    return value
+
+
+def _optional_safety_number(value: Any, *, field: str) -> str | None:
+    if value is None or (type(value) is str and not value.strip()):
+        return None
+    if type(value) is bool or type(value) not in (int, float, str):
+        raise M.DhanMappingError(f"Active Dhan {field} is invalid")
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise M.DhanMappingError(f"Active Dhan {field} is invalid") from exc
+    if not number.is_finite():
+        raise M.DhanMappingError(f"Active Dhan {field} is invalid")
+    return str(value)
 
 
 def load_scrip_master_rows(mode: str = "compact", *, downloader: Callable[[str], str] | None = None) -> list[dict]:
@@ -695,8 +768,8 @@ class DhanAdapter(BrokerAdapter):
     async def forever_orders(self, session: Session) -> list[dict]:
         """List all resting forever (GTT) orders (``GET /forever/orders``) — a read."""
         resp = await self._call(self._client(session).get_forever)
-        rows = M.unwrap(resp) or []
-        return [M.from_dhan_forever_order(r) for r in rows if isinstance(r, dict)]
+        rows = self._strict_response_rows(resp)
+        return [M.from_dhan_forever_order(row) for row in rows]
 
     # ---------- trading: super-order management (router-only writes) ----------
 
@@ -731,8 +804,8 @@ class DhanAdapter(BrokerAdapter):
     async def super_orders(self, session: Session) -> list[dict]:
         """List all super orders with nested leg details (``GET /super/orders``) — a read."""
         resp = await self._call(self._client(session).get_super_order_list)
-        rows = M.unwrap(resp) or []
-        return [M.from_dhan_super_order(r) for r in rows if isinstance(r, dict)]
+        rows = self._strict_response_rows(resp)
+        return [M.from_dhan_super_order(row) for row in rows]
 
     # ---------- trading: conditional triggers (v2.5; router-only writes) ----------
 
@@ -840,7 +913,11 @@ class DhanAdapter(BrokerAdapter):
     async def _active_positions(self, session: Session) -> dict[str, dict]:
         """Return non-zero positions keyed without including account-sensitive data."""
         targets: dict[str, dict] = {}
-        for position in await self.positions(session):
+        try:
+            positions = await self.positions(session)
+        except BrokerReadResponseInvalid:
+            return {"UNKNOWN:UNKNOWN:UNKNOWN": {}}
+        for position in positions:
             if not isinstance(position, dict):
                 continue
             quantity = position.get("quantity", "")
@@ -1017,9 +1094,10 @@ class DhanAdapter(BrokerAdapter):
         product: Any,
         quantity: Any,
         filled_quantity: Any = None,
-        pricetype: Any = "MARKET",
-        price: Any = 0,
-        trigger_price: Any = 0,
+        pricetype: Any = None,
+        price: Any = None,
+        trigger_price: Any = None,
+        disclosed_quantity: Any = None,
         instrument_id: Any = "",
         option_type: Any = "",
         expiry: Any = "",
@@ -1046,25 +1124,47 @@ class DhanAdapter(BrokerAdapter):
         if canonical_product not in M.PRODUCT_MAP:
             raise M.DhanMappingError(f"Active Dhan {family} row has an invalid product")
         canonical_quantity = self._safety_quantity(quantity, field=f"{family} quantity")
-        raw_filled = _optional_safety_text(filled_quantity)
-        terminal_fill_unknown = not raw_filled and (
-            canonical_status in _SAFETY_TERMINAL_ORDER_STATUSES
-            or (
-                family == "conditional"
-                and canonical_status in _SAFETY_CONDITIONAL_TERMINAL_STATUSES
-            )
+        raw_filled = _optional_safety_number(
+            filled_quantity,
+            field=f"{family} filled quantity",
         )
         canonical_filled = (
             None
-            if terminal_fill_unknown
+            if raw_filled is None
             else self._safety_quantity(
-                filled_quantity,
+                raw_filled,
                 field=f"{family} filled quantity",
                 allow_zero=True,
             )
         )
+        if (
+            canonical_filled is None
+            and family != "conditional"
+            and canonical_status not in _SAFETY_TERMINAL_ORDER_STATUSES
+            and not (
+                family == "forever"
+                and canonical_status in _SAFETY_FOREVER_PRE_TRIGGER_STATUSES
+            )
+        ):
+            raise M.DhanMappingError(f"Active Dhan {family} row lacks filled quantity")
         if canonical_filled is not None and canonical_filled > canonical_quantity:
             raise M.DhanMappingError(f"Active Dhan {family} row has inconsistent filled quantity")
+        raw_pricetype = _optional_safety_text(pricetype).strip().upper()
+        canonical_pricetype = M.DHAN_TO_ORDER_TYPE.get(raw_pricetype, raw_pricetype)
+        if canonical_pricetype not in {"MARKET", "LIMIT", "SL", "SL-M"}:
+            raise M.DhanMappingError(f"Active Dhan {family} row has an invalid price type")
+        canonical_disclosed = _optional_safety_number(
+            disclosed_quantity,
+            field=f"{family} disclosed quantity",
+        )
+        if canonical_disclosed is not None:
+            disclosed_decimal = Decimal(canonical_disclosed)
+            if (
+                disclosed_decimal < 0
+                or disclosed_decimal != disclosed_decimal.to_integral_value()
+                or disclosed_decimal > canonical_quantity
+            ):
+                raise M.DhanMappingError(f"Active Dhan {family} disclosed quantity is invalid")
         canonical_instrument_id = str(instrument_id or "").strip()
         option_identity = self._safety_option_identity(
             symbol=canonical_symbol,
@@ -1088,13 +1188,7 @@ class DhanAdapter(BrokerAdapter):
             "action": canonical_action,
             "product": canonical_product,
             "quantity": str(canonical_quantity),
-            "filled_quantity": "" if canonical_filled is None else str(canonical_filled),
-            "pricetype": M.DHAN_TO_ORDER_TYPE.get(
-                str(pricetype or "MARKET").strip().upper(),
-                str(pricetype or "MARKET").strip().upper(),
-            ),
-            "price": str(price or 0),
-            "trigger_price": str(trigger_price or 0),
+            "pricetype": canonical_pricetype,
             "option_type": option_identity[0],
             "expiry": option_identity[1],
             "strike_price": option_identity[2],
@@ -1103,6 +1197,14 @@ class DhanAdapter(BrokerAdapter):
             "exchange_order_id": str(exchange_order_id or "").strip(),
             "parent_order_id": str(parent_order_id or "").strip(),
         }
+        if canonical_filled is not None:
+            row["filled_quantity"] = str(canonical_filled)
+        if canonical_disclosed is not None:
+            row["disclosed_quantity"] = canonical_disclosed
+        for name, value in (("price", price), ("trigger_price", trigger_price)):
+            number = _optional_safety_number(value, field=f"{family} {name}")
+            if number is not None:
+                row[name] = number
         if margin_unfunded:
             row["margin_unfunded"] = True
         return row
@@ -1121,7 +1223,7 @@ class DhanAdapter(BrokerAdapter):
             # reserved fast fill can settle after positions propagate. Dhan
             # may omit descriptive fields on old terminal records; retain the
             # raw values and fail closed if they cannot prove a matched intent.
-            terminal = {
+            terminal: dict[str, Any] = {
                 "orderid": order_id,
                 "safety_order_id": f"{family}:{order_id}",
                 "broker_order_id": order_id,
@@ -1133,12 +1235,12 @@ class DhanAdapter(BrokerAdapter):
                 "exchange": str(row.get("exchange") or "").strip().upper(),
                 "action": str(row.get("action") or "").strip().upper(),
                 "product": str(row.get("product") or "").strip().upper(),
-                "quantity": str(row.get("quantity") or ""),
-                "filled_quantity": _optional_safety_text(row.get("filled_quantity")),
                 "pricetype": str(row.get("pricetype") or "").strip().upper(),
-                "price": str(row.get("price") or 0),
-                "trigger_price": str(row.get("trigger_price") or 0),
             }
+            for name in ("quantity", "filled_quantity", "price", "trigger_price", "disclosed_quantity"):
+                number = _optional_safety_number(row.get(name), field=f"{family} {name}")
+                if number is not None:
+                    terminal[name] = number
             if margin_unfunded:
                 terminal["margin_unfunded"] = True
             return terminal
@@ -1156,6 +1258,7 @@ class DhanAdapter(BrokerAdapter):
             pricetype=row.get("pricetype"),
             price=row.get("price"),
             trigger_price=row.get("trigger_price"),
+            disclosed_quantity=row.get("disclosed_quantity"),
             instrument_id=row.get("instrument_id"),
             option_type=row.get("option_type"),
             expiry=row.get("expiry"),
@@ -1170,7 +1273,7 @@ class DhanAdapter(BrokerAdapter):
         status = self._safety_status(row.get("status"), family="forever")
         order_id = self._safety_id(row.get("orderid"), field="forever order id")
         if status in _SAFETY_TERMINAL_ORDER_STATUSES:
-            return [{
+            terminal: dict[str, Any] = {
                 "orderid": order_id,
                 "safety_order_id": f"forever:{order_id}",
                 "broker_order_id": order_id,
@@ -1182,14 +1285,15 @@ class DhanAdapter(BrokerAdapter):
                 "exchange": str(row.get("exchange") or "").strip().upper(),
                 "action": str(row.get("action") or "").strip().upper(),
                 "product": str(row.get("product") or "").strip().upper(),
-                "quantity": str(row.get("quantity") or ""),
-                "filled_quantity": _optional_safety_text(row.get("filled_quantity")),
                 "pricetype": str(row.get("pricetype") or "").strip().upper(),
-                "price": str(row.get("price") or 0),
-                "trigger_price": str(row.get("trigger_price") or 0),
                 "parent_order_id": order_id,
                 "margin_unfunded": True,
-            }]
+            }
+            for name in ("quantity", "filled_quantity", "price", "trigger_price", "disclosed_quantity"):
+                number = _optional_safety_number(row.get(name), field=f"forever {name}")
+                if number is not None:
+                    terminal[name] = number
+            return [terminal]
         order_flag = str(row.get("order_flag") or "").strip().upper()
         if order_flag not in M.FOREVER_ORDER_FLAGS:
             raise M.DhanMappingError("Active Dhan forever row has an invalid order flag")
@@ -1218,6 +1322,7 @@ class DhanAdapter(BrokerAdapter):
                 filled_quantity=row.get("filled_quantity"),
                 price=row.get("price"),
                 trigger_price=row.get("trigger_price"),
+                disclosed_quantity=row.get("disclosed_quantity"),
                 leg_name="TARGET_LEG",
                 exchange_order_id=row.get("exchange_order_id"),
             )
@@ -1234,7 +1339,7 @@ class DhanAdapter(BrokerAdapter):
                 **common,
                 order_id=f"{order_id}:STOP_LOSS_LEG",
                 quantity=row.get("quantity1"),
-                filled_quantity=0,
+                filled_quantity=None,
                 price=row.get("price1"),
                 trigger_price=row.get("trigger_price1"),
                 leg_name="STOP_LOSS_LEG",
@@ -1248,7 +1353,7 @@ class DhanAdapter(BrokerAdapter):
         legs = row.get("legs")
         if row.get("leg_details_valid") is not True or not isinstance(legs, list):
             if status in _SAFETY_TERMINAL_ORDER_STATUSES:
-                return [{
+                terminal: dict[str, Any] = {
                     "orderid": parent_order_id,
                     "safety_order_id": f"super:{parent_order_id}",
                     "broker_order_id": parent_order_id,
@@ -1260,15 +1365,16 @@ class DhanAdapter(BrokerAdapter):
                     "exchange": str(row.get("exchange") or "").strip().upper(),
                     "action": str(row.get("action") or "").strip().upper(),
                     "product": str(row.get("product") or "").strip().upper(),
-                    "quantity": str(row.get("quantity") or ""),
-                    "filled_quantity": _optional_safety_text(row.get("filled_quantity")),
                     "pricetype": str(row.get("pricetype") or "").strip().upper(),
-                    "price": str(row.get("price") or 0),
-                    "trigger_price": str(row.get("trigger_price") or 0),
                     "leg_name": "ENTRY_LEG",
                     "parent_order_id": parent_order_id,
                     "margin_unfunded": True,
-                }]
+                }
+                for name in ("quantity", "filled_quantity", "price", "trigger_price"):
+                    number = _optional_safety_number(row.get(name), field=f"super {name}")
+                    if number is not None:
+                        terminal[name] = number
+                return [terminal]
             raise M.DhanMappingError("Active Dhan super row has incomplete leg details")
         parent_action = str(row.get("action") or "").strip().upper()
         if parent_action not in {"BUY", "SELL"}:
@@ -1324,8 +1430,8 @@ class DhanAdapter(BrokerAdapter):
                     quantity=leg.get("quantity"),
                     filled_quantity=leg.get("filledQty", leg.get("tradedQty")),
                     pricetype=leg.get("orderType", row.get("pricetype")),
-                    price=leg.get("price", 0),
-                    trigger_price=leg.get("triggerPrice", 0),
+                    price=leg.get("price"),
+                    trigger_price=leg.get("triggerPrice"),
                     leg_name=leg_name,
                     exchange_order_id=leg.get("exchangeOrderId"),
                 )
@@ -1336,27 +1442,26 @@ class DhanAdapter(BrokerAdapter):
         status = self._safety_status(row.get("status"), family="conditional")
         alert_id = self._safety_id(row.get("alert_id"), field="conditional alert id")
         if row.get("orders_valid") is not True:
-            if status in _SAFETY_CONDITIONAL_TERMINAL_STATUSES:
-                return [{
-                    "orderid": alert_id,
-                    "safety_order_id": f"conditional:{alert_id}",
-                    "broker_order_id": alert_id,
-                    "raw_broker_order_id": alert_id,
-                    "order_family": "conditional",
-                    "status": status,
-                    "symbol": "",
-                    "exchange": "",
-                    "action": "",
-                    "product": "",
-                    "quantity": "",
-                    "filled_quantity": "",
-                    "parent_order_id": alert_id,
-                    "margin_unfunded": True,
-                }]
             raise M.DhanMappingError("Active Dhan conditional trigger has malformed order legs")
         order_legs = row.get("orders")
         if not isinstance(order_legs, list) or not order_legs:
             raise M.DhanMappingError("Active Dhan conditional trigger has no order legs")
+        if status in _SAFETY_CONDITIONAL_TERMINAL_STATUSES:
+            return [{
+                "orderid": alert_id,
+                "safety_order_id": f"conditional:{alert_id}",
+                "broker_order_id": alert_id,
+                "raw_broker_order_id": alert_id,
+                "order_family": "conditional",
+                "status": status,
+                "symbol": "",
+                "exchange": "",
+                "action": "",
+                "product": "",
+                "pricetype": "",
+                "parent_order_id": alert_id,
+                "margin_unfunded": True,
+            }]
         rows: list[dict[str, Any]] = []
         for index, leg in enumerate(order_legs):
             security_id = self._safety_id(leg.get("securityId"), field="conditional security id")
@@ -1379,14 +1484,10 @@ class DhanAdapter(BrokerAdapter):
                     action=leg.get("transactionType"),
                     product=product,
                     quantity=leg.get("quantity"),
-                    filled_quantity=(
-                        None
-                        if status in _SAFETY_CONDITIONAL_TERMINAL_STATUSES
-                        else 0
-                    ),
+                    filled_quantity=None,
                     pricetype=M.DHAN_TO_ORDER_TYPE.get(order_type, order_type),
-                    price=leg.get("price", 0),
-                    trigger_price=leg.get("triggerPrice", 0),
+                    price=leg.get("price"),
+                    trigger_price=leg.get("triggerPrice"),
                     instrument_id=security_id,
                     option_type=identity.get("option_type"),
                     expiry=identity.get("expiry"),
@@ -1467,15 +1568,21 @@ class DhanAdapter(BrokerAdapter):
                 candidate_active = candidate["status"] not in _SAFETY_TERMINAL_ORDER_STATUSES
                 regular_active = regular["status"] not in _SAFETY_TERMINAL_ORDER_STATUSES
                 candidate["quantity"] = str(max(candidate_quantity, regular_quantity))
-                candidate_fill_text = _optional_safety_text(candidate["filled_quantity"])
-                regular_fill_text = _optional_safety_text(regular["filled_quantity"])
+                candidate_fill_text = _optional_safety_text(candidate.get("filled_quantity"))
+                regular_fill_text = _optional_safety_text(regular.get("filled_quantity"))
                 if candidate_active and not regular_active:
-                    candidate["filled_quantity"] = candidate_fill_text
+                    if candidate_fill_text:
+                        candidate["filled_quantity"] = candidate_fill_text
+                    else:
+                        candidate.pop("filled_quantity", None)
                 elif regular_active and not candidate_active:
                     candidate["status"] = regular["status"]
-                    candidate["filled_quantity"] = regular_fill_text
+                    if regular_fill_text:
+                        candidate["filled_quantity"] = regular_fill_text
+                    else:
+                        candidate.pop("filled_quantity", None)
                 elif not candidate_fill_text or not regular_fill_text:
-                    candidate["filled_quantity"] = ""
+                    candidate.pop("filled_quantity", None)
                 else:
                     candidate_filled = self._safety_quantity(
                         candidate["filled_quantity"],
@@ -1516,10 +1623,36 @@ class DhanAdapter(BrokerAdapter):
 
     @staticmethod
     def _strict_safety_source(resp: Any, *, family: str) -> list[dict[str, Any]]:
-        rows = M.unwrap(resp)
-        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
-            raise M.DhanMappingError(f"Dhan {family} safety book returned malformed rows")
+        del family
+        if type(resp) is not dict or any(type(key) is not str for key in resp):
+            raise BrokerReadResponseInvalid from None
+        status = resp.get("status")
+        if type(status) is not str or not status:
+            raise BrokerReadResponseInvalid from None
+        if status != "success":
+            M.unwrap(resp)
+            raise M.DhanMappingError("Dhan fixed read response was not successful")
+        rows = resp.get("data")
+        if (
+            type(rows) is not list
+            or any(type(row) is not dict or any(type(key) is not str for key in row) for row in rows)
+        ):
+            raise BrokerReadResponseInvalid from None
         return rows
+
+    @staticmethod
+    def _strict_response_rows(resp: Any) -> list[dict[str, Any]]:
+        return DhanAdapter._strict_safety_source(resp, family="fixed read")
+
+    @staticmethod
+    def _safety_projection(fn: Callable[..., Any], *args: Any) -> Any:
+        """Classify safety-horizon projection defects as malformed responses."""
+        try:
+            return fn(*args)
+        except BrokerReadResponseInvalid:
+            raise
+        except M.DhanMappingError as exc:
+            raise BrokerReadResponseInvalid from exc
 
     async def safety_order_book(self, session: Session) -> list[dict[str, Any]]:
         """Return the complete fail-closed Dhan order horizon for admission.
@@ -1530,28 +1663,28 @@ class DhanAdapter(BrokerAdapter):
         """
         client = self._client(session)
         regular_source = [
-            M.from_dhan_order(row)
+            self._safety_projection(M.from_dhan_order, row)
             for row in self._strict_safety_source(
                 await self._call(client.get_order_list),
                 family="regular",
             )
         ]
         forever_source = [
-            M.from_dhan_forever_order(row)
+            self._safety_projection(M.from_dhan_forever_order, row)
             for row in self._strict_safety_source(
                 await self._call(client.get_forever),
                 family="forever",
             )
         ]
         super_source = [
-            M.from_dhan_super_order(row)
+            self._safety_projection(M.from_dhan_super_order, row)
             for row in self._strict_safety_source(
                 await self._call(client.get_super_order_list),
                 family="super",
             )
         ]
         conditional_source = [
-            M.from_dhan_conditional_trigger(row)
+            self._safety_projection(M.from_dhan_conditional_trigger, row)
             for row in self._strict_safety_source(
                 await self._call(self._http(session).get, M.CONDITIONAL_TRIGGER_ENDPOINT),
                 family="conditional",
@@ -1562,41 +1695,41 @@ class DhanAdapter(BrokerAdapter):
             safety_row
             for row in regular_source
             if isinstance(row, dict)
-            if (safety_row := self._regular_safety_row(row)) is not None
+            if (safety_row := self._safety_projection(self._regular_safety_row, row)) is not None
         ]
         forever_rows = [
             safety_row
             for row in forever_source
             if isinstance(row, dict)
-            for safety_row in self._forever_safety_rows(row)
+            for safety_row in self._safety_projection(self._forever_safety_rows, row)
         ]
         super_rows = [
             safety_row
             for row in super_source
             if isinstance(row, dict)
-            for safety_row in self._super_safety_rows(row)
+            for safety_row in self._safety_projection(self._super_safety_rows, row)
         ]
         conditional_rows = [
             safety_row
             for row in conditional_source
             if isinstance(row, dict)
-            for safety_row in self._conditional_safety_rows(row)
+            for safety_row in self._safety_projection(self._conditional_safety_rows, row)
         ]
         rows = [
-            *self._merge_regular_super_rows(regular_rows, super_rows, super_source),
+            *self._safety_projection(self._merge_regular_super_rows, regular_rows, super_rows, super_source),
             *forever_rows,
             *conditional_rows,
         ]
         order_ids = [str(row["orderid"]) for row in rows]
         safety_ids = [str(row["safety_order_id"]) for row in rows]
         if len(set(order_ids)) != len(order_ids) or len(set(safety_ids)) != len(safety_ids):
-            raise M.DhanMappingError("Dhan safety order horizon contains duplicate identities")
+            raise BrokerReadResponseInvalid from None
         return sorted(rows, key=lambda row: str(row["safety_order_id"]))
 
     async def order_book(self, session: Session) -> list[Order]:
         resp = await self._call(self._client(session).get_order_list)
-        rows = M.unwrap(resp) or []
-        return [M.from_dhan_order(r) for r in rows]  # type: ignore[misc]
+        rows = self._strict_response_rows(resp)
+        return [M.from_dhan_order(row) for row in rows]  # type: ignore[misc]
 
     async def get_order_by_id(self, session: Session, order_id: str) -> dict:
         """Fetch one order's current status by Dhan order id (``GET /orders/{id}``)."""
@@ -1616,27 +1749,26 @@ class DhanAdapter(BrokerAdapter):
 
     async def trade_book(self, session: Session) -> list[Trade]:
         resp = await self._call(self._client(session).get_trade_book)
-        rows = M.unwrap(resp) or []
-        return [M.from_dhan_trade(r) for r in rows]  # type: ignore[misc]
+        rows = self._strict_response_rows(resp)
+        return [M.from_dhan_trade(row) for row in rows]  # type: ignore[misc]
 
     async def positions(self, session: Session) -> list[Position]:
         resp = await self._call(self._client(session).get_positions)
-        rows = M.unwrap(resp) or []
-        return [M.from_dhan_position(r) for r in rows]  # type: ignore[misc]
+        rows = self._strict_response_rows(resp)
+        return [M.from_dhan_position(row) for row in rows]  # type: ignore[misc]
 
     async def holdings(self, session: Session) -> list[dict]:
         resp = await self._call(self._client(session).get_holdings)
-        try:
-            rows = M.unwrap(resp) or []
-        except M.DhanMappingError as exc:
-            if "no holdings available" in str(exc).lower():
-                return []
-            raise
-        return [M.from_dhan_holding(r) for r in rows]
+        rows = self._strict_response_rows(resp)
+        return [M.from_dhan_holding(row) for row in rows]
 
     async def funds(self, session: Session) -> dict:
         resp = await self._call(self._client(session).get_fund_limits)
         return M.from_dhan_funds(resp)
+
+    async def balance_snapshot(self, session: Session) -> BalanceSnapshot:
+        """Read the existing fund-limit endpoint while preserving evidence."""
+        return _balance_snapshot_from_dhan(await self._call(self._client(session).get_fund_limits))
 
     # ---------- market data: rest ----------
 
@@ -1659,7 +1791,7 @@ class DhanAdapter(BrokerAdapter):
         for name, exchange, segment, sec_id in resolved:
             rec = M.quote_from_feed(segment, sec_id, resp)
             if rec is not None:
-                out.append(Quote(**M.from_dhan_quote(name, exchange, rec)))
+                out.append(Quote(**M.from_dhan_quote(name, exchange, rec, strict=True)))
         return out
 
     async def ltp(self, session: Session, symbols: list[str]) -> dict[str, float]:
@@ -1731,7 +1863,7 @@ class DhanAdapter(BrokerAdapter):
             resp = await self._call(
                 client.intraday_minute_data, security_id, segment, instrument, from_date, to_date, minutes
             )
-        cd = M.to_candles_dict(symbol, exchange, interval, resp)
+        cd = M.to_candles_dict(symbol, exchange, interval, resp, strict=True)
         return Candles(
             symbol=cd["symbol"],
             exchange=cd["exchange"],
@@ -1767,6 +1899,8 @@ class DhanAdapter(BrokerAdapter):
                     spot_price=oc["spot_price"],
                     strikes=[OptionChainStrike(**s) for s in oc["strikes"]],
                 )
+            except BrokerReadResponseInvalid:
+                raise
             except BrokerError:
                 raise
             except Exception as exc:  # noqa: BLE001 - enforce the BrokerAdapter exception boundary
@@ -1863,24 +1997,31 @@ class DhanAdapter(BrokerAdapter):
             )
             side = "ce" if option_type == "CE" else "pe"
             if strike is None:
-                raise BrokerError("Dhan option-chain response lacks complete Greek values")
-            chain_instrument_id = str(getattr(strike, f"{side}_instrument_id") or "").strip()
+                raise BrokerReadResponseInvalid from None
+            chain_instrument_id = getattr(strike, f"{side}_instrument_id")
+            if type(chain_instrument_id) is not str:
+                raise BrokerReadResponseInvalid from None
+            chain_instrument_id = chain_instrument_id.strip()
             if not chain_instrument_id or chain_instrument_id != instrument_id:
-                raise BrokerError("Dhan option-chain response conflicts with the option security identity")
+                raise BrokerReadResponseInvalid from None
             if not getattr(strike, f"{side}_greeks_complete"):
-                raise BrokerError("Dhan option-chain response lacks complete Greek values")
-            delta = float(getattr(strike, f"{side}_delta"))
-            gamma = float(getattr(strike, f"{side}_gamma"))
-            theta = float(getattr(strike, f"{side}_theta"))
-            vega = float(getattr(strike, f"{side}_vega"))
-            iv = float(getattr(strike, f"{side}_iv"))
-            if not all(math.isfinite(value) for value in (delta, gamma, theta, vega, iv)):
-                raise BrokerError("Dhan option-chain response contains non-finite Greeks")
+                raise BrokerReadResponseInvalid from None
+            try:
+                delta = float(getattr(strike, f"{side}_delta"))
+                gamma = float(getattr(strike, f"{side}_gamma"))
+                theta = float(getattr(strike, f"{side}_theta"))
+                vega = float(getattr(strike, f"{side}_vega"))
+                iv = float(getattr(strike, f"{side}_iv"))
+                ltp = float(getattr(strike, f"{side}_ltp"))
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise BrokerReadResponseInvalid from exc
+            if not all(math.isfinite(value) for value in (delta, gamma, theta, vega, iv, ltp)):
+                raise BrokerReadResponseInvalid from None
             row = {
                 "symbol": symbol,
                 "instrument_id": instrument_id,
                 "exchange": exchange,
-                "ltp": float(getattr(strike, f"{side}_ltp")),
+                "ltp": ltp,
                 "iv": iv,
                 "delta": delta,
                 "gamma": gamma,
@@ -1889,7 +2030,9 @@ class DhanAdapter(BrokerAdapter):
             }
             oi = getattr(strike, f"{side}_oi")
             if oi is not None:
-                row["oi"] = int(oi)
+                if type(oi) is not int or oi < 0:
+                    raise BrokerReadResponseInvalid from None
+                row["oi"] = oi
             rows.append(row)
         return rows
 

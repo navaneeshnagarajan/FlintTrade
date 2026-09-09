@@ -179,12 +179,16 @@ async def test_stop_hook_timeout_is_bounded_and_blocks_restart_until_retry() -> 
     strategy = _TestStrategy()
     runner = _runner(strategy, lifecycle_timeout=0.02)
     release_stop = asyncio.Event()
+    original_start = strategy.start
     original_stop = strategy.stop
 
     async def delayed_stop() -> None:
         await release_stop.wait()
         original_stop()
 
+    # Keep this stop-timeout regression independent of CI thread-pool
+    # scheduling; synchronous-hook offloading has its own focused coverage.
+    strategy.start = AsyncMock(side_effect=original_start)
     strategy.stop = AsyncMock(side_effect=delayed_stop)
     await runner.start()
 

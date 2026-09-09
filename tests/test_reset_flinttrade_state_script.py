@@ -96,17 +96,13 @@ def test_reset_expands_a_literal_tilde_workspace_override(tmp_path: Path, variab
 
     result = _run(tmp_path, repo, home, **{variable: "~/custom-workspace"})
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert not (workspace / "credentials.db").exists(), (
-        f"{variable}='~/custom-workspace' left the real workspace untouched"
-    )
-    assert workspace.is_dir(), "the reset must leave an empty workspace behind for the backend"
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "coordinated_restore_unavailable" in result.stderr
+    assert (workspace / "credentials.db").read_text() == "encrypted-broker-credentials"
     assert not (repo / "~").exists() and not (home / "~").exists(), (
         "the literal tilde was treated as a directory name, so the wrong tree was wiped"
     )
-    assert str(workspace) in result.stdout, "the reported path must be the expanded workspace"
-    archived = list((repo / ".local" / "archive").glob("flinttrade-state-*/credentials.db"))
-    assert archived, "the workspace was wiped without archiving its contents first"
+    assert not (repo / ".local" / "archive").exists()
 
 
 @pytest.mark.unit
@@ -123,9 +119,10 @@ def test_reset_makes_a_relative_workspace_override_absolute(tmp_path: Path) -> N
 
     result = _run(tmp_path, repo, home, FLINTTRADE_WORKSPACE_DIR="relative-workspace")
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert not (workspace / "credentials.db").exists()
-    assert str(workspace) in result.stdout, "a relative override must be reported as an absolute path"
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "coordinated_restore_unavailable" in result.stderr
+    assert (workspace / "credentials.db").read_text() == "x"
+    assert not (repo / ".local" / "archive").exists()
 
 
 @pytest.mark.unit
@@ -144,5 +141,5 @@ def test_reset_refuses_to_wipe_the_whole_home_directory(tmp_path: Path, override
     result = _run(tmp_path, repo, home, FLINTTRADE_WORKSPACE_DIR=value)
 
     assert result.returncode != 0, result.stdout + result.stderr
-    assert "not a FlintTrade workspace directory" in result.stderr
+    assert "coordinated_restore_unavailable" in result.stderr
     assert keepsake.exists(), "the reset deleted the home directory it was pointed at"

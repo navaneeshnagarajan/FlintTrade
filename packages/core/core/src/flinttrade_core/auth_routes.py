@@ -15,11 +15,14 @@ Session-bound endpoints (valid session JWT required):
 from __future__ import annotations
 
 import functools
+import hashlib
+import hmac
 import logging
 import os
 import secrets
 import time
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -29,6 +32,28 @@ from flask import Blueprint, current_app, jsonify, request
 logger = logging.getLogger("flinttrade.auth")
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/v1/auth")
+
+_ACTOR_REFERENCE_DOMAIN = b"flinttrade:operator-actor-reference:v1\0"
+_SESSION_BINDING_DOMAIN = b"flinttrade:operator-session-binding:v1\0"
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedOperatorSession:
+    """Bounded proof from one successfully verified full operator session."""
+
+    actor_ref: str
+    session_binding: str
+    scopes: tuple[str, ...]
+
+
+class _OperatorSessionVerificationError(RuntimeError):
+    """Closed internal rejection consumed by compatibility and route guards."""
+
+    def __init__(self, reason: str) -> None:
+        if reason not in {"invalid", "not_full_session", "invalid_identity"}:
+            raise ValueError("invalid operator-session rejection")
+        super().__init__(reason)
+        self.reason = reason
 
 # ---------------------------------------------------------------------------
 # JWT revocation blocklist — DuckDB-backed, shared across gunicorn workers.
@@ -317,8 +342,8 @@ def _create_token(
     return jwt.encode(payload, _get_jwt_secret(), algorithm=_JWT_ALGORITHM)
 
 
-def decode_token(token: str) -> dict[str, Any]:
-    """Decode and verify a FlintTrade JWT.
+def _decode_token_with_signing_key(token: str, signing_key: str) -> dict[str, Any]:
+    """Decode and verify a FlintTrade JWT with one already-selected key.
 
     Also checks the server-side JTI revocation blocklist so that tokens
     invalidated by logout are rejected even before expiry, and rejects
@@ -338,7 +363,7 @@ def decode_token(token: str) -> dict[str, Any]:
         jwt.InvalidTokenError: If the token is invalid, has been revoked,
             or was issued before the most recent password change.
     """
-    payload = jwt.decode(token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM])
+    payload = jwt.decode(token, signing_key, algorithms=[_JWT_ALGORITHM])
     jti = payload.get("jti", "")
     if jti and _is_jti_revoked(jti):
         raise jwt.InvalidTokenError("Token has been revoked")
@@ -373,6 +398,42 @@ def decode_token(token: str) -> dict[str, Any]:
     return payload
 
 
+def decode_token(token: str) -> dict[str, Any]:
+    """Decode and verify a FlintTrade JWT with the current signing key."""
+    return _decode_token_with_signing_key(token, _get_jwt_secret())
+
+
+def verify_operator_session_token(token: str) -> VerifiedOperatorSession:
+    """Verify one full session and publish only opaque bounded identity."""
+    signing_key_text = _get_jwt_secret()
+    try:
+        payload = _decode_token_with_signing_key(token, signing_key_text)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        raise _OperatorSessionVerificationError("invalid") from None
+    if payload.get("type") != "session":
+        raise _OperatorSessionVerificationError("not_full_session")
+    subject = payload.get("sub")
+    jti = payload.get("jti")
+    if type(subject) is not str or type(jti) is not str:
+        raise _OperatorSessionVerificationError("invalid_identity")
+    try:
+        subject_bytes = subject.encode("utf-8")
+        jti_bytes = jti.encode("utf-8")
+        token_bytes = token.encode("utf-8")
+    except UnicodeEncodeError:
+        raise _OperatorSessionVerificationError("invalid_identity") from None
+    if not subject.strip() or not jti.strip() or len(subject_bytes) > 1024 or len(jti_bytes) > 256:
+        raise _OperatorSessionVerificationError("invalid_identity")
+    from .auth_scopes import resolve_session_scopes  # noqa: PLC0415 - avoid import cycle
+
+    signing_key = signing_key_text.encode("utf-8")
+    actor_ref = "operator:" + hmac.new(signing_key, _ACTOR_REFERENCE_DOMAIN + subject_bytes, hashlib.sha256).hexdigest()
+    session_binding = "session:" + hmac.new(
+        signing_key, _SESSION_BINDING_DOMAIN + token_bytes, hashlib.sha256
+    ).hexdigest()
+    return VerifiedOperatorSession(actor_ref, session_binding, resolve_session_scopes(payload))
+
+
 def require_operator_session() -> tuple[Any, int] | None:
     """Guard broker-account-management writes with a valid session JWT (G9).
 
@@ -398,21 +459,16 @@ def require_operator_session() -> tuple[Any, int] | None:
             "message": "Broker account management requires a logged-in session — sign in first.",
         }), 401
     try:
-        payload = decode_token(token)
-    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        verify_operator_session_token(token)
+    except _OperatorSessionVerificationError as error:
+        if error.reason == "not_full_session":
+            return jsonify({
+                "status": "error",
+                "message": "Broker account management requires a full login session.",
+            }), 401
         return jsonify({
             "status": "error",
             "message": "Session expired or invalid — sign in again to manage broker accounts.",
-        }), 401
-    # Only a full login session qualifies. A password-reset token (type
-    # "reset") proves email possession, not password+TOTP, AND is exempt from
-    # the password-change invalidation in decode_token — accepting it would let
-    # an email-only attacker mutate broker registration/credentials and survive
-    # a defensive password change.
-    if payload.get("type") != "session":
-        return jsonify({
-            "status": "error",
-            "message": "Broker account management requires a full login session.",
         }), 401
     return None
 

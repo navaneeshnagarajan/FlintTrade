@@ -32,6 +32,13 @@ from typing import Any
 
 from flask import Blueprint, current_app, request
 
+from .broker_account_cutover import (
+    BrokerAccountCutoverUnavailable,
+    MutationAdmission,
+    mutation_admission_for,
+    require_broker_account_mutations,
+)
+
 logger = logging.getLogger("flinttrade.native_rotation")
 
 _NATIVE_ROTATION_ADMISSION_CONFIG = "NATIVE_ROTATION_ADMISSION"
@@ -121,10 +128,10 @@ def _rotation_admission(app: Any) -> NativeRotationAdmission:
 
 
 class _RotationAttemptOwner:
-    """No-op cleanup owner for an unpublished rotation candidate."""
+    """Credential-copy owner; the candidate runner retains late payloads."""
 
     def discard(self) -> None:
-        """The candidate registry and credential copy die with the daemon attempt."""
+        """No SDK disposal is inferred from discarding staged credentials."""
 
 
 class NativeSessionRefresher:
@@ -140,8 +147,13 @@ class NativeSessionRefresher:
         self,
         app: Any,
         admission: NativeRotationAdmission | None = None,
+        *,
+        mutation_admission: MutationAdmission = require_broker_account_mutations,
+        registry_publication_owner: Any | None = None,
     ) -> None:
+        self._mutation_admission = mutation_admission
         self._app = app
+        self._registry_publication_owner = registry_publication_owner
         self._admission = admission or _rotation_admission(app)
 
     def refresh_token(self, broker: str) -> None:
@@ -155,24 +167,29 @@ class NativeSessionRefresher:
                 stored, or any selector's refresh fails (per-selector detail
                 also lands in ``NATIVE_SESSION_STATUS`` for the UI).
         """
+        self._mutation_admission()
+        from .app import registry_publication_owner_for
         from .native_account_routes import NATIVE_ACCOUNT_MUTATION_LOCK  # noqa: PLC0415
-
+        owner = registry_publication_owner_for(self._app, self._app.config.get("REGISTRY"))
+        if self._registry_publication_owner is not owner:
+            from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+            raise RegistrySessionUnavailable
         generation = self._admission.acquire()
         try:
-            with NATIVE_ACCOUNT_MUTATION_LOCK:
+            with self._app.app_context(), NATIVE_ACCOUNT_MUTATION_LOCK:
                 self._refresh_token_locked(broker, generation)
         finally:
             self._admission.release(generation)
 
     def _refresh_token_locked(self, broker: str, generation: int) -> None:
         """Run one broker refresh while native-account mutations are excluded."""
+        self._mutation_admission()
         from flinttrade_gateway.native_login import (  # noqa: PLC0415
             BROKER_LOGIN_RETRY_MESSAGE,
             SESSION_INVALID_RELOGIN_MESSAGE,
-            establish_native_session,
+            prepare_native_session,
             should_keep_session_after_probe_error,
         )
-        from flinttrade_gateway.registry import BrokerRegistry  # noqa: PLC0415
 
         from .native_account_routes import (  # noqa: PLC0415
             _MISSING_REGISTRY_SESSION,
@@ -208,6 +225,7 @@ class NativeSessionRefresher:
             selector = f"{broker}:{account_id}"
             credential_generation = None
             registry_generation = _MISSING_REGISTRY_SESSION
+            candidate_session = None
 
             try:
                 credential_generation = _selector_credential_generation(
@@ -228,17 +246,23 @@ class NativeSessionRefresher:
                     broker,
                     account_id,
                 )
-                # Authenticate and probe against a private registry. No shared
+                # Authenticate and probe an unpublished candidate. No shared
                 # session, status, or vault surface changes until the selector is
                 # revalidated after the broker call completes. The entire broker
                 # call runs behind the daemon candidate boundary so an unkillable
                 # SDK thread cannot hold APScheduler or process shutdown open.
-                candidate_registry = BrokerRegistry()
-                prior_session = (
-                    None
-                    if registry_generation is _MISSING_REGISTRY_SESSION
-                    else registry_generation
-                )
+                from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+                from flinttrade_core.broker_identity import BrokerSelector
+                from flinttrade_core.workspace import workspace_dir
+                from flinttrade_core.workspace_migrations import broker_workspace_version, read_workspace_snapshot
+                from flinttrade_gateway.registry import ManagedLookupAuthority
+                try:
+                    prior_session = registry.get_connected_session_for(BrokerSelector(broker, account_id),
+                        current_authority=ManagedLookupAuthority(credential_generation,
+                            broker_workspace_version(read_workspace_snapshot(workspace_dir()))))
+                except RegistrySessionUnavailable:
+                    prior_session = None
+
 
                 # Every loop-carried value this coroutine reads is bound HERE, at
                 # definition time, rather than looked up when the thread happens to
@@ -253,7 +277,6 @@ class NativeSessionRefresher:
                 async def authenticate_candidate(
                     stored_credentials: dict[str, Any] = stored_credentials,
                     prior_session: Any = prior_session,
-                    candidate_registry: BrokerRegistry = candidate_registry,
                     account_id: str = account_id,
                 ) -> tuple[dict[str, Any], Any]:
                     credentials = dict(stored_credentials)
@@ -266,21 +289,21 @@ class NativeSessionRefresher:
                                 or (renewed or {}).get("access_token")
                                 or ""
                             )
-                            if token:
-                                credentials = {**credentials, "access_token": token}
-                        except Exception as exc:  # noqa: BLE001 - fall back to replay
+                            if not token:
+                                raise RuntimeError("native_renewal_unavailable")
+                            credentials = {**credentials, "access_token": token}
+                        except Exception as exc:  # noqa: BLE001 - unknown renewal is not retried
                             logger.info(
-                                "renew_token failed for %s (%s) — replaying vault credentials",
+                                "renew_token failed for %s (%s); attempt unavailable",
                                 broker,
                                 type(exc).__name__,
                             )
-                    candidate_session = await establish_native_session(
+                            raise
+                    candidate_session = await prepare_native_session(
                         adapter,
-                        candidate_registry,
                         credentials,
-                        broker,
-                        account_id,
                         verify=True,
+                        mutation_admission=self._mutation_admission,
                     )
                     return credentials, candidate_session
 
@@ -290,21 +313,10 @@ class NativeSessionRefresher:
                     timeout=_candidate_login_timeout_seconds(app.config),
                 )
                 self._admission.assert_current(generation)
+                if candidate_session.probe_error is not None:
+                    raise RuntimeError(SESSION_INVALID_RELOGIN_MESSAGE)
 
-                replayable_credentials = credentials
-                replay = getattr(adapter, "replay_credentials", None)
-                if callable(replay):
-                    try:
-                        replayable = replay(dict(credentials), candidate_session)
-                        if isinstance(replayable, dict):
-                            replayable_credentials = replayable
-                    except Exception as exc:  # noqa: BLE001 - write-back remains best-effort
-                        logger.warning(
-                            "Replayable-credential preparation failed for %s (%s)",
-                            broker,
-                            type(exc).__name__,
-                        )
-
+                replayable_credentials = candidate_session.replay_credentials
                 committed_generation = credential_generation
                 if replayable_credentials != stored_credentials:
                     try:
@@ -320,7 +332,7 @@ class NativeSessionRefresher:
                         )
                     except _RotationAdmissionRevoked:
                         raise
-                    except Exception as exc:  # noqa: BLE001 - session can remain live
+                    except Exception as exc:  # noqa: BLE001 - do not publish unpersisted authority
                         logger.warning(
                             "Refreshed-token persist failed for %s (%s)",
                             broker,
@@ -345,6 +357,7 @@ class NativeSessionRefresher:
                         account_id,  # noqa: B023 - invoked before the loop advances
                         registry_generation,  # noqa: B023 - invoked before the loop advances
                         candidate_session,  # noqa: B023 - invoked before the loop advances
+                        final_credential_version=committed_generation,  # noqa: B023 - invoked before the loop advances
                     ),
                 )
                 if not registry_published:
@@ -361,7 +374,7 @@ class NativeSessionRefresher:
                         registry,
                         broker,
                         account_id,
-                        candidate_session,
+                        candidate_session.registry_version,
                     )
                 ):
                     self._admission.publish_if_current(
@@ -370,7 +383,7 @@ class NativeSessionRefresher:
                             registry,
                             broker,
                             account_id,  # noqa: B023 - invoked before the loop advances
-                            candidate_session,  # noqa: B023 - invoked before the loop advances
+                            candidate_session.registry_version,  # noqa: B023 - invoked before the loop advances
                         ),
                     )
                     continue
@@ -396,7 +409,7 @@ class NativeSessionRefresher:
                     credential_generation,
                 ):
                     continue
-                if message == SESSION_INVALID_RELOGIN_MESSAGE:
+                if registry_generation is not _MISSING_REGISTRY_SESSION:
                     registry_removed = self._admission.publish_if_current(
                         generation,
                         lambda: _compare_and_remove_registry_session(
@@ -423,6 +436,10 @@ class NativeSessionRefresher:
                     ),
                 )
                 failures.append(f"{broker}: {message}")
+            finally:
+                if candidate_session is not None and candidate_session.registry_version is None:
+                    from flinttrade_gateway.native_login import quarantine_native_candidate
+                    quarantine_native_candidate(candidate_session)
         if failures:
             raise RuntimeError("; ".join(failures))
 
@@ -433,7 +450,9 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
     Stores the rotator on ``app.config["CREDENTIALS_ROTATOR"]`` and its
     UNSTARTED scheduler on ``app.config["ROTATION_SCHEDULER"]`` (the serve
     path calls ``.start()`` — tests never spawn the thread). Every active
-    registered native broker gets a daily 08:05 IST refresh job. Returns
+    registered native broker gets a daily 08:05 IST refresh job only after
+    mutation admission. During cutover construction and status remain usable,
+    but workspace lookup and job registration are suppressed. Returns
     ``None`` (and logs) when APScheduler is unavailable — rotation then simply
     stays off.
     """
@@ -449,13 +468,20 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
 
     scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
     admission = _rotation_admission(app)
-    rotator = CredentialsRotator(NativeSessionRefresher(app, admission), scheduler)
+    mutation_admission = mutation_admission_for(app)
+    rotator = CredentialsRotator(
+        NativeSessionRefresher(app, admission, mutation_admission=mutation_admission,
+            registry_publication_owner=app.extensions.get("flinttrade.registry_publication_owner")),
+        scheduler,
+        mutation_admission=mutation_admission,
+    )
     app.config["CREDENTIALS_ROTATOR"] = rotator
     app.config["ROTATION_SCHEDULER"] = scheduler
 
     # Morning re-auth for active registered natives (jobs queue on the
     # unstarted scheduler and arm when the serve path starts it).
     try:
+        mutation_admission()
         from .app import _read_workspace_brokers  # noqa: PLC0415
 
         registered = [str(s) for s in ((_read_workspace_brokers() or {}).get("registered") or [])]
@@ -467,6 +493,8 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
         })
         for broker in native_brokers:
             rotator.schedule_daily_refresh(broker, "08:05")
+    except BrokerAccountCutoverUnavailable as exc:
+        logger.info("Native session refresh scheduling unavailable: %s", exc)
     except Exception as exc:  # noqa: BLE001 - scheduling must not brick the factory
         logger.warning("Could not schedule native session refresh jobs: %s", exc)
 
@@ -477,12 +505,6 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
         """G9 + broker truth — writes need auth and an active native adapter."""
         if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
             return None
-        guard = current_app.config.get("BROKER_MGMT_WRITE_GUARD")
-        if guard is not None:
-            guard_result = guard()
-            if guard_result is not None:
-                return guard_result
-
         broker = (request.view_args or {}).get("broker")
         if not broker:
             return None

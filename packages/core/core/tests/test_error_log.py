@@ -247,6 +247,34 @@ class TestErrorLogWrite:
         assert len(ids) == 20
         log.close()
 
+    def test_safe_request_summary_overrides_body_exception_and_identity(self):
+        """Catch a classified request leaking opaque fields or exception text."""
+        from flinttrade_core.request_observability import SafeRequestSummary
+
+        log = _make_log()
+        summary = SafeRequestSummary("/v1/services/connections", "POST", 321, True)
+        try:
+            raise RuntimeError("private exception sentinel")
+        except RuntimeError as error:
+            log.log(
+                "/v1/services/connections/private-path",
+                "POST",
+                500,
+                request_body={"opaque": "private body sentinel"},
+                error=error,
+                user_id="private actor",
+                safe_request=summary,
+            )
+        record = log.recent(limit=1)[0]
+        assert record["route"] == "/v1/services/connections"
+        assert record["method"] == "POST"
+        assert record["request_body"] == summary.to_dict()
+        assert record["error_class"] is None
+        assert record["error_message"] is None
+        assert record["traceback"] is None
+        assert record["user_id"] is None
+        log.close()
+
 
 # ---------------------------------------------------------------------------
 # ErrorLog.recent()

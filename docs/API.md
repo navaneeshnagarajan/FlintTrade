@@ -155,52 +155,61 @@ endpoints are marked.
 Source: `packages/integrations/gateway/src/flinttrade_gateway/auth.py`.
 The gateway blueprint mounts at `/v1` — there is no `/v1/broker/` segment.
 Native-broker ids are rejected here and redirected to `/api/v1/native/*`.
-Used by older OpenAlgo-bridge account flows; Setup → Brokers and
-Settings → Brokers use the native surface below.
+Used by older OpenAlgo-bridge account flows. Catalogue and account-list
+**GET**s remain metadata reads. Every production account-authority
+**mutation** is frozen: authenticated callers receive a stable `503`
+`{error: broker_account_cutover_unavailable}` from
+`guard_broker_account_http` until Task 9D migrates the handlers and
+removes that guard atomically. The terminal still calls these routes;
+they do not create sessions. This is an accepted product decision —
+native broker UX stays down on `main` until Task 9D and Task 7C.2.
 
-| Endpoint | Purpose |
+| Endpoint | Current behaviour |
 |---|---|
 | `GET /v1/brokers` | Enumerate catalogued brokers with capability flags. |
-| `GET /v1/accounts` | List linked (non-native) accounts. |
-| `POST /v1/accounts` | Create a new non-native broker session. |
-| `DELETE /v1/accounts/<account_id>` | Tear down an existing session. |
-| `POST /v1/auth/credentials` | Submit API-key + secret authentication. |
-| `POST /v1/auth/otp/request` | Request a one-time-password challenge. |
-| `POST /v1/auth/otp/verify` | Submit the OTP. |
-| `POST /v1/auth/oauth/start` | Initiate the OAuth flow. |
-| `GET /v1/auth/oauth/callback` | Receive an OAuth callback. |
-| `POST /v1/accounts/<account_id>/reconnect` | Re-authenticate an expired session. |
-| `POST /v1/accounts/<account_id>/set-primary` | Promote a linked account to the write default. |
-| `GET` / `PUT /v1/rate-limits` | Read or update adapter rate-limit configuration. |
+| `GET /v1/accounts` | List linked (non-native) accounts (metadata only; not a restored native session). |
+| `POST /v1/accounts` | Frozen. Returns `503` until Task 9D. |
+| `DELETE /v1/accounts/<account_id>` | Frozen. Returns `503` until Task 9D. |
+| `POST /v1/auth/credentials` | Frozen. Returns `503` until Task 9D. |
+| `POST /v1/auth/otp/request` | Frozen. Returns `503` until Task 9D. |
+| `POST /v1/auth/otp/verify` | Frozen. Returns `503` until Task 9D. |
+| `POST /v1/auth/oauth/start` | Frozen. Returns `503` until Task 9D. |
+| `GET /v1/auth/oauth/callback` | Frozen before state consumption. Returns `503` until Task 9D. |
+| `POST /v1/accounts/<account_id>/reconnect` | Frozen. Returns `503` until Task 9D. |
+| `POST /v1/accounts/<account_id>/set-primary` | Frozen. Returns `503` until Task 9D. |
+| `GET /v1/rate-limits` | Read adapter rate-limit configuration. |
+| `PUT /v1/rate-limits` | Frozen. Returns `503` until Task 9D. |
 
 ### Native broker connect and reads (`/api/v1/native/*`)
 
 Source: `packages/core/core/src/flinttrade_core/native_account_routes.py`.
 
-These endpoints are the first-party native broker path used by Setup →
-Brokers and Settings → Brokers. Connect writes store credentials in the
-encrypted gateway vault, register a workspace selector, rebuild the broker
-router, and attempt login transactionally. Brokers that are built but not
-cleared for activation stay `connectable=false` while any declared
-`native_connect_blocker` remains; their connect/re-login routes return "coming
-soon" rather than creating sessions. Account and market-data reads
-require a live native session but do not create an order safety context.
-Legacy gateway `/v1` account/auth routes reject native broker ids and include
-the same `data.native_connect_blockers` payload when a catalogued native broker
-is still evidence-gated.
+These endpoints are the first-party native broker HTTP surface the terminal
+still calls from Setup → Brokers and Settings → Brokers. **They are not a working operator path
+on this unreleased line.** Account-management writes
+(POST / DELETE / PUT / PATCH, plus the GET OAuth callback) return `503`
+`broker_account_cutover_unavailable` until Task 9D. Account and market-data reads
+return `409` with zero provider calls until the Task 7C.2 / 8B
+read-port cutover onto the in-process `BrokerReadPort`. Exact broker reads
+that already exist are that in-process port, not this HTTP family and not
+terminal UX. Brokers that are built but not cleared for activation stay
+`connectable=false` while any declared `native_connect_blocker` remains.
+Legacy gateway `/v1` account/auth mutations are likewise frozen (`503`) and
+still reject native broker ids with `data.native_connect_blockers` when a
+catalogued native broker is evidence-gated.
 
-| Endpoint | Purpose |
+| Endpoint | Current behaviour |
 |---|---|
 | `native/brokers` (**GET**) | Native broker catalogue with connectability, native-connect blocker reasons, static-outbound-IP requirement, login-method schemas, OAuth/postback URLs, and MCP metadata. |
-| `native/accounts` (**GET**) | Vault-backed native account list with live session status, expiry, read-only flag, and `needs_relogin` / retryable login state. |
-| `native/accounts` (**POST**) | Direct native connect: `{adapter_id, account_id, label?, credentials, is_primary?}`. |
-| `native/oauth/start` (**POST**) | Start an OAuth/app-consent login and return the broker authorisation URL, loopback redirect URI, state, and optional postback URI. |
-| `native/oauth/callback` (**GET**) | Loopback OAuth callback that exchanges a broker `code` or Dhan `tokenId` and then runs the native connect transaction. |
-| `native/postbacks/<adapter_id>` (**POST**) | Bounded, redacted broker postback intake for diagnostics/order-update evidence; not an order execution path. |
-| `native/accounts/<adapter>/<account>/login` (**POST**) | Re-authenticate a native account, optionally with fresh credentials; stale single-use material surfaces `needs_relogin`. |
-| `native/accounts/<adapter>/<account>/<kind>` (**GET**) | Read account or market data from a live native session. Supported kinds include `funds`, `limits`, `positions`, `holdings`, `profile`, `orders`, `orderstatus`, `orderhistory`, `ordertrades`, `trades`, `ltp`, `quotes`, `quote_details`, `ohlc`, `depth`, `margin`, `scrip_master`, `holidays`, `timings`, `optiongreeks`, `history`, `expiry`, `optionchain`, `search`, and `search_scrip`. |
-| `native/accounts/<adapter>/<account>/set-primary` (**POST**) | Promote a connected, non-read-only native session to the live write default. |
-| `native/accounts/<adapter>/<account>` (**DELETE**) | Remove a native account, drop its session, delete credentials, deregister the workspace selector, and stop stale refresh state. |
+| `native/accounts` (**GET**) | Vault-backed native account list (metadata only). Not a live session refresh. |
+| `native/accounts` (**POST**) | Frozen connect. Returns `503` until Task 9D. Body shape remains `{adapter_id, account_id, label?, credentials, is_primary?}`. |
+| `native/oauth/start` (**POST**) | Frozen. Returns `503` until Task 9D. |
+| `native/oauth/callback` (**GET**) | Frozen before state consumption. Returns `503` until Task 9D. |
+| `native/postbacks/<adapter_id>` (**POST**) | Bounded, redacted broker postback intake for diagnostics/order-update evidence; not an order execution path. Not an account-mutation cutover route. |
+| `native/accounts/<adapter>/<account>/login` (**POST**) | Frozen re-authentication. Returns `503` until Task 9D. |
+| `native/accounts/<adapter>/<account>/<kind>` (**GET**) | Frozen native HTTP read. Returns `409` with zero provider calls until Task 7C.2. Documented kinds (`funds`, `limits`, `positions`, `holdings`, `profile`, `orders`, `orderstatus`, `orderhistory`, `ordertrades`, `trades`, `ltp`, `quotes`, `quote_details`, `ohlc`, `depth`, `margin`, `scrip_master`, `holidays`, `timings`, `optiongreeks`, `history`, `expiry`, `optionchain`, `search`, `search_scrip`) are the intended post-cutover surface, not a current live-session API. |
+| `native/accounts/<adapter>/<account>/set-primary` (**POST**) | Frozen. Returns `503` until Task 9D. After Task 9D this remains the write-default gate for a connected, non-read-only native session. |
+| `native/accounts/<adapter>/<account>` (**DELETE**) | Frozen removal. Returns `503` until Task 9D. |
 
 ### Broker capability metadata (`/api/v1/broker/*`, GET)
 
@@ -218,6 +227,55 @@ FlintTrade MCP metadata return `404` with `known_brokers`, so client typos do
 not silently fall back to the full catalogue. Broker-hosted MCP trade tools,
 where a broker offers them, remain external to FlintTrade's in-process
 `gate_order` / `BrokerRouter` path.
+
+### Service providers and connections (`/ft-api/v1/services/*`)
+
+Source: `packages/core/core/src/flinttrade_core/service_provider_routes.py`,
+`service_connection_routes.py`, `service_providers.py`, and
+`service_connections.py`.
+
+This is a static, non-invoking control plane. Listing a provider or persisting
+a connection does not resolve, probe, authenticate to, or start that provider.
+
+The catalogue is composed at app startup from the AI, historical, and gateway
+contributor descriptors. Catalogue `service_kinds` values include
+`broker_execution`, `market_data_live`, `market_data_historical`, `news`,
+`llm`, `forecast`, `agent_runtime`, and `embedding`.
+
+| Endpoint | Purpose |
+|---|---|
+| `services/providers` (**GET**) | Static provider catalogue, returned as `{"status": "success", "data": {"catalogue_digest": …, "count": …, "providers": […]}}`. Requires `admin.observability.read` on a session JWT; an API-key request with no session token is treated as holding every scope. Returns 503 if the catalogue is unavailable. |
+| `services/connections` (**GET**) | List every redacted inert LLM connection. Loopback only. Session JWT with `admin.services.read`, or `X-API-Key` / Bearer API key for GET/HEAD. |
+| `services/connections` (**POST**) | Persist one inert LLM connection (`provider_id`, `label`, optional `model`, and provider-dependent `endpoint` / `auth_mode` / `credential`). Authenticated profiles require a supported `auth_mode`; host-based profiles require `endpoint`, while fixed or managed profiles reject endpoint overrides. Unauthenticated profiles reject credentials. Does not call the provider. Session JWT with `admin.services.write` required — an API key cannot mutate. |
+| `services/connections/<connection_id>` (**GET**) | One redacted connection by canonical UUID4. Same read auth as the collection. |
+| `services/connections/<connection_id>` (**PATCH**) | Update label / model / endpoint / auth_mode (and optional credential rotation). `provider_id` is immutable. Same write auth as create. |
+| `services/connections/<connection_id>` (**DELETE**) | Delete one inert connection. Same write auth as create. JSON body must be an empty object. |
+
+Connection reads and writes are loopback-only. Non-loopback peers receive 403
+`forbidden` before route dispatch. Mutations require `If-Match` (collection
+ETag) and `Idempotency-Key` (UUID4); missing `If-Match` is 428
+`connection_revision_required`. Mutation endpoints share a 10-per-minute
+limit. Individual redacted connection objects include `schema_version`,
+`provider_id`, `connection_id`, `label`, `model`, `endpoint`, `auth_mode`,
+`credential_configured`, `created_at`, and `updated_at` — never the secret
+material. The collection read wraps those objects in `connections`; a delete
+returns only `{"deleted": true}`. Every service-connection-family response is
+`Cache-Control: no-store`.
+
+The in-process `BrokerReadPort` (quotes, depth, history, account books, and
+related exact reads) is not this HTTP surface and is not terminal UX. Native
+HTTP reads stay `409` until Task 7C.2 migrates callers onto that port. See
+[ARCHITECTURE.md](ARCHITECTURE.md#broker-reads-versus-gated-writes).
+
+### News (`/api/v1/news`)
+
+Source: `packages/core/core/src/flinttrade_core/operations_routes.py`. The
+operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
+`/ft-api/api/v1/news`. The terminal News widget calls this route only.
+
+| Endpoint | Purpose |
+|---|---|
+| `news` (**GET**) | Server-side fetch of the static RSS publisher profiles (MoneyControl, ET Markets, LiveMint). There is no browser-side RSS or CORS-proxy fallback. |
 
 ### AI (`/api/v1/ai/*`, `/api/v1/signals/*`; Vite proxy `/ft-api/api/v1/…`)
 
@@ -507,8 +565,10 @@ desktop/dev install can reach read-only setup and sandbox endpoints. Broker
 account-management **writes** (connect/remove/re-authenticate a broker,
 credential capture, OAuth start, rate-limit and rotation config) additionally
 require the operator's logged-in session JWT — the loopback allowance alone is
-not sufficient for them. The PIN quick-unlock likewise requires an existing
-session (the PIN is a re-authentication factor, never a standalone login).
+not sufficient for them. After that JWT check, production mutations still
+return `503` `broker_account_cutover_unavailable` until Task 9D. The PIN
+quick-unlock likewise requires an existing session (the PIN is a
+re-authentication factor, never a standalone login).
 
 The OpenAlgo-compatible passthrough still uses OpenAlgo's own API key. The app
 reads that key from Setup/Settings-backed workspace config first, with

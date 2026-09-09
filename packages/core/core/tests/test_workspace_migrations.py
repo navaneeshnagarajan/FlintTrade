@@ -27,6 +27,12 @@ from flinttrade_core.workspace_migrations import (
 )
 
 _LMSTUDIO_RETIREMENT_JOURNAL = ".lmstudio-retirement.transaction.json"
+_CURRENT_AUTHORITY = {
+    "workspace_instance_id": "07920366-4cf4-4ec3-af37-14758cb19f5a",
+    "workspace_generation": 1,
+    "broker_authority_generation": 1,
+    "services": {"connection_epoch": 0, "connections": [], "routing": {}, "budgets": {}, "access_grants": {}},
+}
 
 
 def _seed(workspace_dir: Path, cfg: dict) -> Path:
@@ -102,7 +108,7 @@ def _wait_for_process_marker(marker: Path, process: subprocess.Popen[str], timeo
 
 def test_fresh_install_no_migration(tmp_path):
     """Workspace already at current version: returned as-is, file untouched."""
-    cfg = {"version": WORKSPACE_VERSION, "brokers": {"registered": ["openalgo:default"]}}
+    cfg = {**_CURRENT_AUTHORITY, "version": "1.3.0", "brokers": {"registered": ["openalgo:default"]}}
     path = _seed(tmp_path, cfg)
     mtime_before = path.stat().st_mtime_ns
 
@@ -304,7 +310,8 @@ def test_default_lmstudio_migration_finishes_a_postcommit_staged_secret(
         },
     }
     current = {
-        "version": WORKSPACE_VERSION,
+        **_CURRENT_AUTHORITY,
+        "version": "1.3.0",
         "llm": {
             "provider": "ollama",
             "host": "",
@@ -337,7 +344,8 @@ def test_current_workspace_never_deletes_an_unjournalled_prefixed_file(tmp_path)
         },
     }
     current = {
-        "version": WORKSPACE_VERSION,
+        **_CURRENT_AUTHORITY,
+        "version": "1.3.0",
         "llm": {
             "provider": "ollama",
             "host": "",
@@ -368,7 +376,8 @@ def test_staged_lmstudio_recovery_rejects_a_file_that_no_longer_matches_its_jour
         },
     }
     current = {
-        "version": WORKSPACE_VERSION,
+        **_CURRENT_AUTHORITY,
+        "version": "1.3.0",
         "llm": {
             "provider": "ollama",
             "host": "",
@@ -798,7 +807,7 @@ def test_concurrent_lock_blocks_second_caller(tmp_path):
 
 def test_workspace_load_waits_for_active_writer(tmp_path):
     """Routine reads wait for a valid writer instead of failing transiently."""
-    expected = {"version": WORKSPACE_VERSION, "value": "preserved"}
+    expected = {**_CURRENT_AUTHORITY, "version": "1.3.0", "value": "preserved"}
     _seed(tmp_path, expected)
     started = threading.Event()
     outcomes: list[dict | BaseException] = []

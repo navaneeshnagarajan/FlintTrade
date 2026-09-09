@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.models import Order
 from flinttrade_gateway.brokers.kotakneo_mapping import (
     KotakNeoMappingError,
@@ -155,6 +156,7 @@ def test_from_kotak_position_net_long_realised_pnl():
         "trdSym": "IDEA-EQ", "exSeg": "nse_cm", "prod": "CNC",
         "cfBuyQty": 0, "flBuyQty": 10, "cfSellQty": 0, "flSellQty": 4,
         "buyAmt": 1000, "sellAmt": 440, "cfBuyAmt": 0, "cfSellAmt": 0,
+        "genNum": 1, "genDen": 1, "prcNum": 1, "prcDen": 1, "multiplier": 1, "precision": 2,
     })
     assert pos["symbol"] == "IDEA-EQ"
     assert pos["exchange"] == "NSE"
@@ -172,6 +174,7 @@ def test_from_kotak_position_net_short():
         "trdSym": "NIFTY25JUN24000CE", "exSeg": "nse_fo", "prod": "NRML",
         "cfSellQty": 0, "flSellQty": 10, "cfBuyQty": 0, "flBuyQty": 4,
         "sellAmt": 1100, "buyAmt": 400, "cfSellAmt": 0, "cfBuyAmt": 0,
+        "genNum": 1, "genDen": 1, "prcNum": 1, "prcDen": 1, "multiplier": 1, "precision": 2,
     })
     assert pos["quantity"] == "-6"
     assert pos["average_price"] == "110.00"  # sell side (sell_qty > buy_qty)
@@ -183,7 +186,9 @@ def test_from_kotak_position_flat_books_full_realised():
     # Bought 5 @ 100, sold 5 @ 110: net flat → avg 0, realised = 5 * 10 = +50.
     pos = from_kotak_position({
         "trdSym": "IDEA-EQ", "exSeg": "nse_cm", "prod": "MIS",
-        "flBuyQty": 5, "flSellQty": 5, "buyAmt": 500, "sellAmt": 550,
+        "cfBuyQty": 0, "flBuyQty": 5, "cfSellQty": 0, "flSellQty": 5,
+        "cfBuyAmt": 0, "buyAmt": 500, "cfSellAmt": 0, "sellAmt": 550,
+        "genNum": 1, "genDen": 1, "prcNum": 1, "prcDen": 1, "multiplier": 1, "precision": 2,
     })
     assert pos["quantity"] == "0"
     assert pos["average_price"] == "0.00"
@@ -193,16 +198,25 @@ def test_from_kotak_position_flat_books_full_realised():
 def test_from_kotak_position_open_long_pnl_is_positive_zero():
     # Open long (no sell leg): realised P&L is zero — must render "0.00", never
     # the negative-zero artefact "-0.00".
-    pos = from_kotak_position({"trdSym": "X", "exSeg": "nse_cm", "flBuyQty": 100, "buyAmt": 5000})
+    pos = from_kotak_position({
+        "trdSym": "X", "exSeg": "nse_cm", "prod": "CNC",
+        "cfBuyQty": 0, "flBuyQty": 100, "cfSellQty": 0, "flSellQty": 0,
+        "cfBuyAmt": 0, "buyAmt": 5000, "cfSellAmt": 0, "sellAmt": 0,
+        "genNum": 1, "genDen": 1, "prcNum": 1, "prcDen": 1, "multiplier": 1, "precision": 2,
+    })
     assert pos["quantity"] == "100"
     assert pos["pnl"] == "0.00"
     assert not pos["pnl"].startswith("-")
 
 
-def test_from_kotak_position_malformed_precision_does_not_crash():
-    # A garbage negative precision must be clamped, not raise from the f-string.
-    pos = from_kotak_position({"trdSym": "X", "exSeg": "nse_cm", "flBuyQty": 10, "buyAmt": 5012, "precision": -1})
-    assert pos["average_price"] == "501"  # precision clamped to 0
+def test_from_kotak_position_malformed_precision_is_rejected():
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_position({
+            "trdSym": "X", "exSeg": "nse_cm", "prod": "CNC",
+            "cfBuyQty": 0, "flBuyQty": 10, "cfSellQty": 0, "flSellQty": 0,
+            "cfBuyAmt": 0, "buyAmt": 5012, "cfSellAmt": 0, "sellAmt": 0,
+            "genNum": 1, "genDen": 1, "prcNum": 1, "prcDen": 1, "multiplier": 1, "precision": -1,
+        })
 
 
 def test_from_kotak_holding_uses_closing_price_not_mktvalue():
@@ -212,18 +226,85 @@ def test_from_kotak_holding_uses_closing_price_not_mktvalue():
     })
     assert h["symbol"] == "IDEA" and h["exchange"] == "NSE"
     assert h["quantity"] == "35"
-    assert h["ltp"] == "9.36"        # closingPrice, NOT the 327.6 aggregate mktValue
+    assert h["close_price"] == "9.36"  # closingPrice, NOT aggregate mktValue
+    assert "ltp" not in h
     assert h["average_price"] == "9.5699"
+
+
+def test_from_kotak_holding_uses_official_unrealised_gain_loss_presence_first():
+    holding = {
+        "displaySymbol": "IDEA",
+        "exchangeSegment": "nse_cm",
+        "quantity": 35,
+        "unrealisedGainLoss": 0,
+        "pnl": 12.5,
+    }
+
+    assert from_kotak_holding(holding)["pnl"] == "0"
+    holding["unrealisedGainLoss"] = "not-a-number"
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_holding(holding)
+
+
+def test_from_kotak_position_incomplete_optional_amounts_are_omitted():
+    pos = from_kotak_position({
+        "trdSym": "X", "exSeg": "nse_cm", "prod": "CNC",
+        "cfBuyQty": 0, "flBuyQty": 10, "cfSellQty": 0, "flSellQty": 0,
+    })
+    assert pos["quantity"] == "10"
+    assert "average_price" not in pos
+    assert "pnl" not in pos
+    assert "accounting_complete" not in pos
 
 
 def test_from_kotak_position_price_denomination_ratio():
     # genNum/genDen + prcNum/prcDen scale the per-unit price (1 for equity).
     pos = from_kotak_position({
-        "trdSym": "X", "exSeg": "nse_cm", "flBuyQty": 10, "buyAmt": 2000,
-        "genNum": 1, "genDen": 1, "prcNum": 1, "prcDen": 2, "precision": 2,
+        "trdSym": "X", "exSeg": "nse_cm", "prod": "CNC",
+        "cfBuyQty": 0, "flBuyQty": 10, "cfSellQty": 0, "flSellQty": 0,
+        "cfBuyAmt": 0, "buyAmt": 2000, "cfSellAmt": 0, "sellAmt": 0,
+        "genNum": 1, "genDen": 1, "prcNum": 1, "prcDen": 2, "multiplier": 1, "precision": 2,
     })
     # avg = 2000 / (10 * (1/1) * (1/2)) = 2000 / 5 = 400.00
     assert pos["average_price"] == "400.00"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"flBuyQty": 0, "buyAmt": 1},
+        {"flSellQty": 0, "sellAmt": 1},
+        {"genNum": -1},
+        {"genDen": -1},
+        {"prcNum": -1},
+        {"prcDen": -1},
+        {"multiplier": -1},
+    ],
+)
+def test_from_kotak_position_rejects_inconsistent_amounts_and_negative_factors(mutation):
+    row = {
+        "trdSym": "TCS",
+        "exSeg": "nse_cm",
+        "prod": "CNC",
+        "cfBuyQty": 0,
+        "flBuyQty": 0,
+        "cfSellQty": 0,
+        "flSellQty": 0,
+        "cfBuyAmt": 0,
+        "buyAmt": 0,
+        "cfSellAmt": 0,
+        "sellAmt": 0,
+        "genNum": 1,
+        "genDen": 1,
+        "prcNum": 1,
+        "prcDen": 1,
+        "multiplier": 1,
+        "precision": 2,
+    }
+    row.update(mutation)
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_position(row)
 
 
 def test_from_kotak_funds_real_limits_shape():

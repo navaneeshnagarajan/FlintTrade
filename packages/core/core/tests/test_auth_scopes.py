@@ -6,6 +6,7 @@ import jwt
 import pytest
 from flask import Flask, jsonify
 
+from flinttrade_core import auth_scopes
 from flinttrade_core.auth_scopes import DEFAULT_SESSION_SCOPES, require_scope
 
 
@@ -74,3 +75,26 @@ def test_legacy_token_without_scopes_claim_gets_full_default(app, monkeypatch):
 def test_default_scopes_cover_audit_and_activity():
     assert "admin.audit.read" in DEFAULT_SESSION_SCOPES
     assert "admin.activity" in DEFAULT_SESSION_SCOPES
+
+
+def test_new_session_scopes_do_not_retroactively_widen_legacy_tokens():
+    """Catch mutable-default fallback granting new write authority to old tokens."""
+    legacy = getattr(auth_scopes, "LEGACY_NO_SCOPE_SESSION_SCOPES", DEFAULT_SESSION_SCOPES)
+    assert "admin.services.write" in DEFAULT_SESSION_SCOPES
+    assert "admin.services.write" not in legacy
+    assert "admin.config.openalgo.write" not in legacy
+
+
+@pytest.mark.parametrize("claim", [None, "admin.audit.read", {"admin.audit.read": True}, ["admin.audit.read", 7]])
+def test_explicit_malformed_scope_claims_receive_no_grants(claim):
+    """Catch malformed claims falling through to defaults or substring membership."""
+    resolver = getattr(auth_scopes, "resolve_session_scopes", lambda payload: DEFAULT_SESSION_SCOPES)
+    assert resolver({"scopes": claim}) == ()
+
+
+def test_absent_and_explicitly_empty_scope_claims_remain_distinct():
+    """Catch an empty narrowed session being recast as a legacy broad session."""
+    resolver = getattr(auth_scopes, "resolve_session_scopes", lambda payload: DEFAULT_SESSION_SCOPES)
+    legacy = getattr(auth_scopes, "LEGACY_NO_SCOPE_SESSION_SCOPES", DEFAULT_SESSION_SCOPES)
+    assert resolver({}) == legacy
+    assert resolver({"scopes": []}) == ()
