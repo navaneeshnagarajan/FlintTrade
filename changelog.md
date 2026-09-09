@@ -29,6 +29,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
+- **OpenAlgo-style password-first Explore; TOTP only before Live (FT-SETUP-002).**
+  After the #184 escape hatch, setup and daily login stay password-only
+  for Explore and Practice. Authenticator enrolment is optional
+  (“set up later”) on day one. TOTP and/or the PIN are gated on Live
+  unlock and remote bind — not the welcome / first-run wall. The
+  mid-step Reset / Start-over wipe from #184 is unchanged. USER_GUIDE
+  will follow once the UX lands.
+
 - **Native broker HTTP freeze (accepted product decision).** Merging this work
   onto `main` leaves native broker UX down until Task 9D and Task 7C.2. That
   is accepted. Broker-account mutations — `/v1` account and auth writes, native
