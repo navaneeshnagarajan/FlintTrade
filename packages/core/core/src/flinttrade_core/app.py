@@ -4187,7 +4187,19 @@ def create_flask_app(
     # unstarted; _run_flask_server starts it on the serve path only.
     from .native_rotation import configure_session_rotation  # noqa: PLC0415
 
-    rotation_bp = configure_session_rotation(app)
+    if runtime_ready:
+        rotation_bp = configure_session_rotation(app)
+    else:
+        from flinttrade_gateway.rotation_routes import create_rotation_blueprint  # noqa: PLC0415
+
+        app.config["CREDENTIALS_ROTATOR"] = None
+        app.config["ROTATION_SCHEDULER"] = None
+        rotation_bp = create_rotation_blueprint(None)
+
+        @rotation_bp.before_request
+        def _rotation_runtime_unavailable() -> Any:
+            return {"status": "error", "error": "backend_lease_unavailable"}, 503
+
     if rotation_bp is not None:
         app.register_blueprint(rotation_bp)
 
@@ -4416,7 +4428,7 @@ def create_flask_app(
     # only place a running backend resolves the strategies directory, so
     # open-coding ``_workspace_dir() / "strategies"`` (as this call used to)
     # left the migration unreachable in production.
-    if "STRATEGY_RUNNER" not in app.config:
+    if runtime_ready and "STRATEGY_RUNNER" not in app.config:
         try:
             from flinttrade_engine.strategy_hot_reload import default_strategies_dir  # noqa: PLC0415
             from flinttrade_engine.strategy_runner import UserStrategyRunner  # noqa: PLC0415
@@ -4430,7 +4442,7 @@ def create_flask_app(
     resolved_time_scheduler = time_scheduler
     if cron_strategy_scheduler is not None:
         resolved_time_scheduler = getattr(cron_strategy_scheduler, "time_scheduler", None) or resolved_time_scheduler
-    if resolved_time_scheduler is None:
+    if runtime_ready and resolved_time_scheduler is None:
         try:
             from flinttrade_engine.scheduler import TimeScheduler  # noqa: PLC0415
 
@@ -4440,7 +4452,7 @@ def create_flask_app(
                 "Time scheduler wiring failed (%s); market-aware work will 503",
                 type(exc).__name__,
             )
-    if "CRON_SCHEDULER" not in app.config:
+    if runtime_ready and "CRON_SCHEDULER" not in app.config:
         try:
             from flinttrade_engine.scheduler import CronStrategyScheduler  # noqa: PLC0415
 
@@ -6872,6 +6884,14 @@ class FlintTradeApp:
                 close_rag,
             ):
                 return False
+
+        # The vault is acquired before contracts, registry and RAG. A failure
+        # in any later constructor still owns its hardened directory handles.
+        credential_store = getattr(self, "credential_store", None)
+        if credential_store is not None and not await stop_sync(
+            "startup-credential-store", "credential store", credential_store.close,
+        ):
+            return False
 
         async def close_openalgo_client() -> None:
             if self.client is None:

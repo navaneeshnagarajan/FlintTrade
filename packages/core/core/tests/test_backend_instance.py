@@ -6,12 +6,155 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import suppress
 from pathlib import Path
 from types import MethodType, SimpleNamespace
 from typing import Any
 
 import pytest
 from flask import Flask
+
+
+@pytest.mark.skipif(os.name != "posix", reason="actual POSIX flock failure contract")
+@pytest.mark.parametrize("stage", ["stat", "proof"])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_post_acquisition_failure_releases_or_retains_exact_kernel_owner(
+    tmp_path, monkeypatch, stage, cleanup_fails,
+):
+    import flinttrade_core.backend_instance as module
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    descriptors = []
+    original_open = os.open
+    original_stat = Path.stat
+    retained_before = tuple(module._RETAINED_FAILED_LEASES)
+
+    def record_open(*args, **kwargs):
+        descriptor = original_open(*args, **kwargs)
+        if str(args[0]).endswith("backend_instance.lock"):
+            descriptors.append(descriptor)
+        return descriptor
+
+    def fail_stat(path, *args, **kwargs):
+        if path.name == "backend_instance.lock":
+            raise PermissionError("injected post-acquisition failure")
+        return original_stat(path, *args, **kwargs)
+
+    def fail_proof(*args, **kwargs):
+        raise PermissionError("injected post-acquisition failure")
+
+    try:
+        with monkeypatch.context() as fault:
+            fault.setattr(os, "open", record_open)
+            fault.setattr(Path, "stat", fail_stat) if stage == "stat" else fault.setattr(
+                module, "BackendLeaseProof", fail_proof,
+            )
+            if cleanup_fails:
+                fault.setattr(module._PosixBackendFileLease, "release", lambda self: (_ for _ in ()).throw(
+                    OSError("injected cleanup failure"),
+                ))
+            with pytest.raises((PermissionError, OSError)):
+                module.acquire_backend_instance_lease()
+        retained = [owner for owner in module._RETAINED_FAILED_LEASES if owner not in retained_before]
+        if cleanup_fails:
+            assert len(retained) == 1
+            with pytest.raises(module.BackendInstanceAlreadyRunning):
+                module.acquire_backend_instance_lease()
+            module.release_retained_backend_instance_lease(retained[0])
+        else:
+            with pytest.raises(OSError):
+                os.fstat(descriptors[0])
+        successor = module.acquire_backend_instance_lease()
+        successor.release()
+    finally:
+        for owner in tuple(module._RETAINED_FAILED_LEASES):
+            if owner not in retained_before:
+                module.release_retained_backend_instance_lease(owner)
+        for descriptor in descriptors:
+            with suppress(OSError):
+                os.close(descriptor)
+
+
+@pytest.mark.parametrize("stage", ["ContractManager", "create_owned_registry", "_initialise_rag_runtime"])
+def test_partial_standalone_construction_closes_actual_vault_before_lease_release(monkeypatch, stage):
+    import flinttrade_core.app as module
+    from flinttrade_core.backend_instance import acquire_backend_instance_lease
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected late constructor failure")
+
+    runtime = module.FlintTradeApp()
+    monkeypatch.setattr(module, stage, fail)
+    try:
+        with pytest.raises(RuntimeError, match="injected late constructor failure"):
+            runtime.run()
+        assert runtime.credential_store._poisoned is True
+        assert runtime._stop_completed is True
+        successor = acquire_backend_instance_lease()
+        successor.release()
+    finally:
+        if runtime.credential_store is not None:
+            runtime.credential_store.close()
+
+
+def test_proofless_factory_does_not_construct_scheduler_or_rotation_owners(monkeypatch):
+    import flinttrade_core.app as module
+    import flinttrade_engine.scheduler as scheduling
+    import flinttrade_gateway.credentials_rotation as rotation
+    from apscheduler.schedulers import background
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("proofless construction acquired scheduling ownership")
+
+    for owner in ("TimeScheduler", "CronStrategyScheduler"):
+        monkeypatch.setattr(scheduling, owner, forbidden)
+    monkeypatch.setattr(background, "BackgroundScheduler", forbidden)
+    monkeypatch.setattr(rotation, "CredentialsRotator", forbidden)
+    app = module.create_flask_app()
+    assert app.config.get("TIME_SCHEDULER") is None
+    assert app.config.get("CRON_SCHEDULER") is None
+    assert app.config.get("ROTATION_SCHEDULER") is None
+    assert app.config.get("CREDENTIALS_ROTATOR") is None
+    response = app.test_client().get("/admin/credentials/rotation/status")
+    assert response.status_code == 503
+    assert response.json["error"] == "backend_lease_unavailable"
+
+
+def test_partial_vault_close_failure_retains_lease_until_exact_owner_recovers(monkeypatch):
+    import flinttrade_core.app as module
+    from flinttrade_core.backend_instance import BackendInstanceAlreadyRunning, acquire_backend_instance_lease
+
+    runtime = module.FlintTradeApp()
+    allow_close = False
+    original_close = module.CredentialStore.close
+
+    def close(store):
+        if not allow_close:
+            raise OSError("injected vault close failure")
+        original_close(store)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected late constructor failure")
+
+    monkeypatch.setattr(module.CredentialStore, "close", close)
+    monkeypatch.setattr(module, "ContractManager", fail)
+    try:
+        with pytest.raises(RuntimeError, match="injected late constructor failure"):
+            runtime.run()
+        assert runtime._stop_completed is False
+        assert runtime._startup_recovery_pending is True
+        with pytest.raises(BackendInstanceAlreadyRunning):
+            acquire_backend_instance_lease()
+        allow_close = True
+        runtime.retry_recovery()
+        assert runtime.credential_store._poisoned is True
+        assert runtime._stop_completed is True
+        successor = acquire_backend_instance_lease()
+        successor.release()
+    finally:
+        allow_close = True
+        if runtime._requires_runtime_recovery():
+            runtime.retry_recovery()
 
 
 def test_kernel_lease_proof_is_opaque_and_revoked_before_unlock(tmp_path, monkeypatch):

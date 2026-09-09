@@ -218,7 +218,7 @@ def test_inactive_adapter_raises() -> None:
         NativeSessionRefresher(app, mutation_admission=lambda: None, registry_publication_owner=_CURRENT.owner).refresh_token("dhan")
 
 
-def test_factory_wires_rotator_routes_and_guard(tmp_path, monkeypatch) -> None:
+def test_factory_wires_rotator_routes_and_guard(tmp_path, monkeypatch, backend_lease_factory) -> None:
     """The real app factory mounts the rotation admin routes behind the G9
     guard and exposes the rotator + unstarted scheduler on app.config."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
@@ -227,7 +227,7 @@ def test_factory_wires_rotator_routes_and_guard(tmp_path, monkeypatch) -> None:
     (tmp_path / "master_password").write_text("rotation-test-pw", encoding="utf-8")
     from flinttrade_core.app import create_flask_app
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
     assert app.config.get("CREDENTIALS_ROTATOR") is not None
     scheduler = app.config.get("ROTATION_SCHEDULER")

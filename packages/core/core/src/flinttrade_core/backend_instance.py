@@ -219,7 +219,7 @@ def prepare_backend_lease_handoff(lease: BackendInstanceLease) -> BackendLeaseHa
 class _PosixBackendFileLease:
     """Explicit POSIX lock owner with no destructor-side unlock."""
 
-    def __init__(self, descriptor: int) -> None:
+    def __init__(self, descriptor: int | None) -> None:
         self._descriptor = descriptor
 
     def release(self) -> None:
@@ -379,12 +379,16 @@ def acquire_backend_instance_lease() -> BackendInstanceLease:
     """
     lock_path = workspace_dir() / "backend_instance.lock"
     if os.name == "posix":
+        raw_lease: BaseFileLock | Any = _PosixBackendFileLease(None)
+        lease = BackendInstanceLease(raw_lease)
         descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        raw_lease._descriptor = descriptor
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             with suppress(OSError):
                 os.close(descriptor)
+                raw_lease._descriptor = None
             if exc.errno not in {errno.EACCES, errno.EAGAIN}:
                 raise
             raise BackendInstanceAlreadyRunning(
@@ -392,9 +396,9 @@ def acquire_backend_instance_lease() -> BackendInstanceLease:
                 f"  lock file: {lock_path}\n"
                 "  stop the other backend or choose a different workspace"
             ) from None
-        raw_lease: BaseFileLock | Any = _PosixBackendFileLease(descriptor)
     else:
         raw_lease = FileLock(lock_path, timeout=0, mode=0o600, thread_local=False)
+        lease = BackendInstanceLease(raw_lease)
         try:
             raw_lease.acquire()
         except FileLockTimeout:
@@ -406,11 +410,17 @@ def acquire_backend_instance_lease() -> BackendInstanceLease:
 
     # ``mode`` applies when filelock creates the inode. Tighten a pre-existing
     # stale file as well; ownership still comes only from the kernel lock.
-    with suppress(OSError):
-        lock_path.chmod(0o600)
-    lease = BackendInstanceLease(raw_lease)
-    lease._lock_path = lock_path
-    stat = lock_path.stat()
-    lease._lock_identity = stat.st_dev, stat.st_ino
-    lease._proof = BackendLeaseProof(_PROOF_SEAL, lease=lease)
+    try:
+        with suppress(OSError):
+            lock_path.chmod(0o600)
+        lease._lock_path = lock_path
+        stat = lock_path.stat()
+        lease._lock_identity = stat.st_dev, stat.st_ino
+        lease._proof = BackendLeaseProof(_PROOF_SEAL, lease=lease)
+    except BaseException:
+        # The wrapper already owns the descriptor before any fallible proof
+        # setup. release() retains that exact owner if cleanup itself fails.
+        with suppress(BaseException):
+            lease.release()
+        raise
     return lease
