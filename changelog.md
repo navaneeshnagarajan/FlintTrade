@@ -46,11 +46,11 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Docs page summary duplicated as first body paragraph (FT-SITE-002).**
-  On `/docs*` routes the page summary appears twice: the site generator
-  `descriptionFromMarkdown` lifts the first body paragraph into
-  frontmatter, and the docs page renders both `DocsDescription` and the
-  full body. Tracking note; the Website Builder lands the generator or
-  UI fix on this branch.
+  On `/docs*` routes the page summary no longer appears twice. The
+  generator still lifts the first body paragraph into frontmatter for
+  SEO, but marks `hideDescription` when that extract matches the opening
+  body paragraph. The docs page skips `DocsDescription` unless the page
+  opts in with a distinct subtitle (fail-closed if the flag is missing).
 
 - **Dependabot qs and fflate (medium).** `qs` 6.15.2 (via `http-server` →
   `union`) is overridden to 6.16.0, clearing GHSA-4mjr / GHSA-px8p. `fflate`
