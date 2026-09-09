@@ -45,6 +45,11 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Dependabot qs and fflate (medium).** `qs` 6.15.2 (via `http-server` →
+  `union`) is overridden to 6.16.0, clearing GHSA-4mjr / GHSA-px8p. `fflate`
+  0.6.10 (via `three-stdlib`) is overridden to 0.6.11, clearing GHSA-x5fp.
+  No new allowlist entries.
+
 - **Node audit blockers on main.** Newly disclosed HIGH/CRITICAL advisories
   against the existing lock (next Windows/AVIF RCE, maplibre-gl XSS,
   `@xmldom/xmldom` name-injection/ReDoS, sharp libheif, js-yaml merge-key
