@@ -55,8 +55,9 @@ bridge and a first-party native gateway that is **not usable on this
 unreleased line**. OpenAlgo is the working/community-tested broker path.
 Native broker HTTP is frozen until Task 9D (account mutations return a
 stable `503` `broker_account_cutover_unavailable`) and Task 7C.2 / 8B
-(native HTTP reads return `409` with zero provider calls until cutover
-onto the in-process `BrokerReadPort`). Setup → Brokers and Settings →
+(native HTTP account and market-data reads return `409` with zero
+provider calls until cutover onto the in-process `BrokerReadPort`;
+catalogue and vault-backed account-list GETs stay metadata only). Setup → Brokers and Settings →
 Brokers will fail rather than connect or refresh a native session. Use
 the OpenAlgo-compatible bridge for a working broker session.
 

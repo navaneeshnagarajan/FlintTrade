@@ -123,8 +123,9 @@ in FlintTrade Setup → OpenAlgo Bridge or Settings → Broker Gateway.
 Do not use Setup → Brokers or Settings → Brokers for a native session on
 this unreleased line. Native broker HTTP is frozen until Task 9D (account
 mutations return `503` `broker_account_cutover_unavailable`) and Task
-7C.2 / 8B (native HTTP reads return `409` with zero provider calls until
-cutover onto the in-process `BrokerReadPort`). The Brokers screen will
+7C.2 / 8B (native HTTP account and market-data reads return `409` with
+zero provider calls until cutover onto the in-process `BrokerReadPort`;
+catalogue and vault-backed account-list GETs stay metadata only). The Brokers screen will
 fail rather than connect. Dhan and Upstox remain evidence-gated as
 connectable in the catalogue; that is not a working native HTTP or UX
 path. INDmoney is read-verified and its fail-closed emergency planner is
