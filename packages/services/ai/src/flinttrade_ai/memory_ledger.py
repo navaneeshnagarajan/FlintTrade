@@ -431,6 +431,8 @@ class MemoryLedger:
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
+        if os.getpid() != self._pid:
+            raise MemoryUnavailable("memory authority inherited across fork")
         with self._thread_lock:
             if self._closed or os.getpid() != self._pid:
                 raise MemoryUnavailable("memory authority closed or inherited across fork")
@@ -449,6 +451,8 @@ class MemoryLedger:
 
     def close(self) -> None:
         """Release filesystem ownership handles; never remove evidence."""
+        if os.getpid() != self._pid:
+            raise MemoryUnavailable("memory authority inherited across fork")
         with self._thread_lock:
             if not self._closed:
                 self._closed = True
@@ -462,13 +466,22 @@ class MemoryLedger:
 
     @staticmethod
     def _event(db: sqlite3.Connection, identity: str) -> MemoryEvent:
-        row = db.execute("SELECT body, digest FROM events WHERE event_id=?", (identity,)).fetchone()
+        row = db.execute(
+            "SELECT body, digest, domain, as_of, scope, search_text FROM events WHERE event_id=?", (identity,)
+        ).fetchone()
         if row is None:
             raise KeyError(identity)
         try:
             event = _event_from_body(row[0])
             if event.event_id != identity or event.digest != row[1]:
                 raise ValueError("memory event digest mismatch")
+            if row[2:] != (
+                event.domain.value,
+                _stamp(event.as_of),
+                event.rights.rights.max_evidence_use_scope.value,
+                _canonical(_thaw(event.payload)).casefold(),
+            ):
+                raise ValueError("memory selection metadata mismatch")
             return event
         except (ValueError, TypeError, KeyError) as exc:
             raise MemoryUnavailable("invalid stored memory event") from exc
@@ -520,33 +533,27 @@ class MemoryLedger:
         return MemoryReadProjection(self)
 
     def _select(self, db: sqlite3.Connection, decision_time: datetime, query: MemoryQuery) -> tuple[MemoryEvent, ...]:
-        clauses, arguments = ["as_of <= ?"], [_stamp(decision_time)]
-        if query.domain is not None:
-            clauses.append("domain=?")
-            arguments.append(query.domain.value)
-        if query.event_ids:
-            clauses.append("event_id IN (" + ",".join("?" for _ in query.event_ids) + ")")
-            arguments.extend(query.event_ids)
-        if query.text:
-            clauses.append("instr(search_text, ?) > 0")
-            arguments.append(query.text.casefold())
-        scopes = _SCOPES[_SCOPES.index(query.minimum_scope) :]
-        clauses.append("scope IN (" + ",".join("?" for _ in scopes) + ")")
-        arguments.extend(scope.value for scope in scopes)
-        rows = db.execute(
-            "SELECT event_id FROM events WHERE " + " AND ".join(clauses) + " ORDER BY as_of, event_id LIMIT ?",
-            (*arguments, query.limit),
-        ).fetchall()
-        events = tuple(self._event(db, row[0]) for row in rows)
-        if any(
-            event.as_of > decision_time
-            or _SCOPES.index(event.rights.rights.max_evidence_use_scope) < _SCOPES.index(query.minimum_scope)
-            for event in events
-        ):
-            raise MemoryUnavailable("memory selection metadata mismatch")
-        if sum(len(_canonical(event._body()).encode()) for event in events) > MAX_CONTEXT_BYTES:
-            raise ValueError("memory context byte limit exceeded")
-        return events
+        # Validate every row before it can be excluded or truncated by derived
+        # metadata. Checking only SQL-selected rows would miss false exclusions
+        # and could record an incorrect empty/subset influence receipt.
+        events: list[MemoryEvent] = []
+        context_bytes = 0
+        for (identity,) in db.execute("SELECT event_id FROM events ORDER BY as_of, event_id"):
+            event = self._event(db, identity)
+            if (
+                event.as_of > decision_time
+                or (query.domain is not None and event.domain is not query.domain)
+                or (query.event_ids and event.event_id not in query.event_ids)
+                or (query.text and query.text.casefold() not in _canonical(_thaw(event.payload)).casefold())
+                or _SCOPES.index(event.rights.rights.max_evidence_use_scope) < _SCOPES.index(query.minimum_scope)
+                or len(events) >= query.limit
+            ):
+                continue
+            context_bytes += len(_canonical(event._body()).encode())
+            if context_bytes > MAX_CONTEXT_BYTES:
+                raise ValueError("memory context byte limit exceeded")
+            events.append(event)
+        return tuple(events)
 
     def _recall(
         self, *, receipt_id: str, decision_id: str, request_id: str, decision_time: datetime, query: MemoryQuery

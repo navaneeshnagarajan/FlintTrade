@@ -418,3 +418,92 @@ def test_exact_decision_cutoff_and_context_limits(tmp_path):
 def test_invalid_queries_refuse_before_receipt(query):
     with pytest.raises(ValueError):
         api().MemoryQuery(**query)
+
+
+@pytest.mark.parametrize(
+    ("column", "direction"),
+    [
+        ("domain", "false-inclusion"),
+        ("domain", "false-exclusion"),
+        ("search_text", "false-inclusion"),
+        ("search_text", "false-exclusion"),
+        ("as_of", "false-exclusion"),
+        ("scope", "false-exclusion"),
+    ],
+)
+def test_corrupt_selection_metadata_cannot_create_influence(tmp_path, column, direction):
+    with api().MemoryLedger(tmp_path / "memory") as store:
+        store.append(event(payload="alpha", rights=permitted()))
+    changes = {
+        "domain": "procedural",
+        "search_text": "beta",
+        "as_of": (NOW + timedelta(days=1)).isoformat(timespec="microseconds"),
+        "scope": EvidenceUseScope.ISOLATED_RESEARCH.value,
+    }
+    # Model corruption of only derived query columns while preserving the
+    # authoritative body, digest, exact schema and SQLite physical integrity.
+    with sqlite3.connect(tmp_path / "memory" / "memory.sqlite") as db:
+        trigger = db.execute("SELECT sql FROM sqlite_master WHERE name='events_no_update'").fetchone()[0]
+        db.execute("DROP TRIGGER events_no_update")
+        db.execute(f"UPDATE events SET {column}=? WHERE event_id='event-1'", (changes[column],))
+        db.execute(trigger)
+        assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    options = {}
+    if column == "domain":
+        options["domain"] = (
+            api().MemoryDomain.PROCEDURAL if direction == "false-inclusion" else api().MemoryDomain.KNOWLEDGE
+        )
+    elif column == "search_text":
+        options["text"] = "beta" if direction == "false-inclusion" else "alpha"
+    elif column == "scope":
+        options["minimum_scope"] = EvidenceUseScope.LIVE_DECISION
+    with api().MemoryLedger(tmp_path / "memory") as reopened:
+        with pytest.raises(api().MemoryUnavailable):
+            recall(reopened.read_projection(), query=api().MemoryQuery(**options))
+        with pytest.raises(KeyError):
+            reopened.read_projection().replay("receipt-1")
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="native POSIX inherited-lock contention test")
+def test_fork_with_other_thread_holding_ledger_lock_refuses_before_locking(tmp_path):
+    script = """
+import os, signal, sys, threading, warnings
+from pathlib import Path
+from flinttrade_ai.memory_ledger import MemoryLedger, MemoryUnavailable
+with MemoryLedger(Path(sys.argv[1])) as store:
+    held = threading.Event()
+    release = threading.Event()
+    def hold():
+        with store._thread_lock:
+            held.set()
+            release.wait(10)
+    thread = threading.Thread(target=hold)
+    thread.start()
+    assert held.wait(5)
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', message='.*multi-threaded.*', category=DeprecationWarning)
+        pid = os.fork()
+    if pid == 0:
+        signal.signal(signal.SIGALRM, lambda *_: os._exit(72))
+        signal.alarm(2)
+        try:
+            store.read_projection().replay('missing')
+        except MemoryUnavailable:
+            try:
+                store.close()
+            except MemoryUnavailable:
+                os._exit(0)
+        os._exit(73)
+    try:
+        _, status = os.waitpid(pid, 0)
+    finally:
+        release.set()
+        thread.join(5)
+    sys.exit(os.waitstatus_to_exitcode(status))
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(str(p) for p in sys.path if p)
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path / "memory")], env=env, text=True, capture_output=True, timeout=15
+    )
+    assert result.returncode == 0, f"child status={result.returncode}; {result.stderr}"
