@@ -317,6 +317,11 @@ export default function WelcomeRoute() {
     fetch(`${getBase()}/v1/auth/status`, { headers: buildHeaders(false), signal: controller.signal })
       .then((response) => (response.ok ? response.json() : Promise.reject(response)))
       .then((data) => {
+        if (cancelled) return;
+        if (isDemoSessionActive()) {
+          useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+          return;
+        }
         if (!data.data?.is_setup) {
           useAuthStore.getState().setSetupRequired();
         } else {
@@ -424,7 +429,22 @@ export default function WelcomeRoute() {
   }
 
   if (authStatus === "logged-out" && flowStep === "login") {
-    return <LoginRoute onSuccess={handleLoginSuccess} onExplore={handleExplore} mode="full" />;
+    let unfinishedSetup = false;
+    try {
+      const raw = localStorage.getItem("flinttrade:setup-progress");
+      const saved = raw ? JSON.parse(raw) as { accountCreated?: boolean } : null;
+      unfinishedSetup = saved?.accountCreated === true;
+    } catch {
+      unfinishedSetup = false;
+    }
+    return (
+      <LoginRoute
+        onSuccess={handleLoginSuccess}
+        onExplore={handleExplore}
+        onUnfinishedSetup={unfinishedSetup ? () => navigate("/setup") : undefined}
+        mode="full"
+      />
+    );
   }
 
   if (authStatus === "pin-required" && flowStep === "login") {

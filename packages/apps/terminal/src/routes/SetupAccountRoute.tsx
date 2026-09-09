@@ -18,9 +18,9 @@
  * Progress is cleared ONLY by explicit user action:
  *   (a) selecting a mode on step 6 (Finish setup)
  *   (b) clicking "Start over" in the header (wipes the unfinished account)
- *   (c) hitting HTTP 409 on account creation (account already exists → sign in)
- *   (d) Explore first on the 2FA step (clears wizard progress, marks the
- *       sample-data Explore session, and opens Home)
+ *   (c) hitting HTTP 409 on account creation (opens the 2FA wipe hatches)
+ *   (d) Explore first on the 2FA step (keeps unfinished-setup progress, marks
+ *       the sample-data Explore session, and opens Home)
  *
  * On completion navigates to /welcome (which shows the sign-in form since an
  * account now exists).
@@ -280,16 +280,16 @@ function passwordStrength(password: string): { score: number; label: string; col
 interface AccountSecurityStepProps {
   onComplete: (values: AccountFormValues, totpUri: string, backupCodes: string[]) => void;
   onBack: () => void;
+  /** Account already exists — jump to the 2FA wipe hatches instead of 409. */
+  onAccountAlreadyExists: () => void;
 }
 
-function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
-  const navigate = useNavigate();
+function AccountSecurityStep({ onComplete, onBack, onAccountAlreadyExists }: AccountSecurityStepProps) {
   const setLoggedOut = useAuthStore((s) => s.setLoggedOut);
   const setLoggedInIfCurrent = useAuthStore((s) => s.setLoggedInIfCurrent);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState("");
-  const [accountExists, setAccountExists] = useState(false);
 
   const {
     register,
@@ -306,7 +306,6 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
     const requestFence = captureAuthSessionFence();
     setIsLoading(true);
     setServerError("");
-    setAccountExists(false);
     try {
       const result = await setupFlintTradeAccount({
         username: values.username,
@@ -328,14 +327,9 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
     } catch (error) {
       if (!isAuthSessionFenceCurrent(requestFence)) return;
       if (error instanceof AccountSetupError && error.kind === "account-exists") {
-        // Account already exists — don't wedge. Route the user to login,
-        // which is the only sensible next step. Clear any stale progress
-        // so the next canonical /setup entry won't try to re-submit.
-        clearProgress();
-        setAccountExists(true);
-        setServerError(
-          error.message || "An account already exists on this machine. Sign in to continue.",
-        );
+        // Unfinished first-run: open the 2FA step so Delete / Start over
+        // can wipe the account instead of a dead-end 409.
+        onAccountAlreadyExists();
         return;
       }
       setServerError(
@@ -357,25 +351,12 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
 
       {serverError && (
         <div
-          className={`flex items-start gap-3 p-3 rounded-lg border text-sm ${
-            accountExists
-              ? "bg-accent/10 border-accent/30 text-text-primary"
-              : "bg-loss/10 border-loss/30 text-loss"
-          }`}
+          className="flex items-start gap-3 p-3 rounded-lg border text-sm bg-loss/10 border-loss/30 text-loss"
           role="alert"
         >
-          <AlertTriangle className={`size-4 shrink-0 mt-0.5 ${accountExists ? "text-accent" : ""}`} />
+          <AlertTriangle className="size-4 shrink-0 mt-0.5" />
           <div className="flex-1 space-y-2">
             <div>{serverError}</div>
-            {accountExists && (
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => navigate("/welcome", { replace: true })}
-              >
-                Go to sign-in
-              </Button>
-            )}
           </div>
         </div>
       )}
@@ -1079,11 +1060,21 @@ export default function SetupAccountRoute({
   }
 
   function handleExploreFirst() {
-    // The setup JWT is memory-only. Persist the same sample-data Explore
-    // session as Welcome → Try with sample data so /home survives refresh
-    // and a /welcome remount (useAuthGuard + Welcome restore demo-user).
-    // Daily password+TOTP login is unchanged.
-    clearProgress();
+    // Keep unfinished-setup progress (no TOTP secrets) so /setup still
+    // offers Start over / Delete account after a remount. The setup JWT is
+    // memory-only; the durable sample-data session is the demo marker.
+    saveProgress({
+      accountCreated: true,
+      totpUri: "",
+      backupCodes: [],
+      persona,
+      connection,
+      trading,
+      risk,
+      mode: null,
+      displayName,
+      currentStep: 1,
+    });
     sessionRecoveryMaterial = null;
     setMode("explore");
     markDemoSessionActive();
@@ -1126,6 +1117,23 @@ export default function SetupAccountRoute({
     setTotpUri(uri);
     setBackupCodes(codes);
     // The persist effect picks this up automatically; no need to save inline.
+  }
+
+  function handleAccountAlreadyExists() {
+    saveProgress({
+      accountCreated: true,
+      totpUri: "",
+      backupCodes: [],
+      persona,
+      connection,
+      trading,
+      risk,
+      mode: null,
+      displayName,
+      currentStep: 1,
+    });
+    setAccountCreated(true);
+    setCurrentStep(1);
   }
 
   function handleAccountDeleted() {
@@ -1319,6 +1327,7 @@ export default function SetupAccountRoute({
               <AccountSecurityStep
                 onComplete={handleAccountComplete}
                 onBack={handleBack}
+                onAccountAlreadyExists={handleAccountAlreadyExists}
               />
             )}
 

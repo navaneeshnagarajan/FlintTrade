@@ -244,7 +244,7 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     expect(screen.getByText(/without 2FA/i)).toBeInTheDocument();
   });
 
-  it("Explore first clears incomplete setup and opens Home in Explore", async () => {
+  it("Explore first opens Home in Explore and keeps unfinished setup wipeable", async () => {
     localStorage.setItem(PROGRESS_KEY, JSON.stringify({
       accountCreated: true,
       totpUri: "",
@@ -270,12 +270,37 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     await waitFor(() =>
       expect(mocks.navigate).toHaveBeenCalledWith("/home", { replace: true }),
     );
-    expect(localStorage.getItem(PROGRESS_KEY)).toBeNull();
+    const progress = JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? "null") as {
+      accountCreated?: boolean;
+      currentStep?: number;
+    } | null;
+    expect(progress?.accountCreated).toBe(true);
+    expect(progress?.currentStep).toBe(1);
     expect(useModeStore.getState().mode).toBe("explore");
     expect(localStorage.getItem("flinttrade:demo-session")).toBe("active");
     expect(useAuthStore.getState().token).toBe("demo-user");
     expect(useAuthStore.getState().status).toBe("logged-in");
     fetchSpy.mockRestore();
+  });
+
+  it("reopening Setup after Explore first still offers Delete account & start over", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      totpUri: "",
+      backupCodes: [],
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "nav",
+      currentStep: 1,
+    }));
+
+    render(<SetupAccountRoute />);
+
+    expect(screen.getByRole("button", { name: /delete account/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start over" })).toBeInTheDocument();
   });
 
   it("Start over wipes the unfinished account so setup can begin again", async () => {

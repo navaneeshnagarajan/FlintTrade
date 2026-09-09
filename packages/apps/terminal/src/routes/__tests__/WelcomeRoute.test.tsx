@@ -136,7 +136,19 @@ vi.mock("@/components/aceternity/meteors", () => ({
 }));
 
 vi.mock("@/routes/LoginRoute", () => ({
-  default: () => <div data-testid="login-route" />,
+  default: ({
+    onUnfinishedSetup,
+  }: {
+    onUnfinishedSetup?: () => void;
+  }) => (
+    <div data-testid="login-route">
+      {onUnfinishedSetup ? (
+        <button type="button" aria-label="Start over unfinished setup" onClick={onUnfinishedSetup}>
+          Unfinished setup — start over
+        </button>
+      ) : null}
+    </div>
+  ),
 }));
 
 // ---------------------------------------------------------------------------
@@ -163,6 +175,23 @@ describe("WelcomeRoute", () => {
     render(<WelcomeRoute />);
 
     expect(screen.getByRole("heading", { name: "FlintTrade" })).toBeInTheDocument();
+  });
+
+  it("offers unfinished-setup start over on Welcome sign-in after a hatch bounce", async () => {
+    authState.status = "logged-out";
+    sessionStorage.setItem("flinttrade:greeted-today", new Date().toDateString());
+    localStorage.setItem(
+      "flinttrade:setup-progress",
+      JSON.stringify({ accountCreated: true, currentStep: 1 }),
+    );
+
+    render(<WelcomeRoute />);
+
+    await waitFor(() => {
+      fireEvent.click(screen.getByLabelText("Start over unfinished setup"));
+    });
+    expect(mockNavigate).toHaveBeenCalledWith("/setup");
+    localStorage.removeItem("flinttrade:setup-progress");
   });
 
   it("does not redirect incomplete setup back to /setup from Welcome", () => {
