@@ -1,6 +1,6 @@
 import type { Page, Request } from "@playwright/test";
 
-import { expect, test } from "./fixture-registry";
+import { expect, registerExploreAdvisorStatusProbe, test } from "./fixture-registry";
 
 const LIVE_AUTHORITY_PAYLOAD = {
   sub: "synthetic-order-pad-operator",
@@ -205,22 +205,7 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
       return { json: { status: "success", data: { positions: [] } } };
     },
   });
-  syntheticApi.register({
-    name: "read unconfigured advisor status",
-    method: "GET",
-    path: "/ft-api/api/v1/advisor/status",
-    expectedCalls: 2,
-    handler: (request) => {
-      expect(request.headers()["authorization"]).toBeUndefined();
-      expect(request.postData()).toBeNull();
-      return {
-        json: {
-          status: "success",
-          data: { configured: false, provider: "none", model: "none" },
-        },
-      };
-    },
-  });
+  registerExploreAdvisorStatusProbe(syntheticApi, { expectedCalls: 2 });
   syntheticApi.register({
     name: "read inactive safety configuration",
     method: "GET",

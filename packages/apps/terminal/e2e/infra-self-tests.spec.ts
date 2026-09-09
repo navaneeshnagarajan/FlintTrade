@@ -3,8 +3,10 @@ import { createServer } from "node:http";
 import { expect, test as baseTest, type Page, type Request } from "@playwright/test";
 
 import {
+  ADVISOR_STATUS_PATH,
   createSyntheticFixtureRegistry,
   expect as journeyExpect,
+  registerExploreAdvisorStatusProbe,
   test as journeyTest,
   type BenignConsoleError,
   type HttpMethod,
@@ -311,6 +313,20 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
       version: "e039",
     });
     expect(registry.callCount("GET", "/api/status")).toBe(1);
+    await expect(registry.dispose()).resolves.toBeUndefined();
+  });
+
+  baseTest("registers the Explore advisor status probe as an expected /ft-api GET", async ({
+    page,
+  }) => {
+    const registry = await createRegistry(page, "advisor status probe");
+    registerExploreAdvisorStatusProbe(registry);
+
+    await expect(fetchJson(page, "GET", ADVISOR_STATUS_PATH)).resolves.toEqual({
+      status: "success",
+      data: { configured: false, provider: "none", model: "none" },
+    });
+    expect(registry.callCount("GET", ADVISOR_STATUS_PATH)).toBe(1);
     await expect(registry.dispose()).resolves.toBeUndefined();
   });
 
