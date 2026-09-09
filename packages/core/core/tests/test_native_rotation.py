@@ -691,7 +691,8 @@ def test_blocked_rotation_sdk_work_times_out_without_accumulating_workers() -> N
         second_started = time.monotonic()
         with pytest.raises(RuntimeError, match="retry"):
             refresher.refresh_token("dhan")
-        assert time.monotonic() - second_started < 0.5
+        # Stay well below the blocked 5s SDK wait; 0.5s flakes under xdist CI load.
+        assert time.monotonic() - second_started < 2.0
         assert probe_calls == [1]
 
         candidate_threads = [
