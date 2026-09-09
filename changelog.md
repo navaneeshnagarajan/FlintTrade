@@ -45,6 +45,12 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Trade Review date filter and mangled timestamps in Explore (FT-TRADE-001).**
+  After Explore/sample-data, `/trade` Trade Review has a date filter
+  that is not usable and timestamps that render mangled. The fix
+  tracked here must make the date filter usable and timestamps
+  readable (not mangled). Product code is not in this revision.
+
 - **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
   Setup Step 2/7 now has an obvious **Explore first — continue without
   2FA** path so sample-data Explore/Practice is reachable without
