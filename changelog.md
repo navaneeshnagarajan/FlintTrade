@@ -45,6 +45,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Strategy Lab stays empty after AI Deploy (FT-DEMO-002).**
+  Tester finding (Medium). Deploying “Trend EMA Crossover” from
+  `/demo-app/ai` opens `/demo-app/lab?strategy=TrendEMACrossover`, but
+  the Lab stays unpopulated and Run Backtest stays disabled. This
+  Unreleased note tracks hydrating Strategy Lab from `?strategy=` when
+  deploying from AI. Product fix is not in this commit — implement on
+  this PR.
+
 - **Docs page summary duplicated as first body paragraph (FT-SITE-002).**
   On `/docs*` routes the page summary no longer appears twice. The
   generator still lifts the first body paragraph into frontmatter for
