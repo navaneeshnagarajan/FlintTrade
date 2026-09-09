@@ -13,8 +13,16 @@ Adapted patterns from:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
+
+from .service_profiles import (
+    HISTORICAL_PROVIDER_PROFILES,
+    OPENALGO_PROFILE,
+    OPENCHART_PROFILE,
+    YFINANCE_PROFILE,
+)
 
 logger = logging.getLogger("flinttrade.historical.data_provider")
 
@@ -43,12 +51,10 @@ INTRADAY_INTERVALS: frozenset[str] = frozenset(
 )
 
 # Exchanges supported natively via OpenAlgo
-OPENALGO_EXCHANGES: frozenset[str] = frozenset(
-    {"NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX"}
-)
+OPENALGO_EXCHANGES: frozenset[str] = frozenset(OPENALGO_PROFILE.exchanges)
 
 # Exchanges supported via free NSE/NFO data (openchart)
-FREE_NSE_EXCHANGES: frozenset[str] = frozenset({"NSE", "NFO"})
+FREE_NSE_EXCHANGES: frozenset[str] = frozenset(OPENCHART_PROFILE.exchanges)
 
 
 def normalise_interval(interval: str) -> str:
@@ -206,7 +212,7 @@ class OpenAlgoProvider:
     @property
     def name(self) -> str:
         """Provider identifier."""
-        return "openalgo"
+        return OPENALGO_PROFILE.runtime_name
 
     def supports(self, exchange: str) -> bool:
         """OpenAlgo supports all standard Indian exchanges.
@@ -217,7 +223,7 @@ class OpenAlgoProvider:
         Returns:
             True for NSE, BSE, NFO, BFO, CDS, BCD, MCX, NCDEX.
         """
-        return exchange.upper() in OPENALGO_EXCHANGES
+        return exchange.upper() in OPENALGO_PROFILE.exchanges
 
     def fetch(
         self,
@@ -312,7 +318,7 @@ class OpenChartProvider:
     @property
     def name(self) -> str:
         """Provider identifier."""
-        return "openchart"
+        return OPENCHART_PROFILE.runtime_name
 
     def supports(self, exchange: str) -> bool:
         """OpenChart only covers NSE and NFO.
@@ -323,7 +329,7 @@ class OpenChartProvider:
         Returns:
             True for NSE and NFO only.
         """
-        return exchange.upper() in FREE_NSE_EXCHANGES
+        return exchange.upper() in OPENCHART_PROFILE.exchanges
 
     def fetch(
         self,
@@ -406,7 +412,7 @@ class YFinanceProvider:
     @property
     def name(self) -> str:
         """Provider identifier."""
-        return "yfinance"
+        return YFINANCE_PROFILE.runtime_name
 
     def supports(self, exchange: str) -> bool:
         """yfinance supports MCX commodity symbols only.
@@ -417,7 +423,7 @@ class YFinanceProvider:
         Returns:
             True for MCX only.
         """
-        return exchange.upper() == "MCX"
+        return exchange.upper() in YFINANCE_PROFILE.exchanges
 
     def fetch(
         self,
@@ -485,6 +491,30 @@ class YFinanceProvider:
 # ---------------------------------------------------------------------------
 
 
+ProviderFactory = Callable[[Any | None], DataProvider]
+
+
+def _openalgo_factory(client: Any | None) -> DataProvider:
+    if client is None:
+        raise ValueError("OpenAlgo provider requires a configured client")
+    return OpenAlgoProvider(client)
+
+
+def _openchart_factory(_client: Any | None) -> DataProvider:
+    return OpenChartProvider()
+
+
+def _yfinance_factory(_client: Any | None) -> DataProvider:
+    return YFinanceProvider()
+
+
+_PROVIDER_FACTORIES: dict[str, ProviderFactory] = {
+    OPENALGO_PROFILE.runtime_name: _openalgo_factory,
+    OPENCHART_PROFILE.runtime_name: _openchart_factory,
+    YFINANCE_PROFILE.runtime_name: _yfinance_factory,
+}
+
+
 class ProviderRegistry:
     """Registry that routes fetch requests to the correct provider with fallback.
 
@@ -513,17 +543,21 @@ class ProviderRegistry:
         openalgo_client: Any | None = None,
         extra_providers: list[DataProvider] | None = None,
     ) -> None:
-        self._providers: list[DataProvider] = []
-
-        if openalgo_client is not None:
-            self._providers.append(OpenAlgoProvider(openalgo_client))
+        self._providers: list[DataProvider] = [
+            _PROVIDER_FACTORIES[profile.runtime_name](openalgo_client)
+            for profile in HISTORICAL_PROVIDER_PROFILES
+            if profile.requires_configured_client and openalgo_client is not None
+        ]
 
         if extra_providers:
             self._providers.extend(extra_providers)
 
-        # Free providers are always available as fallback
-        self._providers.append(OpenChartProvider())
-        self._providers.append(YFinanceProvider())
+        # Providers without a configured client remain available as fallbacks.
+        self._providers.extend(
+            _PROVIDER_FACTORIES[profile.runtime_name](None)
+            for profile in HISTORICAL_PROVIDER_PROFILES
+            if not profile.requires_configured_client
+        )
 
     @property
     def providers(self) -> list[DataProvider]:

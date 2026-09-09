@@ -12,7 +12,10 @@ import json
 import math
 import struct
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
+
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 
 # Canonical order type -> Dhan order_type.
 ORDER_TYPE_MAP = {
@@ -121,6 +124,125 @@ DHAN_TO_PRODUCT = {
 
 class DhanMappingError(ValueError):
     """Raised when an order cannot be translated to / from the Dhan API."""
+
+
+_RESPONSE_MISSING = object()
+
+
+def _response_record(value: Any, *, field: str) -> dict[str, Any]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerReadResponseInvalid from None
+    return value
+
+
+def _response_rows(value: Any, *, field: str) -> list[dict[str, Any]]:
+    if type(value) is not list:
+        raise BrokerReadResponseInvalid from None
+    return [_response_record(row, field=field) for row in value]
+
+
+def _response_decimal(value: Any) -> Decimal:
+    if type(value) is bool or type(value) not in (int, float, str):
+        raise BrokerReadResponseInvalid from None
+    if type(value) is float and not math.isfinite(value):
+        raise BrokerReadResponseInvalid from None
+    if type(value) is str and not value.strip():
+        raise BrokerReadResponseInvalid from None
+    try:
+        number = Decimal(str(value))
+    except InvalidOperation:
+        raise BrokerReadResponseInvalid from None
+    if not number.is_finite():
+        raise BrokerReadResponseInvalid from None
+    return number
+
+
+def _response_number(
+    record: dict[str, Any],
+    *keys: str,
+    required: bool = False,
+) -> str | object:
+    for key in keys:
+        if key not in record:
+            continue
+        value = record[key]
+        if value is None or (type(value) is str and not value.strip()):
+            if required:
+                raise BrokerReadResponseInvalid from None
+            continue
+        _response_decimal(value)
+        return str(value)
+    if required:
+        raise BrokerReadResponseInvalid from None
+    return _RESPONSE_MISSING
+
+
+def _response_text(
+    record: dict[str, Any],
+    *keys: str,
+    required: bool = False,
+    integer: bool = False,
+) -> str | object:
+    for key in keys:
+        if key not in record:
+            continue
+        value = record[key]
+        if value is None or (type(value) is str and not value.strip()):
+            if required:
+                raise BrokerReadResponseInvalid from None
+            continue
+        if type(value) is str:
+            return value
+        if integer and type(value) is int:
+            return str(value)
+        raise BrokerReadResponseInvalid from None
+    if required:
+        raise BrokerReadResponseInvalid from None
+    return _RESPONSE_MISSING
+
+
+def _response_text_or_empty(record: dict[str, Any], *keys: str) -> str:
+    value = _response_text(record, *keys)
+    return "" if value is _RESPONSE_MISSING else value
+
+
+def _put_present(target: dict[str, Any], name: str, value: object) -> None:
+    if value is not _RESPONSE_MISSING:
+        target[name] = value
+
+
+def _market_number(
+    record: dict[str, Any],
+    *keys: str,
+    integer: bool = False,
+) -> float | int | object:
+    """Copy the first present market-data alias after exact primitive validation."""
+    for key in keys:
+        if key not in record:
+            continue
+        number = _response_decimal(record[key])
+        converted = float(number)
+        if not math.isfinite(converted):
+            raise BrokerReadResponseInvalid from None
+        if integer:
+            if number < 0 or number != number.to_integral_value():
+                raise BrokerReadResponseInvalid from None
+            return int(number)
+        return converted
+    return _RESPONSE_MISSING
+
+
+def _market_timestamp(value: object) -> str:
+    """Copy an exact provider timestamp without invoking arbitrary hooks."""
+    if type(value) is str:
+        if not value.strip():
+            raise BrokerReadResponseInvalid from None
+        return value.encode("utf-8").decode("utf-8")
+    if type(value) is int:
+        return str(value)
+    if type(value) is float and math.isfinite(value):
+        return str(value)
+    raise BrokerReadResponseInvalid from None
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -588,39 +710,48 @@ def to_modify_forever_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str
 
 def from_dhan_forever_order(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise one record of the ``GET /forever/orders`` list response."""
-    seg = d.get("exchangeSegment", "")
+    d = _response_record(d, field="forever order")
+    seg = _response_text_or_empty(d, "exchangeSegment")
     option_type, expiry, strike_price, underlying = _option_contract_identity(d)
-    return {
-        "orderid": str(d.get("orderId", "")),
-        "exchange_order_id": str(d.get("exchangeOrderId", "")),
-        "correlation_id": str(d.get("correlationId", "")),
-        "status": d.get("orderStatus", ""),
-        "order_flag": d.get("orderFlag", ""),
-        "symbol": d.get("tradingSymbol", ""),
-        "instrument_id": str(d.get("securityId", "")),
+    order_type = _response_text_or_empty(d, "orderType")
+    product = _response_text_or_empty(d, "productType")
+    validity = _response_text(d, "validity")
+    order = {
+        "orderid": _response_text_or_empty(d, "orderId"),
+        "exchange_order_id": _response_text_or_empty(d, "exchangeOrderId"),
+        "correlation_id": _response_text_or_empty(d, "correlationId"),
+        "status": _response_text_or_empty(d, "orderStatus"),
+        "order_flag": _response_text_or_empty(d, "orderFlag"),
+        "symbol": _response_text_or_empty(d, "tradingSymbol"),
+        "instrument_id": _response_text_or_empty(d, "securityId"),
         "exchange": SEGMENT_TO_EXCHANGE.get(seg, seg),
-        "action": d.get("transactionType", ""),
-        "pricetype": DHAN_TO_ORDER_TYPE.get(d.get("orderType", ""), d.get("orderType", "")),
-        "product": DHAN_TO_PRODUCT.get(d.get("productType", ""), d.get("productType", "")),
-        "quantity": str(d.get("quantity", 0)),
-        "filled_quantity": _optional_text(d, "filledQty", "tradedQty"),
-        "price": str(d.get("price", 0)),
-        "trigger_price": str(d.get("triggerPrice", 0)),
-        "disclosed_quantity": str(d.get("disclosedQuantity", 0)),
-        "validity": d.get("validity", "DAY"),
-        "quantity1": str(d.get("quantity1", 0)),
-        "price1": str(d.get("price1", 0)),
-        "trigger_price1": str(d.get("triggerPrice1", 0)),
-        "oco_leg_complete": all(
-            key in d and d.get(key) is not None for key in ("quantity1", "price1", "triggerPrice1")
-        ),
-        "leg_name": d.get("legName", ""),
-        "created_at": str(d.get("createTime", "")),
+        "action": _response_text_or_empty(d, "transactionType"),
+        "pricetype": DHAN_TO_ORDER_TYPE.get(order_type, order_type),
+        "product": DHAN_TO_PRODUCT.get(product, product),
+        "validity": "DAY" if validity is _RESPONSE_MISSING else validity,
+        "leg_name": _response_text_or_empty(d, "legName"),
+        "created_at": _response_text_or_empty(d, "createTime"),
         "option_type": option_type,
         "expiry": expiry,
-        "strike_price": strike_price,
         "underlying": underlying,
     }
+    if strike_price is not None:
+        order["strike_price"] = strike_price
+    for field, source_fields in {
+        "quantity": ("quantity",),
+        "filled_quantity": ("filledQty", "tradedQty"),
+        "price": ("price",),
+        "trigger_price": ("triggerPrice",),
+        "disclosed_quantity": ("disclosedQuantity",),
+        "quantity1": ("quantity1",),
+        "price1": ("price1",),
+        "trigger_price1": ("triggerPrice1",),
+    }.items():
+        _put_present(order, field, _response_number(d, *source_fields))
+    second_leg = tuple(_response_number(d, key) for key in ("quantity1", "price1", "triggerPrice1"))
+    if all(value is not _RESPONSE_MISSING for value in second_leg):
+        order["oco_leg_complete"] = True
+    return order
 
 
 # ---------------------------------------------------------------------------
@@ -659,41 +790,55 @@ def from_dhan_super_order(d: dict[str, Any]) -> dict[str, Any]:
     Target / stop-loss legs are nested under the entry order as ``legDetails``
     (super-order.md "Super Order List"); they are surfaced as ``legs``.
     """
-    seg = d.get("exchangeSegment", "")
+    d = _response_record(d, field="super order")
+    seg = _response_text_or_empty(d, "exchangeSegment")
     option_type, expiry, strike_price, underlying = _option_contract_identity(d)
     raw_legs = d.get("legDetails")
-    legs = [leg for leg in raw_legs if isinstance(leg, dict)] if isinstance(raw_legs, list) else []
+    if raw_legs is None:
+        legs: list[dict[str, Any]] = []
+    else:
+        legs = _response_rows(raw_legs, field="super order leg")
+    for leg in legs:
+        for field in ("legName", "orderStatus", "orderId", "exchangeOrderId", "transactionType", "orderType"):
+            _response_text(leg, field)
     leg_details_valid = (
         len(legs) == 2
         and len(legs) == len(raw_legs)
-        and {str(leg.get("legName") or "").strip() for leg in legs} == {"TARGET_LEG", "STOP_LOSS_LEG"}
-        and all(bool(str(leg.get("orderStatus") or "").strip()) for leg in legs)
+        and {_response_text_or_empty(leg, "legName").strip() for leg in legs} == {"TARGET_LEG", "STOP_LOSS_LEG"}
+        and all(bool(_response_text_or_empty(leg, "orderStatus").strip()) for leg in legs)
     )
-    return {
-        "orderid": str(d.get("orderId", "")),
-        "exchange_order_id": str(d.get("exchangeOrderId", "")),
-        "correlation_id": str(d.get("correlationId", "")),
-        "status": d.get("orderStatus", ""),
-        "symbol": d.get("tradingSymbol", ""),
-        "instrument_id": str(d.get("securityId", "")),
+    order_type = _response_text_or_empty(d, "orderType")
+    product = _response_text_or_empty(d, "productType")
+    order = {
+        "orderid": _response_text_or_empty(d, "orderId"),
+        "exchange_order_id": _response_text_or_empty(d, "exchangeOrderId"),
+        "correlation_id": _response_text_or_empty(d, "correlationId"),
+        "status": _response_text_or_empty(d, "orderStatus"),
+        "symbol": _response_text_or_empty(d, "tradingSymbol"),
+        "instrument_id": _response_text_or_empty(d, "securityId"),
         "exchange": SEGMENT_TO_EXCHANGE.get(seg, seg),
-        "action": d.get("transactionType", ""),
-        "pricetype": DHAN_TO_ORDER_TYPE.get(d.get("orderType", ""), d.get("orderType", "")),
-        "product": DHAN_TO_PRODUCT.get(d.get("productType", ""), d.get("productType", "")),
-        "quantity": str(d.get("quantity", 0)),
-        "price": str(d.get("price", 0)),
-        "target_price": str(d.get("targetPrice", 0)),
-        "stop_loss_price": str(d.get("stopLossPrice", 0)),
-        "trailing_jump": str(d.get("trailingJump", 0)),
-        "filled_quantity": _optional_text(d, "filledQty", "tradedQty"),
-        "average_price": str(d.get("averageTradedPrice", 0)),
+        "action": _response_text_or_empty(d, "transactionType"),
+        "pricetype": DHAN_TO_ORDER_TYPE.get(order_type, order_type),
+        "product": DHAN_TO_PRODUCT.get(product, product),
         "legs": legs,
         "leg_details_valid": leg_details_valid,
         "option_type": option_type,
         "expiry": expiry,
-        "strike_price": strike_price,
         "underlying": underlying,
     }
+    if strike_price is not None:
+        order["strike_price"] = strike_price
+    for field, source_fields in {
+        "quantity": ("quantity",),
+        "price": ("price",),
+        "target_price": ("targetPrice",),
+        "stop_loss_price": ("stopLossPrice",),
+        "trailing_jump": ("trailingJump",),
+        "filled_quantity": ("filledQty", "tradedQty"),
+        "average_price": ("averageTradedPrice",),
+    }.items():
+        _put_present(order, field, _response_number(d, *source_fields))
+    return order
 
 
 # ---------------------------------------------------------------------------
@@ -818,17 +963,35 @@ def extract_alert_id(resp: Any) -> str:
 
 def from_dhan_conditional_trigger(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise one conditional-trigger record (get by id / list responses)."""
+    d = _response_record(d, field="conditional trigger")
     raw_orders = d.get("orders")
-    orders = [order for order in raw_orders if isinstance(order, dict)] if isinstance(raw_orders, list) else []
+    if type(raw_orders) is not list:
+        raise BrokerReadResponseInvalid from None
+    orders = [_response_record(order, field="conditional trigger order") for order in raw_orders]
+    for order in orders:
+        for field in (
+            "transactionType",
+            "exchangeSegment",
+            "productType",
+            "orderType",
+            "securityId",
+            "validity",
+        ):
+            if field in order and order[field] is not None and type(order[field]) is not str:
+                raise BrokerReadResponseInvalid from None
+    condition = d.get("condition")
+    if condition is not None:
+        condition = _response_record(condition, field="conditional trigger condition")
+    last_price = _response_number(d, "lastPrice")
     return {
-        "alert_id": str(d.get("alertId", "")),
-        "status": d.get("alertStatus", ""),
-        "created_at": str(d.get("createdTime", "")),
-        "triggered_at": str(d.get("triggeredTime") or ""),
-        "last_price": str(d.get("lastPrice", "")),
-        "condition": d.get("condition") if isinstance(d.get("condition"), dict) else {},
+        "alert_id": _response_text(d, "alertId", required=True),
+        "status": _response_text(d, "alertStatus", required=True),
+        "created_at": _response_text_or_empty(d, "createdTime"),
+        "triggered_at": _response_text_or_empty(d, "triggeredTime"),
+        "last_price": "" if last_price is _RESPONSE_MISSING else last_price,
+        "condition": condition or {},
         "orders": orders,
-        "orders_valid": isinstance(raw_orders, list) and len(orders) == len(raw_orders),
+        "orders_valid": True,
     }
 
 
@@ -1034,9 +1197,9 @@ def extract_order_id(resp: Any) -> str:
     raise DhanMappingError(f"No order id in Dhan response: {resp}")
 
 
-def _option_contract_identity(d: dict[str, Any]) -> tuple[str, str, float, str]:
-    raw_option_type = str(d.get("drvOptionType") or "").strip().upper()
-    trading_symbol = str(d.get("tradingSymbol") or "")
+def _option_contract_identity(d: dict[str, Any]) -> tuple[str, str, float | None, str]:
+    raw_option_type = _response_text_or_empty(d, "drvOptionType").strip().upper()
+    trading_symbol = _response_text_or_empty(d, "tradingSymbol")
     symbol_parts = trading_symbol.split("-")
     symbol_option_type = symbol_parts[-1].upper() if symbol_parts else ""
     option_type = {"CALL": "CE", "CE": "CE", "PUT": "PE", "PE": "PE"}.get(
@@ -1047,38 +1210,51 @@ def _option_contract_identity(d: dict[str, Any]) -> tuple[str, str, float, str]:
     if len(symbol_parts) >= 4 and symbol_parts[-1].upper() in {"CE", "PE"}:
         underlying = "-".join(symbol_parts[:-3])
     raw_strike = d.get("drvStrikePrice")
-    if raw_strike in (None, "") and option_type and len(symbol_parts) >= 3:
+    if (raw_strike is None or (type(raw_strike) is str and not raw_strike.strip())) and option_type and len(
+        symbol_parts
+    ) >= 3:
         raw_strike = symbol_parts[-2]
+    strike_price = None
+    if raw_strike is not None and not (type(raw_strike) is str and not raw_strike.strip()):
+        strike_price = float(_response_decimal(raw_strike))
     return (
         option_type,
-        str(d.get("drvExpiryDate") or ""),
-        _num(raw_strike),
+        _response_text_or_empty(d, "drvExpiryDate"),
+        strike_price,
         underlying,
     )
 
 
 def from_dhan_order(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise a Dhan order-book record."""
-    seg = d.get("exchangeSegment", "")
+    d = _response_record(d, field="order")
+    seg = _response_text_or_empty(d, "exchangeSegment")
     option_type, expiry, strike_price, underlying = _option_contract_identity(d)
     order = {
-        "orderid": str(d.get("orderId", "")),
-        "exchange_order_id": str(d.get("exchangeOrderId", "")),
-        "correlation_id": str(d.get("correlationId", "")),
-        "status": d.get("orderStatus", ""),
-        "symbol": d.get("tradingSymbol", ""),
-        "instrument_id": str(d.get("securityId", "")),
+        "orderid": _response_text_or_empty(d, "orderId"),
+        "exchange_order_id": _response_text_or_empty(d, "exchangeOrderId"),
+        "correlation_id": _response_text_or_empty(d, "correlationId"),
+        "status": _response_text_or_empty(d, "orderStatus"),
+        "symbol": _response_text_or_empty(d, "tradingSymbol"),
+        "instrument_id": _response_text_or_empty(d, "securityId"),
         "exchange": SEGMENT_TO_EXCHANGE.get(seg, seg),
-        "action": d.get("transactionType", ""),
-        "pricetype": DHAN_TO_ORDER_TYPE.get(d.get("orderType", ""), d.get("orderType", "")),
-        "product": DHAN_TO_PRODUCT.get(d.get("productType", ""), d.get("productType", "")),
+        "action": _response_text_or_empty(d, "transactionType"),
+        "pricetype": DHAN_TO_ORDER_TYPE.get(
+            _response_text_or_empty(d, "orderType"),
+            _response_text_or_empty(d, "orderType"),
+        ),
+        "product": DHAN_TO_PRODUCT.get(
+            _response_text_or_empty(d, "productType"),
+            _response_text_or_empty(d, "productType"),
+        ),
         "option_type": option_type,
         "expiry": expiry,
-        "strike_price": strike_price,
         "underlying": underlying,
-        "leg_name": str(d.get("legName", "")),
-        "remarks": str(d.get("omsErrorDescription") or d.get("remarks") or d.get("Remarks") or ""),
+        "leg_name": _response_text_or_empty(d, "legName"),
+        "remarks": _response_text_or_empty(d, "omsErrorDescription", "remarks", "Remarks"),
     }
+    if strike_price is not None:
+        order["strike_price"] = strike_price
     for field, source_fields in {
         "quantity": ("quantity",),
         "filled_quantity": ("filledQty", "tradedQty"),
@@ -1087,117 +1263,138 @@ def from_dhan_order(d: dict[str, Any]) -> dict[str, Any]:
         "average_price": ("averageTradedPrice",),
         "disclosed_quantity": ("disclosedQuantity", "disclosed_quantity"),
     }.items():
-        value = _present_order_number(d, *source_fields)
-        if value is not None:
-            order[field] = value
+        _put_present(order, field, _response_number(d, *source_fields))
     return order
 
 
 def from_dhan_position(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise a Dhan position record."""
-    seg = d.get("exchangeSegment", "")
-    carry_buy = d.get("carryForwardBuyQty")
-    carry_sell = d.get("carryForwardSellQty")
-    day_buy = d.get("dayBuyQty")
-    day_sell = d.get("daySellQty")
-    net_quantity = d.get("netQty")
-    accounting_complete = all(
-        value is not None for value in (carry_buy, carry_sell, day_buy, day_sell, net_quantity)
-    )
-    if accounting_complete:
-        try:
-            accounting_matches = int(net_quantity) == (
-                int(carry_buy) - int(carry_sell) + int(day_buy) - int(day_sell)
-            )
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise DhanMappingError("Dhan position accounting is invalid") from exc
-        if not accounting_matches:
-            raise DhanMappingError("Dhan position accounting is inconsistent")
-    trading_symbol = str(d.get("tradingSymbol") or "")
+    d = _response_record(d, field="position")
+    seg = _response_text(d, "exchangeSegment", required=True)
+    trading_symbol = _response_text(d, "tradingSymbol", required=True)
+    product = _response_text(d, "productType", required=True)
+    net_quantity = _response_number(d, "netQty", required=True)
     option_type, expiry, strike_price, underlying = _option_contract_identity(d)
-    return {
+    position = {
         "symbol": trading_symbol,
-        "instrument_id": str(d.get("securityId", "")),
         "exchange": SEGMENT_TO_EXCHANGE.get(seg, seg),
-        "product": DHAN_TO_PRODUCT.get(d.get("productType", ""), d.get("productType", "")),
-        "quantity": str(d.get("netQty", "")),
-        "average_price": str(d.get("costPrice", d.get("buyAvg", 0))),
-        "buy_quantity": str(d.get("buyQty", 0)),
-        "sell_quantity": str(d.get("sellQty", 0)),
-        "buy_avg": str(d.get("buyAvg", 0)),
-        "sell_avg": str(d.get("sellAvg", 0)),
-        "pnl": str(_num(d.get("realizedProfit", 0)) + _num(d.get("unrealizedProfit", 0))),
+        "product": DHAN_TO_PRODUCT.get(product, product),
+        "quantity": net_quantity,
         "multiplier": d.get("multiplier"),
         "fx_rate": d.get("rbiReferenceRate", d.get("referenceRate")),
         "close_price": d.get("closePrice"),
-        "previous_close_trusted": False,
-        "cross_currency": _optional_bool(d.get("crossCurrency"), field="crossCurrency"),
-        "overnight_quantity": str(_num(carry_buy) - _num(carry_sell)),
-        "day_buy_quantity": str(day_buy or 0),
-        "day_sell_quantity": str(day_sell or 0),
-        "carry_forward_buy_quantity": str(carry_buy or 0),
-        "carry_forward_sell_quantity": str(carry_sell or 0),
-        "accounting_complete": accounting_complete,
         "option_type": option_type,
         "expiry": expiry,
-        "strike_price": strike_price,
         "underlying": underlying,
     }
+    if strike_price is not None:
+        position["strike_price"] = strike_price
+    _put_present(position, "instrument_id", _response_text(d, "securityId"))
+    for field, source_fields in {
+        "average_price": ("costPrice", "buyAvg"),
+        "ltp": ("lastTradedPrice", "ltp"),
+        "buy_quantity": ("buyQty",),
+        "sell_quantity": ("sellQty",),
+        "buy_avg": ("buyAvg",),
+        "sell_avg": ("sellAvg",),
+        "day_buy_quantity": ("dayBuyQty",),
+        "day_sell_quantity": ("daySellQty",),
+        "carry_forward_buy_quantity": ("carryForwardBuyQty",),
+        "carry_forward_sell_quantity": ("carryForwardSellQty",),
+    }.items():
+        _put_present(position, field, _response_number(d, *source_fields))
+    if "crossCurrency" in d and d["crossCurrency"] is not None:
+        if type(d["crossCurrency"]) is not bool:
+            raise BrokerReadResponseInvalid from None
+        position["cross_currency"] = d["crossCurrency"]
+    realised = _response_number(d, "realizedProfit")
+    unrealised = _response_number(d, "unrealizedProfit")
+    if realised is not _RESPONSE_MISSING and unrealised is not _RESPONSE_MISSING:
+        pnl = _response_decimal(realised) + _response_decimal(unrealised)
+        if not pnl.is_finite():
+            raise BrokerReadResponseInvalid from None
+        pnl_text = str(pnl)
+        position["pnl"] = f"{pnl_text}.0" if pnl == pnl.to_integral_value() and "." not in pnl_text else pnl_text
+    carry_buy = _response_number(d, "carryForwardBuyQty")
+    carry_sell = _response_number(d, "carryForwardSellQty")
+    day_buy = _response_number(d, "dayBuyQty")
+    day_sell = _response_number(d, "daySellQty")
+    if carry_buy is not _RESPONSE_MISSING and carry_sell is not _RESPONSE_MISSING:
+        position["overnight_quantity"] = str(_response_decimal(carry_buy) - _response_decimal(carry_sell))
+    accounting = (carry_buy, carry_sell, day_buy, day_sell, net_quantity)
+    if all(value is not _RESPONSE_MISSING for value in accounting):
+        if _response_decimal(net_quantity) != (
+            _response_decimal(carry_buy)
+            - _response_decimal(carry_sell)
+            + _response_decimal(day_buy)
+            - _response_decimal(day_sell)
+        ):
+            raise BrokerReadResponseInvalid from None
+        position["accounting_complete"] = True
+    return position
 
 
 def from_dhan_holding(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise a Dhan holding record."""
-    raw_exchange = d.get("exchange", d.get("exchangeSegment", ""))
-    raw_product = d.get("productType") or "CNC"
-    total_quantity = d.get("totalQty")
-    settled_quantity = d.get("dpQty")
-    t1_quantity = d.get("t1Qty")
-    accounting_complete = all(
-        value is not None for value in (total_quantity, settled_quantity, t1_quantity)
-    )
-    if accounting_complete:
-        try:
-            accounting_matches = int(total_quantity) == int(settled_quantity) + int(t1_quantity)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise DhanMappingError("Dhan holding accounting is invalid") from exc
-        if not accounting_matches:
-            raise DhanMappingError("Dhan holding accounting is inconsistent")
-    return {
-        "symbol": d.get("tradingSymbol", ""),
-        "instrument_id": str(d.get("securityId", "")),
+    d = _response_record(d, field="holding")
+    raw_exchange = _response_text(d, "exchange", "exchangeSegment", required=True)
+    total_quantity = _response_number(d, "totalQty", required=True)
+    holding = {
+        "symbol": _response_text(d, "tradingSymbol", required=True),
         "exchange": SEGMENT_TO_EXCHANGE.get(raw_exchange, raw_exchange),
-        "product": DHAN_TO_PRODUCT.get(raw_product, raw_product),
-        "quantity": str(total_quantity if total_quantity is not None else ""),
-        "average_price": str(d.get("avgCostPrice", 0)),
-        "ltp": str(d.get("lastTradedPrice", 0)),
+        "quantity": total_quantity,
         "multiplier": d.get("multiplier"),
         "fx_rate": d.get("rbiReferenceRate", d.get("referenceRate")),
         "close_price": d.get("closePrice"),
-        "previous_close_trusted": False,
-        "cross_currency": _optional_bool(d.get("crossCurrency"), field="crossCurrency"),
-        "settled_quantity": str(settled_quantity or 0),
-        "t1_quantity": str(t1_quantity or 0),
-        "accounting_complete": accounting_complete,
     }
+    _put_present(holding, "instrument_id", _response_text(d, "securityId"))
+    raw_product = _response_text(d, "productType")
+    if raw_product is not _RESPONSE_MISSING:
+        holding["product"] = DHAN_TO_PRODUCT.get(raw_product, raw_product)
+    for field, source_fields in {
+        "average_price": ("avgCostPrice",),
+        "ltp": ("lastTradedPrice",),
+        "pnl": ("unrealizedProfit", "pnl"),
+        "settled_quantity": ("dpQty",),
+        "t1_quantity": ("t1Qty",),
+    }.items():
+        _put_present(holding, field, _response_number(d, *source_fields))
+    if "crossCurrency" in d and d["crossCurrency"] is not None:
+        if type(d["crossCurrency"]) is not bool:
+            raise BrokerReadResponseInvalid from None
+        holding["cross_currency"] = d["crossCurrency"]
+    settled_quantity = _response_number(d, "dpQty")
+    t1_quantity = _response_number(d, "t1Qty")
+    if settled_quantity is not _RESPONSE_MISSING and t1_quantity is not _RESPONSE_MISSING:
+        if _response_decimal(total_quantity) != _response_decimal(settled_quantity) + _response_decimal(t1_quantity):
+            raise BrokerReadResponseInvalid from None
+        holding["accounting_complete"] = True
+    return holding
 
 
 def from_dhan_trade(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise a Dhan trade-book record."""
-    seg = d.get("exchangeSegment", "")
-    return {
-        "orderid": str(d.get("orderId", "")),
-        "symbol": d.get("tradingSymbol", ""),
-        "instrument_id": str(d.get("securityId", "")),
+    d = _response_record(d, field="trade")
+    seg = _response_text_or_empty(d, "exchangeSegment")
+    product = _response_text_or_empty(d, "productType")
+    trade = {
+        "orderid": _response_text_or_empty(d, "orderId"),
+        "symbol": _response_text_or_empty(d, "tradingSymbol"),
+        "instrument_id": _response_text_or_empty(d, "securityId"),
         "exchange": SEGMENT_TO_EXCHANGE.get(seg, seg),
-        "action": d.get("transactionType", ""),
-        "quantity": str(d.get("tradedQuantity", d.get("quantity", 0))),
-        "price": str(d.get("tradedPrice", d.get("price", 0))),
-        "product": DHAN_TO_PRODUCT.get(d.get("productType", ""), d.get("productType", "")),
-        "timestamp": str(d.get("exchangeTime", d.get("createTime", ""))),
+        "action": _response_text_or_empty(d, "transactionType"),
+        "quantity": _response_number(d, "tradedQuantity", "quantity", required=True),
+        "price": _response_number(d, "tradedPrice", "price", required=True),
+        "product": DHAN_TO_PRODUCT.get(product, product),
+        "timestamp": _response_text_or_empty(d, "exchangeTime", "createTime"),
         "multiplier": d.get("multiplier"),
         "fx_rate": d.get("rbiReferenceRate", d.get("referenceRate")),
-        "cross_currency": _optional_bool(d.get("crossCurrency"), field="crossCurrency"),
     }
+    if "crossCurrency" in d and d["crossCurrency"] is not None:
+        if type(d["crossCurrency"]) is not bool:
+            raise BrokerReadResponseInvalid from None
+        trade["cross_currency"] = d["crossCurrency"]
+    return trade
 
 
 def from_dhan_funds(resp: Any) -> dict[str, Any]:
@@ -1249,44 +1446,107 @@ def interval_to_dhan(interval: str) -> tuple[str, int]:
     return "intraday", minutes
 
 
-def to_candles_dict(symbol: str, exchange: str, interval: str, resp: Any) -> dict[str, Any]:
+def to_candles_dict(
+    symbol: str,
+    exchange: str,
+    interval: str,
+    resp: Any,
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
     """Map a Dhan historical response (parallel arrays) to a Candles-shaped dict."""
-    d = unwrap(resp) or {}
-    opens = d.get("open", []) or []
-    highs = d.get("high", []) or []
-    lows = d.get("low", []) or []
-    closes = d.get("close", []) or []
-    vols = d.get("volume", []) or []
-    stamps = d.get("timestamp", []) or []
-    n = min(len(opens), len(highs), len(lows), len(closes))
-    bars = [
-        {
-            "timestamp": str(stamps[i]) if i < len(stamps) else "",
-            "open": _num(opens[i]),
-            "high": _num(highs[i]),
-            "low": _num(lows[i]),
-            "close": _num(closes[i]),
-            "volume": int(_num(vols[i])) if i < len(vols) else 0,
+    if not strict:
+        d = unwrap(resp) or {}
+        opens = d.get("open", []) or []
+        highs = d.get("high", []) or []
+        lows = d.get("low", []) or []
+        closes = d.get("close", []) or []
+        vols = d.get("volume", []) or []
+        stamps = d.get("timestamp", []) or []
+        count = min(len(opens), len(highs), len(lows), len(closes))
+        bars = [
+            {
+                "timestamp": str(stamps[index]) if index < len(stamps) else "",
+                "open": _num(opens[index]),
+                "high": _num(highs[index]),
+                "low": _num(lows[index]),
+                "close": _num(closes[index]),
+                "volume": int(_num(vols[index])) if index < len(vols) else 0,
+            }
+            for index in range(count)
+        ]
+        return {"symbol": symbol, "exchange": exchange, "interval": str(interval), "bars": bars}
+
+    envelope = _response_record(resp, field="historical response")
+    d = _response_record(unwrap(envelope), field="historical data")
+
+    def required_array(name: str) -> list[Any]:
+        if name not in d or type(d[name]) is not list:
+            raise BrokerReadResponseInvalid from None
+        return d[name]
+
+    stamps = required_array("timestamp")
+    opens = required_array("open")
+    highs = required_array("high")
+    lows = required_array("low")
+    closes = required_array("close")
+    count = len(stamps)
+    if any(len(values) != count for values in (opens, highs, lows, closes)):
+        raise BrokerReadResponseInvalid from None
+    volumes: list[Any] | None = None
+    if "volume" in d:
+        if type(d["volume"]) is not list or len(d["volume"]) != count:
+            raise BrokerReadResponseInvalid from None
+        volumes = d["volume"]
+
+    bars: list[dict[str, Any]] = []
+    for index in range(count):
+        bar = {
+            "timestamp": _market_timestamp(stamps[index]),
+            "open": _market_number({"value": opens[index]}, "value"),
+            "high": _market_number({"value": highs[index]}, "value"),
+            "low": _market_number({"value": lows[index]}, "value"),
+            "close": _market_number({"value": closes[index]}, "value"),
         }
-        for i in range(n)
-    ]
+        if volumes is not None:
+            bar["volume"] = _market_number({"value": volumes[index]}, "value", integer=True)
+        bars.append(bar)
     return {"symbol": symbol, "exchange": exchange, "interval": str(interval), "bars": bars}
 
 
-def from_dhan_quote(symbol: str, exchange: str, q: dict[str, Any]) -> dict[str, Any]:
+def from_dhan_quote(
+    symbol: str,
+    exchange: str,
+    q: dict[str, Any],
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
     """Map a single Dhan quote record (marketfeed/quote) to a Quote-shaped dict."""
-    ohlc = q.get("ohlc", {}) or {}
-    return {
-        "symbol": symbol,
-        "exchange": exchange,
-        "ltp": _num(q.get("last_price", q.get("ltp", 0))),
-        "open": _num(ohlc.get("open", 0)),
-        "high": _num(ohlc.get("high", 0)),
-        "low": _num(ohlc.get("low", 0)),
-        "close": _num(ohlc.get("close", 0)),
-        "volume": int(_num(q.get("volume", 0))),
-        "oi": int(_num(q.get("oi", 0))),
-    }
+    if not strict:
+        ohlc = q.get("ohlc", {}) or {}
+        return {
+            "symbol": symbol,
+            "exchange": exchange,
+            "ltp": _num(q.get("last_price", q.get("ltp", 0))),
+            "open": _num(ohlc.get("open", 0)),
+            "high": _num(ohlc.get("high", 0)),
+            "low": _num(ohlc.get("low", 0)),
+            "close": _num(ohlc.get("close", 0)),
+            "volume": int(_num(q.get("volume", 0))),
+            "oi": int(_num(q.get("oi", 0))),
+        }
+
+    record = _response_record(q, field="quote")
+    ohlc: dict[str, Any] = {}
+    if "ohlc" in record:
+        ohlc = _response_record(record["ohlc"], field="quote ohlc")
+    quote: dict[str, Any] = {"symbol": symbol, "exchange": exchange}
+    _put_present(quote, "ltp", _market_number(record, "last_price", "ltp"))
+    for name in ("open", "high", "low", "close"):
+        _put_present(quote, name, _market_number(ohlc, name))
+    _put_present(quote, "volume", _market_number(record, "volume", integer=True))
+    _put_present(quote, "oi", _market_number(record, "oi", integer=True))
+    return quote
 
 
 def quote_from_feed(segment: str, security_id: str, feed: Any) -> dict[str, Any] | None:
@@ -1316,13 +1576,13 @@ def _option_chain_number(value: Any, *, field: str, default: float = 0.0) -> flo
     if value in (None, ""):
         return default
     if isinstance(value, bool):
-        raise DhanMappingError(f"Dhan option chain has an invalid {field}")
+        raise BrokerReadResponseInvalid from None
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise DhanMappingError(f"Dhan option chain has an invalid {field}") from exc
+        raise BrokerReadResponseInvalid from exc
     if not math.isfinite(number):
-        raise DhanMappingError(f"Dhan option chain has an invalid {field}")
+        raise BrokerReadResponseInvalid from None
     return number
 
 
@@ -1332,19 +1592,19 @@ def _option_chain_oi(value: Any, *, field: str) -> int | None:
         return None
     number = _option_chain_number(value, field=field)
     if number < 0 or not number.is_integer():
-        raise DhanMappingError(f"Dhan option chain has an invalid {field}")
+        raise BrokerReadResponseInvalid from None
     return int(number)
 
 
 def _leg(leg: dict[str, Any], side: str) -> dict[str, Any]:
     """Map one CE/PE leg of a Dhan option-chain strike to ce_*/pe_* fields."""
     if not isinstance(leg, dict):
-        raise DhanMappingError(f"Dhan option chain has an invalid {side} leg")
+        raise BrokerReadResponseInvalid from None
     greeks = leg.get("greeks")
     if greeks is None:
         greeks = {}
     if not isinstance(greeks, dict):
-        raise DhanMappingError(f"Dhan option chain has invalid {side} Greeks")
+        raise BrokerReadResponseInvalid from None
     greek_values = tuple(greeks.get(name) for name in ("delta", "gamma", "theta", "vega"))
     complete_values = (*greek_values, leg.get("implied_volatility"))
     greeks_complete = all(value not in (None, "") and not isinstance(value, bool) for value in complete_values)
@@ -1355,7 +1615,7 @@ def _leg(leg: dict[str, Any], side: str) -> dict[str, Any]:
         )
     security_id = leg.get("security_id") or leg.get("securityId") or ""
     if isinstance(security_id, bool):
-        raise DhanMappingError(f"Dhan option chain has an invalid {side} security_id")
+        raise BrokerReadResponseInvalid from None
     mapped = {
         f"{side}_instrument_id": str(security_id).strip(),
         f"{side}_ltp": _option_chain_number(leg.get("last_price"), field=f"{side} last_price"),
@@ -1619,7 +1879,13 @@ def _scrip_security_identity(row: dict[str, Any], security_id: str, exchange: st
     )
     option_type = option_type or inferred_option_type
     raw_strike = _scrip_field(row, "SEM_STRIKE_PRICE", "STRIKE_PRICE")
-    strike_price: float | str = _num(raw_strike) if raw_strike else inferred_strike if option_type else ""
+    strike_price: float | str = (
+        _num(raw_strike)
+        if raw_strike
+        else inferred_strike
+        if option_type and inferred_strike is not None
+        else ""
+    )
     underlying = _scrip_field(row, "UNDERLYING_SYMBOL")
     if option_type and not underlying:
         underlying = inferred_underlying or _scrip_field(row, "SM_SYMBOL_NAME", "SYMBOL_NAME")
@@ -1783,22 +2049,22 @@ def to_option_chain_dict(underlying: str, exchange: str, resp: Any) -> dict[str,
     if isinstance(data, dict) and isinstance(data.get("data"), dict):
         data = data["data"]  # peel the endpoint's second "data" nest
     if not isinstance(data, dict):
-        raise DhanMappingError("Dhan option chain payload is invalid")
+        raise BrokerReadResponseInvalid from None
     oc = data.get("oc")
     if not isinstance(oc, dict) or not oc:
-        raise DhanMappingError("Dhan option chain contracts are invalid")
+        raise BrokerReadResponseInvalid from None
     strikes: list[dict[str, Any]] = []
     parsed_strikes: list[tuple[float, Any]] = []
     seen_strikes: set[float] = set()
     for strike_value, legs in oc.items():
         strike_price = _option_chain_number(strike_value, field="strike_price")
         if strike_price in seen_strikes:
-            raise DhanMappingError("Dhan option chain has duplicate strike identities")
+            raise BrokerReadResponseInvalid from None
         seen_strikes.add(strike_price)
         parsed_strikes.append((strike_price, legs))
     for strike_price, legs in sorted(parsed_strikes, key=lambda item: item[0]):
         if not isinstance(legs, dict):
-            raise DhanMappingError("Dhan option chain strike legs are invalid")
+            raise BrokerReadResponseInvalid from None
         row: dict[str, Any] = {"strike_price": strike_price}
         ce = legs.get("ce")
         pe = legs.get("pe")
@@ -1807,7 +2073,7 @@ def to_option_chain_dict(underlying: str, exchange: str, resp: Any) -> dict[str,
         if pe is None:
             pe = {}
         if not isinstance(ce, dict) or not isinstance(pe, dict):
-            raise DhanMappingError("Dhan option chain strike legs are invalid")
+            raise BrokerReadResponseInvalid from None
         row.update(_leg(ce, "ce"))
         row.update(_leg(pe, "pe"))
         strikes.append(row)

@@ -10,7 +10,7 @@ session to dispatch to — every read and write for that selector fails. This
 module is that step.
 
 It is deliberately broker-agnostic: it only speaks the ``BrokerAdapter.login``
-contract and the ``BrokerRegistry.put_session`` selector store, so the same
+contract and the exact registry publication owner, so the same
 code path serves boot-time re-establishment, an interactive "connect broker"
 action, and daily token re-authentication.
 """
@@ -18,7 +18,11 @@ action, and daily token re-authentication.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import Any
+
+from flinttrade_core.broker_account_cutover import MutationAdmission, require_broker_account_mutations
+from flinttrade_core.broker_identity import CredentialVersion
 
 logger = logging.getLogger("flinttrade.gateway.native_login")
 
@@ -156,129 +160,155 @@ def should_drop_session_after_probe_error(exc: BaseException) -> bool:
     return _is_auth_failure(exc)
 
 
-async def verify_native_session(adapter: Any, registry: Any, adapter_id: str, account_id: str) -> str | None:
-    """Confirm a just-established token actually authenticates (error string or None).
+@dataclass(repr=False)
+class NativeSessionCandidate:
+    """Owner-held unpublished authentication result; never renders replay material."""
 
-    The token-replay logins (Upstox/INDmoney) build a Session WITHOUT contacting
-    the broker, so a dead/expired token would otherwise report success. A cheap
-    authenticated ``funds`` read forces a real API call. On a hard auth/broker
-    failure the live session is DROPPED and an error returned so the caller can
-    surface ``needs_relogin``. A dead credential (typed :class:`AuthError` or an
-    unambiguous auth message) is always evicted — even if the broker's text also
-    carries retry/maintenance phrasing. Otherwise, an error that does NOT prove
-    the token is dead — a transient transport blip, a closed service window, or a
-    typed rate-limit/network error — KEEPS the session (returns None). An adapter
-    without a ``funds`` read is unverifiable and passes. Best-effort — never
-    raises.
-    """
+    session: Any
+    replay_credentials: dict[str, Any] = field(repr=False)
+    probe_error: str | None = None
+    registry_version: Any = None
+
+    @property
+    def expires_at(self) -> float:
+        return self.session.expires_at
+
+    @property
+    def is_read_only(self) -> bool:
+        return self.session.is_read_only
+
+    def __repr__(self) -> str:
+        return "<NativeSessionCandidate>"
+
+    def __reduce_ex__(self, protocol: int) -> Any:
+        raise TypeError("native_candidate_not_serialisable")
+
+
+_QUARANTINED_CANDIDATES: list[NativeSessionCandidate] = []
+
+
+def quarantine_native_candidate(candidate: NativeSessionCandidate) -> None:
+    """Retain unclaimed payloads without guessing SDK disposal semantics."""
+    if not any(owned is candidate for owned in _QUARANTINED_CANDIDATES):
+        _QUARANTINED_CANDIDATES.append(candidate)
+
+
+async def verify_native_session(adapter: Any, session: Any) -> str | None:
+    """Probe an unpublished payload; this function never mutates a registry."""
     reader = getattr(adapter, "funds", None)
     if not callable(reader):
         return None
     try:
-        session = registry.get_session_for(adapter_id, account_id)
-    except Exception:  # noqa: BLE001 - no session means nothing to probe
-        return "no session established"
+        await reader(session)
+    except Exception as exc:
+        if not should_keep_session_after_probe_error(exc):
+            return SESSION_INVALID_RELOGIN_MESSAGE
+    return None
+
+
+async def prepare_native_session(
+    adapter: Any, credentials: dict[str, Any], *, verify: bool,
+    mutation_admission: MutationAdmission = require_broker_account_mutations,
+) -> NativeSessionCandidate:
+    """Authenticate outside the registry; production remains denied before work."""
+    mutation_admission()
+    session = await adapter.login(credentials)
+    candidate = NativeSessionCandidate(session, dict(credentials))
     try:
-        await reader(session)  # native adapters' funds() is always a coroutine
-        return None
-    except Exception as exc:  # noqa: BLE001 - classify below
-        # A dead credential is evicted no matter what else the message says. Only
-        # errors that do NOT prove the token is dead keep the freshly-minted
-        # session: a transport blip, a closed service window, or a typed
-        # rate-limit / network error (NetworkError covers BrokerTimeout/Internal).
-        if should_keep_session_after_probe_error(exc):
-            logger.info(
-                "Token liveness probe inconclusive for %s (%s) — keeping session",
-                adapter_id, type(exc).__name__,
-            )
-            return None
-        try:
-            registry.remove_session_for(adapter_id, account_id)
-        except Exception:  # noqa: BLE001
-            pass
-        logger.warning("Token liveness probe proved %s session invalid; session dropped", adapter_id)
-        return SESSION_INVALID_RELOGIN_MESSAGE
+        if verify:
+            candidate.probe_error = await verify_native_session(adapter, session)
+        replay = getattr(adapter, "replay_credentials", None)
+        if callable(replay) and candidate.probe_error is None:
+            value = replay(dict(credentials), session)
+            if isinstance(value, dict):
+                candidate.replay_credentials = value
+    except BaseException:
+        quarantine_native_candidate(candidate)
+        raise
+    if candidate.probe_error is not None:
+        quarantine_native_candidate(candidate)
+    return candidate
 
 
 async def establish_native_session(
-    adapter: Any,
-    registry: Any,
-    credentials: dict[str, Any],
-    adapter_id: str,
-    account_id: str,
-    credential_store: Any | None = None,
-    verify: bool = False,
+    adapter: Any, registry: Any, credentials: dict[str, Any],
+    adapter_id: str, account_id: str, credential_store: Any | None = None,
+    verify: bool = False, *,
+    mutation_admission: MutationAdmission = require_broker_account_mutations,
+    registry_publication_owner: Any | None = None,
+    workspace_path: Any | None = None,
+    credential_version: CredentialVersion | None = None,
 ) -> Any:
-    """Log a native adapter in and register its session under the selector.
+    """Replay material read under an explicitly captured credential version.
 
-    Args:
-        adapter: The live native ``BrokerAdapter`` instance (already built by
-            ``build_native_adapters`` — this does NOT construct it).
-        registry: The ``BrokerRegistry`` whose selector-keyed session store the
-            router resolves against.
-        credentials: Decrypted broker credentials passed verbatim to
-            ``adapter.login`` (shape is broker-specific; see each adapter's
-            ``login`` docstring).
-        adapter_id: The bare adapter name (e.g. ``"dhan"``).
-        account_id: The account within that adapter (e.g. the client id).
-        credential_store: Optional ``CredentialStore``. When supplied AND the
-            adapter exposes ``replay_credentials`` (Dhan/Upstox/Kotak Neo/Groww), the
-            vault payload is rewritten with the REPLAYABLE material after a
-            successful login (G7): single-use artefacts (OAuth ``code``,
-            30-second TOTP) are swapped for the minted ``access_token`` where
-            one exists, so the next boot reconnects instead of replaying a
-            dead credential. Best-effort — a write-back failure is logged and
-            never fails the live session.
-
-    Returns:
-        The live adapter-layer ``Session`` (also registered in ``registry``).
-
-    Raises:
-        Whatever ``adapter.login`` raises (``BrokerError``/``AuthFlowError``) —
-        fail-closed: on failure NO session is registered, so the selector stays
-        sessionless and the router keeps returning "no session" rather than
-        dispatching against a half-authenticated broker.
+    The caller captures the version before retrieval. Fresh reads only validate
+    that witness; missing authority is refused after the production guard.
     """
-    try:
-        session = await adapter.login(credentials)
-    except Exception:
-        try:
-            registry.remove_session_for(adapter_id, account_id)
-        except Exception:  # noqa: BLE001 - login already failed; best-effort cleanup
-            pass
-        raise
-    registry.put_session(adapter_id, account_id, session)
-    logger.info(
-        "Native session established for %s (expires_at=%s)",
-        adapter_id,
-        getattr(session, "expires_at", None),
-    )
-    replay = getattr(adapter, "replay_credentials", None)
-    if credential_store is not None and callable(replay):
-        try:
-            replayable = replay(dict(credentials), session)
-            if isinstance(replayable, dict) and replayable != credentials:
-                credential_store.update_credentials_for(adapter_id, account_id, replayable)
-                logger.info(
-                    "Vault payload for %s rewritten with replayable material (G7)",
-                    adapter_id,
-                )
-        except Exception as exc:  # noqa: BLE001 - write-back must never fail the live session
-            logger.warning(
-                "Replayable-credential write-back failed for %s (%s)",
-                adapter_id, type(exc).__name__,
-            )
-    if verify:
-        # The token-replay logins build a Session without a broker call, so a
-        # dead/expired token would report success. Probe a cheap authenticated
-        # read; a hard auth failure drops the session AND raises so the caller
-        # records the honest failure (a transient transport error keeps it).
-        probe_error = await verify_native_session(adapter, registry, adapter_id, account_id)
-        if probe_error is not None:
-            from .exceptions import AuthFlowError  # noqa: PLC0415
+    mutation_admission()
+    from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+    from flinttrade_core.broker_identity import BrokerSelector
+    from flinttrade_core.workspace_migrations import broker_workspace_version, read_workspace_snapshot
 
-            raise AuthFlowError(probe_error)
-    return session
+    from .registry import ManagedSessionAuthority, RegistryPublicationOwner
+
+    owner = registry_publication_owner
+    if (type(owner) is not RegistryPublicationOwner or not owner.owns(registry)
+            or workspace_path is None or credential_store is None):
+        raise RegistrySessionUnavailable
+    selector = BrokerSelector(adapter_id, account_id)
+    if type(credential_version) is not CredentialVersion:
+        raise RegistrySessionUnavailable
+    credential_version.__post_init__()
+    if credential_version.selector != selector or credential_version.generation == 0:
+        raise RegistrySessionUnavailable
+    expected = registry.snapshot_selector(selector)
+    before = credential_store.selector_state(selector)
+    if (not before.present or not before.credential_present or before.origin != "managed"
+            or before.version != credential_version):
+        raise RegistrySessionUnavailable
+    candidate = None
+    try:
+        candidate = await prepare_native_session(adapter, credentials, verify=verify, mutation_admission=mutation_admission)
+        if candidate.probe_error is not None:
+            from .exceptions import AuthFlowError
+            raise AuthFlowError(candidate.probe_error)
+        if credential_store.selector_state(selector).version != credential_version:
+            raise RegistrySessionUnavailable
+        final_version = credential_version
+        if candidate.replay_credentials != credentials:
+            final_version = credential_store.update_credentials(
+                selector, candidate.replay_credentials, expected=credential_version)
+        state = credential_store.selector_state(selector)
+        if (not state.present or not state.credential_present or state.origin != "managed"
+                or state.version != final_version):
+            raise RegistrySessionUnavailable
+        workspace = read_workspace_snapshot(workspace_path)
+        authority = ManagedSessionAuthority(final_version, workspace.version, broker_workspace_version(workspace))
+        metadata = credential_store.account_for_selector(selector)
+        receipt = owner.prepare_session_candidate(selector, candidate.session, expected_registry=expected,
+            authority=authority, broker=metadata.broker, label=metadata.label)
+        try:
+            current = read_workspace_snapshot(workspace_path)
+            state = credential_store.selector_state(selector)
+            if (not state.present or not state.credential_present or state.origin != "managed"
+                    or state.version != final_version):
+                raise RegistrySessionUnavailable
+        except BaseException:
+            owner.abandon_prepared_candidate(receipt)
+            raise
+        result = owner.publish_prepared_candidate(receipt, current_authority=ManagedSessionAuthority(
+            final_version, current.version, broker_workspace_version(current)))
+        candidate.registry_version = result.version.registry_version
+    except BaseException:
+        if candidate is not None:
+            quarantine_native_candidate(candidate)
+        from flinttrade_core.account_mutation_contracts import RegistryVersionConflict
+        try:
+            owner.remove_session_for_exact(selector, expected_registry=expected)
+        except RegistryVersionConflict:
+            pass  # A concurrent successor is never ours to retire.
+        raise
+    return candidate
 
 
 async def establish_native_sessions(
@@ -287,6 +317,10 @@ async def establish_native_sessions(
     credential_store: Any,
     selectors: list[str],
     verify: bool = False,
+    *,
+    mutation_admission: MutationAdmission = require_broker_account_mutations,
+    registry_publication_owner: Any | None = None,
+    workspace_path: Any | None = None,
 ) -> dict[str, Any]:
     """Re-establish sessions for every active native selector with vault creds.
 
@@ -308,8 +342,14 @@ async def establish_native_sessions(
             login failures leave the selector sessionless with a retry message.
 
     Returns:
-        ``{selector: "ok" | "<error>"}`` for observability (never raises).
+        ``{selector: "ok" | "<error>"}`` for admitted replay attempts.
+
+    Raises:
+        BrokerAccountCutoverUnavailable: Before any lookup while cutover is active.
     """
+    mutation_admission()
+    from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
+    from flinttrade_core.broker_identity import BrokerSelector
     from flinttrade_engine.request_context import parse_selector  # noqa: PLC0415
 
     results: dict[str, Any] = {}
@@ -323,7 +363,15 @@ async def establish_native_sessions(
             # Not an active native (bridge selector, or dormant) — skip quietly.
             continue
         try:
+            exact_selector = BrokerSelector(adapter_id, account_id)
+            before = credential_store.selector_state(exact_selector)
+            if not before.present or not before.credential_present or before.origin != "managed":
+                raise RegistrySessionUnavailable
             credentials = credential_store.retrieve_for(adapter_id, account_id)
+            after = credential_store.selector_state(exact_selector)
+            if (not after.present or not after.credential_present or after.origin != "managed"
+                    or after.version != before.version):
+                raise RegistrySessionUnavailable
         except Exception as exc:  # noqa: BLE001 - a missing/undecryptable row must not brick boot
             logger.info(
                 "No usable vault credentials for %s (%s) — leaving sessionless",
@@ -334,7 +382,9 @@ async def establish_native_sessions(
         try:
             await establish_native_session(
                 adapter, registry, credentials, adapter_id, account_id,
-                credential_store=credential_store, verify=verify,
+                credential_store=credential_store, verify=verify, mutation_admission=mutation_admission,
+                registry_publication_owner=registry_publication_owner, workspace_path=workspace_path,
+                credential_version=before.version,
             )
             results[selector] = "ok"
         except Exception as exc:  # noqa: BLE001 - per-selector isolation

@@ -8,6 +8,7 @@ from flinttrade_core.exceptions import BrokerError
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter, _ROUTER_TOKEN
+from flinttrade_gateway.brokers.kotakneo_mapping import KotakNeoMappingError
 
 pytestmark = pytest.mark.unit
 
@@ -45,7 +46,10 @@ class MockNeo:
     def positions(self):
         return {"stat": "ok", "stCode": 200, "data": [
             {"trdSym": "IDEA-EQ", "exSeg": "nse_cm", "prod": "MIS",
-             "flBuyQty": 10, "flSellQty": 0, "buyAmt": 1000, "sellAmt": 0},
+             "cfBuyQty": 0, "flBuyQty": 10, "cfSellQty": 0, "flSellQty": 0,
+             "cfBuyAmt": 0, "buyAmt": 1000, "cfSellAmt": 0, "sellAmt": 0,
+             "genNum": 1, "genDen": 1, "prcNum": 1, "prcDen": 1,
+             "multiplier": 1, "precision": 2},
         ]}
 
     def holdings(self):
@@ -60,8 +64,11 @@ class MockNeo:
 
     def quotes(self, instrument_tokens):
         self.calls.append(("quotes", instrument_tokens))
+        requested = str(instrument_tokens[0]["instrument_token"])
+        trading_symbol = requested if requested == "Nifty 50" else "IDEA-EQ"
         return {"stat": "Ok", "data": [
-            {"trading_symbol": "IDEA-EQ", "exchange_segment": "nse_cm", "last_traded_price": 9.4,
+            {"instrument_token": requested, "trading_symbol": trading_symbol,
+             "exchange_segment": "nse_cm", "last_traded_price": 9.4,
              "open": 9.2, "high": 9.6, "low": 9.1, "close": 9.3, "volume": 1000000,
              "buy_price": 9.39, "sell_price": 9.41},
         ]}
@@ -74,8 +81,8 @@ class MockNeo:
     def search_scrip(self, exchange_segment, symbol):
         self.calls.append(("search", (exchange_segment, symbol)))
         return [
-            {"pSymbol": 11915, "pExchSeg": "nse_cm", "pSymbolName": "YESBANK",
-             "pTrdSymbol": "YESBANK-EQ", "pISIN": "INE528G01035", "lLotSize": 1, "dTickSize": 1},
+            {"pSymbol": 11915, "pExchSeg": "nse_cm", "pSymbolName": symbol,
+             "pTrdSymbol": f"{symbol}-EQ", "pISIN": "INE528G01035", "lLotSize": 1, "dTickSize": 1},
         ]
 
 
@@ -203,7 +210,7 @@ async def test_quotes_maps_records():
     quotes = await adapter.quotes(session, ["NSE:IDEA"])
     assert len(quotes) == 1
     q = quotes[0]
-    assert q.symbol == "IDEA-EQ" and q.exchange == "NSE"
+    assert q.symbol == "IDEA" and q.exchange == "NSE"
     assert q.ltp == 9.4 and q.bid == 9.39 and q.ask == 9.41
     # request carried the NEO instrument-token dicts
     _, tokens = [c for c in mock.calls if c[0] == "quotes"][0]
@@ -234,8 +241,10 @@ class _EnvelopeNeo(MockNeo):
 async def test_reads_tolerate_empty_and_error_envelope():
     adapter = _adapter(_EnvelopeNeo())
     session = await _session(adapter)
-    assert await adapter.order_book(session) == []
-    assert await adapter.positions(session) == []
+    with pytest.raises(KotakNeoMappingError, match="rejected"):
+        await adapter.order_book(session)
+    with pytest.raises(KotakNeoMappingError, match="rejected"):
+        await adapter.positions(session)
     funds = await adapter.funds(session)
     # No data → zeroed funds dict, never a raise.
     assert funds["available_balance"] == "0.00" and funds["used_margin"] == "0.00"
@@ -246,15 +255,13 @@ async def test_quotes_bare_list_fallback():
     adapter = _adapter(_EnvelopeNeo())
     session = await _session(adapter)
     quotes = await adapter.quotes(session, ["NSE:IDEA"])
-    assert len(quotes) == 1 and quotes[0].symbol == "IDEA-EQ" and quotes[0].ltp == 9.4
+    assert len(quotes) == 1 and quotes[0].symbol == "IDEA" and quotes[0].ltp == 9.4
 
 
 @pytest.mark.asyncio
 async def test_iceberg_refused_at_gated_adapter_layer():
     # NEO has no slice endpoint; an iceberg must be refused through the gated
     # place path and NEVER reach the broker (no silent regular-order placement).
-    from flinttrade_gateway.brokers.kotakneo_mapping import KotakNeoMappingError
-
     mock = MockNeo()
     adapter = _adapter(mock)
     session = await _session(adapter)

@@ -22,8 +22,11 @@ Usage::
 from __future__ import annotations
 
 import logging
+from typing import Any
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
+
+from flinttrade_core.broker_account_cutover import guard_broker_account_http
 
 logger = logging.getLogger("flinttrade.gateway.rotation_routes")
 
@@ -39,6 +42,18 @@ def create_rotation_blueprint(rotator: object) -> Blueprint:
         Flask :class:`~flask.Blueprint` with rotation routes.
     """
     bp = Blueprint("rotation_admin", __name__)
+
+    @bp.before_request
+    def guard_rotation_mutations() -> Any | None:
+        """Authenticate first, then reject before body or rotator access."""
+        if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
+            return None
+        guard = current_app.config.get("BROKER_MGMT_WRITE_GUARD")
+        if guard is not None:
+            auth_error = guard()
+            if auth_error is not None:
+                return auth_error
+        return guard_broker_account_http()
 
     @bp.route("/admin/credentials/rotation/status", methods=["GET"])
     def rotation_status() -> Response:

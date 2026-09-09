@@ -10,7 +10,7 @@ from flinttrade_core.safety_config import (
     load_workspace_safety_config,
     persist_workspace_safety_config,
 )
-from flinttrade_core.workspace_migrations import WORKSPACE_VERSION
+from flinttrade_core.workspace import Workspace
 from flinttrade_engine.safety import SafetyConfig
 
 
@@ -23,10 +23,7 @@ def test_fresh_workspace_loads_complete_validated_defaults(tmp_path):
 
 
 def test_current_version_missing_safety_section_fails_closed(tmp_path):
-    (tmp_path / "workspace.json").write_text(
-        json.dumps({"version": WORKSPACE_VERSION, "initialized": True}),
-        encoding="utf-8",
-    )
+    Workspace(tmp_path).update(lambda config: config.pop("safety") and None)
 
     with pytest.raises(ValueError, match="missing or invalid"):
         load_workspace_safety_config(tmp_path)
@@ -42,13 +39,7 @@ def test_persisted_config_survives_a_fresh_loader(tmp_path):
 
 
 def test_strict_loader_rejects_invalid_threshold_order(tmp_path):
-    raw = {
-        "version": WORKSPACE_VERSION,
-        "initialized": True,
-        "safety": SafetyConfig().to_mapping(),
-    }
-    raw["safety"]["pnl_kill_pct"] = 2.0
-    (tmp_path / "workspace.json").write_text(json.dumps(raw), encoding="utf-8")
+    Workspace(tmp_path).set("safety.pnl_kill_pct", 2.0)
 
     with pytest.raises(ValueError, match="greater than"):
         load_workspace_safety_config(tmp_path)

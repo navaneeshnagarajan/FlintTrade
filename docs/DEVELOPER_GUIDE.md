@@ -22,7 +22,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | `terminal` | TypeScript / React | User-facing single-page application; FlexLayout workspace, home widgets, routes, and tools | `packages/apps/terminal/**/*.test.ts(x)` |
 | `desktop` | TypeScript / Electron 43 | Sandboxed native shell; verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin | `packages/apps/desktop/electron/*.test.ts` |
 | `design-system` | TypeScript / React | Shared brand tokens, layers, motion, primitives, and FlintTrade UI contracts | type-checked by app builds |
-| `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions | `packages/core/core/tests/` |
+| `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions, service-provider catalogue, inert service connections, and the `BrokerReadPort` contract | `packages/core/core/tests/` |
 | `data` | Python | Tick recorder, audit logger, trade logger, SQLite sandbox state, DuckDB analytics storage | `packages/core/data/tests/` |
 | `historical` | Python | OHLCV downloader (OpenChart, yfinance), DuckDB pipeline, expiry manager, instrument metadata | `packages/core/historical/tests/` |
 | `indicators` | Python | Pure-NumPy batch indicators (110 exports; no TA-Lib) + streaming classes (optional Numba on 3 kernels) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
@@ -328,7 +328,12 @@ SDK/HTTP adapter that implements the `BrokerAdapter` Protocol and is routed
 through the `BrokerRouter`; OpenAlgo is represented by its own bridge adapter
 (`brokers/openalgo.py`) alongside the native ones. Do not model a new native
 broker as an OpenAlgo shim. The `shims/` directory holds only OpenAlgo
-infrastructure shims, not broker adapters.
+infrastructure shims, not broker adapters. Exact **reads** use
+the contract defined by `BrokerReadPort`; `flinttrade_gateway.broker_read_service`
+defines its owner factory, while application composition constructs and retains
+the resulting dependency record. Native HTTP read routes currently return
+`409` with zero provider calls until Task 7C.2 cuts them over to that port.
+Reads do not traverse `gate_order` / `BrokerRouter`. Writes still must.
 
 1. Add a native adapter under
    `packages/integrations/gateway/src/flinttrade_gateway/brokers/<broker>.py`

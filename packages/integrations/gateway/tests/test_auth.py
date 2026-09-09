@@ -42,7 +42,7 @@ class MockRegistry:
         from flinttrade_gateway.adapter import BROKER_CATALOG
         if broker not in BROKER_CATALOG:
             raise BrokerNotFoundError(f"Broker '{broker}' not found in catalog.")
-        info = BrokerAccountInfo(
+        info = BrokerAccountInfo(adapter_id="openalgo",
             account_id=account_id,
             broker=broker,
             label=label,
@@ -114,6 +114,7 @@ def app():
     from flask import Flask
 
     flask_app = Flask(__name__)
+    flask_app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     flask_app.config["TESTING"] = True
     flask_app.config["REGISTRY"] = MockRegistry()
     flask_app.config["CREDENTIAL_STORE"] = MockCredentialStore()

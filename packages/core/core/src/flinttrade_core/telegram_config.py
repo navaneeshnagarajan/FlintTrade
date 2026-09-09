@@ -180,8 +180,12 @@ def persist_telegram_config(payload: dict[str, Any], ws: Workspace | None = None
     # this process's stale in-memory snapshot.
     def _apply(config: dict[str, Any]) -> None:
         notifications = config.setdefault("notifications", {})
-        notifications["telegram_enabled"] = enabled
-        notifications["telegram_chat_id"] = chat_id
+        next_enabled = enabled if "enabled" in payload else notifications.get("telegram_enabled", False)
+        next_chat_id = chat_id if "chat_id" in payload else notifications.get("telegram_chat_id", "")
+        if next_enabled and not (next_chat_id and would_have_token):
+            raise TelegramConfigError("incomplete_enable")
+        notifications["telegram_enabled"] = next_enabled
+        notifications["telegram_chat_id"] = next_chat_id
         notifications["telegram_bot_token_ref"] = (
             TELEGRAM_BOT_TOKEN_REF if would_have_token else ""
         )

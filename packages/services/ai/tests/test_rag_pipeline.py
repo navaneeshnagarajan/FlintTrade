@@ -243,18 +243,66 @@ class TestDocumentLoader:
 
 
 class TestEmbeddingProvider:
+    def test_explicit_aliases_normalise_to_legacy_runtime_names(self) -> None:
+        sentence_transformers = EmbeddingProvider(provider="sentence-transformers")
+        openai_compatible = EmbeddingProvider(provider="openai-compatible")
+        with (
+            patch.object(sentence_transformers, "_embed_sentence_transformers", return_value=[[1.0]]) as local_embed,
+            patch.object(openai_compatible, "_embed_openai", return_value=[[2.0]]) as remote_embed,
+        ):
+            assert sentence_transformers.embed(["local"]) == [[1.0]]
+            assert openai_compatible.embed(["remote"]) == [[2.0]]
+        local_embed.assert_called_once_with(["local"])
+        remote_embed.assert_called_once_with(["remote"])
+        assert sentence_transformers.provider_id == "embedding:sentence-transformers"
+        assert openai_compatible.provider_id == "embedding:openai-compatible"
+
+    def test_unknown_string_provider_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Unknown embedding provider"):
+            EmbeddingProvider(provider="unexpected-provider")
+
+    @pytest.mark.parametrize(
+        "provider",
+        [
+            "sentence_transformers",
+            "sentence-transformers",
+            "openai",
+            "openai-compatible",
+            "embedding:sentence-transformers",
+            "embedding:openai-compatible",
+        ],
+    )
+    def test_custom_embedding_rejects_builtin_provider_lineage(self, provider: str) -> None:
+        with pytest.raises(ValueError, match="Custom embedding provider"):
+            EmbeddingProvider(provider=provider, custom_fn=lambda _texts: [[0.1]])
+
+    def test_custom_embedding_requires_and_exposes_explicit_lineage(self) -> None:
+        provider = EmbeddingProvider(
+            provider="embedding:test-fixture",
+            custom_fn=lambda _texts: [[0.1]],
+        )
+
+        assert provider.provider_id == "embedding:test-fixture"
+        assert provider.embed(["fixture"]) == [[0.1]]
+
+    def test_custom_embedding_rejects_missing_or_non_namespaced_lineage(self) -> None:
+        with pytest.raises(ValueError, match="Custom embedding provider"):
+            EmbeddingProvider(custom_fn=lambda _texts: [[0.1]])
+        with pytest.raises(ValueError, match="Custom embedding provider"):
+            EmbeddingProvider(provider="test-fixture", custom_fn=lambda _texts: [[0.1]])
+
     def test_empty_input_returns_empty(self) -> None:
-        provider = EmbeddingProvider(custom_fn=lambda texts: [[0.1] * 384 for _ in texts])
+        provider = EmbeddingProvider(provider="embedding:test-fixture", custom_fn=lambda texts: [[0.1] * 384 for _ in texts])
         assert provider.embed([]) == []
 
     def test_custom_fn_used(self) -> None:
         fixed = [[1.0, 2.0, 3.0]]
-        provider = EmbeddingProvider(custom_fn=lambda texts: [fixed[0]] * len(texts))
+        provider = EmbeddingProvider(provider="embedding:test-fixture", custom_fn=lambda texts: [fixed[0]] * len(texts))
         result = provider.embed(["hello world"])
         assert result == [[1.0, 2.0, 3.0]]
 
     def test_custom_fn_multiple_texts(self) -> None:
-        provider = EmbeddingProvider(custom_fn=lambda texts: [[float(i)] * 3 for i in range(len(texts))])
+        provider = EmbeddingProvider(provider="embedding:test-fixture", custom_fn=lambda texts: [[float(i)] * 3 for i in range(len(texts))])
         result = provider.embed(["a", "b", "c"])
         assert len(result) == 3
 
@@ -328,7 +376,7 @@ class TestVectorStore:
         client = _make_mock_chroma_client(coll)
         store = VectorStore(
             collection_name="test",
-            embedding_provider=EmbeddingProvider(custom_fn=lambda t: [[0.1] * 384 for _ in t]),
+            embedding_provider=EmbeddingProvider(provider="embedding:test-fixture", custom_fn=lambda t: [[0.1] * 384 for _ in t]),
         )
         # Inject mocked client
         store._client = client
@@ -390,7 +438,7 @@ class TestVectorStore:
         coll.upsert.side_effect = RuntimeError("database is read-only")
         store = VectorStore(
             collection_name="test",
-            embedding_provider=EmbeddingProvider(custom_fn=lambda _texts: [[0.1, 0.2]]),
+            embedding_provider=EmbeddingProvider(provider="embedding:test-fixture", custom_fn=lambda _texts: [[0.1, 0.2]]),
         )
         store._collection = coll
 
@@ -416,7 +464,7 @@ class TestVectorStore:
 
     def test_reopens_existing_persistent_collection_without_reindexing(self, tmp_path: Path) -> None:
         persist_directory = str(tmp_path / "vectors")
-        provider = EmbeddingProvider(custom_fn=lambda _texts: [[1.0, 0.0]])
+        provider = EmbeddingProvider(provider="embedding:test-fixture", custom_fn=lambda _texts: [[1.0, 0.0]])
         old_store = VectorStore(
             collection_name="flinttrade_docs",
             persist_directory=persist_directory,
@@ -450,7 +498,7 @@ class TestVectorStore:
         store = VectorStore(
             collection_name="legacy_docs",
             persist_directory=persist_directory,
-            embedding_provider=EmbeddingProvider(custom_fn=lambda _texts: [[1.0, 0.0]]),
+            embedding_provider=EmbeddingProvider(provider="embedding:test-fixture", custom_fn=lambda _texts: [[1.0, 0.0]]),
         )
         collection = store._get_collection()
         collection.upsert(
@@ -474,7 +522,7 @@ class TestVectorStore:
         store = VectorStore(
             collection_name="flinttrade_docs",
             persist_directory=persist_directory,
-            embedding_provider=EmbeddingProvider(custom_fn=_embed),
+            embedding_provider=EmbeddingProvider(provider="embedding:test-fixture", custom_fn=_embed),
         )
         store.upsert([TextChunk(content="Theta adjustment guide", chunk_id="guide_0")])
 
@@ -503,7 +551,7 @@ class TestVectorStore:
         coll.query.return_value["distances"] = [[0.4]]
         store = VectorStore(
             collection_name="test",
-            embedding_provider=EmbeddingProvider(custom_fn=lambda _texts: [[0.8, 0.6]]),
+            embedding_provider=EmbeddingProvider(provider="embedding:test-fixture", custom_fn=lambda _texts: [[0.8, 0.6]]),
         )
         store._collection = coll
 
@@ -591,7 +639,7 @@ class TestRAGPipeline:
         coll = _make_mock_collection(count=0)
         client = _make_mock_chroma_client(coll)
 
-        embed_provider = EmbeddingProvider(custom_fn=lambda t: [[0.1] * 384 for _ in t])
+        embed_provider = EmbeddingProvider(provider="embedding:test-fixture", custom_fn=lambda t: [[0.1] * 384 for _ in t])
         store = VectorStore(
             collection_name="test_pipe",
             embedding_provider=embed_provider,

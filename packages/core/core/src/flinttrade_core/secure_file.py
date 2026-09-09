@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import ctypes
+import errno
 import functools
+import hashlib
 import os
 import pathlib
 import stat
+import sys
 import tempfile
 
 SENSITIVE_PATTERNS = (
@@ -83,6 +86,482 @@ class _SidAndAttributes(ctypes.Structure):
 
 class _TokenUser(ctypes.Structure):
     _fields_ = [("user", _SidAndAttributes)]
+
+
+class HeldOwnerDirectory:
+    """Retain an owner-validated directory as publication authority.
+
+    Descendants retain their parent scope. POSIX operations are relative to
+    descriptors; Windows holds the namespace without delete sharing. This
+    prevents pathname redirection, not arbitrary compromise of the OS owner.
+    """
+
+    def __init__(
+        self,
+        path: pathlib.Path,
+        *,
+        require_hardened: bool = True,
+        _parent: HeldOwnerDirectory | None = None,
+    ) -> None:
+        self.path = pathlib.Path(path)
+        self.require_hardened = require_hardened
+        self._parent = _parent
+        self._descriptor = -1
+
+    @staticmethod
+    def _name(name: str) -> str:
+        if type(name) is not str or not name or name in {".", ".."} or any(c in name for c in "/\\\0:"):
+            raise OSError("unsafe directory member")
+        return name
+
+    def __enter__(self) -> HeldOwnerDirectory:
+        if self._descriptor != -1:
+            raise OSError("directory scope already open")
+        if self._parent is not None:
+            self._parent.revalidate()
+        before = self.path.lstat()
+        if not stat.S_ISDIR(before.st_mode) or stat.S_ISLNK(before.st_mode) or _is_reparse_point(before):
+            raise OSError("unsafe directory")
+        if _is_windows():
+            self._descriptor = _open_windows_directory(self.path)
+        else:
+            flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+            self._descriptor = os.open(
+                self.path.name if self._parent else self.path,
+                flags,
+                dir_fd=self._parent._descriptor if self._parent else None,
+            )
+        try:
+            self._stat = os.fstat(self._descriptor)
+            if not _same_file_identity(before, self._stat):
+                raise OSError("directory changed while opened")
+            self.revalidate()
+            return self
+        except BaseException:
+            self.__exit__()
+            raise
+
+    def __exit__(self, *args: object) -> None:
+        if self._descriptor != -1:
+            os.close(self._descriptor)
+            self._descriptor = -1
+
+    def revalidate(self) -> os.stat_result:
+        """Prove the held directory still occupies its admitted path."""
+        if self._descriptor == -1:
+            raise OSError("directory scope is closed")
+        if self._parent is not None:
+            self._parent.revalidate()
+        opened = os.fstat(self._descriptor)
+        current = self.path.lstat()
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or not stat.S_ISDIR(current.st_mode)
+            or stat.S_ISLNK(current.st_mode)
+            or _is_reparse_point(current)
+            or not _same_file_identity(opened, current)
+            or not _same_file_identity(opened, self._stat)
+            or not opened.st_ino
+        ):
+            raise OSError("directory identity changed")
+        _assert_current_user_owns(self._descriptor, opened)
+        if self.require_hardened:
+            if _is_windows():
+                valid, _reason = _verify_exact_windows_descriptor_dacl(self._descriptor)
+                if not valid:
+                    raise InsecureFilePermissionsError("directory is not hardened")
+            elif stat.S_IMODE(opened.st_mode) != 0o700:
+                raise InsecureFilePermissionsError("directory is not hardened")
+        return opened
+
+    def child(
+        self,
+        name: str,
+        *,
+        create: bool = False,
+        recover_empty: bool = False,
+    ) -> HeldOwnerDirectory:
+        """Return a child scope; optionally recover an interrupted empty creation.
+
+        Recovery is deliberately opt-in. It only tightens an owner-owned,
+        non-reparse directory which still has no members, covering a process
+        exit between Windows ``mkdir`` and DACL installation without admitting
+        a populated or foreign directory.
+        """
+        self.revalidate()
+        name = self._name(name)
+        if recover_empty and not create:
+            raise ValueError("empty child recovery requires creation authority")
+        if create:
+            try:
+                if _is_windows():
+                    os.mkdir(self.path / name, 0o700)
+                    harden_directory(self.path / name)
+                else:
+                    os.mkdir(name, 0o700, dir_fd=self._descriptor)
+                    os.fsync(self._descriptor)
+            except FileExistsError:
+                if recover_empty:
+                    self._recover_empty_child(name)
+        return HeldOwnerDirectory(self.path / name, _parent=self)
+
+    def _recover_empty_child(self, name: str) -> None:
+        candidate = HeldOwnerDirectory(self.path / name, _parent=self)
+        try:
+            with candidate:
+                return
+        except InsecureFilePermissionsError:
+            pass
+
+        candidate = HeldOwnerDirectory(
+            self.path / name,
+            require_hardened=False,
+            _parent=self,
+        )
+        with candidate:
+            members = os.listdir(candidate.path if _is_windows() else candidate._descriptor)
+            if members:
+                raise InsecureFilePermissionsError("interrupted directory creation is not empty")
+            if _is_windows():
+                # The retained handle denies delete sharing, so the admitted
+                # path cannot be substituted while its DACL is repaired.
+                harden_directory(candidate.path)
+            else:
+                os.fchmod(candidate._descriptor, 0o700)
+                os.fsync(candidate._descriptor)
+                os.fsync(self._descriptor)
+            candidate.require_hardened = True
+            candidate.revalidate()
+            if os.listdir(candidate.path if _is_windows() else candidate._descriptor):
+                raise OSError("interrupted directory creation changed during recovery")
+
+    def exists(self, name: str) -> bool:
+        self.revalidate()
+        try:
+            self._entry_stat(name)
+            return True
+        except FileNotFoundError:
+            return False
+
+    def existing_member(self, name: str) -> str | None:
+        """Locate an entry or its deterministic durable-delete remainder."""
+        name = self._name(name)
+        pending = pending_unlink_path(self.path / name).name
+        present, pending_present = self.exists(name), self.exists(pending)
+        if present and pending_present:
+            raise OSError("ambiguous pending deletion")
+        return name if present else pending if pending_present else None
+
+    def _entry_stat(self, name: str) -> os.stat_result:
+        name = self._name(name)
+        if _is_windows():
+            return (self.path / name).lstat()
+        return os.stat(name, dir_fd=self._descriptor, follow_symlinks=False)
+
+    def read_text(self, name: str, *, max_bytes: int = 64 * 1024) -> str:
+        """Read one bounded hardened regular member of the retained directory."""
+        return self.read_text_with_identity(name, max_bytes=max_bytes)[0]
+
+    def read_text_with_identity(
+        self,
+        name: str,
+        *,
+        max_bytes: int = 64 * 1024,
+    ) -> tuple[str, os.stat_result]:
+        """Observe bounded text and its physical member identity together.
+
+        This is not an inode-CAS. Exclusive claim users must compare the moved
+        object with this observation before publishing a replacement.
+        """
+        self.revalidate()
+        name = self._name(name)
+        before = self._entry_stat(name)
+        if _is_windows():
+            result = read_hardened_owner_owned_text(self.path / name, max_bytes=max_bytes)
+            opened = before
+        else:
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                raise OSError("unsafe directory member")
+            descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self._descriptor)
+            try:
+                opened = os.fstat(descriptor)
+                if not _same_file_identity(before, opened):
+                    raise OSError("directory member changed")
+                result = _read_bounded_descriptor(
+                    descriptor,
+                    max_bytes=max_bytes,
+                    path=self.path / name,
+                    require_hardened=True,
+                ).decode("utf-8")
+                after = os.fstat(descriptor)
+                if (opened.st_size, opened.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                    raise OSError("directory member changed while read")
+                if not _same_file_identity(opened, self._entry_stat(name)):
+                    raise OSError("directory member changed")
+            finally:
+                os.close(descriptor)
+        self.revalidate()
+        current = self._entry_stat(name)
+        if (
+            not _same_file_identity(opened, current)
+            or (opened.st_size, opened.st_mtime_ns) != (current.st_size, current.st_mtime_ns)
+            or not opened.st_ino
+        ):
+            raise OSError("directory member changed while read")
+        return result, opened
+
+    def create_empty_hardened_member(self, name: str) -> os.stat_result:
+        """Exclusively create and sync an empty binary member, never replace it.
+
+        A failed creation may leave an empty member requiring explicit recovery.
+        SQLite callers must initialise it only if this call returns successfully.
+        """
+        self.revalidate()
+        name = self._name(name)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+        if _is_windows():
+            descriptor = os.open(self.path / name, flags, 0o600)
+        else:
+            descriptor = os.open(name, flags | os.O_NOFOLLOW, 0o600, dir_fd=self._descriptor)
+        try:
+            if _is_windows():
+                descriptor = _reopen_windows_descriptor_for_security(descriptor, write_dacl=True)
+                _install_exact_windows_descriptor_dacl(descriptor)
+            else:
+                os.fchmod(descriptor, 0o600)
+            opened = os.fstat(descriptor)
+            _assert_current_user_owns(descriptor, opened)
+            _assert_hardened_descriptor(descriptor, opened, path=self.path / name)
+            os.fsync(descriptor)
+            self.revalidate()
+            if not _same_file_identity(opened, self._entry_stat(name)) or opened.st_nlink != 1:
+                raise OSError("directory member changed")
+            if _is_windows():
+                fsync_parent_directory(self.path / name)
+            else:
+                os.fsync(self._descriptor)
+            self.revalidate()
+            return opened
+        finally:
+            os.close(descriptor)
+
+    def write_text(self, name: str, value: str) -> None:
+        """Atomically publish text under the retained namespace authority."""
+        self.revalidate()
+        name = self._name(name)
+        if self.exists(name):
+            self.read_text(name, max_bytes=1024 * 1024)
+        if _is_windows():
+            write_secret_text(self.path / name, value)
+            self.revalidate()
+            return
+        import uuid
+
+        temporary = f".{name}.{uuid.uuid4()}.tmp"
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=self._descriptor,
+        )
+        created = os.fstat(descriptor)
+        try:
+            os.fchmod(descriptor, 0o600)
+            _assert_current_user_owns(descriptor, os.fstat(descriptor))
+            payload = value.encode("utf-8")
+            offset = 0
+            while offset < len(payload):
+                written = os.write(descriptor, payload[offset:])
+                if written <= 0:
+                    raise OSError("secure write made no progress")
+                offset += written
+            os.fsync(descriptor)
+            self.revalidate()
+            if not _same_file_identity(created, self._entry_stat(temporary)):
+                raise OSError("candidate changed")
+            os.replace(temporary, name, src_dir_fd=self._descriptor, dst_dir_fd=self._descriptor)
+            os.fsync(self._descriptor)
+            self.revalidate()
+        except BaseException:
+            try:
+                if _same_file_identity(created, self._entry_stat(temporary)):
+                    os.unlink(temporary, dir_fd=self._descriptor)
+                    os.fsync(self._descriptor)
+            except FileNotFoundError:
+                pass
+            raise
+        finally:
+            os.close(descriptor)
+
+    def replace(self, name: str, destination: HeldOwnerDirectory, target: str) -> None:
+        """Publish a validated journal-owned candidate into another held scope."""
+        name, target = self._name(name), self._name(target)
+        self.read_text(name, max_bytes=1024 * 1024)
+        destination.revalidate()
+        if destination.exists(target):
+            destination.read_text(target, max_bytes=1024 * 1024)
+        if _is_windows():
+            durable_replace(self.path / name, destination.path / target)
+        else:
+            os.replace(name, target, src_dir_fd=self._descriptor, dst_dir_fd=destination._descriptor)
+            os.fsync(destination._descriptor)
+            os.fsync(self._descriptor)
+        self.revalidate()
+        destination.revalidate()
+
+    def move_no_replace(self, name: str, destination: HeldOwnerDirectory, target: str) -> None:
+        """Exclusively move a hardened member; never overwrite a destination.
+
+        Unsupported native/filesystem semantics fail closed. The caller owns
+        journalled member identity and authentication, including crash recovery.
+        """
+        name, target = self._name(name), self._name(target)
+        self.read_text_with_identity(name, max_bytes=1024 * 1024)
+        destination.revalidate()
+        if _is_windows():
+            _windows_replace_write_through(self.path / name, destination.path / target, replace=False)
+        else:
+            _posix_move_no_replace(self._descriptor, name, destination._descriptor, target)
+            os.fsync(destination._descriptor)
+            os.fsync(self._descriptor)
+        self.revalidate()
+        destination.revalidate()
+
+    def unlink(self, name: str, *, recover_empty_unhardened: bool = False) -> None:
+        """Durably remove a validated member; transaction ownership is caller policy.
+
+        The opt-in recovery path exists for a writer-owned temporary which can
+        be left between Windows file creation and DACL installation. Only an
+        empty, stable, current-user-owned regular file is hardened and admitted
+        for deletion; partial payloads must already carry the exact secret ACL.
+        """
+        name = self._name(name)
+        actual = self.existing_member(name)
+        if actual is None:
+            raise FileNotFoundError("directory member is absent")
+        try:
+            self.read_text(actual, max_bytes=1024 * 1024)
+        except InsecureFilePermissionsError:
+            if not recover_empty_unhardened:
+                raise
+            self._harden_empty_member(actual)
+            self.read_text(actual, max_bytes=1024 * 1024)
+        if _is_windows():
+            if actual != name:
+                cleanup_pending_unlink(self.path / name)
+            else:
+                durable_unlink(self.path / name)
+        else:
+            os.unlink(actual, dir_fd=self._descriptor)
+            os.fsync(self._descriptor)
+        self.revalidate()
+
+    def _harden_empty_member(self, name: str) -> None:
+        """Harden one retained zero-byte member without accepting its contents."""
+        self.revalidate()
+        before = self._entry_stat(name)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or stat.S_ISLNK(before.st_mode)
+            or _is_reparse_point(before)
+            or before.st_nlink != 1
+            or before.st_size != 0
+        ):
+            raise OSError("interrupted temporary is not an empty regular file")
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+        if _is_windows():
+            descriptor = os.open(self.path / name, flags)
+        else:
+            descriptor = os.open(name, flags | os.O_NOFOLLOW, dir_fd=self._descriptor)
+        try:
+            if _is_windows():
+                descriptor = _reopen_windows_descriptor_for_security(
+                    descriptor,
+                    allow_delete_sharing=False,
+                    write_dacl=True,
+                )
+            opened = os.fstat(descriptor)
+            if (
+                not _same_file_identity(before, opened)
+                or not stat.S_ISREG(opened.st_mode)
+                or _is_reparse_point(opened)
+                or opened.st_nlink != 1
+                or opened.st_size != 0
+            ):
+                raise OSError("interrupted temporary changed while opened")
+            _assert_current_user_owns(descriptor, opened)
+            if _is_windows():
+                _install_exact_windows_descriptor_dacl(descriptor)
+            else:
+                os.fchmod(descriptor, 0o600)
+            os.fsync(descriptor)
+            _assert_hardened_descriptor(descriptor, os.fstat(descriptor), path=self.path / name)
+            current = self._entry_stat(name)
+            if not _same_file_identity(opened, current) or current.st_size != 0:
+                raise OSError("interrupted temporary changed during hardening")
+            if not _is_windows():
+                os.fsync(self._descriptor)
+            self.revalidate()
+        finally:
+            os.close(descriptor)
+
+
+def _posix_move_no_replace(source_fd: int, source: str, target_fd: int, target: str) -> None:
+    """Native descriptor-relative exclusive rename, with no fallback."""
+    if sys.platform == "darwin":
+        symbol, flags = "renameatx_np", 0x4  # RENAME_EXCL, Darwin sys/stdio.h
+    elif sys.platform.startswith("linux"):
+        symbol, flags = "renameat2", 0x1  # RENAME_NOREPLACE
+    else:
+        raise OSError(errno.ENOTSUP, "exclusive rename is unsupported")
+    library = ctypes.CDLL(None, use_errno=True)
+    function = getattr(library, symbol, None)
+    if function is None:
+        raise OSError(errno.ENOTSUP, "exclusive rename is unavailable")
+    function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    function.restype = ctypes.c_int
+    if function(source_fd, os.fsencode(source), target_fd, os.fsencode(target), flags):
+        raise OSError(ctypes.get_errno(), "exclusive rename failed")
+
+
+def _open_windows_directory(path: pathlib.Path) -> int:
+    """Open a directory with native no-reparse and no-delete-sharing semantics."""
+    import msvcrt
+
+    kernel32, _advapi32 = _windows_security_libraries()
+    create = kernel32.CreateFileW
+    create.argtypes = [
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    ]
+    create.restype = ctypes.c_void_p
+    handle = create(
+        str(path),
+        _GENERIC_READ | _READ_CONTROL,
+        _FILE_SHARE_READ | _FILE_SHARE_WRITE,
+        None,
+        3,
+        0x02000000 | 0x00200000,
+        None,
+    )
+    if not handle or handle == ctypes.c_void_p(-1).value:
+        _raise_windows_error()
+    try:
+        return msvcrt.open_osfhandle(handle, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    except BaseException:
+        kernel32.CloseHandle(ctypes.c_void_p(handle))
+        raise
+
+
+def validate_owner_owned_directory(path: pathlib.Path, *, require_hardened: bool = True) -> os.stat_result:
+    """Observe a safe directory; retain a scope separately for later publication."""
+    with HeldOwnerDirectory(path, require_hardened=require_hardened) as directory:
+        return directory.revalidate()
 
 
 class PendingDurableUnlinkError(OSError):
@@ -553,12 +1032,17 @@ def harden_directory(path: pathlib.Path, user: str | None = None) -> None:
     path.chmod(0o700)
 
 
-def _windows_replace_write_through(source: pathlib.Path, destination: pathlib.Path) -> None:
+def _windows_replace_write_through(
+    source: pathlib.Path,
+    destination: pathlib.Path,
+    *,
+    replace: bool = True,
+) -> None:
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
     move_file = kernel32.MoveFileExW
     move_file.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
     move_file.restype = ctypes.c_int
-    flags = _MOVEFILE_REPLACE_EXISTING | _MOVEFILE_WRITE_THROUGH
+    flags = _MOVEFILE_WRITE_THROUGH | (_MOVEFILE_REPLACE_EXISTING if replace else 0)
     if not move_file(str(source), str(destination), flags):
         raise ctypes.WinError(ctypes.get_last_error())
 
@@ -952,6 +1436,220 @@ def read_hardened_owner_owned_text(
 ) -> str:
     """Read hardened owner-owned text without following links."""
     return read_hardened_owner_owned_bytes(path, max_bytes=max_bytes).decode(encoding)
+
+
+def validate_owner_owned_regular_file(
+    path: pathlib.Path,
+    *,
+    require_hardened: bool = False,
+) -> os.stat_result:
+    """Validate one current-user-owned regular file without reading its payload.
+
+    The path is opened without following links where the platform supports it,
+    ownership is proved on the descriptor, and the directory entry is compared
+    again before returning.  This is the streaming-safe counterpart to the
+    bounded secure readers for large SQLite snapshots.
+    """
+    path = pathlib.Path(path)
+    path_stat = path.lstat()
+    parent_stat = path.parent.lstat()
+    if (
+        not stat.S_ISDIR(parent_stat.st_mode)
+        or stat.S_ISLNK(parent_stat.st_mode)
+        or _is_reparse_point(parent_stat)
+        or not stat.S_ISREG(path_stat.st_mode)
+        or stat.S_ISLNK(path_stat.st_mode)
+        or _is_reparse_point(path_stat)
+        or path_stat.st_nlink != 1
+    ):
+        raise OSError("secure file path is unsafe")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    if not _is_windows():
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        if _is_windows():
+            descriptor = _reopen_windows_descriptor_for_security(descriptor, write_dacl=False)
+        opened_stat = os.fstat(descriptor)
+        if not _same_file_identity(path_stat, opened_stat) or opened_stat.st_nlink != 1:
+            raise OSError("secure file changed while it was opened")
+        _assert_current_user_owns(descriptor, opened_stat)
+        if require_hardened:
+            _assert_hardened_descriptor(descriptor, opened_stat, path=path)
+        final_stat = path.lstat()
+        if (
+            not _same_file_identity(opened_stat, final_stat)
+            or stat.S_ISLNK(final_stat.st_mode)
+            or _is_reparse_point(final_stat)
+            or final_stat.st_nlink != 1
+        ):
+            raise OSError("secure file changed while it was validated")
+        return opened_stat
+    finally:
+        os.close(descriptor)
+
+
+def digest_owner_owned_regular_file(
+    path: pathlib.Path,
+    *,
+    require_hardened: bool = False,
+) -> str:
+    """Return a SHA-256 digest from one validated, descriptor-pinned file."""
+    digest, _path_stat = digest_owner_owned_regular_file_identity(
+        path,
+        require_hardened=require_hardened,
+    )
+    return digest
+
+
+def digest_owner_owned_regular_file_identity(
+    path: pathlib.Path,
+    *,
+    require_hardened: bool = False,
+) -> tuple[str, os.stat_result]:
+    """Return a stable descriptor-pinned digest and file generation.
+
+    Size and timestamp metadata are checked on the open descriptor before and
+    after streaming, as well as against the final directory entry.  Callers
+    can therefore persist both the content digest and the exact generation
+    that produced it without a path-based stat/hash race.
+    """
+    path = pathlib.Path(path)
+    path_stat = path.lstat()
+    parent_stat = path.parent.lstat()
+    if (
+        not stat.S_ISDIR(parent_stat.st_mode)
+        or stat.S_ISLNK(parent_stat.st_mode)
+        or _is_reparse_point(parent_stat)
+        or not stat.S_ISREG(path_stat.st_mode)
+        or stat.S_ISLNK(path_stat.st_mode)
+        or _is_reparse_point(path_stat)
+        or path_stat.st_nlink != 1
+    ):
+        raise OSError("secure file path is unsafe")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    if not _is_windows():
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        if _is_windows():
+            descriptor = _reopen_windows_descriptor_for_security(descriptor, write_dacl=False)
+        opened_stat = os.fstat(descriptor)
+        if not _same_file_identity(path_stat, opened_stat) or opened_stat.st_nlink != 1:
+            raise OSError("secure file changed while it was opened")
+        _assert_current_user_owns(descriptor, opened_stat)
+        if require_hardened:
+            _assert_hardened_descriptor(descriptor, opened_stat, path=path)
+        digest = hashlib.sha256()
+        while chunk := os.read(descriptor, 1 << 20):
+            digest.update(chunk)
+        final_descriptor_stat = os.fstat(descriptor)
+        final_stat = path.lstat()
+        if (
+            _stable_file_generation(opened_stat) != _stable_file_generation(final_descriptor_stat)
+            or _stable_file_generation(final_descriptor_stat) != _stable_file_generation(final_stat)
+            or stat.S_ISLNK(final_stat.st_mode)
+            or _is_reparse_point(final_stat)
+            or final_stat.st_nlink != 1
+        ):
+            raise OSError("secure file changed while it was hashed")
+        return digest.hexdigest(), final_descriptor_stat
+    finally:
+        os.close(descriptor)
+
+
+def _stable_file_generation(path_stat: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        path_stat.st_dev,
+        path_stat.st_ino,
+        path_stat.st_size,
+        path_stat.st_mtime_ns,
+        path_stat.st_ctime_ns,
+    )
+
+
+def copy_owner_owned_file_durable(source: pathlib.Path, destination: pathlib.Path) -> None:
+    """Copy a hardened owner-owned file to a new hardened, fsynced candidate."""
+    source = pathlib.Path(source)
+    destination = pathlib.Path(destination)
+    source_stat = validate_owner_owned_regular_file(source, require_hardened=True)
+    parent_stat = destination.parent.lstat()
+    if (
+        not stat.S_ISDIR(parent_stat.st_mode)
+        or stat.S_ISLNK(parent_stat.st_mode)
+        or _is_reparse_point(parent_stat)
+    ):
+        raise OSError("secure copy destination parent is unsafe")
+    source_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    if not _is_windows():
+        source_flags |= getattr(os, "O_NOFOLLOW", 0)
+    source_descriptor = os.open(source, source_flags)
+    destination_descriptor = -1
+    destination_stat: os.stat_result | None = None
+    try:
+        if _is_windows():
+            source_descriptor = _reopen_windows_descriptor_for_security(source_descriptor, write_dacl=False)
+        opened_source_stat = os.fstat(source_descriptor)
+        if not _same_file_identity(source_stat, opened_source_stat):
+            raise OSError("secure copy source changed while it was opened")
+        _assert_current_user_owns(source_descriptor, opened_source_stat)
+        _assert_hardened_descriptor(source_descriptor, opened_source_stat, path=source)
+        destination_flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        destination_descriptor = os.open(destination, destination_flags, 0o600)
+        if _is_windows():
+            destination_descriptor = _reopen_windows_descriptor_for_security(
+                destination_descriptor,
+                write_dacl=True,
+            )
+        destination_stat = os.fstat(destination_descriptor)
+        if _is_windows():
+            _install_exact_windows_descriptor_dacl(destination_descriptor)
+        else:
+            os.fchmod(destination_descriptor, 0o600)
+        hardened_destination_stat = os.fstat(destination_descriptor)
+        _assert_current_user_owns(destination_descriptor, hardened_destination_stat)
+        _assert_hardened_descriptor(destination_descriptor, hardened_destination_stat, path=destination)
+        while chunk := os.read(source_descriptor, 1 << 20):
+            offset = 0
+            while offset < len(chunk):
+                written = os.write(destination_descriptor, chunk[offset:])
+                if written <= 0:
+                    raise OSError("secure copy made no progress")
+                offset += written
+        final_source_stat = source.lstat()
+        if (
+            not _same_file_identity(opened_source_stat, final_source_stat)
+            or stat.S_ISLNK(final_source_stat.st_mode)
+            or _is_reparse_point(final_source_stat)
+            or final_source_stat.st_nlink != 1
+        ):
+            raise OSError("secure copy source changed while it was read")
+        os.fsync(destination_descriptor)
+        final_destination_stat = destination.lstat()
+        if not _same_file_identity(hardened_destination_stat, final_destination_stat):
+            raise OSError("secure copy destination changed while it was written")
+    except Exception:
+        if destination_descriptor != -1:
+            os.close(destination_descriptor)
+            destination_descriptor = -1
+        if destination_stat is not None:
+            try:
+                current_stat = destination.lstat()
+                if _same_file_identity(destination_stat, current_stat):
+                    durable_unlink(destination)
+            except OSError:
+                pass
+        raise
+    finally:
+        if destination_descriptor != -1:
+            os.close(destination_descriptor)
+        os.close(source_descriptor)
 
 
 def assert_hardened(path: pathlib.Path, user: str | None = None) -> tuple[bool, str]:

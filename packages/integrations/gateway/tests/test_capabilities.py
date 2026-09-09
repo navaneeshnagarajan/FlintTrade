@@ -251,10 +251,24 @@ def test_auto_native_registry_derives_native_rows_without_seeded_duplicates() ->
 
 def test_native_capabilities_follow_adapter_registry() -> None:
     """Native recommendations must rank the same adapters the factory can activate."""
-    from flinttrade_gateway.brokers.native_factory import NATIVE_ADAPTER_CLASSES
+    from flinttrade_gateway.brokers.native_factory import NATIVE_ADAPTER_CLASSES, NATIVE_ADAPTER_SPECS
     from flinttrade_gateway.capabilities import native_capabilities_by_broker
 
     natives = native_capabilities_by_broker()
     assert set(natives) == set(NATIVE_ADAPTER_CLASSES)
-    for broker_id, cls in NATIVE_ADAPTER_CLASSES.items():
-        assert natives[broker_id] == cls().capabilities
+    for broker_id, spec in NATIVE_ADAPTER_SPECS.items():
+        assert natives[broker_id] is spec.capabilities
+
+
+def test_native_capability_discovery_does_not_construct_adapters(monkeypatch) -> None:
+    """A constructor regression must not make metadata discovery create sessions."""
+    from flinttrade_gateway.brokers.dhan import DhanAdapter
+    from flinttrade_gateway.brokers.native_factory import NATIVE_ADAPTER_SPECS
+    from flinttrade_gateway.capabilities import native_capabilities_by_broker
+
+    def poison_constructor(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        raise AssertionError("capability discovery must not construct adapters")
+
+    monkeypatch.setattr(DhanAdapter, "__init__", poison_constructor)
+
+    assert native_capabilities_by_broker()["dhan"] is NATIVE_ADAPTER_SPECS["dhan"].capabilities

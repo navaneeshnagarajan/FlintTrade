@@ -30,6 +30,8 @@ from flask import Blueprint, Response, current_app, jsonify, request
 from werkzeug.utils import safe_join
 
 from .auth_scopes import require_scope
+from .broker_account_cutover import guard_broker_account_http
+from .news_provider_profiles import OPERATIONS_NEWS_FEEDS
 
 logger = logging.getLogger("flinttrade")
 
@@ -1551,14 +1553,8 @@ def api_security_settings_update() -> tuple[Any, int]:
 @operations_bp.route("/news", methods=["GET"])
 def api_news() -> tuple[Any, int]:
     """Fetch news from Indian financial RSS feeds server-side."""
-    feeds = [
-        ("MoneyControl", "https://www.moneycontrol.com/rss/latestnews.xml"),
-        ("ET Markets", "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"),
-        ("LiveMint", "https://www.livemint.com/rss/markets"),
-    ]
-
     articles: list[dict[str, str]] = []
-    for source_name, url in feeds:
+    for source_name, url in OPERATIONS_NEWS_FEEDS:
         try:
             import httpx  # noqa: PLC0415
 
@@ -1815,9 +1811,10 @@ def _native_account_statuses() -> list[dict[str, Any]]:
         expires_at = None
         if registry is not None:
             try:
-                session = registry.get_session_for(adapter_id, account_id)
-                has_session = True
-                expires_at = getattr(session, "expires_at", None)
+                from flinttrade_core.broker_identity import BrokerSelector
+                state = registry.snapshot_exact_state(BrokerSelector(adapter_id, account_id))
+                has_session = state is not None and state.status == "connected"
+                expires_at = state.expires_at if has_session else None
             except Exception:  # noqa: BLE001 - no registered live session
                 has_session = False
         connectable = bool(info.connectable)
@@ -1866,6 +1863,9 @@ def ditto_account_create() -> tuple[Any, int]:
     _jwt_payload, auth_error = _authenticated_operator_identity()
     if auth_error is not None:
         return auth_error
+    unavailable = guard_broker_account_http()
+    if unavailable is not None:
+        return unavailable
     data = request.get_json(silent=True) or {}
     account_id = str(data.get("account_id", "")).strip()
     openalgo_host = str(data.get("openalgo_host", "")).strip()
@@ -2006,6 +2006,9 @@ def ditto_account_delete(account_id: str) -> tuple[Any, int]:
     _jwt_payload, auth_error = _authenticated_operator_identity()
     if auth_error is not None:
         return auth_error
+    unavailable = guard_broker_account_http()
+    if unavailable is not None:
+        return unavailable
     try:
         with _DITTO_CONTROL_LOCK:
             mgr = _ditto_manager()

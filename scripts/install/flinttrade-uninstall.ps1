@@ -7,9 +7,10 @@
 # installer's own receipt proves it.
 # The workspace, Electron profile, managed source/toolchain, the contributor
 # source-build checkout, the pre-workspace data directories and legacy desktop
-# storage are kept unless -Purge is explicitly confirmed. -Purge always prints
-# every resolved path first, including with -Yes, because for an upgraded
-# install the pre-workspace directories still hold real trading state.
+# storage and the stable installation identity/migration tombstones are kept
+# unless -Purge is explicitly confirmed. The platform-default lineage root is
+# removed last and only after all earlier data targets were removed. Ambient
+# state-root overrides are never recursive-deletion authority.
 
 param(
     [switch]$Purge = ($env:FLINTTRADE_UNINSTALL_PURGE -eq "1"),
@@ -28,6 +29,7 @@ $DefaultInstallDir = Join-Path $LocalAppDataRoot "Programs\FlintTrade"
 # entry made every uninstall fail closed).
 $LegacyShellInstallDir = if ($LocalAppDataRoot) { Join-Path $LocalAppDataRoot "FlintTrade" } else { "" }
 $DefaultWorkspace = Join-Path $RoamingAppDataRoot "flinttrade"
+$DefaultInstallationState = Join-Path $RoamingAppDataRoot "flinttrade-installation"
 $ElectronProfile = Join-Path $RoamingAppDataRoot "flinttrade-shell"
 $ManagedRoot = Join-Path $HOME ".flinttrade"
 $SourceRoot = Join-Path $ManagedRoot "src"
@@ -86,6 +88,7 @@ $script:RemovedAny = $false
 $script:FailedAny = $false
 $script:PurgeCompleted = $false
 $script:PurgedDataAny = $false
+$script:LineageOverlapFound = $false
 $script:DataRetainedAny = $false
 $script:LegacyShellRecord = $null
 $script:WebReceipt = $null
@@ -111,6 +114,7 @@ $WorkspaceDir = if ($env:FLINTTRADE_WORKSPACE_DIR) {
 } else {
     $DefaultWorkspace
 }
+$InstallationStateRoot = $DefaultInstallationState
 
 # A relative override otherwise resolves against the uninstaller's own working
 # directory at every later use, so the path that gets printed is not necessarily
@@ -935,8 +939,17 @@ function Get-DataTargets {
         # claiming everything had been purged.
         $ManagedRoot,
         (Join-Path $RoamingAppDataRoot $LegacyBundleId),
-        (Join-Path $LocalAppDataRoot $LegacyBundleId)
+        (Join-Path $LocalAppDataRoot $LegacyBundleId),
+        # Ordinary uninstall retains irreversible lineage. Explicitly confirmed
+        # purge removes it last, after every workspace/source target.
+        $InstallationStateRoot
     )
+    foreach ($candidate in $candidates[0..($candidates.Count - 2)]) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate) -and
+            (Test-PathsOverlap $candidate $InstallationStateRoot)) {
+            $script:LineageOverlapFound = $true
+        }
+    }
     $seen = @{}
     foreach ($candidate in $candidates) {
         if (-not $candidate -or -not (Test-Path -LiteralPath $candidate)) { continue }
@@ -946,6 +959,46 @@ function Get-DataTargets {
             $candidate
         }
     }
+}
+
+function Test-PathsOverlap([string]$Left, [string]$Right) {
+    try { $leftFull = (Resolve-Path -LiteralPath $Left -ErrorAction Stop).Path.TrimEnd('\', '/') }
+    catch { $leftFull = [System.IO.Path]::GetFullPath($Left).TrimEnd('\', '/') }
+    try { $rightFull = (Resolve-Path -LiteralPath $Right -ErrorAction Stop).Path.TrimEnd('\', '/') }
+    catch { $rightFull = [System.IO.Path]::GetFullPath($Right).TrimEnd('\', '/') }
+    $separator = [System.IO.Path]::DirectorySeparatorChar
+    return $leftFull.Equals($rightFull, [StringComparison]::OrdinalIgnoreCase) -or
+        $leftFull.StartsWith($rightFull + $separator, [StringComparison]::OrdinalIgnoreCase) -or
+        $rightFull.StartsWith($leftFull + $separator, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-SameResolvedPath([string]$Left, [string]$Right) {
+    try { $leftFull = (Resolve-Path -LiteralPath $Left -ErrorAction Stop).Path.TrimEnd('\', '/') }
+    catch { $leftFull = [System.IO.Path]::GetFullPath($Left).TrimEnd('\', '/') }
+    try { $rightFull = (Resolve-Path -LiteralPath $Right -ErrorAction Stop).Path.TrimEnd('\', '/') }
+    catch { $rightFull = [System.IO.Path]::GetFullPath($Right).TrimEnd('\', '/') }
+    return $leftFull.Equals($rightFull, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-PurgeTargetPresent([string]$Target) {
+    try {
+        Get-Item -LiteralPath $Target -Force -ErrorAction Stop | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Test-EarlierPurgeTargetsAbsent([object[]]$Targets) {
+    foreach ($target in $Targets) {
+        if (Test-PurgeTargetPresent ([string]$target)) {
+            Warn "Keeping installation lineage because earlier data still exists at $target."
+            $script:FailedAny = $true
+            $script:DataRetainedAny = $true
+            return $false
+        }
+    }
+    return $true
 }
 
 function Test-ProvenCustomWorkspace([string]$Target) {
@@ -978,6 +1031,11 @@ function Test-SafePurgeTarget([string]$Target) {
     $homePrefix = $homeFull + [System.IO.Path]::DirectorySeparatorChar
     $homeCanonicalPrefix = $homeCanonical + [System.IO.Path]::DirectorySeparatorChar
     $root = [System.IO.Path]::GetPathRoot($full).TrimEnd('\', '/')
+    if ($script:LineageOverlapFound -and (Test-PathsOverlap $Target $InstallationStateRoot)) {
+        Warn "Refusing to purge $Target because an earlier data target overlaps installation lineage."
+        $script:FailedAny = $true
+        return $false
+    }
     try { Get-Item -LiteralPath $Target -Force -ErrorAction Stop | Out-Null } catch { return $false }
     if (Test-PathContainsReparsePoint $Target) {
         Warn "Refusing to purge $Target because the target or one of its ancestors is a reparse point."
@@ -1032,6 +1090,8 @@ if ($Purge) {
         Say "Any .flinttrade\data, .flinttrade\archive or .flinttrade\sandbox path above is"
         Say "pre-workspace storage that the backend still reads: the DuckDB store, the append-only"
         Say "audit chain and the encrypted broker-credential vault live there."
+        Say "The installation identity and consumed migration tombstones are listed last and"
+        Say "are retained by ordinary uninstall; confirmed purge removes that lineage last."
         $proceed = $Yes
         if (-not $proceed) {
             try {
@@ -1043,7 +1103,25 @@ if ($Purge) {
         }
         if ($proceed) {
             Say "Purging explicitly confirmed FlintTrade data:"
-            $purgeTargets | ForEach-Object { Say "  $_"; Remove-IfExists $_ }
+            $earlierPurgeTargets = @()
+            foreach ($target in $purgeTargets) {
+                Say "  $target"
+                $isLineage = Test-SameResolvedPath $target $InstallationStateRoot
+                if ($isLineage) {
+                    if ($script:FailedAny -or -not (Test-EarlierPurgeTargetsAbsent $earlierPurgeTargets)) {
+                        Say "Keeping installation lineage at $target because an earlier data target could not be removed."
+                        $script:DataRetainedAny = $true
+                        continue
+                    }
+                }
+                Remove-IfExists $target
+                if (Test-PurgeTargetPresent $target) {
+                    Warn "Could not verify removal of $target; retaining installation lineage."
+                    $script:FailedAny = $true
+                    $script:DataRetainedAny = $true
+                }
+                if (-not $isLineage) { $earlierPurgeTargets += $target }
+            }
             if (-not $script:FailedAny) {
                 $script:PurgeCompleted = $true
                 $script:PurgedDataAny = $true
@@ -1063,6 +1141,7 @@ if ($Purge) {
     Say "models and strategies state included), any pre-workspace .flinttrade"
     Say "data/archive/sandbox storage (including the encrypted broker-credential vault) and any"
     Say "legacy desktop storage."
+    Say "The stable installation identity and consumed migration tombstones are retained too."
     Say "To delete it too, re-run with -Purge and confirm explicitly."
 }
 

@@ -34,6 +34,7 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     flask_app = Flask(__name__)
     flask_app.config["TESTING"] = True
+    flask_app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     limiter = BrokerRateLimiter({"openalgo": {"order": 10.0, "data": 5.0}})
     flask_app.config["BROKER_ROUTER"] = _FakeRouter(limiter)
     flask_app.register_blueprint(gateway_bp)
@@ -132,6 +133,21 @@ def test_put_requires_broker_id(client):
 def test_put_rejects_negative_rate(client):
     resp = client.put("/v1/rate-limits", json={"broker_id": "openalgo", "order": -1})
     assert resp.status_code == 400
+
+
+def test_rejected_workspace_write_leaves_live_rate_limits_unchanged(app, client, tmp_path):
+    from flinttrade_core.workspace import Workspace
+
+    Workspace(tmp_path).initialise()
+    path = tmp_path / "workspace.json"
+    config = json.loads(path.read_text())
+    config["workspace_generation"] = (1 << 63) - 1
+    path.write_text(json.dumps(config))
+    before = path.read_bytes()
+    response = client.put("/v1/rate-limits", json={"broker_id": "openalgo", "order": 3})
+    assert response.status_code == 503
+    assert app.config["_TEST_LIMITER"]._rate("openalgo", "order") == 10.0
+    assert path.read_bytes() == before
 
 
 def test_put_requires_at_least_one_field(client):

@@ -218,7 +218,7 @@ class TestBrokerInfo:
 
 class TestBrokerAccountInfo:
     def test_default_status_is_disconnected(self) -> None:
-        account = BrokerAccountInfo(
+        account = BrokerAccountInfo(adapter_id="openalgo",
             account_id="AB1234",
             broker="zerodha",
             label="My Zerodha",
@@ -226,7 +226,7 @@ class TestBrokerAccountInfo:
         assert account.status == AccountStatus.disconnected
 
     def test_default_connected_at_none(self) -> None:
-        account = BrokerAccountInfo(
+        account = BrokerAccountInfo(adapter_id="openalgo",
             account_id="AB1234",
             broker="zerodha",
             label="My Zerodha",
@@ -234,7 +234,7 @@ class TestBrokerAccountInfo:
         assert account.connected_at is None
 
     def test_default_error_message_none(self) -> None:
-        account = BrokerAccountInfo(
+        account = BrokerAccountInfo(adapter_id="openalgo",
             account_id="AB1234",
             broker="zerodha",
             label="My Zerodha",
@@ -242,7 +242,7 @@ class TestBrokerAccountInfo:
         assert account.error_message is None
 
     def test_default_is_primary_false(self) -> None:
-        account = BrokerAccountInfo(
+        account = BrokerAccountInfo(adapter_id="openalgo",
             account_id="AB1234",
             broker="zerodha",
             label="My Zerodha",
@@ -251,7 +251,7 @@ class TestBrokerAccountInfo:
 
     def test_connected_state(self) -> None:
         now = datetime.now(tz=timezone.utc)
-        account = BrokerAccountInfo(
+        account = BrokerAccountInfo(adapter_id="openalgo",
             account_id="AB1234",
             broker="zerodha",
             label="Primary",
@@ -264,7 +264,7 @@ class TestBrokerAccountInfo:
         assert account.is_primary is True
 
     def test_error_state(self) -> None:
-        account = BrokerAccountInfo(
+        account = BrokerAccountInfo(adapter_id="openalgo",
             account_id="AB1234",
             broker="zerodha",
             label="Primary",
@@ -275,7 +275,7 @@ class TestBrokerAccountInfo:
         assert account.error_message == "TOTP mismatch"
 
     def test_token_expired_state(self) -> None:
-        account = BrokerAccountInfo(
+        account = BrokerAccountInfo(adapter_id="openalgo",
             account_id="AB1234",
             broker="zerodha",
             label="Primary",
@@ -285,7 +285,7 @@ class TestBrokerAccountInfo:
 
     def test_serialization_round_trip(self) -> None:
         now = datetime.now(tz=timezone.utc)
-        account = BrokerAccountInfo(
+        account = BrokerAccountInfo(adapter_id="openalgo",
             account_id="AB1234",
             broker="zerodha",
             label="Primary",
@@ -298,7 +298,7 @@ class TestBrokerAccountInfo:
         assert restored == account
 
     def test_json_round_trip(self) -> None:
-        account = BrokerAccountInfo(
+        account = BrokerAccountInfo(adapter_id="openalgo",
             account_id="AB1234",
             broker="zerodha",
             label="Primary",
@@ -309,8 +309,8 @@ class TestBrokerAccountInfo:
 
     def test_multiple_accounts_different_brokers(self) -> None:
         accounts = [
-            BrokerAccountInfo(account_id="Z1", broker="zerodha", label="Zerodha Main"),
-            BrokerAccountInfo(account_id="A1", broker="angel", label="Angel Secondary"),
+            BrokerAccountInfo(adapter_id="openalgo", account_id="Z1", broker="zerodha", label="Zerodha Main"),
+            BrokerAccountInfo(adapter_id="openalgo", account_id="A1", broker="angel", label="Angel Secondary"),
         ]
         assert accounts[0].broker == "zerodha"
         assert accounts[1].broker == "angel"

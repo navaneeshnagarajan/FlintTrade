@@ -93,6 +93,237 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+@pytest.mark.unit
+def test_installation_lineage_is_retained_normally_and_purged_last(tmp_path: Path) -> None:
+    installation_state = tmp_path / ".flinttrade-installation"
+    installation_state.mkdir()
+    (installation_state / "installation_id").write_text("test-lineage", encoding="utf-8")
+
+    ordinary = _run(tmp_path, "--dry-run", os_name="Linux")
+    assert ordinary.returncode == 0, ordinary.stdout + ordinary.stderr
+    assert str(installation_state) in ordinary.stdout
+    assert installation_state.exists()
+
+    purge = _run(tmp_path, "--purge", "--yes", "--dry-run", os_name="Linux")
+    assert purge.returncode == 0, purge.stdout + purge.stderr
+    assert f"would DELETE FlintTrade data at {installation_state}" in purge.stdout
+
+    unix = SH.read_text(encoding="utf-8")
+    collect = unix[unix.index("collect_data_targets()") : unix.index("web_receipt_names_source()")]
+    assert collect.rindex('add_data_target "$INSTALLATION_STATE_ROOT"') > collect.rindex(
+        'for candidate in "$@"; do add_data_target "$candidate"; done'
+    )
+    windows = PS1.read_text(encoding="utf-8")
+    candidates = windows[windows.index("$candidates = @(") : windows.index("$seen = @{}")]
+    assert candidates.rindex("$InstallationStateRoot") > candidates.rindex("$ManagedRoot")
+
+    removed = _run(tmp_path, "--purge", "--yes", os_name="Linux")
+    assert removed.returncode == 0, removed.stdout + removed.stderr
+    assert not installation_state.exists()
+
+
+@pytest.mark.unit
+def test_darwin_default_installation_lineage_is_listed_and_retained_on_dry_run(tmp_path: Path) -> None:
+    installation_state = tmp_path / "Library" / "Application Support" / "flinttrade-installation"
+    installation_state.mkdir(parents=True)
+    (installation_state / "installation_id").write_text("test-lineage", encoding="utf-8")
+
+    result = _run(tmp_path, "--purge", "--yes", "--dry-run", os_name="Darwin")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"would DELETE FlintTrade data at {installation_state}" in result.stdout
+    assert installation_state.exists()
+
+
+@pytest.mark.unit
+def test_uninstall_never_treats_installation_state_env_as_purge_authority(tmp_path: Path) -> None:
+    arbitrary = tmp_path / "unrelated-owner-directory"
+    arbitrary.mkdir()
+    (arbitrary / "keep.txt").write_text("keep", encoding="utf-8")
+
+    result = _run(
+        tmp_path,
+        "--purge",
+        "--yes",
+        os_name="Linux",
+        extra_env={"FLINTTRADE_INSTALLATION_STATE_DIR": str(arbitrary)},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert arbitrary.exists()
+    assert (arbitrary / "keep.txt").read_text(encoding="utf-8") == "keep"
+    assert str(arbitrary) not in result.stdout
+
+
+@pytest.mark.unit
+def test_failed_prior_data_removal_retains_installation_lineage(tmp_path: Path) -> None:
+    workspace = tmp_path / ".flinttrade"
+    workspace.mkdir()
+    (workspace / "keep.db").write_text("state", encoding="utf-8")
+    installation_state = tmp_path / ".flinttrade-installation"
+    installation_state.mkdir()
+    (installation_state / "installation_id").write_text("lineage", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    failing_rm = bin_dir / "rm"
+    failing_rm.write_text(
+        "#!/bin/sh\n"
+        "last=''\n"
+        "for arg in \"$@\"; do last=$arg; done\n"
+        f"[ \"$last\" = {str(workspace)!r} ] && exit 1\n"
+        "exec /bin/rm \"$@\"\n",
+        encoding="utf-8",
+    )
+    failing_rm.chmod(0o755)
+
+    result = _run(tmp_path, "--purge", "--yes", os_name="Linux")
+
+    assert result.returncode != 0
+    assert workspace.exists()
+    assert installation_state.exists()
+    assert "Keeping installation lineage" in result.stdout
+
+
+@pytest.mark.unit
+def test_home_symlink_alias_still_identifies_lineage_after_prior_failure(tmp_path: Path) -> None:
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    alias_home = tmp_path / "home-alias"
+    alias_home.symlink_to(real_home, target_is_directory=True)
+    workspace = real_home / ".flinttrade"
+    workspace.mkdir()
+    (workspace / "keep.db").write_text("state", encoding="utf-8")
+    installation_state = real_home / ".flinttrade-installation"
+    installation_state.mkdir()
+    (installation_state / "installation_id").write_text("lineage", encoding="utf-8")
+    bin_dir = real_home / "bin"
+    bin_dir.mkdir()
+    fake_rm = bin_dir / "rm"
+    fake_rm.write_text(
+        "#!/bin/sh\n"
+        "last=''\n"
+        "for arg in \"$@\"; do last=$arg; done\n"
+        f"[ \"$last\" = {str(workspace)!r} ] && exit 1\n"
+        "exec /bin/rm \"$@\"\n",
+        encoding="utf-8",
+    )
+    fake_rm.chmod(0o755)
+
+    result = _run(alias_home, "--purge", "--yes", os_name="Linux")
+
+    assert result.returncode != 0
+    assert workspace.exists()
+    assert installation_state.exists()
+    assert "Keeping installation lineage" in result.stdout
+
+
+@pytest.mark.unit
+def test_successful_noop_data_removal_retains_installation_lineage(tmp_path: Path) -> None:
+    workspace = tmp_path / ".flinttrade"
+    workspace.mkdir()
+    (workspace / "keep.db").write_text("state", encoding="utf-8")
+    installation_state = tmp_path / ".flinttrade-installation"
+    installation_state.mkdir()
+    (installation_state / "installation_id").write_text("lineage", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_rm = bin_dir / "rm"
+    fake_rm.write_text(
+        "#!/bin/sh\n"
+        "last=''\n"
+        "for arg in \"$@\"; do last=$arg; done\n"
+        f"[ \"$last\" = {str(workspace)!r} ] && exit 0\n"
+        "exec /bin/rm \"$@\"\n",
+        encoding="utf-8",
+    )
+    fake_rm.chmod(0o755)
+
+    result = _run(tmp_path, "--purge", "--yes", os_name="Linux")
+
+    assert result.returncode != 0
+    assert workspace.exists()
+    assert installation_state.exists()
+    assert "Could not verify removal" in result.stdout
+
+
+@pytest.mark.unit
+def test_recreated_earlier_data_before_lineage_removal_is_detected(tmp_path: Path) -> None:
+    workspace = tmp_path / ".flinttrade"
+    workspace.mkdir()
+    (workspace / "state.db").write_text("state", encoding="utf-8")
+    profile = tmp_path / ".config" / "flinttrade-shell"
+    profile.mkdir(parents=True)
+    (profile / "profile").write_text("profile", encoding="utf-8")
+    installation_state = tmp_path / ".flinttrade-installation"
+    installation_state.mkdir()
+    (installation_state / "installation_id").write_text("lineage", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_rm = bin_dir / "rm"
+    fake_rm.write_text(
+        "#!/bin/sh\n"
+        "last=''\n"
+        "for arg in \"$@\"; do last=$arg; done\n"
+        f"if [ \"$last\" = {str(profile)!r} ]; then\n"
+        "  /bin/rm \"$@\"\n"
+        f"  /bin/mkdir -p {str(workspace)!r}\n"
+        f"  printf recreated > {str(workspace / 'state.db')!r}\n"
+        "  exit 0\n"
+        "fi\n"
+        "exec /bin/rm \"$@\"\n",
+        encoding="utf-8",
+    )
+    fake_rm.chmod(0o755)
+
+    result = _run(tmp_path, "--purge", "--yes", os_name="Linux")
+
+    assert result.returncode != 0
+    assert workspace.exists()
+    assert installation_state.exists()
+    assert "earlier data still exists" in result.stdout
+
+
+@pytest.mark.unit
+def test_custom_workspace_ancestor_cannot_delete_installation_lineage(tmp_path: Path) -> None:
+    ancestor = tmp_path / "Library" / "Application Support"
+    ancestor.mkdir(parents=True)
+    (ancestor / "workspace.json").write_text("{}", encoding="utf-8")
+    (ancestor / "credentials.db").write_text("state", encoding="utf-8")
+    installation_state = ancestor / "flinttrade-installation"
+    installation_state.mkdir()
+    (installation_state / "installation_id").write_text("lineage", encoding="utf-8")
+
+    result = _run(
+        tmp_path,
+        "--purge",
+        "--yes",
+        os_name="Darwin",
+        extra_env={"FLINTTRADE_WORKSPACE_DIR": str(ancestor)},
+    )
+
+    assert result.returncode != 0
+    assert installation_state.exists()
+    assert "overlaps installation lineage" in result.stdout
+
+
+@pytest.mark.unit
+def test_windows_lineage_removal_is_default_only_last_and_failure_gated() -> None:
+    text = PS1.read_text(encoding="utf-8")
+
+    assert "$InstallationStateRoot = $DefaultInstallationState" in text
+    assert "$env:FLINTTRADE_INSTALLATION_STATE_DIR" not in text
+    purge_loop = text[text.index("foreach ($target in $purgeTargets)") : text.index("if (-not $script:FailedAny)")]
+    gate = purge_loop.index("$script:FailedAny")
+    removal = purge_loop.index("Remove-IfExists $target")
+    assert gate < removal
+    assert "Test-PathsOverlap $candidate $InstallationStateRoot" in text
+    assert "$script:LineageOverlapFound" in text
+    assert "function Test-PurgeTargetPresent" in text
+    assert "function Test-EarlierPurgeTargetsAbsent" in text
+    assert "Test-SameResolvedPath $target $InstallationStateRoot" in text
+    assert "Test-PurgeTargetPresent $target" in purge_loop
+
+
 def _write_receipt(
     home: Path,
     *,
@@ -1259,7 +1490,8 @@ def test_windows_uninstaller_tracks_electron_builder_and_retention_contract() ->
     ordinary_start = text.index("} elseif ($dataTargets)", purge_start)
     purge_branch = text[purge_start:ordinary_start]
     assert "$purgeTargets = @($dataTargets | Where-Object { Test-SafePurgeTarget $_ })" in purge_branch
-    assert "$purgeTargets | ForEach-Object { Say \"  $_\"; Remove-IfExists $_ }" in purge_branch
+    assert "foreach ($target in $purgeTargets)" in purge_branch
+    assert "Remove-IfExists $target" in purge_branch
     assert "$script:PurgeCompleted = $true" in purge_branch
     assert "$script:PurgedDataAny = $true" in purge_branch
     assert "$dataTargets | Where-Object { Test-SafePurgeTarget $_ }" not in text[:purge_start]

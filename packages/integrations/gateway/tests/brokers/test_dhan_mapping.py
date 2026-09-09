@@ -12,6 +12,7 @@ import struct
 
 import pytest
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.models import Order
 from flinttrade_gateway.adapter import BROKER_CATALOG
 from flinttrade_gateway.brokers import dhan_mapping as m
@@ -111,7 +112,7 @@ def test_dhan_cds_position_preserves_contract_accounting_fields() -> None:
     assert position["instrument_id"] == "42"
     assert position["accounting_complete"] is True
     assert position["cross_currency"] is False
-    assert position["previous_close_trusted"] is False
+    assert "previous_close_trusted" not in position
 
 
 def test_dhan_option_position_preserves_contract_identity_for_portfolio_greeks() -> None:
@@ -164,8 +165,8 @@ def test_dhan_order_preserves_pending_option_contract_identity() -> None:
 
 def test_order_mappers_preserve_unknown_filled_quantity() -> None:
     assert "filled_quantity" not in m.from_dhan_order({})
-    assert m.from_dhan_forever_order({})["filled_quantity"] == ""
-    assert m.from_dhan_super_order({})["filled_quantity"] == ""
+    assert "filled_quantity" not in m.from_dhan_forever_order({})
+    assert "filled_quantity" not in m.from_dhan_super_order({})
 
 
 def test_from_dhan_order_preserves_disclosed_quantity_alias() -> None:
@@ -180,6 +181,7 @@ def test_dhan_holding_has_delivery_ledger_identity() -> None:
             "exchange": "NSE",
             "tradingSymbol": "TCS",
             "securityId": "11536",
+            "productType": "CNC",
             "totalQty": 5,
             "dpQty": 4,
             "t1Qty": 1,
@@ -194,8 +196,139 @@ def test_dhan_holding_has_delivery_ledger_identity() -> None:
     assert holding["accounting_complete"] is True
 
 
+def test_dhan_portfolio_rows_omit_absent_optional_evidence() -> None:
+    position = m.from_dhan_position({
+        "tradingSymbol": "TCS",
+        "securityId": "11536",
+        "exchangeSegment": "NSE_EQ",
+        "productType": "CNC",
+        "netQty": 0,
+    })
+    holding = m.from_dhan_holding({
+        "tradingSymbol": "TCS",
+        "securityId": "11536",
+        "exchange": "NSE",
+        "totalQty": 0,
+    })
+
+    assert position["quantity"] == "0"
+    assert holding["quantity"] == "0"
+    assert "strike_price" not in position
+    for field in (
+        "average_price",
+        "ltp",
+        "pnl",
+        "buy_quantity",
+        "sell_quantity",
+        "buy_avg",
+        "sell_avg",
+        "previous_close_trusted",
+        "overnight_quantity",
+        "day_buy_quantity",
+        "day_sell_quantity",
+        "carry_forward_buy_quantity",
+        "carry_forward_sell_quantity",
+        "accounting_complete",
+    ):
+        assert field not in position
+    for field in (
+        "average_price",
+        "ltp",
+        "pnl",
+        "settled_quantity",
+        "t1_quantity",
+        "previous_close_trusted",
+        "accounting_complete",
+    ):
+        assert field not in holding
+
+
+def test_dhan_trade_required_numeric_aliases_are_presence_first() -> None:
+    base = {
+        "orderId": "OID-1",
+        "tradingSymbol": "TCS",
+        "securityId": "11536",
+        "exchangeSegment": "NSE_EQ",
+        "transactionType": "BUY",
+        "productType": "CNC",
+        "exchangeTime": "2026-09-07T09:20:00+05:30",
+        "tradedPrice": 0,
+    }
+    with pytest.raises(BrokerReadResponseInvalid):
+        m.from_dhan_trade(base)
+    with pytest.raises(BrokerReadResponseInvalid):
+        m.from_dhan_trade({**base, "tradedQuantity": "invalid", "quantity": 1})
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("orderId", 123),
+        ("securityId", object()),
+        ("exchangeTime", 123),
+        ("crossCurrency", "false"),
+    ],
+)
+def test_dhan_trade_rejects_coerced_true_text_and_optional_values(field: str, value: object) -> None:
+    row = {
+        "orderId": "OID-1",
+        "tradingSymbol": "TCS",
+        "securityId": "11536",
+        "exchangeSegment": "NSE_EQ",
+        "transactionType": "BUY",
+        "productType": "CNC",
+        "exchangeTime": "2026-09-07T09:20:00+05:30",
+        "tradedQuantity": 1,
+        "tradedPrice": 3500,
+    }
+    row[field] = value
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        m.from_dhan_trade(row)
+
+
+@pytest.mark.parametrize(
+    ("mapper", "row", "field"),
+    [
+        (m.from_dhan_forever_order, {
+            "orderId": "F-1", "orderStatus": "PENDING", "orderFlag": "SINGLE",
+            "tradingSymbol": "TCS", "securityId": "101", "exchangeSegment": "NSE_EQ",
+            "transactionType": "BUY", "orderType": "LIMIT", "productType": "CNC",
+            "quantity": 1,
+        }, "orderId"),
+        (m.from_dhan_forever_order, {
+            "orderId": "F-1", "orderStatus": "PENDING", "orderFlag": "SINGLE",
+            "tradingSymbol": "TCS", "securityId": "101", "exchangeSegment": "NSE_EQ",
+            "transactionType": "BUY", "orderType": "LIMIT", "productType": "CNC",
+            "quantity": 1,
+        }, "createTime"),
+        (m.from_dhan_super_order, {
+            "orderId": "S-1", "orderStatus": "PENDING", "tradingSymbol": "TCS",
+            "securityId": "101", "exchangeSegment": "NSE_EQ", "transactionType": "BUY",
+            "orderType": "LIMIT", "productType": "CNC", "quantity": 1,
+        }, "securityId"),
+    ],
+)
+def test_dhan_forever_and_super_reject_coerced_true_text(mapper, row: dict[str, object], field: str) -> None:
+    row[field] = 123
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        mapper(row)
+
+
+def test_dhan_super_rejects_coerced_nested_leg_identity() -> None:
+    with pytest.raises(BrokerReadResponseInvalid):
+        m.from_dhan_super_order({
+            "orderId": "S-1",
+            "legDetails": [
+                {"legName": "TARGET_LEG", "orderStatus": "PENDING", "orderId": 123},
+                {"legName": "STOP_LOSS_LEG", "orderStatus": "PENDING"},
+            ],
+        })
+
+
 def test_dhan_rejects_inconsistent_complete_portfolio_accounting() -> None:
-    with pytest.raises(m.DhanMappingError, match="position accounting is inconsistent"):
+    with pytest.raises(BrokerReadResponseInvalid):
         m.from_dhan_position({
             "tradingSymbol": "TCS",
             "exchangeSegment": "NSE_EQ",
@@ -207,7 +340,7 @@ def test_dhan_rejects_inconsistent_complete_portfolio_accounting() -> None:
             "daySellQty": 0,
         })
 
-    with pytest.raises(m.DhanMappingError, match="holding accounting is inconsistent"):
+    with pytest.raises(BrokerReadResponseInvalid):
         m.from_dhan_holding({
             "tradingSymbol": "TCS",
             "exchange": "NSE",
@@ -389,7 +522,7 @@ def test_from_dhan_super_order_includes_legs() -> None:
             "trailingJump": 5,
             "filledQty": 0,
             "averageTradedPrice": 0,
-            "legDetails": [{"orderId": "5925022734213", "legName": "STOP_LOSS_LEG"}, "junk"],
+            "legDetails": [{"orderId": "5925022734213", "legName": "STOP_LOSS_LEG"}],
         }
     )
     assert rec["orderid"] == "5925022734212" and rec["exchange"] == "NSE" and rec["product"] == "MIS"
@@ -403,7 +536,6 @@ def test_from_dhan_super_order_includes_legs() -> None:
     [
         None,
         [],
-        "malformed",
         [{"legName": "TARGET_LEG"}],
         [{"orderStatus": "TRADED"}],
         [{"legName": "TARGET_LEG", "orderStatus": "TRADED"}],
@@ -419,6 +551,44 @@ def test_from_dhan_super_order_marks_missing_or_malformed_legs_untrusted(leg_det
     )
 
     assert rec["leg_details_valid"] is False
+
+
+@pytest.mark.parametrize("leg_details", ["malformed", [{"legName": "TARGET_LEG"}, "junk"]])
+def test_from_dhan_super_order_rejects_malformed_leg_shapes(leg_details) -> None:
+    with pytest.raises(BrokerReadResponseInvalid):
+        m.from_dhan_super_order({
+            "orderId": "SUPER-1",
+            "orderStatus": "TRADED",
+            "legDetails": leg_details,
+        })
+
+
+def test_dhan_advanced_orders_omit_absent_optional_numerics() -> None:
+    forever = m.from_dhan_forever_order({"orderId": "GTT-1", "orderStatus": "CANCELLED"})
+    super_order = m.from_dhan_super_order({"orderId": "SUPER-1", "orderStatus": "CANCELLED"})
+
+    for field in (
+        "quantity",
+        "filled_quantity",
+        "price",
+        "trigger_price",
+        "disclosed_quantity",
+        "quantity1",
+        "price1",
+        "trigger_price1",
+        "oco_leg_complete",
+    ):
+        assert field not in forever
+    for field in (
+        "quantity",
+        "filled_quantity",
+        "price",
+        "target_price",
+        "stop_loss_price",
+        "trailing_jump",
+        "average_price",
+    ):
+        assert field not in super_order
 
 
 def test_from_dhan_super_order_marks_complete_leg_statuses_trusted() -> None:
@@ -564,12 +734,26 @@ def test_extract_alert_id_and_normalise() -> None:
             "triggeredTime": None,
             "lastPrice": 245.5,
             "condition": _CONDITION,
-            "orders": [{"transactionType": "BUY"}, "junk"],
+            "orders": [{"transactionType": "BUY"}],
         }
     )
     assert rec["alert_id"] == "12345" and rec["status"] == "ACTIVE"
     assert rec["triggered_at"] == "" and rec["condition"]["operator"] == "CROSSING_UP"
     assert rec["orders"] == [{"transactionType": "BUY"}]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"alertId": "12345", "alertStatus": "CANCELLED", "orders": [{"transactionType": "BUY"}, "junk"]},
+        {"alertId": 12345, "alertStatus": "CANCELLED", "orders": []},
+        {"alertId": "12345", "alertStatus": 1, "orders": []},
+        {"alertId": "12345", "alertStatus": "CANCELLED", "orders": [{"securityId": 11536}]},
+    ],
+)
+def test_conditional_trigger_rejects_malformed_rows_and_true_text(payload: dict[str, object]) -> None:
+    with pytest.raises(BrokerReadResponseInvalid):
+        m.from_dhan_conditional_trigger(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -932,7 +1116,7 @@ def test_compact_scrip_identity_normalises_expiry_and_prefers_trading_symbol_und
     ],
 )
 def test_option_chain_mapping_rejects_malformed_containers_and_numerics(payload) -> None:
-    with pytest.raises(m.DhanMappingError, match="Dhan option chain"):
+    with pytest.raises(BrokerReadResponseInvalid):
         m.to_option_chain_dict("NIFTY", "NSE_INDEX", payload)
 
 
