@@ -43,7 +43,8 @@ native broker gateway that is **not usable on this unreleased line**. Native
 adapters remain catalogued and evidence-gated (Dhan and Upstox are marked
 connectable; others stay disabled), but native HTTP mutations return `503`
 until Task 9D and native HTTP reads return `409` until Task 7C.2. Use OpenAlgo
-for a working broker session. Setup → Brokers will fail rather than connect.
+for a working broker session. Setup → Brokers and Settings → Brokers will
+fail rather than connect.
 See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current matrix.
 
 ## Supported versions
@@ -235,7 +236,7 @@ update, install and uninstall contracts.
 > OpenAlgo Bridge or Settings → Broker Gateway when you want a live broker
 > session. FlintTrade's sandbox and backend do not require OpenAlgo.
 > Native broker HTTP is frozen until Task 9D and Task 7C.2 — Setup → Brokers
-> will fail rather than start a native session.
+> and Settings → Brokers will fail rather than start a native session.
 
 ### Run from source (contributors)
 

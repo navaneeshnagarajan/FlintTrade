@@ -88,11 +88,12 @@ promoted native connect or live order proof yet. `uv run python scripts/sync_bro
 source mirrors and PyPI artifacts under the gitignored `.local/sdk-audit/` cache
 and fails if a locked SDK is behind upstream metadata; `uv.lock` and
 `brokers.lock` remain the only tracked install/attestation sources.
-Credential capture, OAuth start/callback, and session refresh remain
-implemented behind the frozen HTTP surface; they are not a live operator
-path until Task 9D and Task 7C.2 land. Closed-market/no-funds verification
-does not prove funded order execution; keep order-placement claims scoped
-to the evidence collected.
+In-app credential capture and OAuth start/callback remain implemented
+behind the frozen HTTP surface (`503` until Task 9D). They are not a
+live operator path. Setup → Brokers and Settings → Brokers will fail
+rather than connect or refresh a native session. Closed-market/no-funds
+verification does not prove funded order execution; keep
+order-placement claims scoped to the evidence collected.
 
 For the OpenAlgo path, whatever broker version OpenAlgo supports is the
 compatibility boundary. The broker list lives in [`flint.toml`](../flint.toml)
