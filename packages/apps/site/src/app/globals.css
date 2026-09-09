@@ -383,10 +383,12 @@ kbd {
 }
 
 .main-nav a {
+  flex-shrink: 0;
   border-radius: 999px;
   padding: 8px 13px;
   color: var(--site-muted);
   font-size: 14px;
+  white-space: nowrap;
   transition: background 160ms ease, color 160ms ease;
 }
 
@@ -1244,7 +1246,10 @@ kbd {
     grid-column: 1 / -1;
     grid-row: 2;
     justify-self: stretch;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    justify-content: center;
+    overflow: visible;
+    border-radius: 16px;
   }
 
   .header-tools {
