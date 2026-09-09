@@ -38,6 +38,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .request_observability import SafeRequestSummary
 from .workspace import workspace_dir
 
 logger = logging.getLogger("flinttrade.core.api_analyzer")
@@ -190,6 +191,8 @@ class APIAnalyzer:
         response_body: dict[str, Any] | None,
         duration_ms: float,
         user_id: str | None = None,
+        *,
+        safe_request: SafeRequestSummary | None = None,
     ) -> str:
         """Persist a single API call record.
 
@@ -209,6 +212,15 @@ class APIAnalyzer:
         """
         call_id = secrets.token_hex(8)
         timestamp = datetime.now(IST)
+
+        if safe_request is not None:
+            if type(safe_request) is not SafeRequestSummary:
+                raise TypeError("safe_request must be an exact SafeRequestSummary")
+            route = safe_request.route_template
+            method = safe_request.method
+            request_body = safe_request.to_dict()
+            response_body = None
+            user_id = None
 
         req_json = (
             json.dumps(_sanitise(request_body), default=str)

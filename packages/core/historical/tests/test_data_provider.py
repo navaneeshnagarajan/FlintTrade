@@ -342,6 +342,27 @@ class TestProviderRegistry:
         assert result.provider == "mock"
         mock_provider.fetch.assert_called_once()
 
+    def test_fetch_validates_interval_without_rewriting_provider_input(self):
+        from flinttrade_historical.data_provider import ProviderBar, ProviderRegistry, ProviderResult
+
+        provider = MagicMock()
+        provider.name = "fixture"
+        provider.supports.return_value = True
+        provider.fetch.return_value = ProviderResult(
+            symbol="RELIANCE",
+            exchange="NSE",
+            interval="D",
+            provider="fixture",
+            bars=[ProviderBar(timestamp="2026-03-16", close=100)],
+        )
+        registry = ProviderRegistry(extra_providers=[provider])
+        registry._providers = [provider]
+
+        result = registry.fetch("RELIANCE", "NSE", "1d", "2026-03-01", "2026-03-16")
+
+        assert result.success
+        provider.fetch.assert_called_once_with("RELIANCE", "NSE", "1d", "2026-03-01", "2026-03-16")
+
     def test_fallback_to_next_provider_on_failure(self):
         from flinttrade_historical.data_provider import ProviderRegistry, ProviderBar, ProviderResult
 

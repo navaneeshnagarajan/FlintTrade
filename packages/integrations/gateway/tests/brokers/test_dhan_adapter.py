@@ -21,6 +21,7 @@ from typing import Any, AsyncIterator
 
 import pytest
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.exceptions import BrokerError
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
@@ -92,7 +93,6 @@ class MockDhan:
                     "price": 1428,
                     "triggerPrice": 1427,
                 },
-                "junk",
             ],
         }
 
@@ -359,8 +359,22 @@ async def test_forever_modify_cancel_and_list() -> None:
     await adapter.cancel_forever(session, "GTT1", _router_token=_ROUTER_TOKEN)
     assert mock.calls[1] == ("cancel_forever", "GTT1")
     rows = await adapter.forever_orders(session)
-    assert len(rows) == 1  # the junk row is dropped
+    assert len(rows) == 1
     assert rows[0]["orderid"] == "GTT1" and rows[0]["exchange"] == "NSE" and rows[0]["product"] == "CNC"
+
+
+async def test_forever_orders_rejects_malformed_rows_instead_of_filtering() -> None:
+    class MalformedForeverDhan(MockDhan):
+        def get_forever(self):
+            response = super().get_forever()
+            response["data"].append("junk")
+            return response
+
+    adapter = _adapter(MalformedForeverDhan())
+    session = await _session(adapter)
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        await adapter.forever_orders(session)
 
 
 # ---------------------------------------------------------------------------
@@ -585,8 +599,16 @@ class SafetyHorizonDhan(MockDhan):
                         },
                     ],
                 },
-                {"alertId": "ALERT-DONE", "alertStatus": "CANCELLED", "orders": ["malformed"]},
-                {"alertId": "ALERT-FIRED", "alertStatus": "TRIGGERED", "orders": ["malformed"]},
+                {
+                    "alertId": "ALERT-DONE",
+                    "alertStatus": "CANCELLED",
+                    "orders": [{"transactionType": "BUY"}],
+                },
+                {
+                    "alertId": "ALERT-FIRED",
+                    "alertStatus": "TRIGGERED",
+                    "orders": [{"transactionType": "BUY"}],
+                },
             ],
         }
 
@@ -718,7 +740,7 @@ class SafetyHorizonDhan(MockDhan):
                         },
                     ],
                 },
-                {"orderId": "SUP-DONE", "orderStatus": "REJECTED", "legDetails": "malformed"},
+                {"orderId": "SUP-DONE", "orderStatus": "REJECTED"},
             ],
         }
 
@@ -778,7 +800,7 @@ async def test_safety_order_book_reads_and_normalises_full_horizon() -> None:
         "ALERT-FIRED": "TRIGGERED",
     }
     assert all(
-        row["filled_quantity"] == ""
+        "filled_quantity" not in row
         for row in rows
         if row["orderid"]
         in {"REG-DONE", "GTT-DONE", "SUP-DONE", "ALERT-DONE", "ALERT-FIRED"}
@@ -798,7 +820,7 @@ async def test_safety_order_book_fails_closed_when_active_fill_quantity_is_missi
     )
     session = await _session(adapter)
 
-    with pytest.raises(DhanMappingError, match="regular filled quantity is invalid"):
+    with pytest.raises(BrokerReadResponseInvalid):
         await adapter.safety_order_book(session)
 
 
@@ -837,7 +859,7 @@ def test_terminal_super_with_complete_legs_preserves_unknown_fills() -> None:
     rows = adapter._super_safety_rows(row)
 
     assert len(rows) == 3
-    assert all(safety_row["filled_quantity"] == "" for safety_row in rows)
+    assert all("filled_quantity" not in safety_row for safety_row in rows)
 
 
 async def test_regular_super_overlap_preserves_terminal_unknown_and_active_exposure() -> None:
@@ -910,7 +932,7 @@ async def test_regular_super_overlap_preserves_terminal_unknown_and_active_expos
 
     parent = next(row for row in rows if row["orderid"] == "SUP-DONE")
     assert parent["order_family"] == "super"
-    assert parent["filled_quantity"] == ""
+    assert "filled_quantity" not in parent
 
     class ActiveRegularOverlapDhan(TerminalOverlapDhan):
         def get_order_list(self):
@@ -962,7 +984,7 @@ async def test_safety_order_book_fails_closed_on_incomplete_active_super_leg() -
     )
     session = await _session(adapter)
 
-    with pytest.raises(DhanMappingError, match="super quantity is invalid"):
+    with pytest.raises(BrokerReadResponseInvalid):
         await adapter.safety_order_book(session)
 
 
@@ -973,7 +995,7 @@ async def test_safety_order_book_fails_closed_on_incomplete_active_conditional_l
     adapter = _adapter(mock, security_resolver=build_security_resolver(_SAFETY_SCRIP_ROWS))
     session = await _session(adapter)
 
-    with pytest.raises(DhanMappingError, match="conditional quantity is invalid"):
+    with pytest.raises(BrokerReadResponseInvalid):
         await adapter.safety_order_book(session)
 
 

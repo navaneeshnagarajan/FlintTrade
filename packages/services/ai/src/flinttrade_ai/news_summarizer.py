@@ -16,7 +16,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .llm_client import LLMClient, LLMMessage
-from .sentiment import DEFAULT_FEEDS, parse_feed
+from .sentiment import parse_feed
+from .service_profiles import DEFAULT_FEEDS
 
 logger = logging.getLogger("flinttrade.ai.news_summarizer")
 

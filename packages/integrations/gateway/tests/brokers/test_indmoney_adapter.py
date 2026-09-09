@@ -60,7 +60,13 @@ class FakeTransport:
         self.calls.append(
             {"method": method, "path": path, "headers": headers, "params": params, "json": json_body}
         )
-        key = (method, path)
+        scoped_key = (
+            method,
+            path,
+            str((params or {}).get("segment")),
+            str((params or {}).get("product")),
+        )
+        key = scoped_key if scoped_key in self.responses else (method, path)
         if key in self.responses:
             value = self.responses[key]
             return value if isinstance(value, tuple) else (200, value)
@@ -325,10 +331,13 @@ async def test_unsupported_variety_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_unresolvable_symbol_raises() -> None:
-    adapter = IndMoneyAdapter(http_factory=lambda: FakeTransport())  # no resolver
+    transport = FakeTransport()
+    adapter = IndMoneyAdapter(http_factory=lambda: transport)  # no resolver
     session = await _session(adapter)
-    with pytest.raises(BrokerError, match="security_id"):
+    with pytest.raises(BrokerError, match="security_id") as exc_info:
         await adapter.place_order(session, _order(symbol="OBSCURE"), _router_token=_ROUTER_TOKEN)
+    assert type(exc_info.value) is BrokerError
+    assert transport.paths() == ["/market/instruments"]
 
 
 @pytest.mark.asyncio
@@ -574,29 +583,87 @@ async def test_trade_book_aggregates_both_segments() -> None:
     assert segments == ["EQUITY", "DERIVATIVE"]
 
 
+def _scoped_position_responses(rows: list[dict]) -> dict[tuple[str, ...], dict]:
+    responses: dict[tuple[str, ...], dict] = {}
+    for segment, product in _EMERGENCY_SCOPES:
+        exchange_segment = "NSE_FNO" if segment == "derivative" else "NSE_EQ"
+        responses[("GET", "/portfolio/positions", segment, product)] = {
+            "status": "success",
+            "data": {
+                "net_positions": [{**row, "exchange_segment": exchange_segment} for row in rows],
+                "day_positions": [],
+            },
+        }
+    return responses
+
+
 @pytest.mark.asyncio
 async def test_positions_aggregates_combos_and_dedupes() -> None:
     pos = {
-        "security_id": "67890", "trading_symbol": "NIFTY25MAYFUT", "exchange_segment": "NSE_FNO",
+        "security_id": "67890", "trading_symbol": "NIFTY25MAYFUT",
         "net_quantity": 100, "average_price": 18500.0, "last_traded_price": 18550.5,
         "pnl_absolute": 5050.0,
     }
-    transport = FakeTransport({
-        ("GET", "/portfolio/positions"): {"status": "success",
-                                          "data": {"net_positions": [pos], "day_positions": []}},
-    })
+    transport = FakeTransport(_scoped_position_responses([pos]))
     adapter = _adapter(transport)
     session = await _session(adapter)
     positions = await adapter.positions(session)
-    # The same symbol surfaces under four combos but with distinct products
-    # (NRML/MIS/CNC/MIS) — the (symbol, product) dedupe keeps three.
+    # Route-scoped exchange plus product identity keeps every distinct row.
     assert len(transport.calls) == 4
-    assert {(p["symbol"], p["product"]) for p in positions} == {
-        ("NIFTY25MAYFUT", "NRML"), ("NIFTY25MAYFUT", "MIS"), ("NIFTY25MAYFUT", "CNC"),
+    assert {(p["symbol"], p["exchange"], p["product"]) for p in positions} == {
+        ("NIFTY25MAYFUT", "NFO", "NRML"),
+        ("NIFTY25MAYFUT", "NFO", "MIS"),
+        ("NIFTY25MAYFUT", "NSE", "CNC"),
+        ("NIFTY25MAYFUT", "NSE", "MIS"),
     }
     combos = [(c["params"]["segment"], c["params"]["product"]) for c in transport.calls]
     assert combos == [("derivative", "margin"), ("derivative", "intraday"),
                       ("equity", "cnc"), ("equity", "intraday")]
+
+
+@pytest.mark.asyncio
+async def test_positions_dedupe_uses_exact_instrument_exchange_product_identity() -> None:
+    positions = [
+        {
+            "security_id": security_id,
+            "trading_symbol": "SHARED-SYMBOL",
+            "net_quantity": 1,
+        }
+        for security_id in ("101", "202")
+    ]
+    positions.extend([
+        {
+            "trading_symbol": symbol,
+            "net_quantity": 1,
+        }
+        for symbol in ("NO-ID-A", "NO-ID-B")
+    ])
+    transport = FakeTransport(_scoped_position_responses(positions))
+    adapter = _adapter(transport)
+    session = await _session(adapter)
+
+    result = await adapter.positions(session)
+
+    assert len(transport.calls) == 4
+    assert len(result) == 16
+    assert {
+        (row["symbol"], row.get("instrument_id", ""), row["exchange"], row["product"])
+        for row in result
+    } == {
+        ("SHARED-SYMBOL", security_id, exchange, product)
+        for security_id in ("101", "202")
+        for exchange, product in (("NFO", "NRML"), ("NFO", "MIS"), ("NSE", "CNC"), ("NSE", "MIS"))
+    } | {
+        (symbol, "", exchange, product)
+        for symbol in ("NO-ID-A", "NO-ID-B")
+        for exchange, product in (("NFO", "NRML"), ("NFO", "MIS"), ("NSE", "CNC"), ("NSE", "MIS"))
+    }
+    assert [call["params"] for call in transport.calls] == [
+        {"segment": "derivative", "product": "margin"},
+        {"segment": "derivative", "product": "intraday"},
+        {"segment": "equity", "product": "cnc"},
+        {"segment": "equity", "product": "intraday"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -754,11 +821,11 @@ async def test_quotes_map_to_models() -> None:
         transport, security_resolver=lambda s, e: "2885" if s == "RELIANCE" else "9999"
     )
     session = await _session(adapter)
-    quotes = await adapter.quotes(session, ["NSE:RELIANCE", "NSE:MISSING"])
-    assert len(quotes) == 1  # the scrip absent from the payload is skipped
+    quotes = await adapter.quotes(session, ["NSE:RELIANCE"])
+    assert len(quotes) == 1
     assert quotes[0].symbol == "RELIANCE" and quotes[0].ltp == 788.8
     assert quotes[0].bid == 788.95 and quotes[0].ask == 789.00
-    assert transport.calls[0]["params"]["scrip-codes"] == "NSE_2885,NSE_9999"
+    assert transport.calls[0]["params"]["scrip-codes"] == "NSE_2885"
 
 
 @pytest.mark.asyncio
@@ -970,7 +1037,14 @@ async def test_error_status_in_200_body_still_raises() -> None:
 async def test_reconcile_clean_on_empty_state() -> None:
     # Empty broker books + the default EMPTY local state agree → clean report.
     # The diff semantics themselves are covered by tests/test_reconciliation.py.
-    adapter = _adapter(FakeTransport())
+    adapter = _adapter(FakeTransport({
+        ("GET", "/order-book"): {"status": "success", "data": []},
+        ("GET", "/portfolio/positions"): {
+            "status": "success",
+            "data": {"net_positions": [], "day_positions": []},
+        },
+        ("GET", "/portfolio/holdings"): {"status": "success", "data": []},
+    }))
     session = await _session(adapter)
     report = await adapter.reconcile(session)
     assert report.adapter_id == "indmoney"

@@ -12,6 +12,7 @@ from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
 from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
 from flinttrade_gateway.brokers.native_factory import (
     NATIVE_ADAPTER_CLASSES,
+    NATIVE_ADAPTER_SPECS,
     SDK_PIN_BY_BROKER,
     build_native_adapters,
     is_native_broker,
@@ -33,6 +34,14 @@ def test_catalog_covers_native_adapters():
     assert NATIVE_ADAPTER_CLASSES["kotakneo"] is KotakNeoAdapter
     assert NATIVE_ADAPTER_CLASSES["indmoney"] is IndMoneyAdapter
     assert NATIVE_ADAPTER_CLASSES["groww"] is GrowwAdapter
+    assert NATIVE_ADAPTER_SPECS["dhan"].adapter_class is DhanAdapter
+    assert NATIVE_ADAPTER_SPECS["upstox"].adapter_class is UpstoxAdapter
+
+
+def test_native_adapter_specs_are_immutable() -> None:
+    """Static capability authority cannot be rewritten through the spec mapping."""
+    with pytest.raises(TypeError):
+        NATIVE_ADAPTER_SPECS["fixture"] = NATIVE_ADAPTER_SPECS["dhan"]  # type: ignore[index]
 
 
 def test_sdk_pins_are_derived_from_broker_catalogue():

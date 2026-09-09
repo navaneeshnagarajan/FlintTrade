@@ -36,7 +36,6 @@ from flinttrade_engine.safety import (
 )
 from flinttrade_gateway.brokers._base import ROUTER_TOKEN as _ROUTER_TOKEN
 from flinttrade_gateway.brokers._base import Session
-from flinttrade_gateway.brokers.openalgo import OpenAlgoAdapter
 from flinttrade_gateway.router import BrokerRouter
 
 pytestmark = pytest.mark.unit
@@ -2264,7 +2263,7 @@ def test_targeted_retry_cannot_hide_another_selectors_failed_flatten() -> None:
     assert kill_switch.is_active
 
 
-def test_l5_policy_reaches_openalgo_through_authoritative_planned_writes() -> None:
+def test_l5_policy_reaches_openalgo_through_authoritative_planned_writes(tmp_path) -> None:
     class _OpenAlgoClient:
         def __init__(self) -> None:
             self.calls: list[tuple[str, str]] = []
@@ -2313,20 +2312,25 @@ def test_l5_policy_reaches_openalgo_through_authoritative_planned_writes() -> No
             return SimpleNamespace(status="success", message="closed")
 
     client = _OpenAlgoClient()
-    adapter = OpenAlgoAdapter(default_client=client)
+    import importlib.util
+    from pathlib import Path
+
+    _fixture_spec = importlib.util.spec_from_file_location("_registry_fixtures", Path(__file__).resolve().parents[4] / "tests" / "registry_fixtures.py")
+    _fixture_module = importlib.util.module_from_spec(_fixture_spec)
+    _fixture_spec.loader.exec_module(_fixture_module)
+    RegistryFixture = _fixture_module.RegistryFixture
+
+    fixture = RegistryFixture(tmp_path)
+    adapter, session = _fixture_module.exact_openalgo_adapter(fixture, client, account="dhan")
+    session.extra["strategy"] = "Emergency"
 
     def session_provider(
         _ctx: RequestContext,
         adapter_id: str,
         account_id: str,
     ) -> Session:
-        return Session(
-            access_token="",
-            expires_at=datetime.now(tz=timezone.utc).timestamp() + 3600,
-            account_id=account_id,
-            adapter_id=adapter_id,
-            extra={"strategy": "Emergency"},
-        )
+        assert (adapter_id, account_id) == ("openalgo", "dhan")
+        return session
 
     router = BrokerRouter(
         {"openalgo": adapter},
@@ -2351,6 +2355,7 @@ def test_l5_policy_reaches_openalgo_through_authoritative_planned_writes() -> No
         reason="OpenAlgo bridge emergency",
     )
 
+    fixture.close()
     assert result.complete
     assert client.calls.count(("cancel_order", "OPEN-1")) == 1
     assert sum(call[0] == "place_order" for call in client.calls) == 1

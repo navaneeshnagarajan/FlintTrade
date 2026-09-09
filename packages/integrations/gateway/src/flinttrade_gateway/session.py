@@ -67,6 +67,7 @@ class BrokerSession:
             reflecting the account's current status.
         """
         return BrokerAccountInfo(
+            adapter_id="openalgo",
             account_id=self._account_id,
             broker=self._broker_name,
             label=self._label,

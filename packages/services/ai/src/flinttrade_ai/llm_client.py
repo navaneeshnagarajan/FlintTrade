@@ -18,11 +18,16 @@ import os
 import secrets
 import unicodedata
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Any, Generator
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+
+from flinttrade_core.llm_provider_profiles import (
+    LLM_PROVIDER_BY_ID,
+    LLM_PROVIDER_PROFILES,
+    LLMProvider as LLMProvider,
+)
 
 logger = logging.getLogger("flinttrade.ai.llm")
 _LMSTUDIO_RETIRED_ERROR = "LM Studio is retired; use managed Ollama or the Custom provider"
@@ -77,30 +82,6 @@ class _ProviderHTTPClient:
                 self._default.close()
         finally:
             self._managed_ollama.close()
-
-
-class LLMProvider(StrEnum):
-    """Supported LLM providers.
-
-    Local: Ollama (user's hardware, no cloud inference needed)
-    Cloud: Any provider with an API (user brings their own key)
-    Custom: Any OpenAI-compatible endpoint (user provides host URL)
-    """
-
-    OLLAMA = "ollama"
-    ANTHROPIC = "anthropic"
-    OPENAI = "openai"
-    GEMINI = "gemini"
-    DEEPSEEK = "deepseek"
-    GROQ = "groq"       # Groq — fast LPU inference (groq.com)
-    GROK = "grok"       # Grok — xAI's model (x.ai)
-    MISTRAL = "mistral"
-    TOGETHER = "together"
-    NVIDIA = "nvidia"    # NVIDIA NIM — OpenAI-compatible (integrate.api.nvidia.com)
-    CEREBRAS = "cerebras"  # Cerebras — wafer-scale fast inference, OpenAI-compatible (cerebras.ai)
-    OPENROUTER = "openrouter"  # Routes to 100+ models
-    HERMES = "hermes"    # Nous Hermes function-calling agent models (OpenAI-compatible host)
-    CUSTOM = "custom"    # Any OpenAI-compatible endpoint
 
 
 @dataclass
@@ -178,45 +159,12 @@ class LLMResponse:
 # Provider-specific base URLs for the OpenAI-compatible chat endpoint.
 # Most cloud providers offer OpenAI-compatible APIs.
 # Local providers use {host} placeholder resolved at runtime.
-# "custom" and "openrouter" let users connect ANY endpoint.
-_PROVIDER_URLS: dict[str, str] = {
-    # Local (no internet needed)
-    "ollama": "{host}/v1/chat/completions",
-    # Cloud (user provides API key)
-    "openai": "https://api.openai.com/v1/chat/completions",
-    "anthropic": "https://api.anthropic.com/v1/messages",
-    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-    "deepseek": "https://api.deepseek.com/v1/chat/completions",
-    "groq": "https://api.groq.com/openai/v1/chat/completions",
-    "grok": "https://api.x.ai/v1/chat/completions",
-    "mistral": "https://api.mistral.ai/v1/chat/completions",
-    "together": "https://api.together.xyz/v1/chat/completions",
-    "nvidia": "https://integrate.api.nvidia.com/v1/chat/completions",
-    # Cerebras — strictly OpenAI-compatible (Bearer auth), flows through
-    # ``_chat_openai_compat`` with no extra transport code.
-    "cerebras": "https://api.cerebras.ai/v1/chat/completions",
-    "openrouter": "https://openrouter.ai/api/v1/chat/completions",
-    # Hermes — Nous Hermes function-calling/agent models, served OpenAI-compatibly
-    # (local Ollama `hermes3`, a self-hosted vLLM, or any Hermes API host).
-    "hermes": "{host}/v1/chat/completions",
-    # Custom (any OpenAI-compatible endpoint)
-    "custom": "{host}/v1/chat/completions",
-}
+# "custom" lets users connect an operator-supplied endpoint.
+_PROVIDER_URLS = {profile.provider_id: profile.endpoint_template for profile in LLM_PROVIDER_PROFILES}
 
 _OLLAMA_BASE_URL = ""
 _PROVIDER_API_KEY_ENV = {
-    "anthropic": "ANTHROPIC_API_KEY",
-    "cerebras": "CEREBRAS_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-    "grok": "GROK_API_KEY",
-    "groq": "GROQ_API_KEY",
-    "hermes": "HERMES_API_KEY",
-    "mistral": "MISTRAL_API_KEY",
-    "nvidia": "NVIDIA_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
-    "together": "TOGETHER_API_KEY",
+    profile.provider_id: profile.api_key_env for profile in LLM_PROVIDER_PROFILES if profile.api_key_env
 }
 
 
@@ -246,7 +194,10 @@ def _normalise_ollama_host(host: str) -> str:
 def _validate_configurable_api_base_url(provider: str, host: str) -> str:
     """Reject URL components that HTTPX may include in request logs."""
     provider_name = (provider or "").strip().lower()
-    template = _PROVIDER_URLS.get(provider_name, "{host}/v1/chat/completions")
+    profile = LLM_PROVIDER_BY_ID.get(provider_name)
+    if profile is None:
+        raise ValueError(f"Unknown LLM provider: {provider_name or '<empty>'}")
+    template = profile.endpoint_template
     value = (host or "").strip()
     if provider_name == "ollama" or "{host}" not in template:
         return value
@@ -307,17 +258,20 @@ def resolve_endpoint(provider: str, host: str) -> str:
 
     Hermes and custom endpoints interpolate the operator-supplied ``host``;
     managed Ollama is resolved only through runtime admission. Cloud providers
-    return their fixed URL. An
-    unknown provider falls back to a generic ``{host}/v1/chat/completions`` so any
-    OpenAI-compatible endpoint still works. This is the single resolution point
-    used by both the blocking and streaming request paths.
+    return their fixed URL. Unknown providers fail closed; arbitrary
+    OpenAI-compatible endpoints require explicit ``custom`` selection. This is
+    the single resolution point used by both the blocking and streaming request
+    paths.
     """
     provider_name = (provider or "").lower()
     _reject_retired_provider(provider_name)
     if provider_name == "ollama":
         _normalise_ollama_host(host)
         raise ValueError("Ollama endpoint requires managed runtime admission")
-    template = _PROVIDER_URLS.get(provider_name, "{host}/v1/chat/completions")
+    profile = LLM_PROVIDER_BY_ID.get(provider_name)
+    if profile is None:
+        raise ValueError(f"Unknown LLM provider: {provider_name or '<empty>'}")
+    template = profile.endpoint_template
     if "{host}" not in template:
         return template
     safe_host = _validate_configurable_api_base_url(provider_name, host)

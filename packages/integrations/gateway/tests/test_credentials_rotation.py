@@ -45,6 +45,7 @@ def rotator(mock_manager: MagicMock, mock_scheduler: MagicMock) -> CredentialsRo
     return CredentialsRotator(
         credentials_manager=mock_manager,
         scheduler=mock_scheduler,
+        mutation_admission=lambda: None,
     )
 
 

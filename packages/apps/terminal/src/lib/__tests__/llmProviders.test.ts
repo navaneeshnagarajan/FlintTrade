@@ -5,6 +5,7 @@ import {
   providerSelection,
   selectionForLlmSettings,
 } from "../llmProviders";
+import { LLM_PROVIDER_PROFILES } from "@/generated/serviceProviders";
 
 describe("llmProviders", () => {
   it("uses managed Ollama as the local runtime without an LM Studio dependency", () => {
@@ -38,9 +39,9 @@ describe("llmProviders", () => {
     }
   });
 
-  it("defines provider-specific nonblank model defaults except for arbitrary Custom endpoints", () => {
+  it("defines provider-specific nonblank model defaults except for Custom and unpinned NVIDIA", () => {
     for (const provider of LLM_PROVIDERS) {
-      if (provider.id === "custom") {
+      if (provider.id === "custom" || provider.id === "nvidia") {
         expect(provider.defaultModel).toBe("");
       } else {
         expect(provider.defaultModel?.trim()).not.toBe("");
@@ -48,6 +49,16 @@ describe("llmProviders", () => {
     }
     expect(LLM_PROVIDERS.find((provider) => provider.id === "ollama")?.defaultModel).toBe("qwen3:8b");
     expect(LLM_PROVIDERS.find((provider) => provider.id === "openai")?.defaultModel).toBe("gpt-4o-mini");
+  });
+
+  it("projects each backend provider once while keeping OAuth out of the backend catalogue", () => {
+    const backendIds = LLM_PROVIDER_PROFILES.map((provider) => provider.providerId);
+    expect(backendIds).toHaveLength(14);
+    expect(new Set(backendIds)).toHaveLength(14);
+    expect(backendIds).toContain("nvidia");
+    expect(backendIds).not.toContain("claude-code-oauth");
+    expect(LLM_PROVIDERS.filter((provider) => provider.id === "nvidia")).toHaveLength(1);
+    expect(LLM_PROVIDERS.find((provider) => provider.id === "nvidia")?.defaultModel).toBe("");
   });
 
   it("maps Claude Code OAuth to Anthropic without losing its separate auth mode", () => {

@@ -211,18 +211,63 @@ class TestWorkspaceResolution:
         legacy_fast.mkdir(parents=True)
         legacy_accounts = legacy_fast / "ditto_accounts.sqlite"
         legacy_vault = legacy_fast / "ditto_credentials.db"
-        legacy_accounts.write_bytes(b"ditto-accounts")
-        legacy_vault.write_bytes(b"ditto-vault")
+        import sqlite3
+
+        for path, value in ((legacy_accounts, "ditto-accounts"), (legacy_vault, "ditto-vault")):
+            with sqlite3.connect(path) as connection:
+                connection.execute("CREATE TABLE preserved (value TEXT)")
+                connection.execute("INSERT INTO preserved VALUES (?)", (value,))
         target_home = tmp_path / "platform-workspace"
+        installation_root = tmp_path / "installation"
         monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
         monkeypatch.setattr(workspace, "_legacy_fast_data_dir", lambda: legacy_fast, raising=False)
+        monkeypatch.setenv("FLINTTRADE_INSTALLATION_STATE_DIR", str(installation_root))
 
         target = workspace.ditto_accounts_path()
 
-        assert target.read_bytes() == b"ditto-accounts"
-        assert (target.parent / "ditto_credentials.db").read_bytes() == b"ditto-vault"
+        with sqlite3.connect(target) as connection:
+            assert connection.execute("SELECT value FROM preserved").fetchone()[0] == "ditto-accounts"
+        with sqlite3.connect(target_home / "ditto_credentials.db") as connection:
+            assert connection.execute("SELECT value FROM preserved").fetchone()[0] == "ditto-vault"
         assert legacy_accounts.exists()
         assert legacy_vault.exists()
+
+    def test_linux_in_place_accounts_still_migrate_vault_once(self, tmp_path, monkeypatch):
+        import sqlite3
+
+        _clear_storage_overrides(monkeypatch, "DATA_DIR")
+        from flinttrade_core import workspace
+
+        linux_home = tmp_path / ".flinttrade"
+        legacy_fast = linux_home / "data"
+        legacy_fast.mkdir(parents=True)
+        accounts = legacy_fast / "ditto_accounts.sqlite"
+        vault = legacy_fast / "ditto_credentials.db"
+        for path, value in ((accounts, "in-place-accounts"), (vault, "legacy-vault")):
+            with sqlite3.connect(path) as connection:
+                connection.execute("CREATE TABLE preserved (value TEXT)")
+                connection.execute("INSERT INTO preserved VALUES (?)", (value,))
+        installation = tmp_path / ".flinttrade-installation"
+        monkeypatch.setattr(workspace, "_default_home", lambda: linux_home)
+        monkeypatch.setattr(workspace, "_legacy_fast_data_dir", lambda: legacy_fast)
+        monkeypatch.setenv("FLINTTRADE_INSTALLATION_STATE_DIR", str(installation))
+
+        target = workspace.ditto_accounts_path()
+
+        assert target == accounts
+        with sqlite3.connect(target) as connection:
+            assert connection.execute("SELECT value FROM preserved").fetchone()[0] == "in-place-accounts"
+        canonical_vault = linux_home / "ditto_credentials.db"
+        with sqlite3.connect(canonical_vault) as connection:
+            assert connection.execute("SELECT value FROM preserved").fetchone()[0] == "legacy-vault"
+        canonical_vault.unlink()
+        accounts.unlink()
+        assert workspace.ditto_accounts_path() == accounts
+        assert not canonical_vault.exists()
+        assert not accounts.exists()
+        receipt = json.loads((installation / "ditto-legacy-migration.json").read_text())
+        assert receipt["phase"] == "published"
+        assert receipt["sources"]["accounts"]["in_place"] is True
 
     def test_audit_log_dir_copies_chain_without_source_lock(self, tmp_path, monkeypatch):
         _clear_storage_overrides(monkeypatch, "AUDIT_LOG_DIR")
@@ -1172,6 +1217,21 @@ class TestWorkspaceLoadSave:
         assert reloaded.get("ui.theme") == "light"
         assert reloaded.get("llm.model") == "local-model"
 
+    def test_stale_complete_save_refuses_to_overwrite_a_newer_writer(self, tmp_path):
+        from flinttrade_core.workspace import Workspace
+
+        first = Workspace(home_dir=tmp_path / "ws")
+        first.initialise()
+        stale = Workspace(home_dir=tmp_path / "ws")
+        first.set("ui.theme", "light")
+        committed = first.config_path.read_bytes()
+
+        with pytest.raises(RuntimeError):
+            stale.save()
+
+        assert first.config_path.read_bytes() == committed
+        assert Workspace(home_dir=tmp_path / "ws").get("ui.theme") == "light"
+
     def test_failed_atomic_save_preserves_previous_workspace(self, tmp_path, monkeypatch):
         from flinttrade_core import workspace_migrations
         from flinttrade_core.workspace import Workspace
@@ -1228,11 +1288,12 @@ class TestWorkspaceLoadSave:
         d["version"] = "modified"
         assert ws.get("version") != "modified"
 
-    def test_corrupt_json_falls_back_to_defaults(self, tmp_path):
-        from flinttrade_core.workspace_migrations import WORKSPACE_VERSION
+    def test_corrupt_json_is_refused_without_overwriting(self, tmp_path):
+        import json
         from flinttrade_core.workspace import Workspace
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
         (ws_dir / "workspace.json").write_text("not valid json{{{")
-        ws = Workspace(home_dir=ws_dir)
-        assert ws.get("version") == WORKSPACE_VERSION  # fell back to current defaults
+        with pytest.raises(json.JSONDecodeError):
+            Workspace(home_dir=ws_dir)
+        assert (ws_dir / "workspace.json").read_text() == "not valid json{{{"

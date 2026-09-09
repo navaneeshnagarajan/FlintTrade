@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.exceptions import BrokerError
 from flinttrade_gateway import reconciliation as reconciliation_module
 from flinttrade_gateway.brokers import (
@@ -580,6 +581,16 @@ _ORDER_BOOK_NUMERIC_MAPPING_CASES = [
             "trigger_price": "triggerPrice",
             "average_price": "averageTradedPrice",
         },
+        {
+            "orderId": "D1",
+            "orderStatus": "PENDING",
+            "tradingSymbol": "TCS",
+            "securityId": "101",
+            "exchangeSegment": "NSE_EQ",
+            "transactionType": "BUY",
+            "orderType": "LIMIT",
+            "productType": "CNC",
+        },
         id="dhan",
     ),
     pytest.param(
@@ -590,6 +601,17 @@ _ORDER_BOOK_NUMERIC_MAPPING_CASES = [
             "price": "price",
             "trigger_price": "trigger_price",
             "average_price": "average_price",
+        },
+        {
+            "order_id": "U1",
+            "status": "open",
+            "trading_symbol": "TCS",
+            "instrument_token": "NSE_EQ|101",
+            "exchange": "NSE",
+            "segment": "NSE_EQ",
+            "transaction_type": "BUY",
+            "order_type": "LIMIT",
+            "product": "CNC",
         },
         id="upstox",
     ),
@@ -602,6 +624,15 @@ _ORDER_BOOK_NUMERIC_MAPPING_CASES = [
             "trigger_price": "trgPrc",
             "average_price": "avgPrc",
         },
+        {
+            "nOrdNo": "K1",
+            "ordSt": "open",
+            "trdSym": "TCS-EQ",
+            "exSeg": "nse_cm",
+            "trnsTp": "B",
+            "prcTp": "L",
+            "prod": "CNC",
+        },
         id="kotakneo",
     ),
     pytest.param(
@@ -613,6 +644,17 @@ _ORDER_BOOK_NUMERIC_MAPPING_CASES = [
             "trigger_price": "sl_trigger_price",
             "average_price": "traded_price",
         },
+        {
+            "id": "I1",
+            "status": "OPEN",
+            "name": "TCS",
+            "exchange": "NSE",
+            "segment": "EQUITY",
+            "product": "CNC",
+            "txn_type": "BUY",
+            "order_type": "LIMIT",
+            "security_id": "101",
+        },
         id="indmoney",
     ),
     pytest.param(
@@ -622,35 +664,50 @@ _ORDER_BOOK_NUMERIC_MAPPING_CASES = [
             "filled_quantity": "filled_quantity",
             "price": "price",
             "trigger_price": "trigger_price",
-            "average_price": "average_price",
+            "average_price": "average_fill_price",
+        },
+        {
+            "groww_order_id": "G1",
+            "order_status": "OPEN",
+            "trading_symbol": "TCS",
+            "exchange": "NSE",
+            "segment": "CASH",
+            "transaction_type": "BUY",
+            "order_type": "LIMIT",
+            "product": "CNC",
         },
         id="groww",
     ),
 ]
 
 
-@pytest.mark.parametrize(("normalise", "source_fields"), _ORDER_BOOK_NUMERIC_MAPPING_CASES)
+@pytest.mark.parametrize(("normalise", "source_fields", "base_row"), _ORDER_BOOK_NUMERIC_MAPPING_CASES)
 def test_order_book_mapping_keeps_absent_and_blank_numeric_evidence_omitted(
     normalise,
     source_fields: dict[str, str],
+    base_row: dict[str, Any],
 ) -> None:
     material_fields = set(source_fields)
+    absent = dict(base_row)
+    for source in source_fields.values():
+        absent.pop(source, None)
 
-    assert material_fields.isdisjoint(normalise({}))
-    blank = normalise({source: "  " for source in source_fields.values()})
+    assert material_fields.isdisjoint(normalise(absent))
+    blank = normalise({**base_row, **{source: "  " for source in source_fields.values()}})
     assert material_fields.isdisjoint(blank)
 
 
-@pytest.mark.parametrize(("normalise", "source_fields"), _ORDER_BOOK_NUMERIC_MAPPING_CASES)
+@pytest.mark.parametrize(("normalise", "source_fields", "base_row"), _ORDER_BOOK_NUMERIC_MAPPING_CASES)
 def test_order_book_mapping_preserves_present_zero_and_malformed_numeric_evidence(
     normalise,
     source_fields: dict[str, str],
+    base_row: dict[str, Any],
 ) -> None:
-    zero = normalise({source: 0 for source in source_fields.values()})
-    malformed = normalise({source: "not-a-number" for source in source_fields.values()})
+    zero = normalise({**base_row, **{source: 0 for source in source_fields.values()}})
 
     assert all(field in zero and float(zero[field]) == 0.0 for field in source_fields)
-    assert all(malformed[field] == "not-a-number" for field in source_fields)
+    with pytest.raises(BrokerReadResponseInvalid):
+        normalise({**base_row, **{source: "not-a-number" for source in source_fields.values()}})
 
 
 def test_adapter_must_explicitly_declare_unavailable_text_evidence() -> None:
@@ -837,6 +894,7 @@ class _KotakClient:
 
     def order_book(self):
         return {
+            "stat": "Ok",
             "data": [
                 {
                     "nOrdNo": "K1",
@@ -857,6 +915,7 @@ class _KotakClient:
 
     def positions(self):
         return {
+            "stat": "Ok",
             "data": [
                 {
                     "trdSym": "IDEA-EQ",
@@ -878,6 +937,7 @@ class _KotakClient:
 
     def holdings(self):
         return {
+            "stat": "Ok",
             "data": [
                 {"displaySymbol": "IDEA", "exchangeSegment": "nse_cm", "quantity": 10, "averagePrice": 9.5},
             ]

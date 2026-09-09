@@ -39,6 +39,12 @@ import math
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
+from flinttrade_core.broker_read_port import (
+    BalanceEvidence,
+    BalanceSnapshot,
+    BrokerBalanceResponseInvalid,
+    BrokerReadResponseInvalid,
+)
 from flinttrade_core.exceptions import BrokerError
 from flinttrade_engine.safety import EmergencyBrokerWrite, EmergencyReductionPlan, EmergencyWritePolicy
 from flinttrade_gateway.capabilities import (
@@ -52,6 +58,59 @@ from flinttrade_gateway.capabilities import (
 
 from . import upstox_mapping as M
 from ._base import BrokerAdapter, Session, run_blocking_sdk_call
+
+
+def _balance_number(value: object) -> float:
+    if isinstance(value, bool) or type(value) not in (int, float, str) or (type(value) is str and not value.strip()):
+        raise BrokerBalanceResponseInvalid
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise BrokerBalanceResponseInvalid from None
+    if not math.isfinite(number):
+        raise BrokerBalanceResponseInvalid
+    return number
+
+
+def _balance_record(value: object) -> dict[str, object]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise BrokerBalanceResponseInvalid
+    return value
+
+
+def _balance_snapshot_from_upstox(response: object) -> BalanceSnapshot:
+    response = _balance_record(response)
+    data = _balance_record(response.get("data", response))
+    if "available_to_trade" in data:
+        available_to_trade = _balance_record(data["available_to_trade"])
+        available = _balance_number(available_to_trade["total"]) if "total" in available_to_trade else None
+        cash_available = _balance_record(available_to_trade.get("cash_available_to_trade", {}))
+        pledge_available = _balance_record(available_to_trade.get("pledge_available_to_trade", {}))
+        cash_margin = _balance_record(cash_available.get("margin_used", {}))
+        pledge_margin = _balance_record(pledge_available.get("margin_used", {}))
+        cash_total = _balance_number(cash_margin["total"]) if "total" in cash_margin else None
+        pledge_total = _balance_number(pledge_margin["total"]) if "total" in pledge_margin else None
+        used = cash_total + pledge_total if cash_total is not None and pledge_total is not None else None
+        if used is not None and not math.isfinite(used):
+            raise BrokerBalanceResponseInvalid
+        cash = _balance_record(cash_available.get("cash", {}))
+        opening = _balance_number(cash["opening_balance"]) if "opening_balance" in cash else None
+        used_evidence = BalanceEvidence.DERIVED_FROM_DIRECT_COMPONENTS if used is not None else None
+    else:
+        equity = _balance_record(data.get("equity", {}))
+        available = _balance_number(equity["available_margin"]) if "available_margin" in equity else None
+        used = _balance_number(equity["used_margin"]) if "used_margin" in equity else None
+        opening = None
+        used_evidence = BalanceEvidence.DIRECT if used is not None else None
+    total = available + used if available is not None and used is not None else None
+    if total is not None and not math.isfinite(total):
+        raise BrokerBalanceResponseInvalid
+    return BalanceSnapshot(
+        available, BalanceEvidence.DIRECT if available is not None else None,
+        used, used_evidence,
+        total, BalanceEvidence.DERIVED_FROM_DIRECT_COMPONENTS if total is not None else None,
+        opening, BalanceEvidence.DIRECT if opening is not None else None,
+    )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
@@ -713,8 +772,20 @@ class UpstoxAdapter(BrokerAdapter):
 
     @staticmethod
     def _rows(resp: Any) -> list[dict[str, Any]]:
-        data = resp.get("data", []) if isinstance(resp, dict) else []
-        return data if isinstance(data, list) else []
+        if type(resp) is not dict or any(type(key) is not str for key in resp):
+            raise BrokerReadResponseInvalid from None
+        status = resp.get("status")
+        if type(status) is not str or not status:
+            raise BrokerReadResponseInvalid from None
+        if status != "success":
+            raise M.UpstoxMappingError("Upstox read response was not successful")
+        data = resp.get("data")
+        if (
+            type(data) is not list
+            or any(type(row) is not dict or any(type(key) is not str for key in row) for row in data)
+        ):
+            raise BrokerReadResponseInvalid from None
+        return data
 
     @staticmethod
     def _emergency_rows(resp: Any, *, book: str) -> list[dict[str, Any]]:
@@ -1134,6 +1205,8 @@ class UpstoxAdapter(BrokerAdapter):
                 M.from_upstox_position(row)
                 for row in self._emergency_rows(position_response, book="position book")
             ]
+        except BrokerReadResponseInvalid as exc:
+            raise BrokerError("Upstox position accounting is inconsistent or invalid") from exc
         except M.UpstoxMappingError as exc:
             raise BrokerError(str(exc)) from exc
         positions = M.active_emergency_positions(position_rows)
@@ -1512,6 +1585,10 @@ class UpstoxAdapter(BrokerAdapter):
         resp = await self._call(self._client(session).funds)
         return M.from_upstox_funds(resp)
 
+    async def balance_snapshot(self, session: Session) -> BalanceSnapshot:
+        """Read funds once and retain V2/V3 direct and derived evidence."""
+        return _balance_snapshot_from_upstox(await self._call(self._client(session).funds))
+
     async def profile(self, session: Session) -> dict:
         """User profile — segments/products enabled (``GET /v2/user/profile``)."""
         resp = await self._call(self._client(session).profile)
@@ -1590,7 +1667,7 @@ class UpstoxAdapter(BrokerAdapter):
         resp = await self._call(self._client(session).full_quote, ",".join(keys))
         data = resp.get("data", {}) if isinstance(resp, dict) else {}
         records = data.values() if isinstance(data, dict) else []
-        return [Quote(**M.from_upstox_quote(rec)) for rec in records if isinstance(rec, dict)]
+        return [Quote(**M.from_upstox_quote(rec, strict=True)) for rec in records if isinstance(rec, dict)]
 
     async def market_depth(self, session: Session, symbols: list[str]) -> list[dict[str, Any]]:
         """Five-level market depth from Upstox full-quote records.
@@ -1633,15 +1710,19 @@ class UpstoxAdapter(BrokerAdapter):
         by_key: dict[str, dict[str, Any]] = {}
         try:
             rows = M.from_upstox_option_greeks(resp)
+        except BrokerReadResponseInvalid:
+            raise
         except (M.UpstoxMappingError, TypeError, ValueError, OverflowError) as exc:
             raise BrokerError("Upstox option-Greek response is invalid") from exc
         for row in rows:
-            key = str(row.get("instrument_token") or "").strip()
+            key = row.get("instrument_token")
+            if type(key) is not str or not key or key != key.strip():
+                raise BrokerReadResponseInvalid from None
             if not key or key in by_key:
-                raise BrokerError("Upstox option-Greek response has an invalid instrument token")
+                raise BrokerReadResponseInvalid from None
             by_key[key] = row
         if set(by_key) != set(keys):
-            raise BrokerError("Upstox option-Greek response is incomplete")
+            raise BrokerReadResponseInvalid from None
         return by_key
 
     async def ohlc_quotes(self, session: Session, symbols: list[str], interval: str = "1d") -> list[dict]:
@@ -1669,20 +1750,27 @@ class UpstoxAdapter(BrokerAdapter):
         results: list[dict[str, Any]] = []
         for symbol, exchange, key in identities:
             row = by_key[key]
-            values = [float(row[field]) for field in ("delta", "gamma", "theta", "vega", "iv")]
+            try:
+                values = [float(row[field]) for field in ("delta", "gamma", "theta", "vega", "iv")]
+                ltp = float(row["ltp"])
+                oi = int(row["oi"])
+            except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                raise BrokerReadResponseInvalid from exc
             if not row.get("greeks_complete") or not all(math.isfinite(value) for value in values):
-                raise BrokerError("Upstox option-Greek response lacks complete Greek values")
+                raise BrokerReadResponseInvalid from None
+            if not math.isfinite(ltp) or type(row["oi"]) is bool:
+                raise BrokerReadResponseInvalid from None
             results.append({
                 "symbol": symbol,
                 "instrument_id": key,
                 "exchange": exchange,
-                "ltp": float(row["ltp"]),
+                "ltp": ltp,
                 "iv": values[4],
                 "delta": values[0],
                 "gamma": values[1],
                 "theta": values[2],
                 "vega": values[3],
-                "oi": int(row["oi"]),
+                "oi": oi,
             })
         return results
 
@@ -1711,10 +1799,13 @@ class UpstoxAdapter(BrokerAdapter):
         results: list[dict[str, Any]] = []
         for position, key in zip(positions, keys, strict=True):
             row = by_key[key]
-            delta = float(row["delta"])
-            vega = float(row["vega"])
+            try:
+                delta = float(row["delta"])
+                vega = float(row["vega"])
+            except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                raise BrokerReadResponseInvalid from exc
             if not row.get("greeks_complete") or not math.isfinite(delta) or not math.isfinite(vega):
-                raise BrokerError("Upstox option-Greek response lacks complete Delta/Vega values")
+                raise BrokerReadResponseInvalid from None
             results.append({
                 "symbol": str(position.get("symbol") or ""),
                 "instrument_id": key,
@@ -1754,7 +1845,7 @@ class UpstoxAdapter(BrokerAdapter):
                 params["instrument_key"], params["unit"], params["interval"],
                 params["to_date"], params["from_date"],
             )
-        cd = M.from_upstox_candles(symbol, exchange, interval, resp)
+        cd = M.from_upstox_candles(symbol, exchange, interval, resp, strict=True)
         return Candles(
             symbol=cd["symbol"], exchange=cd["exchange"], interval=cd["interval"],
             bars=[OHLCV(**b) for b in cd["bars"]],

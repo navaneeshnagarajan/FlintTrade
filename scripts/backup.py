@@ -1,4 +1,7 @@
-"""CLI for workspace backup and restore.
+"""CLI for ordinary bhavcopy backups and disjoint restoration.
+
+Authority backups and all active-workspace restores fail with
+coordinated_restore_unavailable until the coordinated transaction is available.
 
 Usage::
 
@@ -102,15 +105,15 @@ def main() -> None:
         "--include-ticks",
         action="store_true",
         default=False,
-        help="Include tick data directories (can be very large)",
+        help="Request tick stores; unclassified live stores remain unavailable",
     )
     create_p.add_argument(
         "--include-credentials",
         action="store_true",
         default=False,
         help=(
-            "Include credential database files. Plain-text secret seed files "
-            "are still excluded; store this archive only in an encrypted location."
+            "Reserved option: credential backup is temporarily unavailable "
+            "(coordinated_restore_unavailable)."
         ),
     )
 

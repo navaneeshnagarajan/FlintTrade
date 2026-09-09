@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.exceptions import BrokerError, OrderRejectedByBroker, SessionExpired
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
@@ -2709,16 +2710,12 @@ async def test_forever_orders_lists_and_normalises_active_gtts():
             "exchange": "NSE",
             "product": "CNC",
             "quantity": "1",
-            "filled_quantity": "0",
             "pricetype": "LIMIT",
             "price": "2850.0",
             "action": "BUY",
             "status": "PENDING",
             "entry_status": "PENDING",
             "trigger_price": "2850.0",
-            "stop_loss_price": "",
-            "stop_loss_trailing_gap": "0",
-            "target_price": "",
             "rules": [
                 {
                     "strategy": "ENTRY",
@@ -2745,6 +2742,39 @@ async def test_trades_by_order_and_trade_history():
     rows = await adapter.trade_history(session, "2025-04-01", "2025-04-30", page=2, page_size=50, segment="EQ")
     assert rows[0]["trade_id"] == "T1"
     assert ("trade_history", "2025-04-01", "2025-04-30", 2, 50, "EQ") in mock.calls
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        [],
+        {"status": "success"},
+        {"status": "success", "data": {}},
+        {"status": "success", "data": ["bad-row"]},
+    ],
+)
+async def test_fixed_order_book_rejects_malformed_envelopes_and_rows(response) -> None:
+    class MalformedRowsUpstox(MockUpstox):
+        def order_book(self):
+            return response
+
+    adapter = _adapter(MalformedRowsUpstox())
+    session = await _session(adapter)
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        await adapter.order_book(session)
+
+
+async def test_fixed_order_book_keeps_provider_declared_failure_distinct() -> None:
+    class FailedRowsUpstox(MockUpstox):
+        def order_book(self):
+            return {"status": "failure", "errors": [{"message": "broker refused"}]}
+
+    adapter = _adapter(FailedRowsUpstox())
+    session = await _session(adapter)
+
+    with pytest.raises(UpstoxMappingError):
+        await adapter.order_book(session)
 
 
 @pytest.mark.asyncio
@@ -2942,7 +2972,7 @@ async def test_portfolio_greeks_rejects_malformed_numeric_values() -> None:
     adapter = _adapter(MalformedGreeksUpstox())
     session = await _session(adapter)
 
-    with pytest.raises(BrokerError, match="option-Greek response is invalid"):
+    with pytest.raises(BrokerReadResponseInvalid):
         await adapter.portfolio_greeks(session, [{
             "symbol": "NIFTY 30 JUL 26 25000 CE",
             "instrument_id": "NSE_FO|54452",
@@ -2956,7 +2986,6 @@ async def test_portfolio_greeks_rejects_malformed_numeric_values() -> None:
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda response: response.update({"status": "failure"}),
         lambda response: response.pop("status"),
         lambda response: response["data"]["NSE_FO|54452"].pop("instrument_token"),
         lambda response: response["data"]["NSE_FO|54452"].update({"oi": float("inf")}),
@@ -2971,6 +3000,21 @@ async def test_option_greeks_wraps_failed_or_non_finite_quote_payloads(mutate) -
             return response
 
     adapter = _adapter(InvalidGreeksUpstox())
+    session = await _session(adapter)
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        await adapter.option_greeks(session, ["NFO:NIFTY24600CE"])
+
+
+@pytest.mark.asyncio
+async def test_option_greeks_keeps_provider_declared_failure_as_broker_error() -> None:
+    class FailedGreeksUpstox(MockUpstox):
+        def option_greeks_v3(self, instrument_keys):
+            response = super().option_greeks_v3(instrument_keys)
+            response["status"] = "failure"
+            return response
+
+    adapter = _adapter(FailedGreeksUpstox())
     session = await _session(adapter)
 
     with pytest.raises(BrokerError, match="option-Greek response is invalid"):

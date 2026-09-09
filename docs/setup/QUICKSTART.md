@@ -116,11 +116,19 @@ This populates `.local/external/openalgo/` (gitignored) with a working OpenAlgo 
 
 ## 3. Configure Broker Access
 
-For the recommended OpenAlgo bridge, configure the OpenAlgo server in OpenAlgo
-itself, then paste the OpenAlgo URL/API key in FlintTrade Setup → OpenAlgo
-Bridge or Settings → Broker Gateway. For the native FlintTrade gateway, use the
-app setup flow only for the currently connectable native options (Dhan and
-Upstox). INDmoney is read-verified and its fail-closed emergency planner is
+Use the OpenAlgo-compatible bridge for a working broker session. Configure
+the OpenAlgo server in OpenAlgo itself, then paste the OpenAlgo URL/API key
+in FlintTrade Setup → OpenAlgo Bridge or Settings → Broker Gateway.
+
+Do not use Setup → Brokers or Settings → Brokers for a native session on
+this unreleased line. Native broker HTTP is frozen until Task 9D (account
+mutations return `503` `broker_account_cutover_unavailable`) and Task
+7C.2 / 8B (native HTTP account and market-data reads return `409` with
+zero provider calls until cutover onto the in-process `BrokerReadPort`;
+catalogue and vault-backed account-list GETs stay metadata only). The Brokers screen will
+fail rather than connect. Dhan and Upstox remain evidence-gated as
+connectable in the catalogue; that is not a working native HTTP or UX
+path. INDmoney is read-verified and its fail-closed emergency planner is
 locally verified, but it stays "coming soon" until restart-time regular/smart-parent
 cancellation can be resolved authoritatively, a broker-atomic reduce-only close
 primitive exists, and a funded/live-market order-safety proof lands;
@@ -206,11 +214,12 @@ Read [`contributing.md`](../../contributing.md) for the contribution flow, then 
    (default `5000`); WebSocket Port defaults to `8765`. FlintTrade stores these
    settings in the OS workspace.
 
-Broker and OpenAlgo session lifetimes vary by broker. Native Upstox
-tokens **expire** around ~03:30 IST the next day and have no refresh
-token — `UpstoxAdapter.refresh()` returns the existing session and a
-fresh login is required at expiry. FlintTrade operator JWTs expire at
-08:00 IST. Re-login when the app or broker reports an expired session.
+Broker and OpenAlgo session lifetimes vary by broker. FlintTrade operator
+JWTs expire at 08:00 IST. Re-login when OpenAlgo or FlintTrade reports an
+expired session. When native connect returns, Upstox tokens **expire**
+around ~03:30 IST the next day and have no refresh token —
+`UpstoxAdapter.refresh()` returns the existing session and a fresh login
+is required at expiry.
 
 ## Terminal Env
 

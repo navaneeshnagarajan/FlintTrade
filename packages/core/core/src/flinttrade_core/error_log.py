@@ -37,6 +37,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .request_observability import SafeRequestSummary
 from .workspace import workspace_dir
 
 logger = logging.getLogger("flinttrade.core.error_log")
@@ -222,6 +223,8 @@ class ErrorLog:
         request_body: dict[str, Any] | None = None,
         error: BaseException | None = None,
         user_id: str | None = None,
+        *,
+        safe_request: SafeRequestSummary | None = None,
     ) -> str:
         """Persist a structured error entry and return its ``entry_id``.
 
@@ -243,6 +246,15 @@ class ErrorLog:
             The ``entry_id`` assigned to this entry (16-char hex string).
         """
         entry_id = secrets.token_hex(8)
+
+        if safe_request is not None:
+            if type(safe_request) is not SafeRequestSummary:
+                raise TypeError("safe_request must be an exact SafeRequestSummary")
+            route = safe_request.route_template
+            method = safe_request.method
+            request_body = safe_request.to_dict()
+            error = None
+            user_id = None
 
         sanitised = _sanitise(request_body) if request_body else None
         body_json = json.dumps(sanitised, default=str) if sanitised is not None else None

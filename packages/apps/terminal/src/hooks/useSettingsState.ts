@@ -25,7 +25,7 @@ import {
   type LlmConfigResponse,
 } from "@/services/ftApi.llm";
 import { LLM_PROVIDERS, normaliseLlmHost } from "@/lib/llmProviders";
-import type { LlmAuthMode } from "@/lib/llmProviders";
+import type { LlmAuthMode, LlmProviderId } from "@/lib/llmProviders";
 
 // ---------------------------------------------------------------------------
 // Section data shapes (mirror the section component prop interfaces)
@@ -64,20 +64,7 @@ export interface RiskData {
   maxOrdersPerMinute: string;
 }
 
-export type LlmProvider =
-  | "ollama"
-  | "hermes"
-  | "openai"
-  | "anthropic"
-  | "gemini"
-  | "deepseek"
-  | "groq"
-  | "grok"
-  | "mistral"
-  | "cerebras"
-  | "together"
-  | "openrouter"
-  | "custom";
+export type LlmProvider = LlmProviderId;
 
 export interface LlmData {
   provider: LlmProvider;
