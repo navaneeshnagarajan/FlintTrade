@@ -45,10 +45,10 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
-- **Primary nav overflow clips Contribute (FT-SITE-001).** On the public
-  site at about 390px width the primary nav overflows and Contribute is
-  clipped. Tracking note; the Website Builder lands the responsive nav
-  fix on this branch.
+- **Primary nav overflow clips Contribute (FT-SITE-001).** The marketing
+  header no longer uses a shrinking `overflow-x: auto` row below 900px.
+  Primary links wrap without shrinking, so Contribute and the other
+  destinations stay fully visible on phones around 390px.
 
 - **Dependabot qs and fflate (medium).** `qs` 6.15.2 (via `http-server` →
   `union`) is overridden to 6.16.0, clearing GHSA-4mjr / GHSA-px8p. `fflate`
