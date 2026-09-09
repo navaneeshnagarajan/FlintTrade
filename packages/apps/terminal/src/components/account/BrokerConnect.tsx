@@ -1116,11 +1116,13 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
             <Label htmlFor="broker-select" className="text-xs text-text-secondary mb-1.5 block">Broker</Label>
             <Select
               value={selectedBroker}
+              disabled={connectMutation.isPending}
               onValueChange={(v) => {
+                if (connectMutation.isPending) return;
+                resetForm();
                 setSelectedBroker(v);
                 const first = brokers.find((b) => b.adapter_id === v)?.auth_methods[0]?.id ?? "";
                 setSelectedMethodId(first);
-                resetForm();
               }}
             >
               <SelectTrigger id="broker-select"><SelectValue placeholder="Select a broker" /></SelectTrigger>
@@ -1138,7 +1140,11 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
           {broker && brokerConnectable && (
             <div>
               <Label htmlFor="method-select" className="text-xs text-text-secondary mb-1.5 block">Login method</Label>
-              <Select value={selectedMethodId} onValueChange={(v) => { setSelectedMethodId(v); setFields({}); setError(""); }}>
+              <Select value={selectedMethodId} disabled={connectMutation.isPending}
+                onValueChange={(v) => {
+                  if (connectMutation.isPending) return;
+                  setSelectedMethodId(v); setFields({}); setError("");
+                }}>
                 <SelectTrigger id="method-select"><SelectValue placeholder="Select a method" /></SelectTrigger>
                 <SelectContent>
                   {broker.auth_methods.map((m) => (

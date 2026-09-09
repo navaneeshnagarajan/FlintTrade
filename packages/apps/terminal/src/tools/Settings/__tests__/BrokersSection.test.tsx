@@ -1477,6 +1477,22 @@ describe("BrokersSection", () => {
     expect(screen.getByText(/Postback .* is optional/i)).toBeInTheDocument();
   });
 
+  it("cannot switch broker or login method while a connection is in flight", async () => {
+    const pending = deferred<{ connected: boolean; login: string }>();
+    (connectNativeAccount as ReturnType<typeof vi.fn>).mockReturnValueOnce(pending.promise);
+    renderSection(false);
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+    await submitDhanAccessToken("PENDING-FIXTURE");
+    await waitFor(() => expect(connectNativeAccount).toHaveBeenCalled());
+    try {
+      expect(screen.getByRole("combobox", { name: /^Broker$/i })).toBeDisabled();
+      expect(screen.getByRole("combobox", { name: /login method/i })).toBeDisabled();
+      expect(screen.getByLabelText("Access token")).toHaveValue("TOK");
+    } finally {
+      await act(async () => { pending.resolve({ connected: true, login: "ok" }); });
+    }
+  });
+
   it("reuses the logical connect key after a lost response and component remount", async () => {
     const connect = connectNativeAccount as ReturnType<typeof vi.fn>;
     connect.mockRejectedValueOnce(new TypeError("Lost connection response"))

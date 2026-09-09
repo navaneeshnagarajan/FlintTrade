@@ -735,8 +735,8 @@ class CodexAppServerSession(AgentSession):
         No credit purchase/reset, login flow or token inspection is performed.
         Monetary API budgets remain separate from these subscription windows.
         """
-        client = await self._ensure_client()
         try:
+            client = await self._ensure_client()
             result = await client.request("account/rateLimits/read", {}, timeout=_HANDSHAKE_TIMEOUT)
             if type(result) is not dict:
                 raise ValueError("invalid runtime rate limits")

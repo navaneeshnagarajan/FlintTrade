@@ -492,11 +492,13 @@ class _CatalogCodexServer(_FakeCodexServer):
             super()._on_client_line(line)
 
 
-@pytest.mark.parametrize("fault", ["error_list", "error_code", "broken_pipe"])
+@pytest.mark.parametrize("fault", ["error_list", "error_code", "broken_pipe", "initialise_pipe"])
 async def test_codex_quota_faults_are_unknown_without_leaked_pending_requests(fault):
     class FaultServer(_CatalogCodexServer):
         def _on_client_line(self, line):
             msg = json.loads(line)
+            if fault == "initialise_pipe" and msg.get("method") == "initialize":
+                raise BrokenPipeError("synthetic initialise pipe failure")
             if msg.get("method") != "account/rateLimits/read":
                 return super()._on_client_line(line)
             self.received.append(msg)
@@ -509,7 +511,7 @@ async def test_codex_quota_faults_are_unknown_without_leaked_pending_requests(fa
     session = CodexAppServerSession(spawn=server.spawn)
     try:
         assert await session.read_rate_limits() == {"status": "unknown", "buckets": {}}
-        assert session._client._pending == {}
+        assert session._client is None or session._client._pending == {}
         assert not any(m.get("method") in {"thread/start", "turn/start"} for m in server.received)
     finally:
         await session.close()
