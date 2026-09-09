@@ -12,6 +12,8 @@ vi.mock("../advisorApi", () => ({
 }));
 
 import {
+  ADVISOR_STREAM_TIMEOUT_MS,
+  ADVISOR_TIMEOUT_MESSAGE,
   ADVISOR_UNAVAILABLE_MESSAGE,
   EMPTY_ADVISOR_REPLY_MESSAGE,
   LLM_NOT_CONFIGURED_MESSAGE,
@@ -19,6 +21,7 @@ import {
   probeAdvisorAvailability,
   readAdvisorHttpError,
   requestAdvisorReply,
+  streamAdvisorChat,
 } from "../advisorChat";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -34,6 +37,7 @@ describe("advisorChat", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -70,6 +74,97 @@ describe("advisorChat", () => {
     const body = new Response('data: {"error":"Internal server error"}\n\n').body;
     expect(body).not.toBeNull();
     await expect(consumeAdvisorSse(body!)).rejects.toThrow("Internal server error");
+  });
+
+  it("does not abort a healthy stream after the first token", async () => {
+    vi.useFakeTimers();
+    const encoder = new TextEncoder();
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let sawFirstToken = false;
+    let resolveFirstToken: (() => void) | undefined;
+    const firstToken = new Promise<void>((resolve) => {
+      resolveFirstToken = resolve;
+    });
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+    });
+
+    vi.mocked(fetch).mockImplementationOnce((_url, init) => {
+      init?.signal?.addEventListener("abort", () => {
+        try {
+          streamController?.error(new DOMException("The operation was aborted.", "AbortError"));
+        } catch {
+          /* already closed */
+        }
+      });
+      return Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+      );
+    });
+
+    const replyPromise = streamAdvisorChat({
+      messages: [{ role: "user", content: "What is NIFTY?" }],
+      context: "",
+      onToken: () => {
+        if (!sawFirstToken) {
+          sawFirstToken = true;
+          resolveFirstToken?.();
+        }
+      },
+    });
+
+    await Promise.resolve();
+    expect(streamController).toBeDefined();
+    streamController!.enqueue(encoder.encode('data: {"token":"Hello"}\n\n'));
+    await firstToken;
+
+    await vi.advanceTimersByTimeAsync(ADVISOR_STREAM_TIMEOUT_MS + 1_000);
+
+    streamController!.enqueue(encoder.encode('data: {"token":" world"}\n\n'));
+    streamController!.enqueue(encoder.encode('data: {"done":true}\n\n'));
+    streamController!.close();
+
+    await expect(replyPromise).resolves.toBe("Hello world");
+  });
+
+  it("still times out when the first streamed token never arrives", async () => {
+    vi.useFakeTimers();
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+    });
+
+    vi.mocked(fetch).mockImplementationOnce((_url, init) => {
+      init?.signal?.addEventListener("abort", () => {
+        try {
+          streamController?.error(new DOMException("The operation was aborted.", "AbortError"));
+        } catch {
+          /* already closed */
+        }
+      });
+      return Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+      );
+    });
+
+    const replyPromise = streamAdvisorChat({
+      messages: [{ role: "user", content: "What is NIFTY?" }],
+      context: "",
+    });
+    await Promise.resolve();
+    const expectation = expect(replyPromise).rejects.toThrow(ADVISOR_TIMEOUT_MESSAGE);
+    await vi.advanceTimersByTimeAsync(ADVISOR_STREAM_TIMEOUT_MS + 1);
+    await expectation;
   });
 
   it("assembles tokens on the happy path", async () => {

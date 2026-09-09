@@ -52,8 +52,11 @@ changelog rebuilds itself from the first release cut after this baseline.
   unreachable backend, an empty completion, or an SSE error
   becomes a visible assistant error instead of a blank bubble.
   Empty assistant placeholders are no longer persisted, so a
-  reload cannot restore the silent blank. Native broker freeze is
-  excluded. MF Optimizer and AI suggestions + deploy are unchanged.
+  reload cannot restore the silent blank. The 45-second stream
+  budget is first-token only: once a token arrives, a longer
+  healthy completion is not aborted mid-reply. Native broker
+  freeze is excluded. MF Optimizer and AI suggestions + deploy
+  are unchanged.
 
 - **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
   Setup Step 2/7 now has an obvious **Explore first — continue without

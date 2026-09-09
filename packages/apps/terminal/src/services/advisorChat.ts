@@ -47,7 +47,12 @@ export interface AdvisorChatRequest {
 function combineAbortSignals(
   parent: AbortSignal | undefined,
   timeoutMs: number,
-): { signal: AbortSignal; cleanup: () => void; timedOut: () => boolean } {
+): {
+  signal: AbortSignal;
+  cleanup: () => void;
+  clearTimer: () => void;
+  timedOut: () => boolean;
+} {
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -59,11 +64,15 @@ function combineAbortSignals(
   };
   parent?.addEventListener("abort", onAbort);
   if (parent?.aborted) controller.abort();
+  const clearTimer = (): void => {
+    clearTimeout(timer);
+  };
   return {
     signal: controller.signal,
     timedOut: () => timedOut,
+    clearTimer,
     cleanup: () => {
-      clearTimeout(timer);
+      clearTimer();
       parent?.removeEventListener("abort", onAbort);
     },
   };
@@ -205,7 +214,10 @@ export async function streamAdvisorChat(request: AdvisorChatRequest): Promise<st
     if (!resp.body) {
       throw new Error("No readable stream in response");
     }
-    return await consumeAdvisorSse(resp.body, request.onToken);
+    return await consumeAdvisorSse(resp.body, (token, fullText) => {
+      gated.clearTimer();
+      request.onToken?.(token, fullText);
+    });
   } catch (err) {
     if (gated.timedOut()) {
       throw new Error(ADVISOR_TIMEOUT_MESSAGE);
