@@ -58,7 +58,7 @@ peerDependencyRules:
     '@napi-rs/wasm-runtime>@emnapi/core': '1'
     '@napi-rs/wasm-runtime>@emnapi/runtime': '1'
 
-# These seventeen entries are now the only copy: the duplicate "pnpm.overrides"
+# These twenty entries are now the only copy: the duplicate "pnpm.overrides"
 # block in package.json was removed in the pnpm 10 migration, so this block is
 # what pnpm actually resolves against. Nothing cross-checks it any more - the
 # lockfile's own `overrides:` header is the audit trail, and an entry deleted
@@ -134,3 +134,11 @@ overrides:
   # electron-builder's plist@3.1.0 still requests. 0.8.15 is the patched
   # release for that line (0.9.12 is the 0.9 equivalent).
   '@xmldom/xmldom': 0.8.15
+  # GHSA-4mjr-xmp4-gh2g / CVE-2026-82417 (attacker-controlled isBuffer DoS)
+  # and GHSA-px8p / CVE-2026-82562 (arrayLimit bypass on []= comma groups):
+  # both patched in 6.16.0. union@0.5.0 (via http-server) still requests 6.15.2.
+  qs: 6.16.0
+  # GHSA-x5fp / CVE-2026-45820: ZIP64 unzipSync infinite loop. Affected
+  # 0.6.0-0.6.10; 0.6.11 is the 0.6-line backport (0.8.3 is already in the
+  # tree via @types/three). three-stdlib still requests 0.6.10.
+  'fflate@<0.6.11': 0.6.11
