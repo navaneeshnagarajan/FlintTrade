@@ -12,6 +12,11 @@
 # Uninstall:
 #   irm https://flinttrade.vercel.app/uninstall.ps1 | iex
 #
+# Public-site origin used in help/uninstall examples:
+#   1. FLINTTRADE_SITE_URL (Hostinger / custom-domain override)
+#   2. The https origin this script was fetched from, when recoverable
+#   3. https://flinttrade.vercel.app
+#
 # Written for stock Windows PowerShell 5.1: no '&&', no ternary, no '??'.
 
 param(
@@ -32,7 +37,56 @@ $ArchiveBaseUrl = "https://codeload.github.com/$RepoSlug/zip"
 $DefaultBranch = "main"
 $PinnedPnpmVersion = "10.34.5"
 $BackendUrl = "http://127.0.0.1:5100"
-$UninstallCommand = "irm https://flinttrade.vercel.app/uninstall.ps1 | iex"
+$CanonicalSiteOrigin = "https://flinttrade.vercel.app"
+
+function Get-FlintTradeNormalisedSiteOrigin {
+    param([string]$Raw)
+    if ([string]::IsNullOrWhiteSpace($Raw)) {
+        return $null
+    }
+    $trimmed = $Raw.Trim().TrimEnd('/')
+    if ($trimmed -notmatch '^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d{1,5})?$') {
+        return $null
+    }
+    return $trimmed
+}
+
+function Get-FlintTradeSiteOrigin {
+    $fromEnv = Get-FlintTradeNormalisedSiteOrigin $env:FLINTTRADE_SITE_URL
+    if ($fromEnv) {
+        return $fromEnv
+    }
+
+    $cmd = $null
+    try {
+        $proc = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop
+        $cmd = $proc.CommandLine
+        if (-not $cmd -and $proc.ParentProcessId) {
+            $parent = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$($proc.ParentProcessId)" -ErrorAction Stop
+            $cmd = $parent.CommandLine
+        }
+    } catch {
+        $cmd = $null
+    }
+
+    if ($cmd) {
+        $match = [regex]::Match($cmd, 'https://[A-Za-z0-9._:-]+/(?:web-install|install|uninstall)\.ps1')
+        if ($match.Success) {
+            $hostPart = ($match.Value -replace '^https://', '') -replace '/.*$', ''
+            $blocked = @('raw.githubusercontent.com', 'github.com', 'api.github.com', 'codeload.github.com')
+            if ($blocked -notcontains $hostPart) {
+                $inferred = Get-FlintTradeNormalisedSiteOrigin ("https://" + $hostPart)
+                if ($inferred) {
+                    return $inferred
+                }
+            }
+        }
+    }
+
+    return $CanonicalSiteOrigin
+}
+
+$UninstallCommand = "irm $(Get-FlintTradeSiteOrigin)/uninstall.ps1 | iex"
 $ManagedRoot = Join-Path $HOME ".flinttrade"
 $ToolsRoot = Join-Path $ManagedRoot "tools"
 # The Electron desktop shell resolves exactly these two paths
@@ -180,7 +234,13 @@ Flags:
 
 Environment overrides:
   FLINTTRADE_REF, FLINTTRADE_WEB_SRC_DIR, FLINTTRADE_YES,
-  FLINTTRADE_DRY_RUN, FLINTTRADE_NO_LAUNCH
+  FLINTTRADE_DRY_RUN, FLINTTRADE_NO_LAUNCH, FLINTTRADE_SITE_URL
+
+  FLINTTRADE_SITE_URL is the public https origin used in help/uninstall
+  examples on a custom domain. A piped irm|iex cannot always see the
+  URL it was fetched from; set this on the machine running the installer
+  if the printed uninstall command should use that origin. Otherwise it
+  falls back to $CanonicalSiteOrigin.
 
   FLINTTRADE_SRC_DIR is a deprecated fallback for FLINTTRADE_WEB_SRC_DIR here.
   flinttrade-install.ps1 reads it as the contributor source-build checkout, so
@@ -188,7 +248,7 @@ Environment overrides:
   that only that variable supplied.
 
 Uninstall:
-  irm https://flinttrade.vercel.app/uninstall.ps1 | iex
+  irm $(Get-FlintTradeSiteOrigin)/uninstall.ps1 | iex
 "@
 }
 

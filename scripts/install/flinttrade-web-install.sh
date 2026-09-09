@@ -12,6 +12,11 @@
 #
 # Uninstall:
 #   curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash
+#
+# Public-site origin used in help/uninstall examples:
+#   1. FLINTTRADE_SITE_URL (Hostinger / custom-domain override)
+#   2. The https origin this script was fetched from, when recoverable
+#   3. https://flinttrade.vercel.app
 
 set -euo pipefail
 
@@ -21,7 +26,79 @@ ARCHIVE_BASE_URL="https://codeload.github.com/$REPO_SLUG/zip"
 DEFAULT_BRANCH="main"
 PINNED_PNPM_VERSION="10.34.5"
 BACKEND_URL="http://127.0.0.1:5100"
-UNINSTALL_COMMAND="curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash"
+CANONICAL_SITE_ORIGIN="https://flinttrade.vercel.app"
+
+flinttrade_normalise_site_origin() {
+  local raw="${1:-}"
+  raw="${raw#"${raw%%[![:space:]]*}"}"
+  raw="${raw%"${raw##*[![:space:]]}"}"
+  [ -n "$raw" ] || return 1
+  case "$raw" in
+    https://*/) raw="${raw%/}" ;;
+    https://*) ;;
+    *) return 1 ;;
+  esac
+  case "$raw" in
+    *'?'*|*#*|*@*|https://*/*) return 1 ;;
+  esac
+  printf '%s' "$raw"
+}
+
+flinttrade_first_site_script_url() {
+  local token
+  for token in $1; do
+    case "$token" in
+      https://*/web-install.sh|https://*/web-install.ps1|https://*/install.sh|https://*/install.ps1|https://*/uninstall.sh|https://*/uninstall.ps1)
+        printf '%s' "$token"
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+flinttrade_infer_site_origin_from_parent() {
+  local cmd="" url="" host_part pgid
+  if [ -r "/proc/${PPID}/cmdline" ]; then
+    cmd="$(tr '\0' ' ' < "/proc/${PPID}/cmdline" 2>/dev/null || true)"
+  fi
+  if [ -z "$cmd" ] && command -v ps >/dev/null 2>&1; then
+    cmd="$(ps -o command= -p "${PPID}" 2>/dev/null || true)"
+  fi
+  url="$(flinttrade_first_site_script_url "$cmd" || true)"
+  # curl|bash puts curl in the same process group as this shell, not as PPID.
+  if [ -z "$url" ] && command -v ps >/dev/null 2>&1; then
+    pgid="$(ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ' || true)"
+    if [ -n "$pgid" ]; then
+      cmd="$(ps -ao pgid=,args= 2>/dev/null | awk -v pgid="$pgid" '$1==pgid { $1=""; print substr($0,2) }' || true)"
+      url="$(flinttrade_first_site_script_url "$cmd" || true)"
+    fi
+  fi
+  [ -n "$url" ] || return 1
+  host_part="${url#https://}"
+  host_part="${host_part%%/*}"
+  case "$host_part" in
+    raw.githubusercontent.com|github.com|api.github.com|codeload.github.com) return 1 ;;
+  esac
+  flinttrade_normalise_site_origin "https://${host_part}"
+}
+
+flinttrade_site_origin() {
+  local configured inferred
+  configured="$(flinttrade_normalise_site_origin "${FLINTTRADE_SITE_URL:-}" || true)"
+  if [ -n "$configured" ]; then
+    printf '%s' "$configured"
+    return 0
+  fi
+  inferred="$(flinttrade_infer_site_origin_from_parent || true)"
+  if [ -n "$inferred" ]; then
+    printf '%s' "$inferred"
+    return 0
+  fi
+  printf '%s' "$CANONICAL_SITE_ORIGIN"
+}
+
+UNINSTALL_COMMAND="curl -fsSL $(flinttrade_site_origin)/uninstall.sh | bash"
 MANAGED_ROOT="$HOME/.flinttrade"
 TOOLS_ROOT="$MANAGED_ROOT/tools"
 # The Electron desktop shell resolves exactly these two paths
@@ -126,7 +203,9 @@ need() { command -v "$1" >/dev/null 2>&1; }
 lowercase() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 usage() {
-  cat <<'USAGE'
+  local origin
+  origin="$(flinttrade_site_origin)"
+  cat <<USAGE
 FlintTrade one-line web-app installer (macOS + Linux)
 
 Provisions a verified uv + Node toolchain, builds FlintTrade from a managed
@@ -154,7 +233,13 @@ Flags:
 
 Environment overrides:
   FLINTTRADE_REF, FLINTTRADE_WEB_SRC_DIR, FLINTTRADE_YES,
-  FLINTTRADE_DRY_RUN, FLINTTRADE_NO_LAUNCH
+  FLINTTRADE_DRY_RUN, FLINTTRADE_NO_LAUNCH, FLINTTRADE_SITE_URL
+
+  FLINTTRADE_SITE_URL is the public https origin used in help/uninstall
+  examples on a custom domain. A piped curl|bash cannot always see the
+  URL it was fetched from; set this on the machine running the installer
+  if the printed uninstall command should use that origin. Otherwise it
+  falls back to ${CANONICAL_SITE_ORIGIN}.
 
   FLINTTRADE_SRC_DIR is a deprecated fallback for FLINTTRADE_WEB_SRC_DIR here.
   flinttrade-install.sh reads it as the contributor source-build checkout, so
@@ -162,7 +247,7 @@ Environment overrides:
   that only that variable supplied.
 
 Uninstall:
-  curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash
+  curl -fsSL ${origin}/uninstall.sh | bash
 USAGE
 }
 
@@ -225,7 +310,7 @@ detect_target() {
     Darwin) os=darwin ;;
     Linux) os=linux ;;
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
-      die "This is the POSIX installer. On Windows 10/11 run: irm https://flinttrade.vercel.app/web-install.ps1 | iex"
+      die "This is the POSIX installer. On Windows 10/11 run: irm $(flinttrade_site_origin)/web-install.ps1 | iex"
       ;;
     *)
       die "Unsupported operating system '$kernel'. FlintTrade publishes verified tools for macOS, Linux and Windows 10/11 only."

@@ -35,12 +35,10 @@ describe('Electron source-bootstrap website copy', () => {
     expect(home).toContain('Install the web app');
     expect(home).toContain('WEB_INSTALL_COMMANDS');
     expect(download).toContain('WEB_INSTALL_COMMANDS');
-    expect(webInstallCommands).toContain(
-      'curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash',
-    );
-    expect(webInstallCommands).toContain(
-      'irm https://flinttrade.vercel.app/web-install.ps1 | iex',
-    );
+    expect(webInstallCommands).toContain('https://flinttrade.vercel.app');
+    expect(webInstallCommands).toContain('export function webInstallCommands');
+    expect(webInstallCommands).toContain('web-install.sh | bash');
+    expect(webInstallCommands).toContain('web-install.ps1 | iex');
     expect(home).toContain('Electron installer pending');
     expect(home).toContain('href="/docs/desktop"');
   });

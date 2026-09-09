@@ -8,6 +8,7 @@
     "dev": "next dev --port 3000",
     "prebuild": "npm run generate:content && npm run generate:demo",
     "build": "next build --webpack && node scripts/audit-scroll-world-bundle.mjs",
+    "start": "next start",
     "pretypecheck": "npm run generate:content",
     "typecheck": "tsc --noEmit",
     "pretest": "npm run generate:content",

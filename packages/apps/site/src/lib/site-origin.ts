@@ -1,12 +1,22 @@
 /**
- * Public site origin for copy-paste snippets (MCP URL, and similar).
+ * Public site origin for copy-paste snippets (MCP URL, install commands).
  *
- * Request Host / X-Forwarded-Host are only used when they are an explicit
- * allow-listed host. Anything else falls back to VERCEL_URL, then the
- * canonical production origin.
+ * Precedence:
+ *   1. Request Host / X-Forwarded-Host, only when the host is allow-listed
+ *   2. FLINTTRADE_SITE_URL, then NEXT_PUBLIC_SITE_URL (primary public origin)
+ *   3. VERCEL_URL
+ *   4. The canonical production origin (https://flinttrade.vercel.app)
+ *
+ * Request hosts (and CSP-report Origin headers) are trusted when they are
+ * loopback, the canonical host, the exact VERCEL_URL host, or a host from
+ * FLINTTRADE_SITE_URL / NEXT_PUBLIC_SITE_URL / FLINTTRADE_SITE_ORIGINS. The
+ * last of those is an extra allow-list only — it never becomes the fallback
+ * origin. FLINTTRADE_SITE_ORIGIN remains a legacy extra CSP allow-origin.
  */
 
 export const CANONICAL_SITE_ORIGIN = 'https://flinttrade.vercel.app';
+
+export const SITE_URL_ENV_KEYS = ['FLINTTRADE_SITE_URL', 'NEXT_PUBLIC_SITE_URL'] as const;
 
 export interface SiteOriginRequestHints {
   host?: string | null;
@@ -16,6 +26,10 @@ export interface SiteOriginRequestHints {
 
 export interface SiteOriginEnvHints {
   VERCEL_URL?: string;
+  FLINTTRADE_SITE_URL?: string;
+  NEXT_PUBLIC_SITE_URL?: string;
+  FLINTTRADE_SITE_ORIGINS?: string;
+  FLINTTRADE_SITE_ORIGIN?: string;
 }
 
 interface ParsedHost {
@@ -75,6 +89,87 @@ function isLoopback(hostname: string): boolean {
   return host === 'localhost' || host === '127.0.0.1' || host === '::1';
 }
 
+/**
+ * Parse an operator-configured public origin.
+ *
+ * Accepts a bare `https://host` (optional trailing slash). HTTP is allowed only
+ * for loopback. Paths, query strings, credentials, and hashes are rejected so a
+ * mistyped env var cannot leak into copy-paste install or MCP URLs.
+ */
+function parseConfiguredOrigin(raw?: string): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (url.username || url.password) {
+    return null;
+  }
+  if (url.search !== '' || url.hash !== '') {
+    return null;
+  }
+  if (url.pathname !== '/' && url.pathname !== '') {
+    return null;
+  }
+  if (!url.hostname) {
+    return null;
+  }
+  const loopback = isLoopback(url.hostname);
+  if (loopback) {
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return null;
+    }
+  } else if (url.protocol !== 'https:') {
+    return null;
+  }
+  return url.origin;
+}
+
+export function configuredSiteOriginFromEnv(env?: SiteOriginEnvHints): string | null {
+  for (const key of SITE_URL_ENV_KEYS) {
+    const parsed = parseConfiguredOrigin(env?.[key]);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+/**
+ * Extra Hostinger / custom-domain hosts that may appear on the request.
+ *
+ * `FLINTTRADE_SITE_ORIGINS` is a comma-separated list of bare https origins.
+ * It extends the request allow-list only; the fallback origin stays
+ * `FLINTTRADE_SITE_URL` / `NEXT_PUBLIC_SITE_URL`.
+ */
+export function configuredAllowlistedOrigins(env?: SiteOriginEnvHints): string[] {
+  const origins: string[] = [];
+  const seen = new Set<string>();
+  const add = (origin: string | null): void => {
+    if (!origin) {
+      return;
+    }
+    const key = origin.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    origins.push(origin);
+  };
+  for (const key of SITE_URL_ENV_KEYS) {
+    add(parseConfiguredOrigin(env?.[key]));
+  }
+  for (const part of (env?.FLINTTRADE_SITE_ORIGINS ?? '').split(',')) {
+    add(parseConfiguredOrigin(part));
+  }
+  return origins;
+}
+
 function isAllowedHost(hostname: string, env?: SiteOriginEnvHints): boolean {
   const host = hostname.toLowerCase();
   if (isLoopback(host)) {
@@ -82,6 +177,11 @@ function isAllowedHost(hostname: string, env?: SiteOriginEnvHints): boolean {
   }
   if (host === canonicalHostname()) {
     return true;
+  }
+  for (const origin of configuredAllowlistedOrigins(env)) {
+    if (new URL(origin).hostname.toLowerCase() === host) {
+      return true;
+    }
   }
   const vercelHost = vercelEnvHost(env)?.hostname.toLowerCase();
   if (vercelHost && host === vercelHost) {
@@ -97,6 +197,79 @@ function originFromParsed(parsed: ParsedHost, protoHint?: string | null): string
     return `${proto}://${parsed.authority}`;
   }
   return `https://${parsed.authority}`;
+}
+
+export function processEnvSiteHints(
+  environment: NodeJS.ProcessEnv = process.env,
+): SiteOriginEnvHints {
+  return {
+    VERCEL_URL: environment.VERCEL_URL,
+    FLINTTRADE_SITE_URL: environment.FLINTTRADE_SITE_URL,
+    NEXT_PUBLIC_SITE_URL: environment.NEXT_PUBLIC_SITE_URL,
+    FLINTTRADE_SITE_ORIGINS: environment.FLINTTRADE_SITE_ORIGINS,
+    FLINTTRADE_SITE_ORIGIN: environment.FLINTTRADE_SITE_ORIGIN,
+  };
+}
+
+/**
+ * Whether a browser Origin header is on the site allow-list.
+ *
+ * Used by `/api/csp-report` so a documented cutover alias
+ * (`FLINTTRADE_SITE_ORIGINS`) is not 403'd while `FLINTTRADE_SITE_URL` stays
+ * the apex fallback. The legacy `FLINTTRADE_SITE_ORIGIN` remains an extra
+ * accepted origin when set.
+ */
+export function isAllowedSiteOrigin(origin: string, env?: SiteOriginEnvHints): boolean {
+  const trimmed = origin.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return false;
+  }
+  if (url.username || url.password) {
+    return false;
+  }
+  if (url.search !== '' || url.hash !== '') {
+    return false;
+  }
+  if (url.pathname !== '/' && url.pathname !== '') {
+    return false;
+  }
+
+  const loopback = isLoopback(url.hostname);
+  if (loopback) {
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  }
+  if (url.protocol !== 'https:') {
+    return false;
+  }
+  if (isAllowedHost(url.hostname, env)) {
+    return true;
+  }
+
+  const legacyRaw = env?.FLINTTRADE_SITE_ORIGIN?.trim().replace(/\/+$/, '');
+  if (!legacyRaw) {
+    return false;
+  }
+  const legacyParsed = parseConfiguredOrigin(legacyRaw);
+  if (legacyParsed && legacyParsed.toLowerCase() === url.origin.toLowerCase()) {
+    return true;
+  }
+  return legacyRaw === url.origin || legacyRaw === trimmed.replace(/\/+$/, '');
+}
+
+/**
+ * Build-time / metadata origin: env override, then the canonical fallback.
+ *
+ * There is no request at `metadataBase` evaluation, so this never consults Host.
+ */
+export function siteMetadataOrigin(env?: SiteOriginEnvHints): string {
+  return configuredSiteOriginFromEnv(env ?? processEnvSiteHints()) ?? CANONICAL_SITE_ORIGIN;
 }
 
 export function siteOriginFrom(
@@ -119,6 +292,11 @@ export function siteOriginFrom(
     return originFromParsed(directHost, request?.forwardedProto);
   }
 
+  const configured = configuredSiteOriginFromEnv(env);
+  if (configured) {
+    return configured;
+  }
+
   const vercelHost = vercelEnvHost(env);
   if (vercelHost) {
     return originFromParsed(vercelHost, 'https');
@@ -131,6 +309,7 @@ export function hostedMcpUrl(origin: string): string {
 }
 
 export async function resolveSiteOrigin(): Promise<string> {
+  const env = processEnvSiteHints();
   try {
     const { headers } = await import('next/headers');
     const requestHeaders = await headers();
@@ -140,9 +319,9 @@ export async function resolveSiteOrigin(): Promise<string> {
         forwardedHost: requestHeaders.get('x-forwarded-host'),
         forwardedProto: requestHeaders.get('x-forwarded-proto'),
       },
-      { VERCEL_URL: process.env.VERCEL_URL },
+      env,
     );
   } catch {
-    return siteOriginFrom(undefined, { VERCEL_URL: process.env.VERCEL_URL });
+    return siteOriginFrom(undefined, env);
   }
 }

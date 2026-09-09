@@ -3,7 +3,13 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { CANONICAL_SITE_ORIGIN, hostedMcpUrl, siteOriginFrom } from './site-origin';
+import {
+  CANONICAL_SITE_ORIGIN,
+  hostedMcpUrl,
+  isAllowedSiteOrigin,
+  siteMetadataOrigin,
+  siteOriginFrom,
+} from './site-origin';
 
 describe('site origin', () => {
   it('prefers the forwarded host and proto from the request', () => {
@@ -25,6 +31,68 @@ describe('site origin', () => {
       'https://preview.vercel.app',
     );
     expect(siteOriginFrom()).toBe(CANONICAL_SITE_ORIGIN);
+  });
+
+  it('falls back to FLINTTRADE_SITE_URL when the request host is not allow-listed', () => {
+    const configured = 'https://hosted.example';
+    expect(
+      siteOriginFrom(
+        { host: 'evil.example' },
+        { FLINTTRADE_SITE_URL: configured, VERCEL_URL: 'preview.vercel.app' },
+      ),
+    ).toBe(configured);
+    expect(siteMetadataOrigin({ FLINTTRADE_SITE_URL: `${configured}/` })).toBe(configured);
+  });
+
+  it('accepts NEXT_PUBLIC_SITE_URL when FLINTTRADE_SITE_URL is unset', () => {
+    const configured = 'https://hosted.example';
+    expect(siteOriginFrom(undefined, { NEXT_PUBLIC_SITE_URL: configured })).toBe(configured);
+    expect(siteMetadataOrigin({ NEXT_PUBLIC_SITE_URL: configured })).toBe(configured);
+  });
+
+  it('ignores an env origin that is not a bare https origin', () => {
+    expect(
+      siteOriginFrom({ host: 'localhost:3000' }, { FLINTTRADE_SITE_URL: 'https://hosted.example/docs' }),
+    ).toBe('http://localhost:3000');
+    expect(siteMetadataOrigin({ FLINTTRADE_SITE_URL: 'http://hosted.example' })).toBe(
+      CANONICAL_SITE_ORIGIN,
+    );
+  });
+
+  it('trusts a request host that matches FLINTTRADE_SITE_URL instead of forcing the env origin', () => {
+    expect(
+      siteOriginFrom(
+        { host: 'hosted.example', forwardedProto: 'https' },
+        { FLINTTRADE_SITE_URL: 'https://hosted.example' },
+      ),
+    ).toBe('https://hosted.example');
+    expect(
+      siteOriginFrom(
+        { host: 'localhost:3000' },
+        { FLINTTRADE_SITE_URL: 'https://hosted.example' },
+      ),
+    ).toBe('http://localhost:3000');
+  });
+
+  it('allow-lists extra request hosts from FLINTTRADE_SITE_ORIGINS', () => {
+    expect(
+      siteOriginFrom(
+        { host: 'www.hosted.example', forwardedProto: 'https' },
+        {
+          FLINTTRADE_SITE_URL: 'https://hosted.example',
+          FLINTTRADE_SITE_ORIGINS: 'https://www.hosted.example, https://cdn.hosted.example',
+        },
+      ),
+    ).toBe('https://www.hosted.example');
+    expect(
+      siteOriginFrom(
+        { host: 'www.hosted.example' },
+        { FLINTTRADE_SITE_ORIGINS: 'https://www.hosted.example' },
+      ),
+    ).toBe('https://www.hosted.example');
+    expect(
+      siteOriginFrom(undefined, { FLINTTRADE_SITE_ORIGINS: 'https://www.hosted.example' }),
+    ).toBe(CANONICAL_SITE_ORIGIN);
   });
 
   it('builds a copy-pasteable MCP URL', () => {
@@ -134,5 +202,42 @@ describe('hosted MCP snippet copy', () => {
     expect(mcp).toContain('hostedMcpUrl');
     expect(home).toContain('resolveSiteOrigin');
     expect(mcp).toContain('resolveSiteOrigin');
+  });
+});
+
+describe('isAllowedSiteOrigin', () => {
+  const hosted = {
+    FLINTTRADE_SITE_URL: 'https://hosted.example',
+    FLINTTRADE_SITE_ORIGINS: 'https://www.hosted.example, https://cdn.hosted.example',
+  };
+
+  it('accepts every configured allow-list origin, not only the primary fallback', () => {
+    expect(isAllowedSiteOrigin('https://hosted.example', hosted)).toBe(true);
+    expect(isAllowedSiteOrigin('https://www.hosted.example', hosted)).toBe(true);
+    expect(isAllowedSiteOrigin('https://cdn.hosted.example', hosted)).toBe(true);
+  });
+
+  it('accepts the canonical host, loopback, and the exact VERCEL_URL origin', () => {
+    expect(isAllowedSiteOrigin(CANONICAL_SITE_ORIGIN)).toBe(true);
+    expect(isAllowedSiteOrigin('http://127.0.0.1:3000')).toBe(true);
+    expect(isAllowedSiteOrigin('http://localhost:3001')).toBe(true);
+    expect(
+      isAllowedSiteOrigin('https://preview-abc.vercel.app', { VERCEL_URL: 'preview-abc.vercel.app' }),
+    ).toBe(true);
+  });
+
+  it('still accepts the legacy FLINTTRADE_SITE_ORIGIN when a primary URL is also set', () => {
+    expect(
+      isAllowedSiteOrigin('https://legacy.example', {
+        FLINTTRADE_SITE_URL: 'https://hosted.example',
+        FLINTTRADE_SITE_ORIGIN: 'https://legacy.example',
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects foreign origins and http on a public host', () => {
+    expect(isAllowedSiteOrigin('https://evil.example', hosted)).toBe(false);
+    expect(isAllowedSiteOrigin('http://hosted.example', hosted)).toBe(false);
+    expect(isAllowedSiteOrigin('https://attacker-project.vercel.app')).toBe(false);
   });
 });
