@@ -11,22 +11,46 @@ regulatory responsibilities remain with the operator and their broker.
 
 ## Order-Gating Model
 
-Every order-capable path must pass through the same safety gate before it can
-reach a broker adapter or the OpenAlgo-compatible bridge:
+Every reachable live write must mint a one-shot HMAC `SafetyContext` and
+dispatch through `BrokerRouter`. A route, widget, automation, webhook, agent,
+or script must not call a broker adapter or `OpenAlgoClient.place_order`
+directly. Placement, regular modify/cancel, and extended verbs use different
+gates — pick the matching one.
+
+**Placement** (new orders, including webhook, strategy, and smart-order
+place):
 
 1. `SafetySystem.check_order` runs the L5 → L4 → L1 → L2 → L3 layers
    against the intended order (kill switch, daily P&L, field validation,
    position limits, portfolio risk).
-2. `gate_order` then mints the one-shot HMAC `SafetyContext` bound to that
-   order and the selector-bound principal. It does not re-run the layer
-   checks.
-3. `BrokerRouter` receives only gated requests (re-HMAC, field match,
-   account ACL, one-shot consume).
-4. Broker adapters and `OpenAlgoClient.place_order` remain downstream of the
+2. `gate_order` then mints the `SafetyContext` bound to that order and the
+   selector-bound principal. It does not re-run the layer checks.
+3. `BrokerRouter.place_order` re-HMACs, matches fields, applies the account
+   ACL, and consumes the one-shot gate.
+
+**Regular modify and cancel:**
+
+1. Ordinary modify and cancel are blocked while Layer 5 is latched. A
+   cancellation can remove a protective exit, so it is not exempt.
+2. A risk-increasing modify also runs `SafetySystem.check_order` on the
+   proposed order. A proven no-increase modify and a cancel skip that chain.
+3. `gate_order` mints the `SafetyContext` over the canonical fingerprint
+   (`_op` is `modify` or `cancel`).
+4. `BrokerRouter.modify_order` / `cancel_order` re-verify and consume the
    gate.
 
-New integrations must preserve this flow. A route, widget, automation, webhook,
-agent, or script must not call a broker adapter directly.
+**Extended verbs** (forever/GTT, super-order, conditional trigger, convert,
+exit-all, reducing, multi, cancel-all, smart-cancel):
+
+1. Risk-increasing legs still run `SafetySystem.check_order` where the
+   route admits exposure.
+2. `gate_broker_write` mints the `SafetyContext` (it delegates to
+   `gate_order`, which remains the sole mint). The verb must be listed in
+   `GATED_WRITE_VERBS` and `payload["_op"]` must equal the verb.
+3. `BrokerRouter.execute_gated` re-verifies and dispatches.
+
+New integrations must preserve this split. Do not invent a third path, and
+do not send an extended verb through `gate_order` alone.
 
 ## Unknown Broker Outcomes
 
@@ -195,6 +219,7 @@ Before enabling live-mode order routing:
 3. Configure broker-side safeguards such as order limits, account limits, and
    manual approval controls where available.
 4. Keep broker credentials, API keys, and personal network details out of Git.
-5. Confirm that every enabled automation still routes through `gate_order`.
+5. Confirm that every enabled automation still routes through `gate_order`
+   or `gate_broker_write`.
 6. Treat FlintTrade as local software for your own account, not as an investment
    service for others.
