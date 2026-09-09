@@ -402,19 +402,25 @@ class _CodexAppServerClient:
         rid = self._take_id()
         fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[rid] = fut
-        await self._send({"id": rid, "method": method, "params": params or {}})
         try:
+            await self._send({"id": rid, "method": method, "params": params or {}})
             msg = await asyncio.wait_for(fut, timeout)
         except TimeoutError as exc:
-            self._pending.pop(rid, None)
             raise TimeoutError(
                 f"codex app-server method {method!r} timed out after {timeout}s"
             ) from exc
+        finally:
+            self._pending.pop(rid, None)
+            if not fut.done():
+                fut.cancel()
         if "error" in msg:
-            err = msg.get("error") or {}
+            err = msg["error"]
+            if (type(err) is not dict or type(err.get("code")) is not int
+                    or type(err.get("message")) is not str):
+                raise CodexAppServerError(code=-32603, message="Malformed JSON-RPC error response")
             raise CodexAppServerError(
-                code=int(err.get("code", -1)),
-                message=str(err.get("message", "")),
+                code=err["code"],
+                message=err["message"],
                 data=err.get("data"),
             )
         return msg.get("result") or {}
@@ -768,7 +774,7 @@ class CodexAppServerSession(AgentSession):
                 windows["plan_type"] = plan if type(plan) is str and len(plan) <= 128 else None
                 buckets[key] = windows
             return {"status": "available" if buckets else "unknown", "buckets": buckets}
-        except (CodexAppServerError, TimeoutError, RuntimeError, ValueError, TypeError, OverflowError):
+        except (CodexAppServerError, OSError, TimeoutError, RuntimeError, ValueError, TypeError, OverflowError):
             return {"status": "unknown", "buckets": {}}
 
     async def ensure_started(self) -> None:

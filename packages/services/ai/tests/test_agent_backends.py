@@ -492,6 +492,29 @@ class _CatalogCodexServer(_FakeCodexServer):
             super()._on_client_line(line)
 
 
+@pytest.mark.parametrize("fault", ["error_list", "error_code", "broken_pipe"])
+async def test_codex_quota_faults_are_unknown_without_leaked_pending_requests(fault):
+    class FaultServer(_CatalogCodexServer):
+        def _on_client_line(self, line):
+            msg = json.loads(line)
+            if msg.get("method") != "account/rateLimits/read":
+                return super()._on_client_line(line)
+            self.received.append(msg)
+            if fault == "broken_pipe":
+                raise BrokenPipeError("synthetic closed pipe")
+            error = ["malformed"] if fault == "error_list" else {"code": [], "message": "invalid"}
+            self._feed({"id": msg["id"], "error": error})
+
+    server = FaultServer()
+    session = CodexAppServerSession(spawn=server.spawn)
+    try:
+        assert await session.read_rate_limits() == {"status": "unknown", "buckets": {}}
+        assert session._client._pending == {}
+        assert not any(m.get("method") in {"thread/start", "turn/start"} for m in server.received)
+    finally:
+        await session.close()
+
+
 async def test_codex_explicit_model_and_effort_are_verified_and_sent_on_wire():
     server = _CatalogCodexServer()
     async with CodexAppServerSession(spawn=server.spawn, model="fixture-model", reasoning_effort="low") as session:
