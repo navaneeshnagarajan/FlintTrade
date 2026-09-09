@@ -128,16 +128,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Security
 
-- **Tracking: CodeQL `py/clear-text-logging-sensitive-data` in service-connection
-  tests.** Alerts
+- **Clear-text secret logging in service-connection tests.** CodeQL
+  `py/clear-text-logging-sensitive-data` alerts
   [#420](https://github.com/navaneeshnagarajan/FlintTrade/security/code-scanning/420)
   and
   [#421](https://github.com/navaneeshnagarajan/FlintTrade/security/code-scanning/421)
-  flag `packages/core/core/tests/test_service_connections.py` (lines 653–654)
-  for logging secret material as clear text. Likely introduced with #170.
-  Development should scrub or redact those log/assert paths so the redaction
-  contract stays without passing secret objects to the logger. This entry only
-  opens the tracking PR; it is not the product fix.
+  flagged `packages/core/core/tests/test_service_connections.py` for passing a
+  `secret_version` object to `logger.debug`. The redaction contract still
+  asserts that binding identity and supplied credential material never appear
+  in `str`/`repr`, public DTOs, exception text, or captured logs; the logger
+  now receives only the masked `ServiceSecretVersion(<redacted>)` fixture.
 
 ## [0.0.1] — 2026-07-23
 
