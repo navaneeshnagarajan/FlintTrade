@@ -188,7 +188,7 @@ export default function LoginRoute({ onSuccess, mode, onExplore }: LoginRoutePro
           <p className="text-sm text-text-muted">
             {mode === "pin"
               ? "Enter your PIN to continue"
-              : "Enter your password. Authenticator 2FA is required after you enrol it, and always before Live."}
+              : "Enter your password and 2FA code"}
           </p>
         </div>
 
@@ -273,7 +273,7 @@ export default function LoginRoute({ onSuccess, mode, onExplore }: LoginRoutePro
             </div>
             <Button
               onClick={handlePasswordLogin}
-              disabled={!password || isLoading}
+              disabled={!password || totpCode.length < 6 || isLoading}
               className="w-full"
             >
               <ShieldCheck className="size-4" />

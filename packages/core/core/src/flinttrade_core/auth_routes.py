@@ -492,9 +492,6 @@ def auth_status() -> tuple[Any, int]:
             "is_setup": svc.is_setup(),
             "is_locked": svc.is_locked(),
             "has_pin": svc.has_pin(),
-            "totp_enrolled": bool(
-                svc.is_totp_enrolled() if hasattr(svc, "is_totp_enrolled") else False
-            ),
         },
     }), 200
 
@@ -604,28 +601,6 @@ def auth_setup_reset() -> tuple[Any, int]:
     return jsonify({"status": "success", "data": {}}), 200
 
 
-@auth_bp.route("/setup/confirm-2fa", methods=["POST"])
-@_rate_limit("10 per minute")
-def auth_setup_confirm_2fa() -> tuple[Any, int]:
-    """Mark TOTP as enrolled after the operator saves the QR and backup codes.
-
-    Requires the Explore session minted by ``/auth/setup``. Live unlock then
-    becomes available; subsequent password logins require a TOTP code.
-    """
-    svc = _get_auth_service()
-    if svc is None:
-        return jsonify({"status": "error", "message": "Auth service not available."}), 503
-    token = _session_token_from_request()
-    if not token:
-        return jsonify({"status": "error", "message": "Authentication required."}), 401
-    verified = _verify_setup_session_token(token)
-    if not isinstance(verified, dict):
-        return verified
-    if not svc.confirm_totp_enrolment():
-        return jsonify({"status": "error", "message": "No account exists to enrol."}), 409
-    return jsonify({"status": "success", "data": {"totp_enrolled": True}}), 200
-
-
 @auth_bp.route("/setup/regenerate-2fa", methods=["POST"])
 @_rate_limit("3 per hour")
 def auth_setup_regenerate_2fa() -> tuple[Any, int]:
@@ -699,16 +674,10 @@ def auth_login() -> tuple[Any, int]:
     if not svc.verify_password(password):
         return jsonify({"status": "error", "message": "Invalid credentials."}), 401
 
-    if svc.is_totp_enrolled():
-        if not totp_code:
-            return jsonify({"status": "error", "message": "2FA code required."}), 401
-        if not svc.verify_totp(totp_code):
-            # Try backup code as fallback
-            if not svc.verify_backup_code(totp_code):
-                return jsonify({"status": "error", "message": "Invalid TOTP code."}), 401
-    elif totp_code:
-        if svc.verify_totp(totp_code) or svc.verify_backup_code(totp_code):
-            svc.confirm_totp_enrolment()
+    if not svc.verify_totp(totp_code):
+        # Try backup code as fallback
+        if not svc.verify_backup_code(totp_code):
+            return jsonify({"status": "error", "message": "Invalid TOTP code."}), 401
 
     profile = svc.get_profile()
     username = str(profile.get("username") or "user")
@@ -789,16 +758,6 @@ def auth_pin_verify() -> tuple[Any, int]:
             "status": "error",
             "message": "mode must be one of 'explore', 'practice', 'live'.",
         }), 400
-
-    if target_mode == "live" and not svc.is_totp_enrolled():
-        return jsonify({
-            "status": "error",
-            "code": "totp_required",
-            "message": (
-                "Authenticator 2FA must be enrolled before Live mode. "
-                "Finish Setup 2FA, or reset 2FA from the sign-in screen, then retry."
-            ),
-        }), 403
 
     if not svc.verify_pin(pin):
         # Distinguish "no PIN exists" from "wrong PIN" — with the optional PIN

@@ -27,13 +27,6 @@ def client(tmp_path, monkeypatch):
             yield c, svc
 
 
-def _enrol_totp(c) -> None:
-    """Confirm wizard 2FA so Live PIN tests keep exercising the enrolled path."""
-    headers = _session_headers()
-    resp = c.post("/v1/auth/setup/confirm-2fa", json={}, headers=headers)
-    assert resp.status_code == 200
-
-
 def _session_headers() -> dict[str, str]:
     """A valid session JWT — /v1/auth/pin is session-bound (policy D6): the
     PIN is a re-auth factor, never a session-minting factor."""
@@ -130,7 +123,6 @@ class TestPinEndpoint:
             "username": "nav", "email": "nav@example.com",
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
-        _enrol_totp(c)
         resp = c.post("/v1/auth/pin", json={"pin": "123456"},
                        headers=_session_headers())
         assert resp.status_code == 200
@@ -141,7 +133,6 @@ class TestPinEndpoint:
             "username": "nav", "email": "nav@example.com",
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
-        _enrol_totp(c)
         resp = c.post("/v1/auth/pin", json={"pin": "000000"},
                        headers=_session_headers())
         assert resp.status_code == 401
@@ -158,7 +149,6 @@ class TestPinEndpoint:
             "username": "nav", "email": "nav@example.com",
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
-        _enrol_totp(c)
         resp = c.post("/v1/auth/pin", json={"pin": "123456"},
                        headers=_session_headers())
         assert resp.status_code == 200
@@ -195,7 +185,6 @@ class TestPinSetEndpoint:
         permanently unreachable with no hint of the fix."""
         c, _ = client
         self._setup_without_pin(c)
-        _enrol_totp(c)
         resp = c.post("/v1/auth/pin", json={"pin": "123456"},
                       headers=_session_headers())
         assert resp.status_code == 409
@@ -248,7 +237,6 @@ class TestPinSetEndpoint:
         live session, then arm Live with it via /v1/auth/pin."""
         c, svc = client
         self._setup_without_pin(c)
-        _enrol_totp(c)
 
         resp = c.post("/v1/auth/pin/set",
                       json={"password": "StrongP@ss123!", "pin": "654321"},
@@ -275,7 +263,6 @@ class TestPinSetEndpoint:
             "username": "nav", "email": "nav@example.com",
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
-        _enrol_totp(c)
 
         resp = c.post("/v1/auth/pin/set",
                       json={"password": "StrongP@ss123!", "pin": "999999"},
@@ -301,7 +288,6 @@ class TestModeSwitchEndpoint:
             "username": "nav", "email": "nav@example.com",
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
-        _enrol_totp(c)
         pin_resp = c.post("/v1/auth/pin", json={"pin": "123456"},
                           headers=_session_headers())
         return pin_resp.get_json()["data"]["token"]
@@ -474,7 +460,6 @@ class TestPinModeParameter:
             "username": "nav", "email": "nav@example.com",
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
-        _enrol_totp(c)
 
     def test_pin_default_mode_is_live(self, client):
         c, _ = client
@@ -562,7 +547,6 @@ class TestRateLimitRegistration:
             "auth_reset_password",
             "auth_setup_reset",
             "auth_setup_regenerate_2fa",
-            "auth_setup_confirm_2fa",
         ):
             assert required in names, (
                 f"Auth view '{required}' is missing the @_rate_limit decorator — "
@@ -652,11 +636,11 @@ class TestGuardsRejectResetTokens:
         assert "full login session" in resp.get_json()["message"].lower()
 
 
-class TestExploreBeforeTotp:
-    """FT-SETUP-001: Explore/Practice may proceed before TOTP enrolment.
+class TestSetupSessionReset:
+    """FT-SETUP-001: Start over / Reset wipes an unfinished account.
 
-    Live still requires enrolment. A setup-session reset wipes an unfinished
-    account so a lost QR seed is recoverable without the TOTP secret.
+    A valid setup session JWT is enough (lost QR seed). A password-reset
+    token is never enough. Daily password+TOTP login and Live PIN are unchanged.
     """
 
     def _setup(self, c):
@@ -666,55 +650,6 @@ class TestExploreBeforeTotp:
             "password": "StrongP@ss123!",
             "pin": "123456",
         }, headers={"Content-Type": "application/json"})
-
-    def test_status_reports_totp_unenrolled_after_setup(self, client):
-        c, _ = client
-        self._setup(c)
-        data = c.get("/v1/auth/status").get_json()["data"]
-        assert data["is_setup"] is True
-        assert data["totp_enrolled"] is False
-
-    def test_login_password_only_when_totp_deferred(self, client):
-        c, _ = client
-        self._setup(c)
-        resp = c.post("/v1/auth/login", json={
-            "password": "StrongP@ss123!",
-        }, headers={"Content-Type": "application/json"})
-        assert resp.status_code == 200
-        token = resp.get_json()["data"]["token"]
-        from flinttrade_core.auth_routes import decode_token
-        payload = decode_token(token)
-        assert payload["mode"] == "explore"
-        assert payload["live_mode_unlocked"] is False
-
-    def test_login_still_requires_totp_after_enrolment(self, client):
-        c, svc = client
-        self._setup(c)
-        token = _session_headers()["Authorization"].split(" ", 1)[1]
-        confirm = c.post(
-            "/v1/auth/setup/confirm-2fa",
-            json={},
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
-        )
-        assert confirm.status_code == 200
-        assert svc.is_totp_enrolled() is True
-        resp = c.post("/v1/auth/login", json={
-            "password": "StrongP@ss123!",
-        }, headers={"Content-Type": "application/json"})
-        assert resp.status_code == 401
-        assert "2fa" in resp.get_json()["message"].lower() or "totp" in resp.get_json()["message"].lower()
-
-    def test_live_pin_refuses_unenrolled_totp(self, client):
-        c, _ = client
-        self._setup(c)
-        resp = c.post(
-            "/v1/auth/pin",
-            json={"pin": "123456", "mode": "live"},
-            headers=_session_headers(),
-        )
-        assert resp.status_code == 403
-        body = resp.get_json()
-        assert body.get("code") == "totp_required"
 
     def test_session_reset_wipes_unfinished_account(self, client):
         c, svc = client

@@ -197,20 +197,10 @@ class TestSetupEscapeHatches:
         assert svc.reset_account("StrongP@ss123!") is True
         assert svc.is_setup() is False
 
-    def test_new_account_defers_totp_enrolment(self, tmp_path: Path):
-        svc = self._fresh(tmp_path)
-        assert svc.is_totp_enrolled() is False
-
-    def test_confirm_totp_enrolment(self, tmp_path: Path):
-        svc = self._fresh(tmp_path)
-        assert svc.confirm_totp_enrolment() is True
-        assert svc.is_totp_enrolled() is True
-
     def test_wipe_account_without_password(self, tmp_path: Path):
         svc = self._fresh(tmp_path)
         svc.wipe_account()
         assert svc.is_setup() is False
-        assert svc.is_totp_enrolled() is False
 
     def test_reset_account_rejects_wrong_password(self, tmp_path: Path):
         svc = self._fresh(tmp_path)

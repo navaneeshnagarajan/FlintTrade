@@ -389,13 +389,12 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET auth/status` | Whether the operator account exists and whether TOTP is enrolled / PIN is configured. |
-| `POST auth/setup` | First-run enrolment. Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri` plus backup codes and an Explore JWT. TOTP starts unenrolled so Explore/Practice can proceed; Live still requires enrolment. It does not accept a caller-supplied TOTP secret. |
-| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Body `{ "password" }` or a valid setup/login session JWT (lost-QR start-over). |
-| `POST auth/setup/confirm-2fa` | Mark authenticator 2FA as enrolled (setup session required). Subsequent password logins then require a TOTP code. |
-| `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret (password re-confirm) and mark 2FA enrolled. |
-| `POST auth/login` | Sign in with password. `totp_code` is required after 2FA is enrolled; before that, password-only mints an Explore JWT. |
-| `POST auth/pin` | Re-authenticate with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin", "mode"? }`. `mode: "live"` mints a Live JWT with `live_mode_unlocked=true` only when TOTP is enrolled. There is no `/auth/me`. |
+| `GET auth/status` | Whether the operator account exists and whether TOTP / PIN are configured. |
+| `POST auth/setup` | First-run enrolment. Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri` plus backup codes and an Explore JWT. It does not accept a caller-supplied TOTP secret. |
+| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Body `{ "password" }`, or a valid setup/login session JWT (lost-QR start-over). |
+| `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret (password re-confirm). |
+| `POST auth/login` | Sign in with password and `totp_code` (argon2id-hashed password). Issues a JWT. |
+| `POST auth/pin` | Re-authenticate with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin", "mode"? }`. `mode: "live"` mints a Live JWT with `live_mode_unlocked=true`. There is no `/auth/me`. |
 | `POST auth/pin/set` | Set or change the PIN (password re-confirm). Requires an existing session JWT. |
 | `POST auth/mode` | **Downgrade only** to `practice` or `explore`. Requires an existing session JWT. Issues a fresh JWT and revokes the old `jti`. Live upgrades must use `POST /v1/auth/pin`. |
 | `POST auth/logout` | Revoke the current JWT by `jti`. Requires an existing session JWT. |

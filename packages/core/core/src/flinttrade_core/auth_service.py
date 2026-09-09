@@ -146,8 +146,7 @@ class AuthService:
                 totp_secret_encrypted BLOB NOT NULL,
                 totp_salt BLOB NOT NULL,
                 created_at TEXT NOT NULL,
-                password_changed_at REAL NOT NULL DEFAULT 0,
-                totp_enrolled INTEGER NOT NULL DEFAULT 0
+                password_changed_at REAL NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS backup_codes (
                 code_hash TEXT PRIMARY KEY,
@@ -169,54 +168,12 @@ class AuthService:
             # Column already exists — fresh installs hit this on the
             # CREATE TABLE path above.
             pass
-        try:
-            # Existing installs already required TOTP at login — keep them
-            # enrolled. New CREATE TABLE rows default to 0 (deferred until
-            # the operator confirms the QR or regenerates 2FA).
-            self._db.execute(
-                "ALTER TABLE account ADD COLUMN totp_enrolled INTEGER NOT NULL DEFAULT 1"
-            )
-        except sqlite3.OperationalError:
-            pass
         self._db.commit()
 
     def is_setup(self) -> bool:
         """Check if the account has been created."""
         row = self._db.execute("SELECT 1 FROM account WHERE id = 1").fetchone()
         return row is not None
-
-    def is_totp_enrolled(self) -> bool:
-        """Return whether authenticator 2FA has been confirmed.
-
-        New accounts start unenrolled so Explore/Practice can proceed before
-        the operator saves the QR. Existing databases migrated in-place
-        default to enrolled so daily login behaviour is unchanged.
-        """
-        try:
-            row = self._db.execute(
-                "SELECT totp_enrolled FROM account WHERE id = 1"
-            ).fetchone()
-        except sqlite3.OperationalError:
-            return self.is_setup()
-        if not row:
-            return False
-        try:
-            return bool(row["totp_enrolled"])
-        except (KeyError, IndexError):
-            return True
-
-    def confirm_totp_enrolment(self) -> bool:
-        """Mark authenticator 2FA as confirmed for this account.
-
-        Returns:
-            True when an account exists and was marked enrolled.
-        """
-        if not self.is_setup():
-            return False
-        self._execute_locked(
-            "UPDATE account SET totp_enrolled = 1 WHERE id = 1"
-        )
-        return True
 
     def wipe_account(self) -> None:
         """Delete the single-user account and related setup state.
@@ -290,8 +247,8 @@ class AuthService:
             # Store account in the same transaction.
             self._db.execute(
                 """INSERT INTO account (id, username, email, password_hash, pin_hash,
-                   totp_secret_encrypted, totp_salt, created_at, totp_enrolled)
-                   VALUES (1, ?, ?, ?, ?, ?, ?, ?, 0)""",
+                   totp_secret_encrypted, totp_salt, created_at)
+                   VALUES (1, ?, ?, ?, ?, ?, ?, ?)""",
                 [username, email, password_hash, pin_hash, encrypted, totp_salt,
                  datetime.now(UTC).isoformat()],
             )
@@ -672,7 +629,6 @@ class AuthService:
             self._db.commit()
 
         self._totp_secret_cache = totp_secret
-        self.confirm_totp_enrolment()
         return (self.get_totp_provisioning_uri(), backup_codes)
 
     def close(self) -> None:

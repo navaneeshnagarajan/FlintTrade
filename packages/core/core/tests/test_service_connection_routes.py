@@ -124,7 +124,6 @@ def test_service_connection_imports_are_inert_under_transport_and_credential_poi
         ),
         ("GET", "/ft-api/api/v1/native/oauth/callback?code=private", "/api/v1/native/oauth/callback"),
         ("POST", "/v1/auth/setup/regenerate-2fa", "/v1/auth/setup/regenerate-2fa"),
-        ("POST", "/v1/auth/setup/confirm-2fa", "/v1/auth/setup/confirm-2fa"),
         ("POST", "/v1/auth/reset-password-otp", "/v1/auth/reset-password-otp"),
         ("POST", "/v1/config/llm", "/v1/config/llm"),
         ("POST", "/v1/config/openalgo", "/v1/config/openalgo"),

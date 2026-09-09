@@ -116,13 +116,12 @@ export interface AuthStatusData {
   is_setup: boolean;
   is_locked: boolean;
   has_pin: boolean;
-  totp_enrolled?: boolean;
 }
 
 /**
  * Auth account status — public read (no session required).
  *
- * GET /ft-api/v1/auth/status → ``{ is_setup, is_locked, has_pin, totp_enrolled? }``.
+ * GET /ft-api/v1/auth/status → ``{ is_setup, is_locked, has_pin }``.
  * ``has_pin`` drives the Settings → Security quick-unlock PIN block (set vs
  * change) and lets the UI explain why Live mode cannot be armed yet.
  */

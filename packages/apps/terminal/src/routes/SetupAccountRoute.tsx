@@ -19,7 +19,7 @@
  *   (a) selecting a mode on step 6 (Finish setup)
  *   (b) clicking "Start over" in the header (wipes the unfinished account)
  *   (c) hitting HTTP 409 on account creation (account already exists → sign in)
- *   (d) Explore first on the 2FA step (leaves TOTP unenrolled)
+ *   (d) Explore first on the 2FA step (clears wizard progress and opens Home in Explore)
  *
  * On completion navigates to /welcome (which shows the sign-in form since an
  * account now exists).
@@ -542,7 +542,7 @@ interface TotpDisplayProps {
   onTotpRegenerated: (uri: string, codes: string[]) => void;
   /** Called after a successful "Delete account" reset. */
   onAccountDeleted: () => void;
-  /** Leave 2FA unenrolled and continue in Explore / Practice. */
+  /** Leave the 2FA step and continue in Explore / Practice. */
   onExploreFirst: () => void;
 }
 
@@ -1110,13 +1110,6 @@ export default function SetupAccountRoute({
   }
 
   function handleTotpConfirmed() {
-    void fetch(`${getBase()}/v1/auth/setup/confirm-2fa`, {
-      method: "POST",
-      headers: buildHeaders(true),
-      body: JSON.stringify({}),
-    }).catch(() => {
-      // Explore/Practice stay available; Live enrolment can be retried later.
-    });
     setCurrentStep(2);
   }
 

@@ -47,11 +47,11 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 - **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
   Setup Step 2/7 now has an obvious **Explore first — continue without
-  2FA** path. New accounts start with TOTP unenrolled, so password-only
-  login can mint an Explore session until the operator saves the QR
-  (or resets 2FA). `/welcome` no longer traps an unfinished wizard back
-  onto Setup; sign-in also offers **Try with sample data**. Live still
-  requires TOTP enrolment plus the PIN. **Start over** wipes the
+  2FA** path so sample-data Explore/Practice is reachable without
+  finishing authenticator setup. `/welcome` no longer traps an
+  unfinished wizard back onto Setup; sign-in also offers **Try with
+  sample data**. Daily login still requires password + TOTP, and Live
+  still requires the PIN, as designed. **Start over** wipes the
   unfinished account via the setup session so a lost QR seed is
   recoverable without the TOTP secret.
 

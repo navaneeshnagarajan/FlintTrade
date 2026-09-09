@@ -95,7 +95,6 @@ def classify_secret_envelope(method: object, path: object) -> str | None:
         ("/v1/auth/otp/request", "/v1/auth/otp/request"),
         ("/v1/auth/otp/verify", "/v1/auth/otp/verify"),
         ("/v1/auth/setup/regenerate-2fa", "/v1/auth/setup/regenerate-2fa"),
-        ("/v1/auth/setup/confirm-2fa", "/v1/auth/setup/confirm-2fa"),
         ("/v1/auth/setup/reset", "/v1/auth/setup/reset"),
         ("/v1/auth/setup", "/v1/auth/setup"),
         ("/v1/auth/login", "/v1/auth/login"),
