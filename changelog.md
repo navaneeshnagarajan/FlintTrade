@@ -19,6 +19,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Node audit blockers on main.** Newly disclosed HIGH/CRITICAL advisories
+  against the existing lock (next Windows/AVIF RCE, maplibre-gl XSS,
+  `@xmldom/xmldom` name-injection/ReDoS, sharp libheif, js-yaml merge-key
+  DoS, and four fast-uri host-confusion/SSRF issues) are cleared by real
+  version bumps: next 16.3.4, and overrides for fast-uri 4.1.4, js-yaml
+  4.3.2, sharp 0.35.4, maplibre-gl 6.8.0 and `@xmldom/xmldom` 0.8.15. No
+  new allowlist entries.
+
 - **Production systemd install.** `infra/scripts/setup-production.sh` hardcodes
   `/opt/flinttrade` (the prefix `flinttrade.service` already uses), refuses
   `FLINTTRADE_DIR`, symlink targets and non-git trees, and requires Python
