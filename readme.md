@@ -61,7 +61,7 @@ periodic migrations. Two numbers per runtime, and the difference matters:
 
 The **floor** is the lowest version that actually works — set by what the
 dependency tree genuinely needs, never by ambition. Node's floor comes from
-`react-router@8`'s own `engines` field, and the OS floor is derived rather than
+jsdom 30's `engines` field, and the OS floor is derived rather than
 chosen: Ubuntu 24.04 ships Python 3.12, whereas 22.04 ships 3.10 and cannot meet
 the Python floor with its system interpreter.
 
@@ -242,8 +242,8 @@ update, install and uninstall contracts.
 ### Run from source (contributors)
 
 Use this when you are developing FlintTrade itself. Unlike the one-line
-installer it expects you to supply the toolchain: git, Python 3.12+, Node 22+,
-`uv` and `pnpm`.
+installer it expects you to supply the toolchain: git, Python 3.12+, Node
+22.22.2+, `uv` and `pnpm`.
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git

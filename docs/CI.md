@@ -15,7 +15,7 @@ workflow YAML should read this once.
 
 | Workflow | Trigger | Runner cost | Notes |
 |---|---|---|---|
-| `test.yml` | push to `main` / `dev`; non-draft PR (no `paths` / `paths-ignore` on the PR trigger) | `changed-surfaces` classifier + 9 Linux jobs | The main quality gate. Includes Electron typecheck, Vitest, bundle and Linux directory-package verification. Every non-draft PR to `main`/`dev` instantiates the workflow so required check contexts exist. Documentation, site, and former inert-file edits still run `python-tests`, `node-core-tests` and `secrets-check`; the expensive lanes gate on `changed-surfaces`. |
+| `test.yml` | push to `main` / `dev`; non-draft PR (no `paths` / `paths-ignore` on the PR trigger) | `changed-surfaces` classifier + 10 Linux jobs | The main quality gate. Includes Electron typecheck, Vitest, bundle and Linux directory-package verification. Every non-draft PR to `main`/`dev` instantiates the workflow so required check contexts exist. Documentation, site, and former inert-file edits still run `python-tests`, `node-core-tests`, `secrets-check` and `terminal-e2e-infra-self-tests`; the expensive lanes gate on `changed-surfaces`. |
 | `supply-chain.yml` | push to `main` / `dev`; non-draft PR (paths-ignore); weekly cron (Mon 03:00 UTC); manual dispatch | Linux jobs per-push/PR; the macOS + Windows jobs (`cross-platform-smoke`, `windows-acl-test`) gate to the weekly cron / `workflow_dispatch` only (§7) | Full supply-chain gate: python/rust/node audits, licence + provenance checks, NOTICE drift, hashed-install enforcement, Windows secret-file ACL hardening, cross-platform install smoke, lockfile drift, and the CLA GPG binding (external-fork `pull_request` events only — skipped on push/schedule/owner and same-repo bot merges). |
 | `site.yml` | push to `main` / `dev`; non-draft PR (path-filtered to site, terminal, design-system, package manager, docs, package README, and `site.yml` itself) | 1 Linux job | Typechecks, tests and builds the documentation site (Next.js). Documentation changes still instantiate `test.yml` (cheap lanes only) and also run this workflow. |
 | `nightly-cross-platform.yml` | weekly cron (Sun 03:00 UTC); manual dispatch | Python on macOS, Windows and Ubuntu 26.04; Electron directory packages on macOS, Windows and Linux | Catches slow-burn platform and packaging regressions before they accumulate. |
@@ -28,9 +28,9 @@ workflow YAML should read this once.
 | `claude.yml` | issue / PR comment containing `@claude` | 1 Linux job per invocation | Zero per-push cost. Runs only when explicitly tagged. |
 | `claude-code-review.yml` | PR opened / ready-for-review / reopened (paths-ignore + draft guard) | 1 Linux job per qualifying transition | Skips `synchronize` events to avoid running on every PR commit. |
 
-### The nine per-push Ubuntu jobs
+### The ten per-push Ubuntu jobs
 
-`test.yml` splits the Python, TypeScript, and Rust test suites across nine
+`test.yml` splits the Python, TypeScript, and Rust test suites across ten
 parallel jobs to keep wall-clock time low:
 
 1. `python-tests` — full pytest suite.
@@ -57,8 +57,12 @@ parallel jobs to keep wall-clock time low:
 9. `electron-desktop-tests` — strict Electron TypeScript, the full desktop
    Vitest suite, main/preload bundle, Linux x64 directory package and packaged
    security-contract verification on `ubuntu-24.04`.
+10. `terminal-e2e-infra-self-tests` — Playwright infrastructure typecheck and
+    lint, then Chromium-only fail-closed self-tests plus selected product
+    journeys (`e2e/infra-self-tests.spec.ts`, `e2e/workspace-lifecycle.spec.ts`,
+    `e2e/order-pad-practice.spec.ts`). Not gated on `changed-surfaces`.
 
-All nine must be green for the workflow to be reported as passing. The shard
+All ten must be green for the workflow to be reported as passing. The shard
 path lists are hand-maintained, but `tests/test_ci_vitest_shard_coverage.py`
 (in `python-tests`) fails CI if any terminal `*.test.ts(x)` file runs in no
 shard — so coverage stays complete apart from the allowlisted `TradeIdea`.
@@ -101,8 +105,8 @@ Three mechanisms keep CI inexpensive and signal-rich:
   chaining with `&&`, and `packages/apps/site` carries the `desktop-copy`
   assertions that pin the one-command install strings. Ignoring those paths
   skipped exactly the jobs that police them, so a docs-only PR could reintroduce
-  the defect and still merge green. `python-tests`, `node-core-tests` and
-  `secrets-check` therefore always run.
+  the defect and still merge green. `python-tests`, `node-core-tests`,
+  `secrets-check` and `terminal-e2e-infra-self-tests` therefore always run.
 - **The `changed-surfaces` classifier keeps that cheap.** It diffs the push or PR
   range with plain git and reports `code=false` when every changed path is
   documentation, site content, or a former inert surface listed above; the four
@@ -142,13 +146,14 @@ these may be chained with it.
    - `python scripts/ft.py test` (POSIX alias: `make test`) if anything inside
      `packages/*/src/` changed.
 3. **Doc-only commits** no longer skip `test.yml`. `python-tests`,
-   `node-core-tests` and `secrets-check` always run — the first carries
-   `tests/test_windows_command_docs.py`, the guard that stops a Windows page
-   prescribing `make` or a fence chained with `&&`, so ignoring docs used to
-   skip precisely the job that polices docs. Only the expensive lanes (the four
-   widget shards, `rust-ticks-tests`, `electron-desktop-tests`) gate on the
-   `changed-surfaces` classifier. Changes under `docs/**` additionally run the
-   site typecheck, tests and build through `site.yml`.
+   `node-core-tests`, `secrets-check` and `terminal-e2e-infra-self-tests`
+   always run — the first carries `tests/test_windows_command_docs.py`, the
+   guard that stops a Windows page prescribing `make` or a fence chained with
+   `&&`, so ignoring docs used to skip precisely the job that polices docs.
+   Only the expensive lanes (the four widget shards, `rust-ticks-tests`,
+   `electron-desktop-tests`) gate on the `changed-surfaces` classifier.
+   Changes under `docs/**` additionally run the site typecheck, tests and
+   build through `site.yml`.
 4. **Draft PRs are free.** Open as draft, iterate, mark "ready for
    review" when you want CI to run.
 
@@ -210,6 +215,7 @@ its own line. Do not chain the `cd` with `&&`; Windows PowerShell 5.1 has no
 | `secrets-check` | the inline two-pattern `grep` loop from `test.yml` (NOT gitleaks) |
 | `rust-ticks-tests` | `cargo test --manifest-path packages/core/ticks/Cargo.toml` (or `make ticks-test`, POSIX only) |
 | `electron-desktop-tests` | `python scripts/ft.py desktop-test`, then `python scripts/ft.py desktop-build`, then the Linux `electron-builder --dir` package and `pnpm --filter @flinttrade/desktop verify:package` |
+| `terminal-e2e-infra-self-tests` | from `packages/apps/terminal`: `pnpm run e2e:infra:typecheck`, then `pnpm run e2e:infra:lint`, then `pnpm exec playwright test e2e/infra-self-tests.spec.ts --config=playwright.infra.config.ts --project=chromium`, then `pnpm exec playwright test e2e/workspace-lifecycle.spec.ts e2e/order-pad-practice.spec.ts --config=playwright.config.ts --project=chromium` |
 
 The exact per-shard path lists live in `.github/workflows/test.yml`; treat that
 as the source of truth (the shard-coverage guard keeps it complete).
