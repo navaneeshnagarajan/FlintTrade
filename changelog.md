@@ -45,6 +45,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Invest dashboard holdings count vs listed sample stocks (FT-DEMO-001).**
+  On `/demo-app/invest` the sample dashboard header now uses the Explore
+  demo holdings book (`getDemoHoldings`) as its count source, so the
+  badge matches the listed sample stocks and the Holdings tab. Live and
+  Practice still read the live book — an empty funded account stays at
+  0.
+
 - **Remaining homepage nav overflow at ~390px (FT-SITE-003).** After
   #180, the primary nav wrapped without clipping Contribute, but at
   about 390px four chips still packed onto the first row and left
