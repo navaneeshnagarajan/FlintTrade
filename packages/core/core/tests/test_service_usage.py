@@ -465,3 +465,42 @@ def test_provider_credit_tariffs_have_exact_credit_units(tmp_path):
                 tariff=credit,
                 reservation=api().UsageAmounts(requests=1, concurrency=1, credits_micros=3),
             )
+
+
+def test_prior_period_prepared_attempt_cannot_invoke_after_rollover(tmp_path):
+    """A prior-period invocation must not hide its eventual bill from the active budget."""
+    now = [NOW]
+    with api().ServiceUsageLedger(tmp_path / "usage", clock=lambda: now[0]) as store:
+        store.configure_budget(policy(), expected_revision=0)
+        original = prepare(store)
+        now[0] += timedelta(days=1)
+        store.configure_budget(policy(window_start=now[0], window_end=now[0] + timedelta(days=1)), expected_revision=1)
+        with pytest.raises(api().UsageConflict):
+            store.mark_invoked("attempt-1")
+        assert store.get_attempt("attempt-1") == original
+        with pytest.raises(api().BudgetExceeded):
+            prepare(store, "attempt-2")
+        store.cancel_prepared("attempt-1")
+        prepare(store, "attempt-2")
+        store.mark_invoked("attempt-2")
+        store.settle(
+            "attempt-2", api().UsageAmounts(requests=1, input_tokens=10, output_tokens=25, currency_micros=120)
+        )
+        with pytest.raises(api().BudgetExceeded):
+            prepare(store, "attempt-3")
+
+
+@pytest.mark.parametrize("advance_seconds", [1, 2])
+def test_expired_tariff_cannot_invoke_prepared_attempt(tmp_path, advance_seconds):
+    """The tariff's exclusive expiry must be checked again immediately before invocation."""
+    now = [NOW]
+    with api().ServiceUsageLedger(tmp_path / "usage", clock=lambda: now[0]) as store:
+        store.configure_budget(policy(), expected_revision=0)
+        original = prepare(store, tariff=tariff(effective_until=NOW + timedelta(seconds=1)))
+        now[0] += timedelta(seconds=advance_seconds)
+        with pytest.raises(api().UsageConflict):
+            store.mark_invoked("attempt-1")
+        assert store.get_attempt("attempt-1") == original
+        store.cancel_prepared("attempt-1")
+        prepare(store, "attempt-2")
+        assert store.mark_invoked("attempt-2").state == "INVOKED"

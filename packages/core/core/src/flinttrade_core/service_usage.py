@@ -433,7 +433,16 @@ class ServiceUsageLedger:
             record = self._record(db, attempt_id)
             if record.state != "PREPARED":
                 raise UsageConflict("attempt cannot be invoked again")
-            _, policy = self._budget(db, record.connection, utc(self._clock()))
+            now = utc(self._clock())
+            _, policy = self._budget(db, record.connection, now)
+            if not (
+                datetime.fromisoformat(policy["window_start"])
+                <= record.created_at
+                < datetime.fromisoformat(policy["window_end"])
+            ):
+                raise UsageConflict("attempt belongs to an earlier budget period; cancel and prepare a new attempt")
+            if not record.tariff.effective_from <= now < record.tariff.effective_until:
+                raise UsageConflict("attempt tariff is no longer effective; cancel and prepare a new attempt")
             self._check_budget(db, record.connection, policy, UsageAmounts())
             return self._update(db, attempt_id, "INVOKED", record.charged)
 
