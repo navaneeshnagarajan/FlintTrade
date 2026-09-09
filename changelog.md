@@ -126,6 +126,19 @@ changelog rebuilds itself from the first release cut after this baseline.
   already workspace-routed in production. On macOS and Windows their history
   restarts from empty.
 
+### Security
+
+- **Tracking: CodeQL `py/clear-text-logging-sensitive-data` in service-connection
+  tests.** Alerts
+  [#420](https://github.com/navaneeshnagarajan/FlintTrade/security/code-scanning/420)
+  and
+  [#421](https://github.com/navaneeshnagarajan/FlintTrade/security/code-scanning/421)
+  flag `packages/core/core/tests/test_service_connections.py` (lines 653–654)
+  for logging secret material as clear text. Likely introduced with #170.
+  Development should scrub or redact those log/assert paths so the redaction
+  contract stays without passing secret objects to the logger. This entry only
+  opens the tracking PR; it is not the product fix.
+
 ## [0.0.1] — 2026-07-23
 
 Clean-slate baseline. Pre-1.0, pre-usable, and marked as a pre-release: anything
