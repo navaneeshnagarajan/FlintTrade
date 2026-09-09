@@ -91,13 +91,18 @@ archive.
 
 ## Safety Layers
 
+`SafetySystem` has five layers (L1–L5). Rate limits are a separate
+HTTP/`OpenAlgoClient` control, not a sixth safety layer.
+`_check_order_locked` fail-fasts in runtime order **L5 → L4 → L1 → L2 →
+L3**: the first failing layer is the refusal the operator sees.
+
 | Layer | Purpose | Examples |
 |---|---|---|
-| Order validation | Reject malformed or disallowed orders before routing. | Symbol, exchange, side, quantity, order type, price, and market-session checks. |
-| Rate limits | Keep local order operations bounded. | Per-second order caps and lower smart-order caps. |
-| Position limits | Prevent local workflows from exceeding configured exposure. | Max open positions, per-symbol limits, and margin-use guards. |
-| Daily risk limits | Pause or hard-stop subsequent new orders when daily loss thresholds are hit. | Configured pause and hard-stop thresholds; no broker-side cancel or flatten. |
-| Kill switch | Stop order-capable workflows, cancel open orders, and request position flattening where supported. | Explicit UI button, API endpoint, or Telegram command. |
+| L5 Kill switch | Stop order-capable workflows, cancel open orders, and request position flattening where supported. | Explicit UI button, API endpoint, or Telegram command. Checked first. |
+| L4 Daily P&L | Pause or hard-stop subsequent new orders when daily loss thresholds are hit. | Default pause at 3 % and hard stop at 15 %; no broker-side cancel or flatten. |
+| L1 Order validation | Reject malformed or disallowed orders before routing. | Symbol, exchange, side, quantity, order type, price, and market-session checks. |
+| L2 Position limits | Prevent local workflows from exceeding configured exposure. | Default max five open positions and 60 % margin-use guard. |
+| L3 Portfolio risk | Cap book-level Greek exposure. | Net delta and net vega guards. |
 
 ## Kill Switch
 
@@ -148,9 +153,9 @@ debugging and personal records; they are not a legal or regulatory attestation.
 
 | Category | Default local limit | Enforced by |
 |---|---|---|
-| Orders | 10 per second | Engine safety gate plus adapter-level checks. |
-| Smart orders | 2 per second | Engine safety gate plus adapter-level checks. |
-| General API | 50 per second | OpenAlgo-compatible bridge when enabled. |
+| Orders | 10 per second | FlintTrade order proxy: HTTP 429 `"Rate limit exceeded"` from `@rate_limit`. The OpenAlgo client additionally blocks in-process (`_RateLimiter.acquire`) before a bridge request leaves. |
+| Smart orders | 2 per second | Same split: proxy 429 plus client-side throttle. |
+| General API | 50 per second | OpenAlgo-compatible client throttle when the bridge is enabled. |
 
 Limits apply across configured exchanges for the running FlintTrade instance.
 Operators should also configure any limits available in their broker dashboard.

@@ -1,6 +1,6 @@
 # Backtest Engine
 
-> Strategy simulator, walk-forward and Monte Carlo testing, portfolio backtester, and 94 strategy templates across 6 categories.
+> Strategy simulator, walk-forward and Monte Carlo testing, portfolio backtester, and 94 strategy template modules across 6 categories.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -11,7 +11,7 @@
 - `src/flinttrade_backtest/simulator.py — single-strategy event-driven backtest`
 - `src/flinttrade_backtest/engine.py — entry point used by the Lab route and CLI`
 - `src/flinttrade_backtest/portfolio_backtest.py — multi-strategy portfolio runs via VectorBT`
-- `src/flinttrade_backtest/strategies/ — 94 ready-to-run templates`
+- `src/flinttrade_backtest/strategies/ — 94 ready-to-run template modules` (`_indicators.py` and `_mixin.py` are helpers, not templates)
 
 (See the source for the full surface.)
 

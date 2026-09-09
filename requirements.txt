@@ -1,12 +1,12 @@
 numpy>=2.5.2
 pandas>=2.0.0
 httpx>=0.27.0
-pydantic>=2.0
+pydantic>=2.13.5
 python-dotenv>=1.2.3
 websockets>=17.1
 duckdb>=1.5.5
 flask>=3.0
-ruff>=0.16.5
+ruff>=0.16.6
 pytest>=9.1.1
 pytest-asyncio>=0.23.0
 # Parallel test execution (CI uses `-n auto`); harmless locally
@@ -15,7 +15,7 @@ pytest-xdist>=3.5.0
 pytest-randomly>=5.0.0
 # Per-test wall-clock timeout (60s default in CI; override via @pytest.mark.timeout)
 pytest-timeout>=2.3.0
-anyio>=4.14.2
+anyio>=4.15.0
 pyotp>=2.10.0
 qrcode[svg]>=8.2
 argon2-cffi>=23.1.0
