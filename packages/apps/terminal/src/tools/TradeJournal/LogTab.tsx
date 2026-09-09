@@ -14,14 +14,24 @@
  * is the one-line swap point.
  */
 
+import type { JournalTrade } from "@/services/ftApi";
 import { FillsTable } from "@/widgets/trading/Fills/FillsTable";
 
 export interface LogTabProps {
   /** Committed inclusive IST range (``YYYY-MM-DD``) from the tool header. */
   startDate: string;
   endDate: string;
+  /** Explore-mode sample journal rows already clipped to the committed window. */
+  exploreJournalTrades?: JournalTrade[];
 }
 
-export function LogTab({ startDate, endDate }: LogTabProps) {
-  return <FillsTable startDate={startDate} endDate={endDate} className="flex-1 min-h-0" />;
+export function LogTab({ startDate, endDate, exploreJournalTrades }: LogTabProps) {
+  return (
+    <FillsTable
+      startDate={startDate}
+      endDate={endDate}
+      exploreJournalTrades={exploreJournalTrades}
+      className="flex-1 min-h-0"
+    />
+  );
 }

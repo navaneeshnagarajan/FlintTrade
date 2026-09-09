@@ -213,6 +213,46 @@ export function fmtIstClock(date: Date = new Date()): string {
   return `${pad2(hour)}:${pad2(minute)}:${pad2(second)}`;
 }
 
+const IST_MONTHS_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;
+
+/**
+ * The IST calendar day of an instant as ``D Mon YYYY``.
+ *
+ * Four-digit year, so concatenating this with a 24-hour clock cannot glue the
+ * year onto the hour (``13 Apr 26`` + ``14:55:42`` → ``13 Apr 2614:55:42``).
+ * Host ``toLocaleDateString`` is deliberately avoided: ICU short-month and
+ * 2-digit-year forms vary by build and produced that glue on Trade Review.
+ *
+ * @param date - Instant to render.
+ * @returns Day, English short month and four-digit year on the IST calendar.
+ */
+export function fmtIstDate(date: Date): string {
+  const { year, month, day } = istParts(date);
+  return `${day} ${IST_MONTHS_SHORT[month]} ${year}`;
+}
+
+/**
+ * Inclusive IST-calendar predicate against ``YYYY-MM-DD`` bounds.
+ *
+ * Missing bounds are open. Comparison uses {@link toIstIsoDate}, not the UTC
+ * ``toISOString().slice(0, 10)`` day — that slice still reads yesterday for
+ * every instant between 00:00 and 05:29 IST.
+ *
+ * @param date - Instant to test.
+ * @param startDate - Inclusive IST start day, or omit for an open start.
+ * @param endDate - Inclusive IST end day, or omit for an open end.
+ * @returns True when the instant's IST day sits inside the window.
+ */
+export function isIstDateInRange(date: Date, startDate?: string, endDate?: string): boolean {
+  const day = toIstIsoDate(date);
+  if (startDate && day < startDate) return false;
+  if (endDate && day > endDate) return false;
+  return true;
+}
+
 /** A duration split into whole days, hours, minutes and seconds. */
 export interface DurationParts {
   days: number;

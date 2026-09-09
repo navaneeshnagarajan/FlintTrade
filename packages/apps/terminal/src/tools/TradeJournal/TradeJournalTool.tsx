@@ -253,7 +253,11 @@ export default function TradeJournalTool({ onClose }: Props) {
           value="log"
           className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden"
         >
-          <LogTab startDate={queryStart} endDate={queryEnd} />
+          <LogTab
+            startDate={queryStart}
+            endDate={queryEnd}
+            exploreJournalTrades={isExploreMode ? sampleTrades : undefined}
+          />
         </TabsContent>
 
         <TabsContent

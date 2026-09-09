@@ -46,10 +46,12 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Trade Review date filter and mangled timestamps in Explore (FT-TRADE-001).**
-  After Explore/sample-data, `/trade` Trade Review has a date filter
-  that is not usable and timestamps that render mangled. The fix
-  tracked here must make the date filter usable and timestamps
-  readable (not mangled). Product code is not in this revision.
+  Explore `/trade` Trade Review now clips the Log to the committed IST
+  date range (the same predicate as the sample-journal badge) and
+  renders fill timestamps as `D Mon YYYY HH:MM:SS` with a literal
+  space, so `13 Apr 26` can no longer glue onto `14:55:42`. Live and
+  Practice still use the journal/tradebook path; only the shared IST
+  format and range helpers changed there.
 
 - **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
   Setup Step 2/7 now has an obvious **Explore first — continue without
