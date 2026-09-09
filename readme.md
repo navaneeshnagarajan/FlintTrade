@@ -356,7 +356,7 @@ and 1 Rust/PyO3 tick engine.
 | `packages/integrations/webhooks` | Python | Generic HMAC-signed custom webhooks, visual flow builder |
 | `packages/services/ai` | Python | LLM client, RAG, ML signals, sentiment, MCP bridge, advisor workflows |
 | `packages/services/automation` | Python | Cron jobs, Telegram bot, post-market analysis, voice-order intent extraction |
-| `packages/services/backtest` | Python | Event-driven simulator, 94 strategy templates, walk-forward optimiser |
+| `packages/services/backtest` | Python | Event-driven simulator, 95 strategy template modules, walk-forward optimiser |
 | `packages/services/ditto` | Python | Multi-account mirroring, margin calculator, trailing stop-loss |
 | `packages/services/engine` | Python | 5-layer safety system, order router, scheduler, strategy registry |
 | `packages/services/journal` | Python | Trade journal, execution-quality analytics, realised P&L tracking |
@@ -366,7 +366,7 @@ and 1 Rust/PyO3 tick engine.
 
 | Layer | Tools |
 |---|---|
-| Frontend | React 19, TypeScript 5 (strict), Tailwind CSS v4, FlexLayout (with FDC3 interop), shadcn/ui, Lightweight Charts v5, Glide Data Grid, Zustand 5, Jotai, TanStack Query 5 |
+| Frontend | React 19, TypeScript 7 (strict), Tailwind CSS v4, FlexLayout (with FDC3 interop), shadcn/ui, Lightweight Charts v5, Glide Data Grid, Zustand 5, Jotai, TanStack Query 5 |
 | Backend | Python 3.12, Flask, httpx (async), pydantic, DuckDB, structlog |
 | Data | NumPy (batch indicators; optional Numba on 3 kernels), Rust/PyO3 (tick engine), QuestDB (future) |
 | AI | Managed Ollama sidecar, local SQLite/NumPy vector store, LightGBM (signals), MCP bridge |

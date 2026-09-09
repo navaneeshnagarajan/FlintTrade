@@ -80,8 +80,9 @@ the hosted URL is only a redirect to it:
 irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-uninstall.ps1 | iex
 ```
 
-Or run the same script from a clone or from the managed source checkout at
-`~\.flinttrade\src\FlintTrade`:
+Or run the same script from a clone or from the managed source checkout
+(`~\.flinttrade\web-src\FlintTrade` for the web app,
+`~\.flinttrade\src\FlintTrade` for the desktop shell):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install\flinttrade-uninstall.ps1

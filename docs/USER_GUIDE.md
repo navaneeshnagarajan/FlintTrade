@@ -265,9 +265,11 @@ claim — switching to Live requires a deliberate confirmation step.
 
 ### Walkthrough
 
-1. Open `http://localhost:5173/trade`.
-2. Click the mode badge in the top bar → choose **Practice**. A modal
-   confirms the switch.
+1. Open `/trade` (http://127.0.0.1:5100/trade on the installed web app;
+   http://localhost:5173/trade on the Vite dev server).
+2. If the badge shows **EXPLORE**, click it once to switch to Practice.
+   There is no confirmation dialog. The UI calls `POST /v1/auth/mode`
+   so the JWT matches.
 3. From the dock sidebar, drag the **Order Pad** widget into the workspace
    (or pick a preset that contains it).
 4. Type `NIFTY` into the symbol field; FlintTrade autocompletes the current
@@ -276,7 +278,7 @@ claim — switching to Live requires a deliberate confirmation step.
 6. Click **Place Order**. The order appears in the **Positions** widget
    immediately; the **Orderbook** widget shows it as filled (simulated).
 7. Close the position from the Positions widget. Confirm your simulated
-   P&L is recorded in the **Intraday P&L** widget.
+   P&L is recorded in the **P&L Monitor** widget.
 
 You have just exercised the full FlintTrade order path — front-end → JWT
 guard → mode guard → FlintTrade sandbox → simulated fill →
@@ -306,8 +308,10 @@ software safeguards, prompts, and recovery controls in a local setup.
 
 ### Walkthrough
 
-1. Click the mode badge in the top bar → choose **Live**. A modal warns
-   that real orders will be placed and asks for password re-entry.
+1. Click the **PRACTICE** badge in the top bar. A dialog warns that
+   real orders will be placed and asks for your **6-digit PIN**
+   (`POST /v1/auth/pin`). Set a PIN under Settings → Security first if
+   you have not already.
 2. Cancel the modal unless you are deliberately performing your own broker-side
    test outside this guide.
 3. Confirm the UI clearly shows Live mode, the active account, and the
@@ -346,7 +350,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | Route | Purpose |
 |---|---|
 | `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password + TOTP, or PIN). There is no `/login` URL. |
-| `/explore` | Demo mode with sample data — no broker connection needed. |
+| `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
 | `/setup` | First-time wizard (Quick / Guided / Advanced paths). `/setup-account` is a compatibility alias. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
@@ -411,13 +415,14 @@ preset from Settings → Workspace.
 ## 6. Screener walkthrough
 
 The screener lives under the **Analysis** widget category and shares the
-workspace with everything else — no separate route. The four headline tools:
+workspace with everything else — no separate route. Headline tools:
 
 ### Option Chain
 
 Streaming option-chain widget rendered with
 [Glide Data Grid](https://github.com/glideapps/glide-data-grid) for
-60+ FPS updates even on a 50-strike chain.
+60+ FPS updates even on a 50-strike chain. The header also shows a
+Max Pain badge derived from the same chain.
 
 1. Drag the **Option Chain** widget into the workspace.
 2. Pick a symbol (e.g. `NIFTY`, `BANKNIFTY`, `RELIANCE`).
@@ -425,20 +430,18 @@ Streaming option-chain widget rendered with
 4. Calls on the left, Puts on the right, ATM strike highlighted.
 5. Hover any cell — sparkline shows the last-100-tick history.
 
-### OI Profile
+### OI Analytics
 
-Plots Open Interest changes by strike across CE and PE legs for local analysis
-and UI testing.
+One widget (`oichart`) with several views of the same chain read:
+grouped OI bars, a CE/PE butterfly **OI profile**, a strike heat grid,
+build-up/unwinding signals, and a **Max Pain** view (the strike at
+which option writers lose the least if expiry hit right now). There is
+no standalone Max Pain widget.
 
-### Max Pain
+### IV Smile & Skew
 
-Calculates the strike at which option writers lose the least if expiry hit
-right now. Updates every minute from OpenAlgo's `optionchain` feed.
-
-### IV Smile
-
-Implied-volatility curve across strikes, with skew and term-structure
-indicators. Useful for spotting unusual options activity.
+Implied-volatility curve across strikes, with 25-delta skew and
+term-structure indicators. Useful for spotting unusual options activity.
 
 ---
 
@@ -448,7 +451,7 @@ Open `/lab`. The Strategy Lab is split into three sub-tools:
 
 ### Backtest
 
-1. **Pick a template.** 94 templates ship under
+1. **Pick a template.** 95 template modules ship under
    `packages/services/backtest/src/flinttrade_backtest/strategies/` — ranging
    from simple EMA crossover to complex options-spreads strategies.
 2. **Configure parameters.** Each template exposes a parameter form

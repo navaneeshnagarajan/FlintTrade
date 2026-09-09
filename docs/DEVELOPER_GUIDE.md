@@ -31,7 +31,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | `webhooks` | Python | Generic HMAC-signed custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
 | `ai` | Python | LLM client (multi-provider), optional RAG/vector store, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
 | `automation` | Python | Cron manager, Telegram bot with kill-switch, post-market analysis, voice-order intent extraction | `packages/services/automation/tests/` |
-| `backtest` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 94 strategy templates | `packages/services/backtest/tests/` |
+| `backtest` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 95 strategy template modules | `packages/services/backtest/tests/` |
 | `ditto` | Python | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager | `packages/services/ditto/tests/` |
 | `engine` | Python | 5-layer safety system, order router, scheduler, base strategy, strategy registry, mode guard | `packages/services/engine/tests/` |
 | `journal` | Python | Journal entries, trade logging, execution-quality analytics, and realised P&L tracking | `packages/services/journal/tests/` |

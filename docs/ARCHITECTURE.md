@@ -242,7 +242,7 @@ llms files.
 ## 3. Frontend architecture (terminal)
 
 The terminal is a single React 19 + TypeScript application built with
-Vite 6. Layout is managed by [FlexLayout 0.10](https://github.com/caplin/FlexLayout),
+Vite 8. Layout is managed by [FlexLayout 0.10](https://github.com/caplin/FlexLayout),
 which provides drag-and-drop panels, tabs, floating windows, and
 serialisable layouts. Users compose their workspace from 71 widgets
 (18 trading + 31 analysis + 22 utility) split across 12 routes.
@@ -272,9 +272,9 @@ duplicated:
 
 | Category | Library | Why it's pinned |
 |---|---|---|
-| Language | TypeScript 5 (strict) | No `any`, no `@ts-ignore`. |
-| Framework | React 19 | Server Actions, `use()`, the new compiler. |
-| Build | Vite 6.4 | Fast HMR, ESM-first. |
+| Language | TypeScript 7 (strict) | No `any`, no `@ts-ignore`. |
+| Framework | React 19 | Current React release for the terminal SPA. |
+| Build | Vite 8 | Fast HMR, ESM-first. |
 | CSS | Tailwind CSS v4 | `@tailwindcss/vite` plugin, no `tailwind.config.js` for tokens. |
 | Components | shadcn/ui | Copy-paste ownership, Radix accessibility primitives. |
 | Layout | FlexLayout 0.10 | Tabs, splits, drag-dock, JSON-serialisable. |
@@ -341,9 +341,9 @@ documented, and limited to analysis modules.
 FlintTrade's backend is a single Flask application registered as
 `packages/core/core/src/flinttrade_core/app.py`. Source/browser mode defaults to
 port 5100; the Electron source guardian explicitly selects a dynamic loopback
-port instead. The application mounts every package's blueprints behind
-`/v1/*`, and exposes them externally under `/ft-api/v1/*` thanks to the WSGI
-prefix-strip middleware (see §6).
+port instead. Blueprints mount at `/v1/*` *or* `/api/v1/*` (match the
+prefix the frontend uses). The Vite/dev proxy exposes them under
+`/ft-api/…` and WSGI middleware strips that prefix (see §6).
 
 **One backend process per workspace.** In-memory job/runner state (scheduler
 jobs, download queues, sandbox runtime, session registries) assumes a single
@@ -376,14 +376,14 @@ inside `packages/services/engine/`:
 stateDiagram-v2
     [*] --> Explore
     Explore --> Practice: /auth/mode {mode:practice}
-    Practice --> Live: /auth/mode {mode:live} + password\nconfirm
+    Practice --> Live: /auth/pin {mode:live} +\n6-digit PIN
     Live --> Practice: /auth/mode {mode:practice}
     Practice --> Explore: /auth/mode {mode:explore}
-    Live --> Explore: /auth/mode {mode:explore}\n(forces kill-switch)
+    Live --> Explore: /auth/mode {mode:explore}\n(JWT downgrade only;\nno kill-switch)
 
     state Explore {
         [*] --> noOrders
-        noOrders: All order paths return\nsimulated success without\ntouching OpenAlgo
+        noOrders: All order paths rejected\nHTTP 403 mode_blocked;\nno broker call
     }
     state Practice {
         [*] --> sandbox
@@ -396,7 +396,11 @@ stateDiagram-v2
 ```
 
 Each transition issues a fresh JWT with the new `mode` claim and revokes
-the old token's `jti`. The guard lives at
+the old token's `jti`. Practice → Live is `POST /v1/auth/pin` (PIN
+re-auth). `/v1/auth/mode` accepts only downgrades to `practice` or
+`explore` and does not latch the kill switch. The ModeIndicator UI
+toggles Explore → Practice and Practice ↔ Live; a Live → Explore
+downgrade is available on the API. The guard lives at
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.
 
 ---
