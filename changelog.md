@@ -46,12 +46,12 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Remaining homepage nav overflow at ~390px (FT-SITE-003).** After
-  #180 (Contribute clipping fixed via wrap), a Tester production
-  spot-check after #179/#180 still finds horizontal overflow on the
-  homepage primary nav at about 390px, and “Explore demo” wraps
-  awkwardly. Not blocking; polish for zero overflow. CSS is not in
-  this commit — the Website Builder/Maintainer will implement on this
-  same PR branch.
+  #180, the primary nav wrapped without clipping Contribute, but at
+  about 390px four chips still packed onto the first row and left
+  “Explore demo” cramped against Docs/API. Below 480px the marketing
+  nav now uses two-across chips with slightly smaller type and tighter
+  padding, so every primary label stays on one line with slack. The
+  900px wrap from #180 is unchanged.
 
 - **Docs page summary duplicated as first body paragraph (FT-SITE-002).**
   On `/docs*` routes the page summary no longer appears twice. The
