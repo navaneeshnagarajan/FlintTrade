@@ -66,3 +66,30 @@ describe('marketing primary nav (FT-SITE-001)', () => {
     expect(navLinks).toMatch(/white-space:\s*nowrap/);
   });
 });
+
+describe('marketing primary nav (FT-SITE-003)', () => {
+  const css = readSite('src/app/globals.css');
+
+  it('compacts to two-across chips at phone widths so Explore demo is not cramped', () => {
+    const phone = mediaBlock(css, 'max-width: 480px');
+    const nav = rule(phone, '\\.main-nav');
+    const links = rule(phone, '\\.main-nav a');
+
+    expect(nav.length).toBeGreaterThan(0);
+    expect(links.length).toBeGreaterThan(0);
+    expect(links).toMatch(/flex:\s*1 1 calc\(50%/);
+    expect(links).toMatch(/white-space:\s*nowrap/);
+    expect(links).toMatch(/text-align:\s*center/);
+    expect(links).toMatch(/font-size:\s*13px/);
+    expect(nav).not.toMatch(/overflow-x:\s*auto/);
+  });
+
+  it('keeps the tablet wrap from FT-SITE-001 and does not reintroduce overflow-x auto', () => {
+    const tablet = mediaBlock(css, 'max-width: 900px', 'max-width: 620px');
+    const mobileNav = rule(tablet, '\\.main-nav');
+
+    expect(mobileNav).toMatch(/flex-wrap:\s*wrap/);
+    expect(mobileNav).toMatch(/overflow:\s*visible/);
+    expect(mobileNav).not.toMatch(/overflow-x:\s*auto/);
+  });
+});
