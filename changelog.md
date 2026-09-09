@@ -45,6 +45,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Remaining homepage nav overflow at ~390px (FT-SITE-003).** After
+  #180 (Contribute clipping fixed via wrap), a Tester production
+  spot-check after #179/#180 still finds horizontal overflow on the
+  homepage primary nav at about 390px, and “Explore demo” wraps
+  awkwardly. Not blocking; polish for zero overflow. CSS is not in
+  this commit — the Website Builder/Maintainer will implement on this
+  same PR branch.
+
 - **Docs page summary duplicated as first body paragraph (FT-SITE-002).**
   On `/docs*` routes the page summary no longer appears twice. The
   generator still lifts the first body paragraph into frontmatter for
