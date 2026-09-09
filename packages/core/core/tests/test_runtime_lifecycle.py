@@ -1571,7 +1571,10 @@ async def test_shutdown_deadline_retains_cancelled_task_until_ordinary_retry(
 
         release_cleanup.set()
         await asyncio.gather(owned_task, return_exceptions=True)
-        await runtime.stop(timeout=1.0)
+        # The tick path still starts a storage-close worker after the retained
+        # task joins. Keep that ordinary retry independent of CI thread-pool
+        # scheduling; the 0.02s first attempt already proved the deadline.
+        await runtime.stop(timeout=5.0)
 
         if owner_kind == "holiday":
             assert runtime._holiday_refresh_task is None
