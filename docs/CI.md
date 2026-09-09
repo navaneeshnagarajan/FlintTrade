@@ -35,9 +35,13 @@ parallel jobs to keep wall-clock time low:
 
 1. `python-tests` — full pytest suite.
 2. `node-core-tests` — Vitest for non-widget terminal code (`lib`, `stores`,
-   `atoms`, `services`, `test-utils`, `hooks`, `layout`, `admin`, `__tests__`).
-3. `node-widget-tests-1` — `src/widgets/trading/` + utility widgets A–H.
-4. `node-widget-tests-2a` — utility widgets M–S.
+   `atoms`, `services`, `test-utils`, `hooks`, `layout`, `admin`, `providers`,
+   `__tests__`).
+3. `node-widget-tests-1` — `src/widgets/trading/` + utility widgets A–H
+   (the live list is in `test.yml`; it includes `IndexStrip` and no longer
+   includes retired `GlobalIndices` / `Health` dirs).
+4. `node-widget-tests-2a` — remaining early utility widgets (`MarketClock`,
+   `News` in the current workflow).
 5. `node-widget-tests-2b` — utility widgets S–W + AIBackends/AITeam/Obsidian/
    TradeJournal (`TradeIdea` excluded — OOMs the 7 GB runner).
 6. `node-widget-tests-3` — `src/widgets/analysis/`, `routes/`, `tools/`,
@@ -198,9 +202,9 @@ its own line. Do not chain the `cd` with `&&`; Windows PowerShell 5.1 has no
 | Job | Local command |
 |---|---|
 | `python-tests` | `python scripts/ft.py test` (POSIX alias: `make test`) |
-| `node-core-tests` | `npx vitest run --pool=forks src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/__tests__/` |
-| `node-widget-tests-1` | `... npx vitest run src/widgets/trading/ src/widgets/utility/{AIAdvisor,Alerts,AuditTrail,Calculator,CurrencyConverter,EarningsCalendar,EconomicCalendar,ExpiryCountdown,FundingRate,GlobalIndices,Health}/` |
-| `node-widget-tests-2a` | `... npx vitest run src/widgets/utility/{MarketClock,MarketSummary,News,PositionSizing,ProfitTarget,Scanner}/` |
+| `node-core-tests` | `npx vitest run --pool=forks src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/` |
+| `node-widget-tests-1` | `... npx vitest run src/widgets/trading/` plus `src/widgets/utility/{AIAdvisor,Alerts,AuditTrail,Calculator,IndexStrip,CurrencyConverter,EarningsCalendar,EconomicCalendar,ExpiryCountdown,FundingRate}/` |
+| `node-widget-tests-2a` | `... npx vitest run src/widgets/utility/{MarketClock,News}/` |
 | `node-widget-tests-2b` | `... npx vitest run` over `src/widgets/utility/{StrategyTemplates,TickSpeed,Ticker,Watchlist,AIBackends,AITeam,Obsidian,TradeJournal}/` (one dir per invocation; `TradeIdea` excluded) |
 | `node-widget-tests-3` | `... npx vitest run src/widgets/analysis/ src/routes/ src/tools/ src/components/ src/chrome/ src/widgets/orders/ src/widgets/account/` |
 | `secrets-check` | the inline two-pattern `grep` loop from `test.yml` (NOT gitleaks) |
@@ -301,15 +305,18 @@ job.
 - The four-build-leg installer matrix lives in **`desktop-release.yml`**, which
   is `workflow_dispatch` only. Release Please supplies the immutable tag and
   expected commit SHA; a build-only manual dispatch publishes no GitHub assets.
-- Scheduled workflows use a **weekly-or-less** cadence
-  (`refresh-vuln-snapshot.yml`, `status-report.yml`,
-  `nightly-cross-platform.yml`, and the `supply-chain.yml` cron) — never a
-  daily one.
+- **macOS / Windows** scheduled jobs stay on a **weekly-or-less** cadence
+  (`nightly-cross-platform.yml`, and the gated `supply-chain.yml`
+  `cross-platform-smoke` / `windows-acl-test` jobs).
+- Linux-only freshness jobs may run daily:
+  `key-freshness.yml` and `toolchain-freshness.yml`. Other Linux
+  scheduled work (`refresh-vuln-snapshot.yml`, `status-report.yml`,
+  the Linux half of `supply-chain.yml`) is weekly or manual.
 
-If you genuinely need a daily run or a macOS / Windows job on push, the
-policy test will stop you. That is the intended behaviour: change the
-design (move it to a weekly schedule or behind `workflow_dispatch`), not
-the test.
+If you genuinely need a macOS / Windows job on push, or a daily
+expensive-runner schedule, the policy test will stop you. That is the
+intended behaviour: change the design (move it to a weekly schedule or
+behind `workflow_dispatch`), not the test.
 
 ---
 

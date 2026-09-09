@@ -206,7 +206,11 @@ Read [`contributing.md`](../../contributing.md) for the contribution flow, then 
    (default `5000`); WebSocket Port defaults to `8765`. FlintTrade stores these
    settings in the OS workspace.
 
-Sessions expire at ~3:30 AM IST. Re-login daily when using live broker.
+Broker and OpenAlgo session lifetimes vary by broker. Native Upstox
+tokens **expire** around ~03:30 IST the next day and have no refresh
+token — `UpstoxAdapter.refresh()` returns the existing session and a
+fresh login is required at expiry. FlintTrade operator JWTs expire at
+08:00 IST. Re-login when the app or broker reports an expired session.
 
 ## Terminal Env
 
