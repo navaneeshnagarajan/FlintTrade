@@ -262,6 +262,7 @@ def test_desktop_lease_release_failure_is_generic_and_retains_authority(
 @pytest.mark.unit
 def test_guardian_owned_desktop_path_skips_only_the_second_lease_acquisition(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     events: list[str] = []
     monkeypatch.setattr(
@@ -275,7 +276,7 @@ def test_guardian_owned_desktop_path_skips_only_the_second_lease_acquisition(
         lambda port, **_kwargs: events.append(f"serve:{port}"),
     )
 
-    desktop.serve(5100, guardian_owned_lease=True)
+    desktop.serve(5100, backend_lease_proof=backend_lease_proof)
 
     assert events == ["serve:5100"]
     desktop.acquire_backend_instance_lease.assert_not_called()
@@ -284,6 +285,7 @@ def test_guardian_owned_desktop_path_skips_only_the_second_lease_acquisition(
 @pytest.mark.unit
 def test_guardian_owned_desktop_path_does_not_swallow_incomplete_cleanup(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     recovery_owner = object()
     monkeypatch.setattr(
@@ -303,7 +305,7 @@ def test_guardian_owned_desktop_path_does_not_swallow_incomplete_cleanup(
     )
 
     with pytest.raises(desktop.DesktopBackendShutdownIncomplete) as raised:
-        desktop.serve(5100, guardian_owned_lease=True)
+        desktop.serve(5100, backend_lease_proof=backend_lease_proof)
 
     assert raised.value.recovery_owner is recovery_owner
     desktop.acquire_backend_instance_lease.assert_not_called()
@@ -312,17 +314,18 @@ def test_guardian_owned_desktop_path_does_not_swallow_incomplete_cleanup(
 @pytest.mark.unit
 def test_desktop_main_forwards_guardian_lease_ownership_without_an_environment_bypass(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     monkeypatch.setattr(desktop, "_ensure_workspace", lambda: object())
     serve = MagicMock()
     monkeypatch.setattr(desktop, "serve", serve)
 
-    desktop.main(["--port", "0"], guardian_owned_lease=True)
+    desktop.main(["--port", "0"], backend_lease_proof=backend_lease_proof)
 
     serve.assert_called_once_with(
         0,
         shutdown_signal=None,
-        guardian_owned_lease=True,
+        backend_lease_proof=backend_lease_proof,
     )
 
 
@@ -362,6 +365,7 @@ def test_desktop_workspace_startup_failure_exposes_only_exception_class(
 @pytest.mark.unit
 def test_desktop_arms_rotation_scheduler_before_ready_handshake(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     events: list[str] = []
 
@@ -385,10 +389,10 @@ def test_desktop_arms_rotation_scheduler_before_ready_handshake(
         close=lambda: events.append("server-close"),
     )
     _stub_desktop_shutdown_dependencies(monkeypatch)
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda proof: flask_app)
     monkeypatch.setattr("waitress.server.create_server", lambda *_args, **_kwargs: server)
 
-    desktop._serve_owned(5100, ready_writer=lambda _message: events.append("ready"))
+    desktop._serve_owned(5100, backend_lease_proof=backend_lease_proof, ready_writer=lambda _message: events.append("ready"))
 
     assert events.index("scheduler-start") < events.index("ready") < events.index("serve")
     assert events.count("scheduler-start") == 1
@@ -399,6 +403,7 @@ def test_desktop_arms_rotation_scheduler_before_ready_handshake(
 @pytest.mark.unit
 def test_desktop_rotation_start_failure_never_signals_ready_or_serves(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     events: list[str] = []
 
@@ -417,14 +422,14 @@ def test_desktop_rotation_start_failure_never_signals_ready_or_serves(
         close=lambda: events.append("server-close"),
     )
     _stub_desktop_shutdown_dependencies(monkeypatch)
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda proof: flask_app)
     monkeypatch.setattr("waitress.server.create_server", lambda *_args, **_kwargs: server)
 
     with pytest.raises(
         RuntimeError,
         match=r"Desktop backend startup failed \(RuntimeError\)",
     ) as raised:
-        desktop._serve_owned(5100, ready_writer=lambda _message: events.append("ready"))
+        desktop._serve_owned(5100, backend_lease_proof=backend_lease_proof, ready_writer=lambda _message: events.append("ready"))
 
     assert raised.value.__cause__ is None
     assert events == ["scheduler-start", "server-close"]
@@ -433,6 +438,7 @@ def test_desktop_rotation_start_failure_never_signals_ready_or_serves(
 @pytest.mark.unit
 def test_waitress_bind_failure_cleans_partial_server_and_dispatcher_without_payload(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     events: list[str] = []
     secret = "bind-provider-secret"
@@ -462,7 +468,7 @@ def test_waitress_bind_failure_cleans_partial_server_and_dispatcher_without_payl
     flask_app = Flask("desktop-waitress-bind-failure")
     flask_app.config["AUDIT"] = SimpleNamespace(close=lambda: events.append("audit-close"))
     _stub_desktop_shutdown_dependencies(monkeypatch)
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda proof: flask_app)
     monkeypatch.setattr("waitress.task.ThreadedTaskDispatcher", lambda: dispatcher)
 
     def fail_bind(
@@ -486,6 +492,7 @@ def test_waitress_bind_failure_cleans_partial_server_and_dispatcher_without_payl
     ) as raised:
         desktop._serve_owned(
             5100,
+            backend_lease_proof=backend_lease_proof,
             ready_writer=lambda _message: events.append("ready"),
             shutdown_deadline=deadline,
         )
@@ -505,6 +512,7 @@ def test_waitress_bind_failure_cleans_partial_server_and_dispatcher_without_payl
 @pytest.mark.unit
 def test_desktop_shutdown_owns_waitress_dispatcher_inside_absolute_deadline(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     events: list[str] = []
     deadline = time.monotonic() + 1.0
@@ -539,7 +547,7 @@ def test_desktop_shutdown_owns_waitress_dispatcher_inside_absolute_deadline(
         close=lambda: events.append("server-close"),
     )
     _stub_desktop_shutdown_dependencies(monkeypatch)
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda proof: flask_app)
     monkeypatch.setattr(desktop, "_close_runtime_request_admission", lambda _app: tracker)
     monkeypatch.setattr("waitress.task.ThreadedTaskDispatcher", lambda: dispatcher)
 
@@ -558,6 +566,7 @@ def test_desktop_shutdown_owns_waitress_dispatcher_inside_absolute_deadline(
 
     desktop._serve_owned(
         5100,
+        backend_lease_proof=backend_lease_proof,
         ready_writer=lambda _message: events.append("ready"),
         shutdown_deadline=deadline,
     )
@@ -573,6 +582,7 @@ def test_desktop_shutdown_owns_waitress_dispatcher_inside_absolute_deadline(
 @pytest.mark.unit
 def test_desktop_does_not_start_an_already_running_rotation_scheduler_twice(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     events: list[str] = []
 
@@ -591,10 +601,10 @@ def test_desktop_does_not_start_an_already_running_rotation_scheduler_twice(
     flask_app.config["ROTATION_SCHEDULER"] = RunningScheduler()
     server = SimpleNamespace(effective_port=5100, run=lambda: events.append("serve"), close=lambda: None)
     _stub_desktop_shutdown_dependencies(monkeypatch)
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda proof: flask_app)
     monkeypatch.setattr("waitress.server.create_server", lambda *_args, **_kwargs: server)
 
-    desktop._serve_owned(5100, ready_writer=lambda _message: events.append("ready"))
+    desktop._serve_owned(5100, backend_lease_proof=backend_lease_proof, ready_writer=lambda _message: events.append("ready"))
 
     assert events == ["ready", "serve", "scheduler-stop"]
 
@@ -602,6 +612,7 @@ def test_desktop_does_not_start_an_already_running_rotation_scheduler_twice(
 @pytest.mark.unit
 def test_desktop_quiesces_ditto_before_each_router_retirement(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     events: list[str] = []
     flask_app = Flask("desktop-ditto-shutdown")
@@ -612,7 +623,7 @@ def test_desktop_quiesces_ditto_before_each_router_retirement(
         close=lambda: events.append("server-close"),
     )
     _stub_desktop_shutdown_dependencies(monkeypatch)
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda proof: flask_app)
     monkeypatch.setattr("waitress.server.create_server", lambda *_args, **_kwargs: server)
     monkeypatch.setattr(
         desktop,
@@ -625,7 +636,7 @@ def test_desktop_quiesces_ditto_before_each_router_retirement(
         lambda _app: events.append("router") or True,
     )
 
-    desktop._serve_owned(5100, ready_writer=lambda _message: events.append("ready"))
+    desktop._serve_owned(5100, backend_lease_proof=backend_lease_proof, ready_writer=lambda _message: events.append("ready"))
 
     assert events == [
         "ready",
@@ -641,6 +652,7 @@ def test_desktop_quiesces_ditto_before_each_router_retirement(
 @pytest.mark.unit
 def test_desktop_shutdown_passes_only_one_absolute_deadline_remaining_budget(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     observed: list[tuple[str, float]] = []
     deadline = time.monotonic() + 0.5
@@ -666,7 +678,7 @@ def test_desktop_shutdown_passes_only_one_absolute_deadline_remaining_budget(
     )
     server = SimpleNamespace(effective_port=5100, run=lambda: None, close=lambda: None)
 
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda proof: flask_app)
     monkeypatch.setattr("waitress.server.create_server", lambda *_args, **_kwargs: server)
     monkeypatch.setattr(desktop, "_close_runtime_request_admission", lambda _app: tracker)
     monkeypatch.setattr(
@@ -694,6 +706,7 @@ def test_desktop_shutdown_passes_only_one_absolute_deadline_remaining_budget(
 
     desktop._serve_owned(
         5100,
+        backend_lease_proof=backend_lease_proof,
         ready_writer=lambda _message: None,
         shutdown_deadline=deadline,
     )
@@ -870,7 +883,7 @@ def test_desktop_shutdown_timeout_retains_exact_owner_and_rejoins_one_worker(
     flask_app.config["RUNTIME_REQUEST_TRACKER"] = tracker
     server = SimpleNamespace(effective_port=5100, run=lambda: None, close=lambda: None)
 
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda proof: flask_app)
     monkeypatch.setattr("waitress.server.create_server", lambda *_args, **_kwargs: server)
     monkeypatch.setattr(desktop, "_close_runtime_request_admission", lambda _app: tracker)
     monkeypatch.setattr(
@@ -958,7 +971,7 @@ def test_admission_close_failure_retains_backend_ownership_and_continues_teardow
     lease = MagicMock()
     retain_lease = MagicMock()
     _stub_desktop_shutdown_dependencies(monkeypatch)
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda proof: flask_app)
     monkeypatch.setattr("waitress.server.create_server", lambda *_args, **_kwargs: server)
     monkeypatch.setattr(
         desktop,
@@ -987,6 +1000,7 @@ def test_admission_close_failure_retains_backend_ownership_and_continues_teardow
 @pytest.mark.unit
 def test_desktop_build_failure_rolls_back_acquired_owners_in_reverse_order(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     events: list[str] = []
     secret = "external-startup-secret"
@@ -1003,7 +1017,7 @@ def test_desktop_build_failure_rolls_back_acquired_owners_in_reverse_order(
         RuntimeError,
         match=r"Desktop backend startup failed \(ExternalStartupError\)",
     ) as raised:
-        desktop._build_app()
+        desktop._build_app(backend_lease_proof)
 
     rendered = "".join(traceback.format_exception(raised.value))
     assert secret not in rendered
@@ -1146,6 +1160,7 @@ def test_desktop_startup_local_ai_retry_does_not_repeat_proved_other_teardown(
 @pytest.mark.unit
 def test_desktop_build_retains_recovery_owner_when_reverse_rollback_is_incomplete(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     events: list[str] = []
     flask_app = _stub_transactional_build(
@@ -1155,7 +1170,7 @@ def test_desktop_build_retains_recovery_owner_when_reverse_rollback_is_incomplet
     )
 
     with pytest.raises(desktop.DesktopBackendShutdownIncomplete) as raised:
-        desktop._build_app()
+        desktop._build_app(backend_lease_proof)
 
     owner = raised.value.recovery_owner
     assert owner is not flask_app
@@ -1184,6 +1199,7 @@ def test_desktop_build_retains_recovery_owner_when_reverse_rollback_is_incomplet
 @pytest.mark.unit
 def test_desktop_pre_app_rollback_retains_executable_owner_without_secret_chain(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     import flinttrade_core.config as config_module
     import flinttrade_core.openalgo_client as client_module
@@ -1225,7 +1241,7 @@ def test_desktop_pre_app_rollback_retains_executable_owner_without_secret_chain(
     )
 
     with pytest.raises(desktop.DesktopBackendShutdownIncomplete) as raised:
-        desktop._build_app()
+        desktop._build_app(backend_lease_proof)
 
     owner = raised.value.recovery_owner
     rendered = "".join(traceback.format_exception(raised.value))
@@ -1246,6 +1262,7 @@ def test_desktop_pre_app_rollback_retains_executable_owner_without_secret_chain(
 def test_desktop_construction_diagnostics_expose_classes_not_external_payloads(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     import flinttrade_core.config as config_module
     import flinttrade_core.local_ai_routes as local_ai_routes
@@ -1278,7 +1295,7 @@ def test_desktop_construction_diagnostics_expose_classes_not_external_payloads(
     monkeypatch.setattr(smart_order_routes, "start_smart_order_jobs", lambda: True)
     monkeypatch.setattr(desktop, "_configure_tick_capture", lambda *_args, **_kwargs: None)
 
-    assert desktop._build_app() is flask_app
+    assert desktop._build_app(backend_lease_proof) is flask_app
 
     stderr = capsys.readouterr().err
     assert audit_secret not in stderr
@@ -1291,6 +1308,7 @@ def test_desktop_construction_diagnostics_expose_classes_not_external_payloads(
 def test_desktop_safety_construction_diagnostic_omits_external_payload(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     import flinttrade_core.config as config_module
     import flinttrade_core.local_ai_routes as local_ai_routes
@@ -1319,7 +1337,7 @@ def test_desktop_safety_construction_diagnostic_omits_external_payload(
         MagicMock(side_effect=ExternalSafetyError(f"safety failed with {safety_secret}")),
     )
 
-    assert desktop._build_app() is flask_app
+    assert desktop._build_app(backend_lease_proof) is flask_app
 
     stderr = capsys.readouterr().err
     assert safety_secret not in stderr

@@ -349,6 +349,7 @@ def test_telegram_kill_holds_one_generation_and_acl_authority_through_dispatch(m
 def test_background_l5_scope_blocks_router_rebuild_until_every_verb_finishes(
     monkeypatch,
     tmp_path,
+    backend_lease_proof,
 ) -> None:
     import flinttrade_core.app as app_module
     from flinttrade_core.workspace_migrations import default_workspace_config
@@ -380,6 +381,7 @@ def test_background_l5_scope_blocks_router_rebuild_until_every_verb_finishes(
 
     monkeypatch.setattr(safety_module, "gate_broker_write", lambda *_args, **_kwargs: object())
     app = Flask("emergency-parent-rebuild-race")
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_proof
     from flinttrade_gateway.registry import create_owned_registry
 
     registry, owner = create_owned_registry()

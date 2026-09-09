@@ -71,8 +71,11 @@ from .app import (
 )
 from .backend_instance import (
     BackendInstanceAlreadyRunning,
+    BackendLeaseProof,
     acquire_backend_instance_lease,
+    initialise_backend_runtime,
     release_retained_backend_instance_lease,
+    require_backend_lease_proof,
     retain_backend_instance_lease,
 )
 from .openalgo_client import client_close_sync
@@ -1236,7 +1239,7 @@ class _DesktopStartupRollbackRecoveryOwner:
         ) from None
 
 
-def _build_app() -> object:
+def _build_app(backend_lease_proof: BackendLeaseProof) -> object:
     """Construct the Flask app with the full safety + order-routing surface.
 
     Mirrors the wiring :meth:`FlintTradeApp.start` performs, minus the async
@@ -1250,6 +1253,12 @@ def _build_app() -> object:
     package is unavailable in a stripped build), the app still serves with that
     capability degraded rather than refusing to boot.
     """
+    require_backend_lease_proof(backend_lease_proof)
+    return initialise_backend_runtime(backend_lease_proof, lambda: _build_owned_app(backend_lease_proof))
+
+
+def _build_owned_app(backend_lease_proof: BackendLeaseProof) -> object:
+    """Build desktop owners after the shared backend ownership boundary."""
     safety = None
     audit = None
     client = None
@@ -1282,7 +1291,9 @@ def _build_app() -> object:
     local_ai_attempted = False
     smart_order_started = False
     try:
-        flask_app = create_flask_app(safety=safety, audit=audit, client=client)
+        flask_app = create_flask_app(
+            safety=safety, audit=audit, client=client, backend_lease_proof=backend_lease_proof,
+        )
         from .local_ai_routes import start_configured_local_ai_runtime  # noqa: PLC0415
 
         local_ai_attempted = True
@@ -1954,12 +1965,14 @@ def serve(
     ready_writer: Callable[[str], None] | None = None,
     shutdown_signal: _ShutdownSignal | None = None,
     shutdown_deadline: float | None = None,
-    guardian_owned_lease: bool = False,
+    backend_lease_proof: BackendLeaseProof | None = None,
 ) -> None:
     """Serve while retaining exclusive ownership of the active workspace."""
-    if guardian_owned_lease:
+    if backend_lease_proof is not None:
+        require_backend_lease_proof(backend_lease_proof)
         _serve_owned(
             port,
+            backend_lease_proof=backend_lease_proof,
             ready_writer=ready_writer,
             shutdown_signal=shutdown_signal,
             shutdown_deadline=shutdown_deadline,
@@ -1986,6 +1999,7 @@ def serve(
     try:
         _serve_owned(
             port,
+            backend_lease_proof=backend_lease.proof,
             ready_writer=ready_writer,
             shutdown_signal=shutdown_signal,
             shutdown_deadline=shutdown_deadline,
@@ -2017,6 +2031,7 @@ def serve(
 def _serve_owned(
     port: int,
     *,
+    backend_lease_proof: BackendLeaseProof,
     ready_writer: Callable[[str], None] | None = None,
     shutdown_signal: _ShutdownSignal | None = None,
     shutdown_deadline: float | None = None,
@@ -2031,7 +2046,7 @@ def _serve_owned(
     Args:
         port: Loopback port to bind. ``0`` asks the OS for a free port.
     """
-    app = _build_app()
+    app = _build_app(backend_lease_proof)
     server = None
     waitress_dispatcher = None
     waitress_socket_map: dict[Any, Any] = {}
@@ -2107,7 +2122,7 @@ def main(
     argv: list[str] | None = None,
     *,
     shutdown_signal: _ShutdownSignal | None = None,
-    guardian_owned_lease: bool = False,
+    backend_lease_proof: BackendLeaseProof | None = None,
 ) -> None:
     """CLI entry point — parse args, init workspace, serve.
 
@@ -2138,7 +2153,7 @@ def main(
     serve(
         _resolve_port(args.port),
         shutdown_signal=shutdown_signal,
-        guardian_owned_lease=guardian_owned_lease,
+        backend_lease_proof=backend_lease_proof,
     )
 
 

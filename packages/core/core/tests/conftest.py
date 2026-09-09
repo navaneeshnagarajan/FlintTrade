@@ -45,6 +45,46 @@ for _rel_path in _PY_PACKAGE_SRCS:
 _SCRATCH_MODULE_NAME = "_flinttrade_scratch_workspace"
 
 
+@pytest.fixture
+def backend_lease_factory(monkeypatch):
+    """Acquire explicit proof after a test has selected its scratch workspace."""
+    from flinttrade_core.backend_instance import acquire_backend_instance_lease
+    from flinttrade_core.workspace import workspace_dir
+
+    leases = {}
+
+    def acquire():
+        path = workspace_dir().resolve()
+        if path not in leases:
+            leases[path] = acquire_backend_instance_lease()
+        return leases[path].proof
+
+    try:
+        yield acquire
+    finally:
+        monkeypatch.undo()
+        for lease in leases.values():
+            lease.release()
+
+
+@pytest.fixture
+def backend_lease_proof(monkeypatch):
+    """Explicit real ownership for tests constructing a broker runtime.
+
+    Proofless factory tests deliberately do not request this fixture.
+    """
+    from flinttrade_core.backend_instance import acquire_backend_instance_lease
+
+    lease = acquire_backend_instance_lease()
+    try:
+        yield lease.proof
+    finally:
+        # Some ownership tests deliberately replace os.getpid. Restore that
+        # process view before asking the real kernel owner to release.
+        monkeypatch.undo()
+        lease.release()
+
+
 def _scratch_workspace():
     """Return the shared scratch-workspace finaliser module.
 

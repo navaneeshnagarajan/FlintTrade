@@ -331,12 +331,12 @@ def test_direct_rate_limit_writer_denies_before_generation_lease(guarded_app):
     assert forbidden.calls == []
 
 
-def test_real_factory_keeps_default_guard_and_preserved_http_boundaries(monkeypatch):
+def test_real_factory_keeps_default_guard_and_preserved_http_boundaries(monkeypatch, backend_lease_factory):
     from flinttrade_core.app import create_flask_app
 
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     client = app.test_client()
     with app.app_context():
         headers = {"Authorization": f"Bearer {auth_routes._create_token('synthetic', mode='explore')}"}

@@ -3304,6 +3304,7 @@ def _prepare_posix_owned_process_tree(
     publish_application_identity: Callable[[], None] | None = None,
     *,
     cleanup_complete: Callable[[], None] | None = None,
+    lease_handoff: object | None = None,
 ) -> Callable[[], bool] | None:
     """Fork an external guardian, then isolate the backend leader in a group."""
     if not _enable_linux_child_subreaper():
@@ -3331,6 +3332,8 @@ def _prepare_posix_owned_process_tree(
         os.close(ready_read_fd)
         if lease_write_fd is not None:
             os.close(lease_write_fd)
+        if lease_handoff is not None:
+            lease_handoff.publish(application_pid)
         _run_posix_containment_guardian(
             application_pid,
             read_fd,
@@ -3638,6 +3641,7 @@ def _prepare_owned_process_tree(
     publish_application_identity: Callable[[], None] | None = None,
     *,
     cleanup_complete: Callable[[], None] | None = None,
+    lease_handoff: object | None = None,
 ) -> Callable[[], bool] | None:
     """Prepare kernel/external containment before backend imports spawn children."""
     if os.name == "nt":
@@ -3648,6 +3652,7 @@ def _prepare_owned_process_tree(
     return _prepare_posix_owned_process_tree(
         publish_application_identity,
         cleanup_complete=cleanup_complete,
+        lease_handoff=lease_handoff,
     )
 
 
@@ -4192,7 +4197,7 @@ def _run_core_desktop(
     argv: list[str],
     *,
     shutdown_signal: _ShutdownCoordinator,
-    guardian_owned_lease: bool,
+    backend_lease_proof: object | None,
 ) -> None:
     """Late-import and run the backend after all guardian authority exists."""
     from flinttrade_core.desktop import main  # noqa: PLC0415 - guardian owns boot order
@@ -4200,7 +4205,7 @@ def _run_core_desktop(
     main(
         argv,
         shutdown_signal=shutdown_signal,
-        guardian_owned_lease=guardian_owned_lease,
+        backend_lease_proof=backend_lease_proof,
     )
 
 
@@ -4271,9 +4276,15 @@ def run_desktop_backend(argv: list[str] | None = None) -> int:
         announce_application_pid()
 
     cleanup_complete = getattr(source_lease, "release", None)
+    lease_handoff = None
     try:
+        if source_lease is not None and os.name != "nt":
+            from flinttrade_core.backend_instance import prepare_backend_lease_handoff  # noqa: PLC0415
+
+            lease_handoff = prepare_backend_lease_handoff(source_lease)
         terminate_owned_tree = _prepare_owned_process_tree(
             cleanup_complete=cleanup_complete if callable(cleanup_complete) else None,
+            lease_handoff=lease_handoff,
         )
     except BaseException:  # noqa: BLE001 - cleanup must cover every setup exit
         if source_mode:
@@ -4291,10 +4302,15 @@ def run_desktop_backend(argv: list[str] | None = None) -> int:
     start_stdin_shutdown_listener(shutdown.request, terminate_owned_tree=terminate_owned_tree)
     start_sigterm_shutdown_relay(shutdown.request)
 
+    backend_lease_proof = (
+        lease_handoff.claim() if lease_handoff is not None
+        else source_lease.proof if source_lease is not None
+        else None
+    )
     _run_core_desktop(
         arguments,
         shutdown_signal=shutdown,
-        guardian_owned_lease=source_mode,
+        backend_lease_proof=backend_lease_proof,
     )
 
     if source_mode and os.name == "nt":
