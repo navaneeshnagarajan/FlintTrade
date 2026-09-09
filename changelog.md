@@ -45,6 +45,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Docs page summary duplicated as first body paragraph (FT-SITE-002).**
+  On `/docs*` routes the page summary no longer appears twice. The
+  generator still lifts the first body paragraph into frontmatter for
+  SEO, but marks `hideDescription` when that extract matches the opening
+  body paragraph. The docs page skips `DocsDescription` unless the page
+  opts in with a distinct subtitle (fail-closed if the flag is missing).
+
 - **Primary nav overflow clips Contribute (FT-SITE-001).** The marketing
   header no longer uses a shrinking `overflow-x: auto` row below 900px.
   Primary links wrap without shrinking, so Contribute and the other
