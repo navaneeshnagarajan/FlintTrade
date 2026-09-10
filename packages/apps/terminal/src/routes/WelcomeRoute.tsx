@@ -300,7 +300,10 @@ export default function WelcomeRoute() {
   }, [reducedMotion]);
 
   useEffect(() => {
-    if (authStatus !== "unknown") return;
+    // Daily Sign In remounts Welcome after logout with status already
+    // "logged-out". Probe then too, or totpEnabled stays at the fail-closed
+    // default and a deferred authenticator still blocks password-only login.
+    if (authStatus !== "unknown" && authStatus !== "logged-out") return;
 
     // Explore-first / Try with sample data persist a demo session. Restore it
     // before the public auth probe, or is_setup=true logs the operator out
