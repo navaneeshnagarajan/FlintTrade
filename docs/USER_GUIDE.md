@@ -317,6 +317,11 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] Broker or OpenAlgo session is current if you are intentionally testing a
       live-capable integration.
 - [ ] Your FlintTrade JWT is fresh — it expires daily at 8 AM IST.
+- [ ] The authenticator is enrolled, or you will confirm a one-time
+      authenticator code in the Live switch dialog (if you chose **Set up
+      later** during setup). Explore and Practice stay password-only until
+      enrolment.
+- [ ] A 6-digit PIN is set under Settings → Security.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
 - [ ] Daily P&L pause and hard-stop percentages are configured in Settings → Risk.
@@ -325,11 +330,15 @@ software safeguards, prompts, and recovery controls in a local setup.
 
 ### Walkthrough
 
-1. Click the **PRACTICE** badge in the top bar. A dialog warns that
-   real orders will be placed and asks for your **6-digit PIN**
-   (`POST /v1/auth/pin`). Live unlock requires a confirmed authenticator
-   enrolment first, then the PIN — the PIN alone is refused until the
-   authenticator is enabled. Set a PIN under Settings → Security first
+1. Click the **PRACTICE** badge in the top bar, or select **Live** on
+   the welcome mode picker. The dialog warns that real orders will be
+   placed and asks for an **authenticator code** and your **6-digit PIN**.
+   Live unlock requires both — a confirmed authenticator enrolment plus
+   the PIN. If you deferred 2FA with **Set up later**, enter a one-time
+   authenticator code in the dialog to enrol, then the PIN.
+   `POST /v1/auth/pin` with `mode: "live"` refuses 403
+   `totp_required` until the authenticator is enabled. The PIN
+   alone is not enough. Set a PIN under Settings → Security first
    if you have not already.
 2. Cancel the modal unless you are deliberately performing your own broker-side
    test outside this guide.
