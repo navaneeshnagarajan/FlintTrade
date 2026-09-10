@@ -695,6 +695,28 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
             <Trash2 size={11} />
           </button>
         )}
+        {(chrome === "unconfigured" || chrome === "disconnected" || chrome === "error") && messages.length > 0 && (
+          <>
+            <button
+              type="button"
+              onClick={() => { void refetchAdvisorStatus(); }}
+              className="p-1 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors"
+              aria-label="Retry advisor status"
+              title="Retry advisor status"
+            >
+              <RefreshCw size={11} />
+            </button>
+            <button
+              type="button"
+              onClick={openSettingsLlm}
+              className="p-1 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors"
+              aria-label="Open Settings → AI"
+              title="Open Settings → AI"
+            >
+              <Settings size={11} />
+            </button>
+          </>
+        )}
         <span
           className={[
             "text-xxs font-medium px-1.5 py-0.5 rounded border",
@@ -828,13 +850,25 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
                   Configure your LLM provider in Settings → AI to enable the AI trading advisor.
                 </p>
               </div>
-              <Button
-                size="sm"
-                className="h-6 text-xs px-2.5"
-                onClick={openSettingsLlm}
-              >
-                Open Settings → AI
-              </Button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  size="sm"
+                  className="h-6 text-xs px-2.5"
+                  onClick={openSettingsLlm}
+                >
+                  Open Settings → AI
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-xs px-2.5"
+                  aria-label="Retry advisor status"
+                  onClick={() => { void refetchAdvisorStatus(); }}
+                >
+                  <RefreshCw size={12} aria-hidden="true" />
+                  Retry
+                </Button>
+              </div>
             </>
           ) : (
             <>

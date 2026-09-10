@@ -27,7 +27,8 @@ export function useAdvisorLlmStatus(): AdvisorLlmStatus {
   const query = useQuery({
     queryKey: ADVISOR_LLM_STATUS_QUERY_KEY,
     queryFn: ({ signal }) => probeAdvisorAvailability(signal),
-    staleTime: 30_000,
+    staleTime: 0,
+    refetchOnMount: "always",
     retry: false,
   });
 

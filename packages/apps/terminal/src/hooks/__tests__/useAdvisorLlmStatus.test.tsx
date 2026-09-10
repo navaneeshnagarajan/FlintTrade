@@ -11,6 +11,8 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ADVISOR_LLM_STATUS_QUERY_KEY, useAdvisorLlmStatus } from "../useAdvisorLlmStatus";
+import { useAuthStore } from "@/stores/authStore";
+import { useModeStore } from "@/stores/modeStore";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -36,6 +38,8 @@ describe("useAdvisorLlmStatus", () => {
   });
 
   it("probes advisor/status even when the session is Explore demo-user", async () => {
+    useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ token: "demo-user" });
     vi.mocked(fetch).mockResolvedValue(
       jsonResponse({
         status: "success",
@@ -47,6 +51,8 @@ describe("useAdvisorLlmStatus", () => {
 
     await waitFor(() => expect(result.current.chrome).toBe("unconfigured"));
     expect(result.current.configured).toBe(false);
+    expect(useModeStore.getState().mode).toBe("explore");
+    expect(useAuthStore.getState().token).toBe("demo-user");
     expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes("/advisor/status"))).toBe(true);
     expect(ADVISOR_LLM_STATUS_QUERY_KEY).toEqual(["advisor-llm-readiness"]);
   });

@@ -115,6 +115,7 @@ import AIAdvisorWidget, {
   toPlaceOrderParams,
 } from "../AIAdvisorWidget";
 import { useModeStore } from "@/stores/modeStore";
+import { useAuthStore } from "@/stores/authStore";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -145,6 +146,8 @@ describe("AIAdvisorWidget", () => {
     vi.restoreAllMocks();
     conversationStoreMock.reset();
     mockLlmProvider.mockReturnValue("");
+    useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ token: null });
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No backend"));
   });
 
@@ -184,20 +187,56 @@ describe("AIAdvisorWidget", () => {
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.getByText("LLM not configured")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Open Settings → AI/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
     expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
   });
 
   it("still probes advisor/status in Explore with a demo-user token", async () => {
     mockLlmProvider.mockReturnValue("ollama");
+    useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ token: "demo-user" });
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(advisorStatusResponse(false));
     render(<AIAdvisorWidget />, { wrapper: Providers });
 
     await screen.findByText("Not configured");
     expect(fetchMock).toHaveBeenCalled();
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/advisor/status"))).toBe(true);
+    expect(useModeStore.getState().mode).toBe("explore");
+    expect(useAuthStore.getState().token).toBe("demo-user");
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.queryByText("Sample replies")).not.toBeInTheDocument();
+  });
+
+  it("shows a green Connected badge only after advisor/status reports configured", async () => {
+    mockAdvisorStatus(true);
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    const badge = await screen.findByText("Connected");
+    expect(badge.className).toMatch(/profit/);
+    expect(screen.queryByText("Not configured")).not.toBeInTheDocument();
+    expect(await screen.findByPlaceholderText("Ask the AI advisor...")).not.toBeDisabled();
+  });
+
+  it("keeps Retry and Settings available when a leftover transcript hides the empty state", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    conversationStoreMock.useStore.setState({
+      messages: [{
+        id: "m1",
+        role: "user",
+        content: "What is NIFTY?",
+        timestamp: 1,
+        route: "/ai",
+      }],
+    });
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    expect(await screen.findAllByText("Disconnected")).not.toHaveLength(0);
+    expect(screen.queryByText("LLM not configured")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open Settings → AI/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
   });
 
   it("opens Settings → AI at /settings#llm from the unconfigured CTA", async () => {
