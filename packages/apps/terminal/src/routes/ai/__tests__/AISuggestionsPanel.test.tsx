@@ -124,14 +124,14 @@ describe("AISuggestionsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sideways" }));
     fireEvent.click(screen.getByRole("article", { name: "Iron Condor Strategy" }));
     expect(screen.getByRole("article", { name: "Iron Condor Strategy" })).toHaveAttribute(
-      "aria-pressed",
+      "aria-current",
       "true",
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Trending" }));
 
     expect(screen.queryByRole("article", { name: "Iron Condor Strategy" })).toBeNull();
-    expect(screen.queryByRole("article", { pressed: true })).toBeNull();
+    expect(screen.queryByRole("article", { current: true })).toBeNull();
   });
 
   it("navigates to /lab with strategy key on Deploy click", () => {

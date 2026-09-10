@@ -288,7 +288,7 @@ function StrategyCard({ suggestion, index, selected, onSelect, onDeploy }: Strat
     >
       <article
         aria-label={suggestion.name}
-        aria-pressed={selected}
+        aria-current={selected || undefined}
         data-selected={selected || undefined}
         tabIndex={0}
         onClick={() => onSelect(suggestion.registryKey)}
