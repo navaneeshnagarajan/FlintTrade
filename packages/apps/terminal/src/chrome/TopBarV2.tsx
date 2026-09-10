@@ -286,6 +286,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   const mode = useModeStore((s) => s.mode);
   const directBrokerConnected = useDirectBrokerConnected();
   const storedTickerMode = useSettingsStore((s) => s.tickerMode);
+  const setTickerMode = useSettingsStore((s) => s.setTickerMode);
   const tickerMode: TickerMode = tickerModeProp ?? storedTickerMode;
   const { availableTools } = useSkillContent();
   const { hideTickerByDefault, collapseOverflow } = useChromeCollapse();
@@ -331,14 +332,9 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
       const panel = document.querySelector(
         "[role='dialog'][aria-label='Quick settings']",
       );
-      if (
-        panel &&
-        !panel.contains(e.target as Node) &&
-        gearRef.current &&
-        !gearRef.current.contains(e.target as Node)
-      ) {
-        setQuickSettingsOpen(false);
-      }
+      if (!panel || panel.contains(e.target as Node)) return;
+      if (gearRef.current?.contains(e.target as Node)) return;
+      setQuickSettingsOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -535,7 +531,12 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
             size="sm"
             className="min-h-11 px-2 text-text-muted hover:text-text-primary"
             onClick={() => {
-              setTickerForcedOnNarrow((enabled) => !enabled);
+              if (tickerForcedOnNarrow) {
+                setTickerForcedOnNarrow(false);
+              } else {
+                if (tickerMode === "off") setTickerMode("marquee");
+                setTickerForcedOnNarrow(true);
+              }
               setMoreOpen(false);
             }}
             aria-label={tickerForcedOnNarrow ? "Hide ticker" : "Show ticker"}

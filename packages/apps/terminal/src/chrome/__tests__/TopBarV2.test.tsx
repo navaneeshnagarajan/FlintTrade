@@ -124,6 +124,7 @@ vi.mock("@/hooks/useSkillContent", () => ({
 // Test helpers
 // ---------------------------------------------------------------------------
 
+import { useSettingsStore } from "@/stores/settingsStore";
 import TopBarV2 from "../TopBarV2";
 
 function renderTopBarV2(tickerMode?: "off" | "pinned" | "scroll" | "marquee") {
@@ -497,6 +498,7 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     mockTimingsQuery.dataUpdatedAt = 0;
     mockTimingsQuery.isError = false;
     mockTimingsQuery.isLoading = false;
+    useSettingsStore.setState({ tickerMode: "marquee" });
     stubViewportWidth(390);
   });
 
@@ -558,7 +560,7 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     expect(screen.getByLabelText("Current time in IST")).toBeVisible();
   });
 
-  it("uses at least 44px hit targets in the More overflow sheet", () => {
+  it("uses at least 44px hit targets on More sheet controls, not only the row", () => {
     renderTopBarV2();
 
     fireEvent.click(screen.getByTestId("topbar-more-btn"));
@@ -567,6 +569,7 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     expect(rows.length).toBeGreaterThanOrEqual(4);
     for (const row of rows) {
       expect(row.className).toMatch(/min-h-11/);
+      expect(row.className).toMatch(/\[&_button\]:min-h-11/);
     }
   });
 
@@ -580,13 +583,48 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     expect(screen.getByTestId("ticker-marquee")).toBeInTheDocument();
   });
 
-  it("hides the ticker first at ~450px without collapsing Mode neighbours into More", () => {
+  it("re-enables the ticker from More when persisted mode is off", () => {
+    useSettingsStore.setState({ tickerMode: "off" });
+    renderTopBarV2();
+
+    fireEvent.click(screen.getByTestId("topbar-more-btn"));
+    fireEvent.click(screen.getByRole("button", { name: /show ticker/i }));
+
+    expect(screen.getByTestId("ticker-marquee")).toBeInTheDocument();
+    expect(useSettingsStore.getState().tickerMode).toBe("marquee");
+  });
+
+  it("collapses overflow at ~450px so hidden overflow cannot clip Mode", () => {
     stubViewportWidth(450);
     renderTopBarV2();
 
     expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("topbar-more-btn")).not.toBeInTheDocument();
     expect(screen.getByText("EXPLORE")).toBeVisible();
-    expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument();
+    expect(screen.getByTestId("topbar-more-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
+  });
+
+  it("dismisses Quick settings opened from More when clicking outside", () => {
+    renderTopBarV2();
+
+    fireEvent.click(screen.getByTestId("topbar-more-btn"));
+    fireEvent.click(screen.getByTestId("gear-btn"));
+
+    expect(screen.getByRole("dialog", { name: /quick settings/i })).toBeInTheDocument();
+    expect(screen.queryByTestId("topbar-more-sheet")).not.toBeInTheDocument();
+
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByRole("dialog", { name: /quick settings/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps the More sheet below nested account and notification portals", () => {
+    renderTopBarV2();
+
+    fireEvent.click(screen.getByTestId("topbar-more-btn"));
+
+    const root = screen.getByTestId("topbar-more-root");
+    expect(root.className).toMatch(/z-\[110]/);
+    expect(root.className).not.toMatch(/z-\[121]/);
   });
 });

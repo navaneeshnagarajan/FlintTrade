@@ -11,8 +11,12 @@ import { useEffect, useState } from "react";
 /** Hide the ticker strip by default under this width. Settings can re-enable. */
 export const TICKER_DEFAULT_OFF_MAX_WIDTH = 479;
 
-/** Overflow Workspace and secondary chrome into More at about 390px. */
-export const CHROME_COLLAPSE_MAX_WIDTH = 399;
+/**
+ * Overflow Workspace and secondary chrome into More under the same skinny
+ * band. Hiding overflow without collapsing first would clip Mode between
+ * 400px and 479px.
+ */
+export const CHROME_COLLAPSE_MAX_WIDTH = TICKER_DEFAULT_OFF_MAX_WIDTH;
 
 function useMaxWidthMedia(maxWidth: number): boolean {
   const query = `(max-width: ${maxWidth}px)`;

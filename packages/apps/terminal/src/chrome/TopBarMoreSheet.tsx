@@ -21,7 +21,10 @@ export function MoreRow({
   return (
     <div
       data-testid="topbar-more-row"
-      className={cn("flex min-h-11 items-center gap-2 px-3", className)}
+      className={cn(
+        "flex min-h-11 items-center gap-2 px-3 [&_button]:min-h-11 [&_select]:min-h-11",
+        className,
+      )}
     >
       {children}
     </div>
@@ -49,7 +52,7 @@ export default function TopBarMoreSheet({
   if (!open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[121]">
+    <div className="fixed inset-0 z-[110]" data-testid="topbar-more-root">
       <button
         type="button"
         className="absolute inset-0 bg-black/50"
