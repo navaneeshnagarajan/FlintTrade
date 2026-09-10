@@ -540,7 +540,8 @@ Cron jobs run inside the FlintTrade backend (`packages/services/automation`).
 ### Monitors
 
 Watchdog rules that fire alerts (Telegram, sound, on-screen). Lighter
-than Flows — single-event triggers without action chains.
+than Flows — single-event triggers without action chains. Empty Monitors
+offers **Open Strategy Builder**, which navigates to `/lab`.
 
 ![Automate](screenshots/07-automate.png)
 
