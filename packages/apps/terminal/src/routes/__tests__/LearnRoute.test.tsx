@@ -129,4 +129,34 @@ describe("LearnRoute", () => {
     const kotakRow = screen.getByText("Kotak Neo Sandbox").closest("[data-testid='practice-sandbox-row']");
     expect(kotakRow).toHaveClass("flex-wrap", "min-w-0");
   });
+
+  it("stacks the Learn shell and wraps Practice Trading so a ~390px column cannot clip", () => {
+    renderLearnRoute();
+    fireEvent.click(screen.getByRole("tab", { name: "Practice Trading" }));
+
+    const body = screen.getByTestId("learn-body");
+    expect(body).toHaveClass("flex-col", "min-w-0");
+    expect(body.className).toMatch(/md:flex-row/);
+
+    const sidebar = screen.getByTestId("learn-sidebar");
+    expect(sidebar).toHaveClass("w-full", "min-w-0");
+
+    const tablist = screen.getByRole("tablist");
+    expect(tablist).toHaveClass("flex-wrap", "min-w-0");
+
+    const practice = screen.getByTestId("practice-trading");
+    expect(practice).toHaveClass("min-w-0", "max-w-full");
+
+    const cta = screen.getByRole("link", { name: /open settings.*broker gateway/i });
+    expect(cta).toHaveAttribute("href", "/settings#api");
+    expect(cta).toHaveClass("whitespace-normal");
+    expect(cta.className).not.toMatch(/(?:^|\s)whitespace-nowrap(?:\s|$)/);
+
+    const nowrapLeftovers = [...practice.querySelectorAll("[class]")].filter((el) => {
+      if (el.closest('[data-slot="badge"]')) return false;
+      const cls = el.getAttribute("class") ?? "";
+      return /(?:^|\s)whitespace-nowrap(?:\s|$)/.test(cls) && !cls.includes("whitespace-normal");
+    });
+    expect(nowrapLeftovers).toEqual([]);
+  });
 });
