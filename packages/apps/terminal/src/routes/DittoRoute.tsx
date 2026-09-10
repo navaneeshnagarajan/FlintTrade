@@ -298,7 +298,6 @@ function AccountsTab() {
             <DialogTitle>Add Account</DialogTitle>
             <DialogDescription>
               Register an OpenAlgo-compatible account for mirroring and account-level risk controls.
-              The OpenAlgo URL prefills from Settings → Broker Gateway.
             </DialogDescription>
           </DialogHeader>
 

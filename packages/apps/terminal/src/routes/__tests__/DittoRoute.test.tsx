@@ -336,7 +336,7 @@ describe("DittoRoute", () => {
     expect(host).toHaveValue(DEFAULT_OPENALGO_HOST);
     expect(host).toHaveAttribute("placeholder", DEFAULT_OPENALGO_HOST);
     expect(host).not.toHaveAttribute("placeholder", "http://127.0.0.1:5001");
-    expect(screen.getByText(/Settings → Broker Gateway/)).toBeInTheDocument();
+    expect(screen.getByText(/Prefills from Settings → Broker Gateway/)).toBeInTheDocument();
     expect(dittoRouteSource()).not.toContain("127.0.0.1:5001");
   });
 
