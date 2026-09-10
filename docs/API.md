@@ -399,6 +399,16 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 | `POST auth/pin/set` | Set or change the PIN (password re-confirm). Requires an existing session JWT. |
 | `POST auth/mode` | **Downgrade only** to `practice` or `explore`. Requires an existing session JWT. Issues a fresh JWT and revokes the old `jti`. Live upgrades must use `POST /v1/auth/pin`. |
 | `POST auth/logout` | Revoke the current JWT by `jti`. Requires an existing session JWT. |
+| `POST auth/forgot-password` | JWT-token email reset. Body `{ "email" }`. Reads Flask-Mail `MAIL` from the Flask app config. A normal backend start never assigns `MAIL` (only tests inject it), so this returns 503 (`Email service not configured.`) on a stock process. SMTP/SES env vars do not enable this pair. Missing email → 400. When `MAIL` is injected and `email` is present, always returns 200 (`If the email is registered, a reset link has been sent.`) so the address is not enumerated. Rate-limited to 3 requests per hour per client. |
+| `POST auth/reset-password` | Consume a reset JWT from `forgot-password`. Body `{ "token", "new_password" }`. The token lasts 1 hour. Password minimum 8 characters. Missing fields or an invalid / expired token → 400. Rate-limited to 5 requests per minute per client. A stock backend never issues these tokens because `forgot-password` stays 503. |
+| `POST auth/forgot-password-otp` | Welcome **Forgot your password?** path. Body `{ "email" }`. Sends a 6-digit OTP via `EmailTransport` (Amazon SES is tried first when `AWS_SES_REGION` or `AWS_DEFAULT_REGION` is set, then SMTP). Missing email → 400. When `email` is present, always returns 200 (`If the email is registered, a reset OTP has been sent.`) unless the per-email cap is hit (3 OTP requests per hour → 429). Also limited to 5 requests per minute per client. |
+| `POST auth/reset-password-otp` | Welcome path. Body `{ "email", "otp", "new_password" }`. The OTP is 6 digits with a 10-minute TTL. Password minimum 8 characters. Missing fields or an invalid / expired OTP → 400. Rate-limited to 10 requests per minute per client. |
+
+Welcome's **Forgot your password?** uses the OTP pair (`forgot-password-otp` /
+`reset-password-otp`). The JWT-token pair (`forgot-password` /
+`reset-password`) is present in the handler but is not a working operator
+path until something injects Flask-Mail `MAIL`; SMTP/SES configure
+`EmailTransport` only.
 
 ### Monitoring And Observability
 
@@ -527,6 +537,9 @@ setup can run without `X-API-Key`. That is not session-free auth: `POST
 /v1/auth/totp/enable`, `/pin`, `/pin/set`, `/mode`, and `/logout` still decode
 an existing session JWT and return 401 without one. Truly unauthenticated prefixes
 include `/v1/auth/setup`, `/v1/auth/login`, `/v1/auth/status`,
+the password-reset pair (`/v1/auth/forgot-password`,
+`/v1/auth/reset-password`) and the Welcome OTP pair
+(`/v1/auth/forgot-password-otp`, `/v1/auth/reset-password-otp`),
 `/v1/errors`, `/api/v1/errors`, `/v1/changelog`, `/api/v1/ping`, and the
 other entries in `_PUBLIC_V1_PREFIXES` in `app.py`.
 
