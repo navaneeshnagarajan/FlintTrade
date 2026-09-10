@@ -33,6 +33,114 @@ export function formatINR(v: number): string {
   return formatINRCanonical(v);
 }
 
+/** Per-unit expiry P&L (lots included, contract lot-size not). */
+export function pnlAtExpiry(legs: Leg[], price: number): number {
+  let pnl = 0;
+  for (const leg of legs) {
+    const multiplier = leg.action === "BUY" ? 1 : -1;
+    const intrinsic =
+      leg.optionType === "CE"
+        ? Math.max(0, price - leg.strike)
+        : Math.max(0, leg.strike - price);
+    pnl += multiplier * leg.lots * (intrinsic - leg.premium);
+  }
+  return pnl;
+}
+
+export interface PayoffSummary {
+  /** +Infinity when the right-hand slope is positive (naked long calls, long straddles, …). */
+  maxProfit: number;
+  /** −Infinity when the right-hand slope is negative (naked short calls, short straddles, …). */
+  maxLoss: number;
+  breakevens: number[];
+}
+
+const PNL_EPS = 1e-9;
+
+/** Net call exposure — the slope of expiry P&L as spot → +∞. */
+function rightHandSlope(legs: Leg[]): number {
+  return legs.reduce((acc, leg) => {
+    if (leg.optionType !== "CE") return acc;
+    return acc + (leg.action === "BUY" ? 1 : -1) * leg.lots;
+  }, 0);
+}
+
+function uniqueStrikes(legs: Leg[]): number[] {
+  return [...new Set(legs.map((leg) => leg.strike).filter((strike) => strike > 0))].sort(
+    (a, b) => a - b,
+  );
+}
+
+/**
+ * Analytical expiry summary: evaluate kinks (spot 0 and every strike) and
+ * inspect the right-hand slope instead of taking min/max of a sampled curve.
+ *
+ * A ±15% scan caps unbounded legs (FT-LAB-001: NIFTY 22,500 ATM long call
+ * reported ₹2,53,125) and misses breakevens that sit on a flat-zero segment
+ * (zero-premium long call never changes sign).
+ */
+export function computePayoffSummary(legs: Leg[]): PayoffSummary {
+  if (legs.length === 0) {
+    return { maxProfit: 0, maxLoss: 0, breakevens: [] };
+  }
+
+  const strikes = uniqueStrikes(legs);
+  const nodes = [0, ...strikes];
+  const pnls = nodes.map((price) => pnlAtExpiry(legs, price));
+  const slope = rightHandSlope(legs);
+
+  let maxProfit = -Infinity;
+  let maxLoss = Infinity;
+  for (const pnl of pnls) {
+    if (pnl > maxProfit) maxProfit = pnl;
+    if (pnl < maxLoss) maxLoss = pnl;
+  }
+  if (slope > PNL_EPS) maxProfit = Infinity;
+  else if (slope < -PNL_EPS) maxLoss = -Infinity;
+
+  return { maxProfit, maxLoss, breakevens: findBreakevens(nodes, pnls, slope) };
+}
+
+function findBreakevens(nodes: number[], pnls: number[], slope: number): number[] {
+  const candidates: number[] = [];
+
+  for (let i = 0; i < nodes.length - 1; i++) {
+    const pa = pnls[i];
+    const pb = pnls[i + 1];
+    if ((pa < -PNL_EPS && pb > PNL_EPS) || (pa > PNL_EPS && pb < -PNL_EPS)) {
+      candidates.push(nodes[i] + (-pa / (pb - pa)) * (nodes[i + 1] - nodes[i]));
+    }
+  }
+
+  const last = nodes[nodes.length - 1];
+  const pLast = pnls[pnls.length - 1];
+  if (Math.abs(slope) > PNL_EPS) {
+    const crossing = last - pLast / slope;
+    if (crossing > last + PNL_EPS) candidates.push(crossing);
+  }
+
+  for (let i = 0; i < nodes.length; i++) {
+    if (Math.abs(pnls[i]) > PNL_EPS) continue;
+    const leftZero = i === 0 || Math.abs(pnls[i - 1]) <= PNL_EPS;
+    const rightZero =
+      i === nodes.length - 1
+        ? Math.abs(slope) <= PNL_EPS
+        : Math.abs(pnls[i + 1]) <= PNL_EPS;
+    const leavesLeft = i > 0 && !leftZero;
+    const leavesRight = !rightZero;
+    if (leavesLeft || leavesRight) candidates.push(nodes[i]);
+  }
+
+  candidates.sort((a, b) => a - b);
+  const deduped: number[] = [];
+  for (const value of candidates) {
+    if (deduped.length === 0 || Math.abs(value - deduped[deduped.length - 1]) > 1e-6) {
+      deduped.push(value);
+    }
+  }
+  return deduped;
+}
+
 export function computePayoff(legs: Leg[], spotPrice: number): PayoffPoint[] {
   const range = spotPrice * 0.15;
   const steps = 40;
@@ -41,16 +149,7 @@ export function computePayoff(legs: Leg[], spotPrice: number): PayoffPoint[] {
 
   for (let i = 0; i <= steps; i++) {
     const price = spotPrice - range + i * step;
-    let pnl = 0;
-    for (const leg of legs) {
-      const multiplier = leg.action === "BUY" ? 1 : -1;
-      const intrinsic =
-        leg.optionType === "CE"
-          ? Math.max(0, price - leg.strike)
-          : Math.max(0, leg.strike - price);
-      pnl += multiplier * leg.lots * (intrinsic - leg.premium);
-    }
-    points.push({ price, pnl });
+    points.push({ price, pnl: pnlAtExpiry(legs, price) });
   }
   return points;
 }

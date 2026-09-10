@@ -137,6 +137,17 @@ describe("StrategyBuilderTool", () => {
     expect(screen.getByRole("button", { name: "Long Straddle" })).toBeInTheDocument();
   });
 
+  it("shows unbounded payoff for the Long Call template", async () => {
+    // Tester FT-LAB-001: Options Builder → Long Call → Payoff.
+    render(<StrategyBuilderTool />);
+    await userEvent.click(screen.getByRole("button", { name: "Long Call" }));
+    await userEvent.click(screen.getByRole("tab", { name: /Payoff/i }));
+
+    expect(screen.getByText("Max Profit").nextElementSibling).toHaveTextContent("Unlimited");
+    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("₹0.00");
+    expect(screen.getByText("BEP(s)").nextElementSibling).toHaveTextContent("22500");
+  });
+
   it("applies a live load-template event while mounted", () => {
     render(<StrategyBuilderTool />);
 
