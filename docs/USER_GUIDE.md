@@ -567,6 +567,11 @@ later runtime changes and shows the exact operation and admission IDs. Explicit
 acknowledgement records that the unknown result was reviewed; it does not retry
 the action or label it successful.
 
+On Explore `/settings#llm`, a demo or unconfigured session shows the empty
+state "No LLM provider configured" with **Retry** — not a broken load.
+Configure a provider in Live or Practice on this machine; see
+[Settings reference](#11-settings-reference).
+
 ### Signals
 
 Rule-based and ML-derived software outputs. Includes an executor that runs
@@ -647,6 +652,14 @@ Settings panels:
 | **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. |
 | **Risk Limits** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
 
+On Explore `/settings` → **LLM Config**, a demo or unconfigured session
+shows the empty state "No LLM provider configured", with **Retry** and
+guidance that Explore cannot load or persist LLM secrets. This is not a
+broken session; configure a provider in Live or Practice on this machine.
+Live and Practice still disable editing on a real load failure ("AI
+settings could not be loaded") to protect a saved configuration, and
+offer **Retry**.
+
 Settings → **Report Bug** prepares a GitHub issue without background telemetry.
 The form keeps runtime/error diagnostics out of the public draft by default;
 enable the diagnostic-summary switch only after reviewing the displayed
@@ -705,6 +718,16 @@ kill <pid>
 Get-NetTCPConnection -LocalPort 5100 | Select-Object OwningProcess
 Stop-Process -Id <pid>
 ```
+
+### "No LLM provider configured" or "AI settings could not be loaded"
+
+On Explore `/settings` → LLM Config, the empty state "No LLM provider
+configured" is expected for a demo or unconfigured session. Explore
+cannot load or persist LLM secrets. Use **Retry**, or configure a
+provider in Live or Practice on this machine.
+
+On Live or Practice, "AI settings could not be loaded" disables editing
+to protect a saved configuration. Use **Retry**.
 
 ### "Token expired" when placing an order
 
