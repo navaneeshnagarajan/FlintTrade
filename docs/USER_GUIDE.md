@@ -588,8 +588,24 @@ later runtime changes and shows the exact operation and admission IDs. Explicit
 acknowledgement records that the unknown result was reviewed; it does not retry
 the action or label it successful.
 
+Chat itself needs a configured LLM via Settings → AI. The badge and composer
+follow that configured state (including Explore / `demo-user`), not a leftover
+local setting.
+
+When unconfigured, the warning badge is **Not configured**, the empty state is
+**LLM not configured**, and the primary CTA **Open Settings → AI** opens
+`/settings#llm`. Composer input and Send stay disabled; there is no
+send-then-no-reply path.
+
+A configured but broken probe shows **Error** or **Disconnected** with
+**Retry** — never a green **Connected**. Explore does not show a fake
+Connected sample advisor. Any later demo replies must be labelled
+**Sample replies**. Signals **Live** / **Polling** stay separate from Chat
+LLM readiness.
+
 On Explore `/settings#llm`, a demo or unconfigured session shows the empty
 state "No LLM provider configured" with **Retry** — not a broken load.
+That Settings empty state is distinct from Chat's **LLM not configured**.
 Configure a provider in Live or Practice on this machine; see
 [Settings reference](#11-settings-reference).
 
@@ -749,6 +765,12 @@ provider in Live or Practice on this machine.
 
 On Live or Practice, "AI settings could not be loaded" disables editing
 to protect a saved configuration. Use **Retry**.
+
+On `/ai` Chat, an unconfigured LLM shows **LLM not configured** (badge
+**Not configured**) with **Open Settings → AI**. Composer input and Send
+stay disabled. That is Chat readiness, not the Settings empty state
+above. A configured but broken probe shows **Error** or **Disconnected**
+with **Retry**.
 
 ### "Token expired" when placing an order
 
