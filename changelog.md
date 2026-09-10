@@ -52,6 +52,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **P&L columns unusable at ~390px (FT-MOBILE-001).**
+  Explore `/trade` Positions and Invest Holdings at about 390px
+  keep critical P&L and P&L% columns usable. Priority columns
+  stay in view (or a card layout / sticky first column) with a
+  clear horizontal-scroll affordance, instead of clipping P&L
+  off-screen behind a tiny scrollbar while only Symbol / Qty /
+  LTP remain visible.
+
 - **Invest deep-link hash tabs ignored on load (FT-ROUTE-001).**
   Opening `/invest#holdings` (and the other Invest tab hashes)
   now selects the matching tab on load. A direct `#holdings`
