@@ -52,6 +52,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Chart stays stale when timeframe selector changes (FT-TRADE-003).**
+  Explore `/trade` timeframe buttons now refresh the chart
+  series and visible range to match the selected interval.
+  Switching 5m → 1D no longer leaves candles and intraday
+  timestamps on the prior range, or a brief blank that stays
+  stale.
+
 - **Empty Monitors has no Strategy Builder/Lab CTA (FT-AUTO-001).**
   Explore `/automate` Monitors empty state now includes an
   "Open Strategy Builder" link to `/lab`. Operators no longer
