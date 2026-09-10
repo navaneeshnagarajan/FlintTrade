@@ -39,6 +39,18 @@ vi.mock("@/lib/tourDefinitions", () => ({
   TOUR_DEFINITIONS: {},
 }));
 
+vi.mock("@/components/magicui/animated-counter", () => ({
+  AnimatedCounter: ({
+    value,
+    formatter,
+    className,
+  }: {
+    value: number;
+    formatter?: (v: number) => string;
+    className?: string;
+  }) => <span className={className}>{formatter ? formatter(value) : value}</span>,
+}));
+
 // Mock the InvestContext provider to supply dummy data
 vi.mock("../invest/InvestContext", () => ({
   InvestProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -148,11 +160,11 @@ describe("InvestRoute", () => {
   });
 
   it("syncs the active tab when the Invest hash changes", () => {
-    window.history.replaceState(null, "", "/invest#dashboard");
+    window.history.replaceState(null, "", "/invest#sip");
 
     render(<InvestRoute />, { wrapper: createWrapper() });
 
-    expect(screen.getByRole("tab", { name: /Dashboard/i })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: /SIPs/i })).toHaveAttribute(
       "aria-selected",
       "true",
     );
