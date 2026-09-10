@@ -2977,6 +2977,24 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("spaces Explore history by the requested interval so 1D is not stale 5-minute sample data", async () => {
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "explore";
+
+    const fiveMin = await getHistory("NIFTY", "NSE_INDEX", "5m", "2026-07-01", "2026-07-14");
+    const daily = await getHistory("NIFTY", "NSE_INDEX", "1D", "2025-07-01", "2026-07-14");
+
+    expect(fiveMin.length).toBeGreaterThan(1);
+    expect(daily.length).toBeGreaterThan(1);
+    const fiveMinStep = Number(fiveMin[1]?.timestamp) - Number(fiveMin[0]?.timestamp);
+    const dailyStep = Number(daily[1]?.timestamp) - Number(daily[0]?.timestamp);
+    expect(fiveMinStep).toBe(300);
+    expect(dailyStep).toBe(86_400);
+    expect(Number(daily[daily.length - 1]?.timestamp) - Number(daily[0]?.timestamp))
+      .toBeGreaterThan(Number(fiveMin[fiveMin.length - 1]?.timestamp) - Number(fiveMin[0]?.timestamp));
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("serves sample expiries and a sample option chain in Explore instead of erroring", async () => {
     // Regression: expiry/optionchain had no Explore fallback, so the Option
     // Chain and OI Chart widgets errored with "OpenAlgo API key is not
