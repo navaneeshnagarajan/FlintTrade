@@ -52,6 +52,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Kill All Positions armed on empty Explore Ditto dashboard (FT-DITTO-001).**
+  Explore `/ditto` Risk Dashboard with ₹0 totals and no accounts
+  listed no longer leaves the red Kill All Positions control
+  active. The emergency action is disabled or hidden when there
+  are no accounts or positions, or confirm-gated with a no-op and
+  a clear empty state. Live and Practice with managed accounts
+  stay unchanged.
+
 - **Practice orders in Explore without a live broker (FT-TRADE-002).**
   Explore `/trade` Order Pad Practice Buy opens the Practice review and
   records a sample fill — no live broker is required. Live still
