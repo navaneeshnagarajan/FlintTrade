@@ -52,6 +52,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Security PIN requires exactly six digits (FT-SET-003).**
+  Explore `/settings#security` rejects a five-digit value in
+  either PIN field. Submit stays blocked, and an inline error
+  shows, until both New and Confirm fields contain exactly six
+  digits. Copy already says “6-digit PIN”; validation now
+  matches that copy.
+
 - **Progressive TopBar collapse at ~390px (FT-MOBILE-002).**
   The terminal chrome no longer clips workspace, status, or ticker
   behind a horizontal TopBar scroll at about 390px. Logo mark, Mode
