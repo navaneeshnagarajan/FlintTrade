@@ -273,7 +273,7 @@ Before enabling any order-capable integration, exercise the order path in
 
 | Mode | Order behaviour | Best for |
 |---|---|---|
-| **Explore** | Demo/sample data; no Live broker order authority. On `/trade`, Order Pad **Practice Buy** opens a paper review and records a local sample fill (no broker) | First-time visitors, screenshots, docs |
+| **Explore** | Demo/sample data; no Live broker order authority. On `/trade`, Order Pad **Practice Buy** opens a Practice review and records a local sample fill (no broker) | First-time visitors, screenshots, docs |
 | **Practice** | Orders simulated by FlintTrade's native sandbox | Strategy tests and integration checks |
 | **Live** | Real orders sent through the configured broker path | Gated broker integration, only after user review |
 
@@ -285,7 +285,7 @@ claim — switching to Live requires a deliberate confirmation step.
 1. Open `/trade` (http://127.0.0.1:5100/trade on the installed web app;
    http://localhost:5173/trade on the Vite dev server).
 2. If the badge shows **EXPLORE**, you can stay there and try Order Pad
-   **Practice Buy** — paper review, then a local sample fill (no broker).
+   **Practice Buy** — Practice review, then a local sample fill (no broker).
    For the full native-sandbox path this walkthrough uses, click the
    badge once to switch to Practice. There is no confirmation dialog.
    The UI calls `POST /v1/auth/mode` so the JWT matches.
@@ -294,7 +294,7 @@ claim — switching to Live requires a deliberate confirmation step.
 4. Type `NIFTY` into the symbol field; FlintTrade autocompletes the current
    front-month future. Select it.
 5. Set Quantity = 1 lot (50). Choose **MARKET**. Side = **BUY**.
-6. Click **Practice Buy** and confirm the paper review. The order
+6. Click **Practice Buy** and confirm the Practice review. The order
    appears in the **Positions** widget immediately; the **Orderbook**
    widget shows it as filled (simulated).
 7. Close the position from the Positions widget. Confirm your simulated
@@ -709,7 +709,7 @@ when it detects the 401.
 
 1. Check the mode badge in the top bar. **Explore** has no Live broker
    order authority — Live-intent submits are blocked. Order Pad
-   **Practice Buy** on `/trade` records a local sample fill after paper
+   **Practice Buy** on `/trade` records a local sample fill after Practice
    review (no broker). Switch to **Practice** for the native sandbox
    path, or unlock **Live** for a real broker order.
 2. Open the **Orderbook** widget and look at the rejection reason column.

@@ -53,7 +53,7 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Practice orders in Explore without a live broker (FT-TRADE-002).**
-  Explore `/trade` Order Pad Practice Buy opens the paper review and
+  Explore `/trade` Order Pad Practice Buy opens the Practice review and
   records a sample fill — no live broker is required. Live still
   uses the gated `placeOrder` path and still requires a broker
   connection. Native broker freeze is excluded.
