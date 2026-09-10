@@ -271,6 +271,40 @@ describe("DittoRoute", () => {
     });
   });
 
+  it("disarms Kill All Positions on an empty Explore risk dashboard", async () => {
+    mockGetRisk.mockResolvedValue({
+      complete: true,
+      aggregate_pnl: 0,
+      aggregate_capital: 0,
+      accounts: [],
+    });
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByText("Risk Dashboard"));
+
+    const killAll = await screen.findByRole("button", { name: "Kill All Positions" });
+    expect(killAll).toBeDisabled();
+    expect(killAll).toHaveAttribute("data-variant", "outline");
+    expect(screen.getByText("No managed accounts")).toBeInTheDocument();
+    expect(
+      screen.getByText("Kill All stays disarmed until an account is added."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(killAll);
+    expect(screen.queryByText("Confirm Kill All")).not.toBeInTheDocument();
+    expect(mockKillAll).not.toHaveBeenCalled();
+  });
+
+  it("keeps Kill All Positions armed when managed accounts have open positions", async () => {
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByText("Risk Dashboard"));
+
+    const killAll = await screen.findByRole("button", { name: "Kill All Positions" });
+    expect(killAll).toBeEnabled();
+    expect(killAll).toHaveAttribute("data-variant", "destructive");
+    fireEvent.click(killAll);
+    expect(screen.getByText("Confirm Kill All")).toBeInTheDocument();
+  });
+
   it("displays aggregate P&L in risk tab", async () => {
     render(<DittoRoute />, { wrapper: createWrapper() });
     fireEvent.click(screen.getByText("Risk Dashboard"));
@@ -384,6 +418,7 @@ describe("DittoRoute", () => {
       "Risk snapshot unavailable",
     );
     expect(screen.queryByText("₹0")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Kill All Positions" })).toBeEnabled();
   });
 
   it("keeps the kill confirmation open and reports an incomplete flatten", async () => {

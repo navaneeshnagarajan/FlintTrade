@@ -607,6 +607,10 @@ workspace.
 - **Risk** — per-account risk limits, kill-switch propagation, trailing
   stop-loss governor.
 
+On Explore `/ditto` Risk, **Kill All Positions** is disabled when there are
+no managed accounts (empty state "No managed accounts"; no confirm). The
+control stays armed when accounts are listed or the risk snapshot fails.
+
 Position mirroring patterns originally came from AlgoMirror; they now run
 in-process inside `packages/services/ditto/` (no external service required).
 
