@@ -3141,6 +3141,49 @@ describe("LLMSection provider configuration", () => {
     expect(screen.getByLabelText("LLM provider API key")).toBeDisabled();
   });
 
+  it("shows an Explore empty state with Retry instead of a dead load-failure wall", () => {
+    const onRetry = vi.fn();
+    render(
+      <LLMSection
+        settings={{ provider: "ollama", host: "", model: "", apiKey: "" }}
+        hydrationState="empty"
+        onChange={vi.fn()}
+        onProviderChange={vi.fn().mockResolvedValue(undefined)}
+        onRetry={onRetry}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("No LLM provider configured");
+    expect(screen.getByText(/cannot load or persist LLM secrets/i)).toBeInTheDocument();
+    expect(screen.getByText(/not a broken session/i)).toBeInTheDocument();
+    expect(screen.getByText(/Open Settings → LLM Config in Live or Practice/i)).toBeInTheDocument();
+    expect(screen.queryByText(/could not be loaded/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "LLM provider" })).not.toBeInTheDocument();
+    expect(localAi.getStatus).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry loading AI settings" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Live load-failure protection and offers Retry", () => {
+    const onRetry = vi.fn();
+    render(
+      <LLMSection
+        settings={{ provider: "openai", host: "", model: "gpt-4o-mini", apiKey: "" }}
+        hydrationState="error"
+        credentialConfigured
+        onChange={vi.fn()}
+        onProviderChange={vi.fn().mockResolvedValue(undefined)}
+        onRetry={onRetry}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("AI settings could not be loaded");
+    expect(screen.getByRole("combobox", { name: "LLM provider" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry loading AI settings" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
   it("uses the selected provider's model default instead of carrying the previous model", async () => {
     renderOllama();
 

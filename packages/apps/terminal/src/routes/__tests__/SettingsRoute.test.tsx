@@ -17,11 +17,12 @@ const mockNavigate = vi.fn();
 const llmRouteMocks = vi.hoisted(() => ({
   props: null as null | Record<string, unknown>,
   saveState: "saved" as "saved" | "pending" | "saving" | "error",
-  hydrationState: "ready" as "loading" | "ready" | "error",
+  hydrationState: "ready" as "loading" | "ready" | "error" | "empty",
   setupPending: false,
   updateLLM: vi.fn(),
   updateLLMProvider: vi.fn(),
   removeLLMCredential: vi.fn(),
+  retryLlmHydration: vi.fn(),
 }));
 const brokerRouteMocks = vi.hoisted(() => ({
   props: null as null | Record<string, unknown>,
@@ -140,6 +141,7 @@ vi.mock("@/hooks/useSettingsState", () => ({
     updateLLM: llmRouteMocks.updateLLM,
     updateLLMProvider: llmRouteMocks.updateLLMProvider,
     removeLLMCredential: llmRouteMocks.removeLLMCredential,
+    retryLlmHydration: llmRouteMocks.retryLlmHydration,
     updateTelegram: vi.fn(),
     updateDataPaths: vi.fn(),
     acceptConnection: vi.fn(),
@@ -196,6 +198,7 @@ describe("SettingsRoute", () => {
     llmRouteMocks.saveState = "saved";
     llmRouteMocks.hydrationState = "ready";
     llmRouteMocks.setupPending = false;
+    llmRouteMocks.retryLlmHydration.mockClear();
     brokerRouteMocks.props = null;
     window.history.replaceState(null, "", "/settings");
   });
@@ -362,11 +365,24 @@ describe("SettingsRoute", () => {
   it.each([
     ["loading", "Loading LLM settings"],
     ["error", "LLM settings unavailable"],
+    ["empty", "LLM is not configured"],
   ] as const)("reports the truthful %s hydration state", (hydrationState, copy) => {
     llmRouteMocks.hydrationState = hydrationState;
     render(<SettingsRoute />);
 
     expect(screen.getByRole("status", { name: "Settings save status" })).toHaveTextContent(copy);
+  });
+
+  it("passes Retry through to the LLM section for Explore recovery", () => {
+    llmRouteMocks.hydrationState = "empty";
+    window.history.replaceState(null, "", "/settings#llm");
+
+    render(<SettingsRoute />);
+
+    expect(llmRouteMocks.props).toEqual(expect.objectContaining({
+      hydrationState: "empty",
+      onRetry: llmRouteMocks.retryLlmHydration,
+    }));
   });
 
   it("reports an unapplied provider draft instead of claiming it is saved", () => {
