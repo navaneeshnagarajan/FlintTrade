@@ -879,6 +879,9 @@ function RiskTab() {
   });
 
   const risk: DittoRiskData | null = riskData ?? null;
+  const hasManagedAccounts = (risk?.accounts.length ?? 0) > 0;
+  // Snapshot failed: keep the emergency control available. Empty snapshot: disarm.
+  const killAllArmed = risk === null || hasManagedAccounts;
 
   if (isLoading) {
     return (
@@ -909,13 +912,25 @@ function RiskTab() {
             </p>
           </div>
         )}
-        <div className="rounded-lg border border-loss/30 bg-loss/5 p-4">
-          <p className="text-xs text-loss mb-2">Emergency Action</p>
+        <div
+          className={cn(
+            "rounded-lg border p-4",
+            killAllArmed ? "border-loss/30 bg-loss/5" : "border-border-default bg-surface-card",
+          )}
+        >
+          <p className={cn("text-xs mb-2", killAllArmed ? "text-loss" : "text-text-muted")}>
+            Emergency Action
+          </p>
           <Button
-            variant="destructive"
+            variant={killAllArmed ? "destructive" : "outline"}
             size="sm"
             className="w-full"
-            onClick={() => setKillDialogOpen(true)}
+            disabled={!killAllArmed}
+            title={killAllArmed ? undefined : "No managed accounts to flatten"}
+            onClick={() => {
+              if (!killAllArmed) return;
+              setKillDialogOpen(true);
+            }}
           >
             <AlertTriangle className="size-3.5" />
             Kill All Positions
@@ -923,8 +938,18 @@ function RiskTab() {
         </div>
       </div>
 
+      {risk && !hasManagedAccounts && (
+        <div className="flex flex-col items-center justify-center py-12 gap-2 rounded-lg border border-border-default">
+          <Users className="size-8 text-text-muted" />
+          <p className="text-sm text-text-muted">No managed accounts</p>
+          <p className="text-xs text-text-disabled">
+            Kill All stays disarmed until an account is added.
+          </p>
+        </div>
+      )}
+
       {/* Per-account risk table */}
-      {risk && <div className="rounded-lg border border-border-default overflow-hidden">
+      {risk && hasManagedAccounts && <div className="rounded-lg border border-border-default overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
