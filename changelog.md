@@ -52,6 +52,11 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Invest deep-link hash tabs ignored on load (FT-ROUTE-001).**
+  Opening `/invest#holdings` (and the other Invest tab hashes)
+  now selects the matching tab on load. A direct `#holdings`
+  URL no longer falls back to Dashboard.
+
 - **Duplicate Watchlist widgets from Add widget picker (FT-HOME-002).**
   Explore `/home` Add widget no longer adds a second Watchlist when
   one is already on the dashboard. Already-present widget types are
