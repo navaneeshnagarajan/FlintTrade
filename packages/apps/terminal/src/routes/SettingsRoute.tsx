@@ -147,6 +147,7 @@ export default function SettingsRoute() {
     updateDataPaths,
     acceptConnection,
     handleRestart,
+    retryLlmHydration,
   } = useSettingsState();
 
   function renderLlmContent(): JSX.Element {
@@ -161,6 +162,7 @@ export default function SettingsRoute() {
         onCredentialRemove={removeLLMCredential}
         providerActivationRequired={llmSetupPending}
         onDraftStateChange={setLlmProviderDraftPending}
+        onRetry={retryLlmHydration}
       />
     );
   }
@@ -207,15 +209,17 @@ export default function SettingsRoute() {
     ? { copy: "Loading LLM settings", dot: "bg-accent animate-pulse" }
     : llmHydrationState === "error"
       ? { copy: "LLM settings unavailable", dot: "bg-loss" }
-      : (llmProviderDraftPending || llmSetupPending)
-    ? { copy: "LLM provider changes not applied", dot: "bg-warning" }
-    : llmSaveState === "pending"
-      ? { copy: "LLM changes pending", dot: "bg-warning" }
-      : llmSaveState === "saving"
-        ? { copy: "Saving LLM changes", dot: "bg-accent animate-pulse" }
-        : llmSaveState === "error"
-          ? { copy: "LLM changes not saved", dot: "bg-loss" }
-          : { copy: "No pending LLM changes", dot: "bg-profit" };
+      : llmHydrationState === "empty"
+        ? { copy: "LLM is not configured", dot: "bg-warning" }
+        : (llmProviderDraftPending || llmSetupPending)
+          ? { copy: "LLM provider changes not applied", dot: "bg-warning" }
+          : llmSaveState === "pending"
+            ? { copy: "LLM changes pending", dot: "bg-warning" }
+            : llmSaveState === "saving"
+              ? { copy: "Saving LLM changes", dot: "bg-accent animate-pulse" }
+              : llmSaveState === "error"
+                ? { copy: "LLM changes not saved", dot: "bg-loss" }
+                : { copy: "No pending LLM changes", dot: "bg-profit" };
 
   return (
     <CinematicLayout mode="focused" className="h-full">

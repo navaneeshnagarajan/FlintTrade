@@ -26,6 +26,8 @@ import {
 } from "@/services/ftApi.llm";
 import { LLM_PROVIDERS, normaliseLlmHost } from "@/lib/llmProviders";
 import type { LlmAuthMode, LlmProviderId } from "@/lib/llmProviders";
+import { isDemoAuthSession } from "@/services/ftApi.helpers";
+import { useModeStore } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
 // Section data shapes (mirror the section component prop interfaces)
@@ -75,7 +77,20 @@ export interface LlmData {
 }
 
 export type LlmSaveState = "saved" | "pending" | "saving" | "error";
-export type LlmHydrationState = "loading" | "ready" | "error";
+export type LlmHydrationState = "loading" | "ready" | "error" | "empty";
+
+/**
+ * Explore (and demo/dev-bypass tokens) have no persisted LLM secrets to
+ * protect. A failed GET is an unconfigured empty state, not a broken session.
+ * Live and Practice stay fail-closed so a load error cannot expose or clobber
+ * a saved configuration.
+ */
+export function llmHydrationFailureState(): Exclude<LlmHydrationState, "loading" | "ready"> {
+  if (useModeStore.getState().mode === "explore" || isDemoAuthSession()) {
+    return "empty";
+  }
+  return "error";
+}
 
 export interface TelegramData {
   enabled: boolean;
@@ -136,6 +151,7 @@ export interface SettingsState {
   updateDataPaths: (field: keyof DataPathsData, value: string) => void;
   acceptConnection: (connection: SavedConnectionData) => void;
   handleRestart: (onDone?: (msg: string) => void) => void;
+  retryLlmHydration: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +182,7 @@ export function useSettingsState(): SettingsState {
   const [restarting, setRestarting] = useState(false);
   const [llmSaveState, setLlmSaveState] = useState<LlmSaveState>("saved");
   const [llmHydrationState, setLlmHydrationState] = useState<LlmHydrationState>("loading");
+  const [llmHydrationEpoch, setLlmHydrationEpoch] = useState(0);
   const [llmCredentialMetadata, setLlmCredentialMetadata] = useState({
     provider: "",
     configured: false,
@@ -243,6 +260,12 @@ export function useSettingsState(): SettingsState {
     return () => { cancelled = true; };
   }, []);
 
+  const retryLlmHydration = useCallback(() => {
+    llmHydratedRef.current = false;
+    setLlmHydrationState("loading");
+    setLlmHydrationEpoch((epoch) => epoch + 1);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const providerRevision = llmProviderRevisionRef.current;
@@ -251,7 +274,7 @@ export function useSettingsState(): SettingsState {
         if (cancelled || providerRevision !== llmProviderRevisionRef.current) return;
         if (!isAcceptedLlmConfigStatus(payload.status)) {
           llmHydratedRef.current = false;
-          setLlmHydrationState("error");
+          setLlmHydrationState(llmHydrationFailureState());
           return;
         }
         applyLlmCredentialMetadata(payload);
@@ -273,12 +296,12 @@ export function useSettingsState(): SettingsState {
       .catch((err) => {
         if (cancelled) return;
         llmHydratedRef.current = false;
-        setLlmHydrationState("error");
+        setLlmHydrationState(llmHydrationFailureState());
         console.warn("[settings] failed to hydrate LLM config:", err);
       });
 
     return () => { cancelled = true; };
-  }, [applyLlmCredentialMetadata]);
+  }, [applyLlmCredentialMetadata, llmHydrationEpoch]);
 
   // ---- Actions ----
 
@@ -768,5 +791,6 @@ export function useSettingsState(): SettingsState {
     updateDataPaths,
     acceptConnection,
     handleRestart,
+    retryLlmHydration,
   };
 }

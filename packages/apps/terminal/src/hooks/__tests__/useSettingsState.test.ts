@@ -13,6 +13,8 @@ import { isAcceptedOpenAlgoConfigStatus, useSettingsState } from "../useSettings
 import type { LlmProviderId } from "@/generated/serviceProviders";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useModeStore } from "@/stores/modeStore";
+import { useAuthStore } from "@/stores/authStore";
 import type { OpenAlgoConfigData } from "@/services/ftApi.openalgo";
 
 // ---------------------------------------------------------------------------
@@ -36,6 +38,25 @@ vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
 function resetStores() {
   useSettingsStore.setState(useSettingsStore.getInitialState());
   useConnectionStore.setState(useConnectionStore.getInitialState());
+  useModeStore.setState({ mode: "explore" });
+  useAuthStore.setState({ token: null });
+}
+
+function mockFetchWithFailedLlmHydration(status = 401) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes("/config/llm") && init?.method !== "POST") {
+      return new Response(
+        JSON.stringify({
+          status: "error",
+          message: "LLM configuration requires an authenticated session",
+        }),
+        { status },
+      );
+    }
+    return new Response(JSON.stringify({ status: "success", data: {} }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }
 
 function deferred<T>() {
@@ -1189,5 +1210,68 @@ describe("useSettingsState", () => {
     expect(result.current.risk.mtmStoploss).toBe("0");
     expect(result.current.risk.mtmTarget).toBe("0");
     expect(result.current.risk.maxOrdersPerMinute).toBe("0");
+  });
+
+  it("treats an Explore LLM load failure as an empty unconfigured state, not a broken session", async () => {
+    useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ token: "demo-user" });
+    mockFetchWithFailedLlmHydration();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const { result } = renderHook(() => useSettingsState());
+
+    await waitFor(() => expect(result.current.llmHydrationState).toBe("empty"));
+    expect(typeof result.current.retryLlmHydration).toBe("function");
+    warnSpy.mockRestore();
+  });
+
+  it("retries Explore LLM hydration and becomes ready when the session can load config", async () => {
+    useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ token: "demo-user" });
+    let llmAttempts = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/config/llm") && init?.method !== "POST") {
+        llmAttempts += 1;
+        if (llmAttempts === 1) {
+          return new Response(
+            JSON.stringify({
+              status: "error",
+              message: "LLM configuration requires an authenticated session",
+            }),
+            { status: 401 },
+          );
+        }
+        return new Response(JSON.stringify({
+          status: "success",
+          data: { provider: "ollama", host: "", model: "", api_key_configured: false },
+        }));
+      }
+      return new Response(JSON.stringify({ status: "success", data: {} }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { result } = renderHook(() => useSettingsState());
+
+    await waitFor(() => expect(result.current.llmHydrationState).toBe("empty"));
+
+    act(() => {
+      result.current.retryLlmHydration();
+    });
+
+    await waitFor(() => expect(result.current.llmHydrationState).toBe("ready"));
+    expect(llmAttempts).toBe(2);
+    warnSpy.mockRestore();
+  });
+
+  it("keeps a Live LLM load failure as a protected error, not an empty Explore fallback", async () => {
+    useModeStore.setState({ mode: "live" });
+    useAuthStore.setState({ token: "session-jwt" });
+    mockFetchWithFailedLlmHydration();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const { result } = renderHook(() => useSettingsState());
+
+    await waitFor(() => expect(result.current.llmHydrationState).toBe("error"));
+    warnSpy.mockRestore();
   });
 });
