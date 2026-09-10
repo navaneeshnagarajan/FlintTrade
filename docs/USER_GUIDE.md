@@ -307,6 +307,19 @@ refresh of Positions and Orderbook. No real money moved.
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
 
+### Learn → Practice Trading (OpenAlgo)
+
+This is a different path from the native Practice-mode sandbox on
+`/trade` above. Explore `/learn` → **Practice Trading** walks through
+OpenAlgo broker Practice / sandbox setup (Dhan Sandbox Active, ₹10L
+virtual funds; Kotak Neo Sandbox Planned). The tab shows "How to start
+Practice Trading", helper text "Configure OpenAlgo in Settings → Broker
+Gateway.", and an **Open Settings → Broker Gateway** button that
+navigates to `/settings#api`. The CTA does not send operators to
+Settings → Brokers (`/settings#brokers`). Point the Broker Gateway at
+that OpenAlgo Practice instance, trade against virtual funds, review
+P&L, then point OpenAlgo at live credentials when ready.
+
 ---
 
 ## 4. Live-mode safeguard verification
@@ -387,7 +400,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
 | `/invest` | Portfolio-record workspace — holdings, net worth, SIPs, and mutual-fund tracker. Deep-link hashes such as `#holdings`, `#sip`, `#networth`, and `#mf-optimizer` open the matching tab on load; an unknown hash falls back to Dashboard. |
-| `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. |
+| `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. Practice Trading links to Settings → Broker Gateway (`/settings#api`) for OpenAlgo Practice setup, not native Brokers. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise. |
 | `/automate` | Automation Hub — flows, cron, monitors, logs. Kill-switch activate/reset lives under Automate → Settings. |
 | `/ai` | AI Centre — chat, signals, sentiment, RAG. |
