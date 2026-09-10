@@ -52,6 +52,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Practice Trading has no OpenAlgo Gateway setup CTA (FT-LEARN-001).**
+  Explore `/learn` Practice Trading now links to Settings → Broker
+  Gateway (`/settings#api`) so operators can configure OpenAlgo.
+  On ~390px the Learn section tabs stack above the page instead of
+  a 224px side column, and Practice copy, lists, sandbox rows and
+  the Gateway button wrap. The CTA does not send operators to
+  native Brokers.
+
 - **P&L columns unusable at ~390px (FT-MOBILE-001).**
   Explore `/trade` Positions and Invest Holdings switch to stacked
   cards below 480px, so each row shows symbol, quantity, LTP, P&L
