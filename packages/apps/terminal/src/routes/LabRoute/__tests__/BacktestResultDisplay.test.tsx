@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -74,10 +74,6 @@ vi.mock("framer-motion", () => ({
       return <div {...rest}>{children as React.ReactNode}</div>;
     },
   },
-}));
-
-vi.mock("@/components/magicui/animated-counter", () => ({
-  AnimatedCounter: ({ value }: { value: number }) => <span>{value}</span>,
 }));
 
 vi.mock("@/lib/lightweightChartRuntime", () => ({
@@ -188,5 +184,24 @@ describe("BacktestResultDisplay", () => {
       { color: "#f87171", time: 1709251200, value: -1500 },
     ]);
     expect(chartMocks.fitContent).toHaveBeenCalled();
+  });
+
+  it("shows one formatted value per headline metric, with no leftover 0.00", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <BacktestResultDisplay result={result} />
+      </QueryClientProvider>,
+    );
+
+    const sharpe = (screen.getByText("Sharpe Ratio").parentElement?.textContent ?? "").replace(/\s+/g, " ").trim();
+    const winRate = (screen.getByText("Win Rate").parentElement?.textContent ?? "").replace(/\s+/g, " ").trim();
+    const profitFactor = (screen.getByText("Profit Factor").parentElement?.textContent ?? "").replace(/\s+/g, " ").trim();
+    expect(sharpe).toMatch(/^Sharpe Ratio\s*1\.80$/);
+    expect(winRate).toMatch(/^Win Rate\s*66\.00%$/);
+    expect(profitFactor).toMatch(/^Profit Factor\s*2\.40$/);
+    expect(sharpe).not.toMatch(/0\.00/);
+    expect(winRate).not.toMatch(/0\.00%/);
+    expect(profitFactor).not.toMatch(/0\.00/);
   });
 });
