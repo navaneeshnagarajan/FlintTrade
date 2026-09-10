@@ -45,6 +45,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Explore Ctrl+K symbol search false unavailable error (FT-CMD-001).**
+  After Explore → any route → Ctrl+K → Symbols → type NIFTY, the
+  palette reports “Symbol search unavailable. Check your connection
+  and try again.” even though Commands still work. The fix tracked
+  here must return symbol hits or Explore sample symbols, not a
+  false connection error. Product code is not in this revision.
+
 - **Zero-premium long-call payoff (unbounded max profit + breakeven) (FT-LAB-001).**
   Options Builder Payoff now summarises expiry P&L from strike kinks
   and the right-hand slope, not the ±15% chart sample. A zero-premium
