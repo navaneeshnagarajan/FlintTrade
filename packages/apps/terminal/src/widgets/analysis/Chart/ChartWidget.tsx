@@ -530,6 +530,8 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
   );
   const [exchange, setExchange] = useState(() => pinnedParams?.exchange ?? initialChartView?.exchange ?? DEFAULT_EXCHANGE);
   const [interval, setInterval] = useState(() => pinnedParams?.interval ?? initialChartView?.interval ?? "5m");
+  const intervalRef = useRef(interval);
+  intervalRef.current = interval;
   const [intervals, setIntervals] = useState<IntervalOption[]>(STATIC_INTERVALS);
   const [intervalDataScope, setIntervalDataScope] = useState<string | null>(null);
   const [visibleLogicalRange, setVisibleLogicalRange] = useState<FlintChartVisibleLogicalRange | null>(
@@ -563,6 +565,10 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
   const visibleLogicalRangeRef = useRef<FlintChartVisibleLogicalRange | null>(
     initialChartView?.visibleLogicalRange ?? null,
   );
+  // Interval switches must fit the new series. Clearing the persisted range is
+  // not enough: emptying the series fires a logical-range event that can write
+  // the prior 5-minute window back into the ref before 1D bars arrive.
+  const fitNewSeriesRangeRef = useRef(false);
 
   // ---------------------------------------------------------------------------
   // Option-leg resolution (preset-driven CE/PE panels)
@@ -741,6 +747,10 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     useChartInit(setLegend);
 
   useEffect(() => {
+    if (fitNewSeriesRangeRef.current) {
+      visibleLogicalRangeRef.current = null;
+      return;
+    }
     visibleLogicalRangeRef.current = visibleLogicalRange;
   }, [visibleLogicalRange]);
 
@@ -749,6 +759,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     if (!chart) return;
     const timeScale = chart.timeScale();
     const handleVisibleLogicalRangeChange = (range: LogicalRange | null) => {
+      if (fitNewSeriesRangeRef.current) return;
       if (!range || !Number.isFinite(range.from) || !Number.isFinite(range.to) || range.to <= range.from) {
         return;
       }
@@ -1193,10 +1204,12 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
       volumeSeries.setData(volumes);
       const timeScale = chartRef.current?.timeScale();
       const savedRange = visibleLogicalRangeRef.current;
-      if (savedRange) {
-        timeScale?.setVisibleLogicalRange(savedRange);
-      } else {
+      if (fitNewSeriesRangeRef.current || !savedRange) {
+        fitNewSeriesRangeRef.current = false;
+        visibleLogicalRangeRef.current = null;
         timeScale?.fitContent();
+      } else {
+        timeScale?.setVisibleLogicalRange(savedRange);
       }
       refreshIndicatorsRef.current?.();
       refreshServerIndicatorsRef.current?.();
@@ -1290,6 +1303,8 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
   }, [chartRef, dataScope, indRef, optionLegUnderlying]);
 
   const handleIntervalChange = useCallback((v: string) => {
+    if (intervalRef.current === v) return;
+    fitNewSeriesRangeRef.current = true;
     visibleLogicalRangeRef.current = null;
     setVisibleLogicalRange(null);
     setInterval(v);

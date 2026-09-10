@@ -1970,15 +1970,43 @@ function makeMockSearch(
     .map((tick) => ({ symbol: tick.symbol, exchange: tick.exchange }));
 }
 
-function makeMockHistory(symbol?: string, exchange?: string): OHLCVBar[] {
+const MOCK_HISTORY_BAR_COUNT = 96;
+
+/** Seconds per Explore sample bar. Unknown intervals keep the historic 5-minute step. */
+const MOCK_HISTORY_INTERVAL_SECONDS: Record<string, number> = {
+  "1m": 60,
+  "3m": 180,
+  "5m": 300,
+  "15m": 900,
+  "30m": 1_800,
+  "1h": 3_600,
+  "4h": 14_400,
+  "1D": 86_400,
+  "1d": 86_400,
+  D: 86_400,
+  "1W": 604_800,
+  "1w": 604_800,
+  W: 604_800,
+};
+
+function mockHistoryIntervalSeconds(interval?: string): number {
+  if (!interval) return 300;
+  return MOCK_HISTORY_INTERVAL_SECONDS[interval] ?? 300;
+}
+
+function makeMockHistory(symbol?: string, exchange?: string, interval?: string): OHLCVBar[] {
   const quote = findMockQuote(symbol, exchange);
+  const step = mockHistoryIntervalSeconds(interval);
   const now = Math.floor(Date.now() / 1000);
-  return Array.from({ length: 96 }, (_, index) => {
+  // Calendar intervals align to midnight UTC so the time scale shows dates,
+  // not an 8-hour intraday clock leftover from the 5-minute sample.
+  const end = step >= 86_400 ? now - (now % 86_400) : now;
+  return Array.from({ length: MOCK_HISTORY_BAR_COUNT }, (_, index) => {
     const drift = Math.sin(index / 6) * quote.ltp * 0.002;
     const open = quote.ltp + drift;
     const close = open + Math.cos(index / 5) * quote.ltp * 0.0015;
     return {
-      timestamp: now - (95 - index) * 300,
+      timestamp: end - (MOCK_HISTORY_BAR_COUNT - 1 - index) * step,
       open,
       high: Math.max(open, close) + quote.ltp * 0.001,
       low: Math.min(open, close) - quote.ltp * 0.001,
@@ -2344,8 +2372,10 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
       }));
       return { results } as T;
     }
-    case "history":
-      return makeMockHistory(symbol, exchange) as T;
+    case "history": {
+      const interval = typeof params.interval === "string" ? params.interval : undefined;
+      return makeMockHistory(symbol, exchange, interval) as T;
+    }
     case "expiry":
       return { expiry: makeMockExpiries() } as T;
     case "optionchain": {

@@ -585,6 +585,94 @@ describe("ChartWidget", () => {
     await waitFor(() => expect(apiMocks.getQuotes).toHaveBeenCalledTimes(2));
   });
 
+  it("refetches history and fits the new range when the timeframe changes from 5m to 1D", async () => {
+    chartInitMocks.setReady(true);
+    apiMocks.getIntervals.mockResolvedValue(["5m", "1D"]);
+    const fiveMinBars = [{
+      timestamp: 1_700_000_000,
+      open: 100,
+      high: 101,
+      low: 99,
+      close: 100.5,
+      volume: 10,
+    }];
+    const dailyBars = [{
+      timestamp: 1_699_913_600,
+      open: 200,
+      high: 210,
+      low: 190,
+      close: 205,
+      volume: 99,
+    }];
+    const pendingDaily = deferred<typeof dailyBars>();
+    apiMocks.getHistory
+      .mockResolvedValueOnce(fiveMinBars)
+      .mockImplementationOnce(() => pendingDaily.promise);
+
+    render(<ChartWidget />);
+
+    await waitFor(() => {
+      expect(apiMocks.getHistory).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        "5m",
+        expect.any(String),
+        expect.any(String),
+        expect.any(AbortSignal),
+        "explore:mock",
+      );
+    });
+    await waitFor(() => {
+      expect(chartInitMocks.candleSeries.setData).toHaveBeenLastCalledWith([
+        expect.objectContaining({ close: 100.5, time: 1_700_000_000 }),
+      ]);
+    });
+
+    const rangeHandler = chartInitMocks.timeScale.subscribeVisibleLogicalRangeChange.mock.calls[0]?.[0] as
+      | ((range: { from: number; to: number }) => void)
+      | undefined;
+    expect(rangeHandler).toEqual(expect.any(Function));
+    act(() => {
+      rangeHandler!({ from: 12, to: 48 });
+    });
+    chartInitMocks.timeScale.fitContent.mockClear();
+    chartInitMocks.timeScale.setVisibleLogicalRange.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "1D" }));
+    expect(screen.getByRole("button", { name: "1D" })).toHaveAttribute("aria-pressed", "true");
+
+    await waitFor(() => {
+      expect(apiMocks.getHistory).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        "1D",
+        expect.any(String),
+        expect.any(String),
+        expect.any(AbortSignal),
+        "explore:mock",
+      );
+    });
+    expect(chartInitMocks.candleSeries.setData).toHaveBeenLastCalledWith([]);
+
+    act(() => {
+      rangeHandler!({ from: 12, to: 48 });
+    });
+
+    await act(async () => {
+      pendingDaily.resolve(dailyBars);
+      await Promise.resolve();
+    });
+
+    expect(chartInitMocks.candleSeries.setData).toHaveBeenLastCalledWith([
+      expect.objectContaining({ close: 205, time: 1_699_913_600 }),
+    ]);
+    expect(chartInitMocks.timeScale.fitContent).toHaveBeenCalled();
+    expect(chartInitMocks.timeScale.setVisibleLogicalRange).not.toHaveBeenCalledWith({
+      from: 12,
+      to: 48,
+    });
+  });
+
   it("clears stale candles and quotes before loading a new data scope", async () => {
     chartInitMocks.setReady(true);
     apiMocks.getHistory
