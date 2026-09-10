@@ -71,6 +71,87 @@ def test_send_telegram_rejects_disabled_workspace_config(
     assert response.get_json()["message"] == "Telegram notifications are disabled"
 
 
+def test_send_telegram_rejects_explore_mode_jwt(
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[str] = []
+
+    class FakeBot:
+        def __init__(self, config: Any) -> None:
+            self.config = config
+
+        def send_message(self, text: str) -> bool:
+            sent.append(text)
+            return True
+
+    monkeypatch.setattr("flinttrade_core.telegram_routes.current_mode", lambda: "explore")
+    monkeypatch.setattr("flinttrade_core.telegram_routes.TelegramBot", FakeBot)
+
+    response = client.post(
+        "/api/v1/telegram",
+        json={"message": "hello", "bot_token": "tok-test", "chat_id": "123"},
+    )
+
+    assert response.status_code == 403
+    body = response.get_json()
+    assert body["status"] == "error"
+    assert body["code"] == "mode_blocked"
+    assert body["message"] == "Telegram tests are blocked in Explore (sample-only)."
+    assert sent == []
+
+
+def test_send_telegram_rejects_explore_mode_header(
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[str] = []
+
+    class FakeBot:
+        def __init__(self, config: Any) -> None:
+            self.config = config
+
+        def send_message(self, text: str) -> bool:
+            sent.append(text)
+            return True
+
+    monkeypatch.setattr("flinttrade_core.telegram_routes.current_mode", lambda: None)
+    monkeypatch.setattr("flinttrade_core.telegram_routes.TelegramBot", FakeBot)
+
+    response = client.post(
+        "/api/v1/telegram",
+        json={"message": "hello", "bot_token": "tok-test", "chat_id": "123"},
+        headers={"X-FlintTrade-Mode": "explore"},
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["code"] == "mode_blocked"
+    assert sent == []
+
+
+def test_send_telegram_allows_practice_mode(
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeBot:
+        def __init__(self, config: Any) -> None:
+            self.config = config
+
+        def send_message(self, text: str) -> bool:
+            return True
+
+    monkeypatch.setattr("flinttrade_core.telegram_routes.current_mode", lambda: "practice")
+    monkeypatch.setattr("flinttrade_core.telegram_routes.TelegramBot", FakeBot)
+
+    response = client.post(
+        "/api/v1/telegram",
+        json={"message": "hello", "bot_token": "tok-test", "chat_id": "123"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "success", "data": {"message": "sent"}}
+
+
 def test_send_telegram_reports_send_failure(client: FlaskClient, monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeBot:
         def __init__(self, config: Any) -> None:

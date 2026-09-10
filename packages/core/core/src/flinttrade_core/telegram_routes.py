@@ -17,14 +17,35 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+from flinttrade_engine.mode_guard import current_mode
 
 logger = logging.getLogger("flinttrade.core.telegram_routes")
 
 telegram_bp = Blueprint("telegram", __name__, url_prefix="/api/v1")
 
+_EXPLORE_TELEGRAM_BLOCKED = "Telegram tests are blocked in Explore (sample-only)."
+
 
 def _clean(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _explore_telegram_blocked() -> tuple[Any, int] | None:
+    """Reject Explore-mode test sends (JWT claim or X-FlintTrade-Mode header)."""
+    jwt_mode = (current_mode() or "").strip().lower()
+    header_mode = (request.headers.get("X-FlintTrade-Mode") or "").strip().lower()
+    if jwt_mode != "explore" and header_mode != "explore":
+        return None
+    logger.info(
+        "Blocked Telegram test send (mode=%s header=%s)",
+        jwt_mode or "unknown",
+        header_mode or "-",
+    )
+    return jsonify({
+        "status": "error",
+        "message": _EXPLORE_TELEGRAM_BLOCKED,
+        "code": "mode_blocked",
+    }), 403
 
 
 @telegram_bp.route("/telegram", methods=["POST"])
@@ -39,6 +60,10 @@ def send_telegram() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "message is required"}), 400
     if len(message) > 4096:
         return jsonify({"status": "error", "message": "message exceeds Telegram's 4096 character limit"}), 400
+
+    blocked = _explore_telegram_blocked()
+    if blocked is not None:
+        return blocked
 
     bot_token = _clean(body.get("bot_token") or body.get("botToken") or body.get("token"))
     chat_id = _clean(body.get("chat_id") or body.get("chatId"))

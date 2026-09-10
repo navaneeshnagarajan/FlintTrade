@@ -20,9 +20,15 @@ import {
   resetKillSwitch,
   type SafetyConfig,
 } from "@/services/ftApi";
+import { readTelegramConfig } from "@/services/ftApi.telegram";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useModeStore } from "@/stores/modeStore";
 import { InlineToast } from "./shared";
+
+export const EXPLORE_TELEGRAM_TEST_HELPER =
+  "Telegram tests are blocked in Explore (sample-only). Switch to Practice or Live with Telegram configured to send a real test.";
+
+export const TELEGRAM_UNCONFIGURED_HELPER = "Configure Telegram first";
 
 const SAFETY_CONFIG_QUERY_KEY = ["safetyConfig"] as const;
 
@@ -60,11 +66,33 @@ export function buildAutomateSafetyConfigUpdate(
 // Telegram test panel
 // ---------------------------------------------------------------------------
 
+function isTelegramConfigured(
+  data: { enabled?: boolean; bot_token_set?: boolean; chat_id?: string } | undefined,
+): boolean {
+  return Boolean(data?.enabled && data.bot_token_set && data.chat_id?.trim());
+}
+
 function TelegramTestPanel() {
   const DEFAULT_MESSAGE = "FlintTrade test alert — connection working!";
   const [message, setMessage] = useState(DEFAULT_MESSAGE);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const dismissToast = useCallback(() => setToastMsg(null), []);
+  const mode = useModeStore((state) => state.mode);
+  const isExplore = mode === "explore";
+
+  const configQuery = useQuery({
+    queryKey: ["telegramConfig"],
+    queryFn: readTelegramConfig,
+    staleTime: 30_000,
+    enabled: !isExplore,
+  });
+
+  const armed = !isExplore && isTelegramConfigured(configQuery.data?.data);
+  const helper = isExplore
+    ? EXPLORE_TELEGRAM_TEST_HELPER
+    : armed
+      ? null
+      : TELEGRAM_UNCONFIGURED_HELPER;
 
   const mutation = useMutation({
     mutationFn: (msg: string) => sendTelegram(msg),
@@ -72,6 +100,7 @@ function TelegramTestPanel() {
   });
 
   const handleSend = () => {
+    if (!armed) return;
     const trimmed = message.trim();
     if (!trimmed) return;
     mutation.mutate(trimmed);
@@ -82,17 +111,23 @@ function TelegramTestPanel() {
       <div className="flex gap-2">
         <Input
           value={message}
-          onChange={(e) => setMessage(e.target.value)}
+          onChange={(e) => {
+            if (isExplore) return;
+            setMessage(e.target.value);
+          }}
           placeholder="Enter test message…"
+          aria-label="Telegram test message"
           className="flex-1 bg-surface-base border-border-default text-text-primary text-xs h-8"
           disabled={mutation.isPending}
+          readOnly={isExplore}
           onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
         />
         <Button
           size="sm"
           variant="outline"
           onClick={handleSend}
-          disabled={mutation.isPending || !message.trim()}
+          disabled={!armed || mutation.isPending || !message.trim()}
+          title={helper ?? undefined}
           className="h-8 px-3 gap-1.5 border-border-default text-text-primary hover:text-accent hover:border-accent"
         >
           {mutation.isPending
@@ -102,6 +137,10 @@ function TelegramTestPanel() {
           <span className="text-xs">{mutation.isPending ? "Sending…" : "Send Test"}</span>
         </Button>
       </div>
+
+      {helper && (
+        <p className="text-xs text-text-disabled">{helper}</p>
+      )}
 
       {mutation.isError && (
         <p className="text-xs text-loss">
