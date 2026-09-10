@@ -22,7 +22,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isMarketHours, getMCXStatus, getExchangeStatus, EXCHANGE_HOURS } from "../market";
+import {
+  isMarketHours,
+  getMCXStatus,
+  getExchangeStatus,
+  getNseCashSessionStatus,
+  EXCHANGE_HOURS,
+} from "../market";
 import type { MarketHoursTarget } from "../market";
 import type { Holiday } from "@/types/api";
 
@@ -495,5 +501,79 @@ describe("EXCHANGE_HOURS data", () => {
     for (const exch of expected) {
       expect(EXCHANGE_HOURS).toHaveProperty(exch);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NSE cash session status — HHMM (Explore/OpenAlgo) and epoch (native)
+// ---------------------------------------------------------------------------
+
+const EXPLORE_NSE_TIMINGS = [
+  { exchange: "NSE", start_time: 915, end_time: 1530 },
+  { exchange: "BSE", start_time: 915, end_time: 1530 },
+];
+
+describe("getNseCashSessionStatus IST session window", () => {
+  it("is open at Thursday mid-session with Explore HHMM timings (FT-TRADE-004)", () => {
+    vi.setSystemTime(istToUtc(2026, 9, 10, 12, 8));
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS)).toEqual({
+      status: "open",
+      label: "Market open",
+    });
+  });
+
+  it("is closed after 15:30 IST on a weekday with Explore HHMM timings", () => {
+    vi.setSystemTime(istToUtc(2026, 9, 10, 15, 45));
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS)).toEqual({
+      status: "closed",
+      label: "Market closed",
+    });
+  });
+
+  it("is closed before 09:15 IST on a weekday with Explore HHMM timings", () => {
+    vi.setSystemTime(istToUtc(2026, 9, 10, 9, 0));
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS)).toEqual({
+      status: "closed",
+      label: "Market closed",
+    });
+  });
+
+  it("is open at the 09:15 and 15:30 IST inclusive bounds", () => {
+    vi.setSystemTime(istToUtc(2026, 9, 10, 9, 15));
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS).status).toBe("open");
+    vi.setSystemTime(istToUtc(2026, 9, 10, 15, 30));
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS).status).toBe("open");
+  });
+
+  it("is closed on an IST Saturday even during weekday session hours", () => {
+    vi.setSystemTime(istToUtc(2026, 9, 12, 12, 8));
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS)).toEqual({
+      status: "closed",
+      label: "Market closed",
+    });
+  });
+
+  it("is closed on an IST Sunday", () => {
+    vi.setSystemTime(istToUtc(2026, 9, 13, 12, 8));
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS).status).toBe("closed");
+  });
+
+  it("uses epoch-millisecond timings when the broker supplies them", () => {
+    const start = istToUtc(2026, 9, 10, 9, 15).getTime();
+    const end = istToUtc(2026, 9, 10, 15, 30).getTime();
+    const timings = [{ exchange: "NSE", start_time: start, end_time: end }];
+
+    vi.setSystemTime(istToUtc(2026, 9, 10, 12, 8));
+    expect(getNseCashSessionStatus(timings).status).toBe("open");
+
+    vi.setSystemTime(istToUtc(2026, 9, 10, 16, 0));
+    expect(getNseCashSessionStatus(timings).status).toBe("closed");
+  });
+
+  it("is unavailable when timings are missing", () => {
+    expect(getNseCashSessionStatus(undefined)).toEqual({
+      status: "unavailable",
+      label: "Market unavailable",
+    });
   });
 });
