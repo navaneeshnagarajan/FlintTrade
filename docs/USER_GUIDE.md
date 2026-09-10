@@ -539,8 +539,11 @@ Cron jobs run inside the FlintTrade backend (`packages/services/automation`).
 
 ### Monitors
 
-Watchdog rules that fire alerts (Telegram, sound, on-screen). Lighter
-than Flows — single-event triggers without action chains.
+**Live Strategy Monitors** lists running strategies and auto-refreshes
+about every 5 seconds. You can stop a running strategy from this view.
+When none are running, the empty state shows "No strategies running"
+and "Start a strategy from the Strategy Builder tool.", plus an
+**Open Strategy Builder** outline link that navigates to `/lab`.
 
 ![Automate](screenshots/07-automate.png)
 
