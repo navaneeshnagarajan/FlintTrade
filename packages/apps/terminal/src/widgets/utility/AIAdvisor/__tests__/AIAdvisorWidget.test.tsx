@@ -125,6 +125,21 @@ function Providers({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
+function advisorStatusResponse(configured: boolean): Response {
+  return new Response(JSON.stringify({
+    status: "success",
+    data: {
+      configured,
+      provider: configured ? "openai" : "",
+      model: configured ? "test" : "",
+    },
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+}
+
+function mockAdvisorStatus(configured: boolean): void {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(advisorStatusResponse(configured));
+}
+
 describe("AIAdvisorWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -138,22 +153,107 @@ describe("AIAdvisorWidget", () => {
     expect(screen.getByText("AI Advisor")).toBeInTheDocument();
   });
 
-  it("shows not-configured state when LLM provider is empty", () => {
+  it("shows not-configured state when LLM provider is empty", async () => {
+    mockAdvisorStatus(false);
     render(<AIAdvisorWidget />, { wrapper: Providers });
-    expect(screen.getByText("Not configured")).toBeInTheDocument();
-    expect(screen.getByText("LLM Not Configured")).toBeInTheDocument();
+    expect(await screen.findByText("Not configured")).toBeInTheDocument();
+    expect(screen.getByText("LLM not configured")).toBeInTheDocument();
   });
 
-  it("has a chat input field", () => {
+  it("has a chat input field", async () => {
+    mockAdvisorStatus(false);
     render(<AIAdvisorWidget />, { wrapper: Providers });
     expect(
-      screen.getByPlaceholderText("Configure LLM in Settings first..."),
+      await screen.findByPlaceholderText("Configure LLM in Settings first..."),
     ).toBeInTheDocument();
   });
 
   it("has a send button", () => {
+    mockAdvisorStatus(false);
     render(<AIAdvisorWidget />, { wrapper: Providers });
     expect(screen.getByRole("button", { name: /send message/i })).toBeInTheDocument();
+  });
+
+  it("gates Chat chrome on advisor/status configured — not a stale local store", async () => {
+    mockLlmProvider.mockReturnValue("ollama");
+    mockAdvisorStatus(false);
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    const badge = await screen.findByText("Not configured");
+    expect(badge.className).toMatch(/warning/);
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.getByText("LLM not configured")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open Settings → AI/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
+  });
+
+  it("still probes advisor/status in Explore with a demo-user token", async () => {
+    mockLlmProvider.mockReturnValue("ollama");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(advisorStatusResponse(false));
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    await screen.findByText("Not configured");
+    expect(fetchMock).toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/advisor/status"))).toBe(true);
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sample replies")).not.toBeInTheDocument();
+  });
+
+  it("opens Settings → AI at /settings#llm from the unconfigured CTA", async () => {
+    mockAdvisorStatus(false);
+    const listener = vi.fn();
+    window.addEventListener("flinttrade:navigate", listener);
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Open Settings → AI/i }));
+    expect(listener).toHaveBeenCalled();
+    const detail = (listener.mock.calls[0][0] as CustomEvent).detail;
+    expect(detail === "/settings#llm" || (detail as { path?: string })?.path === "/settings#llm").toBe(true);
+    window.removeEventListener("flinttrade:navigate", listener);
+  });
+
+  it("shows Disconnected and Retry when the status probe cannot reach the backend", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    expect(await screen.findAllByText("Disconnected")).not.toHaveLength(0);
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
+  });
+
+  it("shows Error and Retry when advisor/status is configured-looking but broken", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ status: "error" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    expect(await screen.findAllByText("Error")).not.toHaveLength(0);
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
+  });
+
+  it("does not send when the LLM is unconfigured — no send-then-no-reply path", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(advisorStatusResponse(false));
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+    await screen.findByText("Not configured");
+
+    fireEvent.change(screen.getByPlaceholderText("Configure LLM in Settings first..."), {
+      target: { value: "What is NIFTY?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    });
+    expect(conversationStoreMock.useStore.getState().messages).toHaveLength(0);
   });
 
   it("does not auto-submit and sends exact analysis context in the SSE request body", async () => {
@@ -174,7 +274,7 @@ describe("AIAdvisorWidget", () => {
     render(<AIAdvisorWidget analysisContext={analysisContext} />, { wrapper: Providers });
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
 
-    fireEvent.change(screen.getByPlaceholderText("Ask the AI advisor..."), {
+    fireEvent.change(await screen.findByPlaceholderText("Ask the AI advisor..."), {
       target: { value: "Analyse this instrument" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send message/i }));
@@ -195,7 +295,7 @@ describe("AIAdvisorWidget", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
       if (init?.method !== "POST") {
-        return new Response(JSON.stringify({ status: "error" }), { status: 200 });
+        return advisorStatusResponse(true);
       }
       if (url.endsWith("/api/v1/advisor/stream")) {
         return new Response(null, { status: 404 });
@@ -208,7 +308,7 @@ describe("AIAdvisorWidget", () => {
     const analysisContext = { symbol: "NIFTY-26MAR-FUT", exchange: "NFO", source: "palette" } as const;
 
     render(<AIAdvisorWidget analysisContext={analysisContext} />, { wrapper: Providers });
-    fireEvent.change(screen.getByPlaceholderText("Ask the AI advisor..."), {
+    fireEvent.change(await screen.findByPlaceholderText("Ask the AI advisor..."), {
       target: { value: "What changed?" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send message/i }));
@@ -243,14 +343,11 @@ describe("AIAdvisorWidget", () => {
           { status: 503, headers: { "Content-Type": "application/json" } },
         );
       }
-      return new Response(JSON.stringify({
-        status: "success",
-        data: { configured: false, provider: "", model: "" },
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      return advisorStatusResponse(true);
     });
 
     render(<AIAdvisorWidget />, { wrapper: Providers });
-    fireEvent.change(screen.getByPlaceholderText("Ask the AI advisor..."), {
+    fireEvent.change(await screen.findByPlaceholderText("Ask the AI advisor..."), {
       target: { value: "What is NIFTY?" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send message/i }));
@@ -286,7 +383,7 @@ describe("AIAdvisorWidget", () => {
     });
 
     render(<AIAdvisorWidget />, { wrapper: Providers });
-    fireEvent.change(screen.getByPlaceholderText("Ask the AI advisor..."), {
+    fireEvent.change(await screen.findByPlaceholderText("Ask the AI advisor..."), {
       target: { value: "What is NIFTY?" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send message/i }));
@@ -317,7 +414,7 @@ describe("AIAdvisorWidget", () => {
     });
 
     render(<AIAdvisorWidget />, { wrapper: Providers });
-    fireEvent.change(screen.getByPlaceholderText("Ask the AI advisor..."), {
+    fireEvent.change(await screen.findByPlaceholderText("Ask the AI advisor..."), {
       target: { value: "What is NIFTY?" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send message/i }));
@@ -512,6 +609,7 @@ describe("AIAdvisorWidget history panel", () => {
   }
 
   beforeEach(() => {
+    mockAdvisorStatus(false);
     mockListSessions.mockReset();
     mockSearchSessions.mockReset();
     mockGetSession.mockReset();

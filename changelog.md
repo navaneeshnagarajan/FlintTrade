@@ -53,13 +53,17 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Honest unconfigured LLM state on `/ai` (FT-AI-002).**
-  Explore `/ai` Chat no longer looks Connected or usable when
-  Settings LLM is unconfigured (empty/Retry path from FT-SET-001).
-  Status and chrome show Not configured / Disconnected with a CTA
-  to Settings `#llm` (or the Explore sample advisor), instead of a
-  Connected-looking surface that errors on send with
-  “The LLM returned no reply”. Product copy lands after the
-  UI/UX Designer call on the empty/error pattern.
+  `/ai` Chat now probes `advisor/status` (including Explore /
+  `demo-user`) and gates the badge and composer on `configured` —
+  not a stale local store. Unconfigured shows a warning **Not
+  configured** badge, empty **LLM not configured**, and a primary
+  **Open Settings → AI** CTA to `/settings#llm`. The composer stays
+  disabled, so there is no send-then-`no reply` path. A configured
+  but broken probe shows **Error** / **Disconnected** with Retry —
+  never a green Connected. Signals **Live** / **Polling** stay
+  separate from Chat LLM readiness. Do not add a fake Connected
+  sample advisor in Explore; any later demo replies must be labelled
+  **Sample replies**.
 
 - **Telegram Send Test stays enabled in Explore (FT-AUTO-002).**
   Explore `/automate#settings` Telegram Alerts now disables Send Test

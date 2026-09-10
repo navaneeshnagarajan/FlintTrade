@@ -34,6 +34,51 @@ export const ADVISOR_STREAM_TIMEOUT_MS = 45_000;
 
 export type AdvisorAvailability = "configured" | "unconfigured" | "unknown" | "unreachable";
 
+/**
+ * Honest Chat chrome derived from ``advisor/status``.
+ *
+ * ``ready`` is the only Connected state. A missing, failed, or unconfigured
+ * probe must never look green — including Explore / demo-user sessions that
+ * still have a stale local provider string.
+ */
+export type AdvisorLlmChrome = "loading" | "unconfigured" | "ready" | "disconnected" | "error";
+
+export function advisorAvailabilityToChrome(
+  availability: AdvisorAvailability | undefined,
+): AdvisorLlmChrome {
+  switch (availability) {
+    case "configured":
+      return "ready";
+    case "unconfigured":
+      return "unconfigured";
+    case "unreachable":
+      return "disconnected";
+    case "unknown":
+      return "error";
+    default:
+      return "loading";
+  }
+}
+
+export function advisorLlmChromeLabel(chrome: AdvisorLlmChrome): string {
+  switch (chrome) {
+    case "ready":
+      return "Connected";
+    case "unconfigured":
+      return "Not configured";
+    case "disconnected":
+      return "Disconnected";
+    case "error":
+      return "Error";
+    case "loading":
+      return "Checking…";
+  }
+}
+
+export function isAdvisorChatReady(chrome: AdvisorLlmChrome): boolean {
+  return chrome === "ready";
+}
+
 export type AdvisorChatContext = string | object;
 
 export interface AdvisorChatRequest {

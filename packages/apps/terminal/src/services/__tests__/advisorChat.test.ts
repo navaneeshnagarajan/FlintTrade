@@ -17,7 +17,10 @@ import {
   ADVISOR_UNAVAILABLE_MESSAGE,
   EMPTY_ADVISOR_REPLY_MESSAGE,
   LLM_NOT_CONFIGURED_MESSAGE,
+  advisorAvailabilityToChrome,
+  advisorLlmChromeLabel,
   consumeAdvisorSse,
+  isAdvisorChatReady,
   probeAdvisorAvailability,
   readAdvisorHttpError,
   requestAdvisorReply,
@@ -62,6 +65,24 @@ describe("advisorChat", () => {
   it("treats a network failure on the status probe as unreachable", async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await expect(probeAdvisorAvailability()).resolves.toBe("unreachable");
+  });
+
+  it("maps advisor availability to honest Chat chrome — never Connected unless configured", () => {
+    expect(advisorAvailabilityToChrome(undefined)).toBe("loading");
+    expect(advisorAvailabilityToChrome("unconfigured")).toBe("unconfigured");
+    expect(advisorAvailabilityToChrome("configured")).toBe("ready");
+    expect(advisorAvailabilityToChrome("unreachable")).toBe("disconnected");
+    expect(advisorAvailabilityToChrome("unknown")).toBe("error");
+
+    expect(advisorLlmChromeLabel("unconfigured")).toBe("Not configured");
+    expect(advisorLlmChromeLabel("ready")).toBe("Connected");
+    expect(advisorLlmChromeLabel("disconnected")).toBe("Disconnected");
+    expect(advisorLlmChromeLabel("error")).toBe("Error");
+    expect(isAdvisorChatReady("unconfigured")).toBe(false);
+    expect(isAdvisorChatReady("disconnected")).toBe(false);
+    expect(isAdvisorChatReady("error")).toBe(false);
+    expect(isAdvisorChatReady("loading")).toBe(false);
+    expect(isAdvisorChatReady("ready")).toBe(true);
   });
 
   it("throws when the SSE stream ends with no tokens", async () => {
