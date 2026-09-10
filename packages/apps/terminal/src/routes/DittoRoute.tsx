@@ -78,6 +78,7 @@ import { BrokerRecommendations } from "@/components/account/BrokerRecommendation
 import { AccountStatusPanel } from "@/components/account/AccountStatusPanel";
 import { BrokerRateLimitsPanel } from "@/components/account/BrokerRateLimitsPanel";
 import { DEFAULT_OPENALGO_HOST, resolveOpenAlgoHost } from "@/lib/openAlgoDefaults";
+import { readOpenAlgoConfig } from "@/services/ftApi.openalgo";
 import { useConnectionStore } from "@/stores/connectionStore";
 
 // ─── Tab registry ────────────────────────────────────────────────────────────
@@ -133,11 +134,31 @@ const DEFAULT_ACCOUNT_FORM = {
   isMaster: false,
 };
 
-function createAccountForm(gatewayHost?: string | null) {
+function createAccountForm(
+  gatewayHost?: string | null,
+  gatewayPort?: string | number | null,
+) {
   return {
     ...DEFAULT_ACCOUNT_FORM,
-    openalgoHost: resolveOpenAlgoHost(gatewayHost),
+    openalgoHost: resolveOpenAlgoHost(gatewayHost, gatewayPort),
   };
+}
+
+async function resolveGatewayOpenAlgoHost(): Promise<string> {
+  // Explore clears the volatile connection cache so live-order routing cannot
+  // retain a bridge key. Host and REST port are non-secret workspace fields;
+  // read them here without writing api_key back into the store.
+  try {
+    const payload = await readOpenAlgoConfig();
+    if (payload.status === "success") {
+      const data = payload.data ?? {};
+      const host = String(data.host ?? "").trim();
+      if (host) return resolveOpenAlgoHost(host, data.port);
+    }
+  } catch {
+    // Fall through to the in-session Gateway cache, then the shared default.
+  }
+  return resolveOpenAlgoHost(useConnectionStore.getState().host);
 }
 
 function BrokerOperationsPanels() {
@@ -171,7 +192,7 @@ function AccountsTab() {
   });
 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [form, setForm] = useState(() => createAccountForm(useConnectionStore.getState().host));
+  const [form, setForm] = useState(() => createAccountForm());
   const [formError, setFormError] = useState("");
   const [loadTimedOut, setLoadTimedOut] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -182,7 +203,7 @@ function AccountsTab() {
       queryClient.invalidateQueries({ queryKey: ["ditto", "accounts"] });
       queryClient.invalidateQueries({ queryKey: ["ditto", "risk"] });
       setIsAddDialogOpen(false);
-      setForm(createAccountForm(useConnectionStore.getState().host));
+      setForm(createAccountForm());
       setFormError("");
     },
   });
@@ -277,9 +298,11 @@ function AccountsTab() {
   }
 
   function openAddAccount() {
-    setForm(createAccountForm(useConnectionStore.getState().host));
     setFormError("");
-    setIsAddDialogOpen(true);
+    void resolveGatewayOpenAlgoHost().then((host) => {
+      setForm(createAccountForm(host));
+      setIsAddDialogOpen(true);
+    });
   }
 
   function handleAddDialogOpenChange(open: boolean) {
@@ -332,7 +355,8 @@ function AccountsTab() {
                 autoComplete="url"
               />
               <p className="text-xs text-text-muted">
-                Prefills from Settings → Broker Gateway. The shared OpenAlgo default is port 5000.
+                Prefills from Settings → Broker Gateway, including the saved REST
+                port when the URL omits one. The shared OpenAlgo default is port 5000.
                 Change this only if this account uses a different OpenAlgo instance.
               </p>
             </div>

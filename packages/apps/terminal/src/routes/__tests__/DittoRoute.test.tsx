@@ -49,6 +49,14 @@ vi.mock("@/services/ftApi.native", () => ({
   listBrokerRecommendations: vi.fn(),
 }));
 
+vi.mock("@/services/ftApi.openalgo", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/ftApi.openalgo")>();
+  return {
+    ...actual,
+    readOpenAlgoConfig: vi.fn(),
+  };
+});
+
 import DittoRoute from "../DittoRoute";
 import {
   addDittoAccount,
@@ -61,6 +69,7 @@ import {
   setDittoAccountEnabled,
 } from "@/services/ftApi";
 import { listBrokerRecommendations } from "@/services/ftApi.native";
+import { readOpenAlgoConfig } from "@/services/ftApi.openalgo";
 import { DEFAULT_OPENALGO_HOST } from "@/lib/openAlgoDefaults";
 import { useConnectionStore } from "@/stores/connectionStore";
 
@@ -73,6 +82,7 @@ const mockGetMirrorStatus = getDittoMirrorStatus as ReturnType<typeof vi.fn>;
 const mockGetRisk = getDittoRisk as ReturnType<typeof vi.fn>;
 const mockKillAll = dittoKillAll as ReturnType<typeof vi.fn>;
 const mockListBrokerRecommendations = listBrokerRecommendations as unknown as ReturnType<typeof vi.fn>;
+const mockReadOpenAlgoConfig = readOpenAlgoConfig as ReturnType<typeof vi.fn>;
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const dittoRouteSource = () =>
@@ -199,6 +209,10 @@ beforeEach(() => {
     message: "All managed accounts are flat",
     accounts_affected: 2,
     emergency_actions: {},
+  });
+  mockReadOpenAlgoConfig.mockResolvedValue({
+    status: "success",
+    data: { host: "", port: 5000, ws_port: 8765 },
   });
 });
 
@@ -332,7 +346,7 @@ describe("DittoRoute", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add Account" }));
 
-    const host = screen.getByLabelText("OpenAlgo URL");
+    const host = await screen.findByLabelText("OpenAlgo URL");
     expect(host).toHaveValue(DEFAULT_OPENALGO_HOST);
     expect(host).toHaveAttribute("placeholder", DEFAULT_OPENALGO_HOST);
     expect(host).not.toHaveAttribute("placeholder", "http://127.0.0.1:5001");
@@ -349,8 +363,33 @@ describe("DittoRoute", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add Account" }));
 
-    expect(screen.getByLabelText("OpenAlgo URL")).toHaveValue("http://192.0.2.10:5010");
+    expect(await screen.findByLabelText("OpenAlgo URL")).toHaveValue("http://192.0.2.10:5010");
     expect(screen.getByText(/Prefills from Settings → Broker Gateway/)).toBeInTheDocument();
+  });
+
+  it("prefills Add Account from the saved Gateway host and REST port without retaining the API key", async () => {
+    mockReadOpenAlgoConfig.mockResolvedValue({
+      status: "success",
+      data: {
+        api_key: "must-not-enter-the-connection-cache",
+        api_key_configured: true,
+        host: "http://192.168.1.20",
+        port: 5001,
+        ws_port: 8770,
+      },
+    });
+
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(screen.getByText("Managed Accounts")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Account" }));
+
+    expect(await screen.findByLabelText("OpenAlgo URL")).toHaveValue("http://192.168.1.20:5001");
+    expect(useConnectionStore.getState().host).toBe("");
+    expect(useConnectionStore.getState().apiKey).toBe("");
+    expect(useConnectionStore.getState().openAlgoHydrated).toBe(false);
   });
 
   it("opens Add Account and submits a managed account", async () => {
@@ -361,7 +400,7 @@ describe("DittoRoute", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add Account" }));
 
-    fireEvent.change(screen.getByLabelText("Account ID"), {
+    fireEvent.change(await screen.findByLabelText("Account ID"), {
       target: { value: "family_01" },
     });
     fireEvent.change(screen.getByLabelText("OpenAlgo URL"), {
