@@ -15,7 +15,9 @@ Usage::
     svc = AuthService()
     codes = svc.setup_account("alice", "alice@example.com", "StrongP@ss!", "123456")
     # Daily login:
-    if svc.verify_password("StrongP@ss!") and svc.verify_totp("123456"):
+    if svc.verify_password("StrongP@ss!") and (
+        not svc.is_totp_enabled() or svc.verify_totp("123456")
+    ):
         token = svc.create_session()
 """
 
@@ -145,6 +147,7 @@ class AuthService:
                 pin_hash TEXT NOT NULL,
                 totp_secret_encrypted BLOB NOT NULL,
                 totp_salt BLOB NOT NULL,
+                totp_enabled INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 password_changed_at REAL NOT NULL DEFAULT 0
             );
@@ -167,6 +170,12 @@ class AuthService:
         except sqlite3.OperationalError:
             # Column already exists — fresh installs hit this on the
             # CREATE TABLE path above.
+            pass
+        try:
+            self._db.execute(
+                "ALTER TABLE account ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError:
             pass
         self._db.commit()
 
@@ -247,8 +256,8 @@ class AuthService:
             # Store account in the same transaction.
             self._db.execute(
                 """INSERT INTO account (id, username, email, password_hash, pin_hash,
-                   totp_secret_encrypted, totp_salt, created_at)
-                   VALUES (1, ?, ?, ?, ?, ?, ?, ?)""",
+                   totp_secret_encrypted, totp_salt, totp_enabled, created_at)
+                   VALUES (1, ?, ?, ?, ?, ?, ?, 0, ?)""",
                 [username, email, password_hash, pin_hash, encrypted, totp_salt,
                  datetime.now(UTC).isoformat()],
             )
@@ -376,6 +385,37 @@ class AuthService:
             [new_encrypted, new_salt],
         )
         self._db.commit()
+
+    def is_totp_enabled(self) -> bool:
+        """Return True when the operator has confirmed authenticator enrolment.
+
+        Setup provisions a TOTP secret so the optional QR step can run, but
+        Explore/Practice stay password-only until :meth:`enable_totp` records
+        that confirmation. Live unlock reads the same flag.
+        """
+        try:
+            row = self._db.execute(
+                "SELECT totp_enabled FROM account WHERE id = 1"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return False
+        return bool(row and row["totp_enabled"])
+
+    def enable_totp(self, code: str) -> bool:
+        """Confirm authenticator enrolment with a live TOTP code.
+
+        Requires the TOTP secret to already be cached from a password
+        verification or account-create in this process (same constraint as
+        :meth:`verify_totp`).
+
+        Returns:
+            True when the code verifies and enrolment is recorded.
+        """
+        if not self.verify_totp(code):
+            return False
+        self._execute_locked("UPDATE account SET totp_enabled = 1 WHERE id = 1")
+        logger.info("Authenticator enrolment confirmed")
+        return True
 
     def has_pin(self) -> bool:
         """Check if a PIN was configured during setup."""
@@ -621,7 +661,7 @@ class AuthService:
         backup_codes: list[str] = []
         with self._write_lock:
             self._db.execute(
-                "UPDATE account SET totp_secret_encrypted = ?, totp_salt = ? WHERE id = 1",
+                "UPDATE account SET totp_secret_encrypted = ?, totp_salt = ?, totp_enabled = 0 WHERE id = 1",
                 [encrypted, totp_salt],
             )
             self._db.execute("DELETE FROM backup_codes")

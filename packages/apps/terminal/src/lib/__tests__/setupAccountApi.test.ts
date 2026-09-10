@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { setupFlintTradeAccount } from "../setupAccountApi";
+import { enableFlintTradeTotp, setupFlintTradeAccount } from "../setupAccountApi";
 
 describe("setupAccountApi", () => {
   beforeEach(() => {
@@ -107,6 +107,22 @@ describe("setupAccountApi", () => {
     ).rejects.toMatchObject({
       kind: "network",
       message: "Cannot reach server. Is the FlintTrade backend running?",
+    });
+  });
+
+  it("confirms authenticator enrolment with a live TOTP code", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ status: "success", data: { totp_enabled: true } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(enableFlintTradeTotp("123456")).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith("/ft-api/v1/auth/totp/enable", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ totp_code: "123456" }),
     });
   });
 });

@@ -66,6 +66,16 @@ class TestSetupEndpoint:
         assert resp.status_code == 409
 
 
+def _enable_totp(svc, password: str = "StrongP@ss123!") -> str:
+    """Confirm authenticator enrolment and return the live TOTP code used."""
+    import pyotp
+
+    assert svc.verify_password(password)
+    code = pyotp.TOTP(svc.get_totp_secret()).now()
+    assert svc.enable_totp(code)
+    return code
+
+
 class TestLoginEndpoint:
     def test_login_with_correct_credentials(self, client):
         c, svc = client
@@ -85,6 +95,41 @@ class TestLoginEndpoint:
         data = resp.get_json()
         assert "token" in data["data"]
 
+    def test_login_password_only_when_authenticator_deferred(self, client):
+        """FT-SETUP-002: Explore/Practice daily login is password-only
+        until the operator enrols TOTP."""
+        c, svc = client
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+        assert svc.is_totp_enabled() is False
+        resp = c.post("/v1/auth/login", json={
+            "password": "StrongP@ss123!",
+        }, headers={"Content-Type": "application/json"})
+        assert resp.status_code == 200
+        assert "token" in resp.get_json()["data"]
+
+    def test_login_requires_totp_once_enrolled(self, client):
+        c, svc = client
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+        _enable_totp(svc)
+        resp = c.post("/v1/auth/login", json={
+            "password": "StrongP@ss123!",
+        }, headers={"Content-Type": "application/json"})
+        assert resp.status_code == 401
+        assert "totp" in resp.get_json()["message"].lower()
+        import pyotp
+        code = pyotp.TOTP(svc.get_totp_secret()).now()
+        ok = c.post("/v1/auth/login", json={
+            "password": "StrongP@ss123!",
+            "totp_code": code,
+        }, headers={"Content-Type": "application/json"})
+        assert ok.status_code == 200
+
     def test_login_with_wrong_password(self, client):
         c, svc = client
         c.post("/v1/auth/setup", json={
@@ -96,6 +141,45 @@ class TestLoginEndpoint:
             "totp_code": "000000",
         }, headers={"Content-Type": "application/json"})
         assert resp.status_code == 401
+
+
+class TestTotpEnableEndpoint:
+    """POST /v1/auth/totp/enable — confirm optional authenticator enrolment."""
+
+    def test_enable_totp_with_live_code(self, client):
+        import pyotp
+        c, svc = client
+        setup = c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+        token = setup.get_json()["data"]["token"]
+        code = pyotp.TOTP(svc.get_totp_secret()).now()
+        resp = c.post(
+            "/v1/auth/totp/enable",
+            json={"totp_code": code},
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["totp_enabled"] is True
+        assert svc.is_totp_enabled() is True
+
+    def test_enable_totp_rejects_wrong_code(self, client):
+        c, svc = client
+        setup = c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+        token = setup.get_json()["data"]["token"]
+        resp = c.post(
+            "/v1/auth/totp/enable",
+            json={"totp_code": "000000"},
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 401
+        assert svc.is_totp_enabled() is False
 
 
 class TestStatusEndpoint:
@@ -114,10 +198,37 @@ class TestStatusEndpoint:
         resp = c.get("/v1/auth/status")
         data = resp.get_json()
         assert data["data"]["is_setup"] is True
+        assert data["data"]["totp_enabled"] is False
+
+    def test_status_totp_enabled_after_enrolment(self, client):
+        c, svc = client
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+        _enable_totp(svc)
+        data = c.get("/v1/auth/status").get_json()["data"]
+        assert data["totp_enabled"] is True
 
 
 class TestPinEndpoint:
+    def _setup_with_totp(self, c, svc):
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+        _enable_totp(svc)
+
     def test_pin_verify_correct(self, client):
+        c, svc = client
+        self._setup_with_totp(c, svc)
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
+                       headers=_session_headers())
+        assert resp.status_code == 200
+
+    def test_live_pin_requires_authenticator_enrolment(self, client):
+        """FT-SETUP-002: Live unlock keeps the stronger gate. Password-only
+        Explore/Practice must not be enough to arm real-money mode."""
         c, svc = client
         c.post("/v1/auth/setup", json={
             "username": "nav", "email": "nav@example.com",
@@ -125,14 +236,31 @@ class TestPinEndpoint:
         }, headers={"Content-Type": "application/json"})
         resp = c.post("/v1/auth/pin", json={"pin": "123456"},
                        headers=_session_headers())
-        assert resp.status_code == 200
+        assert resp.status_code == 403
+        body = resp.get_json()
+        assert body.get("code") == "totp_required"
+        assert "authenticator" in body["message"].lower()
+        _enable_totp(svc)
+        ok = c.post("/v1/auth/pin", json={"pin": "123456"},
+                    headers=_session_headers())
+        assert ok.status_code == 200
+        assert ok.get_json()["data"]["live_mode_unlocked"] is True
 
-    def test_pin_verify_wrong(self, client):
-        c, svc = client
+    def test_practice_pin_unlock_without_totp(self, client):
+        """Mode-preserving idle unlock stays password/PIN — TOTP is a Live gate."""
+        c, _svc = client
         c.post("/v1/auth/setup", json={
             "username": "nav", "email": "nav@example.com",
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
+        resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "practice"},
+                       headers=_session_headers())
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["live_mode_unlocked"] is False
+
+    def test_pin_verify_wrong(self, client):
+        c, svc = client
+        self._setup_with_totp(c, svc)
         resp = c.post("/v1/auth/pin", json={"pin": "000000"},
                        headers=_session_headers())
         assert resp.status_code == 401
@@ -145,10 +273,7 @@ class TestPinEndpoint:
         subsequent live order was 403'd by ``require_live_unlocked``.
         """
         c, svc = client
-        c.post("/v1/auth/setup", json={
-            "username": "nav", "email": "nav@example.com",
-            "password": "StrongP@ss123!", "pin": "123456",
-        }, headers={"Content-Type": "application/json"})
+        self._setup_with_totp(c, svc)
         resp = c.post("/v1/auth/pin", json={"pin": "123456"},
                        headers=_session_headers())
         assert resp.status_code == 200
@@ -250,6 +375,7 @@ class TestPinSetEndpoint:
         status = c.get("/v1/auth/status").get_json()["data"]
         assert status["has_pin"] is True
 
+        _enable_totp(svc)
         unlock = c.post("/v1/auth/pin", json={"pin": "654321"},
                         headers=_session_headers())
         assert unlock.status_code == 200
@@ -258,11 +384,12 @@ class TestPinSetEndpoint:
         assert data["live_mode_unlocked"] is True
 
     def test_set_pin_changes_existing_pin(self, client):
-        c, _ = client
+        c, svc = client
         c.post("/v1/auth/setup", json={
             "username": "nav", "email": "nav@example.com",
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
+        _enable_totp(svc)
 
         resp = c.post("/v1/auth/pin/set",
                       json={"password": "StrongP@ss123!", "pin": "999999"},
@@ -283,18 +410,20 @@ class TestModeSwitchEndpoint:
     through /v1/auth/pin.
     """
 
-    def _setup_and_pin_unlock(self, c):
+    def _setup_and_pin_unlock(self, client):
+        c, svc = client
         c.post("/v1/auth/setup", json={
             "username": "nav", "email": "nav@example.com",
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
+        _enable_totp(svc)
         pin_resp = c.post("/v1/auth/pin", json={"pin": "123456"},
                           headers=_session_headers())
         return pin_resp.get_json()["data"]["token"]
 
     def test_downgrade_to_practice_returns_fresh_token(self, client):
         c, _ = client
-        live_token = self._setup_and_pin_unlock(c)
+        live_token = self._setup_and_pin_unlock(client)
 
         resp = c.post(
             "/v1/auth/mode",
@@ -313,7 +442,7 @@ class TestModeSwitchEndpoint:
 
     def test_downgrade_revokes_prior_jwt(self, client):
         c, _ = client
-        live_token = self._setup_and_pin_unlock(c)
+        live_token = self._setup_and_pin_unlock(client)
 
         c.post(
             "/v1/auth/mode",
@@ -337,7 +466,7 @@ class TestModeSwitchEndpoint:
 
     def test_upgrade_to_live_is_rejected(self, client):
         c, _ = client
-        live_token = self._setup_and_pin_unlock(c)
+        live_token = self._setup_and_pin_unlock(client)
 
         resp = c.post(
             "/v1/auth/mode",
@@ -373,7 +502,7 @@ class TestModeSwitchEndpoint:
         defeat of the whole mode-downgrade safety property.
         """
         c, _ = client
-        live_token = self._setup_and_pin_unlock(c)
+        live_token = self._setup_and_pin_unlock(client)
 
         with patch("flinttrade_core.auth_routes._revoke_jti") as mock_revoke:
             mock_revoke.side_effect = RuntimeError("DuckDB lock error")
@@ -397,7 +526,7 @@ class TestModeSwitchEndpoint:
         in lockstep instead of holding a higher-mode token.
         """
         c, _ = client
-        live_token = self._setup_and_pin_unlock(c)
+        live_token = self._setup_and_pin_unlock(client)
 
         resp = c.post(
             "/v1/auth/mode",
@@ -415,7 +544,7 @@ class TestModeSwitchEndpoint:
 
     def test_downgrade_to_explore_revokes_prior_jwt(self, client):
         c, _ = client
-        live_token = self._setup_and_pin_unlock(c)
+        live_token = self._setup_and_pin_unlock(client)
         c.post(
             "/v1/auth/mode",
             json={"mode": "explore"},
@@ -436,7 +565,7 @@ class TestModeSwitchEndpoint:
 
     def test_downgrade_rejects_unknown_target(self, client):
         c, _ = client
-        live_token = self._setup_and_pin_unlock(c)
+        live_token = self._setup_and_pin_unlock(client)
         resp = c.post(
             "/v1/auth/mode",
             json={"mode": "live"},
@@ -455,15 +584,18 @@ class TestPinModeParameter:
     arm-real-money callers.
     """
 
-    def _setup(self, c):
+    def _setup(self, client, *, enable_totp: bool = False):
+        c, svc = client
         c.post("/v1/auth/setup", json={
             "username": "nav", "email": "nav@example.com",
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
+        if enable_totp:
+            _enable_totp(svc)
+        return c
 
     def test_pin_default_mode_is_live(self, client):
-        c, _ = client
-        self._setup(c)
+        c = self._setup(client, enable_totp=True)
         resp = c.post("/v1/auth/pin", json={"pin": "123456"},
                       headers=_session_headers())
         assert resp.status_code == 200
@@ -472,8 +604,7 @@ class TestPinModeParameter:
         assert data["live_mode_unlocked"] is True
 
     def test_pin_practice_mode_does_not_unlock_live(self, client):
-        c, _ = client
-        self._setup(c)
+        c = self._setup(client)
         resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "practice"},
                       headers=_session_headers())
         assert resp.status_code == 200
@@ -482,8 +613,7 @@ class TestPinModeParameter:
         assert data["live_mode_unlocked"] is False
 
     def test_pin_explore_mode_does_not_unlock_live(self, client):
-        c, _ = client
-        self._setup(c)
+        c = self._setup(client)
         resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "explore"},
                       headers=_session_headers())
         assert resp.status_code == 200
@@ -492,15 +622,13 @@ class TestPinModeParameter:
         assert data["live_mode_unlocked"] is False
 
     def test_pin_rejects_unknown_mode(self, client):
-        c, _ = client
-        self._setup(c)
+        c = self._setup(client)
         resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "bogus"},
                       headers=_session_headers())
         assert resp.status_code == 400
 
     def test_pin_wrong_pin_still_401_with_mode(self, client):
-        c, _ = client
-        self._setup(c)
+        c = self._setup(client)
         resp = c.post("/v1/auth/pin", json={"pin": "000000", "mode": "practice"},
                       headers=_session_headers())
         assert resp.status_code == 401
@@ -547,6 +675,7 @@ class TestRateLimitRegistration:
             "auth_reset_password",
             "auth_setup_reset",
             "auth_setup_regenerate_2fa",
+            "auth_totp_enable",
         ):
             assert required in names, (
                 f"Auth view '{required}' is missing the @_rate_limit decorator — "

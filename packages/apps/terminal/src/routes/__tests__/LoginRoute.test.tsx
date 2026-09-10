@@ -190,6 +190,34 @@ describe("LoginRoute", () => {
     expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
   });
 
+  it("signs in with password only when authenticator enrolment is deferred", async () => {
+    const onSuccess = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: "success",
+          data: { token: "explore-session", username: "alice", expires_at: "" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    render(<LoginRoute onSuccess={onSuccess} mode="full" totpRequired={false} />);
+
+    expect(screen.queryByLabelText("Enter your 2FA code")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    expect(screen.getByRole("button", { name: /sign in/i })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/ft-api/v1/auth/login",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ password: "password", totp_code: "" }),
+      }),
+    );
+  });
+
   it("clears a stale Live UI mode after normal password and 2FA login", async () => {
     modeState.mode = "live";
     const onSuccess = vi.fn();

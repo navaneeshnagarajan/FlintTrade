@@ -102,3 +102,29 @@ export async function setupFlintTradeAccount(input: AccountSetupInput): Promise<
 
   return { totpUri, backupCodes, token };
 }
+
+/** Confirm optional authenticator enrolment with a live TOTP code. */
+export async function enableFlintTradeTotp(totpCode: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${getBase()}/v1/auth/totp/enable`, {
+      method: "POST",
+      headers: buildHeaders(true),
+      body: JSON.stringify({ totp_code: totpCode }),
+    });
+  } catch {
+    throw new AccountSetupError(
+      "Cannot reach server. Is the FlintTrade backend running?",
+      "network",
+    );
+  }
+
+  const payload = await parseJsonBody(response);
+  if (!response.ok) {
+    throw new AccountSetupError(
+      extractMessage(payload) ?? httpMessage(response),
+      "server",
+      response.status,
+    );
+  }
+}

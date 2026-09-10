@@ -366,9 +366,9 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 
 | Route | Purpose |
 |---|---|
-| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password + TOTP, or PIN). Welcome and sign-in also offer **Try with sample data** so Explore stays reachable if setup is unfinished. There is no `/login` URL. |
+| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP, or PIN). Welcome and sign-in also offer **Try with sample data** so Explore stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
-| `/setup` | First-time 7-step linear wizard (Account → 2FA → Persona → Broker → Trading → Risk → Choose Mode). After account create, **Explore first** on the authenticator step reaches sample-data Explore or Practice without finishing 2FA. Daily login and Live still require 2FA. `/setup-account` is a compatibility alias. |
+| `/setup` | First-time 7-step linear wizard (Account → optional authenticator → Persona → Broker → Trading → Risk → Choose Mode). After account create, **Set up later** continues Explore/Practice without enrolling 2FA. Daily login stays password-only until enrolment; Live still requires the authenticator and PIN. `/setup-account` is a compatibility alias. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
