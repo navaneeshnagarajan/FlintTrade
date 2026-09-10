@@ -104,7 +104,7 @@ identically to regular orders.
 |---|---|
 | `market/holidays` | Holiday calendar. **POST** with `apikey` and `year` (2020–2050) in the JSON body. Do not call bare `holidays` as the current passthrough path. |
 | `market/timings` | Exchange-timing windows. **POST** with `apikey` and `date` in the JSON body. Missing date fails closed. Do not call bare `timings` as the current passthrough path. |
-| `telegram/notify` | Send a Telegram message via the OpenAlgo bot (`username` + `message`). If `username` is omitted, FlintTrade uses workspace `openalgo.telegram_username` when set; otherwise the call fails closed. That field is accepted and persisted by `GET`/`POST` `/v1/config/openalgo` or a `workspace.json` edit — not by the Setup/Settings connection form, which only writes `api_key`, `host`, `port`, and `ws_port`. |
+| `telegram/notify` | Send a Telegram message via the OpenAlgo bot (`username` + `message`). If `username` is omitted, FlintTrade uses workspace `openalgo.telegram_username` when set; otherwise the call fails closed. That field is accepted and persisted by `GET`/`POST` `/v1/config/openalgo` or a `workspace.json` edit — not by the Setup/Settings connection form, which only writes `api_key`, `host`, `port`, and `ws_port`. Distinct from FlintTrade's native `POST /api/v1/telegram` (Automate → Settings Send Test). |
 | `whatsapp/notify` | Upstream OpenAlgo endpoint. **Not wrapped by FlintTrade** — WhatsApp support was removed on 2026-07-26 (ruling D3); listed only so the OpenAlgo surface stays fully documented. |
 
 ### Broker management (session-authenticated, NOT under `/api/v1/`)
@@ -382,6 +382,19 @@ The operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
 | `safety/l4` (**DELETE**) | Clear one account's latched Layer 4 daily-loss pause or hard stop. Requires both `broker` and `account_id` (query string or JSON body); the backend builds the exact selector `{broker}:{account_id}`. A PIN-unlocked Live JWT is required, and that selector must be in the operator's account ACL. Missing selector → 400 `"L4 reset requires an exact account selector"`; unauthorised selector → 403. Does not activate or reset Layer 5. |
 | `safety/kill-switch` (**POST**) | Latch Layer 5. Body `{ "reason": "…" }`. Cancels open orders and requests supported flatten. |
 | `safety/kill-switch` (**DELETE**) | Reset Layer 5 after emergency actions complete. Incomplete flatten keeps the latch. |
+
+### Telegram (`/api/v1/telegram`)
+
+Source: `packages/core/core/src/flinttrade_core/telegram_routes.py`.
+The telegram blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
+`/ft-api/api/v1/telegram` and a direct backend call is
+`http://<host>:5100/api/v1/telegram`. This is FlintTrade's local automation
+bot (terminal Automate → Settings **Send Test**), not OpenAlgo's
+`telegram/notify`.
+
+| Endpoint | Purpose |
+|---|---|
+| `telegram` (**POST**) | Send a Telegram test message. Body requires `message`. Optional one-shot `bot_token` and `chat_id` are accepted together and are never persisted. Otherwise the route uses env/workspace bot config; disabled config → 400. Send failure → 502. Explore-mode sends (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Telegram tests are blocked in Explore (sample-only).`. |
 
 ### Auth (`/ft-api/v1/auth/*`)
 
@@ -831,11 +844,12 @@ Most handlers return only `status` + `message`. The core
 "Orders are not available in Explore mode…", and a Live JWT without PIN
 unlock is HTTP 403 with "Live mode not unlocked — verify PIN first". A
 `code` field is emitted on `mode_guard`-decorated engine routes (brackets
-and other executor-direct paths), not on that core proxy:
+and other executor-direct paths) and on `POST /api/v1/telegram` Explore
+refusals, not on that core proxy. Not every endpoint emits `code`:
 
 | Code or status | Meaning |
 |---|---|
-| `mode_blocked` | Explore (or another blocked mode) tried a `mode_guard` order-capable action — HTTP 403. |
+| `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers `mode_guard` order-capable engine routes and FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`. |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
 | `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true` (PIN unlock). |
 | HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |
