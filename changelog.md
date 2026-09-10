@@ -52,6 +52,11 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Home greeting uses local evening at noon IST (FT-HOME-001).**
+  Explore `/home` greets from the Asia/Kolkata clock, so ~12:01 IST
+  is Good afternoon (or Good morning before noon), not Good evening
+  from a non-IST browser clock.
+
 - **Market status closed during NSE regular hours (FT-TRADE-004).**
   Explore `/trade` header treats OpenAlgo/Explore session timings
   as IST clock hours (09:15–15:30 on weekdays), not epoch
