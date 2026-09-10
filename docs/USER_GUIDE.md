@@ -590,12 +590,18 @@ the action or label it successful.
 
 Chat itself needs a configured LLM via Settings → AI. The badge and composer
 follow that configured state (including Explore / `demo-user`), not a leftover
-local setting.
+local setting. Returning to Chat after you save Settings → AI re-checks
+advisor readiness, so the **Not configured** gate should not stay stuck on an
+outdated result.
 
 When unconfigured, the warning badge is **Not configured**, the empty state is
-**LLM not configured**, and the primary CTA **Open Settings → AI** opens
-`/settings#llm`. Composer input and Send stay disabled; there is no
-send-then-no-reply path.
+**LLM not configured**, the primary CTA **Open Settings → AI** opens
+`/settings#llm`, and an outline **Retry** re-probes advisor status. Composer
+input and Send stay disabled; there is no send-then-no-reply path.
+
+If leftover transcript messages hide that empty state while Chat is still
+unconfigured, disconnected, or in error, the header still offers **Retry**
+(re-check advisor status) and **Open Settings → AI**.
 
 A configured but broken probe shows **Error** or **Disconnected** with
 **Retry** — never a green **Connected**. Explore does not show a fake
@@ -767,10 +773,14 @@ On Live or Practice, "AI settings could not be loaded" disables editing
 to protect a saved configuration. Use **Retry**.
 
 On `/ai` Chat, an unconfigured LLM shows **LLM not configured** (badge
-**Not configured**) with **Open Settings → AI**. Composer input and Send
-stay disabled. That is Chat readiness, not the Settings empty state
-above. A configured but broken probe shows **Error** or **Disconnected**
-with **Retry**.
+**Not configured**) with **Open Settings → AI** and an outline **Retry**
+that re-probes advisor status. Composer input and Send stay disabled.
+If leftover transcript messages hide that empty state, the header still
+offers **Retry** and **Open Settings → AI**. That is Chat readiness, not
+the Settings empty state above. A configured but broken probe shows
+**Error** or **Disconnected** with **Retry**. Returning to Chat after
+saving Settings → AI re-checks readiness, so the gate should not stay
+stuck on an outdated **Not configured**.
 
 ### "Token expired" when placing an order
 

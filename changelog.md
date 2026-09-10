@@ -56,8 +56,12 @@ changelog rebuilds itself from the first release cut after this baseline.
   `/ai` Chat now probes `advisor/status` (including Explore /
   `demo-user`) and gates the badge and composer on `configured` —
   not a stale local store. Unconfigured shows a warning **Not
-  configured** badge, empty **LLM not configured**, and a primary
-  **Open Settings → AI** CTA to `/settings#llm`. The composer stays
+  configured** badge, empty **LLM not configured**, a primary
+  **Open Settings → AI** CTA to `/settings#llm`, and an outline
+  **Retry** that re-probes advisor status. When a leftover
+  transcript hides that empty state, the header still offers
+  **Retry** and **Open Settings → AI**. Returning to Chat after
+  saving Settings → AI re-checks readiness. The composer stays
   disabled, so there is no send-then-`no reply` path. A configured
   but broken probe shows **Error** / **Disconnected** with Retry —
   never a green Connected. Signals **Live** / **Polling** stay
