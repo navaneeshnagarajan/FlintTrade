@@ -3004,6 +3004,51 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("serves sample symbols from the Explore catalogue instead of erroring", async () => {
+    // Regression FT-CMD-001: search had no Explore fallback, so Ctrl+K
+    // Symbols errored with "OpenAlgo API key is not configured" instead of
+    // returning sample instruments such as NIFTY.
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "explore";
+
+    const results = await searchSymbol("NIFTY");
+    expect(results.some((row) => row.symbol === "NIFTY")).toBe(true);
+    expect(results.every((row) => row.symbol.toUpperCase().includes("NIFTY"))).toBe(true);
+    expect(results.find((row) => row.symbol === "NIFTY")?.exchange).toBe("NSE_INDEX");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps Explore symbol search synthetic even when an OpenAlgo key is configured", async () => {
+    mockConnectionState.apiKey = "configured-live-key";
+    mockModeState.mode = "explore";
+
+    const results = await searchSymbol("REL");
+    expect(results).toEqual([
+      expect.objectContaining({ symbol: "RELIANCE", exchange: "NSE" }),
+    ]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty Explore search without treating it as a connection error", async () => {
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "explore";
+
+    await expect(searchSymbol("XYZNOMATCH")).resolves.toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("filters Explore sample symbols by exchange", async () => {
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "explore";
+
+    const nseIndex = await searchSymbol("NIFTY", "NSE_INDEX");
+    expect(nseIndex.every((row) => row.exchange === "NSE_INDEX")).toBe(true);
+    expect(nseIndex.some((row) => row.symbol === "NIFTY")).toBe(true);
+
+    await expect(searchSymbol("NIFTY", "MCX")).resolves.toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("reads Practice funds from the order-execution sandbox, never a real account", async () => {
     mockConnectionState.apiKey = "configured-live-key";
     mockModeState.mode = "practice";

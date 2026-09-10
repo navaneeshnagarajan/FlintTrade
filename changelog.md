@@ -45,6 +45,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Explore Ctrl+K symbol search false unavailable error (FT-CMD-001).**
+  Explore `search` now uses the same sample-instrument catalogue as
+  Explore quotes and history. Ctrl+K → Symbols → NIFTY returns
+  sample hits (NIFTY, BANKNIFTY, FINNIFTY) instead of a false
+  connection error. Live and Practice still use native / OpenAlgo
+  search.
+
 - **Zero-premium long-call payoff (unbounded max profit + breakeven) (FT-LAB-001).**
   Options Builder Payoff now summarises expiry P&L from strike kinks
   and the right-hand slope, not the ±15% chart sample. A zero-premium
