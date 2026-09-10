@@ -52,6 +52,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Progressive TopBar collapse at ~390px (FT-MOBILE-002).**
+  The terminal chrome no longer clips workspace, status, or ticker
+  behind a horizontal TopBar scroll at about 390px. Logo mark, Mode
+  (Explore / Practice / Live), and compact session/status stay
+  visible and tappable. The ticker strip hides first (default off
+  under ~480px). Workspace, account, Tools, search, fullscreen, and
+  clock move into a More overflow menu with hit targets of at least
+  44px. Workspace and ticker stay reachable via More; no control is
+  clipped and unreachable.
+
 - **Suggest recommendations refresh when mood changes (FT-AI-003).**
   Explore `/ai` Suggest treats market mood as a filter, not a draft.
   Changing mood (chip or **Next mood**) immediately replaces the
