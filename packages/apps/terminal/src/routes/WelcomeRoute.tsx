@@ -274,8 +274,6 @@ export default function WelcomeRoute() {
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [flowStep, setFlowStep] = useState<FlowStep>("cinematic");
-  // Fail closed: hide the TOTP field only when status explicitly says deferred.
-  const [totpEnabled, setTotpEnabled] = useState(true);
   const theme = useThemeStore((s) => s.activeThemeId);
   const reducedMotion = motionConfig.prefersReducedMotion();
   const authStatus = useAuthStore((s) => s.status);
@@ -300,9 +298,6 @@ export default function WelcomeRoute() {
   }, [reducedMotion]);
 
   useEffect(() => {
-    // Daily Sign In remounts Welcome after logout with status already
-    // "logged-out". Probe then too, or totpEnabled stays at the fail-closed
-    // default and a deferred authenticator still blocks password-only login.
     if (authStatus !== "unknown" && authStatus !== "logged-out") return;
 
     // Explore-first / Try with sample data persist a demo session. Restore it
@@ -326,9 +321,6 @@ export default function WelcomeRoute() {
         if (isDemoSessionActive()) {
           useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
           return;
-        }
-        if (typeof data.data?.totp_enabled === "boolean") {
-          setTotpEnabled(data.data.totp_enabled);
         }
         if (!data.data?.is_setup) {
           useAuthStore.getState().setSetupRequired();
@@ -450,7 +442,6 @@ export default function WelcomeRoute() {
         onSuccess={handleLoginSuccess}
         onExplore={handleExplore}
         onUnfinishedSetup={unfinishedSetup ? () => navigate("/setup") : undefined}
-        totpRequired={totpEnabled}
         mode="full"
       />
     );

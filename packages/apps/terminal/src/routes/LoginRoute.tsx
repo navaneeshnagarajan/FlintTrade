@@ -12,7 +12,7 @@
  * permanently locked out of their own machine.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,10 +43,16 @@ interface LoginRouteProps {
   /** Open Setup so an unfinished account can be wiped after a hatch bounce. */
   onUnfinishedSetup?: () => void;
   /**
-   * When false, daily Explore/Practice login is password-only (authenticator
-   * deferred). Defaults to true so an enrolled account still asks for TOTP.
+   * @deprecated Ignored. Daily Sign In probes ``/auth/status`` and shows 2FA
+   * only when ``totp_enabled`` is explicitly true. A stale parent
+   * ``totpRequired={true}`` after Sign Out must not keep the 2FA field.
    */
   totpRequired?: boolean;
+}
+
+/** True only for an explicit enrolled flag — 0 / "false" / missing stay deferred. */
+export function isTotpEnabledFlag(value: unknown): boolean {
+  return value === true || value === 1 || value === "true" || value === "1";
 }
 
 /** Pull the base32 secret out of an ``otpauth://`` URI for manual entry. */
@@ -60,7 +66,6 @@ export default function LoginRoute({
   mode,
   onExplore,
   onUnfinishedSetup,
-  totpRequired = true,
 }: LoginRouteProps) {
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
@@ -69,6 +74,38 @@ export default function LoginRoute({
   const [isLoading, setIsLoading] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [resettingPassword, setResettingPassword] = useState(false);
+  // Deferred-safe until a fresh status probe confirms enrolment. Never inherit
+  // Welcome's fail-closed default — that is the Sign Out remount bug.
+  const [totpEnabled, setTotpEnabled] = useState(false);
+  const totpRequired = totpEnabled;
+
+  useEffect(() => {
+    if (mode !== "full") return;
+
+    const controller = new AbortController();
+    let cancelled = false;
+    fetch(`${getBase()}/v1/auth/status`, {
+      headers: buildHeaders(false),
+      signal: controller.signal,
+    })
+      .then((response) => (response.ok ? response.json() : Promise.reject(response)))
+      .then((body: unknown) => {
+        if (cancelled) return;
+        const payload = body && typeof body === "object" && "data" in body
+          ? (body as { data?: { totp_enabled?: unknown } }).data
+          : undefined;
+        setTotpEnabled(isTotpEnabledFlag(payload?.totp_enabled));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTotpEnabled(false);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [mode]);
 
   async function handlePasswordLogin() {
     const requestFence = captureAuthSessionFence();

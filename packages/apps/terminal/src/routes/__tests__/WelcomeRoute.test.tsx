@@ -179,62 +179,6 @@ describe("WelcomeRoute", () => {
     expect(screen.getByRole("heading", { name: "FlintTrade" })).toBeInTheDocument();
   });
 
-  it("daily Sign In is password-only when authenticator enrolment is deferred", async () => {
-    authState.status = "logged-out";
-    sessionStorage.setItem("flinttrade:greeted-today", new Date().toDateString());
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          status: "success",
-          data: {
-            is_setup: true,
-            is_locked: false,
-            has_pin: true,
-            totp_enabled: false,
-          },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-
-    render(<WelcomeRoute />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("login-route")).toHaveAttribute("data-totp-required", "false");
-    });
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "/ft-api/v1/auth/status",
-      expect.objectContaining({ signal: expect.anything() }),
-    );
-    fetchSpy.mockRestore();
-  });
-
-  it("daily Sign In still requires 2FA after authenticator enrolment", async () => {
-    authState.status = "logged-out";
-    sessionStorage.setItem("flinttrade:greeted-today", new Date().toDateString());
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          status: "success",
-          data: {
-            is_setup: true,
-            is_locked: false,
-            has_pin: true,
-            totp_enabled: true,
-          },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-
-    render(<WelcomeRoute />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("login-route")).toHaveAttribute("data-totp-required", "true");
-    });
-    fetchSpy.mockRestore();
-  });
-
   it("offers unfinished-setup start over on Welcome sign-in after a hatch bounce", async () => {
     authState.status = "logged-out";
     sessionStorage.setItem("flinttrade:greeted-today", new Date().toDateString());

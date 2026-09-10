@@ -53,10 +53,10 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Daily Sign In 2FA field while authenticator is deferred (FT-SETUP-002).**
-  After Set up later, Welcome Sign In no longer keeps the fail-closed
-  2FA field. `/auth/status` is probed on logout remounts as well as
-  first load, so `totp_enabled=0` is password-only and enrolment still
-  requires TOTP.
+  Login Sign In probes `/auth/status` every time it is shown and hides
+  2FA unless `totp_enabled` is explicitly true. A stale Welcome
+  `totpRequired={true}` after Sign Out can no longer keep the field.
+  Enrolment still requires TOTP; Live still needs enrolment plus PIN.
 
 - **Duplicate zero placeholders on backtest metrics (FT-LAB-002).**
   Explore `/lab` backtest headline metrics (Sharpe ratio, max
