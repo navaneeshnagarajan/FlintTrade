@@ -494,6 +494,18 @@ describe("authStore", () => {
   // --- Idle checking --------------------------------------------------------
 
   describe("checkIdle", () => {
+    function loginForIdleCheck(): void {
+      useAuthStore
+        .getState()
+        .setLoggedIn("tok", "user", "2026-04-09T02:30:00Z");
+      // Isolate idle from the daily 08:00 IST expiry timer. Near 02:30 UTC
+      // a 6-minute advance would otherwise fire setLoggedOut first
+      // (node-core-tests flake on this PR).
+      const timerId = useAuthStore.getState()._expiryTimerId;
+      if (timerId !== null) clearTimeout(timerId);
+      useAuthStore.setState({ _expiryTimerId: null });
+    }
+
     it("does nothing when not logged in", () => {
       useAuthStore.setState({ status: "logged-out" });
       useAuthStore.getState().checkIdle();
@@ -501,9 +513,9 @@ describe("authStore", () => {
     });
 
     it("sets pin-required after 5 minutes idle", () => {
-      useAuthStore
-        .getState()
-        .setLoggedIn("tok", "user", "2026-04-09T02:30:00Z");
+      // 02:26 UTC is ~4 minutes before 08:00 IST — the CI collision window.
+      vi.setSystemTime(new Date("2026-09-10T02:26:00.000Z"));
+      loginForIdleCheck();
 
       // Simulate 6 minutes of idle time
       vi.advanceTimersByTime(6 * 60 * 1000);
@@ -514,9 +526,8 @@ describe("authStore", () => {
     });
 
     it("triggers full logout after 30 minutes idle", () => {
-      useAuthStore
-        .getState()
-        .setLoggedIn("tok", "user", "2026-04-09T02:30:00Z");
+      vi.setSystemTime(new Date("2026-09-10T02:26:00.000Z"));
+      loginForIdleCheck();
 
       // Simulate 31 minutes of idle time
       vi.advanceTimersByTime(31 * 60 * 1000);
@@ -526,9 +537,8 @@ describe("authStore", () => {
     });
 
     it("does not change status when recently active", () => {
-      useAuthStore
-        .getState()
-        .setLoggedIn("tok", "user", "2026-04-09T02:30:00Z");
+      vi.setSystemTime(new Date("2026-09-10T02:26:00.000Z"));
+      loginForIdleCheck();
 
       // Touch activity, then check immediately
       useAuthStore.getState().touchActivity();

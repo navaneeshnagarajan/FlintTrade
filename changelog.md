@@ -52,6 +52,12 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Practice orders in Explore without a live broker (FT-TRADE-002).**
+  Explore `/trade` Order Pad Practice Buy opens the Practice review and
+  records a sample fill — no live broker is required. Live still
+  uses the gated `placeOrder` path and still requires a broker
+  connection. Native broker freeze is excluded.
+
 - **Daily Sign In 2FA field while authenticator is deferred (FT-SETUP-002).**
   Login Sign In probes `/auth/status` every time it is shown and hides
   2FA unless `totp_enabled` is explicitly true. A stale Welcome

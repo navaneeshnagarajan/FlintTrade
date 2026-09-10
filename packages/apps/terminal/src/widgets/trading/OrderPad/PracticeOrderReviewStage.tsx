@@ -89,7 +89,7 @@ export function PracticeOrderReviewStage({
               Review Practice order
             </h2>
             <p id={descriptionId} className="mt-1 text-xs leading-relaxed text-text-secondary">
-              Simulation only. This order is sent only to FlintTrade&apos;s Practice sandbox. No broker or native trading API is contacted.
+              Simulation only. No broker or native trading API is contacted. Practice sends this to FlintTrade&apos;s sandbox; Explore records a sample fill.
             </p>
           </div>
         </div>
@@ -108,7 +108,7 @@ export function PracticeOrderReviewStage({
         </dl>
 
         <p className="mt-3 text-xxs leading-relaxed text-text-muted">
-          Back or any order edit invalidates this review. Confirm submits this exact immutable intent through the existing Practice path.
+          Back or any order edit invalidates this review. Confirm submits this exact immutable intent on the paper path.
         </p>
 
         <div className="mt-4 flex gap-2">

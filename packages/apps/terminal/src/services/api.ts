@@ -2557,11 +2557,36 @@ function exactOrderAuthorityMatchesCurrent(
     && nativeTarget.accountId === authority.accountId;
 }
 
+/**
+ * Explore paper fill. Never contacts the order proxy, SafetySystem, or a
+ * broker — Explore has no live session.
+ */
+function placeExploreSampleOrder(params: PlaceOrderParams): { orderId: string } {
+  const stamp = Date.now().toString(36).toUpperCase();
+  const symbol = params.symbol.replace(/[^A-Z0-9]/gi, "").slice(0, 12) || "ORDER";
+  return { orderId: `SAMPLE-${symbol}-${stamp}` };
+}
+
 async function postOrder<T>(
   ftEndpoint: string,
   body: object = {},
   authority?: PostOrderAuthorityPin,
 ): Promise<T> {
+  // Explore paper fill for place only. Checked before the generic mode-pin
+  // mismatch so Order Pad can confirm with a Practice pin while the store is
+  // still Explore. Live pins are still refused. The `placeOrder` export must
+  // stay a brace-depth-0 `postOrder("place", …)` call so the orders-contract
+  // lexer keeps seeing the Live frontend caller.
+  const currentModeForExplore = useModeStore.getState().mode;
+  if (currentModeForExplore === "explore" && ftEndpoint === "place") {
+    if (authority?.mode === "live") {
+      throw new Error(
+        `Order blocked: mode changed from ${authority.mode} to ${currentModeForExplore} before submission.`,
+      );
+    }
+    return placeExploreSampleOrder(body as PlaceOrderParams) as T;
+  }
+
   // Apply the order rate limit (10/s) — identical to OpenAlgo direct calls
   if (!orderLimiter.tryConsume()) {
     throw new Error(`Rate limit exceeded for ${ftEndpoint} (order: 10/s)`);
