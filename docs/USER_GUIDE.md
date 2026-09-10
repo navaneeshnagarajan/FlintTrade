@@ -558,6 +558,14 @@ When none are running, the empty state shows "No strategies running"
 and "Start a strategy from the Strategy Builder tool.", plus an
 **Open Strategy Builder** outline link that navigates to `/lab`.
 
+On Explore `/automate` → Settings → Telegram Alerts, **Send Test** is
+disabled (click and Enter do not send). The prefilled message stays
+visible as a preview-only sample. Helper: "Telegram tests are blocked in
+Explore (sample-only). Switch to Practice or Live with Telegram configured
+to send a real test." There is no confirm-and-send path from Explore.
+Practice and Live arm Send Test only when Telegram is configured; otherwise
+the helper is "Configure Telegram first".
+
 ![Automate](screenshots/07-automate.png)
 
 ---
@@ -662,7 +670,7 @@ Settings panels:
 | **Appearance** | `ui.theme` plus the theme / density stores | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Data Paths** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
 | **LLM Config** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
-| **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. |
+| **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives on Automate → Settings → Telegram Alerts (**Send Test**); Explore keeps that control disarmed. |
 | **Risk Limits** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
 
 On Explore `/settings` → **LLM Config**, a demo or unconfigured session
