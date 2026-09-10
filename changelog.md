@@ -52,6 +52,12 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **P&L columns unusable at ~390px (FT-MOBILE-001).**
+  Explore `/trade` Positions and Invest Holdings switch to stacked
+  cards below 480px, so each row shows symbol, quantity, LTP, P&L
+  and P&L% on one screen. The wide nowrap table no longer clips
+  those figures off-screen behind a tiny scrollbar.
+
 - **Invest deep-link hash tabs ignored on load (FT-ROUTE-001).**
   Opening `/invest#holdings` (and the other Invest tab hashes)
   now selects the matching tab on load. A direct `#holdings`

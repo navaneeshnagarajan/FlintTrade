@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
@@ -486,6 +486,46 @@ describe("PositionsWidget", () => {
     const pct = screen.getByText("-2.05%");
     expect(pct).toBeInTheDocument();
     expect(pct).toHaveClass("text-loss");
+  });
+
+  it("shows stacked P&L cards instead of the clipped table at ~390px", () => {
+    let resizeCallback: ResizeObserverCallback | null = null;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        constructor(callback: ResizeObserverCallback) {
+          resizeCallback = callback;
+        }
+        observe = vi.fn();
+        disconnect = vi.fn();
+        unobserve = vi.fn();
+      },
+    );
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          { symbol: "RELIANCE", pnl: 3500, quantity: 50, ltp: 2520, average_price: 2450 },
+        ],
+      }),
+    );
+
+    render(<PositionsWidget {...defaultProps} />);
+
+    act(() => {
+      resizeCallback?.(
+        [{ contentRect: { width: 390, height: 700 } } as ResizeObserverEntry],
+        {} as ResizeObserver,
+      );
+    });
+
+    const cards = screen.getByRole("list", { name: "Positions" });
+    expect(cards).toHaveAttribute("data-layout", "cards");
+    expect(cards).toHaveTextContent("RELIANCE");
+    expect(cards).toHaveTextContent("+₹3,500");
+    expect(cards).toHaveTextContent("+2.86%");
+    expect(screen.queryByRole("columnheader", { name: /P&L%/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 
   it("renders the position-status tracker with counts from the shared mark-to-market", () => {
