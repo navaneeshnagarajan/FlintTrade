@@ -52,6 +52,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Telegram Send Test stays enabled in Explore (FT-AUTO-002).**
+  Explore `/automate#settings` Telegram Alerts still leaves Send Test
+  enabled with a prefilled message in sample-only mode. Expected:
+  disabled or blocked in Explore with clear copy, or require Live
+  or Practice plus confirmed Telegram config first. Product fix
+  waits for the UI/UX Designer call on the empty/danger state.
+
 - **Practice Trading has no OpenAlgo Gateway setup CTA (FT-LEARN-001).**
   Explore `/learn` Practice Trading now links to Settings → Broker
   Gateway (`/settings#api`) so operators can configure OpenAlgo.
