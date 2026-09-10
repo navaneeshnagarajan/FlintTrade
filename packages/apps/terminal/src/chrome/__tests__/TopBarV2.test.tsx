@@ -459,3 +459,134 @@ describe("TopBarV2", () => {
     expect(screen.getByTestId("topbar-v2")).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// FT-MOBILE-002 — defensive skinny-window chrome (~390px)
+// ---------------------------------------------------------------------------
+
+function stubViewportWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: width,
+  });
+  vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+    const max = /max-width:\s*(\d+)/.exec(query);
+    const min = /min-width:\s*(\d+)/.exec(query);
+    let matches = false;
+    if (max) matches = width <= Number(max[1]);
+    else if (min) matches = width >= Number(min[1]);
+    return {
+      matches,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    };
+  });
+}
+
+describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDirectBrokerConnected.value = false;
+    mockTimingsQuery.data = undefined;
+    mockTimingsQuery.dataUpdatedAt = 0;
+    mockTimingsQuery.isError = false;
+    mockTimingsQuery.isLoading = false;
+    stubViewportWidth(390);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    stubViewportWidth(1024);
+    vi.useRealTimers();
+  });
+
+  it("keeps Mode visible and tappable at ~390px", () => {
+    renderTopBarV2();
+
+    const mode = screen.getByText("EXPLORE");
+    expect(mode).toBeVisible();
+    expect(mode.closest("button")).toBeEnabled();
+  });
+
+  it("does not use horizontal TopBar scroll at ~390px", () => {
+    renderTopBarV2();
+
+    const bar = screen.getByTestId("topbar-v2");
+    expect(bar.className).not.toMatch(/overflow-x-auto/);
+    expect(bar.className).toMatch(/overflow-x-hidden/);
+  });
+
+  it("hides the ticker strip by default under ~480px", () => {
+    renderTopBarV2();
+
+    expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
+  });
+
+  it("keeps Workspace off the inline bar and reachable from More", () => {
+    renderTopBarV2();
+
+    expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("topbar-more-btn"));
+
+    const sheet = screen.getByTestId("topbar-more-sheet");
+    expect(sheet).toBeVisible();
+    expect(screen.getByTestId("workspace-switcher")).toBeVisible();
+  });
+
+  it("reaches account, Tools, search, fullscreen, and clock from More", () => {
+    renderTopBarV2();
+
+    expect(screen.queryByTestId("account-switcher")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("search-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tools-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fullscreen-btn")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Current time in IST")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^more$/i }));
+
+    expect(screen.getByTestId("account-switcher")).toBeVisible();
+    expect(screen.getByTestId("search-btn")).toBeVisible();
+    expect(screen.getByTestId("tools-btn")).toBeVisible();
+    expect(screen.getByTestId("fullscreen-btn")).toBeVisible();
+    expect(screen.getByLabelText("Current time in IST")).toBeVisible();
+  });
+
+  it("uses at least 44px hit targets in the More overflow sheet", () => {
+    renderTopBarV2();
+
+    fireEvent.click(screen.getByTestId("topbar-more-btn"));
+
+    const rows = screen.getAllByTestId("topbar-more-row");
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+    for (const row of rows) {
+      expect(row.className).toMatch(/min-h-11/);
+    }
+  });
+
+  it("lets settings re-enable the ticker under ~480px", () => {
+    renderTopBarV2();
+    expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("topbar-more-btn"));
+    fireEvent.click(screen.getByRole("button", { name: /show ticker/i }));
+
+    expect(screen.getByTestId("ticker-marquee")).toBeInTheDocument();
+  });
+
+  it("hides the ticker first at ~450px without collapsing Mode neighbours into More", () => {
+    stubViewportWidth(450);
+    renderTopBarV2();
+
+    expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("topbar-more-btn")).not.toBeInTheDocument();
+    expect(screen.getByText("EXPLORE")).toBeVisible();
+    expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument();
+  });
+});
