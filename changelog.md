@@ -52,6 +52,12 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Duplicate Watchlist widgets from Add widget picker (FT-HOME-002).**
+  Explore `/home` Add widget no longer adds a second Watchlist when
+  one is already on the dashboard. Already-present widget types are
+  disabled or hidden in the picker; choosing Watchlist focuses the
+  existing card instead of duplicating it.
+
 - **Broker Gateway and Ditto default URLs diverge (FT-SET-002).**
   Explore `/settings#api` Broker Gateway and Explore `/ditto` Add
   Account now share the OpenAlgo default `http://127.0.0.1:5000`.
