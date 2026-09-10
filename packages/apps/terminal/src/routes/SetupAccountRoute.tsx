@@ -2,7 +2,7 @@
  * SetupAccountRoute — the authoritative /setup wizard (7 steps, 0-indexed).
  *
  * Step 0: Account Security  — username, email, password, optional PIN (POSTs /v1/auth/setup)
- * Step 1: Two-Factor Auth   — warning → QR + backup codes, with Explore-first skip
+ * Step 1: Two-Factor Auth   — optional enrol; “Set up later” continues the wizard
  * Step 2: Persona           — Trader / Investor / Beginner
  * Step 3: Broker Connection — OpenAlgo host + API key (or Direct Connect)
  * Step 4: Trading Defaults  — exchange, product, quantity
@@ -19,8 +19,8 @@
  *   (a) selecting a mode on step 6 (Finish setup)
  *   (b) clicking "Start over" in the header (wipes the unfinished account)
  *   (c) hitting HTTP 409 on account creation (opens the 2FA wipe hatches)
- *   (d) Explore first on the 2FA step (keeps unfinished-setup progress, marks
- *       the sample-data Explore session, and opens Home)
+ *   (d) Set up later on the 2FA step (keeps unfinished-setup progress and
+ *       continues the wizard without enabling authenticator login)
  *
  * On completion navigates to /welcome (which shows the sign-in form since an
  * account now exists).
@@ -62,9 +62,8 @@ import {
   isAuthSessionFenceCurrent,
   useAuthStore,
 } from "@/stores/authStore";
-import { AccountSetupError, setupFlintTradeAccount } from "@/lib/setupAccountApi";
+import { AccountSetupError, enableFlintTradeTotp, setupFlintTradeAccount } from "@/lib/setupAccountApi";
 import { persistSetupChoices } from "@/routes/setup/applySetupChoices";
-import { markDemoSessionActive } from "@/lib/demoSession";
 
 // ---------------------------------------------------------------------------
 // Session-storage progress tracking
@@ -525,8 +524,8 @@ interface TotpDisplayProps {
   onTotpRegenerated: (uri: string, codes: string[]) => void;
   /** Called after a successful "Delete account" reset. */
   onAccountDeleted: () => void;
-  /** Leave the 2FA step and continue in Explore / Practice. */
-  onExploreFirst: () => void;
+  /** Defer authenticator enrolment and continue the wizard. */
+  onSetUpLater: () => void;
 }
 
 /** "reset-2fa" regenerates the TOTP; "delete-account" wipes the user entirely. */
@@ -538,7 +537,7 @@ function TotpDisplay({
   onConfirmed,
   onTotpRegenerated,
   onAccountDeleted,
-  onExploreFirst,
+  onSetUpLater,
 }: TotpDisplayProps) {
   const hasRecoveryMaterial = Boolean(totpUri && backupCodes.length > 0);
   // The base32 secret from the otpauth URI, shown as a selectable manual
@@ -562,6 +561,9 @@ function TotpDisplay({
   const [escapePassword, setEscapePassword] = useState("");
   const [escapeLoading, setEscapeLoading] = useState(false);
   const [escapeError, setEscapeError] = useState("");
+  const [enrolCode, setEnrolCode] = useState("");
+  const [enrolLoading, setEnrolLoading] = useState(false);
+  const [enrolError, setEnrolError] = useState("");
 
   // 2FA is a forward-only gate. The in-step back only toggles qr → warning
   // so the user can re-read the warning before scanning.
@@ -709,7 +711,9 @@ function TotpDisplay({
 
         <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
           <p className="text-xs text-text-secondary leading-relaxed">
-            2FA adds an extra layer of security to your account. After setup, every login will require a one-time code from your authenticator app.
+            An authenticator is optional for Explore and Practice. Enrol it now, or choose
+            Set up later and use your password. Live unlock still requires the authenticator
+            and your PIN.
           </p>
           <ul className="space-y-2 text-xs text-text-secondary">
             <li className="flex items-start gap-2">
@@ -757,17 +761,17 @@ function TotpDisplay({
           <Button
             type="button"
             variant="outline"
-            onClick={onExploreFirst}
+            onClick={onSetUpLater}
           >
-            Explore first — continue without 2FA
+            Set up later
           </Button>
           <Button onClick={() => setPhase("qr")} disabled={!hasRecoveryMaterial}>
             I&apos;m ready — show QR code
           </Button>
         </div>
         <p className="text-[11px] text-text-muted text-right">
-          Sample-data Explore and Practice do not need authenticator 2FA.
-          Enrol 2FA before using Live.
+          Explore and Practice work with your password only. Enrol the
+          authenticator before unlocking Live.
         </p>
 
         <EscapeHatches />
@@ -871,16 +875,62 @@ function TotpDisplay({
         </div>
       )}
 
+      <div className="space-y-2">
+        <Label htmlFor="sa-totp-enrol" className="text-xs text-text-secondary uppercase tracking-wider">
+          Authenticator code
+        </Label>
+        <Input
+          id="sa-totp-enrol"
+          type="text"
+          inputMode="numeric"
+          maxLength={6}
+          value={enrolCode}
+          onChange={(e) => {
+            setEnrolCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+            if (enrolError) setEnrolError("");
+          }}
+          placeholder="6-digit code"
+          aria-label="Enter the 6-digit authenticator code to enrol"
+          className="font-mono tracking-widest max-w-48"
+        />
+        {enrolError && (
+          <p role="alert" className="text-xs text-loss">{enrolError}</p>
+        )}
+      </div>
+
       <div className="flex flex-col-reverse sm:flex-row sm:justify-between sm:items-center gap-2 mt-6">
         <Button variant="ghost" onClick={handleInternalBack} type="button">
           Back
         </Button>
         <div className="flex flex-col-reverse sm:flex-row gap-2">
-          <Button type="button" variant="outline" onClick={onExploreFirst}>
-            Explore first — continue without 2FA
+          <Button type="button" variant="outline" onClick={onSetUpLater}>
+            Set up later
           </Button>
-          <Button onClick={onConfirmed} disabled={!hasRecoveryMaterial}>
-            I have saved my codes — Continue
+          <Button
+            onClick={() => {
+              void (async () => {
+                if (enrolCode.length !== 6) {
+                  setEnrolError("Enter the 6-digit authenticator code.");
+                  return;
+                }
+                setEnrolLoading(true);
+                setEnrolError("");
+                try {
+                  await enableFlintTradeTotp(enrolCode);
+                  onConfirmed();
+                } catch (error) {
+                  setEnrolError(
+                    error instanceof Error ? error.message : "Could not confirm authenticator.",
+                  );
+                } finally {
+                  setEnrolLoading(false);
+                }
+              })();
+            }}
+            disabled={!hasRecoveryMaterial || enrolLoading}
+          >
+            {enrolLoading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+            {enrolLoading ? "Confirming…" : "I have saved my codes — Continue"}
           </Button>
         </div>
       </div>
@@ -1037,7 +1087,7 @@ export default function SetupAccountRoute({
       });
       if (!resp.ok) {
         window.alert(
-          "Could not wipe the unfinished account. Use Delete account & start over and confirm your password, or Explore first without 2FA.",
+          "Could not wipe the unfinished account. Use Delete account & start over and confirm your password, or Set up later and finish Explore.",
         );
         return;
       }
@@ -1059,10 +1109,9 @@ export default function SetupAccountRoute({
     useAuthStore.getState().setSetupRequired();
   }
 
-  function handleExploreFirst() {
-    // Keep unfinished-setup progress (no TOTP secrets) so /setup still
-    // offers Start over / Delete account after a remount. The setup JWT is
-    // memory-only; the durable sample-data session is the demo marker.
+  function handleSetUpLater() {
+    // Defer authenticator enrolment. Keep unfinished-setup progress so
+    // Start over / Delete account still work, and continue the wizard.
     saveProgress({
       accountCreated: true,
       totpUri: "",
@@ -1073,13 +1122,10 @@ export default function SetupAccountRoute({
       risk,
       mode: null,
       displayName,
-      currentStep: 1,
+      currentStep: 2,
     });
     sessionRecoveryMaterial = null;
-    setMode("explore");
-    markDemoSessionActive();
-    useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
-    navigate("/home", { replace: true });
+    setCurrentStep(2);
   }
 
   // ---------------------------------------------------------------------------
@@ -1239,14 +1285,13 @@ export default function SetupAccountRoute({
 
   // ---------------------------------------------------------------------------
   // Back navigation
-  //   Steps 0–2 are "sealed" once submitted (account creation + 2FA
-  //   confirmation cannot be undone). Back from any of these returns to
-  //   /welcome so the user can sign in. Steps 3–6 freely decrement and
-  //   the previously entered values are preserved via saveProgress.
+  //   Steps 0–1 are sealed once the account exists (creation cannot be
+  //   undone). The optional authenticator step is revisitable so Live can
+  //   still be enrolled before finish. Steps 2–6 freely decrement.
   // ---------------------------------------------------------------------------
 
   function handleBack() {
-    if (currentStep <= 2) {
+    if (currentStep <= 1) {
       navigate("/welcome", { replace: true });
       return;
     }
@@ -1300,7 +1345,7 @@ export default function SetupAccountRoute({
           onStepClick={(i) => {
             // Only allow jumping to already-completed reversible steps (3+).
             // Steps 0–2 are sealed (account + 2FA submitted on server).
-            if (i >= 3 && i < currentStep) setCurrentStep(i);
+            if (i >= 1 && i < currentStep) setCurrentStep(i);
           }}
         />
 
@@ -1338,7 +1383,7 @@ export default function SetupAccountRoute({
                 onConfirmed={handleTotpConfirmed}
                 onTotpRegenerated={handleTotpRegenerated}
                 onAccountDeleted={handleAccountDeleted}
-                onExploreFirst={handleExploreFirst}
+                onSetUpLater={handleSetUpLater}
               />
             )}
 

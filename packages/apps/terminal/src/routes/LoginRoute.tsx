@@ -1,5 +1,5 @@
 /**
- * LoginRoute — daily login screen (password + TOTP or PIN).
+ * LoginRoute — daily login screen (password, plus TOTP when enrolled, or PIN).
  *
  * Rendered inside /welcome flow for returning users.
  * Not a standalone route — it's a component used by WelcomeRoute.
@@ -12,7 +12,7 @@
  * permanently locked out of their own machine.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +42,17 @@ interface LoginRouteProps {
   onExplore?: () => void;
   /** Open Setup so an unfinished account can be wiped after a hatch bounce. */
   onUnfinishedSetup?: () => void;
+  /**
+   * @deprecated Ignored. Daily Sign In probes ``/auth/status`` and shows 2FA
+   * only when ``totp_enabled`` is explicitly true. A stale parent
+   * ``totpRequired={true}`` after Sign Out must not keep the 2FA field.
+   */
+  totpRequired?: boolean;
+}
+
+/** True only for an explicit enrolled flag — 0 / "false" / missing stay deferred. */
+export function isTotpEnabledFlag(value: unknown): boolean {
+  return value === true || value === 1 || value === "true" || value === "1";
 }
 
 /** Pull the base32 secret out of an ``otpauth://`` URI for manual entry. */
@@ -50,7 +61,12 @@ function extractTotpSecret(uri: string): string {
   return match ? decodeURIComponent(match[1]) : "";
 }
 
-export default function LoginRoute({ onSuccess, mode, onExplore, onUnfinishedSetup }: LoginRouteProps) {
+export default function LoginRoute({
+  onSuccess,
+  mode,
+  onExplore,
+  onUnfinishedSetup,
+}: LoginRouteProps) {
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
   const [pin, setPin] = useState("");
@@ -58,6 +74,38 @@ export default function LoginRoute({ onSuccess, mode, onExplore, onUnfinishedSet
   const [isLoading, setIsLoading] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [resettingPassword, setResettingPassword] = useState(false);
+  // Deferred-safe until a fresh status probe confirms enrolment. Never inherit
+  // Welcome's fail-closed default — that is the Sign Out remount bug.
+  const [totpEnabled, setTotpEnabled] = useState(false);
+  const totpRequired = totpEnabled;
+
+  useEffect(() => {
+    if (mode !== "full") return;
+
+    const controller = new AbortController();
+    let cancelled = false;
+    fetch(`${getBase()}/v1/auth/status`, {
+      headers: buildHeaders(false),
+      signal: controller.signal,
+    })
+      .then((response) => (response.ok ? response.json() : Promise.reject(response)))
+      .then((body: unknown) => {
+        if (cancelled) return;
+        const payload = body && typeof body === "object" && "data" in body
+          ? (body as { data?: { totp_enabled?: unknown } }).data
+          : undefined;
+        setTotpEnabled(isTotpEnabledFlag(payload?.totp_enabled));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTotpEnabled(false);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [mode]);
 
   async function handlePasswordLogin() {
     const requestFence = captureAuthSessionFence();
@@ -190,7 +238,9 @@ export default function LoginRoute({ onSuccess, mode, onExplore, onUnfinishedSet
           <p className="text-sm text-text-muted">
             {mode === "pin"
               ? "Enter your PIN to continue"
-              : "Enter your password and 2FA code"}
+              : totpRequired
+                ? "Enter your password and 2FA code"
+                : "Enter your password to continue"}
           </p>
         </div>
 
@@ -253,6 +303,7 @@ export default function LoginRoute({ onSuccess, mode, onExplore, onUnfinishedSet
                 autoFocus
               />
             </div>
+            {totpRequired && (
             <div>
               <label htmlFor="totp" className="text-xs text-text-secondary font-medium block mb-1.5">
                 2FA or backup code
@@ -273,9 +324,10 @@ export default function LoginRoute({ onSuccess, mode, onExplore, onUnfinishedSet
                 onKeyDown={(e) => e.key === "Enter" && handlePasswordLogin()}
               />
             </div>
+            )}
             <Button
               onClick={handlePasswordLogin}
-              disabled={!password || totpCode.length < 6 || isLoading}
+              disabled={!password || (totpRequired && totpCode.length < 6) || isLoading}
               className="w-full"
             >
               <ShieldCheck className="size-4" />
@@ -288,6 +340,7 @@ export default function LoginRoute({ onSuccess, mode, onExplore, onUnfinishedSet
             >
               Forgot your password?
             </button>
+            {totpRequired && (
             <button
               type="button"
               onClick={() => { setError(""); setRecovering(true); }}
@@ -295,6 +348,7 @@ export default function LoginRoute({ onSuccess, mode, onExplore, onUnfinishedSet
             >
               Lost your authenticator?
             </button>
+            )}
             {onExplore && (
               <button
                 type="button"

@@ -133,6 +133,42 @@ class TestTOTP:
         )
         assert svc.verify_totp("000000") is False
 
+    def test_setup_leaves_authenticator_deferred(self, tmp_path: Path):
+        """FT-SETUP-002: Explore/Practice start password-only. TOTP is
+        provisioned but not enrolled until the operator confirms a code."""
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        svc.setup_account(
+            username="alice", email="alice@example.com",
+            password="StrongP@ss123!", pin="123456",
+        )
+        assert svc.is_totp_enabled() is False
+
+    def test_enable_totp_requires_a_live_code(self, tmp_path: Path):
+        import pyotp
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        svc.setup_account(
+            username="alice", email="alice@example.com",
+            password="StrongP@ss123!", pin="123456",
+        )
+        assert svc.enable_totp("000000") is False
+        assert svc.is_totp_enabled() is False
+        code = pyotp.TOTP(svc.get_totp_secret()).now()
+        assert svc.enable_totp(code) is True
+        assert svc.is_totp_enabled() is True
+
+    def test_regenerate_totp_defers_enrolment_again(self, tmp_path: Path):
+        import pyotp
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        svc.setup_account(
+            username="alice", email="alice@example.com",
+            password="StrongP@ss123!", pin="123456",
+        )
+        svc.enable_totp(pyotp.TOTP(svc.get_totp_secret()).now())
+        assert svc.is_totp_enabled() is True
+        result = svc.regenerate_totp("StrongP@ss123!")
+        assert result is not None
+        assert svc.is_totp_enabled() is False
+
 
 class TestBackupCodes:
     """Recovery backup codes."""

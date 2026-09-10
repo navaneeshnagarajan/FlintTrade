@@ -29,6 +29,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
+- **OpenAlgo-style password-first Explore; TOTP only before Live (FT-SETUP-002).**
+  Setup and daily login are password-only for Explore and Practice.
+  Authenticator enrolment is optional (“Set up later”) on day one.
+  Confirming a live authenticator code enables TOTP for later logins.
+  Live unlock still requires that enrolment plus the PIN. The mid-step
+  Reset / Start-over wipe from #184 is unchanged.
+
 - **Native broker HTTP freeze (accepted product decision).** Merging this work
   onto `main` leaves native broker UX down until Task 9D and Task 7C.2. That
   is accepted. Broker-account mutations — `/v1` account and auth writes, native
@@ -44,6 +51,12 @@ changelog rebuilds itself from the first release cut after this baseline.
   `gate_broker_write` → `BrokerRouter`) stay unchanged.
 
 ### Fixed
+
+- **Daily Sign In 2FA field while authenticator is deferred (FT-SETUP-002).**
+  Login Sign In probes `/auth/status` every time it is shown and hides
+  2FA unless `totp_enabled` is explicitly true. A stale Welcome
+  `totpRequired={true}` after Sign Out can no longer keep the field.
+  Enrolment still requires TOTP; Live still needs enrolment plus PIN.
 
 - **Duplicate zero placeholders on backtest metrics (FT-LAB-002).**
   Explore `/lab` backtest headline metrics (Sharpe ratio, max

@@ -317,6 +317,11 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] Broker or OpenAlgo session is current if you are intentionally testing a
       live-capable integration.
 - [ ] Your FlintTrade JWT is fresh — it expires daily at 8 AM IST.
+- [ ] The authenticator is enrolled, or you will confirm a one-time
+      authenticator code in the Live switch dialog (if you chose **Set up
+      later** during setup). Explore and Practice stay password-only until
+      enrolment.
+- [ ] A 6-digit PIN is set under Settings → Security.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
 - [ ] Daily P&L pause and hard-stop percentages are configured in Settings → Risk.
@@ -325,10 +330,16 @@ software safeguards, prompts, and recovery controls in a local setup.
 
 ### Walkthrough
 
-1. Click the **PRACTICE** badge in the top bar. A dialog warns that
-   real orders will be placed and asks for your **6-digit PIN**
-   (`POST /v1/auth/pin`). Set a PIN under Settings → Security first if
-   you have not already.
+1. Click the **PRACTICE** badge in the top bar, or select **Live** on
+   the welcome mode picker. The dialog warns that real orders will be
+   placed and asks for an **authenticator code** and your **6-digit PIN**.
+   Live unlock requires both — a confirmed authenticator enrolment plus
+   the PIN. If you deferred 2FA with **Set up later**, enter a one-time
+   authenticator code in the dialog to enrol, then the PIN.
+   `POST /v1/auth/pin` with `mode: "live"` refuses 403
+   `totp_required` until the authenticator is enabled. The PIN
+   alone is not enough. Set a PIN under Settings → Security first
+   if you have not already.
 2. Cancel the modal unless you are deliberately performing your own broker-side
    test outside this guide.
 3. Confirm the UI clearly shows Live mode, the active account, and the
@@ -366,9 +377,9 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 
 | Route | Purpose |
 |---|---|
-| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password + TOTP, or PIN). Welcome and sign-in also offer **Try with sample data** so Explore stays reachable if setup is unfinished. There is no `/login` URL. |
+| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP, or PIN). Welcome and sign-in also offer **Try with sample data** so Explore stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
-| `/setup` | First-time 7-step linear wizard (Account → 2FA → Persona → Broker → Trading → Risk → Choose Mode). After account create, **Explore first** on the authenticator step reaches sample-data Explore or Practice without finishing 2FA. Daily login and Live still require 2FA. `/setup-account` is a compatibility alias. |
+| `/setup` | First-time 7-step linear wizard (Account → optional authenticator → Persona → Broker → Trading → Risk → Choose Mode). After account create, **Set up later** continues Explore/Practice without enrolling 2FA. Daily login stays password-only until enrolment; Live still requires the authenticator and PIN. `/setup-account` is a compatibility alias. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |

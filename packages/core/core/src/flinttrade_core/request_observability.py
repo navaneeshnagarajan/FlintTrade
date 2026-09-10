@@ -100,6 +100,7 @@ def classify_secret_envelope(method: object, path: object) -> str | None:
         ("/v1/auth/login", "/v1/auth/login"),
         ("/v1/auth/pin/set", "/v1/auth/pin/set"),
         ("/v1/auth/pin", "/v1/auth/pin"),
+        ("/v1/auth/totp/enable", "/v1/auth/totp/enable"),
         ("/v1/auth/reset-password-otp", "/v1/auth/reset-password-otp"),
         ("/v1/auth/reset-password", "/v1/auth/reset-password"),
         ("/v1/config/llm", "/v1/config/llm"),

@@ -36,6 +36,45 @@ describe("ModeSelectRoute", () => {
     expect(liveButton).toHaveTextContent(/broker required/i);
   });
 
+  it("enrols a deferred authenticator before unlocking Live", async () => {
+    const onSelect = vi.fn();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ status: "success", data: { totp_enabled: true } }))
+      .mockResolvedValueOnce(jsonResponse({
+        status: "success",
+        data: { token: "live-unlocked-jwt", live_mode_unlocked: true },
+      }));
+
+    render(<ModeSelectRoute onSelect={onSelect} />);
+
+    clickLiveMode();
+    fireEvent.change(screen.getByLabelText(/authenticator code to enrol before live/i), {
+      target: { value: "654321" },
+    });
+    fireEvent.change(screen.getByLabelText(/enter your 6-digit pin to enable live mode/i), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /continue with live/i }));
+
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith("live", "live-unlocked-jwt"));
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      1,
+      "/ft-api/v1/auth/totp/enable",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ totp_code: "654321" }),
+      }),
+    );
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(
+      2,
+      "/ft-api/v1/auth/pin",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ pin: "123456", mode: "live" }),
+      }),
+    );
+  });
+
   it("verifies the Live PIN and passes the live-unlocked session token upward", async () => {
     const onSelect = vi.fn();
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(

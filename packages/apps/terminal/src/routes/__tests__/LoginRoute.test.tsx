@@ -129,11 +129,53 @@ vi.mock("@/components/brand/Logo", () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import LoginRoute from "../LoginRoute";
+import LoginRoute, { isTotpEnabledFlag } from "../LoginRoute";
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function statusBody(totpEnabled: unknown) {
+  return {
+    status: "success",
+    data: { is_setup: true, is_locked: false, has_pin: true, totp_enabled: totpEnabled },
+  };
+}
+
+function mockAuthFetch(options?: {
+  totpEnabled?: unknown;
+  onOther?: (url: string, init?: RequestInit) => Response | Promise<Response>;
+}) {
+  const totpEnabled = options?.totpEnabled ?? false;
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.includes("/v1/auth/status")) {
+      return jsonResponse(statusBody(totpEnabled));
+    }
+    if (options?.onOther) return options.onOther(url, init);
+    return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe("isTotpEnabledFlag", () => {
+  it("treats only explicit enrolled values as enabled", () => {
+    expect(isTotpEnabledFlag(true)).toBe(true);
+    expect(isTotpEnabledFlag(1)).toBe(true);
+    expect(isTotpEnabledFlag("true")).toBe(true);
+    expect(isTotpEnabledFlag("1")).toBe(true);
+    expect(isTotpEnabledFlag(false)).toBe(false);
+    expect(isTotpEnabledFlag(0)).toBe(false);
+    expect(isTotpEnabledFlag("false")).toBe(false);
+    expect(isTotpEnabledFlag(undefined)).toBe(false);
+  });
+});
 
 describe("LoginRoute", () => {
   beforeEach(() => {
@@ -155,11 +197,14 @@ describe("LoginRoute", () => {
     expect(screen.getByText("Welcome Back")).toBeInTheDocument();
   });
 
-  it("has password and 2FA code inputs in full mode", () => {
+  it("has password and 2FA code inputs once status says TOTP is enrolled", async () => {
+    mockAuthFetch({ totpEnabled: true });
     render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
 
     expect(screen.getByLabelText("Enter your password")).toBeInTheDocument();
-    expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument();
+    });
   });
 
   it("offers unfinished-setup start over so a bounced hatch can wipe the account", () => {
@@ -190,20 +235,76 @@ describe("LoginRoute", () => {
     expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
   });
 
+  it("clears stale totpRequired after Sign Out when status says TOTP is deferred", async () => {
+    // Tester path: Welcome remounts logged-out and still passes the fail-closed
+    // totpRequired={true} default. Login must probe /auth/status itself and
+    // hide 2FA when totp_enabled is not true (including 0 / "false").
+    mockAuthFetch({ totpEnabled: 0 });
+
+    render(<LoginRoute onSuccess={vi.fn()} mode="full" totpRequired={true} />);
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/ft-api/v1/auth/status",
+        expect.anything(),
+      );
+    });
+    expect(screen.queryByLabelText("Enter your 2FA code")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    expect(screen.getByRole("button", { name: /sign in/i })).not.toBeDisabled();
+  });
+
+  it("signs in with password only when authenticator enrolment is deferred", async () => {
+    const onSuccess = vi.fn();
+    const fetchSpy = mockAuthFetch({
+      totpEnabled: false,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "explore-session", username: "alice", expires_at: "" },
+          });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={onSuccess} mode="full" totpRequired={false} />);
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Enter your 2FA code")).not.toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    expect(screen.getByRole("button", { name: /sign in/i })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/ft-api/v1/auth/login",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ password: "password", totp_code: "" }),
+      }),
+    );
+  });
+
   it("clears a stale Live UI mode after normal password and 2FA login", async () => {
     modeState.mode = "live";
     const onSuccess = vi.fn();
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          status: "success",
-          data: { token: "explore-session", username: "testuser", expires_at: "2026-07-02T08:00:00+05:30" },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
+    mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "explore-session", username: "testuser", expires_at: "2026-07-02T08:00:00+05:30" },
+          });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
     render(<LoginRoute onSuccess={onSuccess} mode="full" />);
 
+    await waitFor(() => expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
     fireEvent.change(screen.getByLabelText("Enter your 2FA code"), { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
@@ -224,27 +325,27 @@ describe("LoginRoute", () => {
     // sync the token to practice — otherwise sandbox orders 403 mode_blocked.
     modeState.mode = "practice";
     const onSuccess = vi.fn();
-    const fetchSpy = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
+    const fetchSpy = mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return jsonResponse({
             status: "success",
             data: { token: "explore-session", username: "testuser", expires_at: "" },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
+          });
+        }
+        if (url.includes("/v1/auth/mode")) {
+          return jsonResponse({
             status: "success",
             data: { token: "practice-session", mode: "practice", live_mode_unlocked: false },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      );
+          });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
     render(<LoginRoute onSuccess={onSuccess} mode="full" />);
 
+    await waitFor(() => expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
     fireEvent.change(screen.getByLabelText("Enter your 2FA code"), { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
@@ -262,18 +363,25 @@ describe("LoginRoute", () => {
 
   it("does not install a password response after a different login wins", async () => {
     let finishLogin: ((response: Response) => void) | undefined;
-    vi.spyOn(globalThis, "fetch").mockReturnValueOnce(
-      new Promise<Response>((resolve) => {
-        finishLogin = resolve;
-      }),
-    );
+    mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return new Promise<Response>((resolve) => {
+            finishLogin = resolve;
+          });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
     const onSuccess = vi.fn();
     render(<LoginRoute onSuccess={onSuccess} mode="full" />);
 
+    await waitFor(() => expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
     fireEvent.change(screen.getByLabelText("Enter your 2FA code"), { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
+    await waitFor(() => expect(finishLogin).toBeDefined());
     Object.assign(authState, {
       status: "logged-in",
       token: "newer-token",
@@ -340,20 +448,30 @@ describe("LoginRoute", () => {
   it("does not downgrade or navigate when a stale Practice upgrade fails", async () => {
     modeState.mode = "practice";
     let failPractice: ((error: Error) => void) | undefined;
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        status: "success",
-        data: { token: "explore-session", username: "alice", expires_at: "" },
-      }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockReturnValueOnce(new Promise<Response>((_resolve, reject) => {
-        failPractice = reject;
-      }));
+    mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "explore-session", username: "alice", expires_at: "" },
+          });
+        }
+        if (url.includes("/v1/auth/mode")) {
+          return new Promise<Response>((_resolve, reject) => {
+            failPractice = reject;
+          });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
     const onSuccess = vi.fn();
     render(<LoginRoute onSuccess={onSuccess} mode="full" />);
+    await waitFor(() => expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
     fireEvent.change(screen.getByLabelText("Enter your 2FA code"), { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(failPractice).toBeDefined());
     Object.assign(authState, {
       status: "logged-in",
       token: "newer-token",
@@ -371,11 +489,13 @@ describe("LoginRoute", () => {
     expect(authState).toMatchObject({ token: "newer-token", username: "bob" });
   });
 
-  it("accepts an 8-char backup code in the 2FA field and enables Sign In", () => {
+  it("accepts an 8-char backup code in the 2FA field and enables Sign In", async () => {
     // The field must take a backup code (upper-hex, 8 chars), not only a
     // 6-digit TOTP — the backend accepts either, so the UI must too.
+    mockAuthFetch({ totpEnabled: true });
     render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
 
+    await waitFor(() => expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
     const field = screen.getByLabelText("Enter your 2FA code") as HTMLInputElement;
     fireEvent.change(field, { target: { value: "a1b2c3d4" } });
@@ -385,19 +505,18 @@ describe("LoginRoute", () => {
   });
 
   it("resets a forgotten password through the email OTP routes", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ status: "success", message: "If registered, a code was sent." }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ status: "success", message: "Password has been reset." }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      );
+    const fetchSpy = mockAuthFetch({
+      totpEnabled: false,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/forgot-password-otp")) {
+          return jsonResponse({ status: "success", message: "If registered, a code was sent." });
+        }
+        if (url.includes("/v1/auth/reset-password-otp")) {
+          return jsonResponse({ status: "success", message: "Password has been reset." });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
     render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
 
     fireEvent.click(screen.getByRole("button", { name: /forgot your password/i }));
@@ -407,8 +526,7 @@ describe("LoginRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: /send reset code/i }));
 
     await waitFor(() => expect(screen.getByText("Enter reset code")).toBeInTheDocument());
-    expect(fetchSpy).toHaveBeenNthCalledWith(
-      1,
+    expect(fetchSpy).toHaveBeenCalledWith(
       "/ft-api/v1/auth/forgot-password-otp",
       expect.objectContaining({
         method: "POST",
@@ -422,8 +540,7 @@ describe("LoginRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: /^reset password$/i }));
 
     await waitFor(() => expect(screen.getByText("Password reset")).toBeInTheDocument());
-    expect(fetchSpy).toHaveBeenNthCalledWith(
-      2,
+    expect(fetchSpy).toHaveBeenCalledWith(
       "/ft-api/v1/auth/reset-password-otp",
       expect.objectContaining({
         method: "POST",
@@ -437,12 +554,15 @@ describe("LoginRoute", () => {
   });
 
   it("does not submit a password reset when confirmations differ", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ status: "success" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
+    const fetchSpy = mockAuthFetch({
+      totpEnabled: false,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/forgot-password-otp")) {
+          return jsonResponse({ status: "success" });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
     render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
 
     fireEvent.click(screen.getByRole("button", { name: /forgot your password/i }));
@@ -458,26 +578,34 @@ describe("LoginRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: /^reset password$/i }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Passwords do not match.");
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/ft-api/v1/auth/forgot-password-otp",
+      expect.anything(),
+    );
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/reset-password-otp"))).toBe(false);
   });
 
   it("recovers a lost authenticator: password mints a fresh QR + backup codes", async () => {
     // The lockout fix — a self-hosted operator who lost their TOTP device AND
     // backup codes can reset 2FA from the login screen with just their password.
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          status: "success",
-          data: {
-            totp_uri: "otpauth://totp/FlintTrade:testuser?secret=ABCDEF23GHIJKL45&issuer=FlintTrade",
-            backup_codes: ["A1B2C3D4", "E5F6A7B8"],
-          },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
+    mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/setup/regenerate-2fa") || url.includes("regenerate-2fa")) {
+          return jsonResponse({
+            status: "success",
+            data: {
+              totp_uri: "otpauth://totp/FlintTrade:testuser?secret=ABCDEF23GHIJKL45&issuer=FlintTrade",
+              backup_codes: ["A1B2C3D4", "E5F6A7B8"],
+            },
+          });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
     render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
 
+    await waitFor(() => expect(screen.getByRole("button", { name: /lost your authenticator/i })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /lost your authenticator/i }));
     expect(screen.getByText("Reset your 2FA")).toBeInTheDocument();
 
@@ -492,14 +620,18 @@ describe("LoginRoute", () => {
   });
 
   it("surfaces a wrong-password error in the recovery panel", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ status: "error", message: "Invalid password." }),
-        { status: 401, headers: { "Content-Type": "application/json" } },
-      ),
-    );
+    mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("regenerate-2fa")) {
+          return jsonResponse({ status: "error", message: "Invalid password." }, 401);
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
     render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
 
+    await waitFor(() => expect(screen.getByRole("button", { name: /lost your authenticator/i })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /lost your authenticator/i }));
     fireEvent.change(screen.getByLabelText("Confirm your password to reset 2FA"), { target: { value: "wrong" } });
     fireEvent.click(screen.getByRole("button", { name: /^reset 2fa$/i }));

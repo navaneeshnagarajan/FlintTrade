@@ -138,10 +138,12 @@ vi.mock("@/components/aceternity/meteors", () => ({
 vi.mock("@/routes/LoginRoute", () => ({
   default: ({
     onUnfinishedSetup,
+    totpRequired,
   }: {
     onUnfinishedSetup?: () => void;
+    totpRequired?: boolean;
   }) => (
-    <div data-testid="login-route">
+    <div data-testid="login-route" data-totp-required={String(totpRequired)}>
       {onUnfinishedSetup ? (
         <button type="button" aria-label="Start over unfinished setup" onClick={onUnfinishedSetup}>
           Unfinished setup — start over

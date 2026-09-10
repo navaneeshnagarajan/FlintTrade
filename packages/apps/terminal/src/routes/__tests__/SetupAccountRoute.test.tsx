@@ -224,7 +224,7 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     });
   });
 
-  it("offers Explore first without 2FA on the mandatory TOTP step", () => {
+  it("offers Set up later on the optional authenticator step", () => {
     localStorage.setItem(PROGRESS_KEY, JSON.stringify({
       accountCreated: true,
       totpUri: "otpauth://totp/x?secret=LEGACY",
@@ -240,11 +240,11 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
 
     render(<SetupAccountRoute />);
 
-    expect(screen.getByRole("button", { name: /explore first/i })).toBeEnabled();
-    expect(screen.getByText(/without 2FA/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /set up later/i })).toBeEnabled();
+    expect(screen.getByText(/optional for Explore and Practice/i)).toBeInTheDocument();
   });
 
-  it("Explore first opens Home in Explore and keeps unfinished setup wipeable", async () => {
+  it("Set up later continues the wizard without enabling 2FA", async () => {
     localStorage.setItem(PROGRESS_KEY, JSON.stringify({
       accountCreated: true,
       totpUri: "",
@@ -257,33 +257,23 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
       displayName: "nav",
       currentStep: 1,
     }));
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ status: "success", data: {} }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
 
     render(<SetupAccountRoute />);
-    fireEvent.click(screen.getByRole("button", { name: /explore first/i }));
+    fireEvent.click(screen.getByRole("button", { name: /set up later/i }));
 
-    await waitFor(() =>
-      expect(mocks.navigate).toHaveBeenCalledWith("/home", { replace: true }),
-    );
-    const progress = JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? "null") as {
-      accountCreated?: boolean;
-      currentStep?: number;
-    } | null;
-    expect(progress?.accountCreated).toBe(true);
-    expect(progress?.currentStep).toBe(1);
-    expect(useModeStore.getState().mode).toBe("explore");
-    expect(localStorage.getItem("flinttrade:demo-session")).toBe("active");
-    expect(useAuthStore.getState().token).toBe("demo-user");
-    expect(useAuthStore.getState().status).toBe("logged-in");
-    fetchSpy.mockRestore();
+    await waitFor(() => {
+      const progress = JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? "null") as {
+        accountCreated?: boolean;
+        currentStep?: number;
+      } | null;
+      expect(progress?.accountCreated).toBe(true);
+      expect(progress?.currentStep).toBe(2);
+    });
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(localStorage.getItem("flinttrade:demo-session")).toBeNull();
   });
 
-  it("reopening Setup after Explore first still offers Delete account & start over", async () => {
+  it("reopening Setup after Set up later still offers Delete account & start over", async () => {
     localStorage.setItem(PROGRESS_KEY, JSON.stringify({
       accountCreated: true,
       totpUri: "",

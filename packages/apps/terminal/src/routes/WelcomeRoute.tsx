@@ -298,11 +298,11 @@ export default function WelcomeRoute() {
   }, [reducedMotion]);
 
   useEffect(() => {
-    if (authStatus !== "unknown") return;
+    if (authStatus !== "unknown" && authStatus !== "logged-out") return;
 
     // Explore-first / Try with sample data persist a demo session. Restore it
     // before the public auth probe, or is_setup=true logs the operator out
-    // onto the password+TOTP wall and /home bounces back here.
+    // onto the daily login wall and /home bounces back here.
     if (isDemoSessionActive()) {
       useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
       return;
