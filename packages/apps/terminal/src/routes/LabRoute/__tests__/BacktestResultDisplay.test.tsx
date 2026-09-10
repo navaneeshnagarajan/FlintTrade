@@ -204,4 +204,32 @@ describe("BacktestResultDisplay", () => {
     expect(winRate).not.toMatch(/0\.00%/);
     expect(profitFactor).not.toMatch(/0\.00/);
   });
+
+  it("shows one value for the Explore sma_crossover demo figures", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const demoResult: BacktestResult = {
+      ...result,
+      metrics: {
+        ...result.metrics,
+        sharpe_ratio: 1.84,
+        win_rate: 0.75,
+        profit_factor: 8.43,
+      },
+    };
+    render(
+      <QueryClientProvider client={qc}>
+        <BacktestResultDisplay result={demoResult} />
+      </QueryClientProvider>,
+    );
+
+    const sharpe = (screen.getByText("Sharpe Ratio").parentElement?.textContent ?? "").replace(/\s+/g, " ").trim();
+    const winRate = (screen.getByText("Win Rate").parentElement?.textContent ?? "").replace(/\s+/g, " ").trim();
+    const profitFactor = (screen.getByText("Profit Factor").parentElement?.textContent ?? "").replace(/\s+/g, " ").trim();
+    expect(sharpe).toMatch(/^Sharpe Ratio\s*1\.84$/);
+    expect(winRate).toMatch(/^Win Rate\s*75\.00%$/);
+    expect(profitFactor).toMatch(/^Profit Factor\s*8\.43$/);
+    expect(sharpe).not.toMatch(/0\.00/);
+    expect(winRate).not.toMatch(/0\.00%/);
+    expect(profitFactor).not.toMatch(/0\.00/);
+  });
 });
