@@ -6,7 +6,7 @@
  */
 
 import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -34,6 +34,7 @@ describe("useAdvisorLlmStatus", () => {
   });
 
   afterEach(() => {
+    onlineManager.setOnline(true);
     vi.unstubAllGlobals();
   });
 
@@ -78,5 +79,47 @@ describe("useAdvisorLlmStatus", () => {
 
     await waitFor(() => expect(result.current.chrome).toBe("disconnected"));
     expect(result.current.configured).toBe(false);
+  });
+
+  it("does not keep Connected while a remount refetch of cached configured is in flight", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(ADVISOR_LLM_STATUS_QUERY_KEY, "configured");
+    let release!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(fetch).mockReturnValue(pending);
+
+    const { result } = renderHook(() => useAdvisorLlmStatus(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(true));
+    expect(result.current.chrome).toBe("loading");
+    expect(result.current.configured).toBe(false);
+
+    release(jsonResponse({
+      status: "success",
+      data: { configured: false, provider: "", model: "" },
+    }));
+    await waitFor(() => expect(result.current.chrome).toBe("unconfigured"));
+    expect(result.current.configured).toBe(false);
+  });
+
+  it("still probes advisor/status when the browser reports offline", async () => {
+    onlineManager.setOnline(false);
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({
+        status: "success",
+        data: { configured: false, provider: "", model: "" },
+      }),
+    );
+
+    const { result } = renderHook(() => useAdvisorLlmStatus(), { wrapper: wrapper() });
+
+    await waitFor(() => expect(result.current.chrome).toBe("unconfigured"));
+    expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes("/advisor/status"))).toBe(true);
   });
 });

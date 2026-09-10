@@ -79,6 +79,34 @@ export function isAdvisorChatReady(chrome: AdvisorLlmChrome): boolean {
   return chrome === "ready";
 }
 
+export type AdvisorQueryFetchStatus = "idle" | "fetching" | "paused";
+
+/**
+ * Chat chrome from a TanStack Query observer.
+ *
+ * A remount refetch of cached ``configured`` must not stay Connected — that
+ * reopens the send-then-error window if Settings just cleared the provider.
+ * An offline-paused observer must not sit on Checking with no Retry, and
+ * must never keep a green Connected from cache.
+ */
+export function resolveAdvisorLlmChrome(input: {
+  availability: AdvisorAvailability | undefined;
+  isPending: boolean;
+  isFetching: boolean;
+  fetchStatus: AdvisorQueryFetchStatus;
+}): AdvisorLlmChrome {
+  if (input.fetchStatus === "paused") {
+    if (input.availability === "configured" || input.availability === undefined) {
+      return "disconnected";
+    }
+    return advisorAvailabilityToChrome(input.availability);
+  }
+  if (input.isPending || (input.isFetching && input.availability === "configured")) {
+    return "loading";
+  }
+  return advisorAvailabilityToChrome(input.availability);
+}
+
 export type AdvisorChatContext = string | object;
 
 export interface AdvisorChatRequest {

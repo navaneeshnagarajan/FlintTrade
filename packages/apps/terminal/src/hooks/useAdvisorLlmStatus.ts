@@ -8,9 +8,9 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
-  advisorAvailabilityToChrome,
   isAdvisorChatReady,
   probeAdvisorAvailability,
+  resolveAdvisorLlmChrome,
   type AdvisorLlmChrome,
 } from "@/services/advisorChat";
 
@@ -29,15 +29,21 @@ export function useAdvisorLlmStatus(): AdvisorLlmStatus {
     queryFn: ({ signal }) => probeAdvisorAvailability(signal),
     staleTime: 0,
     refetchOnMount: "always",
+    networkMode: "always",
     retry: false,
   });
 
-  const chrome = advisorAvailabilityToChrome(query.isPending ? undefined : query.data);
+  const chrome = resolveAdvisorLlmChrome({
+    availability: query.data,
+    isPending: query.isPending,
+    isFetching: query.isFetching,
+    fetchStatus: query.fetchStatus,
+  });
 
   return {
     chrome,
     configured: isAdvisorChatReady(chrome),
-    isLoading: query.isPending,
+    isLoading: chrome === "loading",
     refetch: query.refetch,
   };
 }
