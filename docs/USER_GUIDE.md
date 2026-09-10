@@ -636,9 +636,10 @@ recommendation cards and clears any previously focused strategy card, so
 chips, cards, and focus share one mood state. Selected mood chips use
 `aria-pressed`.
 
-When mood and risk match nothing, the empty state offers **Try another
-mood**, which advances the mood filter. **Deploy to Strategy Lab**
-opens `/lab?strategy=<registryKey>` for that card.
+When mood and risk match nothing, the empty state offers
+**Try another mood**, which advances the mood filter.
+**Deploy to Strategy Lab** opens `/lab?strategy=<registryKey>` for that
+card.
 
 ### Signals
 
