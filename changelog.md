@@ -45,6 +45,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Duplicate zero placeholders on backtest metrics (FT-LAB-002).**
+  Explore `/lab` → `sma_crossover` → Run Backtest currently paints a
+  leftover `0.00` beside the real Sharpe ratio, win rate, and profit
+  factor (`0.00 1.84`, `0.00% 75.00%`, `0.00 8.43`). Each metric
+  should show one clear value, or the zero should be labelled if it
+  is meaningful.
+
 - **Explore Ctrl+K symbol search false unavailable error (FT-CMD-001).**
   Explore `search` now uses the same sample-instrument catalogue as
   Explore quotes and history. Ctrl+K → Symbols → NIFTY returns
