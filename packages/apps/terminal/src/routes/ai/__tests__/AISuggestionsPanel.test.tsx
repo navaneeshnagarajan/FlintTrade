@@ -92,13 +92,46 @@ describe("AISuggestionsPanel", () => {
     expect(deployButtons.length).toBeLessThanOrEqual(5);
   });
 
-  it("clicking a mood button changes displayed strategies", () => {
+  it("mood chips expose aria-pressed from the same mood state", () => {
     render(<AISuggestionsPanel />);
-    // Click "Trending" mood
-    fireEvent.click(screen.getByText("Trending"));
-    // Should still have deploy buttons (trending strategies exist)
-    const deployButtons = screen.getAllByText("Deploy to Strategy Lab");
-    expect(deployButtons.length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Volatile" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Trending" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Sideways" })).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Sideways" }));
+
+    expect(screen.getByRole("button", { name: "Volatile" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Trending" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Sideways" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("changing mood replaces recommendation cards and leaves no prior-mood card", () => {
+    render(<AISuggestionsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Trending" }));
+    expect(screen.getByText("Trend EMA Crossover")).toBeInTheDocument();
+    expect(screen.queryByText("Iron Condor Strategy")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sideways" }));
+
+    expect(screen.getByText("Iron Condor Strategy")).toBeInTheDocument();
+    expect(screen.queryByText("Trend EMA Crossover")).toBeNull();
+    expect(screen.queryByText("ATR Breakout")).toBeNull();
+    expect(screen.getByRole("button", { name: "Sideways" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("clears a previously selected strategy card when mood changes", () => {
+    render(<AISuggestionsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Sideways" }));
+    fireEvent.click(screen.getByRole("article", { name: "Iron Condor Strategy" }));
+    expect(screen.getByRole("article", { name: "Iron Condor Strategy" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Trending" }));
+
+    expect(screen.queryByRole("article", { name: "Iron Condor Strategy" })).toBeNull();
+    expect(screen.queryByRole("article", { pressed: true })).toBeNull();
   });
 
   it("navigates to /lab with strategy key on Deploy click", () => {
@@ -147,14 +180,45 @@ describe("AISuggestionsPanel", () => {
     expect(highRiskBadges.length).toBe(0);
   });
 
-  it("the 'Next mood' control cycles the market-mood scenario (honestly labelled — not a data refresh)", () => {
+  it("Next mood immediately refreshes chips and cards from the same mood state", () => {
     render(<AISuggestionsPanel />);
-    // The control must NOT masquerade as a live "Refresh" — there is no AI
-    // suggestion backend; it only cycles the illustrative mood scenario.
+    // Still labelled Next mood — not a live "Refresh" fetch.
     expect(screen.queryByText("Refresh")).toBeNull();
-    const nextMood = screen.getByText("Next mood");
-    fireEvent.click(nextMood);
-    const deployButtons = screen.getAllByText("Deploy to Strategy Lab");
-    expect(deployButtons.length).toBeGreaterThan(0);
+    expect(screen.getByText("ATR Breakout")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Next mood"));
+
+    expect(screen.getByRole("button", { name: "Trending" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Volatile" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Trend EMA Crossover")).toBeInTheDocument();
+    expect(screen.queryByText("ATR Breakout")).toBeNull();
+    expect(screen.queryByText("Iron Condor Strategy")).toBeNull();
+  });
+
+  it("shows an honest empty state with Try another mood when mood and risk match nothing", () => {
+    mockPersona = "beginner";
+    mockExperience = "beginner";
+    render(<AISuggestionsPanel />);
+
+    expect(
+      screen.getByText("No strategies match this mood + risk combination."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try another mood" })).toBeInTheDocument();
+    expect(screen.queryByText("ATR Breakout")).toBeNull();
+    expect(screen.queryByText("Iron Condor Strategy")).toBeNull();
+    expect(screen.queryByText("Deploy to Strategy Lab")).toBeNull();
+  });
+
+  it("Try another mood advances the filter and replaces the empty state", () => {
+    mockPersona = "beginner";
+    mockExperience = "beginner";
+    render(<AISuggestionsPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Try another mood" }));
+
+    expect(screen.getByRole("button", { name: "Trending" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Portfolio Momentum Rotation")).toBeInTheDocument();
+    expect(screen.queryByText("No strategies match this mood + risk combination.")).toBeNull();
+    expect(screen.queryByText("ATR Breakout")).toBeNull();
   });
 });

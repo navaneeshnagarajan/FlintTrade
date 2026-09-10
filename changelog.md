@@ -52,14 +52,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
-- **Suggest recommendations stay after mood change (FT-AI-003).**
-  Explore `/ai` Suggest: Trending → change mood to Sideways (or
-  Next mood) still leaves the prior strategy card (for example
-  Iron Condor from the previous mood). Selected-state styling on
-  mood chips does not reliably update. Expected: recommendations
-  refresh for the new mood; the selected mood chip reflects the
-  current choice. Product fix waits for the UI/UX Designer call
-  on the refresh vs keep-until-click pattern.
+- **Suggest recommendations refresh when mood changes (FT-AI-003).**
+  Explore `/ai` Suggest treats market mood as a filter, not a draft.
+  Changing mood (chip or **Next mood**) immediately replaces the
+  recommendation list and the selected mood chip from one mood
+  state. A previously focused strategy card is cleared, so a prior
+  mood's card (for example Iron Condor after leaving Sideways)
+  cannot remain. An empty mood + risk match shows an honest empty
+  state with **Try another mood**.
 
 - **Honest unconfigured LLM state on `/ai` (FT-AI-002).**
   `/ai` Chat probes `advisor/status` (including Explore /

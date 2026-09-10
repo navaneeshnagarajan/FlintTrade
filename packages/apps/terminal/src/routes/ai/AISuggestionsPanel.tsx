@@ -27,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { motionConfig } from "@/lib/motion";
+import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Market mood types
@@ -38,32 +39,12 @@ interface MoodDef {
   id: MarketMood;
   label: string;
   icon: typeof TrendingUp;
-  color: string;
-  bgColor: string;
 }
 
 const MOODS: MoodDef[] = [
-  {
-    id: "volatile",
-    label: "Volatile",
-    icon: ArrowUpDown,
-    color: "text-warning",
-    bgColor: "bg-atm-bg",
-  },
-  {
-    id: "trending",
-    label: "Trending",
-    icon: TrendingUp,
-    color: "text-profit",
-    bgColor: "bg-bullish-bg",
-  },
-  {
-    id: "range-bound",
-    label: "Sideways",
-    icon: TrendingDown,
-    color: "text-text-muted",
-    bgColor: "bg-surface-base",
-  },
+  { id: "volatile", label: "Volatile", icon: ArrowUpDown },
+  { id: "trending", label: "Trending", icon: TrendingUp },
+  { id: "range-bound", label: "Sideways", icon: TrendingDown },
 ];
 
 // ---------------------------------------------------------------------------
@@ -293,17 +274,35 @@ function riskBadgeClass(risk: "low" | "medium" | "high"): string {
 interface StrategyCardProps {
   suggestion: StrategySuggestion;
   index: number;
+  selected: boolean;
+  onSelect: (registryKey: string) => void;
   onDeploy: (registryKey: string) => void;
 }
 
-function StrategyCard({ suggestion, index, onDeploy }: StrategyCardProps) {
+function StrategyCard({ suggestion, index, selected, onSelect, onDeploy }: StrategyCardProps) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={motionConfig.stagger(index)}
     >
-      <Card className="bg-surface-card border border-border-default rounded-lg p-4 space-y-3">
+      <article
+        aria-label={suggestion.name}
+        aria-pressed={selected}
+        data-selected={selected || undefined}
+        tabIndex={0}
+        onClick={() => onSelect(suggestion.registryKey)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onSelect(suggestion.registryKey);
+          }
+        }}
+      >
+      <Card className={cn(
+        "bg-surface-card border border-border-default rounded-lg p-4 space-y-3",
+        selected && "border-accent ring-1 ring-accent/40",
+      )}>
         {/* Header */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
@@ -359,12 +358,16 @@ function StrategyCard({ suggestion, index, onDeploy }: StrategyCardProps) {
           variant="outline"
           size="sm"
           className="w-full gap-1.5 text-xs"
-          onClick={() => onDeploy(suggestion.registryKey)}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDeploy(suggestion.registryKey);
+          }}
         >
           <Rocket className="w-3.5 h-3.5" />
           Deploy to Strategy Lab
         </Button>
       </Card>
+      </article>
     </motion.div>
   );
 }
@@ -379,6 +382,7 @@ export default function AISuggestionsPanel() {
   const experience = useSettingsStore((s) => s.experience);
 
   const [mood, setMood] = useState<MarketMood>("volatile");
+  const [selectedStrategyKey, setSelectedStrategyKey] = useState<string | null>(null);
 
   const userRisk = useMemo(() => riskFromPersona(persona, experience), [persona, experience]);
 
@@ -389,17 +393,21 @@ export default function AISuggestionsPanel() {
     return riskFiltered.slice(0, 5);
   }, [mood, userRisk]);
 
+  function applyMood(next: MarketMood) {
+    setMood(next);
+    setSelectedStrategyKey(null);
+  }
+
   function handleDeploy(registryKey: string) {
     navigate(`/lab?strategy=${registryKey}`);
   }
 
-  // Cycles to the next market-mood scenario, re-deriving the illustrative
-  // suggestion set for that mood. There is no AI-suggestion backend, so this is
-  // NOT a data refresh — the control is labelled "Next mood" to reflect that.
+  // Mood is a filter, not a draft. Chip clicks and Next mood both go through
+  // applyMood so chips, cards, and any focused strategy share one mood state.
   function handleNextMood() {
     const moodIds = MOODS.map((m) => m.id);
     const idx = moodIds.indexOf(mood);
-    setMood(moodIds[(idx + 1) % moodIds.length]);
+    applyMood(moodIds[(idx + 1) % moodIds.length]);
   }
 
   return (
@@ -415,8 +423,8 @@ export default function AISuggestionsPanel() {
             size="sm"
             onClick={handleNextMood}
             className="text-text-muted hover:text-text-primary gap-1.5 h-7 text-xs"
-            aria-label="Show suggestions for the next market mood"
-            title="Cycle the market-mood scenario (illustrative suggestions — not a live fetch)"
+            aria-label="Next mood"
+            title="Refresh recommendations for the next market mood"
           >
             <Shuffle className="w-3 h-3" />
             Next mood
@@ -434,19 +442,22 @@ export default function AISuggestionsPanel() {
           <BarChart3 className="w-4 h-4 text-accent" />
           <h4 className="text-sm font-semibold text-text-primary">Market Mood</h4>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2" role="group" aria-label="Market mood">
           {MOODS.map((m) => {
             const Icon = m.icon;
             const isActive = mood === m.id;
             return (
               <button
                 key={m.id}
-                onClick={() => setMood(m.id)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors border ${
+                type="button"
+                aria-pressed={isActive}
+                onClick={() => applyMood(m.id)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors border",
                   isActive
-                    ? `${m.bgColor} ${m.color} border-current`
-                    : "bg-surface-base border-border-default text-text-muted hover:text-text-secondary"
-                }`}
+                    ? "bg-accent/15 text-accent border-accent ring-1 ring-accent/40"
+                    : "bg-surface-base border-border-default text-text-muted hover:text-text-secondary",
+                )}
               >
                 <Icon className="w-3.5 h-3.5" />
                 {m.label}
@@ -485,17 +496,24 @@ export default function AISuggestionsPanel() {
           <p className="text-sm text-text-secondary">
             No strategies match this mood + risk combination.
           </p>
-          <p className="text-xs text-text-muted mt-1">
-            Try adjusting the market mood or update your experience in Settings.
-          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-3 text-xs"
+            onClick={handleNextMood}
+          >
+            Try another mood
+          </Button>
         </Card>
       ) : (
-        <div className="space-y-3">
+        <div key={mood} className="space-y-3">
           {suggestions.map((s, idx) => (
             <StrategyCard
               key={s.registryKey}
               suggestion={s}
               index={idx}
+              selected={selectedStrategyKey === s.registryKey}
+              onSelect={setSelectedStrategyKey}
               onDeploy={handleDeploy}
             />
           ))}
