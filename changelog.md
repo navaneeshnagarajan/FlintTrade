@@ -53,11 +53,9 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Empty Monitors has no Strategy Builder/Lab CTA (FT-AUTO-001).**
-  Explore `/automate` Monitors empty state no longer leaves
-  "Start a strategy from the Strategy Builder tool" as copy
-  only. A button or link now opens Strategy Builder / Lab
-  (`/lab`), or an inline create path, so operators do not have
-  to find `/lab` independently.
+  Explore `/automate` Monitors empty state now includes an
+  "Open Strategy Builder" link to `/lab`. Operators no longer
+  have to find Strategy Lab independently from copy-only text.
 
 - **Kill All Positions armed on empty Explore Ditto dashboard (FT-DITTO-001).**
   Explore `/ditto` Risk Dashboard with ₹0 totals and no accounts
