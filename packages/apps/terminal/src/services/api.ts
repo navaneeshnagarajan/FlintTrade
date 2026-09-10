@@ -1954,6 +1954,22 @@ function findMockQuote(symbol = "NIFTY", exchange = "NSE_INDEX"): Quote {
   };
 }
 
+function makeMockSearch(
+  query: string,
+  exchange?: string,
+): Array<{ symbol: string; exchange: string }> {
+  const needle = query.trim().toUpperCase();
+  if (!needle) return [];
+  const exchangeFilter = exchange?.trim().toUpperCase();
+  return mockDataEngine.getSnapshot()
+    .filter((tick) => {
+      if (!tick.symbol.toUpperCase().includes(needle)) return false;
+      if (exchangeFilter && tick.exchange.toUpperCase() !== exchangeFilter) return false;
+      return true;
+    })
+    .map((tick) => ({ symbol: tick.symbol, exchange: tick.exchange }));
+}
+
 function makeMockHistory(symbol?: string, exchange?: string): OHLCVBar[] {
   const quote = findMockQuote(symbol, exchange);
   const now = Math.floor(Date.now() / 1000);
@@ -2335,6 +2351,10 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
     case "optionchain": {
       const underlying = typeof params.underlying === "string" ? params.underlying : symbol;
       return makeMockOptionChain(underlying, exchange) as T;
+    }
+    case "search": {
+      const query = typeof params.query === "string" ? params.query : "";
+      return makeMockSearch(query, exchange) as T;
     }
     case "symbol":
       return {
