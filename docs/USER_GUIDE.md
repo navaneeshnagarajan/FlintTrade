@@ -327,8 +327,10 @@ software safeguards, prompts, and recovery controls in a local setup.
 
 1. Click the **PRACTICE** badge in the top bar. A dialog warns that
    real orders will be placed and asks for your **6-digit PIN**
-   (`POST /v1/auth/pin`). Set a PIN under Settings → Security first if
-   you have not already.
+   (`POST /v1/auth/pin`). Live unlock requires a confirmed authenticator
+   enrolment first, then the PIN — the PIN alone is refused until the
+   authenticator is enabled. Set a PIN under Settings → Security first
+   if you have not already.
 2. Cancel the modal unless you are deliberately performing your own broker-side
    test outside this guide.
 3. Confirm the UI clearly shows Live mode, the active account, and the
