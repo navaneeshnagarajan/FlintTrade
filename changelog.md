@@ -45,6 +45,12 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Duplicate zero placeholders on backtest metrics (FT-LAB-002).**
+  Explore `/lab` backtest headline metrics (Sharpe ratio, max
+  drawdown, win rate, profit factor) now show a single formatted
+  value. The leftover count-up `0.00` / `0.00%` beside the real
+  figure is gone.
+
 - **Explore Ctrl+K symbol search false unavailable error (FT-CMD-001).**
   Explore `search` now uses the same sample-instrument catalogue as
   Explore quotes and history. Ctrl+K → Symbols → NIFTY returns
