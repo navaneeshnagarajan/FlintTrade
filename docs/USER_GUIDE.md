@@ -589,19 +589,24 @@ acknowledgement records that the unknown result was reviewed; it does not retry
 the action or label it successful.
 
 Chat itself needs a configured LLM via Settings → AI. The badge and composer
-follow that configured state (including Explore / `demo-user`), not a leftover
-local setting. Returning to Chat after you save Settings → AI re-checks
-advisor readiness, so the **Not configured** gate should not stay stuck on an
-outdated result.
+align with Settings → AI / `#llm` hydration as well as advisor status
+(including Explore / `demo-user`), not a leftover local setting. When Explore
+Settings `#llm` looks empty ("No LLM provider configured"), Chat shows
+**Not configured** / **LLM not configured** — **Connected** must not appear
+from an env-default advisor `configured` while Settings looks empty.
+Returning to Chat after you save Settings → AI re-checks readiness (advisor
+and Settings hydration), so the **Not configured** gate should not stay stuck
+on an outdated result.
 
 When unconfigured, the warning badge is **Not configured**, the empty state is
 **LLM not configured**, the primary CTA **Open Settings → AI** opens
-`/settings#llm`, and an outline **Retry** re-probes advisor status. Composer
-input and Send stay disabled; there is no send-then-no-reply path.
+`/settings#llm`, and an outline **Retry** re-probes advisor status and
+Settings `#llm` hydration. Composer input and Send stay disabled; there is no
+send-then-no-reply path.
 
 If leftover transcript messages hide that empty state while Chat is still
 unconfigured, disconnected, or in error, the header still offers **Retry**
-(re-check advisor status) and **Open Settings → AI**.
+(re-check advisor status and Settings hydration) and **Open Settings → AI**.
 
 A configured but broken probe shows **Error** or **Disconnected** with
 **Retry** — never a green **Connected**. Explore does not show a fake
@@ -611,8 +616,10 @@ LLM readiness.
 
 On Explore `/settings#llm`, a demo or unconfigured session shows the empty
 state "No LLM provider configured" with **Retry** — not a broken load.
-That Settings empty state is distinct from Chat's **LLM not configured**.
-Configure a provider in Live or Practice on this machine; see
+That Settings empty-state wording stays distinct from Chat's **LLM not
+configured**; the two are aligned for readiness, so Chat also looks
+unconfigured when Settings looks empty. Configure a provider in Live or
+Practice on this machine; see
 [Settings reference](#11-settings-reference).
 
 ### Signals
@@ -774,13 +781,17 @@ to protect a saved configuration. Use **Retry**.
 
 On `/ai` Chat, an unconfigured LLM shows **LLM not configured** (badge
 **Not configured**) with **Open Settings → AI** and an outline **Retry**
-that re-probes advisor status. Composer input and Send stay disabled.
-If leftover transcript messages hide that empty state, the header still
-offers **Retry** and **Open Settings → AI**. That is Chat readiness, not
-the Settings empty state above. A configured but broken probe shows
+that re-probes advisor status and Settings `#llm` hydration. Composer
+input and Send stay disabled. Chat also looks unconfigured when Explore
+Settings `#llm` looks empty ("No LLM provider configured") — **Connected**
+must not appear from an env-default advisor `configured` while Settings
+looks empty. If leftover transcript messages hide that empty state, the
+header still offers **Retry** and **Open Settings → AI**. The Settings
+empty-state wording stays distinct from Chat's **LLM not configured**; they
+are aligned for readiness. A configured but broken probe shows
 **Error** or **Disconnected** with **Retry**. Returning to Chat after
-saving Settings → AI re-checks readiness, so the gate should not stay
-stuck on an outdated **Not configured**.
+saving Settings → AI re-checks readiness (advisor and Settings hydration),
+so the gate should not stay stuck on an outdated **Not configured**.
 
 ### "Token expired" when placing an order
 
