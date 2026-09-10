@@ -9,6 +9,8 @@
  */
 
 import { useState, useMemo } from "react";
+import { useNarrowLayout } from "@/hooks/useNarrowLayout";
+import { NarrowBookCards } from "@/components/books/NarrowBookCards";
 import {
   useReactTable,
   getCoreRowModel,
@@ -128,6 +130,7 @@ function buildColumns(): ColumnDef<Holding>[] {
 
 export function HoldingsTab() {
   const { holdings: liveHoldings, isLoading, isError, isSampleData, refetchHoldings } = useInvest();
+  const { isNarrow, containerRef } = useNarrowLayout<HTMLDivElement>();
   const [sorting, setSorting] = useState<SortingState>([]);
   const columns = useMemo(() => buildColumns(), []);
 
@@ -159,18 +162,27 @@ export function HoldingsTab() {
     [holdings],
   );
   const totalPnlPct = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0;
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
-        <RefreshCw className="size-5 animate-spin" />
-        <span className="text-sm">Fetching holdings from your active broker...</span>
-      </div>
-    );
-  }
+  const narrowCards = useMemo(
+    () => holdings.map((h) => ({
+      id: `${h.symbol}-${h.exchange}`,
+      symbol: h.symbol,
+      detail: `${h.exchange} · Qty ${h.quantity.toLocaleString("en-IN")} · LTP ${formatINR(h.ltp)}`,
+      pnl: formatINR(h.pnl),
+      pnlPercent: formatPercent(h.pnlPercent),
+      pnlPositive: h.pnl >= 0,
+    })),
+    [holdings],
+  );
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div ref={containerRef} className="flex flex-col h-full overflow-hidden">
+      {isLoading ? (
+        <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
+          <RefreshCw className="size-5 animate-spin" />
+          <span className="text-sm">Fetching holdings from your active broker...</span>
+        </div>
+      ) : (
+        <>
       {/* Demo banner */}
       {isDemo && (
         <div className="px-2 pt-2 shrink-0">
@@ -225,60 +237,83 @@ export function HoldingsTab() {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto">
-        <Table aria-label="Holdings">
-          <TableHeader>
-            {table.getHeaderGroups().map((hg) => (
-              <TableRow key={hg.id} className="border-border-default hover:bg-transparent">
-                {hg.headers.map((header) => {
-                  const sorted = header.column.getIsSorted();
-                  return (
-                    <TableHead
-                      key={header.id}
-                      className="h-8 text-xxs font-medium text-text-muted uppercase tracking-wider cursor-pointer select-none"
-                      onClick={header.column.getToggleSortingHandler()}
-                      aria-sort={
-                        sorted === "asc"
-                          ? "ascending"
-                          : sorted === "desc"
-                            ? "descending"
-                            : "none"
-                      }
-                    >
-                      {flexRender(header.column.columnDef.header, header.getContext())}
-                      {sorted === "asc" && " ↑"}
-                      {sorted === "desc" && " ↓"}
-                    </TableHead>
-                  );
-                })}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows.map((row) => (
-              <TableRow
-                key={row.id}
-                className="border-border-default hover:bg-surface-card transition-colors"
-              >
-                {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id} className="py-2 text-xs">
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      {/* Table or stacked cards on phone-width surfaces */}
+      {isNarrow ? (
+        <NarrowBookCards rows={narrowCards} ariaLabel="Holdings" />
+      ) : (
+        <div className="flex-1 overflow-auto">
+          <Table aria-label="Holdings">
+            <TableHeader>
+              {table.getHeaderGroups().map((hg) => (
+                <TableRow key={hg.id} className="border-border-default hover:bg-transparent">
+                  {hg.headers.map((header) => {
+                    const sorted = header.column.getIsSorted();
+                    return (
+                      <TableHead
+                        key={header.id}
+                        className="h-8 text-xxs font-medium text-text-muted uppercase tracking-wider cursor-pointer select-none"
+                        onClick={header.column.getToggleSortingHandler()}
+                        aria-sort={
+                          sorted === "asc"
+                            ? "ascending"
+                            : sorted === "desc"
+                              ? "descending"
+                              : "none"
+                        }
+                      >
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                        {sorted === "asc" && " ↑"}
+                        {sorted === "desc" && " ↓"}
+                      </TableHead>
+                    );
+                  })}
+                </TableRow>
+              ))}
+            </TableHeader>
+            <TableBody>
+              {table.getRowModel().rows.map((row) => (
+                <TableRow
+                  key={row.id}
+                  className="border-border-default hover:bg-surface-card transition-colors"
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id} className="py-2 text-xs">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
       {/* Sticky totals row */}
-      <div className="border-t border-border-default bg-surface-card px-4 py-2 grid grid-cols-6 gap-2 text-xs font-mono tabular-nums shrink-0">
-        <span className="text-text-secondary font-semibold col-span-1">Total</span>
-        <span className="text-right text-text-muted" />
-        <span className="text-right text-text-muted" />
-        <span className="text-right text-text-muted" />
-        <span className="text-right text-text-secondary">{formatINR(totalInvested)}</span>
+      <div
+        aria-label="Holdings totals"
+        className={cn(
+          "border-t border-border-default bg-surface-card px-4 py-2 text-xs font-mono tabular-nums shrink-0",
+          isNarrow
+            ? "flex items-start justify-between gap-3"
+            : "grid grid-cols-6 gap-2",
+        )}
+      >
+        <div className={isNarrow ? "min-w-0" : "col-span-1"}>
+          <span className="text-text-secondary font-semibold">Total</span>
+          {isNarrow && (
+            <div className="text-xxs text-text-muted">
+              Invested {formatINR(totalInvested)}
+            </div>
+          )}
+        </div>
+        {!isNarrow && (
+          <>
+            <span className="text-right text-text-muted" />
+            <span className="text-right text-text-muted" />
+            <span className="text-right text-text-muted" />
+            <span className="text-right text-text-secondary">{formatINR(totalInvested)}</span>
+          </>
+        )}
         <div className={cn("text-right", totalPnl >= 0 ? "text-profit" : "text-loss")}>
           <div className="font-semibold">{formatINR(totalPnl)}</div>
           <div className="text-xs opacity-75">
@@ -286,6 +321,8 @@ export function HoldingsTab() {
           </div>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }
