@@ -79,6 +79,31 @@ export function isAdvisorChatReady(chrome: AdvisorLlmChrome): boolean {
   return chrome === "ready";
 }
 
+/** Same states Settings `#llm` uses (FT-SET-001). */
+export type SettingsLlmHydration = "loading" | "ready" | "error" | "empty";
+
+/**
+ * Align Chat chrome with Settings `#llm`.
+ *
+ * Explore's Settings empty/Retry path is an unconfigured appearance even when
+ * ``advisor/status`` reports configured because ``LLMConfig.from_env()``
+ * defaults an empty stored provider to ollama. Never show Connected in that
+ * case.
+ */
+export function alignAdvisorChromeWithSettingsHydration(
+  advisorChrome: AdvisorLlmChrome,
+  settingsHydration: SettingsLlmHydration,
+): AdvisorLlmChrome {
+  if (settingsHydration === "empty") return "unconfigured";
+  if (settingsHydration === "error") {
+    return advisorChrome === "ready" || advisorChrome === "loading" ? "error" : advisorChrome;
+  }
+  if (settingsHydration === "loading") {
+    return advisorChrome === "ready" ? "loading" : advisorChrome;
+  }
+  return advisorChrome;
+}
+
 export type AdvisorQueryFetchStatus = "idle" | "fetching" | "paused";
 
 /**

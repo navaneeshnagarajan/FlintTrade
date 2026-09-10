@@ -9,7 +9,11 @@
 
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { isAcceptedOpenAlgoConfigStatus, useSettingsState } from "../useSettingsState";
+import {
+  isAcceptedOpenAlgoConfigStatus,
+  probeSettingsLlmHydration,
+  useSettingsState,
+} from "../useSettingsState";
 import type { LlmProviderId } from "@/generated/serviceProviders";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -1261,6 +1265,23 @@ describe("useSettingsState", () => {
     await waitFor(() => expect(result.current.llmHydrationState).toBe("ready"));
     expect(llmAttempts).toBe(2);
     warnSpy.mockRestore();
+  });
+
+  it("probes Settings #llm hydration the same way Chat aligns with the empty appearance", async () => {
+    useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ token: "demo-user" });
+    mockFetchWithFailedLlmHydration();
+    await expect(probeSettingsLlmHydration()).resolves.toBe("empty");
+
+    useModeStore.setState({ mode: "live" });
+    useAuthStore.setState({ token: "session-jwt" });
+    await expect(probeSettingsLlmHydration()).resolves.toBe("error");
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      status: "success",
+      data: { provider: "openai", model: "test" },
+    }))));
+    await expect(probeSettingsLlmHydration()).resolves.toBe("ready");
   });
 
   it("keeps a Live LLM load failure as a protected error, not an empty Explore fallback", async () => {

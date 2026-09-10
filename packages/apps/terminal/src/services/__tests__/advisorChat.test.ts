@@ -19,6 +19,7 @@ import {
   LLM_NOT_CONFIGURED_MESSAGE,
   advisorAvailabilityToChrome,
   advisorLlmChromeLabel,
+  alignAdvisorChromeWithSettingsHydration,
   consumeAdvisorSse,
   isAdvisorChatReady,
   resolveAdvisorLlmChrome,
@@ -99,6 +100,20 @@ describe("advisorChat", () => {
       isFetching: true,
       fetchStatus: "fetching",
     }))).toBe(false);
+  });
+
+  it("aligns Chat chrome with Settings #llm empty — never Connected from env-default advisor/status", () => {
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "empty")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("loading", "empty")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("disconnected", "empty")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("error", "empty")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "loading")).toBe("loading");
+    expect(alignAdvisorChromeWithSettingsHydration("disconnected", "loading")).toBe("disconnected");
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "error")).toBe("error");
+    expect(alignAdvisorChromeWithSettingsHydration("disconnected", "error")).toBe("disconnected");
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "ready")).toBe("ready");
+    expect(alignAdvisorChromeWithSettingsHydration("unconfigured", "ready")).toBe("unconfigured");
+    expect(isAdvisorChatReady(alignAdvisorChromeWithSettingsHydration("ready", "empty"))).toBe(false);
   });
 
   it("maps an offline-paused probe to Disconnected instead of a stuck Checking or Connected", () => {

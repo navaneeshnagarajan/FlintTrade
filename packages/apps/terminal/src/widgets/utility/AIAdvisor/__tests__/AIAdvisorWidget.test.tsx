@@ -137,8 +137,50 @@ function advisorStatusResponse(configured: boolean): Response {
   }), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
+function settingsLlmResponse(kind: "ready" | "unauthorized"): Response {
+  if (kind === "unauthorized") {
+    return new Response(JSON.stringify({
+      status: "error",
+      message: "LLM configuration requires an authenticated session",
+    }), { status: 401, headers: { "Content-Type": "application/json" } });
+  }
+  return new Response(JSON.stringify({
+    status: "success",
+    data: { provider: "openai", host: "", model: "test", api_key_configured: true },
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+}
+
+function isLlmConfigGet(input: unknown, init?: RequestInit): boolean {
+  const url = String(input);
+  return url.includes("/config/llm") && !url.includes("/test") && init?.method !== "POST";
+}
+
+function mockChatLlmProbes(options: {
+  advisor: "configured" | "unconfigured" | "unreachable" | "unknown";
+  settings: "ready" | "unauthorized";
+}): ReturnType<typeof vi.spyOn> {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (isLlmConfigGet(input, init)) {
+      return settingsLlmResponse(options.settings);
+    }
+    if (options.advisor === "unreachable") {
+      throw new TypeError("Failed to fetch");
+    }
+    if (options.advisor === "unknown") {
+      return new Response(JSON.stringify({ status: "error" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return advisorStatusResponse(options.advisor === "configured");
+  });
+}
+
 function mockAdvisorStatus(configured: boolean): void {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(advisorStatusResponse(configured));
+  mockChatLlmProbes({
+    advisor: configured ? "configured" : "unconfigured",
+    settings: configured ? "ready" : "unauthorized",
+  });
 }
 
 describe("AIAdvisorWidget", () => {
@@ -196,20 +238,41 @@ describe("AIAdvisorWidget", () => {
     mockLlmProvider.mockReturnValue("ollama");
     useModeStore.setState({ mode: "explore" });
     useAuthStore.setState({ token: "demo-user" });
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(advisorStatusResponse(false));
+    const fetchMock = mockChatLlmProbes({ advisor: "unconfigured", settings: "unauthorized" });
     render(<AIAdvisorWidget />, { wrapper: Providers });
 
     await screen.findByText("Not configured");
     expect(fetchMock).toHaveBeenCalled();
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/advisor/status"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]: [unknown]) => String(input).includes("/advisor/status"))).toBe(true);
     expect(useModeStore.getState().mode).toBe("explore");
     expect(useAuthStore.getState().token).toBe("demo-user");
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.queryByText("Sample replies")).not.toBeInTheDocument();
   });
 
-  it("shows a green Connected badge only after advisor/status reports configured", async () => {
-    mockAdvisorStatus(true);
+  it("shows Not configured in Explore when Settings #llm is empty even if advisor/status is configured", async () => {
+    mockLlmProvider.mockReturnValue("ollama");
+    useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ token: "demo-user" });
+    mockChatLlmProbes({ advisor: "configured", settings: "unauthorized" });
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    const badge = await screen.findByText("Not configured");
+    expect(badge.className).toMatch(/warning/);
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.getByText("LLM not configured")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open Settings → AI/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
+    expect(screen.queryByPlaceholderText("Ask the AI advisor...")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ask me anything about trading, markets, or strategies.")).not.toBeInTheDocument();
+  });
+
+  it("shows a green Connected badge only after advisor/status is configured and Settings #llm can load", async () => {
+    useModeStore.setState({ mode: "live" });
+    useAuthStore.setState({ token: "session-jwt" });
+    mockChatLlmProbes({ advisor: "configured", settings: "ready" });
     render(<AIAdvisorWidget />, { wrapper: Providers });
 
     const badge = await screen.findByText("Connected");
@@ -220,7 +283,9 @@ describe("AIAdvisorWidget", () => {
 
   it("keeps Retry and Settings available when a leftover transcript hides the empty state", async () => {
     mockLlmProvider.mockReturnValue("openai");
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ token: "demo-user" });
+    mockChatLlmProbes({ advisor: "configured", settings: "unauthorized" });
     conversationStoreMock.useStore.setState({
       messages: [{
         id: "m1",
@@ -232,10 +297,12 @@ describe("AIAdvisorWidget", () => {
     });
     render(<AIAdvisorWidget />, { wrapper: Providers });
 
-    expect(await screen.findAllByText("Disconnected")).not.toHaveLength(0);
+    expect(await screen.findAllByText("Not configured")).not.toHaveLength(0);
     expect(screen.queryByText("LLM not configured")).not.toBeInTheDocument();
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Open Settings → AI/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
     expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
   });
 
@@ -252,30 +319,31 @@ describe("AIAdvisorWidget", () => {
     window.removeEventListener("flinttrade:navigate", listener);
   });
 
-  it("shows Disconnected and Retry when the status probe cannot reach the backend", async () => {
+  it("shows Disconnected and Retry when Settings #llm is ready but advisor/status cannot be reached", async () => {
     mockLlmProvider.mockReturnValue("openai");
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    useModeStore.setState({ mode: "live" });
+    useAuthStore.setState({ token: "session-jwt" });
+    mockChatLlmProbes({ advisor: "unreachable", settings: "ready" });
     render(<AIAdvisorWidget />, { wrapper: Providers });
 
     expect(await screen.findAllByText("Disconnected")).not.toHaveLength(0);
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
     expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
   });
 
-  it("shows Error and Retry when advisor/status is configured-looking but broken", async () => {
+  it("shows Error and Retry when Settings #llm is ready but advisor/status is configured-looking but broken", async () => {
     mockLlmProvider.mockReturnValue("openai");
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ status: "error" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
+    useModeStore.setState({ mode: "live" });
+    useAuthStore.setState({ token: "session-jwt" });
+    mockChatLlmProbes({ advisor: "unknown", settings: "ready" });
     render(<AIAdvisorWidget />, { wrapper: Providers });
 
     expect(await screen.findAllByText("Error")).not.toHaveLength(0);
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
     expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
   });
 
