@@ -52,6 +52,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Broker Gateway and Ditto default URLs diverge (FT-SET-002).**
+  Explore `/settings#api` Broker Gateway and Explore `/ditto` Add
+  Account now share the OpenAlgo default `http://127.0.0.1:5000`.
+  Add Account prefills the saved Gateway host and REST port
+  without retaining the bridge API key, so the two forms no
+  longer silently default to ports 5000 and 5001.
+
 - **Home greeting uses local evening at noon IST (FT-HOME-001).**
   Explore `/home` greets from the Asia/Kolkata clock, so ~12:01 IST
   is Good afternoon (or Good morning before noon), not Good evening

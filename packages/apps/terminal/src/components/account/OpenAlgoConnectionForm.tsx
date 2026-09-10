@@ -24,6 +24,11 @@ import {
   persistOpenAlgoConfigPatch,
 } from "@/services/ftApi.openalgo";
 import { useConnectionStore } from "@/stores/connectionStore";
+import {
+  DEFAULT_OPENALGO_HOST,
+  DEFAULT_OPENALGO_PORT,
+  DEFAULT_OPENALGO_WS_PORT,
+} from "@/lib/openAlgoDefaults";
 
 interface OpenAlgoConnectionFormProps {
   defaultValues?: Partial<ConnectionFormValues>;
@@ -37,10 +42,10 @@ interface OpenAlgoConnectionFormProps {
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 const DEFAULT_VALUES: ConnectionFormValues = {
-  host: "http://localhost:5000",
-  port: "5000",
+  host: DEFAULT_OPENALGO_HOST,
+  port: DEFAULT_OPENALGO_PORT,
   apiKey: "",
-  wsPort: "8765",
+  wsPort: DEFAULT_OPENALGO_WS_PORT,
 };
 
 export function OpenAlgoConnectionForm({
@@ -174,7 +179,7 @@ export function OpenAlgoConnectionForm({
         <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
           <Input
             id="openalgo-host"
-            placeholder="http://localhost:5000"
+            placeholder={DEFAULT_OPENALGO_HOST}
             aria-label="OpenAlgo-compatible URL"
             className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
             {...register("host")}
@@ -190,7 +195,7 @@ export function OpenAlgoConnectionForm({
         <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
           <Input
             id="openalgo-port"
-            placeholder="5000"
+            placeholder={DEFAULT_OPENALGO_PORT}
             aria-label="REST port"
             className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
             {...register("port")}
