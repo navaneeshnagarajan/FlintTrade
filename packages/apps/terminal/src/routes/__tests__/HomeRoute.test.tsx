@@ -166,6 +166,7 @@ vi.mock("@/atoms/marketAtoms", async (importOriginal) =>
 // ---------------------------------------------------------------------------
 import HomeRoute from "../HomeRoute";
 import { DEFAULT_CARDS, useBentoStore } from "@/stores/bentoStore";
+import { HOME_WIDGET_CATALOG } from "@/routes/home/homeWidgetRegistry";
 import { useModeStore } from "@/stores/modeStore";
 
 function createDataTransfer() {
@@ -293,7 +294,8 @@ describe("HomeRoute", () => {
     const user = userEvent.setup();
     renderHomeRoute();
 
-    expect(screen.getAllByTestId("ai-pulse-card")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: /remove ai pulse widget/i }));
+    expect(screen.queryByTestId("ai-pulse-card")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /add widget/i }));
 
@@ -302,9 +304,61 @@ describe("HomeRoute", () => {
     await user.click(screen.getByRole("button", { name: /add ai pulse widget/i }));
 
     expect(screen.queryByRole("dialog", { name: /add dashboard widget/i })).not.toBeInTheDocument();
-    expect(screen.getAllByTestId("ai-pulse-card")).toHaveLength(2);
+    expect(screen.getAllByTestId("ai-pulse-card")).toHaveLength(1);
     expect(document.querySelector('[data-home-component-id="AIPulseCard"][data-new-widget="true"]')).toBeInTheDocument();
-    expect(screen.getByTestId("status-bar-card-count")).toHaveTextContent("13");
+    expect(screen.getByTestId("status-bar-card-count")).toHaveTextContent("12");
+  });
+
+  it("disables Watchlist in the Add widget picker when it is already on the dashboard", async () => {
+    const user = userEvent.setup();
+    renderHomeRoute();
+
+    expect(screen.getAllByTestId("watchlist-card")).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: /add widget/i }));
+
+    const watchlist = screen.getByRole("button", { name: /watchlist widget/i });
+    expect(watchlist).toBeDisabled();
+    expect(watchlist).toHaveTextContent("Already on the dashboard");
+
+    await user.click(watchlist);
+
+    expect(screen.getByRole("dialog", { name: /add dashboard widget/i })).toBeInTheDocument();
+    expect(screen.getAllByTestId("watchlist-card")).toHaveLength(1);
+    expect(useBentoStore.getState().cards.filter((card) => card.componentId === "WatchlistCard")).toHaveLength(1);
+  });
+
+  it("lets Watchlist be added again after it has been removed", async () => {
+    const user = userEvent.setup();
+    renderHomeRoute();
+
+    await user.click(screen.getByRole("button", { name: /remove watchlist widget/i }));
+    expect(screen.queryByTestId("watchlist-card")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /add widget/i }));
+    const watchlist = screen.getByRole("button", { name: /add watchlist widget/i });
+    expect(watchlist).toBeEnabled();
+    await user.click(watchlist);
+
+    expect(screen.getAllByTestId("watchlist-card")).toHaveLength(1);
+    expect(document.querySelector('[data-home-component-id="WatchlistCard"][data-new-widget="true"]')).toBeInTheDocument();
+  });
+
+  it("disables every home widget type that is already on the dashboard", async () => {
+    const user = userEvent.setup();
+    renderHomeRoute();
+
+    await user.click(screen.getByRole("button", { name: /add widget/i }));
+
+    for (const widget of HOME_WIDGET_CATALOG) {
+      expect(
+        screen.getByRole("button", {
+          name: `${widget.name} widget is already on the dashboard`,
+        }),
+      ).toBeDisabled();
+    }
+
+    expect(screen.getAllByText("Already on the dashboard")).toHaveLength(DEFAULT_CARDS.length);
   });
 
   it("reorders dashboard widgets when one card is dropped onto another", () => {
