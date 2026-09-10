@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useLocation } from "react-router";
+import { Link, useLocation } from "react-router";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
@@ -534,45 +534,61 @@ function StrategiesTab() {
 
 function PaperTradingTab() {
   return (
-    <div className="space-y-6 animate-fade-in">
-      <GlassCard className="rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-3">
+    <div className="min-w-0 max-w-full space-y-6 overflow-x-hidden animate-fade-in">
+      <GlassCard className="min-w-0 rounded-lg p-4 sm:p-6">
+        <h3 className="font-heading font-semibold text-lg text-text-primary mb-3 break-words">
           What is Practice Trading?
         </h3>
-        <p className="text-sm text-text-secondary leading-relaxed mb-4">
+        <p className="text-sm text-text-secondary leading-relaxed mb-4 break-words">
           Practice trading lets you trade with virtual money. You execute the same strategies,
           see the same market data, but don&apos;t risk real capital. It&apos;s the best way to learn
           before going live.
         </p>
-        <h4 className="font-heading font-semibold text-sm text-text-primary mb-2">
-          How to Paper Trade with FlintTrade:
+        <h4 className="font-heading font-semibold text-sm text-text-primary mb-2 break-words">
+          How to start Practice Trading:
         </h4>
-        <ol className="space-y-2 text-sm text-text-secondary list-decimal list-inside">
+        <ol className="min-w-0 space-y-2 pl-5 text-sm text-text-secondary list-decimal list-outside break-words">
           <li>
             Set up OpenAlgo with your broker&apos;s <strong>Practice mode</strong>{" "}
             (Dhan Sandbox provides ₹10L virtual capital)
           </li>
-          <li>Connect FlintTrade to the Practice instance</li>
+          <li>Configure FlintTrade&apos;s Broker Gateway to reach that OpenAlgo Practice instance</li>
           <li>Trade normally — all orders execute against virtual funds</li>
           <li>Review your P&L Dashboard to analyse performance</li>
-          <li>When confident, switch to your real broker credentials</li>
+          <li>When confident, point OpenAlgo at your live broker credentials</li>
         </ol>
+        <div className="mt-4 min-w-0">
+          <p className="mb-3 text-sm text-text-secondary break-words">
+            Configure OpenAlgo in Settings → Broker Gateway.
+          </p>
+          <Button asChild className="w-full min-w-0 sm:w-auto">
+            <Link to="/settings#api">Open Settings → Broker Gateway</Link>
+          </Button>
+        </div>
       </GlassCard>
 
-      <GlassCard className="rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-3">
+      <GlassCard className="min-w-0 rounded-lg p-4 sm:p-6">
+        <h3 className="font-heading font-semibold text-lg text-text-primary mb-3 break-words">
           Supported Sandboxes
         </h3>
         <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <Badge className="bg-bullish-bg text-profit border-0">Active</Badge>
+          <div
+            data-testid="practice-sandbox-row"
+            className="flex min-w-0 flex-wrap items-center gap-2"
+          >
+            <Badge className="shrink-0 bg-bullish-bg text-profit border-0">Active</Badge>
             <span className="text-sm text-text-primary">Dhan Sandbox</span>
-            <span className="text-xs text-text-muted">— ₹10L virtual funds, 24/7, all instruments</span>
+            <span className="min-w-0 break-words text-xs text-text-muted">
+              — ₹10L virtual funds, 24/7, all instruments
+            </span>
           </div>
-          <div className="flex items-center gap-3">
-            <Badge variant="outline" className="text-xs">Planned</Badge>
+          <div
+            data-testid="practice-sandbox-row"
+            className="flex min-w-0 flex-wrap items-center gap-2"
+          >
+            <Badge variant="outline" className="shrink-0 text-xs">Planned</Badge>
             <span className="text-sm text-text-primary">Kotak Neo Sandbox</span>
-            <span className="text-xs text-text-muted">— when available</span>
+            <span className="min-w-0 break-words text-xs text-text-muted">— when available</span>
           </div>
         </div>
       </GlassCard>
@@ -869,8 +885,8 @@ export default function LearnRoute() {
         </motion.div>
 
         {/* Content area */}
-        <ScrollArea className="flex-1">
-          <div role="tabpanel" id={`learn-tabpanel-${activeTab}`} aria-labelledby={`learn-tab-${activeTab}`} className="p-6 max-w-4xl mx-auto">
+        <ScrollArea className="min-w-0 flex-1">
+          <div role="tabpanel" id={`learn-tabpanel-${activeTab}`} aria-labelledby={`learn-tab-${activeTab}`} className="mx-auto min-w-0 max-w-4xl p-4 sm:p-6">
             <TabTransition tabKey={activeTab}>
               {tabContent[activeTab]}
             </TabTransition>

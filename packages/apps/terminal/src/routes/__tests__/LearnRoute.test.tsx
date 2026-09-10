@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 // Mock framer-motion to avoid animation issues in tests
@@ -103,5 +103,30 @@ describe("LearnRoute", () => {
       "/ft-api/v1/docs/document?path=USER_GUIDE.md",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it("offers a Settings Broker Gateway CTA from Practice Trading", () => {
+    renderLearnRoute();
+    fireEvent.click(screen.getByRole("tab", { name: "Practice Trading" }));
+
+    const cta = screen.getByRole("link", { name: /open settings.*broker gateway/i });
+    expect(cta).toHaveAttribute("href", "/settings#api");
+    expect(screen.getByText(/configure openalgo in settings/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /settings\s*→\s*brokers/i })).not.toBeInTheDocument();
+    expect(document.querySelector('a[href="/settings#brokers"]')).toBeNull();
+  });
+
+  it("wraps Practice Trading sandbox rows so a ~390px viewport does not clip", () => {
+    renderLearnRoute();
+    fireEvent.click(screen.getByRole("tab", { name: "Practice Trading" }));
+
+    const panel = screen.getByRole("tabpanel");
+    expect(panel).toHaveClass("min-w-0");
+
+    const dhanRow = screen.getByText("Dhan Sandbox").closest("[data-testid='practice-sandbox-row']");
+    expect(dhanRow).toHaveClass("flex-wrap", "min-w-0");
+
+    const kotakRow = screen.getByText("Kotak Neo Sandbox").closest("[data-testid='practice-sandbox-row']");
+    expect(kotakRow).toHaveClass("flex-wrap", "min-w-0");
   });
 });
