@@ -52,6 +52,12 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Market status closed during NSE regular hours (FT-TRADE-004).**
+  Explore `/trade` header shows open/session-aware status for IST
+  market hours during the NSE cash regular session (until 15:30 IST).
+  Explore sample hours are labelled demo-hours when they are not
+  live session times, not a false “Market closed”.
+
 - **Chart stays stale when timeframe selector changes (FT-TRADE-003).**
   Explore `/trade` timeframe buttons now refresh the chart
   series and visible range to match the selected interval.
