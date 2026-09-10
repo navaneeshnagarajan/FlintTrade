@@ -9,7 +9,6 @@ import {
 import type { SignalStreamState } from "@/hooks/useSignals";
 import { useSkillStore } from "@/stores/skillStore";
 import { importLegacySavedChats, useAIConversationStore } from "@/stores/aiConversationStore";
-import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
@@ -718,12 +717,9 @@ async function fetchAdvisorStatus(): Promise<AdvisorStatusData> {
 }
 
 function AISettingsSection() {
-  const authToken = useAuthStore((s) => s.token);
-  const hasRealAuthToken = Boolean(authToken && authToken !== "demo-user" && authToken !== "dev-bypass");
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["advisor-status"],
     queryFn: fetchAdvisorStatus,
-    enabled: hasRealAuthToken,
     refetchInterval: 60_000,
   });
 
@@ -736,7 +732,7 @@ function AISettingsSection() {
             variant="ghost"
             size="sm"
             onClick={() => refetch()}
-            disabled={isLoading || !hasRealAuthToken}
+            disabled={isLoading}
             className="text-text-muted hover:text-text-primary gap-1.5 h-7 text-xs"
           >
             <RefreshCw className={`w-3 h-3 ${isLoading ? "animate-spin" : ""}`} />
@@ -744,21 +740,14 @@ function AISettingsSection() {
           </Button>
         </div>
 
-        {!hasRealAuthToken && (
-          <div className="flex items-center gap-2 text-text-muted text-sm">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            Sign in to check the AI backend status.
-          </div>
-        )}
-
-        {hasRealAuthToken && isLoading && (
+        {isLoading && (
           <div className="flex items-center gap-2 text-text-muted text-sm">
             <Loader2 className="w-4 h-4 animate-spin" />
             Checking advisor...
           </div>
         )}
 
-        {hasRealAuthToken && isError && (
+        {isError && (
           <div className="flex items-center gap-2 text-loss text-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />
             Could not reach the AI backend. Ensure the FT Python server is running on port 5100.

@@ -9,14 +9,13 @@
  *   - Fallback to non-streaming endpoint on 404
  *   - MCP tool confirmation cards (Approve / Reject)
  *   - Clear chat button
- *   - "Not configured" state with guidance to Settings when LLM provider is unset
- *   - Checks advisor/status on mount to sync LLM config state
+ *   - Honest LLM chrome from advisor/status (not the local settings store)
+ *   - Composer gated until the probe reports configured
  */
 
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent, memo } from "react";
 import { safeParse, wsMessageSchema } from "@/lib/safeParse";
-import { AdvisorStatusResponseSchema } from "@/lib/schemas/ftApi";
-import { Send, Bot, User, Loader2, Settings, Trash2, History, ChevronLeft } from "lucide-react";
+import { Send, Bot, User, Loader2, Settings, Trash2, History, ChevronLeft, RefreshCw } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import {
   getAiSession,
@@ -27,11 +26,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useSettingsStore } from "@/stores/settingsStore";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
 import { useAuthStore } from "@/stores/authStore";
-import { getAdvisorBase } from "@/services/advisorApi";
-import { requestAdvisorReply } from "@/services/advisorChat";
+import { useAdvisorLlmStatus } from "@/hooks/useAdvisorLlmStatus";
+import {
+  advisorLlmChromeLabel,
+  requestAdvisorReply,
+} from "@/services/advisorChat";
 import { placeOrder } from "@/services/api";
 import { checkOrderEntryMode, checkPriceForOrderType, type GuardedOrderType } from "@/lib/orderGuards";
 import { useModeStore } from "@/stores/modeStore";
@@ -75,12 +76,6 @@ export interface ChatMessage {
   toolCall?: ToolCall;
   toolStatus?: "pending" | "approved" | "rejected" | "failed";
 }
-
-// AdvisorStatusResponse is validated via the ftApi schema.
-type AdvisorStatusResponse = {
-  status: "success" | "error";
-  data?: { configured: boolean; provider: string; model: string };
-};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -277,37 +272,8 @@ export async function executeApprovedToolCall(toolCall: ToolCall): Promise<Appro
   }
 }
 
-/**
- * Check if the LLM provider is configured in the settings store.
- */
-function useIsAIConfigured(): boolean {
-  return useSettingsStore((s) => s.llm.provider.length > 0);
-}
-
-/**
- * Fetch advisor status from the backend and sync LLM config into the settings store.
- */
-async function fetchAdvisorStatus(): Promise<void> {
-  try {
-    const base = getAdvisorBase();
-    const resp = await fetch(`${base}/api/v1/advisor/status`);
-    if (!resp.ok) return;
-    const raw: unknown = await resp.json();
-    const result = AdvisorStatusResponseSchema.safeParse(raw);
-    if (!result.success) {
-      console.error("[AIAdvisorWidget] /advisor/status shape mismatch:", result.error.issues);
-      return;
-    }
-    const json = result.data as AdvisorStatusResponse;
-    if (json.status === "success" && json.data) {
-      useSettingsStore.getState().setLLM({
-        provider: json.data.provider,
-        model: json.data.model,
-      });
-    }
-  } catch {
-    // Backend may not be running — leave settings as-is
-  }
+function openSettingsLlm(): void {
+  window.dispatchEvent(new CustomEvent("flinttrade:navigate", { detail: "/settings#llm" }));
 }
 
 function advisorRequestContext(
@@ -501,12 +467,8 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const configured = useIsAIConfigured();
-
-  // On mount, check backend status to sync LLM config into settings store
-  useEffect(() => {
-    void fetchAdvisorStatus();
-  }, []);
+  const { chrome, configured, refetch: refetchAdvisorStatus } = useAdvisorLlmStatus();
+  const chatReady = configured;
 
   // Auto-scroll to bottom whenever messages change
   useEffect(() => {
@@ -584,7 +546,7 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
 
   const sendMessage = useCallback(async () => {
     const text = draft.trim();
-    if (!text || sending) return;
+    if (!text || sending || !chatReady) return;
 
     setDraft("");
     setSending(true);
@@ -674,7 +636,7 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
       abortRef.current = null;
       inputRef.current?.focus();
     }
-  }, [draft, sending, addMessage, setStreaming, analysisContext]);
+  }, [draft, sending, chatReady, addMessage, setStreaming, analysisContext]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
@@ -733,15 +695,41 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
             <Trash2 size={11} />
           </button>
         )}
+        {(chrome === "unconfigured" || chrome === "disconnected" || chrome === "error") && messages.length > 0 && (
+          <>
+            <button
+              type="button"
+              onClick={() => { void refetchAdvisorStatus(); }}
+              className="p-1 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors"
+              aria-label="Retry advisor status"
+              title="Retry advisor status"
+            >
+              <RefreshCw size={11} />
+            </button>
+            <button
+              type="button"
+              onClick={openSettingsLlm}
+              className="p-1 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors"
+              aria-label="Open Settings → AI"
+              title="Open Settings → AI"
+            >
+              <Settings size={11} />
+            </button>
+          </>
+        )}
         <span
           className={[
             "text-xxs font-medium px-1.5 py-0.5 rounded border",
-            configured
+            chrome === "ready"
               ? "text-profit bg-profit/10 border-profit/30"
-              : "text-text-muted bg-surface-hover border-border-default",
+              : chrome === "unconfigured"
+                ? "text-warning bg-warning/10 border-warning/30"
+                : chrome === "loading"
+                  ? "text-text-muted bg-surface-hover border-border-default"
+                  : "text-loss bg-loss/10 border-loss/30",
           ].join(" ")}
         >
-          {configured ? "Connected" : "Not configured"}
+          {advisorLlmChromeLabel(chrome)}
         </span>
       </div>
 
@@ -838,7 +826,7 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
         )
       ) : isEmpty ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 px-4 text-center">
-          {configured ? (
+          {chrome === "ready" ? (
             <>
               <Bot size={28} className="text-text-muted" />
               <div>
@@ -848,25 +836,72 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
                 </p>
               </div>
             </>
+          ) : chrome === "loading" ? (
+            <>
+              <Loader2 size={28} className="text-text-muted animate-spin" />
+              <p className="text-xs text-text-muted">Checking advisor…</p>
+            </>
+          ) : chrome === "unconfigured" ? (
+            <>
+              <Settings size={28} className="text-text-muted" />
+              <div>
+                <p className="text-xs text-text-secondary">LLM not configured</p>
+                <p className="text-xs text-text-muted mt-1 leading-relaxed max-w-56">
+                  Configure your LLM provider in Settings → AI to enable the AI trading advisor.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  size="sm"
+                  className="h-6 text-xs px-2.5"
+                  onClick={openSettingsLlm}
+                >
+                  Open Settings → AI
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-xs px-2.5"
+                  aria-label="Retry advisor status"
+                  onClick={() => { void refetchAdvisorStatus(); }}
+                >
+                  <RefreshCw size={12} aria-hidden="true" />
+                  Retry
+                </Button>
+              </div>
+            </>
           ) : (
             <>
               <Settings size={28} className="text-text-muted" />
               <div>
-                <p className="text-xs text-text-secondary">LLM Not Configured</p>
+                <p className="text-xs text-text-secondary">
+                  {chrome === "disconnected" ? "Disconnected" : "Error"}
+                </p>
                 <p className="text-xs text-text-muted mt-1 leading-relaxed max-w-56">
-                  Configure your LLM provider in Settings &rarr; AI to enable the AI trading advisor.
+                  {chrome === "disconnected"
+                    ? "Could not reach the AI advisor. Check Settings → AI, or retry."
+                    : "Advisor status is unavailable. Check Settings → AI, or retry."}
                 </p>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 text-xs px-2.5 border-border-default text-text-secondary hover:text-text-primary"
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent("flinttrade:navigate", { detail: "/settings" }));
-                }}
-              >
-                Open Settings
-              </Button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-xs px-2.5"
+                  aria-label="Retry advisor status"
+                  onClick={() => { void refetchAdvisorStatus(); }}
+                >
+                  <RefreshCw size={12} aria-hidden="true" />
+                  Retry
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-6 text-xs px-2.5"
+                  onClick={openSettingsLlm}
+                >
+                  Open Settings → AI
+                </Button>
+              </div>
             </>
           )}
         </div>
@@ -911,14 +946,14 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={configured ? "Ask the AI advisor..." : "Configure LLM in Settings first..."}
-          disabled={sending}
+          placeholder={chatReady ? "Ask the AI advisor..." : "Configure LLM in Settings first..."}
+          disabled={!chatReady || sending}
           className="h-10 flex-1 text-sm bg-surface-card border-border-default text-text-primary placeholder-text-muted rounded focus-visible:ring-1 focus-visible:ring-accent/50 disabled:opacity-60"
         />
         <Button
           size="sm"
           onClick={() => void sendMessage()}
-          disabled={!draft.trim() || sending}
+          disabled={!chatReady || !draft.trim() || sending}
           className="bg-accent text-white rounded-md px-4 h-10 shrink-0 hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           aria-label="Send message"
         >

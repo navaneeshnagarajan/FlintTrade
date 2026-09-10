@@ -92,6 +92,24 @@ export function llmHydrationFailureState(): Exclude<LlmHydrationState, "loading"
   return "error";
 }
 
+/**
+ * Probe Settings `#llm` the same way the Settings page hydrates.
+ *
+ * A failed GET in Explore / demo-user is empty (unconfigured), not a broken
+ * session. Chat uses this so it cannot look Connected while Settings is empty.
+ */
+export async function probeSettingsLlmHydration(): Promise<LlmHydrationState> {
+  try {
+    const payload = await readLlmConfig();
+    if (!isAcceptedLlmConfigStatus(payload.status)) {
+      return llmHydrationFailureState();
+    }
+    return "ready";
+  } catch {
+    return llmHydrationFailureState();
+  }
+}
+
 export interface TelegramData {
   enabled: boolean;
   botToken: string;

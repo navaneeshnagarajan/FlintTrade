@@ -34,6 +34,104 @@ export const ADVISOR_STREAM_TIMEOUT_MS = 45_000;
 
 export type AdvisorAvailability = "configured" | "unconfigured" | "unknown" | "unreachable";
 
+/**
+ * Honest Chat chrome derived from ``advisor/status``.
+ *
+ * ``ready`` is the only Connected state. A missing, failed, or unconfigured
+ * probe must never look green — including Explore / demo-user sessions that
+ * still have a stale local provider string.
+ */
+export type AdvisorLlmChrome = "loading" | "unconfigured" | "ready" | "disconnected" | "error";
+
+export function advisorAvailabilityToChrome(
+  availability: AdvisorAvailability | undefined,
+): AdvisorLlmChrome {
+  switch (availability) {
+    case "configured":
+      return "ready";
+    case "unconfigured":
+      return "unconfigured";
+    case "unreachable":
+      return "disconnected";
+    case "unknown":
+      return "error";
+    default:
+      return "loading";
+  }
+}
+
+export function advisorLlmChromeLabel(chrome: AdvisorLlmChrome): string {
+  switch (chrome) {
+    case "ready":
+      return "Connected";
+    case "unconfigured":
+      return "Not configured";
+    case "disconnected":
+      return "Disconnected";
+    case "error":
+      return "Error";
+    case "loading":
+      return "Checking…";
+  }
+}
+
+export function isAdvisorChatReady(chrome: AdvisorLlmChrome): boolean {
+  return chrome === "ready";
+}
+
+/** Same states Settings `#llm` uses (FT-SET-001). */
+export type SettingsLlmHydration = "loading" | "ready" | "error" | "empty";
+
+/**
+ * Align Chat chrome with Settings `#llm`.
+ *
+ * Explore's Settings empty/Retry path is an unconfigured appearance even when
+ * ``advisor/status`` reports configured because ``LLMConfig.from_env()``
+ * defaults an empty stored provider to ollama. Never show Connected in that
+ * case.
+ */
+export function alignAdvisorChromeWithSettingsHydration(
+  advisorChrome: AdvisorLlmChrome,
+  settingsHydration: SettingsLlmHydration,
+): AdvisorLlmChrome {
+  if (settingsHydration === "empty") return "unconfigured";
+  if (settingsHydration === "error") {
+    return advisorChrome === "ready" || advisorChrome === "loading" ? "error" : advisorChrome;
+  }
+  if (settingsHydration === "loading") {
+    return advisorChrome === "ready" ? "loading" : advisorChrome;
+  }
+  return advisorChrome;
+}
+
+export type AdvisorQueryFetchStatus = "idle" | "fetching" | "paused";
+
+/**
+ * Chat chrome from a TanStack Query observer.
+ *
+ * A remount refetch of cached ``configured`` must not stay Connected — that
+ * reopens the send-then-error window if Settings just cleared the provider.
+ * An offline-paused observer must not sit on Checking with no Retry, and
+ * must never keep a green Connected from cache.
+ */
+export function resolveAdvisorLlmChrome(input: {
+  availability: AdvisorAvailability | undefined;
+  isPending: boolean;
+  isFetching: boolean;
+  fetchStatus: AdvisorQueryFetchStatus;
+}): AdvisorLlmChrome {
+  if (input.fetchStatus === "paused") {
+    if (input.availability === "configured" || input.availability === undefined) {
+      return "disconnected";
+    }
+    return advisorAvailabilityToChrome(input.availability);
+  }
+  if (input.isPending || (input.isFetching && input.availability === "configured")) {
+    return "loading";
+  }
+  return advisorAvailabilityToChrome(input.availability);
+}
+
 export type AdvisorChatContext = string | object;
 
 export interface AdvisorChatRequest {

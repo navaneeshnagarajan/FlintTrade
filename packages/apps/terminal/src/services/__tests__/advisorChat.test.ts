@@ -17,7 +17,12 @@ import {
   ADVISOR_UNAVAILABLE_MESSAGE,
   EMPTY_ADVISOR_REPLY_MESSAGE,
   LLM_NOT_CONFIGURED_MESSAGE,
+  advisorAvailabilityToChrome,
+  advisorLlmChromeLabel,
+  alignAdvisorChromeWithSettingsHydration,
   consumeAdvisorSse,
+  isAdvisorChatReady,
+  resolveAdvisorLlmChrome,
   probeAdvisorAvailability,
   readAdvisorHttpError,
   requestAdvisorReply,
@@ -62,6 +67,74 @@ describe("advisorChat", () => {
   it("treats a network failure on the status probe as unreachable", async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await expect(probeAdvisorAvailability()).resolves.toBe("unreachable");
+  });
+
+  it("maps advisor availability to honest Chat chrome — never Connected unless configured", () => {
+    expect(advisorAvailabilityToChrome(undefined)).toBe("loading");
+    expect(advisorAvailabilityToChrome("unconfigured")).toBe("unconfigured");
+    expect(advisorAvailabilityToChrome("configured")).toBe("ready");
+    expect(advisorAvailabilityToChrome("unreachable")).toBe("disconnected");
+    expect(advisorAvailabilityToChrome("unknown")).toBe("error");
+
+    expect(advisorLlmChromeLabel("unconfigured")).toBe("Not configured");
+    expect(advisorLlmChromeLabel("ready")).toBe("Connected");
+    expect(advisorLlmChromeLabel("disconnected")).toBe("Disconnected");
+    expect(advisorLlmChromeLabel("error")).toBe("Error");
+    expect(isAdvisorChatReady("unconfigured")).toBe(false);
+    expect(isAdvisorChatReady("disconnected")).toBe(false);
+    expect(isAdvisorChatReady("error")).toBe(false);
+    expect(isAdvisorChatReady("loading")).toBe(false);
+    expect(isAdvisorChatReady("ready")).toBe(true);
+  });
+
+  it("does not keep Connected while a remount refetch of cached configured is in flight", () => {
+    expect(resolveAdvisorLlmChrome({
+      availability: "configured",
+      isPending: false,
+      isFetching: true,
+      fetchStatus: "fetching",
+    })).toBe("loading");
+    expect(isAdvisorChatReady(resolveAdvisorLlmChrome({
+      availability: "configured",
+      isPending: false,
+      isFetching: true,
+      fetchStatus: "fetching",
+    }))).toBe(false);
+  });
+
+  it("aligns Chat chrome with Settings #llm empty — never Connected from env-default advisor/status", () => {
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "empty")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("loading", "empty")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("disconnected", "empty")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("error", "empty")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "loading")).toBe("loading");
+    expect(alignAdvisorChromeWithSettingsHydration("disconnected", "loading")).toBe("disconnected");
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "error")).toBe("error");
+    expect(alignAdvisorChromeWithSettingsHydration("disconnected", "error")).toBe("disconnected");
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "ready")).toBe("ready");
+    expect(alignAdvisorChromeWithSettingsHydration("unconfigured", "ready")).toBe("unconfigured");
+    expect(isAdvisorChatReady(alignAdvisorChromeWithSettingsHydration("ready", "empty"))).toBe(false);
+  });
+
+  it("maps an offline-paused probe to Disconnected instead of a stuck Checking or Connected", () => {
+    expect(resolveAdvisorLlmChrome({
+      availability: undefined,
+      isPending: true,
+      isFetching: false,
+      fetchStatus: "paused",
+    })).toBe("disconnected");
+    expect(resolveAdvisorLlmChrome({
+      availability: "configured",
+      isPending: false,
+      isFetching: false,
+      fetchStatus: "paused",
+    })).toBe("disconnected");
+    expect(resolveAdvisorLlmChrome({
+      availability: "unconfigured",
+      isPending: false,
+      isFetching: false,
+      fetchStatus: "paused",
+    })).toBe("unconfigured");
   });
 
   it("throws when the SSE stream ends with no tokens", async () => {
