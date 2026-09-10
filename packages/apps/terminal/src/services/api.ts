@@ -2857,10 +2857,34 @@ async function get<T>(
 // `orderStatus` is a read-only query. Native-only workspaces route it through
 // the live native account; OpenAlgo-key workspaces keep the OpenAlgo direct
 // path for bridge parity.
+/**
+ * Explore paper fill. Never contacts the order proxy, SafetySystem, or a
+ * broker — Explore has no live session. Live authority is still refused so a
+ * mid-flight mode flip cannot retarget a Live pin onto a sample fill.
+ */
+function placeExploreSampleOrder(params: PlaceOrderParams): { orderId: string } {
+  const stamp = Date.now().toString(36).toUpperCase();
+  const symbol = params.symbol.replace(/[^A-Z0-9]/gi, "").slice(0, 12) || "ORDER";
+  return { orderId: `SAMPLE-${symbol}-${stamp}` };
+}
+
 export const placeOrder = (
   params: PlaceOrderParams,
   authority?: PostOrderAuthorityPin,
-) => postOrder<{ orderId: string }>("place", params, authority);
+): Promise<{ orderId: string }> => {
+  const currentMode = useModeStore.getState().mode;
+  if (currentMode === "explore") {
+    if (authority?.mode === "live") {
+      return Promise.reject(
+        new Error(
+          `Order blocked: mode changed from ${authority.mode} to ${currentMode} before submission.`,
+        ),
+      );
+    }
+    return Promise.resolve(placeExploreSampleOrder(params));
+  }
+  return postOrder<{ orderId: string }>("place", params, authority);
+};
 export const placeSmartOrder = (params: PlaceOrderParams & { position_size: number }) =>
   postOrder<{ orderId: string }>("place-smart", params);
 export const cancelAllOrders = () =>

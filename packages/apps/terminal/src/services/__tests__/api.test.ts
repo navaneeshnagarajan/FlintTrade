@@ -3444,6 +3444,60 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("placeOrder in Explore returns a sample fill and never contacts the order proxy", async () => {
+    mockModeState.mode = "explore";
+    mockConnectionState.apiKey = "";
+
+    const result = await placeOrder({
+      symbol: "NIFTY",
+      exchange: "NSE",
+      action: "BUY",
+      quantity: 1,
+      product: "MIS",
+      orderType: "MARKET",
+    });
+
+    expect(result.orderId).toMatch(/^SAMPLE-/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("placeOrder in Explore with a Practice pin still records a sample fill", async () => {
+    mockModeState.mode = "explore";
+
+    const result = await placeOrder(
+      {
+        symbol: "RELIANCE",
+        exchange: "NSE",
+        action: "BUY",
+        quantity: 1,
+        product: "MIS",
+        orderType: "MARKET",
+      },
+      { mode: "practice" },
+    );
+
+    expect(result.orderId).toMatch(/^SAMPLE-/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("placeOrder in Explore still refuses a Live authority pin", async () => {
+    mockModeState.mode = "explore";
+    await expect(
+      placeOrder(
+        {
+          symbol: "RELIANCE",
+          exchange: "NSE",
+          action: "BUY",
+          quantity: 1,
+          product: "MIS",
+          orderType: "MARKET",
+        },
+        { mode: "live" },
+      ),
+    ).rejects.toThrow(/mode changed from live to explore/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("rejects an exact account-A authority pin after the active account changes to B", async () => {
     mockConnectionState.apiKey = "";
     mockBrokerState.accounts = [
