@@ -59,11 +59,12 @@ export function isDerivativeExchange(exchange: string): boolean {
 /**
  * Refuse order entry outside a mode that can place one.
  *
- * Explore mode has no broker behind it — every price on screen is demo data,
- * so an order there is meaningless. Practice routes to the native sandbox and
- * is allowed. The backend enforces this too (403 `mode_blocked` /
- * `practice_unsupported`); this guard exists so the operator is told before a
- * round trip, and so no surface silently relies on the server alone.
+ * Live-intent order entry is refused in Explore — every price on screen is
+ * demo data and there is no broker. Practice routes to the native sandbox
+ * and is allowed. Order Pad's Practice Buy is the paper exception: it must
+ * not call this guard, so Explore can record a sample fill without a live
+ * broker. The backend still 403s Explore JWT writes (`mode_blocked`); this
+ * guard exists so Live-intent surfaces tell the operator before a round trip.
  */
 export function checkOrderEntryMode(mode: AppMode): string | null {
   if (mode === "explore") return "Connect a broker to place orders";

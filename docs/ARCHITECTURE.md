@@ -407,8 +407,8 @@ stateDiagram-v2
     Live --> Explore: /auth/mode {mode:explore}\n(JWT downgrade only;\nno kill-switch)
 
     state Explore {
-        [*] --> noOrders
-        noOrders: All order paths rejected\nHTTP 403 mode_blocked;\nno broker call
+        [*] --> noLiveOrders
+        noLiveOrders: No Live broker order authority.\nBackend and Live-intent paths:\nHTTP 403 mode_blocked;\nno broker call.\nException: /trade Order Pad\nPractice Buy is a local\nclient sample fill
     }
     state Practice {
         [*] --> sandbox
@@ -427,6 +427,13 @@ re-auth). `/v1/auth/mode` accepts only downgrades to `practice` or
 toggles Explore → Practice and Practice ↔ Live; a Live → Explore
 downgrade is available on the API. The guard lives at
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.
+
+Explore has no Live broker order authority: backend and Live-intent
+order paths still refuse with `mode_blocked` and never call a broker.
+The exception is Order Pad Practice Buy on `/trade`, which records a
+local client-side sample fill (no HTTP order route, no SafetySystem,
+no broker). Practice remains the native sandbox; Live remains the
+gated broker path.
 
 ---
 
@@ -579,10 +586,13 @@ fallbacks.
 
 ### Server-side mode enforcement
 
-Every order-path endpoint asks `mode_guard` whether the JWT permits a
+Every HTTP order-path endpoint asks `mode_guard` whether the JWT permits a
 live action. Trying to place a live order on a Practice JWT is rejected 403
-immediately with code `practice_unsupported` (Explore mode yields
-`mode_blocked`) — the request never reaches OpenAlgo.
+immediately with code `practice_unsupported`. Explore JWTs yield
+`mode_blocked` on those same server routes — the request never reaches
+OpenAlgo or a broker. That does not cover Order Pad Practice Buy on
+`/trade` in Explore, which records a local client-side sample fill
+without calling an HTTP order route, SafetySystem, or a broker.
 
 ### OpenAlgo X-API-Key
 

@@ -477,14 +477,31 @@ describe("OrderPadWidget shared pre-trade guards", () => {
     mockMode.current = "practice";
   });
 
-  it("refuses order entry in explore mode instead of relying on the backend 403", async () => {
+  it("opens the Practice review from Explore Practice Buy without requiring a broker", async () => {
     mockMode.current = "explore";
     render(<OrderPadWidget {...defaultProps} />);
 
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
 
-    expect(await screen.findByText(/connect a broker to place orders/i)).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: /review practice order/i })).toBeInTheDocument();
+    expect(screen.queryByText(/connect a broker to place orders/i)).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("confirms an Explore Practice Buy on the paper path, never as a live order", async () => {
+    mockMode.current = "explore";
+    mockPlaceOrder.mockResolvedValue({ orderId: "SAMPLE-EXPLORE" });
+    render(<OrderPadWidget {...defaultProps} />);
+
+    await reviewAndConfirmPractice(/practice buy/i);
+
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "NIFTY", action: "BUY" }),
+      { mode: "practice" },
+    );
+    expect(mockPlaceOrder.mock.calls[0][1]).not.toEqual({ mode: "live" });
+    expect(await screen.findByRole("alert")).toHaveTextContent(/SAMPLE-EXPLORE/i);
   });
 
   it("refuses a LIMIT order with no price instead of sending it at zero", async () => {
@@ -721,6 +738,11 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     fireEvent.click(screen.getByRole("button", { name: /place buy order/i }));
 
     await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "NIFTY", action: "BUY" }),
+      { mode: "live" },
+    );
     expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/connect a broker to place orders/i)).not.toBeInTheDocument();
   });
 });
