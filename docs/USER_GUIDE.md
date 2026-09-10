@@ -403,7 +403,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. Practice Trading links to Settings → Broker Gateway (`/settings#api`) for OpenAlgo Practice setup, not native Brokers. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise. |
 | `/automate` | Automation Hub — flows, cron, monitors, logs. Kill-switch activate/reset lives under Automate → Settings. |
-| `/ai` | AI Centre — chat, signals, sentiment, RAG. |
+| `/ai` | AI Centre — chat, Suggest, signals, sentiment, RAG. |
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
 
@@ -572,7 +572,9 @@ the helper is "Configure Telegram first".
 
 ## 9. AI Centre walkthrough
 
-Open `/ai`. Four sub-tools backed by `packages/services/ai`:
+Open `/ai`. Chat, Signals, Sentiment, and RAG are backed by
+`packages/services/ai`. Suggest is a local filter UI over an illustrative
+strategy list — not a live AI fetch.
 
 ### Chat
 
@@ -621,6 +623,23 @@ configured**; the two are aligned for readiness, so Chat also looks
 unconfigured when Settings looks empty. Configure a provider in Live or
 Practice on this machine; see
 [Settings reference](#11-settings-reference).
+
+### Suggest
+
+**AI Strategy Suggestions** filters a local illustrative recommendation
+list by Market Mood chips (**Volatile**, **Trending**, **Sideways**) and
+your risk profile from persona and experience. Mood is a filter, not a
+draft and not a live AI fetch.
+
+Changing mood — a chip or **Next mood** — immediately replaces the
+recommendation cards and clears any previously focused strategy card, so
+chips, cards, and focus share one mood state. Selected mood chips use
+`aria-pressed`.
+
+When mood and risk match nothing, the empty state offers
+**Try another mood**, which advances the mood filter.
+**Deploy to Strategy Lab** opens `/lab?strategy=<registryKey>` for that
+card.
 
 ### Signals
 
