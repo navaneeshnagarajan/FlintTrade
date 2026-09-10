@@ -52,6 +52,12 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Practice Trading has no Brokers setup CTA (FT-LEARN-001).**
+  Explore `/learn` Practice Trading tells operators to configure
+  OpenAlgo and connect FlintTrade, but has no Settings → Brokers
+  / Gateway link and clips horizontally on mobile. Tracking only
+  on this PR — product fix belongs here.
+
 - **P&L columns unusable at ~390px (FT-MOBILE-001).**
   Explore `/trade` Positions and Invest Holdings switch to stacked
   cards below 480px, so each row shows symbol, quantity, LTP, P&L
