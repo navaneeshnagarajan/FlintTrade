@@ -54,9 +54,10 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 - **Broker Gateway and Ditto default URLs diverge (FT-SET-002).**
   Explore `/settings#api` Broker Gateway and Explore `/ditto` Add
-  Account now share one default OpenAlgo base, or label why they
-  differ and inherit the Gateway URL, so the two forms no longer
-  silently default to ports 5000 and 5001.
+  Account now share the OpenAlgo default `http://127.0.0.1:5000`.
+  Add Account prefills from Settings → Broker Gateway when a
+  Gateway URL is saved, so the two forms no longer silently
+  default to ports 5000 and 5001.
 
 - **Home greeting uses local evening at noon IST (FT-HOME-001).**
   Explore `/home` greets from the Asia/Kolkata clock, so ~12:01 IST

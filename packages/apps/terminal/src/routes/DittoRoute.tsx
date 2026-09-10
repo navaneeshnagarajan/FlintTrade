@@ -77,6 +77,8 @@ import { Label } from "@/components/ui/label";
 import { BrokerRecommendations } from "@/components/account/BrokerRecommendations";
 import { AccountStatusPanel } from "@/components/account/AccountStatusPanel";
 import { BrokerRateLimitsPanel } from "@/components/account/BrokerRateLimitsPanel";
+import { DEFAULT_OPENALGO_HOST, resolveOpenAlgoHost } from "@/lib/openAlgoDefaults";
+import { useConnectionStore } from "@/stores/connectionStore";
 
 // ─── Tab registry ────────────────────────────────────────────────────────────
 
@@ -131,6 +133,13 @@ const DEFAULT_ACCOUNT_FORM = {
   isMaster: false,
 };
 
+function createAccountForm(gatewayHost?: string | null) {
+  return {
+    ...DEFAULT_ACCOUNT_FORM,
+    openalgoHost: resolveOpenAlgoHost(gatewayHost),
+  };
+}
+
 function BrokerOperationsPanels() {
   return (
     <>
@@ -162,7 +171,7 @@ function AccountsTab() {
   });
 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [form, setForm] = useState(DEFAULT_ACCOUNT_FORM);
+  const [form, setForm] = useState(() => createAccountForm(useConnectionStore.getState().host));
   const [formError, setFormError] = useState("");
   const [loadTimedOut, setLoadTimedOut] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -173,7 +182,7 @@ function AccountsTab() {
       queryClient.invalidateQueries({ queryKey: ["ditto", "accounts"] });
       queryClient.invalidateQueries({ queryKey: ["ditto", "risk"] });
       setIsAddDialogOpen(false);
-      setForm(DEFAULT_ACCOUNT_FORM);
+      setForm(createAccountForm(useConnectionStore.getState().host));
       setFormError("");
     },
   });
@@ -267,14 +276,29 @@ function AccountsTab() {
     addMutation.mutate(payload);
   }
 
+  function openAddAccount() {
+    setForm(createAccountForm(useConnectionStore.getState().host));
+    setFormError("");
+    setIsAddDialogOpen(true);
+  }
+
+  function handleAddDialogOpenChange(open: boolean) {
+    if (open) {
+      openAddAccount();
+      return;
+    }
+    setIsAddDialogOpen(false);
+  }
+
   const addAccountDialog = (
-    <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+    <Dialog open={isAddDialogOpen} onOpenChange={handleAddDialogOpenChange}>
       <DialogContent className="max-w-xl bg-surface-card border-border-default">
         <form onSubmit={handleSubmitAccount} className="space-y-4">
           <DialogHeader>
             <DialogTitle>Add Account</DialogTitle>
             <DialogDescription>
               Register an OpenAlgo-compatible account for mirroring and account-level risk controls.
+              The OpenAlgo URL prefills from Settings → Broker Gateway.
             </DialogDescription>
           </DialogHeader>
 
@@ -305,9 +329,13 @@ function AccountsTab() {
                 id="ditto-openalgo-host"
                 value={form.openalgoHost}
                 onChange={(event) => updateForm("openalgoHost", event.target.value)}
-                placeholder="http://127.0.0.1:5001"
+                placeholder={DEFAULT_OPENALGO_HOST}
                 autoComplete="url"
               />
+              <p className="text-xs text-text-muted">
+                Prefills from Settings → Broker Gateway. The shared OpenAlgo default is port 5000.
+                Change this only if this account uses a different OpenAlgo instance.
+              </p>
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="ditto-api-key">API Key</Label>
@@ -436,7 +464,7 @@ function AccountsTab() {
           <Users className="size-8 text-text-muted" />
           <p className="text-sm text-text-muted">No accounts connected</p>
           <p className="text-xs text-text-disabled">Add an account to get started.</p>
-          <Button size="sm" variant="outline" onClick={() => setIsAddDialogOpen(true)}>
+          <Button size="sm" variant="outline" onClick={openAddAccount}>
             <Plus className="size-3.5" />
             Add Account
           </Button>
@@ -470,7 +498,7 @@ function AccountsTab() {
         <h2 className="text-sm font-heading font-semibold text-text-primary">
           Managed Accounts
         </h2>
-        <Button size="sm" variant="outline" onClick={() => setIsAddDialogOpen(true)}>
+        <Button size="sm" variant="outline" onClick={openAddAccount}>
           <Plus className="size-3.5" />
           Add Account
         </Button>
