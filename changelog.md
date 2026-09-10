@@ -57,6 +57,11 @@ changelog rebuilds itself from the first release cut after this baseline.
   "Open Strategy Builder" link to `/lab`. Operators no longer
   have to find Strategy Lab independently from copy-only text.
 
+- **Settings `#llm` load failure with no recovery (FT-SET-001).**
+  Explore/installed Settings → `#llm` (or the LLM section) now
+  loads successfully or shows a recoverable error with retry,
+  instead of a dead end after a load failure.
+
 - **Kill All Positions armed on empty Explore Ditto dashboard (FT-DITTO-001).**
   Explore `/ditto` Risk Dashboard with ₹0 totals and no accounts
   listed now disables Kill All Positions and shows an empty
