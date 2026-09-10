@@ -144,6 +144,21 @@ function setOpenMarketTestTime() {
   vi.setSystemTime(new Date("2026-08-10T04:30:00.000Z")); // Monday, 10:00 IST
 }
 
+/** Pin wall-clock so IST calendar parts match the given instant. */
+function setIstInstant(isoUtc: string) {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(isoUtc));
+}
+
+function setExploreHhmmTimings() {
+  mockTimingsQuery.data = [
+    { exchange: "NSE", start_time: 915, end_time: 1530 },
+    { exchange: "BSE", start_time: 915, end_time: 1530 },
+    { exchange: "MCX", start_time: 900, end_time: 2330 },
+  ];
+  mockTimingsQuery.dataUpdatedAt = Date.now();
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -251,6 +266,38 @@ describe("TopBarV2", () => {
     expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
     unmount();
+  });
+
+  it("shows Market open for Explore HHMM timings at Thursday mid-session IST", () => {
+    // 10 Sep 2026 12:08 IST — the FT-TRADE-004 observation window.
+    setIstInstant("2026-09-10T06:38:00.000Z");
+    setExploreHhmmTimings();
+
+    renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market open");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market closed");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent(/demo/i);
+  });
+
+  it("shows Market closed for Explore HHMM timings after 15:30 IST on a weekday", () => {
+    setIstInstant("2026-09-10T10:15:00.000Z"); // Thursday 15:45 IST
+    setExploreHhmmTimings();
+
+    renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
+  });
+
+  it("shows Market closed for Explore HHMM timings on an IST weekend", () => {
+    setIstInstant("2026-09-12T06:38:00.000Z"); // Saturday 12:08 IST
+    setExploreHhmmTimings();
+
+    renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
   });
 
   it("uses the shared timing truth TTL rather than a drifting local limit", () => {

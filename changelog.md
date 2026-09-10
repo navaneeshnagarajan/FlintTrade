@@ -52,6 +52,12 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Market status closed during NSE regular hours (FT-TRADE-004).**
+  Explore `/trade` header treats OpenAlgo/Explore session timings
+  as IST clock hours (09:15–15:30 on weekdays), not epoch
+  milliseconds. Mid-session no longer shows a false
+  “Market closed”. After hours and weekends stay closed.
+
 - **Chart stays stale when timeframe selector changes (FT-TRADE-003).**
   Explore `/trade` timeframe buttons now refresh the chart
   series and visible range to match the selected interval.

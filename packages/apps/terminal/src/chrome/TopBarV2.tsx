@@ -36,7 +36,10 @@ import {
   useTimings,
 } from "@/hooks/useMarketStatus";
 import { ping } from "@/services/api";
-import type { MarketTiming } from "@/types/api";
+import {
+  getNseCashSessionStatus,
+  type MarketSessionInfo,
+} from "@/lib/market";
 import type { ToolId } from "@/types/widgets";
 import NotificationBell from "@/components/NotificationCentre/NotificationCentre";
 import AccountSwitcher from "./AccountSwitcher";
@@ -83,39 +86,6 @@ function ISTClock() {
 // MarketStatus — explicit NSE session state, separate from Live execution mode
 // ---------------------------------------------------------------------------
 
-type MarketStatus = "open" | "closed" | "unavailable";
-
-interface MarketStatusInfo {
-  status: MarketStatus;
-  label: string;
-}
-
-function getNseStatus(timings: MarketTiming[] | undefined): MarketStatusInfo {
-  if (!timings) return { status: "unavailable", label: "Market unavailable" };
-
-  const now = new Date();
-  const istString = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
-  const ist = new Date(istString);
-  const day = ist.getDay();
-
-  if (day === 0 || day === 6) return { status: "closed", label: "Market closed" };
-
-  const nowMs = now.getTime();
-  const nseTiming = timings?.find(
-    (t) => t.exchange === "NSE" || t.exchange === "NSE_INDEX",
-  );
-
-  if (nseTiming) {
-    if (nowMs < nseTiming.start_time)
-      return { status: "closed", label: "Market closed" };
-    if (nowMs <= nseTiming.end_time)
-      return { status: "open", label: "Market open" };
-    return { status: "closed", label: "Market closed" };
-  }
-
-  return { status: "unavailable", label: "Market unavailable" };
-}
-
 function MarketSessionStatus() {
   const { data: timings, dataUpdatedAt, isError, isLoading } = useTimings();
   const currentStatus = useCallback(() => {
@@ -124,9 +94,9 @@ function MarketSessionStatus() {
       !isLoading &&
       dataUpdatedAt > 0 &&
       Date.now() - dataUpdatedAt <= MARKET_TIMINGS_MAX_AGE_MS;
-    return getNseStatus(timingIsTrustworthy ? timings : undefined);
+    return getNseCashSessionStatus(timingIsTrustworthy ? timings : undefined);
   }, [dataUpdatedAt, isError, isLoading, timings]);
-  const [statusInfo, setStatusInfo] = useState<MarketStatusInfo>(() =>
+  const [statusInfo, setStatusInfo] = useState<MarketSessionInfo>(() =>
     currentStatus(),
   );
 

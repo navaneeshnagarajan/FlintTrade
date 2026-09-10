@@ -5,7 +5,7 @@
  * Hours expressed as minutes-since-midnight for fast comparison.
  */
 
-import type { Holiday } from "@/types/api";
+import type { Holiday, MarketTiming } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Per-exchange trading hours (minutes since midnight, IST)
@@ -181,6 +181,94 @@ export function isMarketHours(
 
   const mins = ist.getHours() * 60 + ist.getMinutes();
   return mins >= hours.open && mins <= hours.close;
+}
+
+export type MarketSessionStatus = "open" | "closed" | "unavailable";
+
+export interface MarketSessionInfo {
+  status: MarketSessionStatus;
+  label: string;
+}
+
+const MARKET_OPEN: MarketSessionInfo = { status: "open", label: "Market open" };
+const MARKET_CLOSED: MarketSessionInfo = { status: "closed", label: "Market closed" };
+const MARKET_UNAVAILABLE: MarketSessionInfo = {
+  status: "unavailable",
+  label: "Market unavailable",
+};
+
+/** Contemporary epoch-ms floor; values below this are seconds or clock encodings. */
+const EPOCH_MS_FLOOR = 100_000_000_000;
+/** ~2001-09-09; below this, a timing number is HHMM (915 / 1530), not epoch seconds. */
+const EPOCH_SECONDS_FLOOR = 1_000_000_000;
+
+function istWeekdayAndMinutes(date: Date): { day: number; minutes: number } {
+  const ist = new Date(date.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  return {
+    day: ist.getDay(),
+    minutes: ist.getHours() * 60 + ist.getMinutes(),
+  };
+}
+
+/** Interpret OpenAlgo/Explore `915` / `1530` as minutes since midnight IST. */
+function hhmmToMinutes(value: number): number | null {
+  if (!Number.isFinite(value) || value < 0 || value > 2359) return null;
+  const hhmm = Math.trunc(value);
+  const hours = Math.floor(hhmm / 100);
+  const minutes = hhmm % 100;
+  if (hours > 23 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function sessionBoundToEpochMs(value: number): number | null {
+  if (!Number.isFinite(value) || value <= 0) return null;
+  if (value >= EPOCH_MS_FLOOR) return value;
+  if (value >= EPOCH_SECONDS_FLOOR) return value * 1_000;
+  return null;
+}
+
+/**
+ * NSE cash regular-session status in Asia/Kolkata.
+ *
+ * Timing bounds may be epoch milliseconds (native brokers), epoch seconds,
+ * or HHMM integers used by OpenAlgo and the Explore stub (`915` / `1530`).
+ * Weekends are closed. Missing or unusable timings are unavailable rather
+ * than a false closed state.
+ */
+export function getNseCashSessionStatus(
+  timings: readonly MarketTiming[] | undefined,
+  now: Date = new Date(),
+): MarketSessionInfo {
+  if (!timings) return MARKET_UNAVAILABLE;
+
+  const { day, minutes } = istWeekdayAndMinutes(now);
+  if (day === 0 || day === 6) return MARKET_CLOSED;
+
+  const nseTiming = timings.find(
+    (timing) => timing.exchange === "NSE" || timing.exchange === "NSE_INDEX",
+  );
+  if (!nseTiming) return MARKET_UNAVAILABLE;
+
+  const startMins = hhmmToMinutes(nseTiming.start_time);
+  const endMins = hhmmToMinutes(nseTiming.end_time);
+  if (
+    startMins !== null
+    && endMins !== null
+    && nseTiming.start_time < EPOCH_SECONDS_FLOOR
+    && nseTiming.end_time < EPOCH_SECONDS_FLOOR
+  ) {
+    if (minutes >= startMins && minutes <= endMins) return MARKET_OPEN;
+    return MARKET_CLOSED;
+  }
+
+  const startMs = sessionBoundToEpochMs(nseTiming.start_time);
+  const endMs = sessionBoundToEpochMs(nseTiming.end_time);
+  if (startMs === null || endMs === null) return MARKET_UNAVAILABLE;
+
+  const nowMs = now.getTime();
+  if (nowMs < startMs) return MARKET_CLOSED;
+  if (nowMs <= endMs) return MARKET_OPEN;
+  return MARKET_CLOSED;
 }
 
 export type MCXMarketStatus = "open" | "pre-market" | "closed" | "weekend";
