@@ -5,7 +5,14 @@ import { useMemo } from "react";
 import { TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { validateLegs, calculateNetPremium, computePayoff, estimateMargin, formatINR } from "./utils";
+import {
+  validateLegs,
+  calculateNetPremium,
+  computePayoff,
+  computePayoffSummary,
+  estimateMargin,
+  formatINR,
+} from "./utils";
 import type { Leg, Underlying } from "./types";
 
 interface Props {
@@ -18,27 +25,16 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
   const { valid } = validateLegs(legs);
   const spotPrice = atm > 0 ? atm : 20000;
   const points = useMemo(() => (valid ? computePayoff(legs, spotPrice) : []), [legs, valid, spotPrice]);
+  const summary = useMemo(() => computePayoffSummary(legs), [legs]);
 
-  const maxPnl = points.length ? Math.max(...points.map((p) => p.pnl)) : 0;
-  const minPnl = points.length ? Math.min(...points.map((p) => p.pnl)) : 0;
-  const range  = Math.max(Math.abs(maxPnl), Math.abs(minPnl), 1);
-
-  const bepPoints = useMemo(() => {
-    const beps: number[] = [];
-    for (let i = 1; i < points.length; i++) {
-      if (
-        (points[i - 1].pnl < 0 && points[i].pnl >= 0) ||
-        (points[i - 1].pnl >= 0 && points[i].pnl < 0)
-      ) {
-        const bep =
-          points[i - 1].price +
-          ((0 - points[i - 1].pnl) / (points[i].pnl - points[i - 1].pnl)) *
-            (points[i].price - points[i - 1].price);
-        beps.push(bep);
-      }
-    }
-    return beps;
-  }, [points]);
+  // Chart scale stays on the sampled window; the summary cards use the
+  // analytical kinks so unbounded legs are not capped at ±15% of spot.
+  const sampledMax = points.length ? Math.max(...points.map((p) => p.pnl)) : 0;
+  const sampledMin = points.length ? Math.min(...points.map((p) => p.pnl)) : 0;
+  const range = Math.max(Math.abs(sampledMax), Math.abs(sampledMin), 1);
+  const maxPnl = summary.maxProfit;
+  const minPnl = summary.maxLoss;
+  const bepPoints = summary.breakevens;
 
   const netPremium = calculateNetPremium(legs);
 
@@ -102,7 +98,7 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
             {/* Zero axis */}
             <div
               className="absolute left-0 right-0 h-px bg-surface-active"
-              style={{ top: `${(maxPnl / (range * 2)) * 100 + 50}%` }}
+              style={{ top: `${(sampledMax / (range * 2)) * 100 + 50}%` }}
             />
             {/* Bars */}
             <div className="w-full h-full flex items-center gap-px">

@@ -45,6 +45,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Zero-premium long-call payoff (unbounded max profit + breakeven) (FT-LAB-001).**
+  Options Builder Payoff now summarises expiry P&L from strike kinks
+  and the right-hand slope, not the ±15% chart sample. A zero-premium
+  long call shows Unlimited max profit, max loss equal to the premium
+  (₹0), and breakeven at the strike. Paid-premium long calls and
+  other unbounded legs (short calls, straddles) use the same rule.
+
 - **Trade Review date filter and mangled timestamps in Explore (FT-TRADE-001).**
   Explore `/trade` Trade Review now clips the Log to the committed IST
   date range (the same predicate as the sample-journal badge) and
