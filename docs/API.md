@@ -389,12 +389,13 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET auth/status` | Whether the operator account exists and whether TOTP / PIN are configured. |
-| `POST auth/setup` | First-run enrolment. Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri` plus backup codes and an Explore JWT. It does not accept a caller-supplied TOTP secret. |
+| `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. |
+| `POST auth/setup` | First-run enrolment. Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri` plus backup codes and an Explore JWT. Authenticator enrolment is optional for Explore and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. |
 | `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Body `{ "password" }`, or the account-create setup JWT (lost-QR start-over). Daily-login session JWTs are rejected. |
-| `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret (password re-confirm). |
-| `POST auth/login` | Sign in with password and `totp_code` (argon2id-hashed password). Issues a JWT. |
-| `POST auth/pin` | Re-authenticate with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin", "mode"? }`. `mode: "live"` mints a Live JWT with `live_mode_unlocked=true`. There is no `/auth/me`. |
+| `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret (password re-confirm) and clear `totp_enabled` until a live code is confirmed again. |
+| `POST auth/login` | Sign in with password (argon2id-hashed). `totp_code` (or a backup code) is required only after authenticator enrolment (`totp_enabled`). Issues a JWT. |
+| `POST auth/totp/enable` | Confirm optional authenticator enrolment. Session-bound. Body `{ "totp_code" }`. Sets `totp_enabled`; later logins then require a TOTP or backup code. |
+| `POST auth/pin` | Re-authenticate with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin", "mode"? }`. `mode: "live"` (default) mints a Live JWT with `live_mode_unlocked=true`, and refuses 403 `totp_required` when the authenticator is not enabled. `mode: "practice"` / `"explore"` unlocks that mode without the Live claim and does not require TOTP. There is no `/auth/me`. |
 | `POST auth/pin/set` | Set or change the PIN (password re-confirm). Requires an existing session JWT. |
 | `POST auth/mode` | **Downgrade only** to `practice` or `explore`. Requires an existing session JWT. Issues a fresh JWT and revokes the old `jti`. Live upgrades must use `POST /v1/auth/pin`. |
 | `POST auth/logout` | Revoke the current JWT by `jti`. Requires an existing session JWT. |
@@ -523,8 +524,8 @@ account-management writes still require the operator's session JWT.
 
 `/v1/auth/*` is exempt from the global API-key check so login and first-run
 setup can run without `X-API-Key`. That is not session-free auth: `POST
-/v1/auth/pin`, `/pin/set`, `/mode`, and `/logout` still decode an existing
-session JWT and return 401 without one. Truly unauthenticated prefixes
+/v1/auth/totp/enable`, `/pin`, `/pin/set`, `/mode`, and `/logout` still decode
+an existing session JWT and return 401 without one. Truly unauthenticated prefixes
 include `/v1/auth/setup`, `/v1/auth/login`, `/v1/auth/status`,
 `/v1/errors`, `/api/v1/errors`, `/v1/changelog`, `/api/v1/ping`, and the
 other entries in `_PUBLIC_V1_PREFIXES` in `app.py`.
@@ -610,8 +611,10 @@ the guard returns one of three verdicts:
 
 `POST /v1/auth/mode` issues a fresh JWT and revokes the previous `jti`,
 but it accepts **only** downgrades to `practice` or `explore`. Upgrading
-to Live is `POST /v1/auth/pin` with the 6-digit PIN (`mode: "live"`).
-There is no `/auth/mode {mode:live}` shortcut.
+to Live is `POST /v1/auth/pin` with the 6-digit PIN (`mode: "live"`), after
+the authenticator is enrolled (`totp_enabled`). Without enrolment that call
+refuses 403 with `code: "totp_required"`. There is no
+`/auth/mode {mode:live}` shortcut.
 
 Authoritative coverage: `packages/core/core/tests/test_order_routes.py` asserts
 Explore rejection, Practice sandbox routing, and Live gate / fail-closed

@@ -564,8 +564,12 @@ fallbacks.
 ### FlintTrade JWT
 
 - Issued on `/ft-api/v1/auth/login` after argon2id password
-  verification.
-- Optional second factor: TOTP enrolment with Fernet-encrypted seed.
+  verification. Login is password-only until authenticator enrolment
+  is confirmed (`totp_enabled`); a TOTP or backup code is required
+  only after that.
+- Optional second factor: TOTP enrolment with Fernet-encrypted seed
+  (`POST /v1/auth/totp/enable`). Live PIN unlock refuses with
+  `totp_required` until enrolment is confirmed.
 - **Expires at 8 AM IST the next day.** No refresh tokens — sign in
   again.
 - Carries `sub` (user), `exp` (expiry), `mode` (Explore / Practice /
