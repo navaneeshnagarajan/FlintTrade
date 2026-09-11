@@ -68,8 +68,13 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 - **Options Builder Net Debit and Max Loss share a position ₹ basis (FT-LAB-005).**
   Explore `/lab` Options Builder now shows Net
-  Debit/Credit, Max Loss, and Max Profit as
-  position totals — premium × lots × lot size.
+  Debit/Credit, Max Loss, and Max Profit on a
+  shared position ₹ basis. Net Debit/Credit is
+  the signed premium × lots × lot size. Max
+  Loss and Max Profit are expiry-payoff results
+  (intrinsic at the strikes, strike width, or
+  unlimited) scaled to that same position basis
+  — not premium × lots × lot size on every card.
   For a long call, Max Loss equals the Net Debit
   (the premium paid for the position). A muted
   sublabel `₹X per lot · N lots · lot size L`
