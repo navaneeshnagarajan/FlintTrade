@@ -135,8 +135,19 @@ vi.mock("@/stores/tradingStore", () => ({
 }));
 
 vi.mock("@/stores/settingsStore", () => ({
-  useSettingsStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ riskLimits: { mtmStoploss: mockTradingState.mtmStoploss } }),
+  useSettingsStore: Object.assign(
+    vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
+      selector({
+        density: "comfortable",
+        riskLimits: { mtmStoploss: mockTradingState.mtmStoploss },
+      }),
+    ),
+    {
+      getState: () => ({
+        density: "comfortable",
+        riskLimits: { mtmStoploss: mockTradingState.mtmStoploss },
+      }),
+    },
   ),
 }));
 

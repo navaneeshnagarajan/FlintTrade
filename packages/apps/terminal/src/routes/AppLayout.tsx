@@ -28,6 +28,8 @@ import KeyboardShortcutsDialog from "@/components/KeyboardShortcuts/KeyboardShor
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import { appendAISymbolContext } from "@/lib/aiSymbolContext";
+import { primaryBannerCopy, selectPrimaryBanner } from "@/lib/primaryBanner";
+import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
 
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
@@ -145,6 +147,7 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
  */
 export default function AppLayout() {
   const mode = useModeStore((s) => s.mode);
+  const { showTicker: showTickerBar } = useDeskDensityChrome();
   const authStatus = useAuthStore((s) => s.status);
   const openAlgoApiKey = useConnectionStore((s) => s.apiKey);
   const authenticated = authStatus === "logged-in";
@@ -430,6 +433,9 @@ export default function AppLayout() {
     setShowWelcome(false);
   }, []);
 
+  const primaryBannerKind = selectPrimaryBanner({ mode });
+  const primaryBannerText = primaryBannerCopy(primaryBannerKind);
+
   return (
     <div className="relative h-screen flex flex-col bg-surface-base overflow-hidden">
       <style>{`
@@ -466,28 +472,26 @@ export default function AppLayout() {
       {mode === "live" && (
         <div className="h-px bg-profit/60 shrink-0" aria-hidden="true" />
       )}
-      {/* Mode disclaimer banners — aria-live so screen readers announce mode changes.
-          Note: a bare wrapper with className="contents" strips role="status" from the
-          AX tree in some browsers, so the live region lives on each banner instead. */}
-      {mode === "practice" && (
+      {primaryBannerText && (
         <div
           role="status"
           aria-live="polite"
-          className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-1 text-center"
+          data-testid="primary-banner"
+          data-banner-kind={primaryBannerKind ?? undefined}
+          className={
+            primaryBannerKind === "explore_sample"
+              ? "bg-text-muted/10 border-b border-text-muted/20 px-4 py-1 text-center"
+              : "bg-amber-500/10 border-b border-amber-500/20 px-4 py-1 text-center"
+          }
         >
-          <p className="text-xs text-amber-400">
-            PRACTICE MODE — Virtual trading results are simulated and do not represent actual trading outcomes
-          </p>
-        </div>
-      )}
-      {mode === "explore" && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="bg-text-muted/10 border-b border-text-muted/20 px-4 py-1 text-center"
-        >
-          <p className="text-xs text-text-muted">
-            EXPLORE MODE — All data shown is sample only
+          <p
+            className={
+              primaryBannerKind === "explore_sample"
+                ? "text-xs text-text-muted"
+                : "text-xs text-amber-400"
+            }
+          >
+            {primaryBannerText}
           </p>
         </div>
       )}
@@ -501,7 +505,7 @@ export default function AppLayout() {
       </a>
       <header className="relative z-20">
         <TopBarV2 />
-        <TickerBar />
+        {showTickerBar && <TickerBar />}
       </header>
       {/* Content area: DockSidebar + main panel side by side */}
       {/* Issue #47: visually-hidden H1 for screen readers reflecting the current route */}

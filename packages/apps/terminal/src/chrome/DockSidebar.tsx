@@ -33,6 +33,7 @@ import {
   Settings,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
 import { useSidebarStore } from "@/stores/sidebarStore";
 import type { SidebarItem } from "@/stores/sidebarStore";
 import {
@@ -245,7 +246,9 @@ function AutoHideStrip({ onEnter, onLeave }: AutoHideStripProps) {
 export default function DockSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { mode, items, isHovered, setHovered } = useSidebarStore();
+  const { mode: storedMode, items, isHovered, setHovered } = useSidebarStore();
+  const { dockModeFor } = useDeskDensityChrome();
+  const mode = dockModeFor(storedMode);
 
   // Auto-hide collapse timer ref
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

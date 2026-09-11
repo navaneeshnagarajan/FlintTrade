@@ -138,6 +138,8 @@ vi.mock("@/stores/authStore", () => ({
 
 import AppLayout from "../AppLayout";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
+import { useSettingsStore } from "@/stores/settingsStore";
+import { useDeskChromeStore } from "@/stores/deskChromeStore";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const appLayoutSource = () =>
@@ -182,6 +184,8 @@ describe("AppLayout", () => {
     localStorage.clear();
     // Ensure window.innerWidth is large enough to skip small screen overlay
     Object.defineProperty(window, "innerWidth", { value: 1920, writable: true });
+    useSettingsStore.setState({ density: "comfortable" });
+    useDeskChromeStore.setState({ toolsExpanded: false });
   });
 
   it("renders header with TopBar and TickerBar, and a main landmark", () => {
@@ -211,8 +215,35 @@ describe("AppLayout", () => {
 
     renderApp();
 
+    expect(screen.getByTestId("primary-banner")).toHaveAttribute("data-banner-kind", "practice_sample");
     expect(screen.getByText(/practice mode/i)).toBeInTheDocument();
     expect(screen.getByText(/simulated/i)).toBeInTheDocument();
+  });
+
+  it("shows exactly one Explore sample banner and never a Live-risk stack", () => {
+    mockModeStore.mockImplementation((selector: (s: Record<string, unknown>) => unknown) =>
+      selector({ mode: "explore" }),
+    );
+
+    renderApp();
+
+    const banners = screen.getAllByTestId("primary-banner");
+    expect(banners).toHaveLength(1);
+    expect(banners[0]).toHaveAttribute("data-banner-kind", "explore_sample");
+    expect(banners[0]).toHaveTextContent(/sample only/i);
+    expect(banners[0]).not.toHaveTextContent(/Live/i);
+  });
+
+  it("hides the ticker strip on Compact desk until desk tools expand", () => {
+    useSettingsStore.setState({ density: "compact" });
+    renderApp();
+
+    expect(screen.queryByTestId("tickerbar")).not.toBeInTheDocument();
+
+    act(() => {
+      useDeskChromeStore.getState().setToolsExpanded(true);
+    });
+    expect(screen.getByTestId("tickerbar")).toBeInTheDocument();
   });
 
   it("does not show the daily welcome card in explore mode", () => {

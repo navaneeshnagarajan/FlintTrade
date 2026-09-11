@@ -29,18 +29,17 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
-- **Mode vocabulary and Trade desk density contract (FT-UX-001).**
-  Trade-first, desk-first contract for vocabulary honesty and
-  Compact / Comfortable density. Explore / Practice / Live stay
-  distinct from sample, market-session, and Connected labels —
-  no “Live” or “Practice Buy” confusion in Explore. Compact
-  densifies Trade at about 1280–1920 by collapsing watchlist
-  and tools by default; Comfortable keeps them open. Max one
-  primary banner; the external-action gate pattern is unchanged.
-  Phone product and the marketing site are out of scope.
-  Product work waits on this same PR after Designer/Developer
-  alignment; the full draft stays with the UI/UX Designer as
-  `2026-09-11-mode-density-contract.md` until then.
+- **Mode vocabulary and Trade desk density (FT-UX-001).**
+  Explore / Practice / Live chips mean execution mode only.
+  Explore Order Pad uses Sample Buy / Sample Sell; Practice
+  keeps Practice Buy / Sell; Live uses Place BUY/SELL Order.
+  Market open/closed stays session status. Comfortable is the
+  new-install default. Compact Trade at ~1280 and wider keeps
+  chart, order pad, and positions primary, with ticker, tool
+  ribbon, and watchlist collapsed behind one desk-tools toggle.
+  At most one primary banner (Explore sample > Live risk >
+  feed disconnected). External-action gates stay fail-closed
+  in Explore. Phone product and the marketing site are unchanged.
 
 - **OpenAlgo-style password-first Explore; TOTP only before Live (FT-SETUP-002).**
   Setup and daily login are password-only for Explore and Practice.

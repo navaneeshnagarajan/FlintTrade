@@ -49,6 +49,9 @@ import {
   type SafetyConfig,
 } from "@/services/ftApi";
 import { TradeBottomPanel } from "./trade/TradeBottomPanel";
+import { defaultTradePresetId } from "@/lib/tradeDeskDensity";
+import { useDeskChromeStore } from "@/stores/deskChromeStore";
+import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
 
 // ---------------------------------------------------------------------------
 // Kill Switch Pill — account-MTM warning and explicit Layer 5 control
@@ -248,9 +251,10 @@ function KillSwitchPill() {
  *   Advanced      → "scalper-zone"
  */
 function getDefaultPresetId(level: "beginner" | "intermediate" | "advanced"): string {
-  if (level === "advanced") return "scalper-zone";
-  if (level === "intermediate") return "market-watch";
-  return "beginner-core"; // resolved by buildPresetJsonById like any other id
+  const settings = useSettingsStore.getState?.() ?? { density: "comfortable" as const };
+  const chrome = useDeskChromeStore.getState?.() ?? { toolsExpanded: false };
+  const width = typeof window === "undefined" ? 0 : window.innerWidth;
+  return defaultTradePresetId(level, settings.density ?? "comfortable", width, chrome.toolsExpanded ?? false);
 }
 
 // Full-page tools available from the TOOLS dropdown on /trade.
@@ -467,6 +471,9 @@ export default function TerminalRoute() {
 
   const level = useSkillLevel("trade");
   const skillContent = useSkillContent();
+  const mode = useModeStore((s) => s.mode);
+  const { progressive, toolsExpanded, setToolsExpanded } = useDeskDensityChrome();
+  const showRouteHint = mode === "live";
   const resolvedMode = useThemeStore((s) => s.getResolvedMode());
   const flexThemeClass = resolvedMode === "light" ? "flexlayout__theme_light" : "flexlayout__theme_dark";
 
@@ -756,11 +763,29 @@ export default function TerminalRoute() {
           {layoutPersistenceError}
         </p>
       )}
-      {/* Route-level hint banner — dismissible, respects helpPrefs.inlineHints */}
-      <RouteBanner
-        hintId="trade-shortcuts"
-        text="Press Ctrl+K to open the command palette. Use X to exit all positions and C to cancel all orders."
-      />
+      {progressive && (
+        <div className="shrink-0 flex items-center justify-end gap-2 border-b border-border-default px-3 py-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            aria-expanded={toolsExpanded}
+            aria-label="Watchlist and desk tools"
+            data-testid="desk-tools-toggle"
+            onClick={() => setToolsExpanded(!toolsExpanded)}
+          >
+            {toolsExpanded ? "Hide watchlist & tools" : "Watchlist & tools"}
+          </Button>
+        </div>
+      )}
+      {/* Hint is not a primary banner — suppress it when Explore/Practice already owns the strip. */}
+      {showRouteHint && (
+        <RouteBanner
+          hintId="trade-shortcuts"
+          text="Press Ctrl+K to open the command palette. Use X to exit all positions and C to cancel all orders."
+        />
+      )}
       {/* Main content: workspace canvas OR full-page tool */}
       {activeTool && ToolComponent ? (
         <div className="flex-1 overflow-auto">

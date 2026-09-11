@@ -58,6 +58,13 @@ import {
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { isMarketHours, tickKeyFor } from "@/lib/market";
+import {
+  SESSION_OPEN_LABEL,
+  orderPadCtaLabel,
+  orderSuccessNotificationBody,
+  orderSuccessNotificationTitle,
+  orderSuccessToast,
+} from "@/lib/modeVocabulary";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { PracticeOrderReviewStage } from "./PracticeOrderReviewStage";
 import {
@@ -650,23 +657,18 @@ function OrderPadWidget(props: WidgetProps) {
       const orderId = (result as { orderId?: string; order_id?: string; orderid?: string }).orderId ??
         (result as { order_id?: string }).order_id ??
         (result as { orderid?: string }).orderid ?? "";
-      const isExploreSample = useModeStore.getState().mode === "explore";
-      showToast(
-        "success",
-        isExploreSample
-          ? `Sample Practice order placed${orderId ? ` · ID: ${orderId}` : ""}`
-          : `Order placed${orderId ? ` · ID: ${orderId}` : ""}`,
-        3000,
-      );
+      const placedMode = useModeStore.getState().mode;
+      showToast("success", orderSuccessToast(placedMode, orderId), 3000);
       // Log to the central Notification Centre (complements the transient toast).
       emitNotification({
         category: "order",
-        title: isExploreSample
-          ? `Sample Practice order placed: ${params.action} ${params.quantity} ${params.symbol}`
-          : `Order placed: ${params.action} ${params.quantity} ${params.symbol}`,
-        body: isExploreSample
-          ? "Explore sample fill — no broker contacted."
-          : orderId ? `Order ID ${orderId}` : "Submitted to the broker.",
+        title: orderSuccessNotificationTitle(
+          placedMode,
+          params.action,
+          params.quantity,
+          params.symbol,
+        ),
+        body: orderSuccessNotificationBody(placedMode, orderId),
       });
       return true;
     } catch (err) {
@@ -878,8 +880,11 @@ function OrderPadWidget(props: WidgetProps) {
           Order Pad
         </span>
         {isMarketHours() && (
-          <span className="ml-auto text-xxs px-1.5 py-0.5 rounded bg-profit/10 border border-profit/20 text-profit font-medium">
-            MARKET OPEN
+          <span
+            className="ml-auto text-xxs px-1.5 py-0.5 rounded bg-profit/10 border border-profit/20 text-profit font-medium"
+            aria-label="Market session open"
+          >
+            {SESSION_OPEN_LABEL}
           </span>
         )}
       </div>
@@ -1353,7 +1358,7 @@ function OrderPadWidget(props: WidgetProps) {
           className={`${btnBase} ${btnColor}`}
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}
-          {loading ? "Placing…" : isPracticeOrExplore ? `Practice ${action === "BUY" ? "Buy" : "Sell"}` : `Place ${action} Order`}
+          {loading ? "Placing…" : orderPadCtaLabel(appMode, action)}
         </Button>
       </form>
 
@@ -1362,6 +1367,7 @@ function OrderPadWidget(props: WidgetProps) {
 
       {practiceReview ? (
         <PracticeOrderReviewStage
+          mode={appMode === "live" ? "practice" : appMode}
           review={practiceReview}
           confirming={loading}
           onBack={handlePracticeBack}

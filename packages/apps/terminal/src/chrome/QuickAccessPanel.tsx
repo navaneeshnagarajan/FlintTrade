@@ -37,6 +37,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import type { WsFailure } from "@/services/websocket";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThemeStore } from "@/stores/themeStore";
+import { applyDensityToDocument } from "@/lib/applyDensity";
 import { motionConfig } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
@@ -465,7 +466,10 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
                 role="radio"
                 aria-checked={density === d}
                 tabIndex={density === d ? 0 : -1}
-                onClick={() => setDensity(d)}
+                onClick={() => {
+                  setDensity(d);
+                  applyDensityToDocument(d);
+                }}
                 onKeyDown={(e) => handleDensityKeyDown(e, index)}
                 className={cn(
                   "flex-1 py-1.5 text-xs font-medium transition-colors capitalize",

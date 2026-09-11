@@ -15,6 +15,7 @@ import {
   WORKSPACE_PRESETS,
   applyPreset,
   buildBeginnerCore,
+  buildCompactDesk,
   buildPresetJsonById,
 } from "../workspacePresets";
 import { widgetComponents } from "../widgetFactory";
@@ -54,12 +55,14 @@ describe("workspacePresets", () => {
       expect(model.getRootRow(), `preset ${preset.id}`).toBeDefined();
     }
     expect(Model.fromJson(buildBeginnerCore()).getRootRow()).toBeDefined();
+    expect(Model.fromJson(buildCompactDesk()).getRootRow()).toBeDefined();
   });
 
   it("every preset tab resolves to a registered widget component", () => {
     const documents = [
       ...WORKSPACE_PRESETS.map((p) => ({ id: p.id, json: p.build() })),
       { id: "beginner-core", json: buildBeginnerCore() },
+      { id: "compact-desk", json: buildCompactDesk() },
     ];
     for (const { id, json } of documents) {
       for (const tab of collectTabs(json)) {
@@ -157,6 +160,16 @@ describe("workspacePresets", () => {
     expect(json).toBeDefined();
     const components = collectTabs(json!).map((t) => t.component).sort();
     expect(components).toEqual(["chart", "indexstrip", "orderpad", "positions", "watchlist"]);
+  });
+
+  it("compact-desk defaults to chart + order pad + positions only", () => {
+    const json = buildPresetJsonById("compact-desk");
+    expect(json).toBeDefined();
+    const components = collectTabs(json!).map((t) => t.component).sort();
+    expect(components).toEqual(["chart", "orderpad", "positions"]);
+    expect(components).not.toContain("watchlist");
+    expect(components).not.toContain("orderladder");
+    expect(components).not.toContain("ticker");
   });
 
   it("unknown preset id is a no-op (does not throw, does not load)", () => {

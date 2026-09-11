@@ -12,6 +12,7 @@ import { useThemeStore } from "@/stores/themeStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { ThemePicker } from "@/components/theme/ThemePicker";
 import { BackgroundPicker } from "@/components/theme/BackgroundPicker";
+import { applyDensityToDocument } from "@/lib/applyDensity";
 import { FieldRow, SegmentControl, Toggle, SectionTitle } from "./shared";
 
 export function AppearanceSection() {
@@ -33,7 +34,7 @@ export function AppearanceSection() {
   function handleDensity(v: string) {
     const val = v as "compact" | "comfortable";
     useSettingsStore.getState().setDensity(val);
-    document.documentElement.setAttribute("data-density", val);
+    applyDensityToDocument(val);
   }
 
   function handleReduceMotion(v: boolean) {
