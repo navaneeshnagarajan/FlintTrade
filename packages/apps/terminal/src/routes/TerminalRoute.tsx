@@ -25,7 +25,7 @@ import { useModeStore } from "@/stores/modeStore";
 import WidgetPicker from "@/chrome/WidgetPicker";
 import PresetPicker from "@/chrome/PresetPicker";
 import { flexLayoutFactory, widgetCatalog, widgetComponents } from "@/layout/widgetFactory";
-import { buildPresetJsonById } from "@/layout/workspacePresets";
+import { buildCompactDesk, buildPresetJsonById } from "@/layout/workspacePresets";
 import {
   countTabs,
   createWorkspaceApi,
@@ -49,7 +49,7 @@ import {
   type SafetyConfig,
 } from "@/services/ftApi";
 import { TradeBottomPanel } from "./trade/TradeBottomPanel";
-import { defaultTradePresetId } from "@/lib/tradeDeskDensity";
+import { applyCompactDeskToolsDisclosure, defaultTradePresetId } from "@/lib/tradeDeskDensity";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
 import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
 
@@ -773,7 +773,13 @@ export default function TerminalRoute() {
             aria-expanded={toolsExpanded}
             aria-label="Watchlist and desk tools"
             data-testid="desk-tools-toggle"
-            onClick={() => setToolsExpanded(!toolsExpanded)}
+            onClick={() => {
+              const next = !toolsExpanded;
+              setToolsExpanded(next);
+              const api = useLayoutStore.getState().workspaceApi;
+              if (!api) return;
+              applyCompactDeskToolsDisclosure(api, next, buildCompactDesk);
+            }}
           >
             {toolsExpanded ? "Hide watchlist & tools" : "Watchlist & tools"}
           </Button>

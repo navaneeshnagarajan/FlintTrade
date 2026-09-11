@@ -19,10 +19,13 @@ import React from "react";
 // ---------------------------------------------------------------------------
 
 const mockNavigate = vi.fn();
+const { mockLocation } = vi.hoisted(() => ({
+  mockLocation: { pathname: "/trade" },
+}));
 
 vi.mock("react-router", () => ({
   Outlet: () => <div data-testid="outlet-content">Page Content</div>,
-  useLocation: () => ({ pathname: "/trade" }),
+  useLocation: () => ({ pathname: mockLocation.pathname }),
   useNavigate: () => mockNavigate,
 }));
 
@@ -213,6 +216,7 @@ describe("AppLayout", () => {
     useDeskChromeStore.setState({ toolsExpanded: false });
     mockBrokerConnected.value = true;
     useTradingStore.setState({ totalPnl: 0 });
+    mockLocation.pathname = "/trade";
   });
 
   it("renders header with TopBar and TickerBar, and a main landmark", () => {
@@ -294,6 +298,14 @@ describe("AppLayout", () => {
     act(() => {
       useDeskChromeStore.getState().setToolsExpanded(true);
     });
+    expect(screen.getByTestId("tickerbar")).toBeInTheDocument();
+  });
+
+  it("keeps the ticker on Compact Home — disclosure is Trade-only", () => {
+    mockLocation.pathname = "/home";
+    useSettingsStore.setState({ density: "compact" });
+    renderApp();
+
     expect(screen.getByTestId("tickerbar")).toBeInTheDocument();
   });
 

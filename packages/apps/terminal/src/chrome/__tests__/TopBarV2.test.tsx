@@ -129,13 +129,16 @@ import { useDeskChromeStore } from "@/stores/deskChromeStore";
 import { useModeStore } from "@/stores/modeStore";
 import TopBarV2 from "../TopBarV2";
 
-function renderTopBarV2(tickerMode?: "off" | "pinned" | "scroll" | "marquee") {
+function renderTopBarV2(
+  tickerMode?: "off" | "pinned" | "scroll" | "marquee",
+  path = "/trade",
+) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={["/trade"]}>
+      <MemoryRouter initialEntries={[path]}>
         <TopBarV2 tickerMode={tickerMode} />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -683,6 +686,14 @@ describe("FT-UX-001 Compact desk chrome at 1280", () => {
     renderTopBarV2();
 
     expect(screen.getByText("EXPLORE")).toBeVisible();
+    expect(screen.getByTestId("tools-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument();
+    expect(screen.queryByTestId("topbar-desk-tools-btn")).not.toBeInTheDocument();
+  });
+
+  it("does not collapse the tool ribbon on Compact Home", () => {
+    renderTopBarV2("marquee", "/home");
+
     expect(screen.getByTestId("tools-btn")).toBeInTheDocument();
     expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument();
     expect(screen.queryByTestId("topbar-desk-tools-btn")).not.toBeInTheDocument();

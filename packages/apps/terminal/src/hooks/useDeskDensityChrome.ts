@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router";
 import {
+  isTradePath,
   resolveDockMode,
   showFullToolRibbon,
   showTickerChrome,
@@ -43,7 +45,9 @@ export function useDeskDensityChrome(): {
   const viewportWidth = useViewportWidth();
   const toolsExpanded = useDeskChromeStore((s) => s.toolsExpanded);
   const setToolsExpanded = useDeskChromeStore((s) => s.setToolsExpanded);
-  const progressive = usesCompactProgressiveDisclosure(density, viewportWidth);
+  const pathname = useLocation().pathname;
+  const onTrade = isTradePath(pathname);
+  const progressive = usesCompactProgressiveDisclosure(density, viewportWidth, onTrade);
 
   return {
     density,
@@ -51,8 +55,8 @@ export function useDeskDensityChrome(): {
     progressive,
     toolsExpanded,
     setToolsExpanded,
-    showTicker: showTickerChrome(density, viewportWidth, toolsExpanded),
-    showToolRibbon: showFullToolRibbon(density, viewportWidth, toolsExpanded),
-    dockModeFor: (stored) => resolveDockMode(density, stored, viewportWidth),
+    showTicker: showTickerChrome(density, viewportWidth, toolsExpanded, onTrade),
+    showToolRibbon: showFullToolRibbon(density, viewportWidth, toolsExpanded, onTrade),
+    dockModeFor: (stored) => resolveDockMode(density, stored, viewportWidth, onTrade),
   };
 }

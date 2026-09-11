@@ -5,7 +5,10 @@ import {
   COMPACT_DESK_PRIMARY_WIDGETS,
   DESK_COMPACT_FOCUS_MAX_WIDTH,
   DESK_MIN_WIDTH,
+  applyCompactDeskToolsDisclosure,
+  collectWorkspaceComponents,
   defaultTradePresetId,
+  isTradePath,
   resolveDockMode,
   showFullToolRibbon,
   showTickerChrome,
@@ -19,6 +22,10 @@ describe("FT-UX-001 Compact Trade disclosure", () => {
     expect(usesCompactProgressiveDisclosure("compact", 1920)).toBe(true);
     expect(usesCompactProgressiveDisclosure("comfortable", 1280)).toBe(false);
     expect(usesCompactProgressiveDisclosure("compact", 1024)).toBe(false);
+    expect(usesCompactProgressiveDisclosure("compact", 1280, false)).toBe(false);
+    expect(isTradePath("/trade")).toBe(true);
+    expect(isTradePath("/home")).toBe(false);
+    expect(isTradePath("/settings")).toBe(false);
   });
 
   it("defaults Compact desk to chart + order pad + positions", () => {
@@ -47,5 +54,79 @@ describe("FT-UX-001 Compact Trade disclosure", () => {
     expect(showTickerChrome("compact", 1280, true)).toBe(true);
     expect(showFullToolRibbon("comfortable", 1280)).toBe(true);
     expect(showTickerChrome("comfortable", 1280)).toBe(true);
+    expect(showTickerChrome("compact", 1280, false, false)).toBe(true);
+    expect(showFullToolRibbon("compact", 1280, false, false)).toBe(true);
+    expect(resolveDockMode("compact", "expanded", 1280, false)).toBe("expanded");
+  });
+
+  it("desk-tools expand adds Watchlist; collapse restores compact-desk when safe", () => {
+    const compactJson = {
+      layout: {
+        children: [
+          { component: "chart" },
+          { component: "orderpad" },
+          { component: "positions" },
+        ],
+      },
+    };
+    const withWatchlist = {
+      layout: {
+        children: [
+          { component: "chart" },
+          { component: "orderpad" },
+          { component: "positions" },
+          { component: "watchlist" },
+        ],
+      },
+    };
+    expect(collectWorkspaceComponents(compactJson)).toEqual(["chart", "orderpad", "positions"]);
+
+    let current = compactJson as Record<string, unknown>;
+    const added: Array<{ component: string; title: string }> = [];
+    const loaded: Array<Record<string, unknown>> = [];
+    const api = {
+      addPanel: (panel: { component: string; title: string }) => {
+        added.push(panel);
+        current = withWatchlist;
+      },
+      toJSON: () => current,
+      loadModelJson: (json: Record<string, unknown>) => {
+        loaded.push(json);
+        current = json;
+      },
+    };
+
+    applyCompactDeskToolsDisclosure(api, true, () => ({ restored: true }));
+    expect(added).toEqual([{ component: "watchlist", title: "Watchlist" }]);
+
+    applyCompactDeskToolsDisclosure(api, false, () => ({ restored: true }));
+    expect(loaded).toEqual([{ restored: true }]);
+  });
+
+  it("does not wipe a customised desk when collapsing desk tools", () => {
+    const custom = {
+      layout: {
+        children: [
+          { component: "chart" },
+          { component: "orderpad" },
+          { component: "positions" },
+          { component: "watchlist" },
+          { component: "news" },
+        ],
+      },
+    };
+    const loaded: unknown[] = [];
+    applyCompactDeskToolsDisclosure(
+      {
+        addPanel: () => undefined,
+        toJSON: () => custom,
+        loadModelJson: (json) => {
+          loaded.push(json);
+        },
+      },
+      false,
+      () => ({ restored: true }),
+    );
+    expect(loaded).toEqual([]);
   });
 });

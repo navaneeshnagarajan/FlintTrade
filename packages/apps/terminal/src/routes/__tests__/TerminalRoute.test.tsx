@@ -49,6 +49,7 @@ const mockActivateKillSwitch = vi.hoisted(() => vi.fn());
 
 vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
+  useLocation: () => ({ pathname: "/trade" }),
 }));
 
 vi.mock("@/services/ftApi", () => ({
