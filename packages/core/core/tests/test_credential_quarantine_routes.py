@@ -13,13 +13,14 @@ from flinttrade_gateway.credentials import QuarantinedCredentialMetadata
 
 
 @pytest.fixture
-def recovery_app(monkeypatch):
+def recovery_app(monkeypatch, backend_lease_proof):
     from flinttrade_core.app import create_flask_app
 
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
     monkeypatch.setenv("ENABLE_ANALYZER", "true")
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_proof)
+    assert app.config["CREDENTIAL_STORE"] is not None
     with app.app_context():
         token = auth_routes._create_token("synthetic", mode="explore")
     return app, token

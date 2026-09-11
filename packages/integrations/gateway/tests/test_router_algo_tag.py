@@ -77,17 +77,17 @@ def _request_ctx() -> RequestContext:
     return RequestContext(jti="jti-1", actor_type="human", actor_id="user-1", mode="live")
 
 
-def _mint(order, **over) -> SafetyContext:
+def _mint(order, *, backend_lease_factory, **over) -> SafetyContext:
     kwargs = dict(mode="live", user_jti="jti-1", adapter_id="dhan", account_id="acct-1", actor_type="human")
     kwargs.update(over)
-    return SafetyContext.mint(order, **kwargs)
+    return SafetyContext.mint(order, **kwargs, backend_lease_proof=backend_lease_factory())
 
 
-def _router(adapter: _FakeAdapter, session: Session, guard: AlgoTagGuard | None) -> BrokerRouter:
+def _router(adapter: _FakeAdapter, session: Session, guard: AlgoTagGuard | None, *, backend_lease_factory) -> BrokerRouter:
     return BrokerRouter(
         {"dhan": adapter},
         lambda _ctx, _aid, _acct: session,
-        algo_tag_guard=guard,
+        algo_tag_guard=guard, backend_lease_proof=backend_lease_factory()
     )
 
 
@@ -95,58 +95,58 @@ def _guard(max_per_sec: int = 10) -> AlgoTagGuard:
     return AlgoTagGuard({"dhan": AlgoTagConfig(algo_id="ALGO-REG-1", max_orders_per_sec=max_per_sec)})
 
 
-async def test_place_order_stamps_algo_id_and_counts() -> None:
+async def test_place_order_stamps_algo_id_and_counts(*, backend_lease_factory) -> None:
     adapter, session, guard = _FakeAdapter(), _session(), _guard()
-    router = _router(adapter, session, guard)
+    router = _router(adapter, session, guard, backend_lease_factory=backend_lease_factory)
     order = _order()
     await router.place_order(
-        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order)
+        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory)
     )
     assert session.algo_id == "ALGO-REG-1"
     assert guard.usage("dhan", "NSE") == 1
     assert adapter.placed == [order]
 
 
-async def test_ceiling_breach_refuses_dispatch_before_adapter() -> None:
+async def test_ceiling_breach_refuses_dispatch_before_adapter(*, backend_lease_factory) -> None:
     adapter, session, guard = _FakeAdapter(), _session(), _guard(max_per_sec=2)
-    router = _router(adapter, session, guard)
+    router = _router(adapter, session, guard, backend_lease_factory=backend_lease_factory)
     for _ in range(2):
         order = _order()
         await router.place_order(
-            _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order)
+            _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory)
         )
     order = _order()
     with pytest.raises(AlgoTagLimitError):
         await router.place_order(
-            _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order)
+            _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory)
         )
     # The third dispatch never reached the broker.
     assert len(adapter.placed) == 2
 
 
-async def test_modify_and_cancel_count_toward_the_ceiling() -> None:
+async def test_modify_and_cancel_count_toward_the_ceiling(*, backend_lease_factory) -> None:
     adapter, session, guard = _FakeAdapter(), _session(), _guard()
-    router = _router(adapter, session, guard)
+    router = _router(adapter, session, guard, backend_lease_factory=backend_lease_factory)
     changes = {"price": "100", "exchange": "NSE"}
     order = {"_op": "modify", "order_id": "OID-1", **changes}
     await router.modify_order(
         _request_ctx(), adapter_id="dhan", account_id="acct-1",
-        order=order, order_id="OID-1", changes=changes, safety_ctx=_mint(order),
+        order=order, order_id="OID-1", changes=changes, safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
     )
     order2 = {"_op": "cancel", "order_id": "OID-1", "exchange": "NSE"}
     await router.cancel_order(
         _request_ctx(), adapter_id="dhan", account_id="acct-1",
-        order=order2, order_id="OID-1", safety_ctx=_mint(order2),
+        order=order2, order_id="OID-1", safety_ctx=_mint(order2, backend_lease_factory=backend_lease_factory),
     )
     assert guard.usage("dhan", "NSE") == 2
     assert [c[0] for c in adapter.calls] == ["modify", "cancel"]
 
 
-async def test_execute_gated_counts_and_stamps() -> None:
+async def test_execute_gated_counts_and_stamps(*, backend_lease_factory) -> None:
     adapter, session, guard = _FakeAdapter(), _session(), _guard()
-    router = _router(adapter, session, guard)
+    router = _router(adapter, session, guard, backend_lease_factory=backend_lease_factory)
     payload = {"_op": "cancel_forever", "order_id": "GTT-1", "exchange": "NSE"}
-    ctx = gate_broker_write("cancel_forever", payload, _request_ctx(), "dhan", account_id="acct-1")
+    ctx = gate_broker_write("cancel_forever", payload, _request_ctx(), "dhan", account_id="acct-1", backend_lease_proof=backend_lease_factory())
     await router.execute_gated(
         _request_ctx(), verb="cancel_forever", payload=payload, safety_ctx=ctx,
         adapter_id="dhan", account_id="acct-1",
@@ -155,38 +155,38 @@ async def test_execute_gated_counts_and_stamps() -> None:
     assert guard.usage("dhan", "NSE") == 1
 
 
-async def test_adapter_without_requirement_is_untouched() -> None:
+async def test_adapter_without_requirement_is_untouched(*, backend_lease_factory) -> None:
     adapter = _FakeAdapter(algo_tag_required=False)
     session, guard = _session(), _guard()
-    router = _router(adapter, session, guard)
+    router = _router(adapter, session, guard, backend_lease_factory=backend_lease_factory)
     order = _order()
     await router.place_order(
-        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order)
+        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory)
     )
     assert session.algo_id == ""
     assert guard.usage("dhan", "NSE") == 0
 
 
-async def test_unconfigured_broker_keeps_retail_defaults() -> None:
+async def test_unconfigured_broker_keeps_retail_defaults(*, backend_lease_factory) -> None:
     """A guard with no config for this broker must not tag, count, or refuse —
     the adapter/mapping retail-default algo ids apply unchanged."""
     adapter, session = _FakeAdapter(), _session()
     guard = AlgoTagGuard({"indmoney": AlgoTagConfig(algo_id="X", max_orders_per_sec=5)})
-    router = _router(adapter, session, guard)
+    router = _router(adapter, session, guard, backend_lease_factory=backend_lease_factory)
     order = _order()
     await router.place_order(
-        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order)
+        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory)
     )
     assert session.algo_id == ""
     assert adapter.placed == [order]
 
 
-async def test_no_guard_is_a_noop() -> None:
+async def test_no_guard_is_a_noop(*, backend_lease_factory) -> None:
     adapter, session = _FakeAdapter(), _session()
-    router = _router(adapter, session, None)
+    router = _router(adapter, session, None, backend_lease_factory=backend_lease_factory)
     order = _order()
     await router.place_order(
-        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order)
+        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory)
     )
     assert session.algo_id == ""
     assert adapter.placed == [order]
@@ -197,36 +197,36 @@ async def test_no_guard_is_a_noop() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_stale_algo_id_is_cleared_when_a_later_dispatch_is_not_tagged() -> None:
+async def test_stale_algo_id_is_cleared_when_a_later_dispatch_is_not_tagged(*, backend_lease_factory) -> None:
     """The registry Session is shared across writes; once the guard stops
     tagging (config removed / adapter no longer required) a previously stamped
     algo_id must NOT keep flowing to the broker."""
     adapter, session, guard = _FakeAdapter(), _session(), _guard()
-    router = _router(adapter, session, guard)
+    router = _router(adapter, session, guard, backend_lease_factory=backend_lease_factory)
     order = _order()
     await router.place_order(
-        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order)
+        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory)
     )
     assert session.algo_id == "ALGO-REG-1"
 
     # Operator removes the algo_tags config → guard has no config for the broker.
     empty_guard = AlgoTagGuard({})
-    router2 = _router(adapter, session, empty_guard)
+    router2 = _router(adapter, session, empty_guard, backend_lease_factory=backend_lease_factory)
     order2 = _order()
     await router2.place_order(
-        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order2, safety_ctx=_mint(order2)
+        _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order2, safety_ctx=_mint(order2, backend_lease_factory=backend_lease_factory)
     )
     assert session.algo_id == ""  # cleared, not the stale ALGO-REG-1
 
 
-async def test_exchange_less_payload_buckets_under_the_star_key() -> None:
+async def test_exchange_less_payload_buckets_under_the_star_key(*, backend_lease_factory) -> None:
     """An extended-verb payload with no recoverable exchange still counts
     (conservative shared per-broker bucket), and still stamps the algo_id."""
     adapter, session = _FakeAdapter(), _session()
     guard = _guard(max_per_sec=2)
-    router = _router(adapter, session, guard)
+    router = _router(adapter, session, guard, backend_lease_factory=backend_lease_factory)
     payload1 = {"_op": "cancel_forever", "order_id": "GTT-1"}  # no exchange
-    ctx1 = gate_broker_write("cancel_forever", payload1, _request_ctx(), "dhan", account_id="acct-1")
+    ctx1 = gate_broker_write("cancel_forever", payload1, _request_ctx(), "dhan", account_id="acct-1", backend_lease_proof=backend_lease_factory())
     await router.execute_gated(
         _request_ctx(), verb="cancel_forever", payload=payload1, safety_ctx=ctx1,
         adapter_id="dhan", account_id="acct-1",
@@ -235,11 +235,11 @@ async def test_exchange_less_payload_buckets_under_the_star_key() -> None:
     assert guard.usage("dhan", "*") == 1
 
 
-async def test_nested_exchange_is_recovered_from_the_payload() -> None:
+async def test_nested_exchange_is_recovered_from_the_payload(*, backend_lease_factory) -> None:
     adapter, session, guard = _FakeAdapter(), _session(), _guard()
-    router = _router(adapter, session, guard)
+    router = _router(adapter, session, guard, backend_lease_factory=backend_lease_factory)
     payload = {"_op": "cancel_forever", "order_id": "G1", "order": {"exchange": "BFO"}}
-    ctx = gate_broker_write("cancel_forever", payload, _request_ctx(), "dhan", account_id="acct-1")
+    ctx = gate_broker_write("cancel_forever", payload, _request_ctx(), "dhan", account_id="acct-1", backend_lease_proof=backend_lease_factory())
     await router.execute_gated(
         _request_ctx(), verb="cancel_forever", payload=payload, safety_ctx=ctx,
         adapter_id="dhan", account_id="acct-1",

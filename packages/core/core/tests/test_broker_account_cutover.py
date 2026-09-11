@@ -231,7 +231,7 @@ def test_standalone_rotation_blueprint_denies_before_body_and_rotator(endpoint):
     assert forbidden.calls == []
 
 
-def test_only_exact_default_openalgo_session_is_published(tmp_path):
+def test_only_exact_default_openalgo_session_is_published(tmp_path, *, backend_lease_factory):
     from flinttrade_core.app import build_broker_router
     from flinttrade_core.broker_identity import BrokerSelector
     from flinttrade_core.config import Settings
@@ -247,7 +247,7 @@ def test_only_exact_default_openalgo_session_is_published(tmp_path):
         openalgo_port=int(cfg["port"]), openalgo_ws_port=int(cfg["ws_port"])))
     try:
         build_broker_router(fixture.registry, snapshot.as_dict()["brokers"], openalgo_client=client,
-            registry_publication_owner=fixture.owner, workspace_snapshot=snapshot, workspace_path=tmp_path)
+            registry_publication_owner=fixture.owner, workspace_snapshot=snapshot, workspace_path=tmp_path, backend_lease_proof=backend_lease_factory())
         assert fixture.registry.snapshot_exact_state(BrokerSelector("openalgo", "default")).status == "connected"
         assert fixture.registry.snapshot_exact_state(BrokerSelector("openalgo", "other")) is None
     finally:
@@ -331,12 +331,12 @@ def test_direct_rate_limit_writer_denies_before_generation_lease(guarded_app):
     assert forbidden.calls == []
 
 
-def test_real_factory_keeps_default_guard_and_preserved_http_boundaries(monkeypatch):
+def test_real_factory_keeps_default_guard_and_preserved_http_boundaries(monkeypatch, backend_lease_factory):
     from flinttrade_core.app import create_flask_app
 
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     client = app.test_client()
     with app.app_context():
         headers = {"Authorization": f"Bearer {auth_routes._create_token('synthetic', mode='explore')}"}

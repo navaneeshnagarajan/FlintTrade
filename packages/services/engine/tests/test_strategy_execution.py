@@ -51,7 +51,7 @@ async def _portfolio_state(_order: Order, _reservations: tuple[object, ...]):
 
 
 @pytest.mark.asyncio
-async def test_live_dispatch_mints_a_fresh_safety_context_for_every_order() -> None:
+async def test_live_dispatch_mints_a_fresh_safety_context_for_every_order(*, backend_lease_factory) -> None:
     set_safety_gate_secret(b"strategy-execution-test-secret-32")
     consumed_gate_ids: list[str] = []
     adapter = _TokenCheckingAdapter()
@@ -71,7 +71,7 @@ async def test_live_dispatch_mints_a_fresh_safety_context_for_every_order() -> N
     router = BrokerRouter(
         {"openalgo": adapter},
         session_provider,
-        consume_gate=consume_gate,
+        consume_gate=consume_gate, backend_lease_proof=backend_lease_factory()
     )
     request_ctx = RequestContext(
         jti="strategy-jti",
@@ -183,6 +183,30 @@ def test_live_dispatch_contract_rejects_arbitrary_dispatcher() -> None:
 
     with pytest.raises(ValueError, match="canonical gated dispatcher"):
         StrategyExecutionContract.live(MagicMock())
+
+
+async def test_scheduled_agent_dispatch_refuses_revoked_backend(backend_lease_factory):
+    from flinttrade_core.exceptions import SafetyBypassError
+
+    proof = backend_lease_factory()
+    adapter = _TokenCheckingAdapter()
+    router = BrokerRouter(
+        {"openalgo": adapter}, lambda *_: SimpleNamespace(is_read_only=False, algo_id=""),
+        backend_lease_proof=proof,
+    )
+    request_ctx = RequestContext(
+        jti="revoked-strategy", actor_type="agent", actor_id="strategy:synthetic",
+        mode="live", selector="openalgo:default",
+    )
+    dispatcher = GatedStrategyDispatcher(
+        safety=_passing_safety(), request_context_provider=lambda: request_ctx,
+        router_provider=lambda: router, adapter_id="openalgo", account_id="default",
+        portfolio_state_provider=_portfolio_state,
+    )
+    proof.revoke()
+    with pytest.raises(SafetyBypassError, match="backend_lease_unavailable"):
+        await dispatcher.dispatch_order(Order(symbol="RELIANCE", action="BUY", quantity="1"))
+    assert adapter.orders == []
 
 
 def test_live_dispatch_contract_rejects_dispatcher_subclasses() -> None:

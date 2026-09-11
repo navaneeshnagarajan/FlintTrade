@@ -30,6 +30,7 @@ import asyncio
 import contextlib
 import inspect
 import json
+import math
 import os
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -401,19 +402,25 @@ class _CodexAppServerClient:
         rid = self._take_id()
         fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[rid] = fut
-        await self._send({"id": rid, "method": method, "params": params or {}})
         try:
+            await self._send({"id": rid, "method": method, "params": params or {}})
             msg = await asyncio.wait_for(fut, timeout)
         except TimeoutError as exc:
-            self._pending.pop(rid, None)
             raise TimeoutError(
                 f"codex app-server method {method!r} timed out after {timeout}s"
             ) from exc
+        finally:
+            self._pending.pop(rid, None)
+            if not fut.done():
+                fut.cancel()
         if "error" in msg:
-            err = msg.get("error") or {}
+            err = msg["error"]
+            if (type(err) is not dict or type(err.get("code")) is not int
+                    or type(err.get("message")) is not str):
+                raise CodexAppServerError(code=-32603, message="Malformed JSON-RPC error response")
             raise CodexAppServerError(
-                code=int(err.get("code", -1)),
-                message=str(err.get("message", "")),
+                code=err["code"],
+                message=err["message"],
                 data=err.get("data"),
             )
         return msg.get("result") or {}
@@ -596,6 +603,8 @@ class CodexAppServerSession(AgentSession):
         auto_approve: bool = False,
         turn_timeout: float = _DEFAULT_TURN_TIMEOUT,
         client_factory: Callable[[], _CodexAppServerClient] | None = None,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         """Configure a Codex session.
 
@@ -614,7 +623,18 @@ class CodexAppServerSession(AgentSession):
                 approval requests. Defaults to ``False`` (fail closed).
             turn_timeout: Seconds a single turn may run before it is aborted.
             client_factory: Injectable factory for the wire client (tests).
+            model: Optional exact model from the runtime's official catalogue.
+            reasoning_effort: Optional catalogue-supported effort for that model.
         """
+        for name, value in (("model", model), ("reasoning_effort", reasoning_effort)):
+            if value is not None and (
+                type(value) is not str or not value.strip() or len(value) > 256 or any(ord(c) < 32 for c in value)
+            ):
+                raise ValueError(f"{name} must be bounded non-blank text")
+        if reasoning_effort is not None and model is None:
+            raise ValueError("reasoning effort requires an explicit model")
+        self._model = model
+        self._reasoning_effort = reasoning_effort
         self._cwd = cwd or os.getcwd()
         self._codex_bin = codex_bin
         self._codex_home = codex_home or os.environ.get("CODEX_HOME")
@@ -628,6 +648,7 @@ class CodexAppServerSession(AgentSession):
         self._client: _CodexAppServerClient | None = None
         self._thread_id: str | None = None
         self._closed = False
+        self._client_initialised = False
 
     def _default_client_factory(self) -> _CodexAppServerClient:
         return _CodexAppServerClient(
@@ -640,6 +661,122 @@ class CodexAppServerSession(AgentSession):
 
     # ---- lifecycle ----
 
+    async def _ensure_client(self) -> _CodexAppServerClient:
+        """Initialise metadata access without creating a thread or model turn."""
+        if self._closed:
+            raise RuntimeError("codex session is closed")
+        if self._client is None:
+            self._client = self._client_factory()
+        if not self._client_initialised:
+            try:
+                await self._client.start()
+                await self._client.initialize()
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    await self._client.close()
+                self._client = None
+                raise
+            self._client_initialised = True
+        return self._client
+
+    async def list_models(self) -> tuple[dict[str, Any], ...]:
+        """Read bounded official model/effort choices, never inferred tier lists.
+
+        Protocol: https://learn.chatgpt.com/docs/app-server#models
+        This is availability metadata, not a price, entitlement or pinned model
+        weight revision. Authentication remains owned by the CLI.
+        """
+        client = await self._ensure_client()
+        models: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        cursors: set[str] = set()
+        cursor: str | None = None
+        async with asyncio.timeout(_HANDSHAKE_TIMEOUT):
+            for _ in range(5):
+                result = await client.request("model/list", {
+                    "limit": 100, "includeHidden": False, **({"cursor": cursor} if cursor else {}),
+                }, timeout=_HANDSHAKE_TIMEOUT)
+                if type(result) is not dict:
+                    raise ValueError("invalid runtime model catalogue")
+                page = result.get("data")
+                if type(page) is not list or len(page) > 100:
+                    raise ValueError("invalid runtime model catalogue")
+                for entry in page:
+                    if type(entry) is not dict:
+                        raise ValueError("invalid runtime model entry")
+                    for key in ("id", "model", "displayName"):
+                        if type(entry.get(key)) is not str or not entry[key].strip() or len(entry[key]) > 256:
+                            raise ValueError("invalid runtime model identity")
+                    if entry["id"] in seen_ids or type(entry.get("hidden")) is not bool:
+                        raise ValueError("duplicate or ambiguous runtime model entry")
+                    seen_ids.add(entry["id"])
+                    efforts = entry.get("supportedReasoningEfforts")
+                    if type(efforts) is not list or len(efforts) > 32 or any(
+                        type(e) is not dict or type(e.get("reasoningEffort")) is not str
+                        or not e["reasoningEffort"].strip() or len(e["reasoningEffort"]) > 64 for e in efforts
+                    ):
+                        raise ValueError("invalid runtime reasoning effort catalogue")
+                    if not entry["hidden"]:
+                        models.append({
+                            "id": entry["id"], "model": entry["model"], "display_name": entry["displayName"],
+                            "reasoning_efforts": [e["reasoningEffort"] for e in efforts],
+                        })
+                cursor = result.get("nextCursor")
+                if cursor is None:
+                    return tuple(models)
+                if type(cursor) is not str or not cursor or len(cursor) > 4096 or cursor in cursors:
+                    raise ValueError("invalid runtime catalogue pagination")
+                cursors.add(cursor)
+        raise ValueError("runtime model catalogue exceeds the page limit")
+
+    async def read_rate_limits(self) -> dict[str, Any]:
+        """Return observed subscription windows; unavailable values stay unknown.
+
+        No credit purchase/reset, login flow or token inspection is performed.
+        Monetary API budgets remain separate from these subscription windows.
+        """
+        try:
+            client = await self._ensure_client()
+            result = await client.request("account/rateLimits/read", {}, timeout=_HANDSHAKE_TIMEOUT)
+            if type(result) is not dict:
+                raise ValueError("invalid runtime rate limits")
+            raw = result.get("rateLimitsByLimitId")
+            if raw is None:
+                legacy = result.get("rateLimits")
+                raw = {"codex": legacy} if isinstance(legacy, dict) else {}
+            if type(raw) is not dict or len(raw) > 100:
+                raise ValueError("invalid runtime rate limits")
+            buckets = {}
+            for key, bucket in raw.items():
+                if type(key) is not str or not key or len(key) > 256 or type(bucket) is not dict:
+                    raise ValueError("invalid runtime rate-limit bucket")
+                windows: dict[str, Any] = {}
+                for name in ("primary", "secondary"):
+                    window = bucket.get(name)
+                    if window is None:
+                        windows[name] = None
+                        continue
+                    if type(window) is not dict:
+                        raise ValueError("invalid runtime rate-limit window")
+                    used = window.get("usedPercent")
+                    duration = window.get("windowDurationMins")
+                    resets = window.get("resetsAt")
+                    if used is not None and (type(used) not in (int, float) or not math.isfinite(used) or used < 0):
+                        raise ValueError("invalid runtime usage percentage")
+                    if any(v is not None and (type(v) is not int or v < 0) for v in (duration, resets)):
+                        raise ValueError("invalid runtime window time")
+                    windows[name] = {
+                        "used_percent": used,
+                        "remaining_percent": None if used is None else max(0, min(100, 100 - used)),
+                        "window_duration_minutes": duration, "resets_at": resets,
+                    }
+                plan = bucket.get("planType")
+                windows["plan_type"] = plan if type(plan) is str and len(plan) <= 128 else None
+                buckets[key] = windows
+            return {"status": "available" if buckets else "unknown", "buckets": buckets}
+        except (CodexAppServerError, OSError, TimeoutError, RuntimeError, ValueError, TypeError, OverflowError):
+            return {"status": "unknown", "buckets": {}}
+
     async def ensure_started(self) -> None:
         """Spawn codex, handshake, and start a thread. Idempotent.
 
@@ -651,16 +788,20 @@ class CodexAppServerSession(AgentSession):
             raise RuntimeError("codex session is closed")
         if self._thread_id is not None:
             return
-        if self._client is None:
-            self._client = self._client_factory()
-        await self._client.start()
+        await self._ensure_client()
         # start() has now spawned the child + reader tasks. If the handshake or
         # thread start fails from here, close the client so the subprocess and
         # both reader tasks don't leak, then re-raise the honest error.
         try:
-            await self._client.initialize()
+            if self._model is not None:
+                choices = [entry for entry in await self.list_models() if entry["model"] == self._model]
+                if len(choices) != 1 or (
+                    self._reasoning_effort is not None and self._reasoning_effort not in choices[0]["reasoning_efforts"]
+                ):
+                    raise ValueError("the selected Codex model or reasoning effort is unavailable")
             result = await self._client.request(
-                "thread/start", {"cwd": self._cwd}, timeout=_HANDSHAKE_TIMEOUT
+                "thread/start", {"cwd": self._cwd, **({"model": self._model} if self._model else {})},
+                timeout=_HANDSHAKE_TIMEOUT,
             )
             thread = result.get("thread") or {}
             thread_id = (
@@ -678,6 +819,7 @@ class CodexAppServerSession(AgentSession):
             with contextlib.suppress(Exception):
                 await self._client.close()
             self._client = None
+            self._client_initialised = False
             raise
         self._thread_id = str(thread_id)
 
@@ -690,6 +832,7 @@ class CodexAppServerSession(AgentSession):
             await self._client.close()
             self._client = None
         self._thread_id = None
+        self._client_initialised = False
 
     # ---- per-turn ----
 
@@ -721,7 +864,9 @@ class CodexAppServerSession(AgentSession):
         try:
             ts = await client.request(
                 "turn/start",
-                {"threadId": self._thread_id, "input": [{"type": "text", "text": str(prompt)}]},
+                {"threadId": self._thread_id, "input": [{"type": "text", "text": str(prompt)}],
+                 **({"model": self._model} if self._model else {}),
+                 **({"effort": self._reasoning_effort} if self._reasoning_effort else {})},
                 timeout=_TURN_START_TIMEOUT,
             )
             turn_id = (ts.get("turn") or {}).get("id")

@@ -933,7 +933,8 @@ def build_gated_leg_dispatchers(app: Flask) -> tuple[PlaceLegFn, CancelLegFn]:
             ctx = _request_ctx(principal)
             try:
                 safety_ctx = gate_order(
-                    order, ctx, adapter_id=principal.adapter_id, account_id=principal.account_id
+                    order, ctx, adapter_id=principal.adapter_id, account_id=principal.account_id,
+                    backend_lease_proof=router.backend_lease_proof,
                 )
                 reservation = lease.reserve(order, admission.positions)
                 result = _call_on_owner_loop(
@@ -996,7 +997,8 @@ def build_gated_leg_dispatchers(app: Flask) -> tuple[PlaceLegFn, CancelLegFn]:
         ctx = _request_ctx(principal)
         try:
             safety_ctx = gate_order(
-                canonical, ctx, adapter_id=principal.adapter_id, account_id=principal.account_id
+                canonical, ctx, adapter_id=principal.adapter_id, account_id=principal.account_id,
+                backend_lease_proof=router.backend_lease_proof,
             )
             _call_on_owner_loop(
                 router.cancel_order(

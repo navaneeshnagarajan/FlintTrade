@@ -1801,7 +1801,7 @@ async def test_reducing_order_refuses_changed_position_before_post() -> None:
 
 
 @pytest.mark.asyncio
-async def test_emergency_smart_cancel_traverses_real_broker_router() -> None:
+async def test_emergency_smart_cancel_traverses_real_broker_router(*, backend_lease_factory) -> None:
     set_safety_gate_secret(b"0123456789abcdef0123456789abcdef")
     transport = EmergencyTransport(
         orders=[_broker_order("EQ-SMART-1", order_type="TRIGGER", trigger_price=2490)]
@@ -1827,11 +1827,11 @@ async def test_emergency_smart_cancel_traverses_real_broker_router() -> None:
         request_ctx,
         "indmoney",
         account_id="U1",
-        intent_source=EMERGENCY_INTENT_SOURCE,
+        intent_source=EMERGENCY_INTENT_SOURCE, backend_lease_proof=backend_lease_factory()
     )
     router = BrokerRouter(
         {"indmoney": adapter},
-        lambda _ctx, _adapter_id, _account_id: session,
+        lambda _ctx, _adapter_id, _account_id: session, backend_lease_proof=backend_lease_factory()
     )
 
     await router.execute_gated(
@@ -1847,7 +1847,7 @@ async def test_emergency_smart_cancel_traverses_real_broker_router() -> None:
     assert transport.calls[-1]["json"] == {"order_id": "EQ-SMART-1", "segment": "EQUITY"}
 
 
-def test_full_emergency_dispatch_cancels_regular_order_with_signed_segment() -> None:
+def test_full_emergency_dispatch_cancels_regular_order_with_signed_segment(*, backend_lease_factory) -> None:
     set_safety_gate_secret(b"0123456789abcdef0123456789abcdef")
     transport = EmergencyTransport(
         order_snapshots=[[_broker_order("EQ-REGULAR-1")], [], []]
@@ -1869,7 +1869,7 @@ def test_full_emergency_dispatch_cancels_regular_order_with_signed_segment() -> 
     )
     router = BrokerRouter(
         {"indmoney": adapter},
-        lambda _ctx, _adapter_id, _account_id: session,
+        lambda _ctx, _adapter_id, _account_id: session, backend_lease_proof=backend_lease_factory()
     )
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
@@ -1893,7 +1893,7 @@ def test_full_emergency_dispatch_cancels_regular_order_with_signed_segment() -> 
     ]
 
 
-def test_full_emergency_dispatch_reduces_indmoney_then_proves_quiet() -> None:
+def test_full_emergency_dispatch_reduces_indmoney_then_proves_quiet(*, backend_lease_factory) -> None:
     set_safety_gate_secret(b"0123456789abcdef0123456789abcdef")
     initial = {("equity", "cnc"): [_broker_position(quantity=5)]}
     transport = EmergencyTransport(
@@ -1916,7 +1916,7 @@ def test_full_emergency_dispatch_reduces_indmoney_then_proves_quiet() -> None:
     )
     router = BrokerRouter(
         {"indmoney": adapter},
-        lambda _ctx, _adapter_id, _account_id: session,
+        lambda _ctx, _adapter_id, _account_id: session, backend_lease_proof=backend_lease_factory()
     )
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,

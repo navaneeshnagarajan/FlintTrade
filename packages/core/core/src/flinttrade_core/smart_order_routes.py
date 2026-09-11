@@ -263,6 +263,7 @@ class GatedChildExecutor:
                 safety_ctx = gate_order(
                     order,
                     self._request_ctx,
+                    backend_lease_proof=router.backend_lease_proof,
                     adapter_id=self._adapter_id,
                     account_id=self._account_id,
                 )

@@ -1041,7 +1041,7 @@ async def test_place_reducing_order_revalidates_position_and_requires_router_tok
     assert placed.strategy == payload["emergency_tag"]
 
 
-def test_emergency_dispatcher_uses_openalgo_planned_readback_not_bulk_sweeps() -> None:
+def test_emergency_dispatcher_uses_openalgo_planned_readback_not_bulk_sweeps(*, backend_lease_factory) -> None:
     import asyncio
 
     from flinttrade_engine.request_context import RequestContext
@@ -1096,7 +1096,7 @@ def test_emergency_dispatcher_uses_openalgo_planned_readback_not_bulk_sweeps() -
     router = BrokerRouter(
         {"openalgo": adapter},
         lambda _request_ctx, _adapter_id, _account_id: _session(),
-        consume_gate=safety_gate.consume,
+        consume_gate=safety_gate.consume, backend_lease_proof=backend_lease_factory()
     )
     request_ctx = RequestContext(
         jti="openalgo-planned-emergency",

@@ -290,10 +290,18 @@ def _intersect_grant_rights(grants: tuple[RightsGrant, ...]) -> UsageRights:
 
 
 def intersect_rights(*items: RightsGrant | RightsResolution) -> RightsResolution:
+    # An empty resolution is an input with unknown rights, not the absence of
+    # an input. Preserve that ceiling when flattening provenance for downstream
+    # LLMs, memory or ensembles; otherwise a permissive neighbour widens it.
+    unknown_input = RightsGrant(
+        grant_id="flinttrade-policy:unresolved-input",
+        basis=RightsBasis.FLINTTRADE_POLICY,
+        rights=UsageRights(),
+    )
     grants = tuple(
         grant
         for item in items
-        for grant in (item.grants if isinstance(item, RightsResolution) else (item,))
+        for grant in ((item.grants or (unknown_input,)) if isinstance(item, RightsResolution) else (item,))
     )
     grants = _canonical_grants(grants)
     return RightsResolution(rights=_intersect_grant_rights(grants), grants=grants)

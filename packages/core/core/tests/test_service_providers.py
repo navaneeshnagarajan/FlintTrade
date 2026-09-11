@@ -148,6 +148,28 @@ def test_licence_facts_bind_subject_identity_and_basis() -> None:
     assert fact.to_public_dict()["identifier"] == "provider/model"
 
 
+def test_combining_unknown_input_resolution_cannot_discard_its_restrictions() -> None:
+    allowed = RightsGrant(
+        grant_id="grant:allowed-source",
+        basis=RightsBasis.ENTITLEMENT,
+        rights=UsageRights(
+            commercial_use=PermissionState.ALLOWED,
+            production_use=PermissionState.ALLOWED,
+            output_use=PermissionState.ALLOWED,
+            max_evidence_use_scope=EvidenceUseScope.LIVE_DECISION,
+        ),
+        evidence=(_fact(RightsBasis.ENTITLEMENT),),
+    )
+    unknown_input = RightsResolution()
+    combined = intersect_rights(unknown_input, allowed)
+
+    assert combined.rights.max_evidence_use_scope is EvidenceUseScope.ISOLATED_RESEARCH
+    assert combined.rights.output_use is PermissionState.UNKNOWN
+    assert combined == intersect_rights(allowed, unknown_input)
+    assert intersect_rights(combined, allowed) == combined
+    assert intersect_rights(intersect_rights(), allowed) == combined
+
+
 def test_model_identity_requires_a_namespaced_provider_id() -> None:
     with pytest.raises(ValueError, match="namespaced"):
         ModelIdentity(

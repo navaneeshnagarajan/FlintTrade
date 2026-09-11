@@ -154,6 +154,27 @@ export async function post<T>(endpoint: string, body: object = {}, signal?: Abor
   return parseResponse<T>(resp, endpoint);
 }
 
+/** Account writes require a caller-owned logical action identity, never a per-fetch UUID. */
+export async function accountMutation<T>(
+  family: "api/v1" | "v1",
+  method: "POST" | "DELETE" | "PUT" | "PATCH",
+  endpoint: string,
+  idempotencyKey: string,
+  body?: object,
+): Promise<T> {
+  if (typeof idempotencyKey !== "string"
+    || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(idempotencyKey)) {
+    throw new Error("A canonical account action Idempotency-Key is required");
+  }
+  const resp = await fetch(`${getBase()}/${family}/${endpoint}`, {
+    method,
+    headers: { ...buildHeaders(body !== undefined), "Idempotency-Key": idempotencyKey },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  if (!resp.ok) await throwHttpError(resp, endpoint);
+  return parseResponse<T>(resp, endpoint);
+}
+
 /** POST to an extended live-write route with an immutable mode assertion. */
 export async function postWithMode<T>(
   endpoint: string,

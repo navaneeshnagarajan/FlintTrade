@@ -10,13 +10,14 @@
  * terminal client.
  */
 
-import { delV1, getV1, postV1, putV1 } from "@/services/ftApi.helpers";
+import { accountMutation, FtApiError, getV1, putV1 } from "@/services/ftApi.helpers";
 import type { BrokerInfo, BrokerAccount } from "@/types/broker";
 
 async function gateway<T>(request: Promise<T>): Promise<T> {
   try {
     return await request;
   } catch (error) {
+    if (error instanceof FtApiError) throw new FtApiError(`Gateway: ${error.message}`, error.status, error.data);
     if (error instanceof Error) throw new Error(`Gateway: ${error.message}`);
     throw error;
   }
@@ -44,12 +45,15 @@ export const gatewayApi = {
   listAccounts: (signal?: AbortSignal) =>
     gateway(getV1<{ accounts: BrokerAccount[] }>("accounts", signal)).then((r) => r.accounts),
 
-  removeAccount: (accountId: string) =>
-    gateway(delV1<{ status: string }>(`accounts/${encodeURIComponent(accountId)}`)),
+  removeAccount: (accountId: string, idempotencyKey: string) =>
+    gateway(accountMutation<{ status: string }>("v1", "DELETE",
+      `accounts/${encodeURIComponent(accountId)}`, idempotencyKey)),
 
-  reconnectAccount: (accountId: string) =>
-    gateway(postV1<{ account: BrokerAccount }>(`accounts/${encodeURIComponent(accountId)}/reconnect`)),
+  reconnectAccount: (accountId: string, idempotencyKey: string) =>
+    gateway(accountMutation<{ account: BrokerAccount }>("v1", "POST",
+      `accounts/${encodeURIComponent(accountId)}/reconnect`, idempotencyKey, {})),
 
-  setPrimary: (accountId: string) =>
-    gateway(postV1<{ account: BrokerAccount }>(`accounts/${encodeURIComponent(accountId)}/set-primary`)),
+  setPrimary: (accountId: string, idempotencyKey: string) =>
+    gateway(accountMutation<{ account: BrokerAccount }>("v1", "POST",
+      `accounts/${encodeURIComponent(accountId)}/set-primary`, idempotencyKey, {})),
 };
