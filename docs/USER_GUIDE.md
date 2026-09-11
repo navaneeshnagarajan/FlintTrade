@@ -307,6 +307,12 @@ refresh of Positions and Orders. No real money moved.
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
 
+On Explore `/trade` Positions → Heat, **Group by Exchange** and
+**Group by Sector** draw a labelled band per group (name chip plus
+exposure when there is room). Flat stays leaf-only. Positions with no
+exchange metadata show `No exchange groups in these positions` instead
+of an undifferentiated treemap.
+
 ### Learn → Practice Trading (OpenAlgo)
 
 This is a different path from the native Practice-mode sandbox on

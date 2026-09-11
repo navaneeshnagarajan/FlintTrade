@@ -52,6 +52,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Heatmap Group by Exchange shows labelled group bands (FT-TRADE-005).**
+  Explore `/trade` Positions → Heat → Group by Exchange (and
+  Group by Sector) now draws a labelled band per group: a
+  name chip (`NSE`, `NFO`, …) plus an optional exposure
+  sublabel, with a stronger gutter than the leaf-tile
+  borders. A single group still carries its label. Positions
+  with no exchange metadata show `No exchange groups in these
+  positions` instead of an undifferentiated treemap. Flat
+  stays leaf-only, with no group chrome.
+
 - **Explore Mutual Fund NAVs no longer claim a daily AMFI feed (FT-INVEST-001).**
   Explore `/invest#mutual-funds` now labels the fixture
   `Sample NAVs · as of 10-Sep-2026` and drops “Updated daily
