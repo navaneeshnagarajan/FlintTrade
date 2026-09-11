@@ -52,6 +52,15 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Heatmap Group by Exchange lacks visual group labels (FT-TRADE-005).**
+  Explore `/trade` Positions → Heat → Group by Exchange still
+  leaves the treemap visually undifferentiated — the selected
+  grouping is not apparent. Expected: clearly separated or
+  labelled exchange groups, or an honest empty if Explore
+  cannot group sample positions. Product fix waits for the
+  UI/UX Designer call on labels vs separators vs empty for
+  desk Heat grouping.
+
 - **Explore Mutual Fund NAVs no longer claim a daily AMFI feed (FT-INVEST-001).**
   Explore `/invest#mutual-funds` now labels the fixture
   `Sample NAVs · as of 10-Sep-2026` and drops “Updated daily

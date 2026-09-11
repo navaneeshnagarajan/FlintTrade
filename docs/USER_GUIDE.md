@@ -307,6 +307,13 @@ refresh of Positions and Orders. No real money moved.
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
 
+On Explore `/trade` Positions → Heat, **Group by Exchange** currently
+leaves the treemap visually undifferentiated — there are no group labels
+or clear separators, so the selected grouping is not apparent
+(FT-TRADE-005). Labels versus separators versus an honest empty (if
+Explore cannot group sample positions) wait for the UI/UX Designer
+call.
+
 ### Learn → Practice Trading (OpenAlgo)
 
 This is a different path from the native Practice-mode sandbox on
