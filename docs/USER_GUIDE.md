@@ -560,21 +560,28 @@ and Options Builder.
    (pure Python by default). Install the optional VectorBT extra for
    vectorised exploration, or opt in to the Rust `ticks` engine for
    tick-level precision.
-5. **Review.** **Total Return (%)**, **Net trade P&L (₹)**, equity curve,
+5. **Review.** **Total Return (%)**, **Net trade P&L (₹)** (or **Trade
+   log P&L** when net P&L is missing from the result), equity curve,
    Sharpe, Sortino, max drawdown, win rate, trade list, Monte Carlo
    confidence band.
 
 After a backtest run on Explore `/lab`, Review shows labelled dual
-metrics. **Total Return (%)** is the equity-curve start→end percentage,
-with subtitle `Equity curve · start→end` — not a sum of trades.
-**Net trade P&L (₹)** is the Trade Log P&L sum on the same rupee basis
-as the trade table. When Net trade P&L matches the equity-curve rupee
-change, a quiet `Reconciles with trade log` note appears. When they
-diverge (fees, open marks, partial fills), both numbers stay visible
-with `Trade log sum ≠ equity change — fees / open marks`. The helper
+metrics. **Total Return (%)** is initial capital → final equity
+(including a forced last-bar close), with subtitle
+`Initial capital → final equity` — not a sum of trades.
+**Net trade P&L (₹)** is the Trade Log net-P&L sum when every trade
+has net P&L. If net P&L is missing, the card is labelled **Trade log
+P&L** with subtitle `Gross — net P&L not in result` — never a gross
+sum called net. The trade table column is `Net P&L` when the basis is
+net, otherwise `P&L`. When the summed trade-log amount matches the
+equity-curve rupee change, a quiet `Reconciles with trade log` note
+appears. When they diverge (fees, open marks, partial fills), both
+numbers stay visible with
+`Trade log sum ≠ equity change — fees / open marks`. The helper
 is omitted when the trade log or equity curve is empty — nothing to
 reconcile. Monthly P&L stays labelled
-`Trade-based · sums Trade Log P&L` so the chart matches the log.
+`Trade-based · sums Trade Log P&L` so the chart matches the log
+on the same basis as the table.
 
 ### Forward Test
 
