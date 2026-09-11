@@ -189,6 +189,17 @@ describe("LearnRoute", () => {
     expect(verify.closest("button")).toBeNull();
   });
 
+  it("does not clip the glossary toggle focus ring with overflow-hidden", () => {
+    renderLearnRoute();
+    fireEvent.click(screen.getByRole("tab", { name: "Glossary" }));
+
+    const toggle = screen.getByText("Lot Size").closest("button");
+    expect(toggle).not.toBeNull();
+    const card = toggle!.closest("[data-slot='card']");
+    expect(card).not.toBeNull();
+    expect(card!.className).not.toMatch(/(?:^|\s)overflow-hidden(?:\s|$)/);
+  });
+
   it("keeps Lot Size source dated so NIFTY=25 / BANKNIFTY=15 cannot regress", () => {
     const src = readFileSync(join(process.cwd(), "src/routes/LearnRoute.tsx"), "utf8");
     expect(src).not.toMatch(/NIFTY\s*=\s*25/);

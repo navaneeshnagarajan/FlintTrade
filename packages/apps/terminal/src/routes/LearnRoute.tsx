@@ -382,7 +382,7 @@ function GlossaryItem({ entry }: GlossaryItemProps) {
   const [open, setOpen] = useState(false);
 
   return (
-    <GlassCard className="rounded-lg p-0 overflow-hidden hover:border-border-strong transition-colors duration-150">
+    <GlassCard className="rounded-lg p-0 hover:border-border-strong transition-colors duration-150">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
