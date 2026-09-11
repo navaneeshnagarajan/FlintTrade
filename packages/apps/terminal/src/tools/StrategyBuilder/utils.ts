@@ -53,7 +53,8 @@ export function validateLegs(legs: Leg[]): { valid: boolean; error: string | nul
   for (let i = 0; i < legs.length; i++) {
     if (legs[i].strike <= 0)  return { valid: false, error: `Leg ${i + 1}: strike must be > 0` };
     if (legs[i].lots < 1)     return { valid: false, error: `Leg ${i + 1}: lots must be >= 1` };
-    if (isPricedPremium(legs[i].premium) && legs[i].premium < 0) {
+    const premium = legs[i].premium;
+    if (isPricedPremium(premium) && premium < 0) {
       return { valid: false, error: `Leg ${i + 1}: premium must be >= 0` };
     }
   }
