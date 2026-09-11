@@ -589,13 +589,17 @@ premium blank so Payoff stays on that helper instead of modelling ₹0.
 Typing an explicit ₹0 is allowed. Payoff then treats cost as free and
 warns `Premium is ₹0 — payoff treats cost as free`.
 
-Debit/credit and max loss are position totals: Net Debit/Credit, Max
-Loss, and Max Profit use premium × lots × lot size. For a long call,
-Max Loss equals Net Debit. A muted sublabel
-`₹X per lot · N lots · lot size L` is optional, never the only number.
-Header and Legs chips use the same position basis as Payoff. If figures
-still cannot be reconciled, both are tagged `per lot` or `position` —
-never two unlabelled ₹.
+Debit/credit and max loss share a position ₹ basis. Net Debit/Credit
+is the signed premium × lots × lot size. Max Loss and Max Profit
+are expiry-payoff results (intrinsic at the strikes, strike width,
+or unlimited) shown on that same position basis — not
+premium × lots × lot size on every card. For a long call, Max Loss
+equals Net Debit. A muted sublabel
+`₹X per lot · N lots · lot size L` sits under those figures and is
+never the only number. Header and Legs chips use the same position
+basis as Payoff. When lots differ and a single per-lot breakdown
+cannot be formed, the primary figure is tagged `position` — never
+two unlabelled ₹ on mixed bases.
 
 ![Lab](screenshots/06-lab.png)
 
