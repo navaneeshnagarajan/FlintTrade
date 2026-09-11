@@ -175,7 +175,8 @@ describe("SecuritySection — quick-unlock PIN", () => {
     await screen.findByText("No PIN set");
 
     fillPinForm("hunter2secret", "123456", "654321");
-    fireEvent.click(screen.getByRole("button", { name: /set pin/i }));
+    expect(screen.getByRole("button", { name: /set pin/i })).toBeDisabled();
+    fireEvent.blur(screen.getByLabelText("Confirm new PIN"));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/do not match/i);
     expect(pinSetCalls).toHaveLength(0);
@@ -276,7 +277,9 @@ describe("SecuritySection — quick-unlock PIN", () => {
     await screen.findByText("No PIN set");
 
     fillPinForm("hunter2secret", "12345", "12345");
-    fireEvent.click(screen.getByRole("button", { name: /set pin/i }));
+    const button = screen.getByRole("button", { name: /set pin/i });
+    expect(button).toBeDisabled();
+    fireEvent.blur(screen.getByLabelText("New 6-digit PIN"));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "PIN must be exactly 6 digits",

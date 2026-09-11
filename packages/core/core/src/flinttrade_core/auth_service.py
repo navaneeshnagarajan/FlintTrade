@@ -57,11 +57,13 @@ _LOCKOUT_DURATION_SECONDS = 900  # 15 minutes
 
 
 _KDF_ITERATIONS: int = 390_000  # NIST-recommended minimum for PBKDF2-SHA256
-_PIN_RE = re.compile(r"^\d{6}$")
+# ASCII [0-9] only. Python ``\\d`` matches Unicode Nd (fullwidth digits
+# would otherwise pass); JS ``^\\d{6}$`` is [0-9]{6}.
+_PIN_RE = re.compile(r"^[0-9]{6}$")
 
 
 def _is_six_digit_pin(pin: str) -> bool:
-    """Return True when ``pin`` is exactly six ASCII digits (``^\\d{6}$``)."""
+    """Return True when ``pin`` is exactly six ASCII digits (JS ``^\\d{6}$``)."""
     return _PIN_RE.fullmatch(pin) is not None
 
 
