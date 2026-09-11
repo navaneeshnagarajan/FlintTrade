@@ -552,13 +552,16 @@ and Options Builder.
 5. **Review.** Equity curve, Sharpe, Sortino, max drawdown, win rate,
    trade list, Monte Carlo confidence band.
 
-**Pending (FT-LAB-004).** Explore `/lab` → select `sma_crossover` → run
-backtest: headline **Total Return** does not clearly reconcile with the
-trade-log P&L sum. Headline metrics must match the trade log on the same
-currency and basis, or carry an explicit note when the headline uses a
-different definition (equity curve versus sum of fills). The UI/UX
-Designer call on reconcile copy versus dual metrics labelling lands on
-this same PR; do not treat the two totals as the same figure until then.
+**Total Return vs Net trade P&L (FT-LAB-004).** Explore `/lab` backtest
+results show labelled dual metrics. **Total Return (%)** is the
+equity-curve start→end figure (subtitle `Equity curve · start→end`),
+not a sum of trades. **Net trade P&L (₹)** is the Trade Log P&L sum on
+the same rupee basis as the table. When that sum matches the equity
+change, a quiet `Reconciles with trade log` note appears; when they
+diverge (fees, open marks, partial fills) both numbers stay visible
+with `Trade log sum ≠ equity change — fees / open marks`. The helper
+is omitted when the trade log or equity curve is empty. Monthly P&L
+stays trade-based (sums Trade Log P&L).
 
 ### Forward Test
 
