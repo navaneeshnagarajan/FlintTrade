@@ -321,6 +321,7 @@ describe("OrderPadWidget", () => {
 describe("OrderPadWidget options premium prefill", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockMode.current = "practice";
   });
 
   function renderOptionsPad(): void {
@@ -391,6 +392,7 @@ describe("OrderPadWidget options premium prefill", () => {
 describe("OrderPadWidget F&O lot-size validation", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockMode.current = "practice";
     vi.spyOn(jotai, "useAtomValue").mockReturnValue(null);
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
