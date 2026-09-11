@@ -4308,7 +4308,7 @@ def test_connect_rolls_back_when_read_generation_refresh_returns_false(client, m
 
     workspace_before = _workspace_brokers(tmp_path)
     monkeypatch.setattr(routes, "_workspace_execution_default_is_disabled", lambda: True)
-    monkeypatch.setattr(routes, "_refresh_broker_dependencies_without_writes", lambda *_args: False)
+    monkeypatch.setattr(routes, "_refresh_broker_dependencies_without_writes", lambda *_args, **_kwargs: False)
 
     response = c.post(
         "/api/v1/native/accounts",
@@ -4345,7 +4345,7 @@ def test_relogin_rolls_back_when_read_generation_refresh_returns_false(client, m
     import flinttrade_core.native_account_routes as routes
 
     monkeypatch.setattr(routes, "_workspace_execution_default_is_disabled", lambda: True)
-    monkeypatch.setattr(routes, "_refresh_broker_dependencies_without_writes", lambda *_args: False)
+    monkeypatch.setattr(routes, "_refresh_broker_dependencies_without_writes", lambda *_args, **_kwargs: False)
 
     response = c.post(
         "/api/v1/native/accounts/upstox/READREFRESHRELOGIN/login",
@@ -4375,7 +4375,7 @@ def test_remove_reports_committed_runtime_failure_when_read_generation_refresh_r
     import flinttrade_core.native_account_routes as routes
 
     monkeypatch.setattr(routes, "_workspace_execution_default_is_disabled", lambda: True)
-    monkeypatch.setattr(routes, "_refresh_broker_dependencies_without_writes", lambda *_args: False)
+    monkeypatch.setattr(routes, "_refresh_broker_dependencies_without_writes", lambda *_args, **_kwargs: False)
 
     response = c.delete("/api/v1/native/accounts/upstox/READREFRESHREMOVE", headers=_h())
 

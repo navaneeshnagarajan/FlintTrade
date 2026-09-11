@@ -23,12 +23,13 @@ import os
 import secrets
 import time
 from collections import defaultdict
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
 from flask import Blueprint, current_app, jsonify, request
+
+from .operator_session import VerifiedOperatorSession
 
 logger = logging.getLogger("flinttrade.auth")
 
@@ -36,15 +37,6 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/v1/auth")
 
 _ACTOR_REFERENCE_DOMAIN = b"flinttrade:operator-actor-reference:v1\0"
 _SESSION_BINDING_DOMAIN = b"flinttrade:operator-session-binding:v1\0"
-
-
-@dataclass(frozen=True, slots=True)
-class VerifiedOperatorSession:
-    """Bounded proof from one successfully verified full operator session."""
-
-    actor_ref: str
-    session_binding: str
-    scopes: tuple[str, ...]
 
 
 class _OperatorSessionVerificationError(RuntimeError):

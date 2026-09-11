@@ -7,7 +7,6 @@ Physical composite keying does not activate cross-adapter duplicate creation.
 from __future__ import annotations
 
 import base64
-import ipaddress
 import json
 import os
 import re
@@ -22,7 +21,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from cryptography.fernet import Fernet
@@ -31,6 +29,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from flinttrade_core.broker_account_cutover import BrokerAccountCutoverUnavailable, require_broker_account_mutations
 from flinttrade_core.broker_identity import INT64_MAX, BrokerSelector, CredentialVersion, QuarantineRef
+from flinttrade_core.broker_setup import BrokerSetupValidationError, normalise_broker_setup
 from flinttrade_core.db import open_sqlite
 from flinttrade_core.secure_file import (
     HeldOwnerDirectory,
@@ -366,65 +365,10 @@ def _metadata(selector: BrokerSelector, broker: str, label: str) -> None:
 
 
 def _normalise_setup(selector: BrokerSelector, setup: dict[str, Any]) -> str:
-    """Validate a bounded OpenAlgo origin without DNS or client invocation."""
+    """Preserve the vault error boundary around shared non-invoking validation."""
     try:
-        if (
-            selector.adapter_id != "openalgo"
-            or type(setup) is not dict
-            or set(setup)
-            not in (
-                {"base_url"},
-                {"base_url", "ws_port"},
-            )
-        ):
-            raise ValueError
-        value = setup["base_url"]
-        if (
-            type(value) is not str
-            or len(value) > 2048
-            or not value.isascii()
-            or any(ord(c) <= 32 or ord(c) == 127 or c in "\\?#" for c in value)
-        ):
-            raise ValueError
-        parsed = urlsplit(value)
-        if (
-            parsed.scheme.lower() not in {"http", "https"}
-            or not parsed.netloc
-            or parsed.path not in {"", "/"}
-            or "@" in parsed.netloc
-            or "%" in parsed.netloc
-        ):
-            raise ValueError
-        authority = parsed.netloc
-        if authority.startswith("["):
-            end = authority.index("]")
-            host = "[" + str(ipaddress.IPv6Address(authority[1:end])) + "]"
-            tail = authority[end + 1 :]
-        else:
-            host, separator, port = authority.partition(":")
-            tail = separator + port
-            if (
-                not host
-                or len(host) > 253
-                or any(
-                    not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", part)
-                    for part in host.removesuffix(".").split(".")
-                )
-            ):
-                raise ValueError
-            host = host.lower()
-        if tail and (not re.fullmatch(r":[0-9]+", tail) or not 1 <= int(tail[1:]) <= 65535):
-            raise ValueError
-        result = {"base_url": parsed.scheme.lower() + "://" + host + tail}
-        if "ws_port" in setup:
-            if type(setup["ws_port"]) is not int or not 1 <= setup["ws_port"] <= 65535:
-                raise ValueError
-            result["ws_port"] = setup["ws_port"]
-        encoded = json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False)
-        if len(encoded.encode("utf-8")) > 4096:
-            raise ValueError
-        return encoded
-    except (ValueError, TypeError, OverflowError):
+        return normalise_broker_setup(selector, setup)
+    except BrokerSetupValidationError:
         raise CredentialValidationError from None
 
 

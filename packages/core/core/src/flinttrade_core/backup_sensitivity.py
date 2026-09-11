@@ -33,6 +33,11 @@ _PRIVATE_ROOTS = frozenset(
         "node_modules",
         "contracts",
         "engine-sandbox",
+        "account-coordinator",
+        "account-candidates",
+        "account-transaction-backups",
+        "account-receipts",
+        "account-auth-challenges",
     }
 )
 _DATABASES = frozenset(
@@ -71,6 +76,10 @@ _SECURITY_MEMBERS = frozenset(
         ".env",
         ".totp-migration.lock",
         ".action-center-migration.lock",
+        ".account-coordinator-binding.json",
+        ".account-coordinator-anchor.json",
+        ".account-coordinator-keys.json",
+        ".account-coordinator.lock",
     }
 )
 _WORKSPACE_MEMBERS = frozenset(

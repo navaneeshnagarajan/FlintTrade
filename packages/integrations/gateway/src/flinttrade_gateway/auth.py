@@ -15,14 +15,15 @@ from __future__ import annotations
 
 import logging
 import secrets
-import threading
 import time
+import uuid
 from functools import wraps
 from typing import Any
 
 from flask import Blueprint, current_app, g, jsonify, redirect, request
 
 from flinttrade_core.broker_account_cutover import guard_broker_account_http, mutation_admission_for
+from flinttrade_core.router_mutation_lease import RouterMutationLeaseToken
 
 from .adapter import BROKER_CATALOG
 from .exceptions import AuthFlowError, BrokerNotFoundError, CredentialError
@@ -682,21 +683,33 @@ def _rate_limit_generation_lease(handler: Any) -> Any:
     def wrapped(*args: Any, **kwargs: Any) -> Any:
         mutation_admission_for(current_app)()
         from flinttrade_core.app import _broker_router_drain_timeout  # noqa: PLC0415
+        from flinttrade_core.backend_instance import BackendLeaseUnavailable  # noqa: PLC0415
+        from flinttrade_core.router_mutation_lease import (  # noqa: PLC0415
+            RouterMutationLeaseUnavailable,
+            router_mutation_lease,
+        )
 
         app = current_app._get_current_object()
-        lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
-        if not lock.acquire(timeout=_broker_router_drain_timeout(app)):
-            return jsonify({"status": "error", "message": "Broker routing is busy"}), 503
         try:
-            return handler(*args, **kwargs)
-        finally:
-            lock.release()
+            with router_mutation_lease(
+                app,
+                uuid.uuid4(),
+                backend_lease_proof=app.config.get("BACKEND_LEASE_PROOF"),
+                timeout=_broker_router_drain_timeout(app),
+            ) as router_mutation_token:
+                return handler(
+                    *args,
+                    router_mutation_token=router_mutation_token,
+                    **kwargs,
+                )
+        except (BackendLeaseUnavailable, RouterMutationLeaseUnavailable):
+            return jsonify({"status": "error", "message": "Broker routing is busy"}), 503
     return wrapped
 
 
 @gateway_bp.route("/rate-limits", methods=["PUT"])
 @_rate_limit_generation_lease
-def update_rate_limits() -> Any:
+def update_rate_limits(*, router_mutation_token: RouterMutationLeaseToken) -> Any:
     """Set a broker's order/data API rate limit (requests/sec; 0 = unlimited).
 
     Body: ``{ "broker_id": str, "order"?: number, "data"?: number }``. The change
@@ -744,7 +757,10 @@ def update_rate_limits() -> Any:
         if "REGISTRY" in current_app.config:
             from flinttrade_core.app import retire_broker_dependencies  # noqa: PLC0415
 
-            if not retire_broker_dependencies(current_app._get_current_object()):
+            if not retire_broker_dependencies(
+                current_app._get_current_object(),
+                router_mutation_token=router_mutation_token,
+            ):
                 return jsonify({"status": "error", "message": "Broker routing is busy"}), 503
         ws.update(update_override)
     except Exception:  # noqa: BLE001 - rejected authority must stay fail-closed
@@ -759,12 +775,19 @@ def update_rate_limits() -> Any:
 
         registry = _registry()
         client = app.config.get("CLIENT")
-        rebuilt = configure_broker_router(app, registry, app.config.get("CREDENTIAL_STORE"), client)
+        rebuilt = configure_broker_router(
+            app,
+            registry,
+            app.config.get("CREDENTIAL_STORE"),
+            client,
+            router_mutation_token=router_mutation_token,
+        )
         if not rebuilt and not broker_reads_published_without_writes(
             app,
             previous_dependencies=previous_dependencies,
             registry=registry,
             openalgo_client=client,
+            router_mutation_token=router_mutation_token,
         ):
             return jsonify({"status": "error", "message": "Broker routing unavailable"}), 503
         limiter = _live_rate_limiter()

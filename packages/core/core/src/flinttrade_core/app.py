@@ -37,7 +37,7 @@ import signal
 import threading
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass, replace
 from functools import wraps
 from pathlib import Path
@@ -113,6 +113,12 @@ from .request_observability import (  # noqa: E402
     reset_safe_request_summary,
     sentry_event_is_secret,
     set_safe_request_summary,
+)
+from .router_mutation_lease import (  # noqa: E402
+    RouterMutationLeaseToken,
+    RouterMutationLeaseUnavailable,
+    require_router_mutation_token,
+    router_mutation_lease,
 )
 from .secure_file import write_secret_text as _write_secret_text  # noqa: E402
 from .service_connection_store import ServiceConnectionStore  # noqa: E402
@@ -2552,7 +2558,29 @@ def _broker_router_drain_timeout(app: Flask) -> float:
         return 10.0
 
 
-def retire_broker_router_generation(app: Flask, *, timeout: float | None = None) -> bool:
+def _router_mutation_scope(
+    app: Flask,
+    *,
+    timeout: float,
+    router_mutation_token: RouterMutationLeaseToken | None,
+) -> ContextManager[RouterMutationLeaseToken]:
+    """Return a standalone lease or validate one explicitly held by a caller."""
+    if router_mutation_token is not None:
+        return nullcontext(require_router_mutation_token(app, router_mutation_token))
+    return router_mutation_lease(
+        app,
+        uuid.uuid4(),
+        backend_lease_proof=app.config.get("BACKEND_LEASE_PROOF"),
+        timeout=timeout,
+    )
+
+
+def retire_broker_router_generation(
+    app: Flask,
+    *,
+    timeout: float | None = None,
+    router_mutation_token: RouterMutationLeaseToken | None = None,
+) -> bool:
     """Unpublish and permanently retire the current routing generation.
 
     A timed-out generation remains strongly referenced in app config so a
@@ -2563,9 +2591,17 @@ def retire_broker_router_generation(app: Flask, *, timeout: float | None = None)
     Safety reset follows the same outer-lease-first order and never acquires
     this lock from inside the kill-switch condition.
     """
-    rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
     drain_timeout = _broker_router_drain_timeout(app) if timeout is None else max(0.0, timeout)
-    if not rebuild_lock.acquire(timeout=drain_timeout):
+    lease_stack = ExitStack()
+    try:
+        lease_stack.enter_context(
+            _router_mutation_scope(
+                app,
+                timeout=drain_timeout,
+                router_mutation_token=router_mutation_token,
+            )
+        )
+    except (BackendLeaseUnavailable, RouterMutationLeaseUnavailable):
         logger.critical("BrokerRouter retirement timed out waiting for the routing-generation lease")
         return False
     try:
@@ -2604,15 +2640,28 @@ def retire_broker_router_generation(app: Flask, *, timeout: float | None = None)
             app.config["BROKER_ROUTER_DRAINING"] = None
         return True
     finally:
-        rebuild_lock.release()
+        lease_stack.close()
 
 
-def retire_broker_dependencies(app: Flask, *, timeout: float | None = None) -> bool:
+def retire_broker_dependencies(
+    app: Flask,
+    *,
+    timeout: float | None = None,
+    router_mutation_token: RouterMutationLeaseToken | None = None,
+) -> bool:
     """Invalidate and drain the exact shared read/write dependency generation."""
-    rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
     drain_timeout = _broker_router_drain_timeout(app) if timeout is None else max(0.0, timeout)
     deadline = time.monotonic() + drain_timeout
-    if not rebuild_lock.acquire(timeout=drain_timeout):
+    lease_stack = ExitStack()
+    try:
+        lease_stack.enter_context(
+            _router_mutation_scope(
+                app,
+                timeout=drain_timeout,
+                router_mutation_token=router_mutation_token,
+            )
+        )
+    except (BackendLeaseUnavailable, RouterMutationLeaseUnavailable):
         logger.critical("Broker dependency retirement timed out waiting for the generation lease")
         return False
     try:
@@ -2685,35 +2734,54 @@ def retire_broker_dependencies(app: Flask, *, timeout: float | None = None) -> b
             app.config["BROKER_ROUTER_DRAINING"] = None
         return True
     finally:
-        rebuild_lock.release()
+        lease_stack.close()
 
 
-def _publish_broker_dependencies(app: Flask, dependencies: _BrokerRuntimeDependencies) -> bool:
+def _publish_broker_dependencies(
+    app: Flask,
+    dependencies: _BrokerRuntimeDependencies,
+    *,
+    router_mutation_token: RouterMutationLeaseToken | None = None,
+) -> bool:
     """Publish one validated dependency record and borrowed compatibility views."""
-    if app.config.get("RUNTIME_ACCEPTING_REQUESTS", True) is not True:
+    lease_stack = ExitStack()
+    try:
+        lease_stack.enter_context(
+            _router_mutation_scope(
+                app,
+                timeout=_broker_router_drain_timeout(app),
+                router_mutation_token=router_mutation_token,
+            )
+        )
+    except (BackendLeaseUnavailable, RouterMutationLeaseUnavailable):
         return False
-    if app.extensions.get("flinttrade_broker_dependencies_draining") is not None:
-        return False
-    current = app.extensions.get("flinttrade_broker_dependencies")
-    if current is not None and current is not dependencies:
-        return False
-    owner = dependencies.registry_publication_owner
-    if (
-        type(owner) is not RegistryPublicationOwner
-        or not owner.owns(dependencies.registry)
-        or app.extensions.get("flinttrade.registry_publication_owner") is not owner
-        or app.config.get("REGISTRY") is not dependencies.registry
-    ):
-        return False
-    app.extensions["flinttrade_broker_dependencies"] = dependencies
-    app.config["OPENALGO_CLIENT"] = dependencies.openalgo_client
-    app.config["SMART_ROUTING"] = dict(dependencies.brokers_config.get("smart_routing") or {})
-    app.config["NATIVE_ADAPTERS"] = dependencies.native_adapters
-    app.config["ACTIVE_BROKER_ADAPTERS"] = dependencies.adapters
-    app.config["ORDER_LIFECYCLE_LEDGER"] = dependencies.lifecycle_store
-    app.config["LOCAL_STATE_PROVIDER"] = dependencies.lifecycle_store
-    app.config["RECONCILE_TARGETS"] = None
-    return True
+    try:
+        if app.config.get("RUNTIME_ACCEPTING_REQUESTS", True) is not True:
+            return False
+        if app.extensions.get("flinttrade_broker_dependencies_draining") is not None:
+            return False
+        current = app.extensions.get("flinttrade_broker_dependencies")
+        if current is not None and current is not dependencies:
+            return False
+        owner = dependencies.registry_publication_owner
+        if (
+            type(owner) is not RegistryPublicationOwner
+            or not owner.owns(dependencies.registry)
+            or app.extensions.get("flinttrade.registry_publication_owner") is not owner
+            or app.config.get("REGISTRY") is not dependencies.registry
+        ):
+            return False
+        app.extensions["flinttrade_broker_dependencies"] = dependencies
+        app.config["OPENALGO_CLIENT"] = dependencies.openalgo_client
+        app.config["SMART_ROUTING"] = dict(dependencies.brokers_config.get("smart_routing") or {})
+        app.config["NATIVE_ADAPTERS"] = dependencies.native_adapters
+        app.config["ACTIVE_BROKER_ADAPTERS"] = dependencies.adapters
+        app.config["ORDER_LIFECYCLE_LEDGER"] = dependencies.lifecycle_store
+        app.config["LOCAL_STATE_PROVIDER"] = dependencies.lifecycle_store
+        app.config["RECONCILE_TARGETS"] = None
+        return True
+    finally:
+        lease_stack.close()
 
 
 def broker_reads_published_without_writes(
@@ -2722,10 +2790,19 @@ def broker_reads_published_without_writes(
     previous_dependencies: Any,
     registry: Any,
     openalgo_client: Any,
+    router_mutation_token: RouterMutationLeaseToken | None = None,
 ) -> bool:
     """Verify one newly published read generation with writes intentionally off."""
-    rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
-    if not rebuild_lock.acquire(timeout=_broker_router_drain_timeout(app)):
+    lease_stack = ExitStack()
+    try:
+        lease_stack.enter_context(
+            _router_mutation_scope(
+                app,
+                timeout=_broker_router_drain_timeout(app),
+                router_mutation_token=router_mutation_token,
+            )
+        )
+    except (BackendLeaseUnavailable, RouterMutationLeaseUnavailable):
         return False
     try:
         dependencies = app.extensions.get("flinttrade_broker_dependencies")
@@ -2767,7 +2844,7 @@ def broker_reads_published_without_writes(
     except Exception:
         return False
     finally:
-        rebuild_lock.release()
+        lease_stack.close()
 
 
 def _broker_write_readiness(app: Flask) -> tuple[Any, Callable[[bool, str], ContextManager[None]]] | None:
@@ -2793,11 +2870,24 @@ def _broker_write_readiness(app: Flask) -> tuple[Any, Callable[[bool, str], Cont
     return safety, write_admission
 
 
-def _configure_broker_writes(app: Flask, dependencies: _BrokerRuntimeDependencies) -> bool:
+def _configure_broker_writes(
+    app: Flask,
+    dependencies: _BrokerRuntimeDependencies,
+    *,
+    router_mutation_token: RouterMutationLeaseToken | None = None,
+) -> bool:
     """Retry or publish writes from the exact current prepared dependency record."""
-    rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
     rebuild_timeout = _broker_router_drain_timeout(app)
-    if not rebuild_lock.acquire(timeout=rebuild_timeout):
+    lease_stack = ExitStack()
+    try:
+        active_token = lease_stack.enter_context(
+            _router_mutation_scope(
+                app,
+                timeout=rebuild_timeout,
+                router_mutation_token=router_mutation_token,
+            )
+        )
+    except (BackendLeaseUnavailable, RouterMutationLeaseUnavailable):
         logger.critical("BrokerRouter write configuration timed out waiting for the generation lease")
         return False
 
@@ -2836,7 +2926,11 @@ def _configure_broker_writes(app: Flask, dependencies: _BrokerRuntimeDependencie
 
     def retire_stale_dependency() -> None:
         if app.extensions.get("flinttrade_broker_dependencies") is dependencies:
-            retire_broker_dependencies(app, timeout=0.0)
+            retire_broker_dependencies(
+                app,
+                timeout=0.0,
+                router_mutation_token=active_token,
+            )
 
     try:
         if app.extensions.get("flinttrade_broker_dependencies") is not dependencies:
@@ -2848,7 +2942,11 @@ def _configure_broker_writes(app: Flask, dependencies: _BrokerRuntimeDependencie
         ):
             retire_stale_dependency()
             return False
-        if not retire_broker_router_generation(app, timeout=0.0):
+        if not retire_broker_router_generation(
+            app,
+            timeout=0.0,
+            router_mutation_token=active_token,
+        ):
             return False
         readiness = _broker_write_readiness(app)
         if readiness is None or not execution_default_is_available():
@@ -2895,7 +2993,7 @@ def _configure_broker_writes(app: Flask, dependencies: _BrokerRuntimeDependencie
         app.config["RECONCILE_TARGETS"] = reconcile_targets
         return True
     finally:
-        rebuild_lock.release()
+        lease_stack.close()
 
 
 def configure_broker_router(
@@ -2903,19 +3001,33 @@ def configure_broker_router(
     registry: Any,
     credential_store: Any,
     openalgo_client: Any,
+    *,
+    router_mutation_token: RouterMutationLeaseToken | None = None,
 ) -> bool:
     """Refresh shared broker dependencies once, then independently attempt writes."""
-    rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
     rebuild_timeout = _broker_router_drain_timeout(app)
-    if not rebuild_lock.acquire(timeout=rebuild_timeout):
+    lease_stack = ExitStack()
+    try:
+        active_token = lease_stack.enter_context(
+            _router_mutation_scope(
+                app,
+                timeout=rebuild_timeout,
+                router_mutation_token=router_mutation_token,
+            )
+        )
+    except (BackendLeaseUnavailable, RouterMutationLeaseUnavailable):
         logger.critical("BrokerRouter rebuild timed out waiting for the routing-generation lease")
         return False
     try:
         if not app.config.get("RUNTIME_ACCEPTING_REQUESTS", True):
             logger.warning("BrokerRouter rebuild refused while the runtime is shutting down")
-            retire_broker_dependencies(app)
+            retire_broker_dependencies(app, router_mutation_token=active_token)
             return False
-        if not retire_broker_dependencies(app, timeout=rebuild_timeout):
+        if not retire_broker_dependencies(
+            app,
+            timeout=rebuild_timeout,
+            router_mutation_token=active_token,
+        ):
             logger.critical("Broker dependency refresh aborted because the prior generation did not drain")
             return False
 
@@ -3002,12 +3114,20 @@ def configure_broker_router(
             dependencies.read_owner.close(timeout=0.0)
             logger.warning("Broker dependencies discarded because shutdown began during rebuild")
             return False
-        if not _publish_broker_dependencies(app, dependencies):
+        if not _publish_broker_dependencies(
+            app,
+            dependencies,
+            router_mutation_token=active_token,
+        ):
             dependencies.read_owner.close(timeout=0.0)
             return False
-        return _configure_broker_writes(app, dependencies)
+        return _configure_broker_writes(
+            app,
+            dependencies,
+            router_mutation_token=active_token,
+        )
     finally:
-        rebuild_lock.release()
+        lease_stack.close()
 
 
 def _bind_runtime_emergency_dispatcher(
@@ -5373,13 +5493,22 @@ def create_flask_app(
         @wraps(handler)
         def serialised(*args: Any, **kwargs: Any) -> Any:
             with openalgo_config_lock:
-                rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
-                if not rebuild_lock.acquire(timeout=_broker_router_drain_timeout(app)):
-                    return jsonify({"status": "error", "message": "Broker routing is busy"}), 503
+                if request.method != "POST":
+                    return handler(*args, router_mutation_token=None, **kwargs)
                 try:
-                    return handler(*args, **kwargs)
-                finally:
-                    rebuild_lock.release()
+                    with router_mutation_lease(
+                        app,
+                        uuid.uuid4(),
+                        backend_lease_proof=app.config.get("BACKEND_LEASE_PROOF"),
+                        timeout=_broker_router_drain_timeout(app),
+                    ) as router_mutation_token:
+                        return handler(
+                            *args,
+                            router_mutation_token=router_mutation_token,
+                            **kwargs,
+                        )
+                except (BackendLeaseUnavailable, RouterMutationLeaseUnavailable):
+                    return jsonify({"status": "error", "message": "Broker routing is busy"}), 503
 
         return serialised
 
@@ -5402,7 +5531,10 @@ def create_flask_app(
     @app.route("/v1/config/openalgo", methods=["GET", "POST"])
     @limiter.limit("10 per minute")
     @_serialise_openalgo_config
-    def _set_openalgo_config() -> Any:
+    def _set_openalgo_config(
+        *,
+        router_mutation_token: RouterMutationLeaseToken | None,
+    ) -> Any:
         """Persist OpenAlgo connection settings from the UI.
 
         Security: writes and unauthenticated status probes are loopback-only.
@@ -5567,7 +5699,10 @@ def create_flask_app(
             client_replacement_required = not isinstance(old_client, OpenAlgoClient)
             dependency_refresh_requested = broker_change_requested or client_replacement_required
             prior_dependencies = app.extensions.get("flinttrade_broker_dependencies")
-            if dependency_refresh_requested and not retire_broker_dependencies(app):
+            if dependency_refresh_requested and not retire_broker_dependencies(
+                app,
+                router_mutation_token=router_mutation_token,
+            ):
                 return jsonify({"status": "error", "message": "Broker routing could not drain"}), 503
             ws.update(update_openalgo)
             candidate_settings = candidate["settings"]
@@ -5611,13 +5746,20 @@ def create_flask_app(
             app.config["OPENALGO_CLIENT"] = new_client
             broker_reads_refreshed_without_writes = False
             if dependency_refresh_requested:
-                broker_router_rebuilt = configure_broker_router(app, registry, credential_store, new_client) is True
+                broker_router_rebuilt = configure_broker_router(
+                    app,
+                    registry,
+                    credential_store,
+                    new_client,
+                    router_mutation_token=router_mutation_token,
+                ) is True
                 if broker_router_rebuilt is False:
                     broker_reads_refreshed_without_writes = broker_reads_published_without_writes(
                         app,
                         previous_dependencies=prior_dependencies,
                         registry=registry,
                         openalgo_client=new_client,
+                        router_mutation_token=router_mutation_token,
                     )
         except Exception as exc:
             diagnostic = _sanitise_tick_capture_error(exc, api_key)

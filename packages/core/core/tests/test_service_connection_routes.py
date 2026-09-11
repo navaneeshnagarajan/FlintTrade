@@ -437,12 +437,7 @@ def test_real_app_composition_is_lazy_inert_and_cors_bounded(tmp_path, monkeypat
         set_safe_request_summary,
     )
     from flinttrade_core.service_providers import ServiceProviderCatalogue
-    from flinttrade_gateway.registry import create_owned_registry
-
     safety = MagicMock(order_reservations_durable=True)
-    registry, registry_owner = create_owned_registry()
-    credentials = MagicMock()
-    credentials.list_accounts.return_value = []
     contract_manager = MagicMock()
     injected = ServiceConnectionStore(tmp_path)
     audit = RecordingAudit()
@@ -546,14 +541,14 @@ def test_real_app_composition_is_lazy_inert_and_cors_bounded(tmp_path, monkeypat
         app = create_flask_app(
             safety=safety,
             audit=audit,
-            registry=registry,
-            registry_publication_owner=registry_owner,
-            credential_store=credentials,
             contract_manager=contract_manager,
             service_provider_catalogue=ServiceProviderCatalogue(()),
             service_connection_store=injected,
         )
         app.config["TESTING"] = True
+        assert app.config["REGISTRY"] is None
+        assert app.config["CREDENTIAL_STORE"] is None
+        assert app.config["BROKER_ROUTER"] is None
 
         def unhandled_secret_failure():
             raise RuntimeError("credential must never reach diagnostics")

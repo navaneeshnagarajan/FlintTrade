@@ -354,7 +354,7 @@ def test_openalgo_key_reload_drains_old_router_before_reconfiguring_and_rebinds(
         return original(settings)
     monkeypatch.setattr(shared, "reconfigure", reconfigure)
     replacement = object()
-    def rebuild(application, *_args):
+    def rebuild(application, *_args, **_kwargs):
         application.config["BROKER_ROUTER"] = replacement
         return True
     monkeypatch.setattr(app_module, "configure_broker_router", rebuild)
