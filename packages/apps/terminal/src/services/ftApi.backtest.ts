@@ -20,6 +20,8 @@ export interface BacktestTrade {
   entry_price: number;
   exit_price: number;
   pnl: number;
+  /** Net P&L after charges. Present on live ``/backtest/run``; optional on older/demo rows. */
+  net_pnl?: number;
   commission: number;
   bars_held: number;
 }
@@ -276,6 +278,7 @@ function createDemoBacktestResult(config: BacktestConfig): BacktestResult {
       entry_price: Number(entryPrice.toFixed(2)),
       exit_price: Number(exitPrice.toFixed(2)),
       pnl,
+      net_pnl: pnl,
       commission: 40,
       bars_held: 75 + index * 8,
     };
