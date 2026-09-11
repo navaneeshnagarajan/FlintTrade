@@ -44,6 +44,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { buildCompactOptionSymbol, normaliseExpiryForOptionSymbol } from "@/lib/optionSymbols";
+import { sampleChainOptionLtp } from "@/lib/sampleOptionChain";
 import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import {
   requireCurrentBrokerCapabilityScope,
@@ -2045,9 +2046,8 @@ function makeMockOptionChain(symbol = "NIFTY", exchange = "NSE_INDEX"): Record<s
     const offset = index - 10;
     const strike = atm + offset * step;
     const distance = Math.abs(offset);
-    const timeValue = step * 0.9 * Math.exp(-distance / 5);
-    const makeLeg = (intrinsic: number, oiBias: number) => ({
-      ltp: Math.round((Math.max(intrinsic, 0) + timeValue) * 100) / 100,
+    const makeLeg = (optionType: "CE" | "PE", oiBias: number) => ({
+      ltp: sampleChainOptionLtp(spot, strike, step, optionType),
       oi: Math.round((120_000 - distance * 8_000 + oiBias) * (1 + (distance % 3) * 0.1)),
       volume: Math.max(500, 40_000 - distance * 3_200),
       iv: Math.round((12 + distance * distance * 0.18 + (oiBias > 0 ? 0.6 : 0)) * 100) / 100,
@@ -2058,8 +2058,8 @@ function makeMockOptionChain(symbol = "NIFTY", exchange = "NSE_INDEX"): Record<s
     });
     return {
       strike,
-      ce: makeLeg(spot - strike, offset > 0 ? 15_000 : 0),
-      pe: makeLeg(strike - spot, offset < 0 ? 15_000 : 0),
+      ce: makeLeg("CE", offset > 0 ? 15_000 : 0),
+      pe: makeLeg("PE", offset < 0 ? 15_000 : 0),
     };
   });
   const totalCallOi = chain.reduce((sum, row) => sum + row.ce.oi, 0);

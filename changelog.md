@@ -52,16 +52,15 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
-- **Options Builder Explore Long Call Payoff shows zero premium (FT-LAB-003).**
-  Explore `/lab` Options Builder → Long Call → Payoff still
-  shows Premium ₹0, max premium ₹0, and max loss ₹0, so the
-  payoff reads as free. Possible follow-on from FT-LAB-001
-  (#188), which fixed unbounded max profit / max loss =
-  premium / breakeven for zero-premium long calls but left
-  Explore seeding Premium ₹0. Expected: a realistic or
-  labelled sample premium and a non-zero max loss for a
-  long call with a sample underlying. Product fix waits for
-  the UI/UX Designer call on empty vs sample-premium honesty.
+- **Options Builder Explore Long Call no longer looks zero-risk (FT-LAB-003).**
+  Explore `/lab` Options Builder now treats a blank premium as
+  unknown: Payoff summary cards show `—` and
+  `Enter premium to model payoff` instead of modelling ₹0.
+  The Long Call template seeds the Explore sample-chain ATM CE
+  LTP, labelled `Sample premium — edit to model`, so Max Loss
+  and breakeven follow FT-LAB-001 maths on a non-zero cost.
+  Typing an explicit ₹0 still uses that maths and warns
+  `Premium is ₹0 — payoff treats cost as free`.
 
 - **Security PIN requires exactly six digits (FT-SET-003).**
   Explore `/settings#security` keeps New and Confirm as digits-only
