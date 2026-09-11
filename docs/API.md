@@ -71,7 +71,6 @@ identically to regular orders.
 | `ping` | Health check (POST). |
 | `analyzer` | Read sandbox / analyzer mode status. |
 | `analyzer/toggle` | Toggle sandbox / live mode. |
-| `pnl/symbols` | P&L breakdown per symbol. |
 
 ### Data
 
@@ -92,11 +91,12 @@ identically to regular orders.
 | `syntheticfuture` | Synthetic future from CE - PE + strike. Same required fields as `optionchain`: `underlying`, `exchange`, and `expiry_date` (`DDMMMYY`). FlintTrade helpers refuse a missing expiry before posting; raw HTTP still reaches OpenAlgo. |
 | `ticker/{exchange}:{symbol}` (**GET**) | Dated historical helper on the Python client only (`apikey`, `interval`, `from`, `to` query params). Not the live polling path — polling uses POST `quotes`. Missing `from`/`to` fails closed. |
 | `instruments` (**GET**) | Instrument master for an exchange. Requires `apikey` and `exchange` query params. When no exchange is given, FlintTrade queries `NFO` / `BFO` / `MCX` / `CDS`. |
-| `gex` | Gamma Exposure curve. |
-| `iv_smile` | Implied-volatility smile curve. |
-| `max_pain` | Max-pain strike calculation. |
-| `oi_profile` | Open-Interest profile by strike. |
-| `chart` (**GET/POST**) | Chart-preference get/set. |
+
+`gex`, `iv_smile`, `max_pain`, `oi_profile`, `pnl/symbols`, and `chart` are
+**not** OpenAlgo passthroughs. The `OpenAlgoClient` wrappers were removed
+because those routes do not exist upstream. GEX / IV smile / max-pain / OI
+profile are FlintTrade analysis routes below. Chart preferences are
+FlintTrade `GET`/`POST` `/api/v1/chart`.
 
 ### Utilities
 
@@ -137,7 +137,7 @@ endpoints are marked.
 
 | Endpoint | Purpose |
 |---|---|
-| `gex` (**POST**) | Gamma Exposure dashboard data (alternative to the OpenAlgo passthrough; computed locally on historical chains). |
+| `gex` (**POST**) | FlintTrade analysis route: Gamma Exposure dashboard data, computed locally on historical chains. |
 | `volsurface` (**POST**) | Volatility surface across strikes and expiries. |
 | `ivsmile` (**POST**) | IV smile curve. |
 | `straddlepnl` (**POST**) | Live straddle P&L for an at-the-money pair. |
@@ -149,6 +149,15 @@ endpoints are marked.
 | `screener/arbitrage` (**POST**) | Cash-future and cross-exchange arbitrage scan. |
 | `candlestick-patterns` (**POST**) | Candlestick pattern detection over OHLCV history. |
 | `/v1/index-contribution` (**GET**) | Index constituent contribution — `breadth_bp` at `/v1`, not `analysis_bp`. |
+
+### Chart preferences (`/api/v1/chart`)
+
+Source: `packages/core/core/src/flinttrade_core/chart_prefs_routes.py`.
+FlintTrade-owned UI store — not an OpenAlgo passthrough.
+
+| Endpoint | Purpose |
+|---|---|
+| `chart` (**GET/POST**) | Chart-preference get/set. |
 
 ### Legacy gateway accounts (`/v1/*`; Vite proxy `/ft-api/v1/*`)
 
@@ -351,7 +360,7 @@ The blueprint mounts at `/api/v1/strategies`. Backed by the
 
 | Endpoint | Purpose |
 |---|---|
-| `strategies/uploaded` (**GET**) | List uploaded user strategies. |
+| `strategies` (**GET**) | List uploaded user strategies (engine runner). Lab also lists the same runner via `GET /api/v1/backtest/strategies/uploaded`. There is no `/api/v1/strategies/uploaded` route. |
 | `strategies/upload` (**POST**) | Upload + validate a strategy. |
 | `strategies/<id>/start` · `…/stop` (**POST**) | Start / stop a running strategy. |
 | `strategies/<id>/logs` (**GET**) | Tail a strategy's logs. |

@@ -295,14 +295,14 @@ claim — switching to Live requires a deliberate confirmation step.
    front-month future. Select it.
 5. Set Quantity = 1 lot (50). Choose **MARKET**. Side = **BUY**.
 6. Click **Practice Buy** and confirm the Practice review. The order
-   appears in the **Positions** widget immediately; the **Orderbook**
+   appears in the **Positions** widget immediately; the **Orders**
    widget shows it as filled (simulated).
 7. Close the position from the Positions widget. Confirm your simulated
    P&L is recorded in the **P&L Monitor** widget.
 
 You have just exercised the full FlintTrade order path — front-end → JWT
 guard → mode guard → FlintTrade sandbox → simulated fill → REST
-refresh of Positions and Orderbook. No real money moved.
+refresh of Positions and Orders. No real money moved.
 
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
@@ -837,7 +837,7 @@ when it detects the 401.
    **Practice Buy** on `/trade` records a local sample fill after Practice
    review (no broker). Switch to **Practice** for the native sandbox
    path, or unlock **Live** for a real broker order.
-2. Open the **Orderbook** widget and look at the rejection reason column.
+2. Open the **Orders** widget and look at the rejection reason column.
 3. Check the FlintTrade backend logs — the console where you ran
    `python scripts/ft.py start` (or `make start`) — every rejected order is
    logged with the safety-layer that blocked it.
@@ -879,19 +879,10 @@ ensure the running user has write access.
 - **security.md** — for security issues (private disclosure via GitHub
   Security Advisories).
 
-If your issue requires a backend log, raise the log level and attach the
-relevant lines (redact any broker account IDs or tokens first):
-
-```bash
-# macOS / Linux
-FLINTTRADE_LOG_LEVEL=DEBUG python scripts/ft.py start
-```
-
-```powershell
-# Windows 10/11
-$env:FLINTTRADE_LOG_LEVEL = "DEBUG"
-python scripts/ft.py start
-```
+If your issue requires a backend log, attach the relevant lines from the
+console where you ran `python scripts/ft.py start`, or from the persistent
+log at `<workspace>/logs/flinttrade.log` (redact any broker account IDs or
+tokens first).
 
 ---
 
