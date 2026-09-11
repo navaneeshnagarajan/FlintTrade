@@ -16,13 +16,17 @@
  *
  * Click fires flinttrade:open-command-palette; keyboard handling is owned by
  * the active route's global shortcut layer.
+ *
+ * Skinny windows (FT-MOBILE-002): ticker hides under ~480px; at ~390px
+ * Workspace and secondary chrome move into a More sheet so Mode stays
+ * reachable and the bar does not scroll sideways.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router";
 import { AnimatePresence } from "framer-motion";
-import { Search, Maximize2, Minimize2, Settings, Wrench } from "lucide-react";
+import { Search, Maximize2, Minimize2, MoreHorizontal, Settings, Wrench } from "lucide-react";
 import { LogoIcon } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -48,6 +52,8 @@ import QuickAccessPanel from "./QuickAccessPanel";
 import TickerMarquee from "./TickerMarquee";
 import type { TickerMode } from "./TickerMarquee";
 import ToolsDropdown from "./ToolsDropdown";
+import TopBarMoreSheet, { MoreRow } from "./TopBarMoreSheet";
+import { useChromeCollapse } from "./useChromeCollapse";
 
 // ---------------------------------------------------------------------------
 // ISTClock
@@ -86,7 +92,13 @@ function ISTClock() {
 // MarketStatus — explicit NSE session state, separate from Live execution mode
 // ---------------------------------------------------------------------------
 
-function MarketSessionStatus() {
+function compactSessionLabel(status: MarketSessionInfo["status"]): string {
+  if (status === "open") return "Open";
+  if (status === "unavailable") return "N/A";
+  return "Closed";
+}
+
+function MarketSessionStatus({ compact = false }: { compact?: boolean }) {
   const { data: timings, dataUpdatedAt, isError, isLoading } = useTimings();
   const currentStatus = useCallback(() => {
     const timingIsTrustworthy =
@@ -138,7 +150,7 @@ function MarketSessionStatus() {
               : "text-text-muted"
         }`}
       >
-        {statusInfo.label}
+        {compact ? compactSessionLabel(statusInfo.status) : statusInfo.label}
       </span>
     </div>
   );
@@ -274,12 +286,17 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   const mode = useModeStore((s) => s.mode);
   const directBrokerConnected = useDirectBrokerConnected();
   const storedTickerMode = useSettingsStore((s) => s.tickerMode);
+  const setTickerMode = useSettingsStore((s) => s.setTickerMode);
   const tickerMode: TickerMode = tickerModeProp ?? storedTickerMode;
   const { availableTools } = useSkillContent();
+  const { hideTickerByDefault, collapseOverflow } = useChromeCollapse();
   const [quickSettingsOpen, setQuickSettingsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [tickerForcedOnNarrow, setTickerForcedOnNarrow] = useState(false);
   const gearRef = useRef<HTMLButtonElement>(null);
   const toolsRef = useRef<HTMLButtonElement>(null);
+  const showTicker = tickerMode !== "off" && (!hideTickerByDefault || tickerForcedOnNarrow);
 
   // Maintain broker connection status from either OpenAlgo bridge ping or a
   // live native/gateway broker session. This store still drives older widgets.
@@ -315,14 +332,9 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
       const panel = document.querySelector(
         "[role='dialog'][aria-label='Quick settings']",
       );
-      if (
-        panel &&
-        !panel.contains(e.target as Node) &&
-        gearRef.current &&
-        !gearRef.current.contains(e.target as Node)
-      ) {
-        setQuickSettingsOpen(false);
-      }
+      if (!panel || panel.contains(e.target as Node)) return;
+      if (gearRef.current?.contains(e.target as Node)) return;
+      setQuickSettingsOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -343,7 +355,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
 
   return (
     <div
-      className="sticky top-0 z-100 flex items-center min-h-9.5 px-3 shrink-0 select-none animate-fade-in overflow-x-auto"
+      className="sticky top-0 z-100 flex items-center min-h-9.5 px-3 shrink-0 select-none animate-fade-in overflow-x-hidden"
       style={barStyle}
       data-testid="topbar-v2"
     >
@@ -355,93 +367,184 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
         data-testid="logo-link"
       >
         <LogoIcon size={18} aria-hidden />
-        <span className="font-heading font-bold text-sm text-text-primary tracking-tight leading-none">
-          Flint
-        </span>
+        {!collapseOverflow && (
+          <span className="font-heading font-bold text-sm text-text-primary tracking-tight leading-none">
+            Flint
+          </span>
+        )}
       </Link>
 
       <Divider />
 
       {/* ── GROUP 2: Ticker (flex:1) + Gear ───────────────────────────────── */}
       <div className="flex items-center gap-1 flex-1 min-w-0 mx-2">
-        {tickerMode !== "off" && (
+        {showTicker && (
           <TickerMarquee
             mode={tickerMode}
             className="flex-1 min-w-0 h-9.5"
           />
         )}
 
-        {/* Gear icon: ticker settings */}
-        <Button
-          ref={gearRef}
-          variant="ghost"
-          size="sm"
-          className="h-7 w-7 p-0 text-text-muted hover:text-text-primary shrink-0"
-          onClick={() => setQuickSettingsOpen(!quickSettingsOpen)}
-          aria-label="Quick settings"
-          aria-expanded={quickSettingsOpen}
-          aria-haspopup="dialog"
-          data-testid="gear-btn"
-        >
-          <Settings className="h-3.5 w-3.5" aria-hidden="true" />
-        </Button>
+        {!collapseOverflow && (
+          <Button
+            ref={gearRef}
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-text-muted hover:text-text-primary shrink-0"
+            onClick={() => setQuickSettingsOpen(!quickSettingsOpen)}
+            aria-label="Quick settings"
+            aria-expanded={quickSettingsOpen}
+            aria-haspopup="dialog"
+            data-testid="gear-btn"
+          >
+            <Settings className="h-3.5 w-3.5" aria-hidden="true" />
+          </Button>
+        )}
       </div>
 
       <Divider />
 
       {/* ── GROUP 3: Right controls ───────────────────────────────────────── */}
       <div className="flex items-center gap-1 ml-2 shrink-0">
-        {/* Search / command palette */}
-        <SearchButton />
-
-        {/* Route-aware tool menu */}
-        <Button
-          ref={toolsRef}
-          variant="ghost"
-          size="sm"
-          className="h-7 px-2 gap-1.5 text-text-muted hover:text-text-primary shrink-0"
-          onClick={() => {
-            setToolsOpen((open) => !open);
-            setQuickSettingsOpen(false);
-          }}
-          aria-label="Tools"
-          aria-expanded={toolsOpen}
-          aria-haspopup="menu"
-          data-testid="tools-btn"
-        >
-          <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="text-xs hidden md:inline">Tools</span>
-        </Button>
-
-        {/* Notification bell */}
-        <NotificationBell />
-
-        {/* Connected broker account context */}
-        <AccountSwitcher />
-        <WorkspaceSwitcher />
-
-        {/* Trading mode switch first — it must stay reachable when the bar
-            is crowded. Secondary chrome can hide on narrower viewports. */}
-        <ModeIndicator />
-
-        <Divider />
-
-        {/* Fullscreen toggle */}
-        <FullscreenButton />
-
-        {/* Market session state — separate from the Live execution mode */}
-        <div className="hidden lg:block">
-          <MarketSessionStatus />
-        </div>
-
-        {/* IST clock */}
-        <div className="hidden xl:block">
-          <ISTClock />
-        </div>
-
-        {/* Avatar */}
-        <Avatar />
+        {collapseOverflow ? (
+          <>
+            <ModeIndicator />
+            <MarketSessionStatus compact />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 gap-1 text-text-muted hover:text-text-primary shrink-0"
+              onClick={() => {
+                setMoreOpen((open) => !open);
+                setToolsOpen(false);
+                setQuickSettingsOpen(false);
+              }}
+              aria-label="More"
+              aria-expanded={moreOpen}
+              aria-haspopup="dialog"
+              data-testid="topbar-more-btn"
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+            </Button>
+          </>
+        ) : (
+          <>
+            <SearchButton />
+            <Button
+              ref={toolsRef}
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 gap-1.5 text-text-muted hover:text-text-primary shrink-0"
+              onClick={() => {
+                setToolsOpen((open) => !open);
+                setQuickSettingsOpen(false);
+              }}
+              aria-label="Tools"
+              aria-expanded={toolsOpen}
+              aria-haspopup="menu"
+              data-testid="tools-btn"
+            >
+              <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="text-xs hidden md:inline">Tools</span>
+            </Button>
+            <NotificationBell />
+            <AccountSwitcher />
+            <WorkspaceSwitcher />
+            <ModeIndicator />
+            <Divider />
+            <FullscreenButton />
+            <div className="hidden lg:block">
+              <MarketSessionStatus />
+            </div>
+            <div className="hidden xl:block">
+              <ISTClock />
+            </div>
+            <Avatar />
+          </>
+        )}
       </div>
+
+      <TopBarMoreSheet open={moreOpen && collapseOverflow} onClose={() => setMoreOpen(false)}>
+        <MoreRow>
+          <span className="w-20 shrink-0 text-xs text-text-muted">Workspace</span>
+          <WorkspaceSwitcher />
+        </MoreRow>
+        <MoreRow>
+          <span className="w-20 shrink-0 text-xs text-text-muted">Account</span>
+          <AccountSwitcher />
+        </MoreRow>
+        <MoreRow>
+          <SearchButton />
+        </MoreRow>
+        <MoreRow>
+          <Button
+            ref={toolsRef}
+            variant="ghost"
+            size="sm"
+            className="min-h-11 px-2 gap-1.5 text-text-muted hover:text-text-primary"
+            onClick={() => {
+              setToolsOpen((open) => !open);
+              setQuickSettingsOpen(false);
+            }}
+            aria-label="Tools"
+            aria-expanded={toolsOpen}
+            aria-haspopup="menu"
+            data-testid="tools-btn"
+          >
+            <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+            <span className="text-xs">Tools</span>
+          </Button>
+        </MoreRow>
+        <MoreRow>
+          <FullscreenButton />
+          <span className="text-xs text-text-secondary">Fullscreen</span>
+        </MoreRow>
+        <MoreRow>
+          <ISTClock />
+        </MoreRow>
+        <MoreRow>
+          <Button
+            ref={gearRef}
+            variant="ghost"
+            size="sm"
+            className="min-h-11 px-2 gap-1.5 text-text-muted hover:text-text-primary"
+            onClick={() => {
+              setQuickSettingsOpen((open) => !open);
+              setMoreOpen(false);
+            }}
+            aria-label="Quick settings"
+            aria-expanded={quickSettingsOpen}
+            aria-haspopup="dialog"
+            data-testid="gear-btn"
+          >
+            <Settings className="h-3.5 w-3.5" aria-hidden="true" />
+            <span className="text-xs">Settings</span>
+          </Button>
+        </MoreRow>
+        <MoreRow>
+          <NotificationBell />
+          <Avatar />
+        </MoreRow>
+        <MoreRow>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="min-h-11 px-2 text-text-muted hover:text-text-primary"
+            onClick={() => {
+              if (tickerForcedOnNarrow) {
+                setTickerForcedOnNarrow(false);
+              } else {
+                if (tickerMode === "off") setTickerMode("marquee");
+                setTickerForcedOnNarrow(true);
+              }
+              setMoreOpen(false);
+            }}
+            aria-label={tickerForcedOnNarrow ? "Hide ticker" : "Show ticker"}
+          >
+            {tickerForcedOnNarrow ? "Hide ticker" : "Show ticker"}
+          </Button>
+        </MoreRow>
+      </TopBarMoreSheet>
 
       {/* QuickAccessPanel portal — renders outside TopBar stacking context */}
       {createPortal(

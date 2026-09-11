@@ -72,10 +72,10 @@ describe("terminal usability chrome", () => {
 
   it("keeps the mode pill reachable when the top bar is crowded", () => {
     const topbar = read("chrome/TopBarV2.tsx");
-    expect(topbar).toContain("overflow-x-auto");
-    const modeIndex = topbar.indexOf("<ModeIndicator />");
-    const clockIndex = topbar.indexOf("<ISTClock />");
+    expect(topbar).not.toContain("overflow-x-auto");
+    expect(topbar).toContain("overflow-x-hidden");
+    expect(topbar).toContain("topbar-more-btn");
+    const modeIndex = topbar.indexOf("<ModeIndicator");
     expect(modeIndex).toBeGreaterThan(0);
-    expect(clockIndex).toBeGreaterThan(modeIndex);
   });
 });
