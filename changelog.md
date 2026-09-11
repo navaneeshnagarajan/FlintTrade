@@ -66,6 +66,22 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Options Builder Net Debit vs Max Loss mix per-lot vs position bases (FT-LAB-005).**
+  Explore `/lab` Options Builder currently mixes
+  per-lot and position ₹ for Net Debit/Credit and
+  Max Loss, so the two figures cannot be compared
+  and a long call does not show Max Loss = Net Debit.
+  Locked UX: primary figures use the same position
+  basis — Net Debit/Credit, Max Loss, and Max Profit
+  are premium × lots × lot size. A muted sublabel
+  `₹X per lot · N lots · lot size L` is optional,
+  never the only number. Header and Legs chips use
+  the same position basis as Payoff. If the two
+  still cannot be reconciled, show both with
+  explicit `per lot` / `position` tags — never two
+  unlabelled ₹. Product fix follows this locked
+  call on this same PR.
+
 - **Learn Glossary Lot Size freshness (FT-LEARN-002).**
   Explore `/learn` → Glossary → Lot Size now teaches the
   Jan 2026 NSE-cycle index lots — NIFTY 65, BANKNIFTY 30,
