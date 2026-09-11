@@ -88,9 +88,7 @@ flowchart LR
     F --> JNL
     F --> ING
     F --> GW
-    E --> TICK
     BT --> TICK
-    IND --> TICK
     F --> NGA
     NGA --> DHAN
     F -- "REST" --> OA
@@ -366,8 +364,8 @@ operator sees is the earliest of:
    broker path. The account MTM circuit breaker is a separate automatic path.
 2. **L4 Daily P&L** — pause new orders at 3 % drawdown and latch a new-order
    hard stop at 15 % drawdown. Layer 4 does not cancel or flatten.
-3. **L1 Order validation** — price within ±5 % of LTP, quantity multiple of
-   lot size.
+3. **L1 Order validation** — price within ±5 % of LTP, quantity must be
+   positive and within the per-exchange quantity cap.
 4. **L2 Position limits** — max five simultaneous positions, no single
    position over 60 % of free margin.
 5. **L3 Portfolio risk** — net delta and net vega caps across the book.
@@ -560,9 +558,11 @@ config.workspace.fast_data_dir    # from workspace.json
 config.workspace.get("ui.theme")  # dot-notation access
 ```
 
-Packages never read `os.environ` for data paths directly. They use the
-`Workspace` class, which resolves paths from `workspace.json` with
-fallbacks.
+Feature packages do not read `os.environ` for data paths themselves. They
+use the `Workspace` class, which resolves the platform workspace directory
+(`FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME`, then the OS default)
+and honours explicit server overrides such as `DATA_DIR`, `AUDIT_LOG_DIR`,
+and `DUCKDB_PATH` (see `.env.example`).
 
 ---
 

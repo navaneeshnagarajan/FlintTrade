@@ -164,7 +164,7 @@ directory, which is platform-specific:
 | Linux | `~/.flinttrade/archive/audit/` |
 | macOS | `~/Library/Application Support/flinttrade/archive/audit/` |
 | Windows | `%APPDATA%\flinttrade\archive\audit\` |
-| Override | `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME` (in that precedence order) |
+| Override | `AUDIT_LOG_DIR` (direct directory), otherwise `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME` |
 
 | Event | Typical fields |
 |---|---|
