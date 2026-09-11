@@ -28,6 +28,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -56,6 +57,12 @@ _LOCKOUT_DURATION_SECONDS = 900  # 15 minutes
 
 
 _KDF_ITERATIONS: int = 390_000  # NIST-recommended minimum for PBKDF2-SHA256
+_PIN_RE = re.compile(r"^\d{6}$")
+
+
+def _is_six_digit_pin(pin: str) -> bool:
+    """Return True when ``pin`` is exactly six ASCII digits (``^\\d{6}$``)."""
+    return _PIN_RE.fullmatch(pin) is not None
 
 
 def _hash_pin(pin: str) -> str:
@@ -225,7 +232,7 @@ class AuthService:
             raise ValueError("Password too weak — minimum 8 characters")
 
         # Validate PIN (optional — empty string means no PIN)
-        if pin and not (pin.isdigit() and len(pin) == 6):
+        if pin and not _is_six_digit_pin(pin):
             raise ValueError("PIN must be exactly 6 digits")
 
         # Hash password with argon2id
@@ -444,7 +451,7 @@ class AuthService:
         Raises:
             ValueError: If ``pin`` is not exactly 6 digits.
         """
-        if not (pin.isdigit() and len(pin) == 6):
+        if not _is_six_digit_pin(pin):
             raise ValueError("PIN must be exactly 6 digits")
         if not self.verify_password(password):
             return False

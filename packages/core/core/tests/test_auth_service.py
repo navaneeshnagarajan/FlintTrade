@@ -101,6 +101,33 @@ class TestPinVerification:
         assert svc.verify_pin("000000") is False
 
 
+class TestSetPin:
+    """Post-setup PIN set/change — ASCII ^\\d{6}$ only (FT-SET-003)."""
+
+    def _ready(self, tmp_path: Path) -> AuthService:
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        svc.setup_account(
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="",
+        )
+        return svc
+
+    @pytest.mark.parametrize("pin", ["12345", "1234567", "12ab56", "１２３４５６"])
+    def test_set_pin_rejects_non_six_ascii_digits(self, tmp_path: Path, pin: str):
+        svc = self._ready(tmp_path)
+        with pytest.raises(ValueError, match="exactly 6 digits"):
+            svc.set_pin("StrongP@ss123!", pin)
+        assert svc.has_pin() is False
+
+    def test_set_pin_accepts_six_ascii_digits(self, tmp_path: Path):
+        svc = self._ready(tmp_path)
+        assert svc.set_pin("StrongP@ss123!", "654321") is True
+        assert svc.has_pin() is True
+        assert svc.verify_pin("654321") is True
+
+
 class TestTOTP:
     """2FA TOTP setup and verification."""
 

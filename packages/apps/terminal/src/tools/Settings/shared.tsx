@@ -48,6 +48,9 @@ interface TextInputProps {
   placeholder?: string;
   type?: string;
   disabled?: boolean;
+  maxLength?: number;
+  inputMode?: "none" | "text" | "tel" | "url" | "email" | "numeric" | "decimal" | "search";
+  onBlur?: () => void;
   "aria-label"?: string;
   "aria-invalid"?: boolean;
   "aria-describedby"?: string;
@@ -59,6 +62,9 @@ export function TextInput({
   placeholder,
   type = "text",
   disabled = false,
+  maxLength,
+  inputMode,
+  onBlur,
   "aria-label": ariaLabel,
   "aria-invalid": ariaInvalid,
   "aria-describedby": ariaDescribedBy,
@@ -68,8 +74,11 @@ export function TextInput({
       type={type}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur}
       placeholder={placeholder}
       disabled={disabled}
+      maxLength={maxLength}
+      inputMode={inputMode}
       aria-label={ariaLabel}
       aria-invalid={ariaInvalid || undefined}
       aria-describedby={ariaDescribedBy}
