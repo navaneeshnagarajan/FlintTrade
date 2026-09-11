@@ -16,7 +16,11 @@ import "@testing-library/jest-dom";
 // ---------------------------------------------------------------------------
 
 const tradeJournalMocks = vi.hoisted(() => ({
-  queryOptions: undefined as { enabled?: boolean; queryKey?: unknown[] } | undefined,
+  queryOptions: undefined as {
+    enabled?: boolean;
+    queryKey?: unknown[];
+    queryFn?: () => Promise<unknown>;
+  } | undefined,
   refetch: vi.fn(),
 }));
 
@@ -26,7 +30,11 @@ const tradeJournalMocks = vi.hoisted(() => ({
 // but only when their tab content mounts, and their keys carry a marker
 // segment — the guard below keeps the capture on the tool's range query.
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: { enabled?: boolean; queryKey?: unknown[] }) => {
+  useQuery: (options: {
+    enabled?: boolean;
+    queryKey?: unknown[];
+    queryFn?: () => Promise<unknown>;
+  }) => {
     const key = options.queryKey ?? [];
     if (key[0] === "tradeJournal" && key.length === 4 && key[1] !== "perf" && key[1] !== "calendar") {
       tradeJournalMocks.queryOptions = options;
@@ -53,6 +61,7 @@ vi.mock("@tanstack/react-query", () => ({
 // Mock ft API
 vi.mock("@/services/ftApi", () => ({
   getTradeJournal: vi.fn().mockResolvedValue({ trades: [] }),
+  TRADE_JOURNAL_MAX_LIMIT: 1000,
 }));
 
 // The Log tab embeds the canonical Fills surface; stub it so this suite pins
@@ -134,6 +143,7 @@ import TradeJournalTool from "../TradeJournalTool";
 import { getSampleJournalTrades } from "../sampleJournal";
 import { istDayKey, sevenDaysAgoISO, todayISO } from "../utils";
 import { toIstIsoDate } from "@/lib/ist";
+import { getTradeJournal } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 
 beforeAll(() => {
@@ -264,12 +274,41 @@ describe("TradeJournalTool (Trade Review)", () => {
     expect(screen.getByText("Sample data")).toBeInTheDocument();
   });
 
-  it("mounts the Performance tab with an honest empty state when live with no trades", async () => {
+  it("REGRESSION: Review-range journal query uses the analytics page size, not a silent 200-row list cap", async () => {
+    const mockJournal = getTradeJournal as ReturnType<typeof vi.fn>;
     render(<TradeJournalTool />);
+
+    expect(tradeJournalMocks.queryOptions?.queryFn).toEqual(expect.any(Function));
+    await tradeJournalMocks.queryOptions!.queryFn!();
+
+    expect(mockJournal).toHaveBeenCalledWith(
+      sevenDaysAgoISO(),
+      todayISO(),
+      undefined,
+      1000,
+    );
+    expect(mockJournal.mock.calls[0]?.[3]).not.toBe(200);
+  });
+
+  it("REGRESSION: Performance follows the Review range on open, not a silent YTD jump", async () => {
+    render(<TradeJournalTool />);
+    fireEvent.change(screen.getByLabelText("Start date"), {
+      target: { value: "2026-09-05" },
+    });
+    fireEvent.change(screen.getByLabelText("End date"), {
+      target: { value: "2026-09-11" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
     const user = userEvent.setup();
     await user.click(screen.getByRole("tab", { name: "Performance" }));
 
-    expect(screen.getByText(/No closed trades yet this year/i)).toBeInTheDocument();
+    const review = screen.getByRole("button", { name: "Review range · 05 Sep–11 Sep 2026" });
+    expect(review).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "YTD" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText(/No closed trades in the selected range/i)).toBeInTheDocument();
+    expect(screen.queryByText(/No closed trades yet this year/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^YTD ·/ })).not.toBeInTheDocument();
   });
 
   it("mounts the Calendar tab with month navigation", async () => {

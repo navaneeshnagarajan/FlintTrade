@@ -76,6 +76,19 @@ changelog rebuilds itself from the first release cut after this baseline.
   dated, not as forever hardcodes. Independent of #213
   (FT-UX-001).
 
+- **Performance follows the Review date range (FT-TRADE-006).**
+  Trade Review **Performance** uses the same date range as
+  Log and the other Review tabs. Changing Review dates
+  updates Performance. A visible **Review range** | **YTD**
+  control keeps YTD as an explicit choice; the active chip
+  always shows the effective window (for example
+  `YTD · 01 Jan–11 Sep 2026`). Opening Performance no longer
+  auto-jumps to YTD. An empty range or no fills is an honest
+  empty for that window, not a quiet YTD fallback. Metrics
+  cover the labelled window up to the journal's 1,000-fill
+  analytics page; a larger window is disclosed rather than
+  silently sliced.
+
 - **Heatmap Group by Exchange shows labelled group bands (FT-TRADE-005).**
   Explore `/trade` Positions → Heat → Group by Exchange (and
   Group by Sector) now draws a labelled band per group: a

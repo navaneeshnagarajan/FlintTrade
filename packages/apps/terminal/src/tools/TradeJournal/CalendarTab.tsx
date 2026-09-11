@@ -28,16 +28,13 @@ import { Calendar, ChevronLeft, ChevronRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { computeDayPnl } from "@/lib/journalAnalytics";
 import { istParts, istToday } from "@/lib/ist";
-import { getTradeJournal, type JournalTrade } from "@/services/ftApi";
+import { getTradeJournal, TRADE_JOURNAL_MAX_LIMIT, type JournalTrade } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import { getSampleJournalTrades } from "./sampleJournal";
 
 // ---------------------------------------------------------------------------
 // Helpers (exported for tests)
 // ---------------------------------------------------------------------------
-
-/** Backend maximum page size for ``/api/v1/trades/journal``. */
-const JOURNAL_MAX_LIMIT = 1000;
 
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
@@ -184,12 +181,12 @@ export function CalendarTab() {
 
   const journalQuery = useQuery({
     queryKey: ["tradeJournal", "calendar", start, end],
-    queryFn: () => getTradeJournal(start, end, undefined, JOURNAL_MAX_LIMIT),
+    queryFn: () => getTradeJournal(start, end, undefined, TRADE_JOURNAL_MAX_LIMIT),
     enabled: !isExplore,
   });
 
   const sampleRows = useMemo<JournalTrade[]>(
-    () => (isExplore ? getSampleJournalTrades(start, end, undefined, JOURNAL_MAX_LIMIT) : []),
+    () => (isExplore ? getSampleJournalTrades(start, end, undefined, TRADE_JOURNAL_MAX_LIMIT) : []),
     [isExplore, start, end],
   );
   // Memoised so the `?? []` fallback does not mint a fresh array on every

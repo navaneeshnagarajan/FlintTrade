@@ -8,11 +8,13 @@
  *     journal endpoint returns newest-first);
  *   - the YTD window ends on the IST trading day, not the lagging UTC day;
  *   - shared Flint chart primitives (threshold-line equity, signed
- *     categorical-bar day-of-week).
+ *     categorical-bar day-of-week);
+ *   - FT-TRADE-006: Performance defaults to the Review range (never a silent
+ *     YTD jump); YTD is an explicit chip that labels its window.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
@@ -24,6 +26,7 @@ import "@testing-library/jest-dom";
 
 vi.mock("@/services/ftApi", () => ({
   getTradeJournal: vi.fn(() => Promise.resolve({ trades: [], total: 0 })),
+  TRADE_JOURNAL_MAX_LIMIT: 1000,
 }));
 
 import { getTradeJournal, type JournalTrade } from "@/services/ftApi";
@@ -33,6 +36,8 @@ import {
   closedChronological,
   computeEquitySeries,
   computeMonthlyReturns,
+  formatPerformanceWindow,
+  journalSliceNote,
   ytdIstRange,
 } from "../PerformanceTab";
 
@@ -52,7 +57,20 @@ function jt(overrides: Partial<JournalTrade>): JournalTrade {
   };
 }
 
-const RANGE_LABEL = "2026-03-01 → 2026-03-07";
+const RANGE_START = "2026-03-01";
+const RANGE_END = "2026-03-07";
+const REVIEW_CHIP = "Review range · 01 Mar–07 Mar 2026";
+
+function renderPerf(trades: JournalTrade[] = [], rangeTotal?: number) {
+  return renderTab(
+    <PerformanceTab
+      trades={trades}
+      rangeStart={RANGE_START}
+      rangeEnd={RANGE_END}
+      rangeTotal={rangeTotal}
+    />,
+  );
+}
 
 beforeEach(() => {
   global.ResizeObserver = class {
@@ -129,135 +147,190 @@ describe("ytdIstRange", () => {
   });
 });
 
+describe("journalSliceNote", () => {
+  it("is silent when the fetched page covers the untruncated total", () => {
+    expect(journalSliceNote(12, 12)).toBeNull();
+    expect(journalSliceNote(12, undefined)).toBeNull();
+    expect(journalSliceNote(12, 11)).toBeNull();
+  });
+
+  it("names the earliest-page prefix when the labelled window is larger", () => {
+    expect(journalSliceNote(1000, 1420)).toBe(
+      "Metrics use the first 1,000 of 1,420 fills in this window.",
+    );
+  });
+});
+
+describe("formatPerformanceWindow", () => {
+  it("formats a same-year Review or YTD window as DD MMM–DD MMM YYYY", () => {
+    expect(formatPerformanceWindow("2026-01-01", "2026-09-11")).toBe("01 Jan–11 Sep 2026");
+    expect(formatPerformanceWindow("2026-09-05", "2026-09-11")).toBe("05 Sep–11 Sep 2026");
+  });
+
+  it("keeps both years when the window crosses a year boundary", () => {
+    expect(formatPerformanceWindow("2025-12-20", "2026-01-05")).toBe("20 Dec 2025–05 Jan 2026");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
 
 describe("PerformanceTab", () => {
-  it("renders the scope toggle with YTD as the default", () => {
-    renderTab(<PerformanceTab trades={[]} rangeLabel={RANGE_LABEL} />);
+  it("REGRESSION: defaults to Review range and labels the active chip with that window", () => {
+    renderPerf();
+    const review = screen.getByRole("button", { name: REVIEW_CHIP });
     const ytd = screen.getByRole("button", { name: "YTD" });
-    const range = screen.getByRole("button", { name: "Range" });
-    expect(ytd).toHaveAttribute("aria-pressed", "true");
-    expect(range).toHaveAttribute("aria-pressed", "false");
+    expect(review).toHaveAttribute("aria-pressed", "true");
+    expect(ytd).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("button", { name: /^YTD ·/ })).toBeNull();
   });
 
-  it("queries the YTD journal when live and shows an honest empty state", async () => {
-    renderTab(<PerformanceTab trades={[]} rangeLabel={RANGE_LABEL} />);
+  it("REGRESSION: opening Performance does not query YTD", () => {
+    renderPerf();
+    expect(mockJournal).not.toHaveBeenCalled();
+  });
+
+  it("REGRESSION: empty Review range is an honest empty for that window, not a quiet YTD fallback", () => {
+    renderPerf();
+    expect(screen.getByText(/No closed trades in the selected range/i)).toBeTruthy();
+    expect(screen.queryByText(/No closed trades yet this year/i)).toBeNull();
+    expect(mockJournal).not.toHaveBeenCalled();
+  });
+
+  it("updates the Review-range chip when the tool's committed dates change", () => {
+    const { rerender } = renderPerf();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rerender(
+      <QueryClientProvider client={qc}>
+        <PerformanceTab trades={[]} rangeStart="2026-09-05" rangeEnd="2026-09-11" />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole("button", { name: "Review range · 05 Sep–11 Sep 2026" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(mockJournal).not.toHaveBeenCalled();
+  });
+
+  it("labels the YTD chip with the IST year-to-date window when YTD is selected", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-11T04:30:00Z")); // 10:00 IST on 11 Sep
+    renderPerf();
+    fireEvent.click(screen.getByRole("button", { name: "YTD" }));
+
+    const ytd = screen.getByRole("button", { name: "YTD · 01 Jan–11 Sep 2026" });
+    expect(ytd).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Review range" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("button", { name: REVIEW_CHIP })).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("queries the YTD journal only after an explicit YTD click and shows an honest empty state", async () => {
+    const user = userEvent.setup();
+    renderPerf();
+    expect(mockJournal).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "YTD" }));
     await vi.waitFor(() => expect(mockJournal).toHaveBeenCalled());
+    expect(mockJournal).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      undefined,
+      1000,
+    );
     expect(await screen.findByText(/No closed trades yet this year/i)).toBeTruthy();
+  });
+
+  it("REGRESSION: discloses a truncated analytics slice instead of claiming the full labelled window", () => {
+    renderPerf([jt({ pnl: 800 })], 250);
+    expect(screen.getByRole("button", { name: REVIEW_CHIP })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/Metrics use the first 1 of 250 fills in this window/i)).toBeTruthy();
+  });
+
+  it("omits the truncation note when the fetched Review-range rows are complete", () => {
+    renderPerf([jt({ pnl: 800 })], 1);
+    expect(screen.queryByText(/fills in this window/i)).toBeNull();
+  });
+
+  it("REGRESSION: YTD discloses a truncated analytics slice", async () => {
+    mockJournal.mockResolvedValue({ trades: [jt({ pnl: 800 })], total: 250 });
+    const user = userEvent.setup();
+    renderPerf();
+    await user.click(screen.getByRole("button", { name: "YTD" }));
+    expect(await screen.findByText(/Metrics use the first 1 of 250 fills in this window/i)).toBeTruthy();
   });
 
   it("never queries the backend in explore mode and renders the sample prop rows", () => {
     useModeStore.setState({ mode: "explore" });
-    renderTab(
-      <PerformanceTab
-        trades={[jt({ pnl: 1000 }), jt({ pnl: -250, timestamp: "2026-03-03T10:00:00+05:30" })]}
-        rangeLabel={RANGE_LABEL}
-      />,
-    );
+    renderPerf([jt({ pnl: 1000 }), jt({ pnl: -250, timestamp: "2026-03-03T10:00:00+05:30" })]);
     expect(mockJournal).not.toHaveBeenCalled();
     expect(screen.getByText("Win Rate")).toBeTruthy();
     expect(screen.getByText("50.0%")).toBeTruthy();
   });
 
-  it("renders metrics from real journal data when connected", async () => {
-    mockJournal.mockResolvedValue({
-      trades: [jt({ pnl: 1000 }), jt({ pnl: 2000 })],
-      total: 2,
-    });
-    renderTab(<PerformanceTab trades={[]} rangeLabel={RANGE_LABEL} />);
+  it("renders metrics from the Review-range trades prop when connected", () => {
+    renderPerf([jt({ pnl: 1000 }), jt({ pnl: 2000 })]);
     // 2 wins → 100% win rate tile renders (sample data would not be all-wins).
-    expect(await screen.findByText("100.0%")).toBeTruthy();
+    expect(screen.getByText("100.0%")).toBeTruthy();
+    expect(mockJournal).not.toHaveBeenCalled();
   });
 
-  it("renders '∞' for an all-win profit factor instead of a fabricated 99", async () => {
-    mockJournal.mockResolvedValue({
-      trades: [jt({ pnl: 1000 }), jt({ pnl: 2000 })],
-      total: 2,
-    });
-    renderTab(<PerformanceTab trades={[]} rangeLabel={RANGE_LABEL} />);
-    expect(await screen.findByText("∞")).toBeTruthy();
+  it("renders '∞' for an all-win profit factor instead of a fabricated 99", () => {
+    renderPerf([jt({ pnl: 1000 }), jt({ pnl: 2000 })]);
+    expect(screen.getByText("∞")).toBeTruthy();
     expect(screen.queryByText("99.00")).toBeNull();
   });
 
-  it("pins R:R and expectancy against the signed avg-loss reconciliation", async () => {
+  it("pins R:R and expectancy against the signed avg-loss reconciliation", () => {
     // avgWin (900+1500)/2 = 1200, |avgLoss| 300 → R:R 4.00 (profit factor is
     // 2400/300 = 8.00, so the two tiles stay distinguishable); expectancy =
     // (2/3)×1200 − (1/3)×300 = ₹700.
-    mockJournal.mockResolvedValue({
-      trades: [
-        jt({ pnl: 900 }),
-        jt({ pnl: 1500, timestamp: "2026-03-03T10:00:00+05:30" }),
-        jt({ pnl: -300, timestamp: "2026-03-04T10:00:00+05:30" }),
-      ],
-      total: 3,
-    });
-    renderTab(<PerformanceTab trades={[]} rangeLabel={RANGE_LABEL} />);
-    expect(await screen.findByText("4.00")).toBeTruthy();
+    renderPerf([
+      jt({ pnl: 900 }),
+      jt({ pnl: 1500, timestamp: "2026-03-03T10:00:00+05:30" }),
+      jt({ pnl: -300, timestamp: "2026-03-04T10:00:00+05:30" }),
+    ]);
+    expect(screen.getByText("4.00")).toBeTruthy();
     expect(screen.getByText("8.00")).toBeTruthy();
     expect(screen.getByText("Expectancy")).toBeTruthy();
     expect(screen.getByText("₹700")).toBeTruthy();
   });
 
-  it("uses the shared core threshold-line chart for the equity curve", async () => {
-    mockJournal.mockResolvedValue({ trades: [jt({ pnl: 1000 })], total: 1 });
-    renderTab(<PerformanceTab trades={[]} rangeLabel={RANGE_LABEL} />);
-    const chart = await screen.findByRole("img", { name: /equity curve chart/i });
+  it("uses the shared core threshold-line chart for the equity curve", () => {
+    renderPerf([jt({ pnl: 1000 })]);
+    const chart = screen.getByRole("img", { name: /equity curve chart/i });
     expect(chart).toHaveAttribute("data-flint-chart", "threshold-line");
     expect(chart.querySelector("polyline")).not.toBeInTheDocument();
   });
 
-  it("renders the streak tracker section", async () => {
-    mockJournal.mockResolvedValue({ trades: [jt({ pnl: 1000 })], total: 1 });
-    renderTab(<PerformanceTab trades={[]} rangeLabel={RANGE_LABEL} />);
-    expect(await screen.findByText("Current")).toBeTruthy();
+  it("renders the streak tracker section", () => {
+    renderPerf([jt({ pnl: 1000 })]);
+    expect(screen.getByText("Current")).toBeTruthy();
     expect(screen.getByText("Best Win")).toBeTruthy();
     expect(screen.getByText("Worst Loss")).toBeTruthy();
   });
 
-  it("renders the monthly returns heatmap", async () => {
-    mockJournal.mockResolvedValue({ trades: [jt({ pnl: 1000 })], total: 1 });
-    renderTab(<PerformanceTab trades={[]} rangeLabel={RANGE_LABEL} />);
-    expect(await screen.findByLabelText("Monthly returns heatmap")).toBeTruthy();
+  it("renders the monthly returns heatmap", () => {
+    renderPerf([jt({ pnl: 1000 })]);
+    expect(screen.getByLabelText("Monthly returns heatmap")).toBeTruthy();
   });
 
-  it("renders P&L by day of week through the shared signed categorical bar", async () => {
-    mockJournal.mockResolvedValue({ trades: [jt({ pnl: 1000 })], total: 1 });
-    renderTab(<PerformanceTab trades={[]} rangeLabel={RANGE_LABEL} />);
-    const chart = await screen.findByRole("img", { name: "Trade review P&L by day of week" });
+  it("renders P&L by day of week through the shared signed categorical bar", () => {
+    renderPerf([jt({ pnl: 1000 })]);
+    const chart = screen.getByRole("img", { name: "Trade review P&L by day of week" });
     expect(chart).toHaveAttribute("data-flint-chart", "signed-categorical-bar");
   });
 
-  it("renders the P&L by symbol list (absorbed Analytics tab)", async () => {
-    mockJournal.mockResolvedValue({
-      trades: [jt({ pnl: 1000, symbol: "NIFTY" })],
-      total: 1,
-    });
-    renderTab(<PerformanceTab trades={[]} rangeLabel={RANGE_LABEL} />);
-    expect(await screen.findByText("P&L by Symbol")).toBeTruthy();
+  it("renders the P&L by symbol list (absorbed Analytics tab)", () => {
+    renderPerf([jt({ pnl: 1000, symbol: "NIFTY" })]);
+    expect(screen.getByText("P&L by Symbol")).toBeTruthy();
     expect(screen.getAllByText("NIFTY").length).toBeGreaterThan(0);
   });
 
-  it("switches to the tool's committed range without a second fetch", async () => {
-    const user = userEvent.setup();
-    renderTab(
-      <PerformanceTab
-        trades={[jt({ pnl: 800 })]}
-        rangeLabel={RANGE_LABEL}
-      />,
-    );
-    await user.click(screen.getByRole("button", { name: "Range" }));
-
-    expect(screen.getByText(RANGE_LABEL)).toBeTruthy();
-    // Range scope reads the tool's shared query result (the trades prop).
+  it("renders Review-range metrics from the trades prop without a YTD fetch", () => {
+    renderPerf([jt({ pnl: 800 })]);
+    expect(screen.getByRole("button", { name: REVIEW_CHIP })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("100.0%")).toBeTruthy();
-  });
-
-  it("shows a range-scoped empty state when the committed range has no closed trades", async () => {
-    const user = userEvent.setup();
-    renderTab(<PerformanceTab trades={[]} rangeLabel={RANGE_LABEL} />);
-    await user.click(screen.getByRole("button", { name: "Range" }));
-    expect(screen.getByText(/No closed trades in the selected range/i)).toBeTruthy();
+    expect(mockJournal).not.toHaveBeenCalled();
   });
 });

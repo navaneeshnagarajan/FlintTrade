@@ -21,6 +21,7 @@ import "@testing-library/jest-dom";
 
 vi.mock("@/services/ftApi", () => ({
   getTradeJournal: vi.fn(() => Promise.resolve({ trades: [], total: 0 })),
+  TRADE_JOURNAL_MAX_LIMIT: 1000,
 }));
 
 import { getTradeJournal, type JournalTrade } from "@/services/ftApi";

@@ -433,6 +433,9 @@ export interface OHLCVBar {
   volume: number;
 }
 
+/** Backend maximum page size for ``/api/v1/trades/journal`` (route caps at 1000). */
+export const TRADE_JOURNAL_MAX_LIMIT = 1000;
+
 export const getTradeJournal = (
   startDate?: string,
   endDate?: string,

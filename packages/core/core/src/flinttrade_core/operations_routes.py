@@ -256,7 +256,9 @@ def trades_journal() -> tuple[Any, int]:
         # ``ts`` but the frontend ``JournalTrade`` type (and journalAnalytics,
         # which does ``new Date(t.timestamp)``) keys off ``timestamp`` — emit that
         # name so the journal renders instead of producing Invalid Dates. All
-        # datetimes serialise to ISO strings.
+        # datetimes serialise to ISO strings. ``total`` is the untruncated match
+        # count so a capped page (default 100, max 1000) cannot look complete.
+        untruncated_total = len(trades)
         normalised: list[dict[str, Any]] = []
         for t in trades[:limit]:
             row = dict(t)
@@ -271,7 +273,7 @@ def trades_journal() -> tuple[Any, int]:
         return jsonify(
             {
                 "status": "success",
-                "data": {"trades": trades, "total": len(trades)},
+                "data": {"trades": trades, "total": untruncated_total},
             }
         ), 200
     except ImportError:
