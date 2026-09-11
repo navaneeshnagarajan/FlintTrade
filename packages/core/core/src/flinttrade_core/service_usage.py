@@ -190,6 +190,8 @@ class ServiceUsageLedger:
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
+        if os.getpid() != self._pid:
+            raise UsageUnavailable("usage ledger inherited across fork")
         with self._thread_lock:
             if self._closed or os.getpid() != self._pid:
                 raise UsageUnavailable("usage ledger is closed or inherited across fork")
@@ -207,6 +209,8 @@ class ServiceUsageLedger:
 
     def close(self) -> None:
         """Release retained directory handles without refunding attempts."""
+        if os.getpid() != self._pid:
+            raise UsageUnavailable("usage ledger inherited across fork")
         with self._thread_lock:
             if not self._closed:
                 self._closed = True

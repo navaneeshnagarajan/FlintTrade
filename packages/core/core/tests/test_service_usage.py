@@ -504,3 +504,48 @@ def test_expired_tariff_cannot_invoke_prepared_attempt(tmp_path, advance_seconds
         store.cancel_prepared("attempt-1")
         prepare(store, "attempt-2")
         assert store.mark_invoked("attempt-2").state == "INVOKED"
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="native POSIX inherited-lock contention test")
+@pytest.mark.parametrize("operation", ["list_attempts", "close"])
+def test_forked_usage_ledger_refuses_before_acquiring_inherited_lock(tmp_path, operation):
+    """A vanished parent thread must not trap a child before the PID fence."""
+    script = """
+import os, signal, sys, threading, warnings
+from pathlib import Path
+from flinttrade_core.service_usage import ServiceUsageLedger, UsageUnavailable
+with ServiceUsageLedger(Path(sys.argv[1])) as store:
+    held = threading.Event()
+    release = threading.Event()
+    def hold():
+        with store._thread_lock:
+            held.set()
+            release.wait(10)
+    thread = threading.Thread(target=hold)
+    thread.start()
+    assert held.wait(5)
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', message='.*multi-threaded.*', category=DeprecationWarning)
+        pid = os.fork()
+    if pid == 0:
+        signal.signal(signal.SIGALRM, lambda *_: os._exit(72))
+        signal.alarm(2)
+        try:
+            getattr(store, sys.argv[2])()
+        except UsageUnavailable:
+            os._exit(0)
+        os._exit(73)
+    try:
+        _, status = os.waitpid(pid, 0)
+    finally:
+        release.set()
+        thread.join(5)
+    sys.exit(os.waitstatus_to_exitcode(status))
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(str(p) for p in sys.path if p)
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path / "usage"), operation],
+        env=env, text=True, capture_output=True, timeout=15,
+    )
+    assert result.returncode == 0, f"child status={result.returncode}; {result.stderr}"

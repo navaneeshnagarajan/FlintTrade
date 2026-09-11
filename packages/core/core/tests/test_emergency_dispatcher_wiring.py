@@ -13,6 +13,7 @@ from typing import Any
 from flask import Flask
 
 from flinttrade_core.app import FlintTradeApp, _bind_runtime_emergency_dispatcher
+from flinttrade_core.backend_instance import BackendLeaseProof
 from flinttrade_engine.safety import (
     L5_EMERGENCY_POLICY,
     EmergencyBrokerWrite,
@@ -39,7 +40,10 @@ class _Router:
         self,
         selectors: tuple[str, ...] = ("openalgo:primary",),
         authorised: tuple[str, ...] | None = None,
+        *,
+        backend_lease_proof: BackendLeaseProof,
     ) -> None:
+        self.backend_lease_proof = backend_lease_proof
         self.calls: list[dict[str, Any]] = []
         self.selectors = selectors
         self.authorised = selectors if authorised is None else authorised
@@ -95,18 +99,21 @@ class _Safety:
         self.dispatcher = dispatcher
 
 
-def test_runtime_dispatcher_binds_operator_principal_and_confirms_retry_by_readback(monkeypatch) -> None:
+def test_runtime_dispatcher_binds_operator_principal_and_confirms_retry_by_readback(
+    monkeypatch, backend_lease_proof,
+) -> None:
     from flinttrade_engine import safety as safety_module
 
     minted: list[tuple[str, dict[str, Any], Any, str, str]] = []
 
-    def fake_gate(verb, payload, request_ctx, adapter_id, *, account_id):
+    def fake_gate(verb, payload, request_ctx, adapter_id, *, account_id, backend_lease_proof):
+        assert backend_lease_proof is router.backend_lease_proof
         minted.append((verb, dict(payload), request_ctx, adapter_id, account_id))
         return object()
 
     monkeypatch.setattr(safety_module, "gate_broker_write", fake_gate)
     app = Flask("emergency-parent-wiring")
-    router = _Router()
+    router = _Router(backend_lease_proof=backend_lease_proof)
     app.config.update(
         BROKER_ROUTER=router,
         AUTH_SERVICE=SimpleNamespace(get_profile=lambda: {"username": "operator"}),
@@ -136,13 +143,13 @@ def test_runtime_dispatcher_binds_operator_principal_and_confirms_retry_by_readb
     assert len(router.calls) == 2
 
 
-def test_runtime_dispatcher_uses_the_app_owned_intent_journal() -> None:
+def test_runtime_dispatcher_uses_the_app_owned_intent_journal(backend_lease_proof) -> None:
     from flinttrade_engine.emergency_intents import InMemoryEmergencyIntentJournal
 
     app = Flask("emergency-parent-journal")
     journal = InMemoryEmergencyIntentJournal()
     app.config.update(
-        BROKER_ROUTER=_Router(),
+        BROKER_ROUTER=_Router(backend_lease_proof=backend_lease_proof),
         AUTH_SERVICE=SimpleNamespace(get_profile=lambda: {"username": "operator"}),
         EMERGENCY_INTENT_JOURNAL=journal,
     )
@@ -157,9 +164,9 @@ def test_runtime_dispatcher_uses_the_app_owned_intent_journal() -> None:
     assert dispatcher.durable_intent_journal is journal
 
 
-def test_runtime_dispatcher_fails_closed_without_operator_profile() -> None:
+def test_runtime_dispatcher_fails_closed_without_operator_profile(backend_lease_proof) -> None:
     app = Flask("emergency-parent-no-profile")
-    router = _Router()
+    router = _Router(backend_lease_proof=backend_lease_proof)
     app.config["BROKER_ROUTER"] = router
     safety = _Safety()
     telegram = SimpleNamespace(emergency_dispatcher=None)
@@ -177,11 +184,12 @@ def test_runtime_dispatcher_fails_closed_without_operator_profile() -> None:
     assert router.calls == []
 
 
-def test_runtime_dispatcher_targets_every_registered_account_before_per_write_acl() -> None:
+def test_runtime_dispatcher_targets_every_registered_account_before_per_write_acl(backend_lease_proof) -> None:
     app = Flask("emergency-parent-multi-account")
     router = _Router(
         ("openalgo:primary", "dhan:family"),
         authorised=("openalgo:primary",),
+        backend_lease_proof=backend_lease_proof,
     )
     app.config.update(
         BROKER_ROUTER=router,
@@ -201,7 +209,7 @@ def test_runtime_dispatcher_targets_every_registered_account_before_per_write_ac
     assert router.authorised_actor_ids == []
 
 
-def test_runtime_dispatcher_persists_unauthorised_registered_target_under_l5() -> None:
+def test_runtime_dispatcher_persists_unauthorised_registered_target_under_l5(backend_lease_proof) -> None:
     from flinttrade_engine.emergency_intents import InMemoryEmergencyIntentJournal
 
     class ACLRouter(_Router):
@@ -218,7 +226,10 @@ def test_runtime_dispatcher_persists_unauthorised_registered_target_under_l5() -
 
     journal = InMemoryEmergencyIntentJournal()
     app = Flask("emergency-parent-global-l5")
-    router = ACLRouter(("openalgo:primary", "dhan:family"), authorised=("openalgo:primary",))
+    router = ACLRouter(
+        ("openalgo:primary", "dhan:family"), authorised=("openalgo:primary",),
+        backend_lease_proof=backend_lease_proof,
+    )
     app.config.update(
         BROKER_ROUTER=router,
         AUTH_SERVICE=SimpleNamespace(get_profile=lambda: {"username": "operator"}),
@@ -248,12 +259,12 @@ def test_telegram_polling_starts_only_after_emergency_dispatcher_binding() -> No
     )
 
 
-def test_telegram_kill_preflight_failure_does_not_latch_l5_or_dispatch() -> None:
+def test_telegram_kill_preflight_failure_does_not_latch_l5_or_dispatch(backend_lease_proof) -> None:
     """Missing operator profile is rejected before Telegram can activate L5."""
     from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
 
     app = Flask("telegram-preflight")
-    router = _Router()
+    router = _Router(backend_lease_proof=backend_lease_proof)
     safety = SafetySystem()
     bot = TelegramBot(config=BotConfig(chat_id="1"), safety_system=safety)
     app.config.update(BROKER_ROUTER=router, AUTH_SERVICE=SimpleNamespace(get_profile=lambda: {}))
@@ -289,7 +300,7 @@ def test_telegram_released_preflight_cannot_authorise_l5_activation() -> None:
     assert "authority is unavailable" in result.response
 
 
-def test_telegram_kill_holds_one_generation_and_acl_authority_through_dispatch(monkeypatch) -> None:
+def test_telegram_kill_holds_one_generation_and_acl_authority_through_dispatch(monkeypatch, backend_lease_proof) -> None:
     """A rebuild cannot invalidate Telegram's target between preflight and L5."""
     from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
     from flinttrade_engine import safety as safety_module
@@ -297,8 +308,8 @@ def test_telegram_kill_holds_one_generation_and_acl_authority_through_dispatch(m
     monkeypatch.setattr(safety_module, "gate_broker_write", lambda *_args, **_kwargs: object())
     app = Flask("telegram-authority-transfer")
     rebuild_lock = threading.RLock()
-    old_router = _Router(("dhan:family",))
-    revoked_router = _Router(())
+    old_router = _Router(("dhan:family",), backend_lease_proof=backend_lease_proof)
+    revoked_router = _Router((), backend_lease_proof=backend_lease_proof)
     safety = SafetySystem()
     bot = TelegramBot(config=BotConfig(chat_id="1"), safety_system=safety)
     app.config.update(
@@ -363,7 +374,7 @@ def test_background_l5_scope_blocks_router_rebuild_until_every_verb_finishes(
 
     class BlockingRouter(_Router):
         def __init__(self) -> None:
-            super().__init__()
+            super().__init__(backend_lease_proof=backend_lease_proof)
             self.revoke_calls = 0
 
         async def execute_gated(self, request_ctx: Any, **kwargs: Any) -> dict[str, bool]:
@@ -387,7 +398,7 @@ def test_background_l5_scope_blocks_router_rebuild_until_every_verb_finishes(
     registry, owner = create_owned_registry()
     app.extensions["flinttrade.registry_publication_owner"] = owner
     old_router = BlockingRouter()
-    candidate_router = _Router(("upstox:replacement",))
+    candidate_router = _Router(("upstox:replacement",), backend_lease_proof=backend_lease_proof)
     safety = SafetySystem(reservation_db_path=tmp_path / "order-exposure-reservations.sqlite")
     journal = InMemoryEmergencyIntentJournal()
     safety.bind_emergency_journal(journal)
@@ -455,9 +466,9 @@ def test_background_l5_scope_blocks_router_rebuild_until_every_verb_finishes(
     assert app.config["BROKER_ROUTER"] is candidate_router
 
 
-def test_background_l5_generation_lease_contention_fails_closed_within_timeout() -> None:
+def test_background_l5_generation_lease_contention_fails_closed_within_timeout(backend_lease_proof) -> None:
     app = Flask("emergency-parent-generation-timeout")
-    router = _Router()
+    router = _Router(backend_lease_proof=backend_lease_proof)
     safety = SafetySystem()
     rebuild_lock = threading.RLock()
     lock_held = threading.Event()
