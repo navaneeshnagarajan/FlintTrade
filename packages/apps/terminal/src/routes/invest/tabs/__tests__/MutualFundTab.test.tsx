@@ -84,6 +84,7 @@ vi.mock("@/services/ftApi", () => ({
 // ---------------------------------------------------------------------------
 
 import { MutualFundTab } from "../MutualFundTab";
+import { EXPLORE_SAMPLE_NAV_DATE } from "@/hooks/useMutualFundData";
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -113,15 +114,12 @@ describe("MutualFundTab Explore sample copy (FT-INVEST-001)", () => {
   it("shows Sample NAVs · as of the fixture date and drops the daily-update claim", () => {
     renderTab();
 
-    const asOfLines = screen.getAllByText(/Sample NAVs · as of /);
+    const asOfLines = screen.getAllByText(`Sample NAVs · as of ${EXPLORE_SAMPLE_NAV_DATE}`);
     expect(asOfLines.length).toBeGreaterThan(0);
     expect(screen.queryByText(/Updated daily after market close/i)).not.toBeInTheDocument();
     expect(screen.getByText("Sample Data")).toBeInTheDocument();
-
-    const match = asOfLines[0].textContent?.match(/as of (\d{2}-[A-Za-z]{3}-\d{4})/);
-    expect(match?.[1]).toBeTruthy();
     // Fixture date must appear on the NAV rows as well as the as-of line.
-    expect(screen.getAllByText(match![1]).length).toBeGreaterThan(1);
+    expect(screen.getAllByText(EXPLORE_SAMPLE_NAV_DATE).length).toBeGreaterThan(1);
   });
 
   it("does not advertise live AMFI updates while Explore sample data is showing", () => {
@@ -132,7 +130,7 @@ describe("MutualFundTab Explore sample copy (FT-INVEST-001)", () => {
   });
 
   it.each(["practice", "live"] as const)(
-    "keeps daily AMFI update copy in %s when a live feed is used",
+    "keeps daily AMFI update copy in %s",
     (mode) => {
       currentMode = mode;
       renderTab();
