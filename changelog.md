@@ -52,6 +52,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Options Builder Explore Long Call no longer looks zero-risk (FT-LAB-003).**
+  Explore `/lab` Options Builder now treats a blank premium as
+  unknown: Payoff summary cards show `—` and
+  `Enter premium to model payoff` instead of modelling ₹0.
+  The Long Call template seeds the Explore sample-chain ATM CE
+  LTP, labelled `Sample premium — edit to model`, so Max Loss
+  and breakeven follow FT-LAB-001 maths on a non-zero cost.
+  Typing an explicit ₹0 still uses that maths and warns
+  `Premium is ₹0 — payoff treats cost as free`.
+
 - **Security PIN requires exactly six digits (FT-SET-003).**
   Explore `/settings#security` keeps New and Confirm as digits-only
   fields with `maxLength` 6. Set/Change PIN stays disabled until the

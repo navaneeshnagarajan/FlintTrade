@@ -3,13 +3,22 @@
 export type OptionType = "CE" | "PE";
 export type Direction = "BUY" | "SELL";
 
+/** How a builder premium was set. Cleared when the operator edits the field. */
+export type PremiumSource = "sample";
+
 export interface Leg {
   id: string;
   action: Direction;
   optionType: OptionType;
   strike: number;
   lots: number;
-  premium: number;
+  /**
+   * Per-unit premium. `null` means unset / unknown — never treat as ₹0.
+   * `0` is an explicit free premium the operator typed.
+   */
+  premium: number | null;
+  /** Set when Explore seeded a sample-chain LTP. */
+  premiumSource?: PremiumSource;
 }
 
 export interface PayoffPoint {

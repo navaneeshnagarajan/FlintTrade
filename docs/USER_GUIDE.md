@@ -403,7 +403,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
 | `/invest` | Portfolio-record workspace — holdings, net worth, SIPs, and mutual-fund tracker. Deep-link hashes such as `#holdings`, `#sip`, `#networth`, and `#mf-optimizer` open the matching tab on load; an unknown hash falls back to Dashboard. |
 | `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. Practice Trading links to Settings → Broker Gateway (`/settings#api`) for OpenAlgo Practice setup, not native Brokers. |
-| `/lab` | Strategy Lab — backtest, forward test, optimise. |
+| `/lab` | Strategy Lab — backtest, forward test, optimise, Options Builder. |
 | `/automate` | Automation Hub — flows, cron, monitors, logs. Kill-switch activate/reset lives under Automate → Settings. |
 | `/ai` | AI Centre — chat, Suggest, signals, sentiment, RAG. |
 | `/ditto` | Multi-account management — mirror, margin, risk. |
@@ -499,7 +499,8 @@ term-structure indicators. Useful for spotting unusual options activity.
 
 ## 7. Strategy Lab walkthrough
 
-Open `/lab`. The Strategy Lab is split into three sub-tools:
+Open `/lab`. The Strategy Lab includes Backtest, Forward Test, Optimise,
+and Options Builder.
 
 ### Backtest
 
@@ -527,6 +528,22 @@ validate the software path before any Live-mode use.
 
 Walk-forward optimisation across a parameter grid. Outputs a heatmap of
 performance per parameter combination plus an out-of-sample evaluation.
+
+### Options Builder
+
+Payoff needs a premium before it shows numbers. Open `/lab` →
+**Options Builder** → **Payoff**. Until every leg has a premium, Max
+Profit, Max Loss, Net Premium, and BEP(s) show `—`. Helper:
+`Enter premium to model payoff`. A blank premium is unknown, not
+zero-risk.
+
+On Explore, the **Long Call** template seeds a **sample premium** from
+the sample-chain ATM CE LTP, labelled `Sample premium — edit to model`.
+Edit the field if you want a different cost. Other templates leave
+premium blank so Payoff stays on that helper instead of modelling ₹0.
+
+Typing an explicit ₹0 is allowed. Payoff then treats cost as free and
+warns `Premium is ₹0 — payoff treats cost as free`.
 
 ![Lab](screenshots/06-lab.png)
 

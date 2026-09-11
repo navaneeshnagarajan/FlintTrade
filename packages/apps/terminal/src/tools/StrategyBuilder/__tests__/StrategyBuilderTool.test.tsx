@@ -137,15 +137,50 @@ describe("StrategyBuilderTool", () => {
     expect(screen.getByRole("button", { name: "Long Straddle" })).toBeInTheDocument();
   });
 
-  it("shows unbounded payoff for the Long Call template", async () => {
-    // Tester FT-LAB-001: Options Builder → Long Call → Payoff.
+  it("seeds a labelled sample premium on Explore Long Call so payoff is not zero-risk", async () => {
+    // Tester FT-LAB-003: Explore → /lab → Options Builder → Long Call → Payoff
+    // must not read as Premium ₹0 / max loss ₹0. Sample-chain ATM CE LTP
+    // (NIFTY 22500, gap 50) is 45 → max loss 45 × 75 = ₹3,375.
     render(<StrategyBuilderTool />);
     await userEvent.click(screen.getByRole("button", { name: "Long Call" }));
+
+    expect(screen.getByLabelText("Premium")).toHaveValue(45);
+    expect(screen.getAllByText("Sample premium — edit to model").length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getByRole("tab", { name: /Payoff/i }));
+
+    expect(screen.getByText("Max Profit").nextElementSibling).toHaveTextContent("Unlimited");
+    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("-₹3,375.00");
+    expect(screen.getByText("BEP(s)").nextElementSibling).toHaveTextContent("22545");
+    expect(screen.getByText("Sample premium — edit to model")).toBeInTheDocument();
+    expect(screen.queryByText("Premium is ₹0 — payoff treats cost as free")).not.toBeInTheDocument();
+  });
+
+  it("shows em-dash payoff cards for an unset Add-Leg premium, not ₹0", async () => {
+    render(<StrategyBuilderTool />);
+    await userEvent.click(screen.getByRole("button", { name: /Add Leg/i }));
+    expect(screen.getByLabelText("Premium")).toHaveValue(null);
+
+    await userEvent.click(screen.getByRole("tab", { name: /Payoff/i }));
+
+    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("—");
+    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent("—");
+    expect(screen.getByText("Enter premium to model payoff")).toBeInTheDocument();
+    expect(screen.queryByText("₹0.00")).not.toBeInTheDocument();
+  });
+
+  it("warns when the operator types an explicit ₹0 premium on a long call", async () => {
+    render(<StrategyBuilderTool />);
+    await userEvent.click(screen.getByRole("button", { name: "Long Call" }));
+    const premium = screen.getByLabelText("Premium");
+    await userEvent.clear(premium);
+    await userEvent.type(premium, "0");
     await userEvent.click(screen.getByRole("tab", { name: /Payoff/i }));
 
     expect(screen.getByText("Max Profit").nextElementSibling).toHaveTextContent("Unlimited");
     expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("₹0.00");
-    expect(screen.getByText("BEP(s)").nextElementSibling).toHaveTextContent("22500");
+    expect(screen.getByText("Premium is ₹0 — payoff treats cost as free")).toBeInTheDocument();
+    expect(screen.queryByText("Sample premium — edit to model")).not.toBeInTheDocument();
   });
 
   it("applies a live load-template event while mounted", () => {
