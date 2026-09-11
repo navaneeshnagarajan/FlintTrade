@@ -2,6 +2,7 @@ import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+import { DEFAULT_OPENALGO_HOST } from "@/lib/openAlgoDefaults";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { ConnectionStep } from "./ConnectionStep";
@@ -50,6 +51,7 @@ describe("ConnectionStep", () => {
       "false",
     );
     expect(screen.getByText(/Recommended/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/openalgo-compatible url/i)).toHaveValue(DEFAULT_OPENALGO_HOST);
     expect(screen.getByLabelText(/REST port/i)).toHaveValue("5000");
     // The native section is behind the secondary tab, not shown by default.
     expect(screen.queryByText("Native brokers section")).not.toBeInTheDocument();
@@ -109,16 +111,16 @@ describe("ConnectionStep", () => {
         method: "POST",
         body: JSON.stringify({
           api_key: "candidate-api-key",
-          host: "http://localhost:5000",
+          host: DEFAULT_OPENALGO_HOST,
           port: "5000",
           ws_port: "8765",
         }),
       }),
     );
     expect(useConnectionStore.getState()).toEqual(expect.objectContaining({
-      host: "http://localhost:5000",
+      host: DEFAULT_OPENALGO_HOST,
       apiKey: "candidate-api-key",
-      wsUrl: "ws://localhost:8765",
+      wsUrl: "ws://127.0.0.1:8765",
     }));
   });
 

@@ -1,8 +1,10 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import {
   exploreRoutePolicy,
   INSTALLED_EXPLORE_REDIRECT,
+  isDemoSessionActive,
   isPublicDemoBuild,
+  markDemoSessionActive,
 } from "./demoSession";
 
 /**
@@ -53,5 +55,39 @@ describe("exploreRoutePolicy (build-aware /explore contract)", () => {
       to: INSTALLED_EXPLORE_REDIRECT,
     });
     expect(INSTALLED_EXPLORE_REDIRECT).toBe("/welcome");
+  });
+});
+
+describe("isDemoSessionActive (hard-refresh remount)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("restores Explore when only the demo-session marker is set", () => {
+    localStorage.setItem("flinttrade:demo-session", "active");
+    expect(isDemoSessionActive()).toBe(true);
+  });
+
+  it("does not restore Explore when the operator left for Practice", () => {
+    localStorage.setItem("flinttrade:demo-session", "active");
+    localStorage.setItem(
+      "flinttrade:mode",
+      JSON.stringify({ state: { mode: "practice" }, version: 2 }),
+    );
+    expect(isDemoSessionActive()).toBe(false);
+  });
+
+  it("markDemoSessionActive writes a durable Explore mode record", () => {
+    markDemoSessionActive();
+    expect(localStorage.getItem("flinttrade:demo-session")).toBe("active");
+    expect(isDemoSessionActive()).toBe(true);
+    const persisted = JSON.parse(localStorage.getItem("flinttrade:mode") ?? "{}") as {
+      state?: { mode?: string };
+    };
+    expect(persisted.state?.mode).toBe("explore");
   });
 });

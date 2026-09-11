@@ -192,6 +192,28 @@ describe("useAuthGuard", () => {
     });
   });
 
+  it("restores demo workspace auth on hard refresh when only the demo-session marker exists", async () => {
+    authState.status = "unknown";
+    localStorage.setItem("flinttrade:demo-session", "active");
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const { result } = renderHook(() => useAuthGuard());
+
+    await waitFor(() => {
+      expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+        "demo-user",
+        "Explorer",
+        "",
+        { status: "unknown", principal: null, generation: 0 },
+      );
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.current.isLoading).toBe(false);
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(mockSetLoggedOut).not.toHaveBeenCalled();
+  });
+
   it("restores demo workspace auth on reload when explore demo session is active", async () => {
     authState.status = "unknown";
     localStorage.setItem("flinttrade:demo-session", "active");

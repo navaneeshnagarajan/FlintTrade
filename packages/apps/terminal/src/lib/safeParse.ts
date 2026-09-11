@@ -48,10 +48,11 @@ export function safeParseOr<T>(
 // Commonly reused schemas (shared across multiple call sites)
 // ---------------------------------------------------------------------------
 
-/** `{ done?: boolean; token?: string }` — SSE stream tokens from /ft-api */
+/** `{ done?: boolean; token?: string; error?: string }` — SSE stream tokens from /ft-api */
 export const sseTokenSchema = z.object({
   done: z.boolean().optional(),
   token: z.string().optional(),
+  error: z.string().optional(),
 });
 
 /**

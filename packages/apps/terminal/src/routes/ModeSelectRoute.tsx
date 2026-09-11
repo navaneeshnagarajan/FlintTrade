@@ -11,6 +11,7 @@ import { Monitor, FlaskConical, Zap, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AppMode } from "@/stores/modeStore";
+import { enableFlintTradeTotp } from "@/lib/setupAccountApi";
 import { unlockWithPin } from "@/lib/modeAuth";
 
 // ---------------------------------------------------------------------------
@@ -71,7 +72,7 @@ const MODE_CARDS: ModeCardConfig[] = [
     id: "live",
     label: "Live",
     description: "Real trading",
-    brokerNote: "Broker required · PIN required",
+    brokerNote: "Broker required · PIN and authenticator required",
     icon: <Zap size={22} aria-hidden="true" />,
     pillClass: "bg-profit/20 text-profit",
     borderClass: "border-border-default/70 hover:border-profit/50",
@@ -87,6 +88,7 @@ const MODE_CARDS: ModeCardConfig[] = [
 export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: ModeSelectRouteProps) {
   const [selected, setSelected] = useState<AppMode>(initialMode);
   const [pin, setPin] = useState("");
+  const [totpCode, setTotpCode] = useState("");
   const [pinError, setPinError] = useState("");
   const [isVerifyingPin, setIsVerifyingPin] = useState(false);
 
@@ -98,14 +100,17 @@ export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: M
       }
       setIsVerifyingPin(true);
       try {
+        if (totpCode.length === 6) {
+          await enableFlintTradeTotp(totpCode);
+        }
         const { token: liveSessionToken } = await unlockWithPin(pin, "live");
         setPinError("");
         onSelect(selected, liveSessionToken);
         return;
       } catch (e) {
         // Surface the backend's actual reason — a wrong PIN says "Invalid PIN",
-        // but a missing/expired session (D6) says to sign in first; the old
-        // blanket "Incorrect PIN" mislabelled the latter.
+        // totp_required asks for authenticator enrolment, and a missing
+        // session (D6) says to sign in first.
         setPinError(e instanceof Error && e.message ? e.message : "Incorrect PIN. Try again.");
         return;
       } finally {
@@ -118,6 +123,7 @@ export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: M
   const handleCardSelect = (mode: AppMode) => {
     setSelected(mode);
     setPin("");
+    setTotpCode("");
     setPinError("");
   };
 
@@ -190,8 +196,28 @@ export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: M
             <div className="space-y-3 rounded-xl border border-profit/25 bg-profit/8 p-4 shadow-xl shadow-black/10 backdrop-blur-xl">
               <p className="text-xs text-text-secondary flex items-center gap-1.5">
                 <Zap size={12} className="text-profit shrink-0" aria-hidden="true" />
-                Live mode executes real orders with real money. Enter your PIN to confirm.
+                Live mode executes real orders with real money. Enter your PIN
+                and, if you deferred setup, a one-time authenticator code.
               </p>
+              <div>
+                <label htmlFor="live-mode-totp" className="text-xs text-text-secondary font-medium block mb-1.5">
+                  Authenticator code
+                </label>
+                <Input
+                  id="live-mode-totp"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={totpCode}
+                  onChange={(e) => {
+                    setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                    if (pinError) setPinError("");
+                  }}
+                  placeholder="6-digit code if not enrolled yet"
+                  aria-label="Enter your authenticator code to enrol before Live"
+                  className="text-center font-mono text-lg tracking-widest max-w-48"
+                />
+              </div>
               <div>
                 <label htmlFor="live-mode-pin" className="text-xs text-text-secondary font-medium block mb-1.5">
                   PIN

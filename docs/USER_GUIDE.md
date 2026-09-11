@@ -273,36 +273,89 @@ Before enabling any order-capable integration, exercise the order path in
 
 | Mode | Order behaviour | Best for |
 |---|---|---|
-| **Explore** | No orders sent; demo data only | First-time visitors, screenshots, docs |
+| **Explore** | Demo/sample data; no Live broker order authority. On `/trade`, Order Pad **Sample Buy** opens a sample review and records a local sample fill (no broker) | First-time visitors, screenshots, docs |
 | **Practice** | Orders simulated by FlintTrade's native sandbox | Strategy tests and integration checks |
 | **Live** | Real orders sent through the configured broker path | Gated broker integration, only after user review |
 
 The current mode is shown in the top bar and is server-enforced via the JWT
 claim — switching to Live requires a deliberate confirmation step.
 
+**Mode vs session vs sample (FT-UX-001).** The Explore / Practice / Live chips
+mean execution mode only. Market open/closed is session status, never Live
+mode. Explore Order Pad uses **Sample Buy** / **Sample Sell** (a local sample
+fill after review). Practice keeps **Practice Buy** / **Practice Sell**. Live
+uses **Place BUY Order**. Connected / green is never shown for an
+unconfigured subsystem.
+
+**Compact / Comfortable.** New installs default to Comfortable (full labels).
+Compact on a desk Trade viewport (~1280 and wider) keeps chart, order pad,
+and positions primary; the ticker strip, full tool ribbon, and watchlist /
+indices / advanced tools start collapsed behind **Watchlist & tools** /
+**Desk tools**. Selecting Compact again re-collapses that disclosure.
+Phone layouts are unchanged.
+
 ### Walkthrough
 
 1. Open `/trade` (http://127.0.0.1:5100/trade on the installed web app;
    http://localhost:5173/trade on the Vite dev server).
-2. If the badge shows **EXPLORE**, click it once to switch to Practice.
-   There is no confirmation dialog. The UI calls `POST /v1/auth/mode`
-   so the JWT matches.
+2. If the badge shows **EXPLORE**, you can stay there and try Order Pad
+   **Sample Buy** — sample review, then a local sample fill (no broker).
+   For the full native-sandbox path this walkthrough uses, click the
+   badge once to switch to Practice. There is no confirmation dialog.
+   The UI calls `POST /v1/auth/mode` so the JWT matches.
 3. From the dock sidebar, drag the **Order Pad** widget into the workspace
    (or pick a preset that contains it).
 4. Type `NIFTY` into the symbol field; FlintTrade autocompletes the current
    front-month future. Select it.
 5. Set Quantity = 1 lot (50). Choose **MARKET**. Side = **BUY**.
-6. Click **Place Order**. The order appears in the **Positions** widget
-   immediately; the **Orderbook** widget shows it as filled (simulated).
+6. Click **Sample Buy** (Explore) or **Practice Buy** (Practice) and confirm the review. The order
+   appears in the **Positions** widget immediately; the **Orders**
+   widget shows it as filled (simulated).
 7. Close the position from the Positions widget. Confirm your simulated
    P&L is recorded in the **P&L Monitor** widget.
 
 You have just exercised the full FlintTrade order path — front-end → JWT
 guard → mode guard → FlintTrade sandbox → simulated fill → REST
-refresh of Positions and Orderbook. No real money moved.
+refresh of Positions and Orders. No real money moved.
 
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
+
+On Explore `/trade` Positions → Heat, **Group by Exchange** and
+**Group by Sector** draw a labelled band per group (name chip plus
+exposure when there is room). Flat stays leaf-only. Positions with no
+exchange metadata show `No exchange groups in these positions` instead
+of an undifferentiated treemap.
+
+On `/trade` Trade Review, **Performance** uses the same date range as
+Log and the other Review tabs. Changing Review dates updates
+Performance. A visible **Review range** | **YTD** control keeps YTD as
+an explicit choice; the active chip shows the effective window (for
+example `Review range · 05 Sep–11 Sep 2026` or
+`YTD · 01 Jan–11 Sep 2026`). Opening Performance stays on the Review
+range rather than jumping to YTD. An empty range or no fills is an
+honest empty for that window, not a quiet YTD fallback. Metrics cover
+the labelled window up to the journal's 1,000-fill analytics page; a
+larger window is disclosed rather than silently sliced.
+
+### Learn → Practice Trading (OpenAlgo)
+
+This is a different path from the native Practice-mode sandbox on
+`/trade` above. Explore `/learn` → **Practice Trading** walks through
+OpenAlgo broker Practice / sandbox setup (Dhan Sandbox Active, ₹10L
+virtual funds; Kotak Neo Sandbox Planned). The tab shows "How to start
+Practice Trading", helper text "Configure OpenAlgo in Settings → Broker
+Gateway.", and an **Open Settings → Broker Gateway** button that
+navigates to `/settings#api`. The CTA does not send operators to
+Settings → Brokers (`/settings#brokers`). Point the Broker Gateway at
+that OpenAlgo Practice instance, trade against virtual funds, review
+P&L, then point OpenAlgo at live credentials when ready.
+
+On Explore `/learn` → Glossary → Lot Size, the glossary teaches dated
+Jan 2026 NSE-cycle index lots (`NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 ·
+MIDCPNIFTY 120 (as of Jan 2026 NSE cycle)`) plus a **Verify on NSE**
+link to circular NSE/FAOP/70616. Learn market facts that exchanges
+revise must ship dated, not as forever hardcodes.
 
 ---
 
@@ -317,6 +370,12 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] Broker or OpenAlgo session is current if you are intentionally testing a
       live-capable integration.
 - [ ] Your FlintTrade JWT is fresh — it expires daily at 8 AM IST.
+- [ ] The authenticator is enrolled, or you will confirm a one-time
+      authenticator code in the Live switch dialog (if you chose **Set up
+      later** during setup). Explore and Practice stay password-only until
+      enrolment.
+- [ ] An **exactly 6-digit** Security PIN is set under Settings → Security
+      (`/settings#security`). Live cannot be armed until this PIN exists.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
 - [ ] Daily P&L pause and hard-stop percentages are configured in Settings → Risk.
@@ -325,10 +384,17 @@ software safeguards, prompts, and recovery controls in a local setup.
 
 ### Walkthrough
 
-1. Click the **PRACTICE** badge in the top bar. A dialog warns that
-   real orders will be placed and asks for your **6-digit PIN**
-   (`POST /v1/auth/pin`). Set a PIN under Settings → Security first if
-   you have not already.
+1. Click the **PRACTICE** badge in the top bar, or select **Live** on
+   the welcome mode picker. The dialog warns that real orders will be
+   placed and asks for an **authenticator code** and your **exactly
+   6-digit PIN**. Live unlock requires both — a confirmed authenticator
+   enrolment plus the PIN. If you deferred 2FA with **Set up later**,
+   enter a one-time authenticator code in the dialog to enrol, then the
+   PIN. `POST /v1/auth/pin` with `mode: "live"` refuses 403
+   `totp_required` until the authenticator is enabled. The PIN
+   alone is not enough. Set the PIN under Settings → Security
+   (`/settings#security`) first if you have not already — see
+   [Settings reference](#11-settings-reference).
 2. Cancel the modal unless you are deliberately performing your own broker-side
    test outside this guide.
 3. Confirm the UI clearly shows Live mode, the active account, and the
@@ -366,19 +432,26 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 
 | Route | Purpose |
 |---|---|
-| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password + TOTP, or PIN). There is no `/login` URL. |
+| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP, or PIN). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Explore stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
-| `/setup` | First-time wizard (Quick / Guided / Advanced paths). `/setup-account` is a compatibility alias. |
+| `/setup` | First-time 7-step linear wizard (Account → optional authenticator → Persona → Broker → Trading → Risk → Choose Mode). After account create, **Set up later** continues Explore/Practice without enrolling 2FA. Daily login stays password-only until enrolment; Live still requires the authenticator and PIN. `/setup-account` is a compatibility alias. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
-| `/invest` | Portfolio-record workspace — holdings, net worth, SIPs, and mutual-fund tracker. |
-| `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. |
-| `/lab` | Strategy Lab — backtest, forward test, optimise. |
+| `/invest` | Portfolio-record workspace — holdings, net worth, SIPs, and mutual-fund tracker. Deep-link hashes such as `#holdings`, `#sip`, `#networth`, `#mutual-funds`, and `#mf-optimizer` open the matching tab on load; an unknown hash falls back to Dashboard. |
+| `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. Practice Trading links to Settings → Broker Gateway (`/settings#api`) for OpenAlgo Practice setup, not native Brokers. |
+| `/lab` | Strategy Lab — backtest, forward test, optimise, Options Builder. |
 | `/automate` | Automation Hub — flows, cron, monitors, logs. Kill-switch activate/reset lives under Automate → Settings. |
-| `/ai` | AI Centre — chat, signals, sentiment, RAG. |
+| `/ai` | AI Centre — chat, Suggest, signals, sentiment, RAG. |
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
+
+On Explore `/invest#mutual-funds`, Mutual Fund Explorer labels the static
+fixture `Sample NAVs · as of 10-Sep-2026` (from `EXPLORE_SAMPLE_NAV_DATE`)
+and does not claim "Updated daily after market close." The as-of is the
+fixture date and does not auto-update. Practice and Live keep the live
+AMFI sentence ("Updated daily after market close") when the live feed is
+in use.
 
 ### The widgets (71)
 
@@ -470,7 +543,8 @@ term-structure indicators. Useful for spotting unusual options activity.
 
 ## 7. Strategy Lab walkthrough
 
-Open `/lab`. The Strategy Lab is split into three sub-tools:
+Open `/lab`. The Strategy Lab includes Backtest, Forward Test, Optimise,
+and Options Builder.
 
 ### Backtest
 
@@ -499,6 +573,22 @@ validate the software path before any Live-mode use.
 Walk-forward optimisation across a parameter grid. Outputs a heatmap of
 performance per parameter combination plus an out-of-sample evaluation.
 
+### Options Builder
+
+Payoff needs a premium before it shows numbers. Open `/lab` →
+**Options Builder** → **Payoff**. Until every leg has a premium, Max
+Profit, Max Loss, Net Premium, and BEP(s) show `—`. Helper:
+`Enter premium to model payoff`. A blank premium is unknown, not
+zero-risk.
+
+On Explore, the **Long Call** template seeds a **sample premium** from
+the sample-chain ATM CE LTP, labelled `Sample premium — edit to model`.
+Edit the field if you want a different cost. Other templates leave
+premium blank so Payoff stays on that helper instead of modelling ₹0.
+
+Typing an explicit ₹0 is allowed. Payoff then treats cost as free and
+warns `Premium is ₹0 — payoff treats cost as free`.
+
 ![Lab](screenshots/06-lab.png)
 
 ---
@@ -525,8 +615,19 @@ Cron jobs run inside the FlintTrade backend (`packages/services/automation`).
 
 ### Monitors
 
-Watchdog rules that fire alerts (Telegram, sound, on-screen). Lighter
-than Flows — single-event triggers without action chains.
+**Live Strategy Monitors** lists running strategies and auto-refreshes
+about every 5 seconds. You can stop a running strategy from this view.
+When none are running, the empty state shows "No strategies running"
+and "Start a strategy from the Strategy Builder tool.", plus an
+**Open Strategy Builder** outline link that navigates to `/lab`.
+
+On Explore `/automate` → Settings → Telegram Alerts, **Send Test** is
+disabled (click and Enter do not send). The prefilled message stays
+visible as a preview-only sample. Helper: "Telegram tests are blocked in
+Explore (sample-only). Switch to Practice or Live with Telegram configured
+to send a real test." There is no confirm-and-send path from Explore.
+Practice and Live arm Send Test only when Telegram is configured; otherwise
+the helper is "Configure Telegram first".
 
 ![Automate](screenshots/07-automate.png)
 
@@ -534,7 +635,9 @@ than Flows — single-event triggers without action chains.
 
 ## 9. AI Centre walkthrough
 
-Open `/ai`. Four sub-tools backed by `packages/services/ai`:
+Open `/ai`. Chat, Signals, Sentiment, and RAG are backed by
+`packages/services/ai`. Suggest is a local filter UI over an illustrative
+strategy list — not a live AI fetch.
 
 ### Chat
 
@@ -549,6 +652,57 @@ If a timed-out mutation has an outcome FlintTrade cannot prove, Settings blocks
 later runtime changes and shows the exact operation and admission IDs. Explicit
 acknowledgement records that the unknown result was reviewed; it does not retry
 the action or label it successful.
+
+Chat itself needs a configured LLM via Settings → AI. The badge and composer
+align with Settings → AI / `#llm` hydration as well as advisor status
+(including Explore / `demo-user`), not a leftover local setting. When Explore
+Settings `#llm` looks empty ("No LLM provider configured"), Chat shows
+**Not configured** / **LLM not configured** — **Connected** must not appear
+from an env-default advisor `configured` while Settings looks empty.
+Returning to Chat after you save Settings → AI re-checks readiness (advisor
+and Settings hydration), so the **Not configured** gate should not stay stuck
+on an outdated result.
+
+When unconfigured, the warning badge is **Not configured**, the empty state is
+**LLM not configured**, the primary CTA **Open Settings → AI** opens
+`/settings#llm`, and an outline **Retry** re-probes advisor status and
+Settings `#llm` hydration. Composer input and Send stay disabled; there is no
+send-then-no-reply path.
+
+If leftover transcript messages hide that empty state while Chat is still
+unconfigured, disconnected, or in error, the header still offers **Retry**
+(re-check advisor status and Settings hydration) and **Open Settings → AI**.
+
+A configured but broken probe shows **Error** or **Disconnected** with
+**Retry** — never a green **Connected**. Explore does not show a fake
+Connected sample advisor. Any later demo replies must be labelled
+**Sample replies**. Signals **Live** / **Polling** stay separate from Chat
+LLM readiness.
+
+On Explore `/settings#llm`, a demo or unconfigured session shows the empty
+state "No LLM provider configured" with **Retry** — not a broken load.
+That Settings empty-state wording stays distinct from Chat's **LLM not
+configured**; the two are aligned for readiness, so Chat also looks
+unconfigured when Settings looks empty. Configure a provider in Live or
+Practice on this machine; see
+[Settings reference](#11-settings-reference).
+
+### Suggest
+
+**AI Strategy Suggestions** filters a local illustrative recommendation
+list by Market Mood chips (**Volatile**, **Trending**, **Sideways**) and
+your risk profile from persona and experience. Mood is a filter, not a
+draft and not a live AI fetch.
+
+Changing mood — a chip or **Next mood** — immediately replaces the
+recommendation cards and clears any previously focused strategy card, so
+chips, cards, and focus share one mood state. Selected mood chips use
+`aria-pressed`.
+
+When mood and risk match nothing, the empty state offers
+**Try another mood**, which advances the mood filter.
+**Deploy to Strategy Lab** opens `/lab?strategy=<registryKey>` for that
+card.
 
 ### Signals
 
@@ -593,6 +747,10 @@ workspace.
 - **Risk** — per-account risk limits, kill-switch propagation, trailing
   stop-loss governor.
 
+On Explore `/ditto` Risk, **Kill All Positions** is disabled when there are
+no managed accounts (empty state "No managed accounts"; no confirm). The
+control stays armed when accounts are listed or the risk snapshot fails.
+
 Position mirroring patterns originally came from AlgoMirror; they now run
 in-process inside `packages/services/ditto/` (no external service required).
 
@@ -623,8 +781,26 @@ Settings panels:
 | **Appearance** | `ui.theme` plus the theme / density stores | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Data Paths** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
 | **LLM Config** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
-| **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. |
+| **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives on Automate → Settings → Telegram Alerts (**Send Test**); Explore keeps that control disarmed. |
 | **Risk Limits** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
+
+On `/settings#security`, **Quick-unlock PIN** is the Live-arming
+re-auth factor (it can also unlock an idle session). The PIN is optional
+at account setup, but Live cannot be armed until one exists. New and
+Confirm accept digits only (`maxLength` 6). **Set PIN** / **Change PIN**
+stays disabled until the account password is present, both fields are
+exactly six digits, and they match. Leaving (blur) a field with 1–5
+digits shows `PIN must be exactly 6 digits`; leaving Confirm when both
+fields are filled and different shows `PINs do not match`.
+`POST /v1/auth/pin/set` rejects anything that is not `^[0-9]{6}$`.
+
+On Explore `/settings` → **LLM Config**, a demo or unconfigured session
+shows the empty state "No LLM provider configured", with **Retry** and
+guidance that Explore cannot load or persist LLM secrets. This is not a
+broken session; configure a provider in Live or Practice on this machine.
+Live and Practice still disable editing on a real load failure ("AI
+settings could not be loaded") to protect a saved configuration, and
+offer **Retry**.
 
 Settings → **Report Bug** prepares a GitHub issue without background telemetry.
 The form keeps runtime/error diagnostics out of the public draft by default;
@@ -685,6 +861,30 @@ Get-NetTCPConnection -LocalPort 5100 | Select-Object OwningProcess
 Stop-Process -Id <pid>
 ```
 
+### "No LLM provider configured" or "AI settings could not be loaded"
+
+On Explore `/settings` → LLM Config, the empty state "No LLM provider
+configured" is expected for a demo or unconfigured session. Explore
+cannot load or persist LLM secrets. Use **Retry**, or configure a
+provider in Live or Practice on this machine.
+
+On Live or Practice, "AI settings could not be loaded" disables editing
+to protect a saved configuration. Use **Retry**.
+
+On `/ai` Chat, an unconfigured LLM shows **LLM not configured** (badge
+**Not configured**) with **Open Settings → AI** and an outline **Retry**
+that re-probes advisor status and Settings `#llm` hydration. Composer
+input and Send stay disabled. Chat also looks unconfigured when Explore
+Settings `#llm` looks empty ("No LLM provider configured") — **Connected**
+must not appear from an env-default advisor `configured` while Settings
+looks empty. If leftover transcript messages hide that empty state, the
+header still offers **Retry** and **Open Settings → AI**. The Settings
+empty-state wording stays distinct from Chat's **LLM not configured**; they
+are aligned for readiness. A configured but broken probe shows
+**Error** or **Disconnected** with **Retry**. Returning to Chat after
+saving Settings → AI re-checks readiness (advisor and Settings hydration),
+so the gate should not stay stuck on an outdated **Not configured**.
+
 ### "Token expired" when placing an order
 
 FlintTrade JWTs expire daily at 8 AM IST. Refresh the token by signing in
@@ -693,9 +893,12 @@ when it detects the 401.
 
 ### Orders not arriving / silently dropped
 
-1. Check the mode badge in the top bar. If it says **Explore**, no orders
-   are sent at all (by design).
-2. Open the **Orderbook** widget and look at the rejection reason column.
+1. Check the mode badge in the top bar. **Explore** has no Live broker
+   order authority — Live-intent submits are blocked. Order Pad
+   **Sample Buy** on `/trade` records a local sample fill after sample
+   review (no broker). Switch to **Practice** for the native sandbox
+   path, or unlock **Live** for a real broker order.
+2. Open the **Orders** widget and look at the rejection reason column.
 3. Check the FlintTrade backend logs — the console where you ran
    `python scripts/ft.py start` (or `make start`) — every rejected order is
    logged with the safety-layer that blocked it.
@@ -737,19 +940,10 @@ ensure the running user has write access.
 - **security.md** — for security issues (private disclosure via GitHub
   Security Advisories).
 
-If your issue requires a backend log, raise the log level and attach the
-relevant lines (redact any broker account IDs or tokens first):
-
-```bash
-# macOS / Linux
-FLINTTRADE_LOG_LEVEL=DEBUG python scripts/ft.py start
-```
-
-```powershell
-# Windows 10/11
-$env:FLINTTRADE_LOG_LEVEL = "DEBUG"
-python scripts/ft.py start
-```
+If your issue requires a backend log, attach the relevant lines from the
+console where you ran `python scripts/ft.py start`, or from the persistent
+log at `<workspace>/logs/flinttrade.log` (redact any broker account IDs or
+tokens first).
 
 ---
 

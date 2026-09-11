@@ -1,8 +1,16 @@
 import { useEffect, useId, useRef, type KeyboardEvent } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
+import type { AppMode } from "@/stores/modeStore";
+import {
+  orderReviewConfirmAria,
+  orderReviewDescription,
+  orderReviewDetailsLabel,
+  orderReviewTitle,
+} from "@/lib/modeVocabulary";
 import type { PracticeOrderReviewSnapshot } from "./practiceOrderReview";
 
 interface PracticeOrderReviewStageProps {
+  mode: Exclude<AppMode, "live">;
   review: PracticeOrderReviewSnapshot;
   confirming: boolean;
   onBack: () => void;
@@ -29,6 +37,7 @@ function detailRow(label: string, value: string, emphasis = false) {
 
 /** Dedicated Practice-only review surface. It deliberately does not share a generic order dialog. */
 export function PracticeOrderReviewStage({
+  mode,
   review,
   confirming,
   onBack,
@@ -86,15 +95,15 @@ export function PracticeOrderReviewStage({
           <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-warning" />
           <div>
             <h2 id={titleId} className="font-heading text-sm font-semibold text-text-primary">
-              Review Practice order
+              {orderReviewTitle(mode)}
             </h2>
             <p id={descriptionId} className="mt-1 text-xs leading-relaxed text-text-secondary">
-              Simulation only. This order is sent only to FlintTrade&apos;s Practice sandbox. No broker or native trading API is contacted.
+              {orderReviewDescription(mode)}
             </p>
           </div>
         </div>
 
-        <dl aria-label="Practice order details" className="rounded border border-border-default bg-surface-base px-3 py-1">
+        <dl aria-label={orderReviewDetailsLabel(mode)} className="rounded border border-border-default bg-surface-base px-3 py-1">
           {detailRow("Instrument", `${params.symbol} · ${params.exchange}`, true)}
           {detailRow("Side", params.action, true)}
           {detailRow("Type", params.orderType)}
@@ -108,7 +117,7 @@ export function PracticeOrderReviewStage({
         </dl>
 
         <p className="mt-3 text-xxs leading-relaxed text-text-muted">
-          Back or any order edit invalidates this review. Confirm submits this exact immutable intent through the existing Practice path.
+          Back or any order edit invalidates this review. Confirm submits this exact immutable intent on the paper path.
         </p>
 
         <div className="mt-4 flex gap-2">
@@ -125,7 +134,7 @@ export function PracticeOrderReviewStage({
             ref={confirmRef}
             type="button"
             disabled={confirming}
-            aria-label="Confirm simulated Practice order"
+            aria-label={orderReviewConfirmAria(mode)}
             aria-busy={confirming}
             onClick={onConfirm}
             className="flex h-9 flex-1 items-center justify-center gap-2 rounded border border-accent bg-accent px-3 text-xs font-semibold text-white hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60"

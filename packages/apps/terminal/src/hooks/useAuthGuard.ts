@@ -41,6 +41,14 @@ export function useAuthGuard(): {
         })
         .then((raw: unknown) => {
           if (!isAuthSessionFenceCurrent(probeFence)) return;
+          // A late status probe must not clear a hatch session that landed
+          // while the request was in flight (setLoggedOut wipes the marker).
+          if (isDemoSessionActive()) {
+            useAuthStore
+              .getState()
+              .setLoggedInIfCurrent("demo-user", "Explorer", "", probeFence);
+            return;
+          }
           const result = AuthStatusSchema.safeParse(raw);
           if (!result.success) {
             console.error(

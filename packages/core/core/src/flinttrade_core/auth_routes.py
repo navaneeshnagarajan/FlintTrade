@@ -5,11 +5,12 @@ Blueprint prefix: /v1/auth
 Public endpoints (no API key required):
   - GET  /v1/auth/status   — check if setup complete
   - POST /v1/auth/setup    — one-time account creation
-  - POST /v1/auth/login    — daily password + TOTP login
-  - POST /v1/auth/pin      — PIN quick-unlock
+  - POST /v1/auth/login    — daily password login (TOTP only once enrolled)
+  - POST /v1/auth/pin      — PIN quick-unlock (Live also requires TOTP enrolment)
   - POST /v1/auth/logout   — invalidate session
 Session-bound endpoints (valid session JWT required):
   - POST /v1/auth/pin/set  — set/change the quick-unlock PIN (password re-confirm)
+  - POST /v1/auth/totp/enable — confirm optional authenticator enrolment
 """
 
 from __future__ import annotations
@@ -308,6 +309,8 @@ def _create_token(
     *,
     live_mode_unlocked: bool = False,
     mode: str = "explore",
+    setup_session: bool = False,
+    setup_bound: str = "",
 ) -> str:
     """Create a JWT that expires at next 8:00 AM IST.
 
@@ -323,6 +326,10 @@ def _create_token(
         mode: Trading mode at token-issue time: ``"explore"``,
             ``"practice"``, or ``"live"``.  Defaults to ``"explore"`` so
             that freshly issued (non-PIN) tokens cannot place live orders.
+        setup_session: If ``True``, mark this as the one-shot account-create
+            JWT. Passwordless ``/setup/reset`` accepts only this claim.
+        setup_bound: Account ``created_at`` stamp bound into a setup JWT so
+            a stale token cannot wipe a later replacement account.
     """
     from .auth_scopes import DEFAULT_SESSION_SCOPES  # noqa: PLC0415 — avoid import cycle
 
@@ -339,6 +346,9 @@ def _create_token(
         # to every admin/observability surface; require_scope() enforces it per route.
         "scopes": list(DEFAULT_SESSION_SCOPES),
     }
+    if setup_session:
+        payload["setup_session"] = True
+        payload["setup_bound"] = setup_bound
     return jwt.encode(payload, _get_jwt_secret(), algorithm=_JWT_ALGORITHM)
 
 
@@ -492,6 +502,7 @@ def auth_status() -> tuple[Any, int]:
             "is_setup": svc.is_setup(),
             "is_locked": svc.is_locked(),
             "has_pin": svc.has_pin(),
+            "totp_enabled": svc.is_totp_enabled(),
         },
     }), 200
 
@@ -525,9 +536,14 @@ def auth_setup() -> tuple[Any, int]:
     # write guard / D6 session-bound PIN). Legitimate: the operator is
     # physically creating the account right now, so this first session needs no
     # separate TOTP step. It is non-live (mode=explore, live_mode_unlocked
-    # false); arming Live still requires the PIN. Subsequent logins after this
-    # session ends require password + TOTP as usual.
-    token = _create_token(username, mode="explore")
+    # false). Authenticator enrolment is optional for Explore/Practice;
+    # arming Live still requires PIN and a confirmed authenticator.
+    token = _create_token(
+        username,
+        mode="explore",
+        setup_session=True,
+        setup_bound=svc.get_created_at(),
+    )
     return jsonify({
         "status": "success",
         "data": {
@@ -539,24 +555,90 @@ def auth_setup() -> tuple[Any, int]:
     }), 201
 
 
+def _session_token_from_request() -> str:
+    """Return the Bearer / X-FlintTrade-Token value, or an empty string."""
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip()
+    if token:
+        return token
+    return request.headers.get("X-FlintTrade-Token", "").strip()
+
+
+def _verify_setup_session_token(token: str) -> dict[str, Any] | tuple[Any, int]:
+    """Accept only the account-create setup JWT for passwordless wipe.
+
+    Daily-login, PIN-issued, and password-reset tokens are rejected even when
+    they carry ``type: "session"``. The setup JWT is also bound to this
+    account's ``created_at`` so a stale token cannot wipe a replacement.
+    """
+    try:
+        payload = decode_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return jsonify({
+            "status": "error",
+            "message": "Session expired or invalid — confirm with your password instead.",
+        }), 401
+    if payload.get("type") != "session" or payload.get("setup_session") is not True:
+        return jsonify({
+            "status": "error",
+            "message": "A setup session is required.",
+        }), 401
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    profile = svc.get_profile()
+    subject = str(payload.get("sub") or "")
+    expected_user = str(profile.get("username") or "")
+    bound = str(payload.get("setup_bound") or "")
+    created = svc.get_created_at()
+    if (
+        not subject
+        or not expected_user
+        or not hmac.compare_digest(subject, expected_user)
+        or not bound
+        or not created
+        or not hmac.compare_digest(bound, created)
+    ):
+        return jsonify({
+            "status": "error",
+            "message": "Session expired or invalid — confirm with your password instead.",
+        }), 401
+    return payload
+
+
 @auth_bp.route("/setup/reset", methods=["POST"])
 @_rate_limit("3 per hour")
 def auth_setup_reset() -> tuple[Any, int]:
     """Wipe the account during the setup wizard.
 
-    Body: ``{"password": "…"}``. Requires the password the user just set so
-    a casual shoulder-surfer cannot destroy an account. Used by the "Delete
-    account & start over" escape hatch on the 2FA screen.
+    Body: ``{"password": "…"}`` (password-confirmed wipe) **or** the
+    account-create setup JWT with an empty body (lost-QR start-over). A
+    daily-login session or password-reset token is never enough.
     """
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
     body = request.get_json(silent=True) or {}
     password = str(body.get("password", ""))
-    if not password:
+    if password:
+        if not svc.reset_account(password):
+            return jsonify({"status": "error", "message": "Invalid password."}), 401
+        return jsonify({"status": "success", "data": {}}), 200
+
+    token = _session_token_from_request()
+    if not token:
         return jsonify({"status": "error", "message": "Password required to confirm reset."}), 400
-    if not svc.reset_account(password):
-        return jsonify({"status": "error", "message": "Invalid password."}), 401
+    verified = _verify_setup_session_token(token)
+    if not isinstance(verified, dict):
+        return verified
+    svc.wipe_account()
+    old_jti = str(verified.get("jti", ""))
+    old_exp = float(verified.get("exp", 0) or 0)
+    if old_jti:
+        try:
+            _revoke_jti(old_jti, old_exp)
+        except Exception:
+            logger.debug("Setup reset could not revoke the spent session", exc_info=True)
     return jsonify({"status": "success", "data": {}}), 200
 
 
@@ -615,7 +697,7 @@ def _tofu_authorise_login_actor(actor_id: str) -> None:
 @auth_bp.route("/login", methods=["POST"])
 @_rate_limit("5 per minute")
 def auth_login() -> tuple[Any, int]:
-    """Daily login with password + TOTP."""
+    """Daily login with password; TOTP only after authenticator enrolment."""
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
@@ -633,10 +715,11 @@ def auth_login() -> tuple[Any, int]:
     if not svc.verify_password(password):
         return jsonify({"status": "error", "message": "Invalid credentials."}), 401
 
-    if not svc.verify_totp(totp_code):
-        # Try backup code as fallback
-        if not svc.verify_backup_code(totp_code):
-            return jsonify({"status": "error", "message": "Invalid TOTP code."}), 401
+    if svc.is_totp_enabled():
+        if not svc.verify_totp(totp_code):
+            # Try backup code as fallback
+            if not svc.verify_backup_code(totp_code):
+                return jsonify({"status": "error", "message": "Invalid TOTP code."}), 401
 
     profile = svc.get_profile()
     username = str(profile.get("username") or "user")
@@ -735,6 +818,16 @@ def auth_pin_verify() -> tuple[Any, int]:
             }), 409
         return jsonify({"status": "error", "message": "Invalid PIN."}), 401
 
+    if target_mode == "live" and not svc.is_totp_enabled():
+        return jsonify({
+            "status": "error",
+            "code": "totp_required",
+            "message": (
+                "Authenticator enrolment is required before Live. "
+                "Confirm a one-time code from your authenticator app, then retry."
+            ),
+        }), 403
+
     live_unlocked = target_mode == "live"
     profile = svc.get_profile()
     token = _create_token(
@@ -828,6 +921,51 @@ def auth_pin_set() -> tuple[Any, int]:
 
     logger.info("Quick-unlock PIN set via /v1/auth/pin/set")
     return jsonify({"status": "success", "data": {"has_pin": True}}), 200
+
+
+@auth_bp.route("/totp/enable", methods=["POST"])
+@_rate_limit("5 per minute")
+def auth_totp_enable() -> tuple[Any, int]:
+    """Confirm optional authenticator enrolment with a live TOTP code.
+
+    Session-bound: the operator must already hold a setup or daily-login
+    JWT (password verified in this process so the TOTP secret is cached).
+    Explore/Practice stay usable without this step; Live unlock reads
+    ``totp_enabled`` and refuses until enrolment is confirmed.
+    """
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+
+    auth_header = request.headers.get("Authorization", "")
+    session_token = auth_header.removeprefix("Bearer ").strip()
+    if not session_token:
+        session_token = request.headers.get("X-FlintTrade-Token", "").strip()
+    if not session_token:
+        return jsonify({
+            "status": "error",
+            "message": "Authenticator enrolment requires an active session — sign in first.",
+        }), 401
+    try:
+        session_payload = decode_token(session_token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return jsonify({
+            "status": "error",
+            "message": "Session expired — sign in, then enrol the authenticator.",
+        }), 401
+    if session_payload.get("type") != "session":
+        return jsonify({
+            "status": "error",
+            "message": "Authenticator enrolment requires a full login session.",
+        }), 401
+
+    body = request.get_json(silent=True) or {}
+    totp_code = str(body.get("totp_code", ""))
+    if not totp_code:
+        return jsonify({"status": "error", "message": "totp_code is required."}), 400
+    if not svc.enable_totp(totp_code):
+        return jsonify({"status": "error", "message": "Invalid TOTP code."}), 401
+    return jsonify({"status": "success", "data": {"totp_enabled": True}}), 200
 
 
 @auth_bp.route("/mode", methods=["POST"])

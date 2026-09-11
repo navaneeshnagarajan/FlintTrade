@@ -29,6 +29,27 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
+- **Mode vocabulary and Trade desk density (FT-UX-001).**
+  Explore / Practice / Live chips mean execution mode only.
+  Explore Order Pad uses Sample Buy / Sample Sell; Practice
+  keeps Practice Buy / Sell; Live uses Place BUY/SELL Order.
+  Market open/closed stays session status. Comfortable is the
+  new-install default. Compact Trade at ~1280 and wider keeps
+  chart, order pad, and positions primary, with ticker, tool
+  ribbon, and watchlist / indices collapsed behind one desk-tools
+  toggle. Selecting Compact on Trade at ~1280 and wider always
+  starts with that disclosure collapsed.
+  At most one primary banner (Explore sample > Practice sample >
+  Live risk > feed disconnected). External-action gates stay fail-closed
+  in Explore. Phone product and the marketing site are unchanged.
+
+- **OpenAlgo-style password-first Explore; TOTP only before Live (FT-SETUP-002).**
+  Setup and daily login are password-only for Explore and Practice.
+  Authenticator enrolment is optional (“Set up later”) on day one.
+  Confirming a live authenticator code enables TOTP for later logins.
+  Live unlock still requires that enrolment plus the PIN. The mid-step
+  Reset / Start-over wipe from #184 is unchanged.
+
 - **Native broker HTTP freeze (accepted product decision).** Merging this work
   onto `main` leaves native broker UX down until Task 9D and Task 7C.2. That
   is accepted. Broker-account mutations — `/v1` account and auth writes, native
@@ -44,6 +65,250 @@ changelog rebuilds itself from the first release cut after this baseline.
   `gate_broker_write` → `BrokerRouter`) stay unchanged.
 
 ### Fixed
+
+- **Learn Glossary Lot Size freshness (FT-LEARN-002).**
+  Explore `/learn` → Glossary → Lot Size now teaches the
+  Jan 2026 NSE-cycle index lots — NIFTY 65, BANKNIFTY 30,
+  FINNIFTY 60, MIDCPNIFTY 120 — with an explicit “as of”
+  date and a Verify on NSE link to circular NSE/FAOP/70616
+  (3 Oct 2025). Stale `NIFTY=25` / `BANKNIFTY=15` copy is
+  gone. Learn market facts that exchanges revise must ship
+  dated, not as forever hardcodes. Independent of #213
+  (FT-UX-001).
+
+- **Performance follows the Review date range (FT-TRADE-006).**
+  Trade Review **Performance** uses the same date range as
+  Log and the other Review tabs. Changing Review dates
+  updates Performance. A visible **Review range** | **YTD**
+  control keeps YTD as an explicit choice; the active chip
+  always shows the effective window (for example
+  `YTD · 01 Jan–11 Sep 2026`). Opening Performance no longer
+  auto-jumps to YTD. An empty range or no fills is an honest
+  empty for that window, not a quiet YTD fallback. Metrics
+  cover the labelled window up to the journal's 1,000-fill
+  analytics page; a larger window is disclosed rather than
+  silently sliced.
+
+- **Heatmap Group by Exchange shows labelled group bands (FT-TRADE-005).**
+  Explore `/trade` Positions → Heat → Group by Exchange (and
+  Group by Sector) now draws a labelled band per group: a
+  name chip (`NSE`, `NFO`, …) plus an optional exposure
+  sublabel, with a stronger gutter than the leaf-tile
+  borders. A single group still carries its label. Positions
+  with no exchange metadata show `No exchange groups in these
+  positions` instead of an undifferentiated treemap. Flat
+  stays leaf-only, with no group chrome.
+
+- **Explore Mutual Fund NAVs no longer claim a daily AMFI feed (FT-INVEST-001).**
+  Explore `/invest#mutual-funds` now labels the fixture
+  `Sample NAVs · as of 10-Sep-2026` and drops “Updated daily
+  after market close.” The sample date was refreshed once so
+  the as-of is not months stale; it does not auto-update.
+  Practice and Live keep the daily-update sentence when the
+  live AMFI feed is in use.
+
+- **Options Builder Explore Long Call no longer looks zero-risk (FT-LAB-003).**
+  Explore `/lab` Options Builder now treats a blank premium as
+  unknown: Payoff summary cards show `—` and
+  `Enter premium to model payoff` instead of modelling ₹0.
+  The Long Call template seeds the Explore sample-chain ATM CE
+  LTP, labelled `Sample premium — edit to model`, so Max Loss
+  and breakeven follow FT-LAB-001 maths on a non-zero cost.
+  Typing an explicit ₹0 still uses that maths and warns
+  `Premium is ₹0 — payoff treats cost as free`.
+
+- **Security PIN requires exactly six digits (FT-SET-003).**
+  Explore `/settings#security` keeps New and Confirm as digits-only
+  fields with `maxLength` 6. Set/Change PIN stays disabled until the
+  account password is present, both fields are exactly six digits,
+  and they match. Blurring a field with 1–5 digits shows
+  `PIN must be exactly 6 digits`; blurring Confirm when both are
+  filled and different shows `PINs do not match`. A five-digit value
+  no longer looks valid. `POST /v1/auth/pin/set` still rejects
+  anything that is not `^\d{6}$`.
+
+- **Progressive TopBar collapse at ~390px (FT-MOBILE-002).**
+  The terminal chrome no longer clips workspace, status, or ticker
+  behind a horizontal TopBar scroll at about 390px. Logo mark, Mode
+  (Explore / Practice / Live), and compact session/status stay
+  visible and tappable. The ticker strip hides first (default off
+  under ~480px). Workspace, account, Tools, search, fullscreen, and
+  clock move into a More overflow menu with hit targets of at least
+  44px. Workspace and ticker stay reachable via More; no control is
+  clipped and unreachable.
+
+- **Suggest recommendations refresh when mood changes (FT-AI-003).**
+  Explore `/ai` Suggest treats market mood as a filter, not a draft.
+  Changing mood (chip or **Next mood**) immediately replaces the
+  recommendation list and the selected mood chip from one mood
+  state. A previously focused strategy card is cleared, so a prior
+  mood's card (for example Iron Condor after leaving Sideways)
+  cannot remain. An empty mood + risk match shows an honest empty
+  state with **Try another mood**.
+
+- **Honest unconfigured LLM state on `/ai` (FT-AI-002).**
+  `/ai` Chat probes `advisor/status` (including Explore /
+  `demo-user`) and aligns the badge and composer with Settings
+  `#llm` hydration — not a stale local store, and not an
+  env-default `configured: true` while Settings looks empty.
+  Unconfigured shows a warning **Not configured** badge, empty
+  **LLM not configured**, a primary **Open Settings → AI** CTA to
+  `/settings#llm`, and an outline **Retry**. When a leftover
+  transcript hides that empty state, the header still offers
+  **Retry** and **Open Settings → AI**. Returning to Chat after
+  saving Settings → AI re-checks readiness. The composer input and
+  Send stay disabled, so there is no send-then-`no reply` path. A
+  configured but broken probe shows **Error** / **Disconnected**
+  with Retry — never a green Connected. Signals **Live** /
+  **Polling** stay separate from Chat LLM readiness. Do not add a
+  fake Connected sample advisor in Explore; any later demo replies
+  must be labelled **Sample replies**.
+
+- **Telegram Send Test stays enabled in Explore (FT-AUTO-002).**
+  Explore `/automate#settings` Telegram Alerts now disables Send Test
+  and keeps the prefilled message as a preview-only sample. Helper:
+  Telegram tests are blocked in Explore (sample-only). Switch to
+  Practice or Live with Telegram configured to send a real test.
+  Practice and Live enable Send Test only when Telegram is configured;
+  otherwise the control stays disarmed with "Configure Telegram first".
+  The backend rejects Explore-mode test sends with `mode_blocked`.
+
+- **Practice Trading has no OpenAlgo Gateway setup CTA (FT-LEARN-001).**
+  Explore `/learn` Practice Trading now links to Settings → Broker
+  Gateway (`/settings#api`) so operators can configure OpenAlgo.
+  On ~390px the Learn section tabs stack above the page instead of
+  a 224px side column, and Practice copy, lists, sandbox rows and
+  the Gateway button wrap. The CTA does not send operators to
+  native Brokers.
+
+- **P&L columns unusable at ~390px (FT-MOBILE-001).**
+  Explore `/trade` Positions and Invest Holdings switch to stacked
+  cards below 480px, so each row shows symbol, quantity, LTP, P&L
+  and P&L% on one screen. The wide nowrap table no longer clips
+  those figures off-screen behind a tiny scrollbar.
+
+- **Invest deep-link hash tabs ignored on load (FT-ROUTE-001).**
+  Opening `/invest#holdings` (and the other Invest tab hashes)
+  now selects the matching tab on load. A direct `#holdings`
+  URL no longer falls back to Dashboard.
+
+- **Duplicate Watchlist widgets from Add widget picker (FT-HOME-002).**
+  Explore `/home` Add widget no longer adds a second Watchlist when
+  one is already on the dashboard. Already-present widget types are
+  disabled or hidden in the picker; choosing Watchlist focuses the
+  existing card instead of duplicating it.
+
+- **Broker Gateway and Ditto default URLs diverge (FT-SET-002).**
+  Explore `/settings#api` Broker Gateway and Explore `/ditto` Add
+  Account now share the OpenAlgo default `http://127.0.0.1:5000`.
+  Add Account prefills the saved Gateway host and REST port
+  without retaining the bridge API key, so the two forms no
+  longer silently default to ports 5000 and 5001.
+
+- **Home greeting uses local evening at noon IST (FT-HOME-001).**
+  Explore `/home` greets from the Asia/Kolkata clock, so ~12:01 IST
+  is Good afternoon (or Good morning before noon), not Good evening
+  from a non-IST browser clock.
+
+- **Market status closed during NSE regular hours (FT-TRADE-004).**
+  Explore `/trade` header treats OpenAlgo/Explore session timings
+  as IST clock hours (09:15–15:30 on weekdays), not epoch
+  milliseconds. Mid-session no longer shows a false
+  “Market closed”. After hours and weekends stay closed.
+
+- **Chart stays stale when timeframe selector changes (FT-TRADE-003).**
+  Explore `/trade` timeframe buttons now refresh the chart
+  series and visible range to match the selected interval.
+  Switching 5m → 1D no longer leaves candles and intraday
+  timestamps on the prior range, or a brief blank that stays
+  stale.
+
+- **Empty Monitors has no Strategy Builder/Lab CTA (FT-AUTO-001).**
+  Explore `/automate` Monitors empty state now includes an
+  "Open Strategy Builder" link to `/lab`. Operators no longer
+  have to find Strategy Lab independently from copy-only text.
+
+- **Settings `#llm` load failure with no recovery (FT-SET-001).**
+  Explore `/settings#llm` no longer treats a demo or unconfigured
+  session as a broken load. It shows an empty LLM state with Retry
+  and guidance that Explore cannot persist LLM secrets. Live still
+  fail-closes on a real load error to protect a saved configuration,
+  and now offers Retry.
+
+- **Kill All Positions armed on empty Explore Ditto dashboard (FT-DITTO-001).**
+  Explore `/ditto` Risk Dashboard with ₹0 totals and no accounts
+  listed now disables Kill All Positions and shows an empty
+  state. The control is no longer a bright red armed emergency
+  CTA on an empty dashboard. Live and Practice with managed
+  accounts still keep the armed control.
+
+- **Practice orders in Explore without a live broker (FT-TRADE-002).**
+  Explore `/trade` Order Pad Practice Buy opens the Practice review and
+  records a sample fill — no live broker is required. Live still
+  uses the gated `placeOrder` path and still requires a broker
+  connection. Native broker freeze is excluded.
+
+- **Daily Sign In 2FA field while authenticator is deferred (FT-SETUP-002).**
+  Login Sign In probes `/auth/status` every time it is shown and hides
+  2FA unless `totp_enabled` is explicitly true. A stale Welcome
+  `totpRequired={true}` after Sign Out can no longer keep the field.
+  Enrolment still requires TOTP; Live still needs enrolment plus PIN.
+
+- **Duplicate zero placeholders on backtest metrics (FT-LAB-002).**
+  Explore `/lab` backtest headline metrics (Sharpe ratio, max
+  drawdown, win rate, profit factor) now show a single formatted
+  value. The leftover count-up `0.00` / `0.00%` beside the real
+  figure is gone.
+
+- **Explore Ctrl+K symbol search false unavailable error (FT-CMD-001).**
+  Explore `search` now uses the same sample-instrument catalogue as
+  Explore quotes and history. Ctrl+K → Symbols → NIFTY returns
+  sample hits (NIFTY, BANKNIFTY, FINNIFTY) instead of a false
+  connection error. Live and Practice still use native / OpenAlgo
+  search.
+
+- **Zero-premium long-call payoff (unbounded max profit + breakeven) (FT-LAB-001).**
+  Options Builder Payoff now summarises expiry P&L from strike kinks
+  and the right-hand slope, not the ±15% chart sample. A zero-premium
+  long call shows Unlimited max profit, max loss equal to the premium
+  (₹0), and breakeven at the strike. Paid-premium long calls and
+  other unbounded legs (short calls, straddles) use the same rule.
+
+- **Trade Review date filter and mangled timestamps in Explore (FT-TRADE-001).**
+  Explore `/trade` Trade Review now clips the Log to the committed IST
+  date range (the same predicate as the sample-journal badge) and
+  renders fill timestamps as `D Mon YYYY HH:MM:SS` with a literal
+  space, so `13 Apr 26` can no longer glue onto `14:55:42`. Live and
+  Practice still use the journal/tradebook path; only the shared IST
+  format and range helpers changed there.
+
+- **Explore /ai chat produces no assistant reply (FT-AI-001).**
+  `/ai` and the floating tutor now share one advisor chat path:
+  a short status probe (including Explore/sample-data), SSE
+  streaming, then the non-streaming fallback. A missing LLM, an
+  unreachable backend, an empty completion, or an SSE error
+  becomes a visible assistant error instead of a blank bubble.
+  Empty assistant placeholders are no longer persisted, so a
+  reload cannot restore the silent blank. The 45-second stream
+  budget is first-token only: once a token arrives, a longer
+  healthy completion is not aborted mid-reply. Native broker
+  freeze is excluded. MF Optimizer and AI suggestions + deploy
+  are unchanged.
+
+- **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
+  Setup Step 2/7 now has an obvious **Explore first — continue without
+  2FA** path so sample-data Explore/Practice is reachable without
+  finishing authenticator setup. The hatch marks the durable demo
+  session (same as **Try with sample data**) so `/home` survives
+  refresh and a `/welcome` remount instead of bouncing to the
+  password+TOTP wall. Sign-in still requires TOTP. Daily login still
+  requires password + TOTP, and Live still requires the PIN, as
+  designed. **Start over** wipes the unfinished account via the
+  account-create setup JWT so a lost QR seed is recoverable without the
+  TOTP secret. Daily-login session tokens cannot wipe the account. A
+  hard refresh of `/home` after Explore first restores the sample-data
+  session even when `flinttrade:mode` was never persisted; unfinished
+  setup progress stays so Start over / Delete account remain reachable.
 
 - **Strategy Lab stays empty after AI Deploy (FT-DEMO-002).**
   Deploying a suggestion from `/demo-app/ai` (for example “Trend EMA

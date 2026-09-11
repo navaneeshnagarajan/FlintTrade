@@ -16,7 +16,11 @@ import "@testing-library/jest-dom";
 // ---------------------------------------------------------------------------
 
 const tradeJournalMocks = vi.hoisted(() => ({
-  queryOptions: undefined as { enabled?: boolean; queryKey?: unknown[] } | undefined,
+  queryOptions: undefined as {
+    enabled?: boolean;
+    queryKey?: unknown[];
+    queryFn?: () => Promise<unknown>;
+  } | undefined,
   refetch: vi.fn(),
 }));
 
@@ -26,7 +30,11 @@ const tradeJournalMocks = vi.hoisted(() => ({
 // but only when their tab content mounts, and their keys carry a marker
 // segment — the guard below keeps the capture on the tool's range query.
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: { enabled?: boolean; queryKey?: unknown[] }) => {
+  useQuery: (options: {
+    enabled?: boolean;
+    queryKey?: unknown[];
+    queryFn?: () => Promise<unknown>;
+  }) => {
     const key = options.queryKey ?? [];
     if (key[0] === "tradeJournal" && key.length === 4 && key[1] !== "perf" && key[1] !== "calendar") {
       tradeJournalMocks.queryOptions = options;
@@ -53,14 +61,28 @@ vi.mock("@tanstack/react-query", () => ({
 // Mock ft API
 vi.mock("@/services/ftApi", () => ({
   getTradeJournal: vi.fn().mockResolvedValue({ trades: [] }),
+  TRADE_JOURNAL_MAX_LIMIT: 1000,
 }));
 
 // The Log tab embeds the canonical Fills surface; stub it so this suite pins
 // the tool wiring (the range handed over) without dragging in the Fills data
 // planes, which have their own suite.
 vi.mock("@/widgets/trading/Fills/FillsTable", () => ({
-  FillsTable: ({ startDate, endDate }: { startDate?: string; endDate?: string }) => (
-    <div data-testid="fills-table" data-start={startDate} data-end={endDate} />
+  FillsTable: ({
+    startDate,
+    endDate,
+    exploreJournalTrades,
+  }: {
+    startDate?: string;
+    endDate?: string;
+    exploreJournalTrades?: { symbol: string }[];
+  }) => (
+    <div
+      data-testid="fills-table"
+      data-start={startDate}
+      data-end={endDate}
+      data-explore-count={exploreJournalTrades?.length ?? ""}
+    />
   ),
 }));
 
@@ -118,7 +140,10 @@ vi.mock("@/lib/formatters", () => ({
 // ---------------------------------------------------------------------------
 
 import TradeJournalTool from "../TradeJournalTool";
+import { getSampleJournalTrades } from "../sampleJournal";
 import { istDayKey, sevenDaysAgoISO, todayISO } from "../utils";
+import { toIstIsoDate } from "@/lib/ist";
+import { getTradeJournal } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 
 beforeAll(() => {
@@ -138,6 +163,10 @@ describe("TradeJournalTool (Trade Review)", () => {
     vi.clearAllMocks();
     tradeJournalMocks.queryOptions = undefined;
     useModeStore.setState({ mode: "live" });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("renders without crashing", () => {
@@ -206,6 +235,35 @@ describe("TradeJournalTool (Trade Review)", () => {
     expect(screen.getByText("0 trades")).toBeInTheDocument();
   });
 
+  it("REGRESSION: committed date range filters explore sample trades and the Log", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-09T04:30:00Z")); // 10:00 IST on 9 September
+    useModeStore.setState({ mode: "explore" });
+
+    render(<TradeJournalTool />);
+
+    // Default last-7 IST days (3–9 Sep) covers every relative sample row.
+    expect(screen.getByText("12 trades")).toBeInTheDocument();
+    expect(screen.getByTestId("fills-table")).toHaveAttribute("data-explore-count", "12");
+
+    fireEvent.change(screen.getByLabelText("Start date"), {
+      target: { value: "2026-09-04" },
+    });
+    fireEvent.change(screen.getByLabelText("End date"), {
+      target: { value: "2026-09-10" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    // daysAgo=6 is 3 Sep — outside 4–10 Sep — so two Opening Range rows drop.
+    expect(screen.getByText("10 trades")).toBeInTheDocument();
+    const fills = screen.getByTestId("fills-table");
+    expect(fills).toHaveAttribute("data-start", "2026-09-04");
+    expect(fills).toHaveAttribute("data-end", "2026-09-10");
+    expect(fills).toHaveAttribute("data-explore-count", "10");
+
+    vi.useRealTimers();
+  });
+
   it("mounts the Session tab with its provenance badge", async () => {
     render(<TradeJournalTool />);
     const user = userEvent.setup();
@@ -216,12 +274,41 @@ describe("TradeJournalTool (Trade Review)", () => {
     expect(screen.getByText("Sample data")).toBeInTheDocument();
   });
 
-  it("mounts the Performance tab with an honest empty state when live with no trades", async () => {
+  it("REGRESSION: Review-range journal query uses the analytics page size, not a silent 200-row list cap", async () => {
+    const mockJournal = getTradeJournal as ReturnType<typeof vi.fn>;
     render(<TradeJournalTool />);
+
+    expect(tradeJournalMocks.queryOptions?.queryFn).toEqual(expect.any(Function));
+    await tradeJournalMocks.queryOptions!.queryFn!();
+
+    expect(mockJournal).toHaveBeenCalledWith(
+      sevenDaysAgoISO(),
+      todayISO(),
+      undefined,
+      1000,
+    );
+    expect(mockJournal.mock.calls[0]?.[3]).not.toBe(200);
+  });
+
+  it("REGRESSION: Performance follows the Review range on open, not a silent YTD jump", async () => {
+    render(<TradeJournalTool />);
+    fireEvent.change(screen.getByLabelText("Start date"), {
+      target: { value: "2026-09-05" },
+    });
+    fireEvent.change(screen.getByLabelText("End date"), {
+      target: { value: "2026-09-11" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
     const user = userEvent.setup();
     await user.click(screen.getByRole("tab", { name: "Performance" }));
 
-    expect(screen.getByText(/No closed trades yet this year/i)).toBeInTheDocument();
+    const review = screen.getByRole("button", { name: "Review range · 05 Sep–11 Sep 2026" });
+    expect(review).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "YTD" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText(/No closed trades in the selected range/i)).toBeInTheDocument();
+    expect(screen.queryByText(/No closed trades yet this year/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^YTD ·/ })).not.toBeInTheDocument();
   });
 
   it("mounts the Calendar tab with month navigation", async () => {
@@ -232,6 +319,29 @@ describe("TradeJournalTool (Trade Review)", () => {
     expect(screen.getByText("Daily P&L Calendar")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /previous month/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /next month/i })).toBeInTheDocument();
+  });
+});
+
+describe("getSampleJournalTrades — IST dates", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stamps relative sample rows on the IST calendar, not the host-local clock", () => {
+    vi.useFakeTimers();
+    // 01:00 IST on 4 September 2026; UTC is still 3 September.
+    vi.setSystemTime(new Date("2026-09-03T19:30:00Z"));
+
+    const trades = getSampleJournalTrades();
+    const days = new Set(trades.map((t) => toIstIsoDate(new Date(t.timestamp))));
+    expect(days.has("2026-09-03")).toBe(true);
+    expect([...days].every((d) => d <= "2026-09-04")).toBe(true);
+
+    const third = getSampleJournalTrades("2026-09-03", "2026-09-03");
+    expect(third.length).toBeGreaterThan(0);
+    for (const trade of third) {
+      expect(toIstIsoDate(new Date(trade.timestamp))).toBe("2026-09-03");
+    }
   });
 });
 

@@ -2977,6 +2977,24 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("spaces Explore history by the requested interval so 1D is not stale 5-minute sample data", async () => {
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "explore";
+
+    const fiveMin = await getHistory("NIFTY", "NSE_INDEX", "5m", "2026-07-01", "2026-07-14");
+    const daily = await getHistory("NIFTY", "NSE_INDEX", "1D", "2025-07-01", "2026-07-14");
+
+    expect(fiveMin.length).toBeGreaterThan(1);
+    expect(daily.length).toBeGreaterThan(1);
+    const fiveMinStep = Number(fiveMin[1]?.timestamp) - Number(fiveMin[0]?.timestamp);
+    const dailyStep = Number(daily[1]?.timestamp) - Number(daily[0]?.timestamp);
+    expect(fiveMinStep).toBe(300);
+    expect(dailyStep).toBe(86_400);
+    expect(Number(daily[daily.length - 1]?.timestamp) - Number(daily[0]?.timestamp))
+      .toBeGreaterThan(Number(fiveMin[fiveMin.length - 1]?.timestamp) - Number(fiveMin[0]?.timestamp));
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("serves sample expiries and a sample option chain in Explore instead of erroring", async () => {
     // Regression: expiry/optionchain had no Explore fallback, so the Option
     // Chain and OI Chart widgets errored with "OpenAlgo API key is not
@@ -3001,6 +3019,51 @@ describe("OpenAlgo API client (api.ts)", () => {
       expect(row.ce.ltp).toBeGreaterThanOrEqual(0);
       expect(row.pe.oi).toBeGreaterThan(0);
     }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("serves sample symbols from the Explore catalogue instead of erroring", async () => {
+    // Regression FT-CMD-001: search had no Explore fallback, so Ctrl+K
+    // Symbols errored with "OpenAlgo API key is not configured" instead of
+    // returning sample instruments such as NIFTY.
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "explore";
+
+    const results = await searchSymbol("NIFTY");
+    expect(results.some((row) => row.symbol === "NIFTY")).toBe(true);
+    expect(results.every((row) => row.symbol.toUpperCase().includes("NIFTY"))).toBe(true);
+    expect(results.find((row) => row.symbol === "NIFTY")?.exchange).toBe("NSE_INDEX");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps Explore symbol search synthetic even when an OpenAlgo key is configured", async () => {
+    mockConnectionState.apiKey = "configured-live-key";
+    mockModeState.mode = "explore";
+
+    const results = await searchSymbol("REL");
+    expect(results).toEqual([
+      expect.objectContaining({ symbol: "RELIANCE", exchange: "NSE" }),
+    ]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty Explore search without treating it as a connection error", async () => {
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "explore";
+
+    await expect(searchSymbol("XYZNOMATCH")).resolves.toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("filters Explore sample symbols by exchange", async () => {
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "explore";
+
+    const nseIndex = await searchSymbol("NIFTY", "NSE_INDEX");
+    expect(nseIndex.every((row) => row.exchange === "NSE_INDEX")).toBe(true);
+    expect(nseIndex.some((row) => row.symbol === "NIFTY")).toBe(true);
+
+    await expect(searchSymbol("NIFTY", "MCX")).resolves.toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -3396,6 +3459,60 @@ describe("OpenAlgo API client (api.ts)", () => {
         { mode: "practice" },
       ),
     ).rejects.toThrow(/mode changed from practice to live/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("placeOrder in Explore returns a sample fill and never contacts the order proxy", async () => {
+    mockModeState.mode = "explore";
+    mockConnectionState.apiKey = "";
+
+    const result = await placeOrder({
+      symbol: "NIFTY",
+      exchange: "NSE",
+      action: "BUY",
+      quantity: 1,
+      product: "MIS",
+      orderType: "MARKET",
+    });
+
+    expect(result.orderId).toMatch(/^SAMPLE-/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("placeOrder in Explore with a Practice pin still records a sample fill", async () => {
+    mockModeState.mode = "explore";
+
+    const result = await placeOrder(
+      {
+        symbol: "RELIANCE",
+        exchange: "NSE",
+        action: "BUY",
+        quantity: 1,
+        product: "MIS",
+        orderType: "MARKET",
+      },
+      { mode: "practice" },
+    );
+
+    expect(result.orderId).toMatch(/^SAMPLE-/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("placeOrder in Explore still refuses a Live authority pin", async () => {
+    mockModeState.mode = "explore";
+    await expect(
+      placeOrder(
+        {
+          symbol: "RELIANCE",
+          exchange: "NSE",
+          action: "BUY",
+          quantity: 1,
+          product: "MIS",
+          orderType: "MARKET",
+        },
+        { mode: "live" },
+      ),
+    ).rejects.toThrow(/mode changed from live to explore/i);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

@@ -82,6 +82,10 @@ const storeImpl: StateCreator<
 
   addCard: (componentId, size = "default") => {
     const cards = get().cards;
+    const existing = cards.find((card) => card.componentId === componentId);
+    if (existing) {
+      return existing.id;
+    }
     const id = generateId();
     const order = cards.length;
     set((state) => ({

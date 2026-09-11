@@ -116,6 +116,7 @@ export interface AuthStatusData {
   is_setup: boolean;
   is_locked: boolean;
   has_pin: boolean;
+  totp_enabled?: boolean;
 }
 
 /**

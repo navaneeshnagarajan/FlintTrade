@@ -71,7 +71,6 @@ identically to regular orders.
 | `ping` | Health check (POST). |
 | `analyzer` | Read sandbox / analyzer mode status. |
 | `analyzer/toggle` | Toggle sandbox / live mode. |
-| `pnl/symbols` | P&L breakdown per symbol. |
 
 ### Data
 
@@ -92,11 +91,12 @@ identically to regular orders.
 | `syntheticfuture` | Synthetic future from CE - PE + strike. Same required fields as `optionchain`: `underlying`, `exchange`, and `expiry_date` (`DDMMMYY`). FlintTrade helpers refuse a missing expiry before posting; raw HTTP still reaches OpenAlgo. |
 | `ticker/{exchange}:{symbol}` (**GET**) | Dated historical helper on the Python client only (`apikey`, `interval`, `from`, `to` query params). Not the live polling path — polling uses POST `quotes`. Missing `from`/`to` fails closed. |
 | `instruments` (**GET**) | Instrument master for an exchange. Requires `apikey` and `exchange` query params. When no exchange is given, FlintTrade queries `NFO` / `BFO` / `MCX` / `CDS`. |
-| `gex` | Gamma Exposure curve. |
-| `iv_smile` | Implied-volatility smile curve. |
-| `max_pain` | Max-pain strike calculation. |
-| `oi_profile` | Open-Interest profile by strike. |
-| `chart` (**GET/POST**) | Chart-preference get/set. |
+
+`gex`, `iv_smile`, `max_pain`, `oi_profile`, `pnl/symbols`, and `chart` are
+**not** OpenAlgo passthroughs. The `OpenAlgoClient` wrappers were removed
+because those routes do not exist upstream. GEX / IV smile / max-pain / OI
+profile are FlintTrade analysis routes below. Chart preferences are
+FlintTrade `GET`/`POST` `/api/v1/chart`.
 
 ### Utilities
 
@@ -104,7 +104,7 @@ identically to regular orders.
 |---|---|
 | `market/holidays` | Holiday calendar. **POST** with `apikey` and `year` (2020–2050) in the JSON body. Do not call bare `holidays` as the current passthrough path. |
 | `market/timings` | Exchange-timing windows. **POST** with `apikey` and `date` in the JSON body. Missing date fails closed. Do not call bare `timings` as the current passthrough path. |
-| `telegram/notify` | Send a Telegram message via the OpenAlgo bot (`username` + `message`). If `username` is omitted, FlintTrade uses workspace `openalgo.telegram_username` when set; otherwise the call fails closed. That field is accepted and persisted by `GET`/`POST` `/v1/config/openalgo` or a `workspace.json` edit — not by the Setup/Settings connection form, which only writes `api_key`, `host`, `port`, and `ws_port`. |
+| `telegram/notify` | Send a Telegram message via the OpenAlgo bot (`username` + `message`). If `username` is omitted, FlintTrade uses workspace `openalgo.telegram_username` when set; otherwise the call fails closed. That field is accepted and persisted by `GET`/`POST` `/v1/config/openalgo` or a `workspace.json` edit — not by the Setup/Settings connection form, which only writes `api_key`, `host`, `port`, and `ws_port`. Distinct from FlintTrade's native `POST /api/v1/telegram` (Automate → Settings Send Test). |
 | `whatsapp/notify` | Upstream OpenAlgo endpoint. **Not wrapped by FlintTrade** — WhatsApp support was removed on 2026-07-26 (ruling D3); listed only so the OpenAlgo surface stays fully documented. |
 
 ### Broker management (session-authenticated, NOT under `/api/v1/`)
@@ -137,7 +137,7 @@ endpoints are marked.
 
 | Endpoint | Purpose |
 |---|---|
-| `gex` (**POST**) | Gamma Exposure dashboard data (alternative to the OpenAlgo passthrough; computed locally on historical chains). |
+| `gex` (**POST**) | FlintTrade analysis route: Gamma Exposure dashboard data, computed locally on historical chains. |
 | `volsurface` (**POST**) | Volatility surface across strikes and expiries. |
 | `ivsmile` (**POST**) | IV smile curve. |
 | `straddlepnl` (**POST**) | Live straddle P&L for an at-the-money pair. |
@@ -149,6 +149,15 @@ endpoints are marked.
 | `screener/arbitrage` (**POST**) | Cash-future and cross-exchange arbitrage scan. |
 | `candlestick-patterns` (**POST**) | Candlestick pattern detection over OHLCV history. |
 | `/v1/index-contribution` (**GET**) | Index constituent contribution — `breadth_bp` at `/v1`, not `analysis_bp`. |
+
+### Chart preferences (`/api/v1/chart`)
+
+Source: `packages/core/core/src/flinttrade_core/chart_prefs_routes.py`.
+FlintTrade-owned UI store — not an OpenAlgo passthrough.
+
+| Endpoint | Purpose |
+|---|---|
+| `chart` (**GET/POST**) | Chart-preference get/set. |
 
 ### Legacy gateway accounts (`/v1/*`; Vite proxy `/ft-api/v1/*`)
 
@@ -351,7 +360,7 @@ The blueprint mounts at `/api/v1/strategies`. Backed by the
 
 | Endpoint | Purpose |
 |---|---|
-| `strategies/uploaded` (**GET**) | List uploaded user strategies. |
+| `strategies` (**GET**) | List uploaded user strategies (engine runner). Lab also lists the same runner via `GET /api/v1/backtest/strategies/uploaded`. There is no `/api/v1/strategies/uploaded` route. |
 | `strategies/upload` (**POST**) | Upload + validate a strategy. |
 | `strategies/<id>/start` · `…/stop` (**POST**) | Start / stop a running strategy. |
 | `strategies/<id>/logs` (**GET**) | Tail a strategy's logs. |
@@ -367,7 +376,7 @@ documented in-memory `pnl-tracker` endpoints were unfed and were removed.)
 
 | Endpoint | Purpose |
 |---|---|
-| `trades/journal` (**GET**) | Recorded trades. No params → today; `start_date`+`end_date` → history window across all strategies; `+strategy` → that strategy only. Rows are keyed `timestamp` (ISO, IST), with `symbol`, `action`, `quantity`, `price`, `pnl`, `strategy`, `orderid`. |
+| `trades/journal` (**GET**) | Recorded trades. No params → today; `start_date`+`end_date` → history window across all strategies; `+strategy` → that strategy only. `limit` defaults to 100 and caps at 1000 (oldest-first). `data.total` is the untruncated match count. Rows are keyed `timestamp` (ISO, IST), with `symbol`, `action`, `quantity`, `price`, `pnl`, `strategy`, `orderid`. |
 
 ### Safety (`/api/v1/safety/*`)
 
@@ -383,21 +392,45 @@ The operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
 | `safety/kill-switch` (**POST**) | Latch Layer 5. Body `{ "reason": "…" }`. Cancels open orders and requests supported flatten. |
 | `safety/kill-switch` (**DELETE**) | Reset Layer 5 after emergency actions complete. Incomplete flatten keeps the latch. |
 
+### Telegram (`/api/v1/telegram`)
+
+Source: `packages/core/core/src/flinttrade_core/telegram_routes.py`.
+The telegram blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
+`/ft-api/api/v1/telegram` and a direct backend call is
+`http://<host>:5100/api/v1/telegram`. This is FlintTrade's local automation
+bot (terminal Automate → Settings **Send Test**), not OpenAlgo's
+`telegram/notify`.
+
+| Endpoint | Purpose |
+|---|---|
+| `telegram` (**POST**) | Send a Telegram test message. Body requires `message`. Optional one-shot `bot_token` and `chat_id` are accepted together and are never persisted. Otherwise the route uses env/workspace bot config; disabled config → 400. Send failure → 502. Explore-mode sends (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Telegram tests are blocked in Explore (sample-only).`. |
+
 ### Auth (`/ft-api/v1/auth/*`)
 
 JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET auth/status` | Whether the operator account exists and whether TOTP / PIN are configured. |
-| `POST auth/setup` | First-run enrolment. Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri` plus backup codes and an Explore JWT. It does not accept a caller-supplied TOTP secret. |
-| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Body `{ "password" }`. |
-| `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret (password re-confirm). |
-| `POST auth/login` | Sign in with password and `totp_code` (argon2id-hashed password). Issues a JWT. |
-| `POST auth/pin` | Re-authenticate with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin", "mode"? }`. `mode: "live"` mints a Live JWT with `live_mode_unlocked=true`. There is no `/auth/me`. |
+| `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. |
+| `POST auth/setup` | First-run enrolment. Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri` plus backup codes and an Explore JWT. Authenticator enrolment is optional for Explore and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. |
+| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Body `{ "password" }`, or the account-create setup JWT (lost-QR start-over). Daily-login session JWTs are rejected. |
+| `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret (password re-confirm) and clear `totp_enabled` until a live code is confirmed again. |
+| `POST auth/login` | Sign in with password (argon2id-hashed). `totp_code` (or a backup code) is required only after authenticator enrolment (`totp_enabled`). Issues a JWT. |
+| `POST auth/totp/enable` | Confirm optional authenticator enrolment. Session-bound. Body `{ "totp_code" }`. Sets `totp_enabled`; later logins then require a TOTP or backup code. |
+| `POST auth/pin` | Re-authenticate with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin", "mode"? }`. `mode: "live"` (default) mints a Live JWT with `live_mode_unlocked=true`, and refuses 403 `totp_required` when the authenticator is not enabled. `mode: "practice"` / `"explore"` unlocks that mode without the Live claim and does not require TOTP. There is no `/auth/me`. |
 | `POST auth/pin/set` | Set or change the PIN (password re-confirm). Requires an existing session JWT. |
 | `POST auth/mode` | **Downgrade only** to `practice` or `explore`. Requires an existing session JWT. Issues a fresh JWT and revokes the old `jti`. Live upgrades must use `POST /v1/auth/pin`. |
 | `POST auth/logout` | Revoke the current JWT by `jti`. Requires an existing session JWT. |
+| `POST auth/forgot-password` | JWT-token email reset. Body `{ "email" }`. Reads Flask-Mail `MAIL` from the Flask app config. A normal backend start never assigns `MAIL` (only tests inject it), so this returns 503 (`Email service not configured.`) on a stock process. SMTP/SES env vars do not enable this pair. Missing email → 400. When `MAIL` is injected and `email` is present, always returns 200 (`If the email is registered, a reset link has been sent.`) so the address is not enumerated. Rate-limited to 3 requests per hour per client. |
+| `POST auth/reset-password` | Consume a reset JWT from `forgot-password`. Body `{ "token", "new_password" }`. The token lasts 1 hour. Password minimum 8 characters. Missing fields or an invalid / expired token → 400. Rate-limited to 5 requests per minute per client. A stock backend never issues these tokens because `forgot-password` stays 503. |
+| `POST auth/forgot-password-otp` | Welcome **Forgot your password?** path. Body `{ "email" }`. Sends a 6-digit OTP via `EmailTransport` (Amazon SES is tried first when `AWS_SES_REGION` or `AWS_DEFAULT_REGION` is set, then SMTP). Missing email → 400. When `email` is present, always returns 200 (`If the email is registered, a reset OTP has been sent.`) unless the per-email cap is hit (3 OTP requests per hour → 429). Also limited to 5 requests per minute per client. |
+| `POST auth/reset-password-otp` | Welcome path. Body `{ "email", "otp", "new_password" }`. The OTP is 6 digits with a 10-minute TTL. Password minimum 8 characters. Missing fields or an invalid / expired OTP → 400. Rate-limited to 10 requests per minute per client. |
+
+Welcome's **Forgot your password?** uses the OTP pair (`forgot-password-otp` /
+`reset-password-otp`). The JWT-token pair (`forgot-password` /
+`reset-password`) is present in the handler but is not a working operator
+path until something injects Flask-Mail `MAIL`; SMTP/SES configure
+`EmailTransport` only.
 
 ### Monitoring And Observability
 
@@ -523,9 +556,12 @@ account-management writes still require the operator's session JWT.
 
 `/v1/auth/*` is exempt from the global API-key check so login and first-run
 setup can run without `X-API-Key`. That is not session-free auth: `POST
-/v1/auth/pin`, `/pin/set`, `/mode`, and `/logout` still decode an existing
-session JWT and return 401 without one. Truly unauthenticated prefixes
+/v1/auth/totp/enable`, `/pin`, `/pin/set`, `/mode`, and `/logout` still decode
+an existing session JWT and return 401 without one. Truly unauthenticated prefixes
 include `/v1/auth/setup`, `/v1/auth/login`, `/v1/auth/status`,
+the password-reset pair (`/v1/auth/forgot-password`,
+`/v1/auth/reset-password`) and the Welcome OTP pair
+(`/v1/auth/forgot-password-otp`, `/v1/auth/reset-password-otp`),
 `/v1/errors`, `/api/v1/errors`, `/v1/changelog`, `/api/v1/ping`, and the
 other entries in `_PUBLIC_V1_PREFIXES` in `app.py`.
 
@@ -610,8 +646,10 @@ the guard returns one of three verdicts:
 
 `POST /v1/auth/mode` issues a fresh JWT and revokes the previous `jti`,
 but it accepts **only** downgrades to `practice` or `explore`. Upgrading
-to Live is `POST /v1/auth/pin` with the 6-digit PIN (`mode: "live"`).
-There is no `/auth/mode {mode:live}` shortcut.
+to Live is `POST /v1/auth/pin` with the 6-digit PIN (`mode: "live"`), after
+the authenticator is enrolled (`totp_enabled`). Without enrolment that call
+refuses 403 with `code: "totp_required"`. There is no
+`/auth/mode {mode:live}` shortcut.
 
 Authoritative coverage: `packages/core/core/tests/test_order_routes.py` asserts
 Explore rejection, Practice sandbox routing, and Live gate / fail-closed
@@ -815,11 +853,12 @@ Most handlers return only `status` + `message`. The core
 "Orders are not available in Explore mode…", and a Live JWT without PIN
 unlock is HTTP 403 with "Live mode not unlocked — verify PIN first". A
 `code` field is emitted on `mode_guard`-decorated engine routes (brackets
-and other executor-direct paths), not on that core proxy:
+and other executor-direct paths) and on `POST /api/v1/telegram` Explore
+refusals, not on that core proxy. Not every endpoint emits `code`:
 
 | Code or status | Meaning |
 |---|---|
-| `mode_blocked` | Explore (or another blocked mode) tried a `mode_guard` order-capable action — HTTP 403. |
+| `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers `mode_guard` order-capable engine routes and FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`. |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
 | `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true` (PIN unlock). |
 | HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |

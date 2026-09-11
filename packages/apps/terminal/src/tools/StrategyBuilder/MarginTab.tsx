@@ -6,7 +6,15 @@ import { Zap } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { validateLegs, calculateNetPremium, estimateMargin, formatINR } from "./utils";
+import {
+  UNSET_PREMIUM_HELPER,
+  validateLegs,
+  calculateNetPremium,
+  estimateMargin,
+  formatINR,
+  hasUnsetPremium,
+  isPricedPremium,
+} from "./utils";
 import type { Leg, Underlying } from "./types";
 
 interface Props {
@@ -16,17 +24,23 @@ interface Props {
 
 export function MarginTab({ legs, underlying }: Props) {
   const { valid } = validateLegs(legs);
-  const margin = useMemo(() => (valid ? estimateMargin(legs, underlying) : 0), [legs, valid, underlying]);
+  const premiumUnset = hasUnsetPremium(legs);
+  const margin = useMemo(
+    () => (valid && !premiumUnset ? estimateMargin(legs, underlying) : 0),
+    [legs, valid, underlying, premiumUnset],
+  );
   const netPremium = calculateNetPremium(legs);
-  const premiumCollected = netPremium < 0 ? Math.abs(netPremium) * underlying.lotSize : 0;
-  const premiumPaid = netPremium > 0 ? netPremium * underlying.lotSize : 0;
+  const premiumCollected = netPremium != null && netPremium < 0 ? Math.abs(netPremium) * underlying.lotSize : 0;
+  const premiumPaid = netPremium != null && netPremium > 0 ? netPremium * underlying.lotSize : 0;
   const effectiveMargin = margin - premiumCollected;
 
-  if (!valid || legs.length === 0) {
+  if (!valid || legs.length === 0 || premiumUnset) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3 text-text-muted">
         <Zap size={40} />
-        <p className="text-xs">Add valid legs to see margin estimate</p>
+        <p className="text-xs">
+          {premiumUnset && legs.length > 0 ? UNSET_PREMIUM_HELPER : "Add valid legs to see margin estimate"}
+        </p>
       </div>
     );
   }
@@ -75,7 +89,9 @@ export function MarginTab({ legs, underlying }: Props) {
                 const legMargin =
                   leg.action === "SELL"
                     ? 0.15 * leg.strike * underlying.lotSize * leg.lots
-                    : leg.premium * leg.lots * underlying.lotSize;
+                    : isPricedPremium(leg.premium)
+                      ? leg.premium * leg.lots * underlying.lotSize
+                      : 0;
                 return (
                   <TableRow key={leg.id} className="border-border-subtle hover:bg-surface-base">
                     <TableCell className="py-1 pl-3 text-xs text-text-muted">{idx + 1}</TableCell>

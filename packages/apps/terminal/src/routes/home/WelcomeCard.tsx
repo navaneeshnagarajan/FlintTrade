@@ -10,13 +10,7 @@ import { getDemoPositions } from "@/hooks/useModeData";
 import { useModeStore } from "@/stores/modeStore";
 import { BentoCard } from "@/components/bento/BentoCard";
 import { DemoBadge } from "./DemoBadge";
-
-function getGreeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
-}
+import { getIstGreeting } from "./getIstGreeting";
 
 export function WelcomeCard() {
   const name = useSettingsStore((s) => s.name);
@@ -45,7 +39,7 @@ export function WelcomeCard() {
             Dashboard
           </p>
           <h2 className="font-heading text-xl font-semibold text-text-primary">
-            {getGreeting()}{name ? `, ${name}` : ""}
+            {getIstGreeting()}{name ? `, ${name}` : ""}
           </h2>
         </div>
 

@@ -20,6 +20,7 @@
  * record; the journal is derived from it and only contributes enrichment.
  */
 
+import { fmtIstClock, fmtIstDate, isIstDateInRange } from "@/lib/ist";
 import type { JournalTrade } from "@/services/ftApi";
 import type { RawTrade } from "@/types/rawApi";
 
@@ -103,18 +104,36 @@ export function parseFillTime(raw: string): ParsedFillTime {
   const d = new Date(raw);
   if (!isNaN(d.getTime())) {
     return {
-      dateDisplay: d.toLocaleDateString("en-IN", {
-        timeZone: "Asia/Kolkata",
-        day: "2-digit",
-        month: "short",
-        year: "2-digit",
-      }),
-      timeDisplay: d.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false }),
+      dateDisplay: fmtIstDate(d),
+      timeDisplay: fmtIstClock(d),
       ms: d.getTime(),
     };
   }
   // Unparseable broker time strings still show their leading HH:MM:SS.
   return { dateDisplay: "—", timeDisplay: String(raw).slice(0, 8), ms: 0 };
+}
+
+/**
+ * Join a parsed fill date and time with a literal space.
+ *
+ * CSS margin between two spans is not a character — testers (and copy/paste)
+ * saw ``13 Apr 2614:55:42``. The space lives in the text itself.
+ */
+export function formatFillDateTime(dateDisplay: string, timeDisplay: string): string {
+  if (dateDisplay === "—" && timeDisplay === "—") return "—";
+  if (dateDisplay === "—") return timeDisplay;
+  if (timeDisplay === "—") return dateDisplay;
+  return `${dateDisplay} ${timeDisplay}`;
+}
+
+/** Keep fills whose IST calendar day sits inside an inclusive ``YYYY-MM-DD`` window. */
+export function filterFillsByIstRange(
+  rows: FillRow[],
+  startDate?: string,
+  endDate?: string,
+): FillRow[] {
+  if (!startDate && !endDate) return rows;
+  return rows.filter((row) => isIstDateInRange(new Date(row.timeSortMs), startDate, endDate));
 }
 
 function resolveSide(t: RawFillSource): FillSide {

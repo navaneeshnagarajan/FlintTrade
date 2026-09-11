@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router";
 import { useThemeStore } from "@/stores/themeStore";
+import { useApplyDensity } from "@/hooks/useApplyDensity";
 import { useApplyFontScale } from "@/hooks/useApplyFontScale";
 import { AITutorPill } from "@/components/help/AITutorPill";
 import { UpgradeSuggestionHost } from "@/components/help/UpgradeSuggestion";
@@ -38,6 +39,7 @@ export default function RootLayout() {
   // Mirror the persisted font-size preference onto <html data-font-scale> so
   // the design-system typography tokens pick it up from first paint.
   useApplyFontScale();
+  useApplyDensity();
 
   useEffect(() => {
     applyTheme();

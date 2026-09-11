@@ -130,8 +130,21 @@ const TABS: TabDef[] = [
   { id: "correlation", label: "Correlation", icon: Grid2X2 },
 ];
 
+const TAB_IDS = new Set<string>(TABS.map((tab) => tab.id));
+
 /** Holdings tab owns its scroll — all others use the shared ScrollArea. */
 const FULL_HEIGHT_TABS: TabId[] = ["holdings"];
+
+/**
+ * Resolve an Invest URL hash to a tab id.
+ *
+ * Deep links such as `/invest#holdings` must select Holdings on the first
+ * paint. Unknown or empty hashes fall back to Dashboard.
+ */
+function tabFromHash(): TabId {
+  const hash = window.location.hash.replace(/^#/, "");
+  return TAB_IDS.has(hash) ? (hash as TabId) : "dashboard";
+}
 
 // ─── Active tab renderer ──────────────────────────────────────────────────────
 
@@ -186,12 +199,22 @@ function InvestShell() {
     useSkillStore.getState().trackAction("invest", "daysActive");
   }, []);
 
-  const [activeTab, setActiveTab] = useState<TabId>("dashboard");
+  const [activeTab, setActiveTab] = useState<TabId>(tabFromHash);
   const level = useSkillLevel("invest");
   const { holdings, isLoading } = useInvest();
   const tablistRef = useRef<HTMLDivElement>(null);
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);
   const toggleValues = useValueVisibilityStore((s) => s.toggle);
+
+  useEffect(() => {
+    const syncTabFromHash = () => setActiveTab(tabFromHash());
+    window.addEventListener("hashchange", syncTabFromHash);
+    return () => window.removeEventListener("hashchange", syncTabFromHash);
+  }, []);
+
+  useEffect(() => {
+    window.history.replaceState(null, "", `#${activeTab}`);
+  }, [activeTab]);
 
   // Density adaptation: fewer tabs for lower skill levels
   const visibleTabIds: TabId[] = (() => {

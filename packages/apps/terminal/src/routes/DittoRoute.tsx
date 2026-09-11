@@ -77,6 +77,9 @@ import { Label } from "@/components/ui/label";
 import { BrokerRecommendations } from "@/components/account/BrokerRecommendations";
 import { AccountStatusPanel } from "@/components/account/AccountStatusPanel";
 import { BrokerRateLimitsPanel } from "@/components/account/BrokerRateLimitsPanel";
+import { DEFAULT_OPENALGO_HOST, resolveOpenAlgoHost } from "@/lib/openAlgoDefaults";
+import { readOpenAlgoConfig } from "@/services/ftApi.openalgo";
+import { useConnectionStore } from "@/stores/connectionStore";
 
 // ─── Tab registry ────────────────────────────────────────────────────────────
 
@@ -131,6 +134,33 @@ const DEFAULT_ACCOUNT_FORM = {
   isMaster: false,
 };
 
+function createAccountForm(
+  gatewayHost?: string | null,
+  gatewayPort?: string | number | null,
+) {
+  return {
+    ...DEFAULT_ACCOUNT_FORM,
+    openalgoHost: resolveOpenAlgoHost(gatewayHost, gatewayPort),
+  };
+}
+
+async function resolveGatewayOpenAlgoHost(): Promise<string> {
+  // Explore clears the volatile connection cache so live-order routing cannot
+  // retain a bridge key. Host and REST port are non-secret workspace fields;
+  // read them here without writing api_key back into the store.
+  try {
+    const payload = await readOpenAlgoConfig();
+    if (payload.status === "success") {
+      const data = payload.data ?? {};
+      const host = String(data.host ?? "").trim();
+      if (host) return resolveOpenAlgoHost(host, data.port);
+    }
+  } catch {
+    // Fall through to the in-session Gateway cache, then the shared default.
+  }
+  return resolveOpenAlgoHost(useConnectionStore.getState().host);
+}
+
 function BrokerOperationsPanels() {
   return (
     <>
@@ -162,7 +192,7 @@ function AccountsTab() {
   });
 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [form, setForm] = useState(DEFAULT_ACCOUNT_FORM);
+  const [form, setForm] = useState(() => createAccountForm());
   const [formError, setFormError] = useState("");
   const [loadTimedOut, setLoadTimedOut] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -173,7 +203,7 @@ function AccountsTab() {
       queryClient.invalidateQueries({ queryKey: ["ditto", "accounts"] });
       queryClient.invalidateQueries({ queryKey: ["ditto", "risk"] });
       setIsAddDialogOpen(false);
-      setForm(DEFAULT_ACCOUNT_FORM);
+      setForm(createAccountForm());
       setFormError("");
     },
   });
@@ -267,8 +297,24 @@ function AccountsTab() {
     addMutation.mutate(payload);
   }
 
+  function openAddAccount() {
+    setFormError("");
+    void resolveGatewayOpenAlgoHost().then((host) => {
+      setForm(createAccountForm(host));
+      setIsAddDialogOpen(true);
+    });
+  }
+
+  function handleAddDialogOpenChange(open: boolean) {
+    if (open) {
+      openAddAccount();
+      return;
+    }
+    setIsAddDialogOpen(false);
+  }
+
   const addAccountDialog = (
-    <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+    <Dialog open={isAddDialogOpen} onOpenChange={handleAddDialogOpenChange}>
       <DialogContent className="max-w-xl bg-surface-card border-border-default">
         <form onSubmit={handleSubmitAccount} className="space-y-4">
           <DialogHeader>
@@ -305,9 +351,14 @@ function AccountsTab() {
                 id="ditto-openalgo-host"
                 value={form.openalgoHost}
                 onChange={(event) => updateForm("openalgoHost", event.target.value)}
-                placeholder="http://127.0.0.1:5001"
+                placeholder={DEFAULT_OPENALGO_HOST}
                 autoComplete="url"
               />
+              <p className="text-xs text-text-muted">
+                Prefills from Settings → Broker Gateway, including the saved REST
+                port when the URL omits one. The shared OpenAlgo default is port 5000.
+                Change this only if this account uses a different OpenAlgo instance.
+              </p>
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="ditto-api-key">API Key</Label>
@@ -436,7 +487,7 @@ function AccountsTab() {
           <Users className="size-8 text-text-muted" />
           <p className="text-sm text-text-muted">No accounts connected</p>
           <p className="text-xs text-text-disabled">Add an account to get started.</p>
-          <Button size="sm" variant="outline" onClick={() => setIsAddDialogOpen(true)}>
+          <Button size="sm" variant="outline" onClick={openAddAccount}>
             <Plus className="size-3.5" />
             Add Account
           </Button>
@@ -470,7 +521,7 @@ function AccountsTab() {
         <h2 className="text-sm font-heading font-semibold text-text-primary">
           Managed Accounts
         </h2>
-        <Button size="sm" variant="outline" onClick={() => setIsAddDialogOpen(true)}>
+        <Button size="sm" variant="outline" onClick={openAddAccount}>
           <Plus className="size-3.5" />
           Add Account
         </Button>
@@ -879,6 +930,9 @@ function RiskTab() {
   });
 
   const risk: DittoRiskData | null = riskData ?? null;
+  const hasManagedAccounts = (risk?.accounts.length ?? 0) > 0;
+  // Snapshot failed: keep the emergency control available. Empty snapshot: disarm.
+  const killAllArmed = risk === null || hasManagedAccounts;
 
   if (isLoading) {
     return (
@@ -909,13 +963,25 @@ function RiskTab() {
             </p>
           </div>
         )}
-        <div className="rounded-lg border border-loss/30 bg-loss/5 p-4">
-          <p className="text-xs text-loss mb-2">Emergency Action</p>
+        <div
+          className={cn(
+            "rounded-lg border p-4",
+            killAllArmed ? "border-loss/30 bg-loss/5" : "border-border-default bg-surface-card",
+          )}
+        >
+          <p className={cn("text-xs mb-2", killAllArmed ? "text-loss" : "text-text-muted")}>
+            Emergency Action
+          </p>
           <Button
-            variant="destructive"
+            variant={killAllArmed ? "destructive" : "outline"}
             size="sm"
             className="w-full"
-            onClick={() => setKillDialogOpen(true)}
+            disabled={!killAllArmed}
+            title={killAllArmed ? undefined : "No managed accounts to flatten"}
+            onClick={() => {
+              if (!killAllArmed) return;
+              setKillDialogOpen(true);
+            }}
           >
             <AlertTriangle className="size-3.5" />
             Kill All Positions
@@ -923,8 +989,18 @@ function RiskTab() {
         </div>
       </div>
 
+      {risk && !hasManagedAccounts && (
+        <div className="flex flex-col items-center justify-center py-12 gap-2 rounded-lg border border-border-default">
+          <Users className="size-8 text-text-muted" />
+          <p className="text-sm text-text-muted">No managed accounts</p>
+          <p className="text-xs text-text-disabled">
+            Kill All stays disarmed until an account is added.
+          </p>
+        </div>
+      )}
+
       {/* Per-account risk table */}
-      {risk && <div className="rounded-lg border border-border-default overflow-hidden">
+      {risk && hasManagedAccounts && <div className="rounded-lg border border-border-default overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>

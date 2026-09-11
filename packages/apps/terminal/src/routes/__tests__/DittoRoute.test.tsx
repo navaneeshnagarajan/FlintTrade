@@ -49,6 +49,14 @@ vi.mock("@/services/ftApi.native", () => ({
   listBrokerRecommendations: vi.fn(),
 }));
 
+vi.mock("@/services/ftApi.openalgo", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/ftApi.openalgo")>();
+  return {
+    ...actual,
+    readOpenAlgoConfig: vi.fn(),
+  };
+});
+
 import DittoRoute from "../DittoRoute";
 import {
   addDittoAccount,
@@ -61,6 +69,9 @@ import {
   setDittoAccountEnabled,
 } from "@/services/ftApi";
 import { listBrokerRecommendations } from "@/services/ftApi.native";
+import { readOpenAlgoConfig } from "@/services/ftApi.openalgo";
+import { DEFAULT_OPENALGO_HOST } from "@/lib/openAlgoDefaults";
+import { useConnectionStore } from "@/stores/connectionStore";
 
 const mockGet = get as unknown as ReturnType<typeof vi.fn>;
 const mockGetAccounts = getDittoAccounts as ReturnType<typeof vi.fn>;
@@ -71,6 +82,7 @@ const mockGetMirrorStatus = getDittoMirrorStatus as ReturnType<typeof vi.fn>;
 const mockGetRisk = getDittoRisk as ReturnType<typeof vi.fn>;
 const mockKillAll = dittoKillAll as ReturnType<typeof vi.fn>;
 const mockListBrokerRecommendations = listBrokerRecommendations as unknown as ReturnType<typeof vi.fn>;
+const mockReadOpenAlgoConfig = readOpenAlgoConfig as ReturnType<typeof vi.fn>;
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const dittoRouteSource = () =>
@@ -160,6 +172,7 @@ const sampleRisk = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useConnectionStore.setState(useConnectionStore.getInitialState());
   mockGet.mockImplementation((path: string) => {
     if (path === "accounts/status") {
       return Promise.resolve({
@@ -196,6 +209,10 @@ beforeEach(() => {
     message: "All managed accounts are flat",
     accounts_affected: 2,
     emergency_actions: {},
+  });
+  mockReadOpenAlgoConfig.mockResolvedValue({
+    status: "success",
+    data: { host: "", port: 5000, ws_port: 8765 },
   });
 });
 
@@ -271,6 +288,40 @@ describe("DittoRoute", () => {
     });
   });
 
+  it("disarms Kill All Positions on an empty Explore risk dashboard", async () => {
+    mockGetRisk.mockResolvedValue({
+      complete: true,
+      aggregate_pnl: 0,
+      aggregate_capital: 0,
+      accounts: [],
+    });
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByText("Risk Dashboard"));
+
+    const killAll = await screen.findByRole("button", { name: "Kill All Positions" });
+    expect(killAll).toBeDisabled();
+    expect(killAll).toHaveAttribute("data-variant", "outline");
+    expect(screen.getByText("No managed accounts")).toBeInTheDocument();
+    expect(
+      screen.getByText("Kill All stays disarmed until an account is added."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(killAll);
+    expect(screen.queryByText("Confirm Kill All")).not.toBeInTheDocument();
+    expect(mockKillAll).not.toHaveBeenCalled();
+  });
+
+  it("keeps Kill All Positions armed when managed accounts have open positions", async () => {
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByText("Risk Dashboard"));
+
+    const killAll = await screen.findByRole("button", { name: "Kill All Positions" });
+    expect(killAll).toBeEnabled();
+    expect(killAll).toHaveAttribute("data-variant", "destructive");
+    fireEvent.click(killAll);
+    expect(screen.getByText("Confirm Kill All")).toBeInTheDocument();
+  });
+
   it("displays aggregate P&L in risk tab", async () => {
     render(<DittoRoute />, { wrapper: createWrapper() });
     fireEvent.click(screen.getByText("Risk Dashboard"));
@@ -287,6 +338,60 @@ describe("DittoRoute", () => {
     }, { timeout: 6000 });
   });
 
+  it("prefills Add Account from the shared OpenAlgo default when Broker Gateway is unset", async () => {
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(screen.getByText("Managed Accounts")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Account" }));
+
+    const host = await screen.findByLabelText("OpenAlgo URL");
+    expect(host).toHaveValue(DEFAULT_OPENALGO_HOST);
+    expect(host).toHaveAttribute("placeholder", DEFAULT_OPENALGO_HOST);
+    expect(host).not.toHaveAttribute("placeholder", "http://127.0.0.1:5001");
+    expect(screen.getByText(/Prefills from Settings → Broker Gateway/)).toBeInTheDocument();
+    expect(dittoRouteSource()).not.toContain("127.0.0.1:5001");
+  });
+
+  it("prefills Add Account from the saved Broker Gateway URL", async () => {
+    useConnectionStore.getState().setConfig({ host: "http://192.0.2.10:5010" });
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(screen.getByText("Managed Accounts")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Account" }));
+
+    expect(await screen.findByLabelText("OpenAlgo URL")).toHaveValue("http://192.0.2.10:5010");
+    expect(screen.getByText(/Prefills from Settings → Broker Gateway/)).toBeInTheDocument();
+  });
+
+  it("prefills Add Account from the saved Gateway host and REST port without retaining the API key", async () => {
+    mockReadOpenAlgoConfig.mockResolvedValue({
+      status: "success",
+      data: {
+        api_key: "must-not-enter-the-connection-cache",
+        api_key_configured: true,
+        host: "http://192.168.1.20",
+        port: 5001,
+        ws_port: 8770,
+      },
+    });
+
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(screen.getByText("Managed Accounts")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Account" }));
+
+    expect(await screen.findByLabelText("OpenAlgo URL")).toHaveValue("http://192.168.1.20:5001");
+    expect(useConnectionStore.getState().host).toBe("");
+    expect(useConnectionStore.getState().apiKey).toBe("");
+    expect(useConnectionStore.getState().openAlgoHydrated).toBe(false);
+  });
+
   it("opens Add Account and submits a managed account", async () => {
     render(<DittoRoute />, { wrapper: createWrapper() });
     await waitFor(() => {
@@ -295,11 +400,11 @@ describe("DittoRoute", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add Account" }));
 
-    fireEvent.change(screen.getByLabelText("Account ID"), {
+    fireEvent.change(await screen.findByLabelText("Account ID"), {
       target: { value: "family_01" },
     });
     fireEvent.change(screen.getByLabelText("OpenAlgo URL"), {
-      target: { value: "http://127.0.0.1:5001" },
+      target: { value: "http://127.0.0.1:5000" },
     });
     fireEvent.change(screen.getByLabelText("API Key"), {
       target: { value: "secret-key" },
@@ -315,7 +420,7 @@ describe("DittoRoute", () => {
     await waitFor(() => {
       expect(mockAddAccount).toHaveBeenCalledWith({
         account_id: "family_01",
-        openalgo_host: "http://127.0.0.1:5001",
+        openalgo_host: "http://127.0.0.1:5000",
         api_key: "secret-key",
         name: "Family Account",
         group: "Family",
@@ -384,6 +489,7 @@ describe("DittoRoute", () => {
       "Risk snapshot unavailable",
     );
     expect(screen.queryByText("₹0")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Kill All Positions" })).toBeEnabled();
   });
 
   it("keeps the kill confirmation open and reports an incomplete flatten", async () => {

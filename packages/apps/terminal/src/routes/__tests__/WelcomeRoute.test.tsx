@@ -136,7 +136,21 @@ vi.mock("@/components/aceternity/meteors", () => ({
 }));
 
 vi.mock("@/routes/LoginRoute", () => ({
-  default: () => <div data-testid="login-route" />,
+  default: ({
+    onUnfinishedSetup,
+    totpRequired,
+  }: {
+    onUnfinishedSetup?: () => void;
+    totpRequired?: boolean;
+  }) => (
+    <div data-testid="login-route" data-totp-required={String(totpRequired)}>
+      {onUnfinishedSetup ? (
+        <button type="button" aria-label="Start over unfinished setup" onClick={onUnfinishedSetup}>
+          Unfinished setup — start over
+        </button>
+      ) : null}
+    </div>
+  ),
 }));
 
 // ---------------------------------------------------------------------------
@@ -163,6 +177,57 @@ describe("WelcomeRoute", () => {
     render(<WelcomeRoute />);
 
     expect(screen.getByRole("heading", { name: "FlintTrade" })).toBeInTheDocument();
+  });
+
+  it("offers unfinished-setup start over on Welcome sign-in after a hatch bounce", async () => {
+    authState.status = "logged-out";
+    sessionStorage.setItem("flinttrade:greeted-today", new Date().toDateString());
+    localStorage.setItem(
+      "flinttrade:setup-progress",
+      JSON.stringify({ accountCreated: true, currentStep: 1 }),
+    );
+
+    render(<WelcomeRoute />);
+
+    await waitFor(() => {
+      fireEvent.click(screen.getByLabelText("Start over unfinished setup"));
+    });
+    expect(mockNavigate).toHaveBeenCalledWith("/setup");
+    localStorage.removeItem("flinttrade:setup-progress");
+  });
+
+  it("does not redirect incomplete setup back to /setup from Welcome", () => {
+    authState.status = "logged-out";
+    localStorage.setItem(
+      "flinttrade:setup-progress",
+      JSON.stringify({ accountCreated: true, currentStep: 1 }),
+    );
+
+    render(<WelcomeRoute />);
+
+    expect(mockNavigate).not.toHaveBeenCalledWith("/setup", { replace: true });
+    localStorage.removeItem("flinttrade:setup-progress");
+  });
+
+  it("restores sample-data Explore on Welcome remount when the hatch session is active", async () => {
+    authState.status = "unknown";
+    localStorage.setItem("flinttrade:demo-session", "active");
+    localStorage.setItem(
+      "flinttrade:mode",
+      JSON.stringify({ state: { mode: "explore" }, version: 2 }),
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    render(<WelcomeRoute />);
+
+    await waitFor(() =>
+      expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Explorer", ""),
+    );
+    expect(mockSetLoggedOut).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+    localStorage.removeItem("flinttrade:demo-session");
+    localStorage.removeItem("flinttrade:mode");
   });
 
   it("shows Get Started and Explore CTAs for setup-required users", () => {

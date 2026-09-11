@@ -11,7 +11,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { UNDERLYINGS } from "./types";
 import { LOADABLE_STRATEGY_TEMPLATES } from "@/lib/strategyTemplates";
 import { analyseVerticalSpread } from "@/lib/spreadAnalysis";
-import { validateLegs, calculateNetPremium, formatINR } from "./utils";
+import {
+  SAMPLE_PREMIUM_HELPER,
+  validateLegs,
+  calculateNetPremium,
+  formatINR,
+  parsePremiumInput,
+} from "./utils";
 import type { Leg, Direction, OptionType, Underlying } from "./types";
 
 interface Props {
@@ -43,7 +49,8 @@ export function LegsTab({
 }: Props) {
   const { valid, error } = validateLegs(legs);
   const netPremium = calculateNetPremium(legs);
-  const isDebit = netPremium > 0;
+  const isDebit = netPremium != null && netPremium > 0;
+  const sampleSeeded = legs.some((leg) => leg.premiumSource === "sample");
 
   // Vertical-spread economics — carried over from the retired SpreadView
   // widget, which was the only surface in the terminal that checked them.
@@ -92,7 +99,7 @@ export function LegsTab({
           />
         </div>
 
-        {legs.length > 0 && (
+        {legs.length > 0 && netPremium != null && (
           <Badge
             variant="outline"
             className={`text-xxs px-1.5 border-0 font-mono ml-auto ${isDebit ? "bg-red-900/40 text-red-400" : "bg-emerald-900/40 text-emerald-400"}`}
@@ -143,7 +150,7 @@ export function LegsTab({
             </TableHeader>
             <TableBody>
               {legs.map((leg, idx) => {
-                const net = (leg.action === "BUY" ? 1 : -1) * leg.lots * leg.premium;
+                const net = leg.premium == null ? null : (leg.action === "BUY" ? 1 : -1) * leg.lots * leg.premium;
                 return (
                   <TableRow key={leg.id} className="border-border-subtle hover:bg-surface-base">
                     <TableCell className="py-1 text-xs text-text-muted">{idx + 1}</TableCell>
@@ -200,12 +207,13 @@ export function LegsTab({
                         type="number"
                         min={0}
                         step={0.05}
-                        value={leg.premium}
-                        onChange={(e) => onChange(leg.id, "premium", Math.max(0, Number(e.target.value)))}
+                        value={leg.premium ?? ""}
+                        aria-label="Premium"
+                        onChange={(e) => onChange(leg.id, "premium", parsePremiumInput(e.target.value))}
                       />
                     </TableCell>
-                    <TableCell className={`py-1 text-xs font-mono text-right ${net >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                      {net >= 0 ? "+" : ""}{net.toFixed(2)}
+                    <TableCell className={`py-1 text-xs font-mono text-right ${net == null ? "text-text-muted" : net >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {net == null ? "—" : `${net >= 0 ? "+" : ""}${net.toFixed(2)}`}
                     </TableCell>
                     <TableCell className="py-1">
                       <Button
@@ -224,6 +232,10 @@ export function LegsTab({
           </Table>
         )}
       </div>
+
+      {sampleSeeded && (
+        <p className="px-3 text-xxs text-text-muted">{SAMPLE_PREMIUM_HELPER}</p>
+      )}
 
       {/* Vertical-spread economics */}
       {spreadCheck.kind === "invalid" && (

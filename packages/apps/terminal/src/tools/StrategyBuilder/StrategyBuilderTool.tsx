@@ -11,6 +11,7 @@ import { UNDERLYINGS } from "./types";
 import type { Leg, Underlying } from "./types";
 import { builderLegsFor, getStrategyTemplate } from "@/lib/strategyTemplates";
 import { calculateNetPremium, formatINR, genId } from "./utils";
+import { sampleChainOptionLtp } from "@/lib/sampleOptionChain";
 import {
   LOAD_TEMPLATE_EVENT,
   readAndClearPendingTemplate,
@@ -61,7 +62,7 @@ export default function StrategyBuilderTool({ onClose }: Props) {
   const handleAdd = () => {
     setLegs((prev) => [
       ...prev,
-      { id: genId(), action: "BUY", optionType: "CE", strike: atm, lots: 1, premium: 0 },
+      { id: genId(), action: "BUY", optionType: "CE", strike: atm, lots: 1, premium: null },
     ]);
   };
 
@@ -70,21 +71,35 @@ export default function StrategyBuilderTool({ onClose }: Props) {
   };
 
   const handleChange = (id: string, field: keyof Leg, value: unknown) => {
-    setLegs((prev) => prev.map((l) => (l.id === id ? { ...l, [field]: value } : l)));
+    setLegs((prev) =>
+      prev.map((l) => {
+        if (l.id !== id) return l;
+        if (field === "premium") {
+          return { ...l, premium: value as number | null, premiumSource: undefined };
+        }
+        return { ...l, [field]: value };
+      }),
+    );
   };
 
   // Apply a hand-off template from the StrategyTemplates widget — the legs
   // arrive via templateBridge. validateLegs caps at 6 legs, so trim anything
-  // longer.
+  // longer. Long Call is the only template that seeds a labelled sample-chain
+  // LTP (FT-LAB-003); every other shape lands unset so payoff is not ₹0.
   const applyBridgeTemplate = (tmpl: BuilderTemplate) => {
-    const newLegs: Leg[] = tmpl.legs.slice(0, 6).map((lt) => ({
-      id: genId(),
-      action: lt.action,
-      optionType: lt.optionType,
-      strike: atm + lt.strikeOffset * strikeGap,
-      lots: Math.max(1, lt.lots),
-      premium: 0,
-    }));
+    const seedSample = tmpl.id === "long-call";
+    const newLegs: Leg[] = tmpl.legs.slice(0, 6).map((lt) => {
+      const strike = atm + lt.strikeOffset * strikeGap;
+      return {
+        id: genId(),
+        action: lt.action,
+        optionType: lt.optionType,
+        strike,
+        lots: Math.max(1, lt.lots),
+        premium: seedSample ? sampleChainOptionLtp(atm, strike, strikeGap, lt.optionType) : null,
+        premiumSource: seedSample ? "sample" : undefined,
+      };
+    });
     setLegs(newLegs);
   };
 
@@ -130,7 +145,7 @@ export default function StrategyBuilderTool({ onClose }: Props) {
           <Badge variant="outline" className="text-xxs border-border-default text-text-muted font-normal">
             {underlying.symbol}
           </Badge>
-          {legs.length > 0 && (
+          {legs.length > 0 && netPremium != null && (
             <Badge
               variant="outline"
               className={`text-xxs px-1.5 border-0 font-mono ${netPremium <= 0 ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}

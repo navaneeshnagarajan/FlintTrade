@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
@@ -226,8 +226,8 @@ function mockBrokerAccountMatch(
 const defaultProps = makeWidgetPanelProps();
 
 /** Panel props that open the widget on one of the two absorbed views. */
-function viewProps(view: "table" | "net" | "heat") {
-  return makeWidgetPanelProps<Record<string, unknown>>({ params: { view } });
+function viewProps(view: "table" | "net" | "heat", extra: Record<string, unknown> = {}) {
+  return makeWidgetPanelProps<Record<string, unknown>>({ params: { view, ...extra } });
 }
 
 function queryResult(overrides = {}) {
@@ -488,6 +488,46 @@ describe("PositionsWidget", () => {
     expect(pct).toHaveClass("text-loss");
   });
 
+  it("shows stacked P&L cards instead of the clipped table at ~390px", () => {
+    let resizeCallback: ResizeObserverCallback | null = null;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        constructor(callback: ResizeObserverCallback) {
+          resizeCallback = callback;
+        }
+        observe = vi.fn();
+        disconnect = vi.fn();
+        unobserve = vi.fn();
+      },
+    );
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          { symbol: "RELIANCE", pnl: 3500, quantity: 50, ltp: 2520, average_price: 2450 },
+        ],
+      }),
+    );
+
+    render(<PositionsWidget {...defaultProps} />);
+
+    act(() => {
+      resizeCallback?.(
+        [{ contentRect: { width: 390, height: 700 } } as ResizeObserverEntry],
+        {} as ResizeObserver,
+      );
+    });
+
+    const cards = screen.getByRole("list", { name: "Positions" });
+    expect(cards).toHaveAttribute("data-layout", "cards");
+    expect(cards).toHaveTextContent("RELIANCE");
+    expect(cards).toHaveTextContent("+₹3,500");
+    expect(cards).toHaveTextContent("+2.86%");
+    expect(screen.queryByRole("columnheader", { name: /P&L%/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
   it("renders the position-status tracker with counts from the shared mark-to-market", () => {
     mockUsePositions.mockReturnValue(
       queryResult({
@@ -642,6 +682,7 @@ describe("PositionsWidget", () => {
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByText("Sample")).toBeInTheDocument();
     expect(screen.getByText(/Sample data — connect a broker/i)).toBeInTheDocument();
+    expect(screen.queryByText("Live only")).toBeNull();
   });
 
   // ── Excel export ─────────────────────────────────────────────────────────
@@ -1393,6 +1434,115 @@ describe("PositionsWidget", () => {
         render(<PositionsWidget {...viewProps("heat")} />);
         expect(screen.getByText(/Sample data — connect a broker/i)).toBeInTheDocument();
         expect(screen.queryByText("No open positions")).not.toBeInTheDocument();
+      });
+    });
+
+    // ── FT-TRADE-005: labelled group bands, not a silent re-sort ──────────
+
+    it("shows labelled exchange group bands, not a silent re-sort", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "INFY", exchange: "NSE", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
+            { symbol: "NIFTY24APR22500CE", exchange: "NFO", product: "MIS", quantity: 75, averagePrice: 180, ltp: 235, pnl: 4125, pnlPercent: 30.6 },
+          ],
+        }),
+      );
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "exchange" })} />);
+        expect(screen.getByRole("group", { name: "NSE group" })).toBeInTheDocument();
+        expect(screen.getByRole("group", { name: "NFO group" })).toBeInTheDocument();
+        expect(screen.getByTestId("heat-group-chip-NSE")).toHaveTextContent("NSE");
+        expect(screen.getByTestId("heat-group-chip-NFO")).toHaveTextContent("NFO");
+        expect(screen.getByRole("button", { name: /^INFY:/ })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^NIFTY24APR22500CE:/ })).toBeInTheDocument();
+      });
+    });
+
+    it("still labels a single exchange group so the mode control looks used", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "INFY", exchange: "NSE", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
+            { symbol: "TCS", exchange: "NSE", product: "CNC", quantity: 50, averagePrice: 3900, ltp: 3820, pnl: -4000, pnlPercent: -2.1 },
+          ],
+        }),
+      );
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "exchange" })} />);
+        expect(screen.getByRole("group", { name: "NSE group" })).toBeInTheDocument();
+        expect(screen.getByTestId("heat-group-chip-NSE")).toHaveTextContent("NSE");
+        expect(screen.queryByRole("group", { name: "NFO group" })).not.toBeInTheDocument();
+      });
+    });
+
+    it("shows an honest empty when positions have no exchange metadata", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "INFY", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
+            { symbol: "TCS", product: "CNC", quantity: 50, averagePrice: 3900, ltp: 3820, pnl: -4000, pnlPercent: -2.1 },
+          ],
+        }),
+      );
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "exchange" })} />);
+        expect(screen.getByText("No exchange groups in these positions")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /^INFY:/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /^TCS:/ })).not.toBeInTheDocument();
+        expect(screen.queryByTestId("heat-group-band")).not.toBeInTheDocument();
+        expect(screen.queryByRole("group", { name: /group$/ })).not.toBeInTheDocument();
+      });
+    });
+
+    it("renders Flat without group chrome", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "INFY", exchange: "NSE", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
+            { symbol: "NIFTY24APR22500CE", exchange: "NFO", product: "MIS", quantity: 75, averagePrice: 180, ltp: 235, pnl: 4125, pnlPercent: 30.6 },
+          ],
+        }),
+      );
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "flat" })} />);
+        expect(screen.queryByTestId("heat-group-band")).not.toBeInTheDocument();
+        expect(screen.queryByRole("group", { name: /group$/ })).not.toBeInTheDocument();
+        expect(screen.queryByTestId("heat-group-chip-NSE")).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^INFY:/ })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^NIFTY24APR22500CE:/ })).toBeInTheDocument();
+      });
+    });
+
+    it("shows labelled sector group bands", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "INFY", exchange: "NSE", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
+            { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 300, averagePrice: 810, ltp: 832, pnl: 6600, pnlPercent: 2.7 },
+          ],
+        }),
+      );
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "sector" })} />);
+        expect(screen.getByRole("group", { name: "IT group" })).toBeInTheDocument();
+        expect(screen.getByRole("group", { name: "Banking group" })).toBeInTheDocument();
+        expect(screen.getByTestId("heat-group-chip-IT")).toHaveTextContent("IT");
+        expect(screen.getByTestId("heat-group-chip-Banking")).toHaveTextContent("Banking");
+      });
+    });
+
+    it("labels Explore sample exchange groups (NSE and NFO)", () => {
+      mockModeState.mode = "explore";
+      mockUseBrokerConnected.mockReturnValue(false);
+      mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat", { group: "exchange" })} />);
+        expect(screen.getByRole("group", { name: "NSE group" })).toBeInTheDocument();
+        expect(screen.getByRole("group", { name: "NFO group" })).toBeInTheDocument();
+        expect(screen.getByTestId("heat-group-chip-NSE")).toHaveTextContent("NSE");
+        expect(screen.getByTestId("heat-group-chip-NFO")).toHaveTextContent("NFO");
+        expect(screen.queryByText("No exchange groups in these positions")).not.toBeInTheDocument();
       });
     });
   });

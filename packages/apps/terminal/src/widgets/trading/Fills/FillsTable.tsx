@@ -72,7 +72,7 @@ import { useTradebook } from "@/hooks/useTradebook";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useModeStore } from "@/stores/modeStore";
-import { getTradeJournal } from "@/services/ftApi";
+import { getTradeJournal, type JournalTrade } from "@/services/ftApi";
 import {
   addJournalScreenshot,
   deleteJournalScreenshot,
@@ -84,6 +84,9 @@ import {
   buildFillRows,
   computeFillStats,
   downloadFillsCsv,
+  filterFillsByIstRange,
+  formatFillDateTime,
+  journalToFills,
   legacyFillKey,
   SAMPLE_FILLS,
   type FillRow,
@@ -179,10 +182,21 @@ export interface FillsTableProps {
    */
   startDate?: string;
   endDate?: string;
+  /**
+   * Explore-mode journal rows already filtered by the embedder (Trade Review).
+   * When omitted, the frozen SAMPLE_FILLS blotter is used and then clipped to
+   * the IST range so a date window cannot resurrect April demo rows.
+   */
+  exploreJournalTrades?: JournalTrade[];
   className?: string;
 }
 
-export function FillsTable({ startDate, endDate, className }: FillsTableProps) {
+export function FillsTable({
+  startDate,
+  endDate,
+  exploreJournalTrades,
+  className,
+}: FillsTableProps) {
   const track = useTrackBehavior();
   const mode = useModeStore((s) => s.mode);
   const isExplore = mode === "explore";
@@ -286,12 +300,28 @@ export function FillsTable({ startDate, endDate, className }: FillsTableProps) {
 
   // --- Row model: one union, newest first ---
   const allRows = useMemo<FillRow[]>(() => {
-    if (isExplore) return [...SAMPLE_FILLS];
+    if (isExplore) {
+      const rows =
+        exploreJournalTrades !== undefined
+          ? journalToFills(exploreJournalTrades)
+          : [...SAMPLE_FILLS];
+      return ranged ? filterFillsByIstRange(rows, startDate, endDate) : rows;
+    }
     return buildFillRows(
       tradebookEnabled ? ((tradebookQuery.data ?? []) as RawFillSource[]) : [],
       isLive ? (journalQuery.data?.trades ?? []) : [],
     );
-  }, [isExplore, isLive, tradebookEnabled, tradebookQuery.data, journalQuery.data]);
+  }, [
+    isExplore,
+    isLive,
+    tradebookEnabled,
+    tradebookQuery.data,
+    journalQuery.data,
+    exploreJournalTrades,
+    ranged,
+    startDate,
+    endDate,
+  ]);
 
   const counts = useMemo(
     () => ({
@@ -341,10 +371,7 @@ export function FillsTable({ startDate, endDate, className }: FillsTableProps) {
         header: "Time",
         cell: ({ row }) => (
           <span className="font-mono tabular-nums text-text-muted whitespace-nowrap">
-            {row.original.dateDisplay !== "—" && (
-              <span className="text-text-disabled mr-1">{row.original.dateDisplay}</span>
-            )}
-            {row.original.timeDisplay}
+            {formatFillDateTime(row.original.dateDisplay, row.original.timeDisplay)}
           </span>
         ),
       },

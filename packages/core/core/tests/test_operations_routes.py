@@ -1739,6 +1739,43 @@ class TestTradesJournal:
             flask_app.config["TRADE_STORAGE"] = orig
             store.close()
 
+    def test_limit_slices_rows_but_total_is_untruncated(self, flask_app, client, tmp_path):
+        """``total`` is the pre-slice count so analytics can disclose a cap.
+
+        The route's docstring already promised this; reporting ``len(trades)``
+        after ``trades[:limit]`` made a 200/1000-row page look complete.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        ist = timezone(timedelta(hours=5, minutes=30))
+        orig = flask_app.config.get("TRADE_STORAGE")
+        store = self._temp_store(flask_app, tmp_path)
+        try:
+            base = datetime(2026, 3, 2, 10, 0, tzinfo=ist)
+            for i in range(5):
+                store.insert_trade(
+                    ts=base + timedelta(minutes=i),
+                    orderid=f"LIM-{i}",
+                    symbol="TCS",
+                    exchange="NSE",
+                    action="BUY",
+                    quantity=1,
+                    price=100.0 + i,
+                    strategy="manual",
+                )
+
+            resp = client.get(
+                "/api/v1/trades/journal?start_date=2026-03-01&end_date=2026-03-07&limit=2",
+                headers=_auth_headers(),
+            )
+            assert resp.status_code == 200
+            body = resp.get_json()["data"]
+            assert len(body["trades"]) == 2
+            assert body["total"] == 5
+        finally:
+            flask_app.config["TRADE_STORAGE"] = orig
+            store.close()
+
 
 # ---------------------------------------------------------------------------
 # Recent logs

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useLocation } from "react-router";
+import { Link, useLocation } from "react-router";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
@@ -17,11 +17,11 @@ import {
   PanelLeftOpen,
   Clock,
   ChevronDown,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { GlassCard } from "@/components/ui/GlassCard";
 import TabTransition from "@/components/motion/TabTransition";
 import { motionConfig } from "@/lib/motion";
@@ -43,6 +43,9 @@ interface TabDef {
 interface GlossaryEntry {
   term: string;
   definition: string;
+  /** Exchange circular or contract file for figures that get revised. */
+  verifyHref?: string;
+  verifyLabel?: string;
 }
 
 interface StrategyCard {
@@ -77,6 +80,8 @@ interface BasicsSection {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
+
+const LEARN_DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
 
 const TABS: TabDef[] = [
   { id: "basics",     label: "Market Basics",    icon: BookOpen,     progress: 33 },
@@ -131,6 +136,13 @@ const BASICS_SECTIONS: BasicsSection[] = [
   },
 ];
 
+/**
+ * Learn Glossary entries. Any figure an exchange revises must ship with an
+ * “as of” date and a verify link — stale undated lots are a bug (FT-LEARN-002).
+ */
+const LEARN_INDEX_LOT_VERIFY_HREF =
+  "https://nsearchives.nseindia.com/content/circulars/FAOP70616.pdf";
+
 const GLOSSARY: GlossaryEntry[] = [
   { term: "ATM",        definition: "At The Money — option strike closest to current market price" },
   { term: "Bid/Ask",    definition: "Bid is the highest buy price, Ask is the lowest sell price" },
@@ -141,7 +153,13 @@ const GLOSSARY: GlossaryEntry[] = [
   { term: "Gamma",      definition: "Rate of change of Delta — measures acceleration of price change" },
   { term: "Hedge",      definition: "A position taken to offset potential losses in another position" },
   { term: "IV",         definition: "Implied Volatility — market's expectation of future price movement" },
-  { term: "Lot Size",   definition: "Minimum quantity for F&O trading. NIFTY=25, BANKNIFTY=15" },
+  {
+    term: "Lot Size",
+    definition:
+      "Minimum quantity for F&O trading. NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 · MIDCPNIFTY 120 (as of Jan 2026 NSE cycle).",
+    verifyHref: LEARN_INDEX_LOT_VERIFY_HREF,
+    verifyLabel: "Verify on NSE",
+  },
   { term: "Margin",     definition: "Deposit required to open F&O positions. Can be SPAN + Exposure." },
   { term: "MTM",        definition: "Mark To Market — daily P&L calculation based on closing price" },
   { term: "NRML",       definition: "Normal position — can be carried overnight, higher margin" },
@@ -364,14 +382,13 @@ function GlossaryItem({ entry }: GlossaryItemProps) {
   const [open, setOpen] = useState(false);
 
   return (
-    <button
-      type="button"
-      onClick={() => setOpen((v) => !v)}
-      aria-expanded={open}
-      className="w-full text-left"
-    >
-      <GlassCard className="rounded-lg p-0 overflow-hidden hover:border-border-strong transition-colors duration-150">
-        {/* Accordion header */}
+    <GlassCard className="rounded-lg p-0 hover:border-border-strong transition-colors duration-150">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full text-left"
+      >
         <div className="flex items-center gap-3 px-4 py-3">
           <span className="text-sm font-mono font-semibold text-accent shrink-0 w-28 truncate">
             {entry.term}
@@ -387,28 +404,39 @@ function GlossaryItem({ entry }: GlossaryItemProps) {
             <ChevronDown className="w-3.5 h-3.5 text-text-muted" />
           </motion.div>
         </div>
+      </button>
 
-        {/* Accordion body — smooth height reveal */}
-        <AnimatePresence initial={false}>
-          {open && (
-            <motion.div
-              key="body"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: motionConfig.duration.normal, ease: motionConfig.ease.enter }}
-              style={{ overflow: "hidden" }}
-            >
-              <div className="px-4 pb-3 pt-0 border-t border-border-default/50">
-                <p className="text-sm text-text-secondary leading-relaxed text-left">
-                  {entry.definition}
-                </p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </GlassCard>
-    </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="body"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: motionConfig.duration.normal, ease: motionConfig.ease.enter }}
+            style={{ overflow: "hidden" }}
+          >
+            <div className="flex flex-col gap-2 border-t border-border-default/50 px-4 pb-3 pt-2">
+              <p className="text-left text-sm leading-relaxed text-text-secondary">
+                {entry.definition}
+              </p>
+              {entry.verifyHref && entry.verifyLabel && (
+                <Button asChild variant="link" size="sm" className="h-auto w-fit px-0">
+                  <a
+                    href={entry.verifyHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <ExternalLink data-icon="inline-start" />
+                    {entry.verifyLabel}
+                  </a>
+                </Button>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </GlassCard>
   );
 }
 
@@ -534,45 +562,64 @@ function StrategiesTab() {
 
 function PaperTradingTab() {
   return (
-    <div className="space-y-6 animate-fade-in">
-      <GlassCard className="rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-3">
+    <div data-testid="practice-trading" className="min-w-0 max-w-full space-y-6 animate-fade-in">
+      <GlassCard className="min-w-0 rounded-lg p-4 sm:p-6">
+        <h3 className="font-heading font-semibold text-lg text-text-primary mb-3 break-words">
           What is Practice Trading?
         </h3>
-        <p className="text-sm text-text-secondary leading-relaxed mb-4">
+        <p className="text-sm text-text-secondary leading-relaxed mb-4 break-words">
           Practice trading lets you trade with virtual money. You execute the same strategies,
           see the same market data, but don&apos;t risk real capital. It&apos;s the best way to learn
           before going live.
         </p>
-        <h4 className="font-heading font-semibold text-sm text-text-primary mb-2">
-          How to Paper Trade with FlintTrade:
+        <h4 className="font-heading font-semibold text-sm text-text-primary mb-2 break-words">
+          How to start Practice Trading:
         </h4>
-        <ol className="space-y-2 text-sm text-text-secondary list-decimal list-inside">
+        <ol className="min-w-0 space-y-2 pl-5 text-sm text-text-secondary list-decimal list-outside break-words">
           <li>
             Set up OpenAlgo with your broker&apos;s <strong>Practice mode</strong>{" "}
             (Dhan Sandbox provides ₹10L virtual capital)
           </li>
-          <li>Connect FlintTrade to the Practice instance</li>
+          <li>Configure FlintTrade&apos;s Broker Gateway to reach that OpenAlgo Practice instance</li>
           <li>Trade normally — all orders execute against virtual funds</li>
           <li>Review your P&L Dashboard to analyse performance</li>
-          <li>When confident, switch to your real broker credentials</li>
+          <li>When confident, point OpenAlgo at your live broker credentials</li>
         </ol>
+        <div className="mt-4 min-w-0">
+          <p className="mb-3 text-sm text-text-secondary break-words">
+            Configure OpenAlgo in Settings → Broker Gateway.
+          </p>
+          <Button
+            asChild
+            className="h-auto w-full min-w-0 max-w-full shrink whitespace-normal break-words sm:w-auto"
+          >
+            <Link to="/settings#api">Open Settings → Broker Gateway</Link>
+          </Button>
+        </div>
       </GlassCard>
 
-      <GlassCard className="rounded-lg p-6">
-        <h3 className="font-heading font-semibold text-lg text-text-primary mb-3">
+      <GlassCard className="min-w-0 rounded-lg p-4 sm:p-6">
+        <h3 className="font-heading font-semibold text-lg text-text-primary mb-3 break-words">
           Supported Sandboxes
         </h3>
         <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <Badge className="bg-bullish-bg text-profit border-0">Active</Badge>
+          <div
+            data-testid="practice-sandbox-row"
+            className="flex min-w-0 flex-wrap items-center gap-2"
+          >
+            <Badge className="shrink-0 bg-bullish-bg text-profit border-0">Active</Badge>
             <span className="text-sm text-text-primary">Dhan Sandbox</span>
-            <span className="text-xs text-text-muted">— ₹10L virtual funds, 24/7, all instruments</span>
+            <span className="min-w-0 break-words text-xs text-text-muted">
+              — ₹10L virtual funds, 24/7, all instruments
+            </span>
           </div>
-          <div className="flex items-center gap-3">
-            <Badge variant="outline" className="text-xs">Planned</Badge>
+          <div
+            data-testid="practice-sandbox-row"
+            className="flex min-w-0 flex-wrap items-center gap-2"
+          >
+            <Badge variant="outline" className="shrink-0 text-xs">Planned</Badge>
             <span className="text-sm text-text-primary">Kotak Neo Sandbox</span>
-            <span className="text-xs text-text-muted">— when available</span>
+            <span className="min-w-0 break-words text-xs text-text-muted">— when available</span>
           </div>
         </div>
       </GlassCard>
@@ -688,7 +735,7 @@ function SidebarItem({ tab, isActive, collapsed, onClick }: SidebarItemProps) {
         tabIndex={isActive ? 0 : -1}
         onClick={onClick}
         title={collapsed ? tab.label : undefined}
-        className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm font-sans transition-colors border-l-2 ${
+        className={`flex w-auto min-w-0 items-center gap-3 border-l-2 px-3 py-2.5 text-sm font-sans transition-colors md:w-full ${
           isActive
             ? "text-accent bg-accent/10 border-accent"
             : "text-text-secondary hover:text-text-primary hover:bg-surface-base border-transparent"
@@ -757,8 +804,21 @@ export default function LearnRoute() {
   const location = useLocation();
   const [activeTab, setActiveTab] = useState<TabId>("basics");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isDesktopTablist, setIsDesktopTablist] = useState(
+    () => window.matchMedia(LEARN_DESKTOP_MEDIA_QUERY).matches,
+  );
   const level = useSkillLevel("learn");
   const selectedDoc = useMemo(() => getSelectedDoc(location.state), [location.state]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(LEARN_DESKTOP_MEDIA_QUERY);
+    const handleChange = (event: MediaQueryListEvent) => {
+      setIsDesktopTablist(event.matches);
+    };
+    setIsDesktopTablist(mediaQuery.matches);
+    mediaQuery.addEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener("change", handleChange);
+  }, []);
 
   useEffect(() => {
     if (selectedDoc) setActiveTab("resources");
@@ -780,16 +840,18 @@ export default function LearnRoute() {
   const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
   const tablistRef = useRef<HTMLDivElement>(null);
 
-  // Roving tabindex: arrow key navigation on the vertical tablist
+  // Roving tabindex: arrow keys follow tablist orientation
   const handleTablistKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const previousKey = isDesktopTablist ? "ArrowUp" : "ArrowLeft";
+      const nextKey = isDesktopTablist ? "ArrowDown" : "ArrowRight";
+      if (e.key !== previousKey && e.key !== nextKey) return;
       e.preventDefault();
       const tabs = tablistRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']");
       if (!tabs || tabs.length === 0) return;
       const idx = Array.from(tabs).indexOf(document.activeElement as HTMLButtonElement);
       const next =
-        e.key === "ArrowDown"
+        e.key === nextKey
           ? (idx + 1) % tabs.length
           : (idx - 1 + tabs.length) % tabs.length;
       const nextTab = tabs[next];
@@ -797,7 +859,7 @@ export default function LearnRoute() {
       const tabId = visibleTabs[next]?.id;
       if (tabId) setActiveTab(tabId);
     },
-    [visibleTabs],
+    [isDesktopTablist, visibleTabs],
   );
 
   const tabContent = useMemo<Record<TabId, React.ReactNode>>(() => ({
@@ -808,17 +870,19 @@ export default function LearnRoute() {
     resources:  <ResourceHubTab selectedDoc={selectedDoc} />,
   }), [selectedDoc]);
 
+  const desktopCollapsed = isDesktopTablist && sidebarCollapsed;
+
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-b border-border-default bg-surface-card/80 backdrop-blur-sm px-6 py-4" data-tour-target="course-list">
-          <div className="flex items-center gap-3">
-            <GraduationCap className="w-6 h-6 text-accent" />
-            <div>
-              <h1 className="font-heading font-bold text-lg text-text-primary">
+      <div className="min-w-0 border-b border-border-default bg-surface-card/80 px-4 py-4 backdrop-blur-sm sm:px-6" data-tour-target="course-list">
+          <div className="flex min-w-0 items-center gap-3">
+            <GraduationCap className="h-6 w-6 shrink-0 text-accent" />
+            <div className="min-w-0">
+              <h1 className="font-heading break-words font-bold text-lg text-text-primary">
                 {level === "beginner" ? "Getting Started" : "Learning Center"}
               </h1>
-              <p className="text-xxs text-text-muted">
+              <p className="break-words text-xxs text-text-muted">
                 {level === "beginner"
                   ? "Learn market basics one lesson at a time"
                   : "Market concepts, Practice workflows, and project resources"}
@@ -827,40 +891,49 @@ export default function LearnRoute() {
           </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Collapsible sidebar */}
+      <div
+        data-testid="learn-body"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:flex-row"
+      >
+        {/* Section tabs: stacked/wrapping rail on narrow viewports, collapsible column on desktop */}
         <motion.div
-          animate={{ width: sidebarCollapsed ? 48 : 224 }}
+          data-testid="learn-sidebar"
+          animate={isDesktopTablist ? { width: sidebarCollapsed ? 48 : 224 } : { width: "100%" }}
           transition={{ duration: motionConfig.duration.normal, ease: motionConfig.ease.enter }}
-          className="border-r border-border-default bg-surface-card shrink-0 flex flex-col overflow-hidden"
-          style={{ minWidth: 0 }}
+          className="flex w-full min-w-0 flex-col border-b border-border-default bg-surface-card md:border-b-0 md:border-r md:shrink-0"
         >
-          {/* Collapse toggle */}
-          <div className={`flex py-2 ${sidebarCollapsed ? "justify-center" : "justify-end px-2"}`}>
+          {/* Collapse toggle — desktop column only */}
+          <div className={`hidden py-2 md:flex ${sidebarCollapsed ? "justify-center" : "justify-end px-2"}`}>
             <button
               type="button"
               onClick={() => setSidebarCollapsed((v) => !v)}
               title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               aria-expanded={!sidebarCollapsed}
-              className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-surface-base transition-colors"
+              className="rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-base hover:text-text-primary"
             >
               {sidebarCollapsed ? (
-                <PanelLeftOpen className="w-4 h-4" />
+                <PanelLeftOpen className="h-4 w-4" />
               ) : (
-                <PanelLeftClose className="w-4 h-4" />
+                <PanelLeftClose className="h-4 w-4" />
               )}
             </button>
           </div>
 
           {/* Nav items — filtered by skill level */}
-          <nav aria-label="Learning sections" className="flex-1 overflow-y-auto" data-tour-target="glossary">
-            <div ref={tablistRef} role="tablist" aria-orientation="vertical" className="flex flex-col" onKeyDown={handleTablistKeyDown}>
+          <nav aria-label="Learning sections" className="min-w-0 md:flex-1 md:overflow-y-auto" data-tour-target="glossary">
+            <div
+              ref={tablistRef}
+              role="tablist"
+              aria-orientation={isDesktopTablist ? "vertical" : "horizontal"}
+              className="flex min-w-0 flex-row flex-wrap md:flex-col"
+              onKeyDown={handleTablistKeyDown}
+            >
               {visibleTabs.map((tab) => (
                 <SidebarItem
                   key={tab.id}
                   tab={tab}
                   isActive={activeTab === tab.id}
-                  collapsed={sidebarCollapsed}
+                  collapsed={desktopCollapsed}
                   onClick={() => setActiveTab(tab.id)}
                 />
               ))}
@@ -868,14 +941,14 @@ export default function LearnRoute() {
           </nav>
         </motion.div>
 
-        {/* Content area */}
-        <ScrollArea className="flex-1">
-          <div role="tabpanel" id={`learn-tabpanel-${activeTab}`} aria-labelledby={`learn-tab-${activeTab}`} className="p-6 max-w-4xl mx-auto">
+        {/* Content area — plain overflow-y pane so Radix ScrollArea cannot pin a min-content width */}
+        <div className="min-w-0 flex-1 overflow-y-auto">
+          <div role="tabpanel" id={`learn-tabpanel-${activeTab}`} aria-labelledby={`learn-tab-${activeTab}`} className="mx-auto min-w-0 max-w-4xl p-4 sm:p-6">
             <TabTransition tabKey={activeTab}>
               {tabContent[activeTab]}
             </TabTransition>
           </div>
-        </ScrollArea>
+        </div>
       </div>
 
       {/* Guided tour — beginner only, first visit */}

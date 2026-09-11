@@ -4,6 +4,7 @@
  */
 
 import { useState } from "react";
+import { Link } from "react-router";
 import { Activity, Loader2, Square } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
@@ -99,6 +100,9 @@ export default function MonitorsSection() {
             <p className="text-xs text-text-muted opacity-60">
               Start a strategy from the Strategy Builder tool.
             </p>
+            <Button asChild variant="outline" size="sm" className="mt-2">
+              <Link to="/lab">Open Strategy Builder</Link>
+            </Button>
           </div>
         )}
 

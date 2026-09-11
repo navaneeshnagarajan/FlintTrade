@@ -151,8 +151,12 @@ describe("Slice 1 canonical vocabulary — rendered source guard", () => {
     expect(src).toMatch(/id:\s*["']paper["']/);
     expect(src).toMatch(/label:\s*["']Practice Trading["']/);
     expect(src).toMatch(/What is Practice Trading\?/);
+    expect(src).toMatch(/How to start Practice Trading/);
+    expect(src).toMatch(/to=["']\/settings#api["']/);
     expect(src).not.toMatch(/label:\s*["']Paper Trading["']/);
     expect(src).not.toMatch(/What is Paper Trading\?/);
+    expect(src).not.toMatch(/How to Paper Trade/);
+    expect(src).not.toMatch(/\/settings#brokers/);
   });
 
   it("PortfolioOptimiser Practice title uses Practice data scope (not sandbox data scope)", () => {

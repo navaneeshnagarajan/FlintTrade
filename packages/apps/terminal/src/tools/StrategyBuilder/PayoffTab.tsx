@@ -2,10 +2,23 @@
 // Extracted from StrategyBuilderTool.tsx
 
 import { useMemo } from "react";
-import { TrendingUp } from "lucide-react";
+import { AlertCircle, TrendingUp } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { validateLegs, calculateNetPremium, computePayoff, estimateMargin, formatINR } from "./utils";
+import {
+  SAMPLE_PREMIUM_HELPER,
+  UNSET_PREMIUM_HELPER,
+  ZERO_PREMIUM_WARNING,
+  validateLegs,
+  calculateNetPremium,
+  computePayoff,
+  computePayoffSummary,
+  estimateMargin,
+  formatINR,
+  hasExplicitZeroPremium,
+  hasUnsetPremium,
+} from "./utils";
 import type { Leg, Underlying } from "./types";
 
 interface Props {
@@ -14,31 +27,40 @@ interface Props {
   underlying: Underlying;
 }
 
+function dashCard(label: string) {
+  return (
+    <Card className="bg-surface-card border-border-default">
+      <CardContent className="p-3">
+        <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">{label}</div>
+        <div className="text-base font-bold font-mono tabular-nums text-text-muted">—</div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function PayoffTab({ legs, atm, underlying }: Props) {
   const { valid } = validateLegs(legs);
+  const premiumUnset = hasUnsetPremium(legs);
+  const explicitZero = hasExplicitZeroPremium(legs);
+  const sampleSeeded = legs.some((leg) => leg.premiumSource === "sample");
   const spotPrice = atm > 0 ? atm : 20000;
-  const points = useMemo(() => (valid ? computePayoff(legs, spotPrice) : []), [legs, valid, spotPrice]);
+  const points = useMemo(
+    () => (valid && !premiumUnset ? computePayoff(legs, spotPrice) : []),
+    [legs, valid, spotPrice, premiumUnset],
+  );
+  const summary = useMemo(
+    () => (premiumUnset ? null : computePayoffSummary(legs)),
+    [legs, premiumUnset],
+  );
 
-  const maxPnl = points.length ? Math.max(...points.map((p) => p.pnl)) : 0;
-  const minPnl = points.length ? Math.min(...points.map((p) => p.pnl)) : 0;
-  const range  = Math.max(Math.abs(maxPnl), Math.abs(minPnl), 1);
-
-  const bepPoints = useMemo(() => {
-    const beps: number[] = [];
-    for (let i = 1; i < points.length; i++) {
-      if (
-        (points[i - 1].pnl < 0 && points[i].pnl >= 0) ||
-        (points[i - 1].pnl >= 0 && points[i].pnl < 0)
-      ) {
-        const bep =
-          points[i - 1].price +
-          ((0 - points[i - 1].pnl) / (points[i].pnl - points[i - 1].pnl)) *
-            (points[i].price - points[i - 1].price);
-        beps.push(bep);
-      }
-    }
-    return beps;
-  }, [points]);
+  // Chart scale stays on the sampled window; the summary cards use the
+  // analytical kinks so unbounded legs are not capped at ±15% of spot.
+  const sampledMax = points.length ? Math.max(...points.map((p) => p.pnl)) : 0;
+  const sampledMin = points.length ? Math.min(...points.map((p) => p.pnl)) : 0;
+  const range = Math.max(Math.abs(sampledMax), Math.abs(sampledMin), 1);
+  const maxPnl = summary?.maxProfit ?? null;
+  const minPnl = summary?.maxLoss ?? null;
+  const bepPoints = summary?.breakevens ?? [];
 
   const netPremium = calculateNetPremium(legs);
 
@@ -51,6 +73,20 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
     );
   }
 
+  if (premiumUnset) {
+    return (
+      <div className="flex-1 overflow-auto px-3 py-2 space-y-3">
+        <div className="grid grid-cols-4 gap-2">
+          {dashCard("Max Profit")}
+          {dashCard("Max Loss")}
+          {dashCard("Net Premium")}
+          {dashCard("BEP(s)")}
+        </div>
+        <p className="text-xs text-text-muted">{UNSET_PREMIUM_HELPER}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 overflow-auto px-3 py-2 space-y-3">
       {/* Summary cards */}
@@ -58,26 +94,26 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Max Profit</div>
-            <div className={`text-base font-bold font-mono tabular-nums ${maxPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-              {maxPnl === Infinity ? "Unlimited" : formatINR(maxPnl * underlying.lotSize)}
+            <div className={`text-base font-bold font-mono tabular-nums ${(maxPnl ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              {maxPnl === Infinity ? "Unlimited" : formatINR((maxPnl ?? 0) * underlying.lotSize)}
             </div>
           </CardContent>
         </Card>
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Max Loss</div>
-            <div className={`text-base font-bold font-mono tabular-nums ${minPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-              {minPnl === -Infinity ? "Unlimited" : formatINR(minPnl * underlying.lotSize)}
+            <div className={`text-base font-bold font-mono tabular-nums ${(minPnl ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              {minPnl === -Infinity ? "Unlimited" : formatINR((minPnl ?? 0) * underlying.lotSize)}
             </div>
           </CardContent>
         </Card>
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Net Premium</div>
-            <div className={`text-base font-bold font-mono tabular-nums ${netPremium <= 0 ? "text-emerald-400" : "text-red-400"}`}>
-              {formatINR(netPremium)}
+            <div className={`text-base font-bold font-mono tabular-nums ${(netPremium ?? 0) <= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              {formatINR(netPremium ?? 0)}
             </div>
-            <div className="text-xxs text-text-muted">{netPremium <= 0 ? "Credit" : "Debit"}</div>
+            <div className="text-xxs text-text-muted">{(netPremium ?? 0) <= 0 ? "Credit" : "Debit"}</div>
           </CardContent>
         </Card>
         <Card className="bg-surface-card border-border-default">
@@ -89,6 +125,21 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
           </CardContent>
         </Card>
       </div>
+
+      {sampleSeeded && (
+        <Badge variant="outline" className="text-xxs border-border-default text-text-muted font-normal">
+          {SAMPLE_PREMIUM_HELPER}
+        </Badge>
+      )}
+      {explicitZero && (
+        <div
+          role="alert"
+          className="flex items-start gap-1.5 rounded border border-amber-500/30 bg-amber-900/20 px-2 py-1.5 text-xs text-amber-300"
+        >
+          <AlertCircle size={11} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>{ZERO_PREMIUM_WARNING}</span>
+        </div>
+      )}
 
       {/* Visual payoff chart */}
       <Card className="bg-surface-card border-border-default">
@@ -102,7 +153,7 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
             {/* Zero axis */}
             <div
               className="absolute left-0 right-0 h-px bg-surface-active"
-              style={{ top: `${(maxPnl / (range * 2)) * 100 + 50}%` }}
+              style={{ top: `${(sampledMax / (range * 2)) * 100 + 50}%` }}
             />
             {/* Bars */}
             <div className="w-full h-full flex items-center gap-px">

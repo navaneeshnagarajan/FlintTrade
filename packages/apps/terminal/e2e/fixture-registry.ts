@@ -550,6 +550,42 @@ export async function createSyntheticFixtureRegistry(
   return registry;
 }
 
+/** Dev-proxy path used by ``probeAdvisorAvailability`` / tutor status sync. */
+export const ADVISOR_STATUS_PATH = "/ft-api/api/v1/advisor/status";
+
+/**
+ * Register the Explore ``GET /ft-api/api/v1/advisor/status`` probe.
+ *
+ * FT-AI-001 chats (and the floating tutor) probe this endpoint after a
+ * logged-in Explore session. Product journeys that used to claim "no
+ * /ft-api traffic" must register this handler or the fail-closed registry
+ * records an unexpected request.
+ */
+export function registerExploreAdvisorStatusProbe(
+  registry: SyntheticFixtureRegistry,
+  options: {
+    expectedCalls?: SyntheticHandlerRegistration["expectedCalls"];
+    name?: string;
+  } = {},
+): void {
+  registry.register({
+    name: options.name ?? "read unconfigured advisor status",
+    method: "GET",
+    path: ADVISOR_STATUS_PATH,
+    expectedCalls: options.expectedCalls ?? 1,
+    handler: (request) => {
+      expect(request.headers()["authorization"]).toBeUndefined();
+      expect(request.postData()).toBeNull();
+      return {
+        json: {
+          status: "success",
+          data: { configured: false, provider: "none", model: "none" },
+        },
+      };
+    },
+  });
+}
+
 type JourneyFixtures = {
   syntheticApi: SyntheticFixtureRegistry;
 };

@@ -58,6 +58,14 @@ import {
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { isMarketHours, tickKeyFor } from "@/lib/market";
+import {
+  SESSION_OPEN_LABEL,
+  optionPremiumHint,
+  orderPadCtaLabel,
+  orderSuccessNotificationBody,
+  orderSuccessNotificationTitle,
+  orderSuccessToast,
+} from "@/lib/modeVocabulary";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { PracticeOrderReviewStage } from "./PracticeOrderReviewStage";
 import {
@@ -389,8 +397,8 @@ function OrderPadWidget(props: WidgetProps) {
   const lastSubmissionModeRef = useRef<"practice" | "live" | null>(null);
   const practiceConfirmInFlightRef = useRef(false);
 
-  // Practice review/confirm state — distinct stage only for practice mode.
-  // The snapshot is immutable; edits or mode changes invalidate it.
+  // Practice review/confirm state — paper path for Practice and Explore.
+  // The snapshot is immutable; edits or a switch to Live invalidate it.
   const [practiceReview, setPracticeReview] = useState<PracticeOrderReviewSnapshot | null>(null);
 
   const {
@@ -650,12 +658,18 @@ function OrderPadWidget(props: WidgetProps) {
       const orderId = (result as { orderId?: string; order_id?: string; orderid?: string }).orderId ??
         (result as { order_id?: string }).order_id ??
         (result as { orderid?: string }).orderid ?? "";
-      showToast("success", `Order placed${orderId ? ` · ID: ${orderId}` : ""}`, 3000);
+      const placedMode = useModeStore.getState().mode;
+      showToast("success", orderSuccessToast(placedMode, orderId), 3000);
       // Log to the central Notification Centre (complements the transient toast).
       emitNotification({
         category: "order",
-        title: `Order placed: ${params.action} ${params.quantity} ${params.symbol}`,
-        body: orderId ? `Order ID ${orderId}` : "Submitted to the broker.",
+        title: orderSuccessNotificationTitle(
+          placedMode,
+          params.action,
+          params.quantity,
+          params.symbol,
+        ),
+        body: orderSuccessNotificationBody(placedMode, orderId),
       });
       return true;
     } catch (err) {
@@ -690,10 +704,11 @@ function OrderPadWidget(props: WidgetProps) {
     discQty,
   });
 
-  // A mode switch or any edit revokes the captured confirmation. The final
-  // confirm handler repeats both checks synchronously before calling placeOrder.
+  // A Live switch or any edit revokes the captured confirmation. Explore and
+  // Practice share the paper review. The final confirm handler repeats both
+  // checks synchronously before calling placeOrder.
   useEffect(() => {
-    if (practiceReview && appMode !== "practice") {
+    if (practiceReview && appMode === "live") {
       setPracticeReview(null);
       showToast("error", "Mode changed — the Practice review was invalidated.", 4000);
     }
@@ -709,13 +724,15 @@ function OrderPadWidget(props: WidgetProps) {
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
     clearErrors("qty");
 
-    // Explore mode has no broker behind it — every price on screen is demo
-    // data. The backend refuses too (403 mode_blocked), but the operator is
-    // told here rather than after a round trip.
-    const modeRefusal = checkOrderEntryMode(appMode);
-    if (modeRefusal) {
-      showToast("error", modeRefusal, 6000);
-      return;
+    // Live-intent surfaces still use checkOrderEntryMode to refuse Explore.
+    // Order Pad's Practice Buy is the paper path: Explore records a sample
+    // fill and Practice uses the sandbox. Do not demand a live broker here.
+    if (!isPracticeOrExplore) {
+      const modeRefusal = checkOrderEntryMode(appMode);
+      if (modeRefusal) {
+        showToast("error", modeRefusal, 6000);
+        return;
+      }
     }
 
     // F&O lot-multiple validation. Quantity on a derivative exchange must be a
@@ -761,7 +778,7 @@ function OrderPadWidget(props: WidgetProps) {
     // orders keep sending price 0 for market types (the broker fills at market),
     // so this fallback never alters the live-order payload.
     const isMarketType = values.orderType === "MARKET" || values.orderType === "SL-M";
-    const practiceMarketFill = !priceEnabled && isMarketType && ltp > 0 && appMode === "practice";
+    const practiceMarketFill = !priceEnabled && isMarketType && ltp > 0 && isPracticeOrExplore;
 
     const params: PlaceOrderParams = {
       symbol: values.symbol,
@@ -780,10 +797,10 @@ function OrderPadWidget(props: WidgetProps) {
         : {}),
       strategy: "FlintOrderPad",
     };
-    if (appMode === "practice") {
-      // Practice opens a dedicated review stage; no placement call occurs yet.
-      // Do not contaminate lastParamsRef — a later Live retry must never reuse
-      // a Practice payload that only opened a review dialog.
+    if (isPracticeOrExplore) {
+      // Practice and Explore open a dedicated review stage; no placement call
+      // occurs yet. Do not contaminate lastParamsRef — a later Live retry must
+      // never reuse a paper payload that only opened a review dialog.
       setPracticeReview(createPracticeOrderReviewSnapshot(values, params));
       return;
     }
@@ -803,7 +820,9 @@ function OrderPadWidget(props: WidgetProps) {
 
     // Query the store synchronously at the irreversible boundary. This catches
     // a mode switch even when React has not rendered the selector update yet.
-    if (useModeStore.getState().mode !== "practice") {
+    // Explore and Practice share the paper path; Live must never confirm it.
+    const modeAtConfirm = useModeStore.getState().mode;
+    if (modeAtConfirm !== "practice" && modeAtConfirm !== "explore") {
       setPracticeReview(null);
       showToast("error", "Mode changed — the Practice review was invalidated.", 4000);
       return;
@@ -834,8 +853,8 @@ function OrderPadWidget(props: WidgetProps) {
   function handleRetry() {
     const mode = useModeStore.getState().mode;
     setToast(null);
-    if (mode === "practice") {
-      // A Practice retry must be reviewed again; it can never call placement
+    if (mode === "practice" || mode === "explore") {
+      // A paper retry must be reviewed again; it can never call placement
       // directly from a stale toast action.
       void handleSubmit(onSubmit)();
       return;
@@ -844,9 +863,7 @@ function OrderPadWidget(props: WidgetProps) {
       void submitOrder(lastParamsRef.current, { mode: "live" });
       return;
     }
-    showToast("error", mode === "explore"
-      ? "Explore mode is read-only. Connect a broker to place orders."
-      : "A Practice order cannot be retried after switching to Live mode.", 5000);
+    showToast("error", "A Practice order cannot be retried after switching to Live mode.", 5000);
   }
 
   const btnBase =
@@ -864,8 +881,11 @@ function OrderPadWidget(props: WidgetProps) {
           Order Pad
         </span>
         {isMarketHours() && (
-          <span className="ml-auto text-xxs px-1.5 py-0.5 rounded bg-profit/10 border border-profit/20 text-profit font-medium">
-            MARKET OPEN
+          <span
+            className="ml-auto text-xxs px-1.5 py-0.5 rounded bg-profit/10 border border-profit/20 text-profit font-medium"
+            aria-label="Market session open"
+          >
+            {SESSION_OPEN_LABEL}
           </span>
         )}
       </div>
@@ -1032,14 +1052,7 @@ function OrderPadWidget(props: WidgetProps) {
               Option Premium
             </span>
             <p className="text-xxs text-text-muted">
-              {ltp > 0 ? (
-                <>
-                  Live premium ₹{ltp.toLocaleString("en-IN", { maximumFractionDigits: 2 })} — prefills
-                  the LIMIT/SL price field.
-                </>
-              ) : (
-                "Live premium unavailable — enter the limit price manually."
-              )}
+              {optionPremiumHint(appMode, ltp)}
             </p>
           </div>
         )}
@@ -1339,7 +1352,7 @@ function OrderPadWidget(props: WidgetProps) {
           className={`${btnBase} ${btnColor}`}
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}
-          {loading ? "Placing…" : isPracticeOrExplore ? `Practice ${action === "BUY" ? "Buy" : "Sell"}` : `Place ${action} Order`}
+          {loading ? "Placing…" : orderPadCtaLabel(appMode, action)}
         </Button>
       </form>
 
@@ -1348,6 +1361,7 @@ function OrderPadWidget(props: WidgetProps) {
 
       {practiceReview ? (
         <PracticeOrderReviewStage
+          mode={appMode === "live" ? "practice" : appMode}
           review={practiceReview}
           confirming={loading}
           onBack={handlePracticeBack}

@@ -27,6 +27,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { FieldRow, SelectInput, TextInput, SectionTitle } from "./shared";
 import {
   CLAUDE_CODE_OAUTH_PROVIDER,
@@ -105,10 +106,11 @@ interface LLMSectionProps {
   ) => Promise<void>;
   providerActivationRequired?: boolean;
   onDraftStateChange?: (pending: boolean) => void;
-  hydrationState?: "loading" | "ready" | "error";
+  hydrationState?: "loading" | "ready" | "error" | "empty";
   credentialConfigured?: boolean;
   credentialLast4?: string;
   onCredentialRemove?: () => Promise<void>;
+  onRetry?: () => void;
 }
 
 type TestStatus = "idle" | "testing" | "ok" | "error";
@@ -305,6 +307,7 @@ export function LLMSection({
   credentialConfigured = false,
   credentialLast4 = "",
   onCredentialRemove,
+  onRetry,
 }: LLMSectionProps) {
   const [testStatus, setTestStatus] = useState<TestStatus>("idle");
   const [testMessage, setTestMessage] = useState("");
@@ -397,7 +400,8 @@ export function LLMSection({
   const persistedProvider = selectedProviderMapping.provider as LlmProvider;
   const isClaudeCodeOAuth = selectedProvider === CLAUDE_CODE_OAUTH;
   const isManagedOllama = selectedProvider === "ollama";
-  const showManagedRuntime = isManagedOllama || activeSelection === "ollama";
+  const hydrationReady = hydrationState === "ready";
+  const showManagedRuntime = hydrationReady && (isManagedOllama || activeSelection === "ollama");
   const providerConfig = LLM_PROVIDERS.find((provider) => provider.id === selectedProvider);
   const showHost = providerConfig?.requiresHost === true && !isManagedOllama;
   const showApiKey = providerConfig?.requiresApiKey === true;
@@ -445,7 +449,6 @@ export function LLMSection({
       || (runtimeStatus && BUSY_STATES.has(runtimeStatus.state)),
   );
   const providerBusy = providerAction !== null;
-  const hydrationReady = hydrationState === "ready";
   const formBusy = runtimeBusy
     || providerBusy
     || credentialAction !== null
@@ -1571,6 +1574,42 @@ export function LLMSection({
     }
   }, [hydrationReady, invalidateConnectionTest, onCredentialRemove]);
 
+  if (hydrationState === "empty") {
+    return (
+      <div className="space-y-5">
+        <SectionTitle>LLM Config</SectionTitle>
+        <div
+          className="space-y-3 rounded-md border border-border-default bg-surface-hover/40 p-4"
+          role="status"
+          aria-live="polite"
+        >
+          <p className="text-sm font-medium text-text-primary">No LLM provider configured</p>
+          <p className="text-xs text-text-secondary">
+            Explore uses sample data and cannot load or persist LLM secrets. This is not a broken
+            session. Switch to Live or Practice on this machine to configure a provider, or retry
+            if an authenticated session is available.
+          </p>
+          <p className="text-xs text-text-muted">
+            Open Settings → LLM Config in Live or Practice, choose a provider, and save the
+            credential on this machine.
+          </p>
+          {onRetry && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onRetry}
+              aria-label="Retry loading AI settings"
+            >
+              <RefreshCw size={12} aria-hidden="true" />
+              Retry
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       <SectionTitle>LLM Config</SectionTitle>
@@ -1581,10 +1620,24 @@ export function LLMSection({
         </p>
       )}
       {hydrationState === "error" && (
-        <p className="flex items-start gap-1.5 text-xs text-loss" role="alert" aria-live="assertive">
-          <AlertCircle size={13} className="mt-0.5 shrink-0" />
-          AI settings could not be loaded. Editing is disabled to protect the saved configuration.
-        </p>
+        <div className="space-y-2">
+          <p className="flex items-start gap-1.5 text-xs text-loss" role="alert" aria-live="assertive">
+            <AlertCircle size={13} className="mt-0.5 shrink-0" />
+            AI settings could not be loaded. Editing is disabled to protect the saved configuration.
+          </p>
+          {onRetry && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onRetry}
+              aria-label="Retry loading AI settings"
+            >
+              <RefreshCw size={12} aria-hidden="true" />
+              Retry
+            </Button>
+          )}
+        </div>
       )}
 
       <FieldRow

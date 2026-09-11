@@ -199,6 +199,7 @@ import { PracticeSection } from "../PracticeSection";
 import { MonitoringSection } from "../MonitoringSection";
 import { SkillSection } from "../SkillSection";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
+import { DEFAULT_OPENALGO_HOST } from "@/lib/openAlgoDefaults";
 import { useConnectionStore } from "@/stores/connectionStore";
 
 // ---------------------------------------------------------------------------
@@ -247,8 +248,10 @@ describe("ConnectionSection", () => {
 
     expect(screen.getByLabelText("OpenAlgo-compatible URL")).toHaveAttribute(
       "placeholder",
-      "http://localhost:5000",
+      DEFAULT_OPENALGO_HOST,
     );
+    expect(DEFAULT_OPENALGO_HOST).toContain(":5000");
+    expect(DEFAULT_OPENALGO_HOST).not.toContain(":5001");
   });
 
   it("keeps edits local and preserves the saved key in one complete save", async () => {

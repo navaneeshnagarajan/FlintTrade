@@ -14,6 +14,10 @@ import type { BentoCardSize } from "@/components/bento/BentoCard";
 import { HomeWidgetFrame } from "@/routes/home/HomeWidgetFrame";
 import { HomeWidgetPicker } from "@/routes/home/HomeWidgetPicker";
 import { HOME_WIDGET_CATALOG, HOME_WIDGET_COMPONENTS } from "@/routes/home/homeWidgetRegistry";
+import {
+  presentHomeComponentIds,
+  resolveHomeWidgetPlacement,
+} from "@/routes/home/homeWidgetPresence";
 import { useBentoStore } from "@/stores/bentoStore";
 import StatusBar from "@/chrome/StatusBar";
 
@@ -48,6 +52,7 @@ export default function HomeRoute() {
     () => new Map(HOME_WIDGET_CATALOG.map((widget) => [widget.componentId, widget.name])),
     [],
   );
+  const presentComponentIds = useMemo(() => presentHomeComponentIds(cards), [cards]);
 
   useEffect(() => {
     if (!highlightedCardId) return undefined;
@@ -68,7 +73,8 @@ export default function HomeRoute() {
   }, [highlightedCardId]);
 
   function handleAddWidget(componentId: string) {
-    const cardId = addCard(componentId);
+    const placement = resolveHomeWidgetPlacement(cards, componentId);
+    const cardId = placement.kind === "focus" ? placement.cardId : addCard(componentId);
     setIsWidgetPickerOpen(false);
     setHighlightedCardId(cardId);
   }
@@ -196,6 +202,7 @@ export default function HomeRoute() {
         isOpen={isWidgetPickerOpen}
         onClose={() => setIsWidgetPickerOpen(false)}
         onAdd={handleAddWidget}
+        presentComponentIds={presentComponentIds}
       />
     </div>
   );

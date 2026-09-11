@@ -101,6 +101,33 @@ class TestPinVerification:
         assert svc.verify_pin("000000") is False
 
 
+class TestSetPin:
+    """Post-setup PIN set/change — ASCII ^\\d{6}$ only (FT-SET-003)."""
+
+    def _ready(self, tmp_path: Path) -> AuthService:
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        svc.setup_account(
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="",
+        )
+        return svc
+
+    @pytest.mark.parametrize("pin", ["12345", "1234567", "12ab56", "１２３４５６"])
+    def test_set_pin_rejects_non_six_ascii_digits(self, tmp_path: Path, pin: str):
+        svc = self._ready(tmp_path)
+        with pytest.raises(ValueError, match="exactly 6 digits"):
+            svc.set_pin("StrongP@ss123!", pin)
+        assert svc.has_pin() is False
+
+    def test_set_pin_accepts_six_ascii_digits(self, tmp_path: Path):
+        svc = self._ready(tmp_path)
+        assert svc.set_pin("StrongP@ss123!", "654321") is True
+        assert svc.has_pin() is True
+        assert svc.verify_pin("654321") is True
+
+
 class TestTOTP:
     """2FA TOTP setup and verification."""
 
@@ -132,6 +159,42 @@ class TestTOTP:
             password="StrongP@ss123!", pin="123456",
         )
         assert svc.verify_totp("000000") is False
+
+    def test_setup_leaves_authenticator_deferred(self, tmp_path: Path):
+        """FT-SETUP-002: Explore/Practice start password-only. TOTP is
+        provisioned but not enrolled until the operator confirms a code."""
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        svc.setup_account(
+            username="alice", email="alice@example.com",
+            password="StrongP@ss123!", pin="123456",
+        )
+        assert svc.is_totp_enabled() is False
+
+    def test_enable_totp_requires_a_live_code(self, tmp_path: Path):
+        import pyotp
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        svc.setup_account(
+            username="alice", email="alice@example.com",
+            password="StrongP@ss123!", pin="123456",
+        )
+        assert svc.enable_totp("000000") is False
+        assert svc.is_totp_enabled() is False
+        code = pyotp.TOTP(svc.get_totp_secret()).now()
+        assert svc.enable_totp(code) is True
+        assert svc.is_totp_enabled() is True
+
+    def test_regenerate_totp_defers_enrolment_again(self, tmp_path: Path):
+        import pyotp
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        svc.setup_account(
+            username="alice", email="alice@example.com",
+            password="StrongP@ss123!", pin="123456",
+        )
+        svc.enable_totp(pyotp.TOTP(svc.get_totp_secret()).now())
+        assert svc.is_totp_enabled() is True
+        result = svc.regenerate_totp("StrongP@ss123!")
+        assert result is not None
+        assert svc.is_totp_enabled() is False
 
 
 class TestBackupCodes:
@@ -195,6 +258,11 @@ class TestSetupEscapeHatches:
         svc = self._fresh(tmp_path)
         assert svc.is_setup() is True
         assert svc.reset_account("StrongP@ss123!") is True
+        assert svc.is_setup() is False
+
+    def test_wipe_account_without_password(self, tmp_path: Path):
+        svc = self._fresh(tmp_path)
+        svc.wipe_account()
         assert svc.is_setup() is False
 
     def test_reset_account_rejects_wrong_password(self, tmp_path: Path):

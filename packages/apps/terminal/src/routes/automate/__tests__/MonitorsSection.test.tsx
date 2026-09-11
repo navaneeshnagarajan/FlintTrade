@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router";
 import React from "react";
 
 // ---------------------------------------------------------------------------
@@ -58,8 +59,11 @@ function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return ({ children }: { children: React.ReactNode }) =>
-    React.createElement(QueryClientProvider, { client: queryClient }, children);
+  return ({ children }: { children: React.ReactNode }) => (
+    <MemoryRouter initialEntries={["/automate"]}>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </MemoryRouter>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -85,5 +89,13 @@ describe("MonitorsSection", () => {
     await waitFor(() => {
       expect(screen.getByText("No strategies running")).toBeInTheDocument();
     });
+  });
+
+  it("offers a Strategy Builder CTA to Lab from the empty state", async () => {
+    mockGetRunningStrategies.mockResolvedValue([]);
+    render(<MonitorsSection />, { wrapper: createWrapper() });
+
+    const cta = await screen.findByRole("link", { name: /open strategy builder/i });
+    expect(cta).toHaveAttribute("href", "/lab");
   });
 });

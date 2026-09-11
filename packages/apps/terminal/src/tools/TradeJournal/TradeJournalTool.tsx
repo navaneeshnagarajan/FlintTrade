@@ -6,9 +6,10 @@
  *                   committed header window; replaced the old TradeLogTab.
  *   - Session     — today's session statistics (absorbed the SessionStats
  *                   widget: FIFO round trips via lib/pnl).
- *   - Performance — longer-horizon metrics with a Range/YTD scope toggle
- *                   (absorbed the TradePerformance widget and the old
+ *   - Performance — longer-horizon metrics with a Review-range/YTD scope
+ *                   toggle (absorbed the TradePerformance widget and the old
  *                   Analytics tab; metrics via lib/journalAnalytics).
+ *                   Defaults to the committed Review dates; YTD is explicit.
  *   - Calendar    — daily P&L heat calendar over real journalled trades
  *                   (absorbed the P&L Dashboard Calendar tab's data plane and
  *                   the HeatCalendar widget's rendering affordances).
@@ -41,7 +42,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { getTradeJournal } from "@/services/ftApi";
+import { getTradeJournal, TRADE_JOURNAL_MAX_LIMIT } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import { type Props } from "./types";
 import { todayISO, sevenDaysAgoISO } from "./utils";
@@ -73,7 +74,7 @@ export default function TradeJournalTool({ onClose }: Props) {
   } = useQuery({
     queryKey: ["tradeJournal", queryStart, queryEnd, queryStrategy],
     queryFn: () =>
-      getTradeJournal(queryStart, queryEnd, queryStrategy || undefined, 200),
+      getTradeJournal(queryStart, queryEnd, queryStrategy || undefined, TRADE_JOURNAL_MAX_LIMIT),
     enabled: !!queryStart && !isExploreMode,
   });
 
@@ -253,7 +254,11 @@ export default function TradeJournalTool({ onClose }: Props) {
           value="log"
           className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden"
         >
-          <LogTab startDate={queryStart} endDate={queryEnd} />
+          <LogTab
+            startDate={queryStart}
+            endDate={queryEnd}
+            exploreJournalTrades={isExploreMode ? sampleTrades : undefined}
+          />
         </TabsContent>
 
         <TabsContent
@@ -267,7 +272,12 @@ export default function TradeJournalTool({ onClose }: Props) {
           value="performance"
           className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden"
         >
-          <PerformanceTab trades={trades} rangeLabel={`${queryStart} → ${queryEnd}`} />
+          <PerformanceTab
+            trades={trades}
+            rangeStart={queryStart}
+            rangeEnd={queryEnd}
+            rangeTotal={isExploreMode ? sampleTrades.length : data?.total}
+          />
         </TabsContent>
 
         <TabsContent

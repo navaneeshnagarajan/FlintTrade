@@ -1,17 +1,20 @@
 /**
  * MutualFundTab.tsx
  *
- * Mutual Fund Explorer with live NAV data from AMFI India.
- * Search funds by name/AMC, filter by SEBI category, view current NAV.
+ * Mutual Fund Explorer with AMFI NAV data (Practice / Live) or a static
+ * Explore sample. Search funds by name/AMC, filter by SEBI category, view NAV.
  *
  * Features:
  *   - Search bar with debounced input (2 char minimum)
  *   - SEBI category filter dropdown
  *   - Results table: scheme name, AMC, category, NAV, NAV date
  *   - Click row to see fund detail (scheme code, type)
- *   - Mode-aware: explore mode uses fallback data, live fetches from backend
+ *   - Mode-aware: Explore uses a static sample with an as-of date; Practice /
+ *     Live fetch AMFI via the backend and keep the daily-update sentence
  *
- * Data source: AMFI NAVAll.txt parsed by the Python backend.
+ * Data source: AMFI NAVAll.txt parsed by the Python backend (Practice / Live).
+ * Explore shows ``Sample NAVs · as of`` the fixture date and does not claim
+ * a daily feed.
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
@@ -39,7 +42,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { useMFSearch, useMFCategories } from "@/hooks/useMutualFundData";
+import { useMFSearch, useMFCategories, EXPLORE_SAMPLE_NAV_DATE } from "@/hooks/useMutualFundData";
+
+const SAMPLE_NAVS_AS_OF = `Sample NAVs · as of ${EXPLORE_SAMPLE_NAV_DATE}`;
 
 // ---------------------------------------------------------------------------
 // Debounce hook
@@ -145,7 +150,9 @@ export function MutualFundTab() {
           )}
         </div>
         <p className="text-xs text-text-muted mt-1">
-          Search Indian mutual funds with live NAV data from AMFI. Updated daily after market close.
+          {isLive
+            ? "Search Indian mutual funds with live NAV data from AMFI. Updated daily after market close."
+            : SAMPLE_NAVS_AS_OF}
         </p>
       </div>
 
@@ -393,7 +400,9 @@ export function MutualFundTab() {
 
       {/* Disclaimer */}
       <p className="text-xxs text-text-muted">
-        NAV data sourced from AMFI India (amfiindia.com). Updated daily after market close.
+        {isLive
+          ? "NAV data sourced from AMFI India (amfiindia.com). Updated daily after market close. "
+          : `${SAMPLE_NAVS_AS_OF}. `}
         Past performance does not guarantee future returns. Mutual fund investments are subject
         to market risks. Read all scheme-related documents carefully before investing.
       </p>

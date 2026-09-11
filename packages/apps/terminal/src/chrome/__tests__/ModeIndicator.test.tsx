@@ -56,6 +56,16 @@ describe("ModeIndicator", () => {
       expect(screen.getByText("EXPLORE")).toBeInTheDocument();
     });
 
+    it("names Explore as execution mode with sample data, not a market session", () => {
+      resetStore("explore");
+      render(<ModeIndicator />);
+
+      const chip = screen.getByTestId("execution-mode");
+      expect(chip).toHaveTextContent("EXPLORE");
+      expect(chip).toHaveAccessibleName(/explore mode active — sample data only/i);
+      expect(chip).not.toHaveAccessibleName(/market open|session/i);
+    });
+
     it("switches to Practice when clicked, syncing the JWT server-side", async () => {
       // Phase 1 G1 regression: Explore→Practice must call /auth/mode so the
       // backend upgrades the explore JWT to practice. Without the server round

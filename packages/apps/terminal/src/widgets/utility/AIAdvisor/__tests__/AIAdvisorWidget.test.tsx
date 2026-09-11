@@ -115,6 +115,7 @@ import AIAdvisorWidget, {
   toPlaceOrderParams,
 } from "../AIAdvisorWidget";
 import { useModeStore } from "@/stores/modeStore";
+import { useAuthStore } from "@/stores/authStore";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -125,11 +126,70 @@ function Providers({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
+function advisorStatusResponse(configured: boolean): Response {
+  return new Response(JSON.stringify({
+    status: "success",
+    data: {
+      configured,
+      provider: configured ? "openai" : "",
+      model: configured ? "test" : "",
+    },
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+}
+
+function settingsLlmResponse(kind: "ready" | "unauthorized"): Response {
+  if (kind === "unauthorized") {
+    return new Response(JSON.stringify({
+      status: "error",
+      message: "LLM configuration requires an authenticated session",
+    }), { status: 401, headers: { "Content-Type": "application/json" } });
+  }
+  return new Response(JSON.stringify({
+    status: "success",
+    data: { provider: "openai", host: "", model: "test", api_key_configured: true },
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
+}
+
+function isLlmConfigGet(input: unknown, init?: RequestInit): boolean {
+  const url = String(input);
+  return url.includes("/config/llm") && !url.includes("/test") && init?.method !== "POST";
+}
+
+function mockChatLlmProbes(options: {
+  advisor: "configured" | "unconfigured" | "unreachable" | "unknown";
+  settings: "ready" | "unauthorized";
+}): ReturnType<typeof vi.spyOn> {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (isLlmConfigGet(input, init)) {
+      return settingsLlmResponse(options.settings);
+    }
+    if (options.advisor === "unreachable") {
+      throw new TypeError("Failed to fetch");
+    }
+    if (options.advisor === "unknown") {
+      return new Response(JSON.stringify({ status: "error" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return advisorStatusResponse(options.advisor === "configured");
+  });
+}
+
+function mockAdvisorStatus(configured: boolean): void {
+  mockChatLlmProbes({
+    advisor: configured ? "configured" : "unconfigured",
+    settings: configured ? "ready" : "unauthorized",
+  });
+}
+
 describe("AIAdvisorWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     conversationStoreMock.reset();
     mockLlmProvider.mockReturnValue("");
+    useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ token: null });
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No backend"));
   });
 
@@ -138,22 +198,169 @@ describe("AIAdvisorWidget", () => {
     expect(screen.getByText("AI Advisor")).toBeInTheDocument();
   });
 
-  it("shows not-configured state when LLM provider is empty", () => {
+  it("shows not-configured state when LLM provider is empty", async () => {
+    mockAdvisorStatus(false);
     render(<AIAdvisorWidget />, { wrapper: Providers });
-    expect(screen.getByText("Not configured")).toBeInTheDocument();
-    expect(screen.getByText("LLM Not Configured")).toBeInTheDocument();
+    expect(await screen.findByText("Not configured")).toBeInTheDocument();
+    expect(screen.getByText("LLM not configured")).toBeInTheDocument();
   });
 
-  it("has a chat input field", () => {
+  it("has a chat input field", async () => {
+    mockAdvisorStatus(false);
     render(<AIAdvisorWidget />, { wrapper: Providers });
     expect(
-      screen.getByPlaceholderText("Configure LLM in Settings first..."),
+      await screen.findByPlaceholderText("Configure LLM in Settings first..."),
     ).toBeInTheDocument();
   });
 
   it("has a send button", () => {
+    mockAdvisorStatus(false);
     render(<AIAdvisorWidget />, { wrapper: Providers });
     expect(screen.getByRole("button", { name: /send message/i })).toBeInTheDocument();
+  });
+
+  it("gates Chat chrome on advisor/status configured — not a stale local store", async () => {
+    mockLlmProvider.mockReturnValue("ollama");
+    mockAdvisorStatus(false);
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    const badge = await screen.findByText("Not configured");
+    expect(badge.className).toMatch(/warning/);
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.getByText("LLM not configured")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open Settings → AI/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
+  });
+
+  it("still probes advisor/status in Explore with a demo-user token", async () => {
+    mockLlmProvider.mockReturnValue("ollama");
+    useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ token: "demo-user" });
+    const fetchMock = mockChatLlmProbes({ advisor: "unconfigured", settings: "unauthorized" });
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    await screen.findByText("Not configured");
+    expect(fetchMock).toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([input]: [unknown]) => String(input).includes("/advisor/status"))).toBe(true);
+    expect(useModeStore.getState().mode).toBe("explore");
+    expect(useAuthStore.getState().token).toBe("demo-user");
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sample replies")).not.toBeInTheDocument();
+  });
+
+  it("shows Not configured in Explore when Settings #llm is empty even if advisor/status is configured", async () => {
+    mockLlmProvider.mockReturnValue("ollama");
+    useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ token: "demo-user" });
+    mockChatLlmProbes({ advisor: "configured", settings: "unauthorized" });
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    const badge = await screen.findByText("Not configured");
+    expect(badge.className).toMatch(/warning/);
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.getByText("LLM not configured")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open Settings → AI/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
+    expect(screen.queryByPlaceholderText("Ask the AI advisor...")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ask me anything about trading, markets, or strategies.")).not.toBeInTheDocument();
+  });
+
+  it("shows a green Connected badge only after advisor/status is configured and Settings #llm can load", async () => {
+    useModeStore.setState({ mode: "live" });
+    useAuthStore.setState({ token: "session-jwt" });
+    mockChatLlmProbes({ advisor: "configured", settings: "ready" });
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    const badge = await screen.findByText("Connected");
+    expect(badge.className).toMatch(/profit/);
+    expect(screen.queryByText("Not configured")).not.toBeInTheDocument();
+    expect(await screen.findByPlaceholderText("Ask the AI advisor...")).not.toBeDisabled();
+  });
+
+  it("keeps Retry and Settings available when a leftover transcript hides the empty state", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ token: "demo-user" });
+    mockChatLlmProbes({ advisor: "configured", settings: "unauthorized" });
+    conversationStoreMock.useStore.setState({
+      messages: [{
+        id: "m1",
+        role: "user",
+        content: "What is NIFTY?",
+        timestamp: 1,
+        route: "/ai",
+      }],
+    });
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    expect(await screen.findAllByText("Not configured")).not.toHaveLength(0);
+    expect(screen.queryByText("LLM not configured")).not.toBeInTheDocument();
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open Settings → AI/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
+  });
+
+  it("opens Settings → AI at /settings#llm from the unconfigured CTA", async () => {
+    mockAdvisorStatus(false);
+    const listener = vi.fn();
+    window.addEventListener("flinttrade:navigate", listener);
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Open Settings → AI/i }));
+    expect(listener).toHaveBeenCalled();
+    const detail = (listener.mock.calls[0][0] as CustomEvent).detail;
+    expect(detail === "/settings#llm" || (detail as { path?: string })?.path === "/settings#llm").toBe(true);
+    window.removeEventListener("flinttrade:navigate", listener);
+  });
+
+  it("shows Disconnected and Retry when Settings #llm is ready but advisor/status cannot be reached", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    useModeStore.setState({ mode: "live" });
+    useAuthStore.setState({ token: "session-jwt" });
+    mockChatLlmProbes({ advisor: "unreachable", settings: "ready" });
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    expect(await screen.findAllByText("Disconnected")).not.toHaveLength(0);
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
+  });
+
+  it("shows Error and Retry when Settings #llm is ready but advisor/status is configured-looking but broken", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    useModeStore.setState({ mode: "live" });
+    useAuthStore.setState({ token: "session-jwt" });
+    mockChatLlmProbes({ advisor: "unknown", settings: "ready" });
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    expect(await screen.findAllByText("Error")).not.toHaveLength(0);
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
+  });
+
+  it("does not send when the LLM is unconfigured — no send-then-no-reply path", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(advisorStatusResponse(false));
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+    await screen.findByText("Not configured");
+
+    fireEvent.change(screen.getByPlaceholderText("Configure LLM in Settings first..."), {
+      target: { value: "What is NIFTY?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    });
+    expect(conversationStoreMock.useStore.getState().messages).toHaveLength(0);
   });
 
   it("does not auto-submit and sends exact analysis context in the SSE request body", async () => {
@@ -174,7 +381,7 @@ describe("AIAdvisorWidget", () => {
     render(<AIAdvisorWidget analysisContext={analysisContext} />, { wrapper: Providers });
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
 
-    fireEvent.change(screen.getByPlaceholderText("Ask the AI advisor..."), {
+    fireEvent.change(await screen.findByPlaceholderText("Ask the AI advisor..."), {
       target: { value: "Analyse this instrument" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send message/i }));
@@ -195,7 +402,7 @@ describe("AIAdvisorWidget", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
       if (init?.method !== "POST") {
-        return new Response(JSON.stringify({ status: "error" }), { status: 200 });
+        return advisorStatusResponse(true);
       }
       if (url.endsWith("/api/v1/advisor/stream")) {
         return new Response(null, { status: 404 });
@@ -208,7 +415,7 @@ describe("AIAdvisorWidget", () => {
     const analysisContext = { symbol: "NIFTY-26MAR-FUT", exchange: "NFO", source: "palette" } as const;
 
     render(<AIAdvisorWidget analysisContext={analysisContext} />, { wrapper: Providers });
-    fireEvent.change(screen.getByPlaceholderText("Ask the AI advisor..."), {
+    fireEvent.change(await screen.findByPlaceholderText("Ask the AI advisor..."), {
       target: { value: "What changed?" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send message/i }));
@@ -228,6 +435,107 @@ describe("AIAdvisorWidget", () => {
       message: "What changed?",
       context: analysisContext,
     });
+  });
+
+  it("surfaces the backend LLM-not-configured message instead of a blank assistant", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation(async (_input, init) => {
+      if (init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            status: "error",
+            message: "LLM not configured. Set provider in Settings → AI.",
+          }),
+          { status: 503, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return advisorStatusResponse(true);
+    });
+
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+    fireEvent.change(await screen.findByPlaceholderText("Ask the AI advisor..."), {
+      target: { value: "What is NIFTY?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+    await waitFor(() => {
+      const assistant = conversationStoreMock.useStore.getState().messages.find(
+        (m) => m.role === "assistant",
+      );
+      expect(assistant?.content).toMatch(/LLM not configured/i);
+    });
+    const assistant = conversationStoreMock.useStore.getState().messages.find(
+      (m) => m.role === "assistant",
+    );
+    expect(assistant?.content).toBeTruthy();
+    expect(String(assistant?.content)).not.toMatch(/HTTP 503/);
+  });
+
+  it("surfaces an error when the SSE stream ends with no tokens", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "POST" && url.endsWith("/api/v1/advisor/stream")) {
+        return new Response('data: {"done":true}\n\n', {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }
+      return new Response(JSON.stringify({
+        status: "success",
+        data: { configured: true, provider: "openai", model: "test" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+    fireEvent.change(await screen.findByPlaceholderText("Ask the AI advisor..."), {
+      target: { value: "What is NIFTY?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+    await waitFor(() => {
+      const assistant = conversationStoreMock.useStore.getState().messages.find(
+        (m) => m.role === "assistant",
+      );
+      expect(assistant?.content).toMatch(/no reply|not configured|unavailable|timed out/i);
+    });
+  });
+
+  it("surfaces an SSE error event instead of leaving a blank assistant", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "POST" && url.endsWith("/api/v1/advisor/stream")) {
+        return new Response('data: {"error":"Internal server error"}\n\n', {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }
+      return new Response(JSON.stringify({
+        status: "success",
+        data: { configured: true, provider: "openai", model: "test" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+    fireEvent.change(await screen.findByPlaceholderText("Ask the AI advisor..."), {
+      target: { value: "What is NIFTY?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+    await waitFor(() => {
+      const assistant = conversationStoreMock.useStore.getState().messages.find(
+        (m) => m.role === "assistant",
+      );
+      expect(assistant?.content).toMatch(/Internal server error|Error:/i);
+    });
+    const assistant = conversationStoreMock.useStore.getState().messages.find(
+      (m) => m.role === "assistant",
+    );
+    expect(String(assistant?.content).trim()).not.toBe("");
   });
 });
 
@@ -408,6 +716,7 @@ describe("AIAdvisorWidget history panel", () => {
   }
 
   beforeEach(() => {
+    mockAdvisorStatus(false);
     mockListSessions.mockReset();
     mockSearchSessions.mockReset();
     mockGetSession.mockReset();

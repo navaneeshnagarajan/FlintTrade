@@ -124,15 +124,21 @@ vi.mock("@/hooks/useSkillContent", () => ({
 // Test helpers
 // ---------------------------------------------------------------------------
 
+import { useSettingsStore } from "@/stores/settingsStore";
+import { useDeskChromeStore } from "@/stores/deskChromeStore";
+import { useModeStore } from "@/stores/modeStore";
 import TopBarV2 from "../TopBarV2";
 
-function renderTopBarV2(tickerMode?: "off" | "pinned" | "scroll" | "marquee") {
+function renderTopBarV2(
+  tickerMode?: "off" | "pinned" | "scroll" | "marquee",
+  path = "/trade",
+) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={["/trade"]}>
+      <MemoryRouter initialEntries={[path]}>
         <TopBarV2 tickerMode={tickerMode} />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -142,6 +148,21 @@ function renderTopBarV2(tickerMode?: "off" | "pinned" | "scroll" | "marquee") {
 function setOpenMarketTestTime() {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-08-10T04:30:00.000Z")); // Monday, 10:00 IST
+}
+
+/** Pin wall-clock so IST calendar parts match the given instant. */
+function setIstInstant(isoUtc: string) {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(isoUtc));
+}
+
+function setExploreHhmmTimings() {
+  mockTimingsQuery.data = [
+    { exchange: "NSE", start_time: 915, end_time: 1530 },
+    { exchange: "BSE", start_time: 915, end_time: 1530 },
+    { exchange: "MCX", start_time: 900, end_time: 2330 },
+  ];
+  mockTimingsQuery.dataUpdatedAt = Date.now();
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +177,9 @@ describe("TopBarV2", () => {
     mockTimingsQuery.dataUpdatedAt = 0;
     mockTimingsQuery.isError = false;
     mockTimingsQuery.isLoading = false;
+    useSettingsStore.setState({ density: "comfortable", tickerMode: "marquee" });
+    useDeskChromeStore.setState({ toolsExpanded: false });
+    useModeStore.setState({ mode: "explore" });
   });
 
   afterEach(() => {
@@ -253,6 +277,38 @@ describe("TopBarV2", () => {
     unmount();
   });
 
+  it("shows Market open for Explore HHMM timings at Thursday mid-session IST", () => {
+    // 10 Sep 2026 12:08 IST — the FT-TRADE-004 observation window.
+    setIstInstant("2026-09-10T06:38:00.000Z");
+    setExploreHhmmTimings();
+
+    renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market open");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market closed");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent(/demo/i);
+  });
+
+  it("shows Market closed for Explore HHMM timings after 15:30 IST on a weekday", () => {
+    setIstInstant("2026-09-10T10:15:00.000Z"); // Thursday 15:45 IST
+    setExploreHhmmTimings();
+
+    renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
+  });
+
+  it("shows Market closed for Explore HHMM timings on an IST weekend", () => {
+    setIstInstant("2026-09-12T06:38:00.000Z"); // Saturday 12:08 IST
+    setExploreHhmmTimings();
+
+    renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
+  });
+
   it("uses the shared timing truth TTL rather than a drifting local limit", () => {
     setOpenMarketTestTime();
     const now = Date.now();
@@ -311,12 +367,25 @@ describe("TopBarV2", () => {
 
   it("keeps the terminal connected when a direct broker session exists and OpenAlgo ping fails", async () => {
     mockDirectBrokerConnected.value = true;
+    useModeStore.setState({ mode: "live" });
 
     renderTopBarV2();
 
     await waitFor(() => {
       expect(mockSetConnectionStatus).toHaveBeenCalledWith("connected");
     });
+  });
+
+  it("never paints Connected in Explore even if a leftover broker session exists", async () => {
+    mockDirectBrokerConnected.value = true;
+    useModeStore.setState({ mode: "explore" });
+
+    renderTopBarV2();
+
+    await waitFor(() => {
+      expect(mockSetConnectionStatus).toHaveBeenCalledWith("disconnected");
+    });
+    expect(mockSetConnectionStatus).not.toHaveBeenCalledWith("connected");
   });
 
   it("renders the fullscreen button", () => {
@@ -410,5 +479,223 @@ describe("TopBarV2", () => {
     // was removed (commit ab0b595) to avoid a11y conflicts with the <header>
     // landmark it is nested inside.
     expect(screen.getByTestId("topbar-v2")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FT-MOBILE-002 — defensive skinny-window chrome (~390px)
+// ---------------------------------------------------------------------------
+
+function stubViewportWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: width,
+  });
+  vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+    const max = /max-width:\s*(\d+)/.exec(query);
+    const min = /min-width:\s*(\d+)/.exec(query);
+    let matches = false;
+    if (max) matches = width <= Number(max[1]);
+    else if (min) matches = width >= Number(min[1]);
+    return {
+      matches,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    };
+  });
+}
+
+describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDirectBrokerConnected.value = false;
+    mockTimingsQuery.data = undefined;
+    mockTimingsQuery.dataUpdatedAt = 0;
+    mockTimingsQuery.isError = false;
+    mockTimingsQuery.isLoading = false;
+    useSettingsStore.setState({ tickerMode: "marquee" });
+    stubViewportWidth(390);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    stubViewportWidth(1024);
+    vi.useRealTimers();
+  });
+
+  it("keeps Mode visible and tappable at ~390px", () => {
+    renderTopBarV2();
+
+    const mode = screen.getByText("EXPLORE");
+    expect(mode).toBeVisible();
+    expect(mode.closest("button")).toBeEnabled();
+  });
+
+  it("does not use horizontal TopBar scroll at ~390px", () => {
+    renderTopBarV2();
+
+    const bar = screen.getByTestId("topbar-v2");
+    expect(bar.className).not.toMatch(/overflow-x-auto/);
+    expect(bar.className).toMatch(/overflow-x-hidden/);
+  });
+
+  it("hides the ticker strip by default under ~480px", () => {
+    renderTopBarV2();
+
+    expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
+  });
+
+  it("keeps Workspace off the inline bar and reachable from More", () => {
+    renderTopBarV2();
+
+    expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("topbar-more-btn"));
+
+    const sheet = screen.getByTestId("topbar-more-sheet");
+    expect(sheet).toBeVisible();
+    expect(screen.getByTestId("workspace-switcher")).toBeVisible();
+  });
+
+  it("reaches account, Tools, search, fullscreen, and clock from More", () => {
+    renderTopBarV2();
+
+    expect(screen.queryByTestId("account-switcher")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("search-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tools-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("fullscreen-btn")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Current time in IST")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^more$/i }));
+
+    expect(screen.getByTestId("account-switcher")).toBeVisible();
+    expect(screen.getByTestId("search-btn")).toBeVisible();
+    expect(screen.getByTestId("tools-btn")).toBeVisible();
+    expect(screen.getByTestId("fullscreen-btn")).toBeVisible();
+    expect(screen.getByLabelText("Current time in IST")).toBeVisible();
+  });
+
+  it("uses at least 44px hit targets on More sheet controls, not only the row", () => {
+    renderTopBarV2();
+
+    fireEvent.click(screen.getByTestId("topbar-more-btn"));
+
+    const rows = screen.getAllByTestId("topbar-more-row");
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+    for (const row of rows) {
+      expect(row.className).toMatch(/min-h-11/);
+      expect(row.className).toMatch(/\[&_button\]:min-h-11/);
+    }
+  });
+
+  it("lets settings re-enable the ticker under ~480px", () => {
+    renderTopBarV2();
+    expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("topbar-more-btn"));
+    fireEvent.click(screen.getByRole("button", { name: /show ticker/i }));
+
+    expect(screen.getByTestId("ticker-marquee")).toBeInTheDocument();
+  });
+
+  it("re-enables the ticker from More when persisted mode is off", () => {
+    useSettingsStore.setState({ tickerMode: "off" });
+    renderTopBarV2();
+
+    fireEvent.click(screen.getByTestId("topbar-more-btn"));
+    fireEvent.click(screen.getByRole("button", { name: /show ticker/i }));
+
+    expect(screen.getByTestId("ticker-marquee")).toBeInTheDocument();
+    expect(useSettingsStore.getState().tickerMode).toBe("marquee");
+  });
+
+  it("collapses overflow at ~450px so hidden overflow cannot clip Mode", () => {
+    stubViewportWidth(450);
+    renderTopBarV2();
+
+    expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
+    expect(screen.getByText("EXPLORE")).toBeVisible();
+    expect(screen.getByTestId("topbar-more-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
+  });
+
+  it("dismisses Quick settings opened from More when clicking outside", () => {
+    renderTopBarV2();
+
+    fireEvent.click(screen.getByTestId("topbar-more-btn"));
+    fireEvent.click(screen.getByTestId("gear-btn"));
+
+    expect(screen.getByRole("dialog", { name: /quick settings/i })).toBeInTheDocument();
+    expect(screen.queryByTestId("topbar-more-sheet")).not.toBeInTheDocument();
+
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByRole("dialog", { name: /quick settings/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps the More sheet below nested account and notification portals", () => {
+    renderTopBarV2();
+
+    fireEvent.click(screen.getByTestId("topbar-more-btn"));
+
+    const root = screen.getByTestId("topbar-more-root");
+    expect(root.className).toMatch(/z-\[110]/);
+    expect(root.className).not.toMatch(/z-\[121]/);
+  });
+});
+
+describe("FT-UX-001 Compact desk chrome at 1280", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ density: "compact", tickerMode: "marquee" });
+    useDeskChromeStore.setState({ toolsExpanded: false });
+    stubViewportWidth(1280);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    stubViewportWidth(1024);
+    useSettingsStore.setState({ density: "comfortable" });
+    useDeskChromeStore.setState({ toolsExpanded: false });
+  });
+
+  it("keeps Mode and market-session copy distinct and hides the ticker", () => {
+    setOpenMarketTestTime();
+    setExploreHhmmTimings();
+    mockTimingsQuery.dataUpdatedAt = Date.now();
+    renderTopBarV2();
+
+    expect(screen.getByText("EXPLORE")).toBeVisible();
+    const session = screen.getByTestId("market-session-status");
+    expect(session).toHaveAccessibleName(/market status: market open/i);
+    expect(session).toHaveTextContent(/market open/i);
+    expect(session).not.toHaveTextContent(/Live/i);
+    expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
+    expect(screen.getByTestId("topbar-desk-tools-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("tools-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
+  });
+
+  it("Comfortable restores the tool ribbon without changing Mode honesty", () => {
+    useSettingsStore.setState({ density: "comfortable" });
+    renderTopBarV2();
+
+    expect(screen.getByText("EXPLORE")).toBeVisible();
+    expect(screen.getByTestId("tools-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument();
+    expect(screen.queryByTestId("topbar-desk-tools-btn")).not.toBeInTheDocument();
+  });
+
+  it("does not collapse the tool ribbon on Compact Home", () => {
+    renderTopBarV2("marquee", "/home");
+
+    expect(screen.getByTestId("tools-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument();
+    expect(screen.queryByTestId("topbar-desk-tools-btn")).not.toBeInTheDocument();
   });
 });

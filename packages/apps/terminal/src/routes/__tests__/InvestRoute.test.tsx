@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
@@ -37,6 +37,18 @@ vi.mock("@/components/help/SpotlightTour", () => ({
 
 vi.mock("@/lib/tourDefinitions", () => ({
   TOUR_DEFINITIONS: {},
+}));
+
+vi.mock("@/components/magicui/animated-counter", () => ({
+  AnimatedCounter: ({
+    value,
+    formatter,
+    className,
+  }: {
+    value: number;
+    formatter?: (v: number) => string;
+    className?: string;
+  }) => <span className={className}>{formatter ? formatter(value) : value}</span>,
 }));
 
 // Mock the InvestContext provider to supply dummy data
@@ -77,6 +89,10 @@ function createWrapper() {
 }
 
 describe("InvestRoute", () => {
+  beforeEach(() => {
+    window.history.replaceState(null, "", "/invest");
+  });
+
   it("renders the Investor Dashboard heading", () => {
     render(<InvestRoute />, { wrapper: createWrapper() });
     expect(screen.getByText("Investor Dashboard")).toBeInTheDocument();
@@ -110,5 +126,61 @@ describe("InvestRoute", () => {
       expect(screen.getByText("Shareholding Pattern")).toBeInTheDocument();
     });
     expect(screen.queryByText("Portfolio Allocation")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["#holdings", /Holdings/i],
+    ["#sip", /SIPs/i],
+    ["#networth", /Net Worth/i],
+    ["#mf-optimizer", /MF Optimizer/i],
+  ] as const)("selects the matching tab when opened with %s", (hash, tabName) => {
+    window.history.replaceState(null, "", `/invest${hash}`);
+
+    render(<InvestRoute />, { wrapper: createWrapper() });
+
+    expect(screen.getByRole("tab", { name: tabName })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: /Dashboard/i })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+
+  it("keeps Dashboard selected for an unknown Invest hash", () => {
+    window.history.replaceState(null, "", "/invest#not-a-tab");
+
+    render(<InvestRoute />, { wrapper: createWrapper() });
+
+    expect(screen.getByRole("tab", { name: /Dashboard/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("syncs the active tab when the Invest hash changes", () => {
+    window.history.replaceState(null, "", "/invest#sip");
+
+    render(<InvestRoute />, { wrapper: createWrapper() });
+
+    expect(screen.getByRole("tab", { name: /SIPs/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    act(() => {
+      window.location.hash = "#holdings";
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+
+    expect(screen.getByRole("tab", { name: /Holdings/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: /Dashboard/i })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
   });
 });

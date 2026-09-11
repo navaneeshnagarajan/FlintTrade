@@ -113,6 +113,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { usePositions } from "@/hooks/usePositions";
+import { useNarrowLayout } from "@/hooks/useNarrowLayout";
+import { NarrowBookCards } from "@/components/books/NarrowBookCards";
 import type { WidgetProps } from "@/types/widgets";
 import {
   fmtPnl,
@@ -629,6 +631,7 @@ function PositionsWidget(props: WidgetProps) {
     context: accountReadContext,
   });
 
+  const { isNarrow, containerRef } = useNarrowLayout<HTMLDivElement>();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [convertIntent, setConvertIntent] = useState<PositionActionIntent | null>(null);
   const [squareOffIntent, setSquareOffIntent] = useState<PositionActionIntent | null>(null);
@@ -846,6 +849,61 @@ function PositionsWidget(props: WidgetProps) {
 
   // ---- Table view ---------------------------------------------------------
 
+  const renderRowActions = useCallback((position: PositionRow) => {
+    if (!(canSquareOff || canUseNativePositionVerbs)) {
+      // Explore/Practice books are not Live — omit the Live-only hint.
+      if (isExplore || appMode === "practice") return null;
+      return <span className="text-xxs text-text-muted">Live only</span>;
+    }
+    return (
+      <span className="inline-flex items-center gap-0.5">
+        {canSquareOff && position.quantity !== 0 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setSquareOffIntent({
+              position,
+              identity: captureAccountAuthority(readIdentity),
+            })}
+            aria-label={`Square off ${position.symbol}`}
+            title={`Square off ${position.symbol} at market`}
+            className="h-5 px-1.5 text-xxs gap-1 text-loss hover:bg-loss/10 hover:text-loss"
+          >
+            <SquareX size={10} aria-hidden="true" /> Square off
+          </Button>
+        )}
+        {canUseNativePositionVerbs && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setConvertIntent({
+              position,
+              identity: captureAccountAuthority(readIdentity),
+            })}
+            aria-label={`Convert ${position.symbol}`}
+            title={`Convert ${position.symbol} to another product`}
+            className="h-5 px-1.5 text-xxs gap-1 text-text-muted hover:text-text-primary"
+          >
+            <Repeat size={10} aria-hidden="true" /> Convert
+          </Button>
+        )}
+      </span>
+    );
+  }, [appMode, canSquareOff, canUseNativePositionVerbs, isExplore, readIdentity]);
+
+  const narrowCards = useMemo(
+    () => rows.map((row) => ({
+      id: `${row.symbol}-${row.exchange}-${row.product}`,
+      symbol: row.symbol,
+      detail: `Qty ${row.quantity} · LTP ${fmtPrice(row.ltp)}`,
+      pnl: fmtPnl(row.mtm),
+      pnlPercent: fmtPnlPct(row.pnlPercent),
+      pnlPositive: row.mtm >= 0,
+      actions: renderRowActions(row),
+    })),
+    [renderRowActions, rows],
+  );
+
   const columns = useMemo<ColumnDef<PositionRow>[]>(
     () => [
       {
@@ -914,45 +972,10 @@ function PositionsWidget(props: WidgetProps) {
         id: "actions",
         header: "",
         enableSorting: false,
-        cell: ({ row }) => (canSquareOff || canUseNativePositionVerbs) ? (
-          <span className="inline-flex items-center gap-0.5">
-            {canSquareOff && row.original.quantity !== 0 && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setSquareOffIntent({
-                  position: row.original,
-                  identity: captureAccountAuthority(readIdentity),
-                })}
-                aria-label={`Square off ${row.original.symbol}`}
-                title={`Square off ${row.original.symbol} at market`}
-                className="h-5 px-1.5 text-xxs gap-1 text-loss hover:bg-loss/10 hover:text-loss"
-              >
-                <SquareX size={10} aria-hidden="true" /> Square off
-              </Button>
-            )}
-            {canUseNativePositionVerbs && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setConvertIntent({
-                  position: row.original,
-                  identity: captureAccountAuthority(readIdentity),
-                })}
-                aria-label={`Convert ${row.original.symbol}`}
-                title={`Convert ${row.original.symbol} to another product`}
-                className="h-5 px-1.5 text-xxs gap-1 text-text-muted hover:text-text-primary"
-              >
-                <Repeat size={10} aria-hidden="true" /> Convert
-              </Button>
-            )}
-          </span>
-        ) : (
-          <span className="text-xxs text-text-muted">Live only</span>
-        ),
+        cell: ({ row }) => renderRowActions(row.original),
       },
     ],
-    [canSquareOff, canUseNativePositionVerbs, readIdentity],
+    [renderRowActions],
   );
 
   const table = useReactTable({
@@ -979,7 +1002,11 @@ function PositionsWidget(props: WidgetProps) {
         : "Live positions require a broker session";
 
   return (
-    <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base" data-tour-target="positions">
+    <div
+      ref={containerRef}
+      className="h-full flex flex-col overflow-hidden text-xs bg-surface-base"
+      data-tour-target="positions"
+    >
       {/* Header */}
       <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border-default shrink-0 flex-wrap">
         <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">
@@ -997,7 +1024,7 @@ function PositionsWidget(props: WidgetProps) {
             <span
               className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
               role="status"
-              aria-label="Broker connection required for live positions"
+              aria-label="Broker connection required for real positions"
             >
               Broker required
             </span>
@@ -1201,6 +1228,9 @@ function PositionsWidget(props: WidgetProps) {
               <span>{rows.filter((row) => row.mtm === 0).length} flat</span>
             </div>
           </div>
+          {isNarrow ? (
+            <NarrowBookCards rows={narrowCards} ariaLabel="Positions" />
+          ) : (
           <div className="flex-1 overflow-auto min-h-0">
           <div className="overflow-x-auto min-w-0">
           <Table>
@@ -1248,13 +1278,14 @@ function PositionsWidget(props: WidgetProps) {
           </Table>
           </div>
           </div>
+          )}
         </div>
       )}
 
       {/* Explore-mode watermark */}
       {isExplore && (
         <div className="shrink-0 px-3 py-1 border-t border-border-subtle text-xxs text-text-disabled text-center">
-          Sample data — connect a broker to see live positions
+          Sample data — connect a broker to see your positions
         </div>
       )}
 

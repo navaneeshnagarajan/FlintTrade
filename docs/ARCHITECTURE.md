@@ -88,9 +88,7 @@ flowchart LR
     F --> JNL
     F --> ING
     F --> GW
-    E --> TICK
     BT --> TICK
-    IND --> TICK
     F --> NGA
     NGA --> DHAN
     F -- "REST" --> OA
@@ -366,8 +364,8 @@ operator sees is the earliest of:
    broker path. The account MTM circuit breaker is a separate automatic path.
 2. **L4 Daily P&L** — pause new orders at 3 % drawdown and latch a new-order
    hard stop at 15 % drawdown. Layer 4 does not cancel or flatten.
-3. **L1 Order validation** — price within ±5 % of LTP, quantity multiple of
-   lot size.
+3. **L1 Order validation** — price within ±5 % of LTP, quantity must be
+   positive and within the per-exchange quantity cap.
 4. **L2 Position limits** — max five simultaneous positions, no single
    position over 60 % of free margin.
 5. **L3 Portfolio risk** — net delta and net vega caps across the book.
@@ -407,8 +405,8 @@ stateDiagram-v2
     Live --> Explore: /auth/mode {mode:explore}\n(JWT downgrade only;\nno kill-switch)
 
     state Explore {
-        [*] --> noOrders
-        noOrders: All order paths rejected\nHTTP 403 mode_blocked;\nno broker call
+        [*] --> noLiveOrders
+        noLiveOrders: No Live broker order authority.\nBackend and Live-intent paths:\nHTTP 403 mode_blocked;\nno broker call.\nException: /trade Order Pad\nSample Buy is a local\nclient sample fill
     }
     state Practice {
         [*] --> sandbox
@@ -427,6 +425,13 @@ re-auth). `/v1/auth/mode` accepts only downgrades to `practice` or
 toggles Explore → Practice and Practice ↔ Live; a Live → Explore
 downgrade is available on the API. The guard lives at
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.
+
+Explore has no Live broker order authority: backend and Live-intent
+order paths still refuse with `mode_blocked` and never call a broker.
+The exception is Order Pad Sample Buy on `/trade`, which records a
+local client-side sample fill (no HTTP order route, no SafetySystem,
+no broker). Practice remains the native sandbox; Live remains the
+gated broker path.
 
 ---
 
@@ -553,9 +558,14 @@ config.workspace.fast_data_dir    # from workspace.json
 config.workspace.get("ui.theme")  # dot-notation access
 ```
 
-Packages never read `os.environ` for data paths directly. They use the
-`Workspace` class, which resolves paths from `workspace.json` with
-fallbacks.
+Feature packages do not read `os.environ` for data paths themselves. They
+use the `Workspace` class, which resolves the platform workspace directory
+(`FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME`, then the OS default)
+and `storage.fast` / `storage.archive` from `workspace.json`. Those workspace
+paths are distinct from specialised env overrides: `DATA_DIR` only affects
+`ditto_accounts_path()` and does not rewrite `config.workspace.fast_data_dir`;
+`AUDIT_LOG_DIR` is read by `audit_log_dir()`; `DUCKDB_PATH` is read by
+`duckdb_path()`.
 
 ---
 
@@ -564,8 +574,12 @@ fallbacks.
 ### FlintTrade JWT
 
 - Issued on `/ft-api/v1/auth/login` after argon2id password
-  verification.
-- Optional second factor: TOTP enrolment with Fernet-encrypted seed.
+  verification. Login is password-only until authenticator enrolment
+  is confirmed (`totp_enabled`); a TOTP or backup code is required
+  only after that.
+- Optional second factor: TOTP enrolment with Fernet-encrypted seed
+  (`POST /v1/auth/totp/enable`). Live PIN unlock refuses with
+  `totp_required` until enrolment is confirmed.
 - **Expires at 8 AM IST the next day.** No refresh tokens — sign in
   again.
 - Carries `sub` (user), `exp` (expiry), `mode` (Explore / Practice /
@@ -575,10 +589,13 @@ fallbacks.
 
 ### Server-side mode enforcement
 
-Every order-path endpoint asks `mode_guard` whether the JWT permits a
+Every HTTP order-path endpoint asks `mode_guard` whether the JWT permits a
 live action. Trying to place a live order on a Practice JWT is rejected 403
-immediately with code `practice_unsupported` (Explore mode yields
-`mode_blocked`) — the request never reaches OpenAlgo.
+immediately with code `practice_unsupported`. Explore JWTs yield
+`mode_blocked` on those same server routes — the request never reaches
+OpenAlgo or a broker. That does not cover Order Pad Sample Buy on
+`/trade` in Explore, which records a local client-side sample fill
+without calling an HTTP order route, SafetySystem, or a broker.
 
 ### OpenAlgo X-API-Key
 

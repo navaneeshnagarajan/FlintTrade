@@ -247,8 +247,8 @@ export interface VerticalSpreadLeg {
   optionType: "CE" | "PE";
   strike: number;
   lots: number;
-  /** Per-unit premium for this leg. Always a positive cost, never signed. */
-  premium: number;
+  /** Per-unit premium for this leg. `null` is unset; `0` is an explicit free cost. */
+  premium: number | null;
 }
 
 export interface VerticalSpread {
@@ -263,7 +263,8 @@ export interface VerticalSpread {
  * `not-a-vertical` is the common case (one leg, a straddle, a condor, a ratio
  * spread) and carries no judgement — those shapes have their own economics and
  * this validator says nothing about them. `unpriced` is the freshly loaded
- * template, whose legs carry a zero premium until the operator types one.
+ * template, whose legs carry an unset (`null`) premium until the operator types
+ * one. An explicit ₹0 is priced (FT-LAB-003).
  */
 export type VerticalSpreadCheck =
   | { kind: "not-a-vertical" }
@@ -308,7 +309,7 @@ export function asVerticalSpread(
     inputs: {
       longStrike: long.strike,
       shortStrike: short.strike,
-      premium: long.premium - short.premium,
+      premium: (long.premium ?? 0) - (short.premium ?? 0),
       lotSize: long.lots * contractLotSize,
     },
   };
@@ -328,9 +329,9 @@ export function analyseVerticalSpread(
   const spread = asVerticalSpread(legs, contractLotSize);
   if (!spread) return { kind: "not-a-vertical" };
 
-  // A template lands with zero premiums; that is "not yet priced", not
-  // "impossible". Only judge the economics once a premium has been typed.
-  if (legs.every((leg) => leg.premium === 0)) {
+  // A template lands with unset premiums; that is "not yet priced", not
+  // "impossible". Only judge the economics once every premium has been typed.
+  if (legs.some((leg) => leg.premium == null)) {
     return { kind: "unpriced", spread };
   }
 

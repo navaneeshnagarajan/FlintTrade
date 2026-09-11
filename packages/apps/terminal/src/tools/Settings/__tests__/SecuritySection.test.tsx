@@ -175,9 +175,115 @@ describe("SecuritySection — quick-unlock PIN", () => {
     await screen.findByText("No PIN set");
 
     fillPinForm("hunter2secret", "123456", "654321");
-    fireEvent.click(screen.getByRole("button", { name: /set pin/i }));
+    expect(screen.getByRole("button", { name: /set pin/i })).toBeDisabled();
+    fireEvent.blur(screen.getByLabelText("Confirm new PIN"));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/do not match/i);
+    expect(pinSetCalls).toHaveLength(0);
+  });
+
+  it("constrains both PIN fields to six digits", async () => {
+    mockFetch({ hasPin: false });
+    renderSection();
+    await screen.findByText("No PIN set");
+
+    const newPin = screen.getByLabelText("New 6-digit PIN");
+    const confirmPin = screen.getByLabelText("Confirm new PIN");
+    expect(newPin).toHaveAttribute("maxLength", "6");
+    expect(confirmPin).toHaveAttribute("maxLength", "6");
+
+    fireEvent.change(newPin, { target: { value: "12ab34567" } });
+    expect(newPin).toHaveValue("123456");
+  });
+
+  it("does not nag a short PIN on every keystroke", async () => {
+    mockFetch({ hasPin: false });
+    renderSection();
+    await screen.findByText("No PIN set");
+
+    fireEvent.change(screen.getByLabelText("New 6-digit PIN"), {
+      target: { value: "12345" },
+    });
+    expect(screen.queryByText("PIN must be exactly 6 digits")).not.toBeInTheDocument();
+  });
+
+  it("shows an inline 6-digit error when a PIN field blurs with 1–5 digits", async () => {
+    mockFetch({ hasPin: false });
+    renderSection();
+    await screen.findByText("No PIN set");
+
+    const newPin = screen.getByLabelText("New 6-digit PIN");
+    fireEvent.change(newPin, { target: { value: "12345" } });
+    fireEvent.blur(newPin);
+
+    const error = await screen.findByRole("alert");
+    expect(error).toHaveTextContent("PIN must be exactly 6 digits");
+    expect(newPin).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("clears the length error as soon as the PIN becomes six digits", async () => {
+    mockFetch({ hasPin: false });
+    renderSection();
+    await screen.findByText("No PIN set");
+
+    const newPin = screen.getByLabelText("New 6-digit PIN");
+    fireEvent.change(newPin, { target: { value: "12345" } });
+    fireEvent.blur(newPin);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "PIN must be exactly 6 digits",
+    );
+
+    fireEvent.change(newPin, { target: { value: "123456" } });
+    expect(screen.queryByText("PIN must be exactly 6 digits")).not.toBeInTheDocument();
+    expect(newPin).not.toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("shows a mismatch error when confirm blurs with both fields filled and different", async () => {
+    mockFetch({ hasPin: false });
+    renderSection();
+    await screen.findByText("No PIN set");
+
+    fillPinForm("hunter2secret", "123456", "654321");
+    fireEvent.blur(screen.getByLabelText("Confirm new PIN"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("PINs do not match");
+    expect(pinSetCalls).toHaveLength(0);
+  });
+
+  it("disables Set PIN until password, both exact 6-digit PINs, and a match are present", async () => {
+    mockFetch({ hasPin: false });
+    renderSection();
+    await screen.findByText("No PIN set");
+
+    const button = screen.getByRole("button", { name: /set pin/i });
+    expect(button).toBeDisabled();
+
+    fillPinForm("hunter2secret", "12345", "12345");
+    expect(button).toBeDisabled();
+
+    fillPinForm("hunter2secret", "123456", "654321");
+    expect(button).toBeDisabled();
+
+    fillPinForm("", "123456", "123456");
+    expect(button).toBeDisabled();
+
+    fillPinForm("hunter2secret", "123456", "123456");
+    expect(button).toBeEnabled();
+  });
+
+  it("blocks a 5-digit submit without calling the endpoint", async () => {
+    mockFetch({ hasPin: false });
+    renderSection();
+    await screen.findByText("No PIN set");
+
+    fillPinForm("hunter2secret", "12345", "12345");
+    const button = screen.getByRole("button", { name: /set pin/i });
+    expect(button).toBeDisabled();
+    fireEvent.blur(screen.getByLabelText("New 6-digit PIN"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "PIN must be exactly 6 digits",
+    );
     expect(pinSetCalls).toHaveLength(0);
   });
 });

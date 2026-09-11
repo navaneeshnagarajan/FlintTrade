@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -90,5 +90,39 @@ describe("HoldingsTab", () => {
     expect(screen.getByText("2 stocks")).toBeInTheDocument();
     expect(screen.getByText("Export CSV")).toBeInTheDocument();
     expect(screen.getByText("Refresh")).toBeInTheDocument();
+  });
+
+  it("shows stacked P&L cards instead of the clipped table at ~390px", () => {
+    let resizeCallback: ResizeObserverCallback | null = null;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        constructor(callback: ResizeObserverCallback) {
+          resizeCallback = callback;
+        }
+        observe = vi.fn();
+        disconnect = vi.fn();
+        unobserve = vi.fn();
+      },
+    );
+
+    render(<HoldingsTab />);
+
+    act(() => {
+      resizeCallback?.(
+        [{ contentRect: { width: 390, height: 700 } } as ResizeObserverEntry],
+        {} as ResizeObserver,
+      );
+    });
+
+    const cards = screen.getByRole("list", { name: "Holdings" });
+    expect(cards).toHaveAttribute("data-layout", "cards");
+    expect(cards).toHaveTextContent("RELIANCE");
+    expect(cards).toHaveTextContent("₹3,500");
+    expect(cards).toHaveTextContent("+2.86%");
+    expect(screen.queryByRole("columnheader", { name: /Avg Price/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Holdings totals")).toHaveTextContent("₹6,500");
+    vi.unstubAllGlobals();
   });
 });

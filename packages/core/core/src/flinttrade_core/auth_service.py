@@ -15,7 +15,9 @@ Usage::
     svc = AuthService()
     codes = svc.setup_account("alice", "alice@example.com", "StrongP@ss!", "123456")
     # Daily login:
-    if svc.verify_password("StrongP@ss!") and svc.verify_totp("123456"):
+    if svc.verify_password("StrongP@ss!") and (
+        not svc.is_totp_enabled() or svc.verify_totp("123456")
+    ):
         token = svc.create_session()
 """
 
@@ -26,6 +28,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -54,6 +57,14 @@ _LOCKOUT_DURATION_SECONDS = 900  # 15 minutes
 
 
 _KDF_ITERATIONS: int = 390_000  # NIST-recommended minimum for PBKDF2-SHA256
+# ASCII [0-9] only. Python ``\\d`` matches Unicode Nd (fullwidth digits
+# would otherwise pass); JS ``^\\d{6}$`` is [0-9]{6}.
+_PIN_RE = re.compile(r"^[0-9]{6}$")
+
+
+def _is_six_digit_pin(pin: str) -> bool:
+    """Return True when ``pin`` is exactly six ASCII digits (JS ``^\\d{6}$``)."""
+    return _PIN_RE.fullmatch(pin) is not None
 
 
 def _hash_pin(pin: str) -> str:
@@ -145,6 +156,7 @@ class AuthService:
                 pin_hash TEXT NOT NULL,
                 totp_secret_encrypted BLOB NOT NULL,
                 totp_salt BLOB NOT NULL,
+                totp_enabled INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 password_changed_at REAL NOT NULL DEFAULT 0
             );
@@ -168,12 +180,35 @@ class AuthService:
             # Column already exists — fresh installs hit this on the
             # CREATE TABLE path above.
             pass
+        try:
+            self._db.execute(
+                "ALTER TABLE account ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError:
+            pass
         self._db.commit()
 
     def is_setup(self) -> bool:
         """Check if the account has been created."""
         row = self._db.execute("SELECT 1 FROM account WHERE id = 1").fetchone()
         return row is not None
+
+    def wipe_account(self) -> None:
+        """Delete the single-user account and related setup state.
+
+        Used by password-confirmed reset and by the setup-wizard session
+        start-over path when the operator lost the TOTP seed mid-enrolment.
+        """
+        with self._write_lock:
+            self._db.execute("DELETE FROM account WHERE id = 1")
+            self._db.execute("DELETE FROM backup_codes")
+            self._db.execute("DELETE FROM login_attempts")
+            self._db.commit()
+
+        if hasattr(self, "_totp_secret_cache"):
+            delattr(self, "_totp_secret_cache")
+
+        logger.info("Account fully reset via setup-wizard escape hatch")
 
     def setup_account(
         self,
@@ -199,7 +234,7 @@ class AuthService:
             raise ValueError("Password too weak — minimum 8 characters")
 
         # Validate PIN (optional — empty string means no PIN)
-        if pin and not (pin.isdigit() and len(pin) == 6):
+        if pin and not _is_six_digit_pin(pin):
             raise ValueError("PIN must be exactly 6 digits")
 
         # Hash password with argon2id
@@ -230,8 +265,8 @@ class AuthService:
             # Store account in the same transaction.
             self._db.execute(
                 """INSERT INTO account (id, username, email, password_hash, pin_hash,
-                   totp_secret_encrypted, totp_salt, created_at)
-                   VALUES (1, ?, ?, ?, ?, ?, ?, ?)""",
+                   totp_secret_encrypted, totp_salt, totp_enabled, created_at)
+                   VALUES (1, ?, ?, ?, ?, ?, ?, 0, ?)""",
                 [username, email, password_hash, pin_hash, encrypted, totp_salt,
                  datetime.now(UTC).isoformat()],
             )
@@ -249,6 +284,13 @@ class AuthService:
         if not row:
             return {}
         return {"username": row["username"], "email": row["email"]}
+
+    def get_created_at(self) -> str:
+        """Return the account ``created_at`` stamp, or ``""`` if none exists."""
+        row = self._db.execute("SELECT created_at FROM account WHERE id = 1").fetchone()
+        if not row:
+            return ""
+        return str(row["created_at"] or "")
 
     def verify_password(self, password: str) -> bool:
         """Verify password and cache decrypted TOTP secret. Returns False if locked out."""
@@ -353,6 +395,37 @@ class AuthService:
         )
         self._db.commit()
 
+    def is_totp_enabled(self) -> bool:
+        """Return True when the operator has confirmed authenticator enrolment.
+
+        Setup provisions a TOTP secret so the optional QR step can run, but
+        Explore/Practice stay password-only until :meth:`enable_totp` records
+        that confirmation. Live unlock reads the same flag.
+        """
+        try:
+            row = self._db.execute(
+                "SELECT totp_enabled FROM account WHERE id = 1"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return False
+        return bool(row and row["totp_enabled"])
+
+    def enable_totp(self, code: str) -> bool:
+        """Confirm authenticator enrolment with a live TOTP code.
+
+        Requires the TOTP secret to already be cached from a password
+        verification or account-create in this process (same constraint as
+        :meth:`verify_totp`).
+
+        Returns:
+            True when the code verifies and enrolment is recorded.
+        """
+        if not self.verify_totp(code):
+            return False
+        self._execute_locked("UPDATE account SET totp_enabled = 1 WHERE id = 1")
+        logger.info("Authenticator enrolment confirmed")
+        return True
+
     def has_pin(self) -> bool:
         """Check if a PIN was configured during setup."""
         row = self._db.execute("SELECT pin_hash FROM account WHERE id = 1").fetchone()
@@ -380,7 +453,7 @@ class AuthService:
         Raises:
             ValueError: If ``pin`` is not exactly 6 digits.
         """
-        if not (pin.isdigit() and len(pin) == 6):
+        if not _is_six_digit_pin(pin):
             raise ValueError("PIN must be exactly 6 digits")
         if not self.verify_password(password):
             return False
@@ -562,16 +635,7 @@ class AuthService:
         if not self.verify_password(password):
             return False
 
-        with self._write_lock:
-            self._db.execute("DELETE FROM account WHERE id = 1")
-            self._db.execute("DELETE FROM backup_codes")
-            self._db.execute("DELETE FROM login_attempts")
-            self._db.commit()
-
-        if hasattr(self, "_totp_secret_cache"):
-            delattr(self, "_totp_secret_cache")
-
-        logger.info("Account fully reset via setup-wizard escape hatch")
+        self.wipe_account()
         return True
 
     def regenerate_totp(self, password: str) -> tuple[str, list[str]] | None:
@@ -606,7 +670,7 @@ class AuthService:
         backup_codes: list[str] = []
         with self._write_lock:
             self._db.execute(
-                "UPDATE account SET totp_secret_encrypted = ?, totp_salt = ? WHERE id = 1",
+                "UPDATE account SET totp_secret_encrypted = ?, totp_salt = ?, totp_enabled = 0 WHERE id = 1",
                 [encrypted, totp_salt],
             )
             self._db.execute("DELETE FROM backup_codes")

@@ -224,6 +224,108 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     });
   });
 
+  it("offers Set up later on the optional authenticator step", () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      totpUri: "otpauth://totp/x?secret=LEGACY",
+      backupCodes: ["LEGACY01"],
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "nav",
+      currentStep: 1,
+    }));
+
+    render(<SetupAccountRoute />);
+
+    expect(screen.getByRole("button", { name: /set up later/i })).toBeEnabled();
+    expect(screen.getByText(/optional for Explore and Practice/i)).toBeInTheDocument();
+  });
+
+  it("Set up later continues the wizard without enabling 2FA", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      totpUri: "",
+      backupCodes: [],
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "nav",
+      currentStep: 1,
+    }));
+
+    render(<SetupAccountRoute />);
+    fireEvent.click(screen.getByRole("button", { name: /set up later/i }));
+
+    await waitFor(() => {
+      const progress = JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? "null") as {
+        accountCreated?: boolean;
+        currentStep?: number;
+      } | null;
+      expect(progress?.accountCreated).toBe(true);
+      expect(progress?.currentStep).toBe(2);
+    });
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(localStorage.getItem("flinttrade:demo-session")).toBeNull();
+  });
+
+  it("reopening Setup after Set up later still offers Delete account & start over", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      totpUri: "",
+      backupCodes: [],
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "nav",
+      currentStep: 1,
+    }));
+
+    render(<SetupAccountRoute />);
+
+    expect(screen.getByRole("button", { name: /delete account/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start over" })).toBeInTheDocument();
+  });
+
+  it("Start over wipes the unfinished account so setup can begin again", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      totpUri: "",
+      backupCodes: [],
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "nav",
+      currentStep: 1,
+    }));
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ status: "success", data: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    render(<SetupAccountRoute />);
+    fireEvent.click(screen.getByRole("button", { name: "Start over" }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Choose a username")).toBeInTheDocument(),
+    );
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/auth/setup/reset"))).toBe(true);
+    expect(localStorage.getItem(PROGRESS_KEY)).toBeNull();
+    expect(useAuthStore.getState().status).toBe("setup-required");
+    fetchSpy.mockRestore();
+  });
+
   it("requires password-backed 2FA regeneration after a recovery-step reload", () => {
     localStorage.setItem(PROGRESS_KEY, JSON.stringify({
       accountCreated: true,

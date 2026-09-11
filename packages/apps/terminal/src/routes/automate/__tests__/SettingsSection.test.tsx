@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -48,6 +48,17 @@ vi.mock("@/components/ui/GlassCard", () => ({
 
 vi.mock("@/services/api", () => ({
   sendTelegram: vi.fn(),
+}));
+
+const mockReadTelegramConfig = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({
+    status: "success",
+    data: { enabled: false, chat_id: "", bot_token_set: false },
+  }),
+);
+
+vi.mock("@/services/ftApi.telegram", () => ({
+  readTelegramConfig: () => mockReadTelegramConfig() as Promise<unknown>,
 }));
 
 vi.mock("@/services/ftApi", () => ({
@@ -107,6 +118,7 @@ function deferred<T>() {
 // ---------------------------------------------------------------------------
 
 import SettingsSection from "../SettingsSection";
+import { sendTelegram } from "@/services/api";
 import {
   activateKillSwitch,
   getSafetyConfig,
@@ -114,6 +126,19 @@ import {
   updateSafetyConfig,
   type SafetyConfig,
 } from "@/services/ftApi";
+
+const configuredTelegram = {
+  status: "success",
+  data: { enabled: true, chat_id: "-100123", bot_token_set: true },
+};
+
+const unconfiguredTelegram = {
+  status: "success",
+  data: { enabled: false, chat_id: "", bot_token_set: false },
+};
+
+const EXPLORE_TELEGRAM_HELPER =
+  "Telegram tests are blocked in Explore (sample-only). Switch to Practice or Live with Telegram configured to send a real test.";
 
 const partialEmergencyResult = {
   policy: "l5_emergency_flatten",
@@ -175,6 +200,8 @@ describe("SettingsSection", () => {
     vi.mocked(activateKillSwitch).mockReset();
     vi.mocked(resetKillSwitch).mockReset();
     vi.mocked(updateSafetyConfig).mockReset().mockResolvedValue({ status: "success" });
+    mockReadTelegramConfig.mockReset().mockResolvedValue(unconfiguredTelegram);
+    vi.mocked(sendTelegram).mockReset();
   });
 
   afterEach(() => {
@@ -457,5 +484,75 @@ describe("SettingsSection", () => {
 
     const button = await screen.findByRole("button", { name: "Activate Kill Switch" });
     expect(button.parentElement).toHaveClass("flex-wrap");
+  });
+
+  it("disarms Send Test in Explore and does not send on click or Enter", async () => {
+    const user = userEvent.setup();
+    mockMode.mode = "explore";
+    mockReadTelegramConfig.mockResolvedValue(configuredTelegram);
+    render(<SettingsSection />, { wrapper: createWrapper() });
+
+    const sendTest = await screen.findByRole("button", { name: "Send Test" });
+    expect(sendTest).toBeDisabled();
+    expect(sendTest).toHaveAttribute("data-variant", "outline");
+    expect(screen.getByDisplayValue("FlintTrade test alert — connection working!")).toBeInTheDocument();
+    expect(screen.getByText(EXPLORE_TELEGRAM_HELPER)).toBeInTheDocument();
+    expect(screen.queryByText("Configure Telegram first")).not.toBeInTheDocument();
+
+    await user.click(sendTest);
+    fireEvent.keyDown(
+      screen.getByDisplayValue("FlintTrade test alert — connection working!"),
+      { key: "Enter" },
+    );
+    expect(sendTelegram).not.toHaveBeenCalled();
+  });
+
+  it("keeps Send Test disarmed in Practice until Telegram is configured", async () => {
+    const user = userEvent.setup();
+    mockMode.mode = "practice";
+    render(<SettingsSection />, { wrapper: createWrapper() });
+
+    const sendTest = await screen.findByRole("button", { name: "Send Test" });
+    expect(sendTest).toBeDisabled();
+    expect(screen.getByText("Configure Telegram first")).toBeInTheDocument();
+    expect(screen.queryByText(EXPLORE_TELEGRAM_HELPER)).not.toBeInTheDocument();
+
+    await user.click(sendTest);
+    expect(sendTelegram).not.toHaveBeenCalled();
+  });
+
+  it("keeps Send Test disarmed in Live until Telegram is configured", async () => {
+    render(<SettingsSection />, { wrapper: createWrapper() });
+
+    const sendTest = await screen.findByRole("button", { name: "Send Test" });
+    expect(sendTest).toBeDisabled();
+    expect(screen.getByText("Configure Telegram first")).toBeInTheDocument();
+  });
+
+  it("arms Send Test in Practice when Telegram is configured", async () => {
+    const user = userEvent.setup();
+    mockMode.mode = "practice";
+    mockReadTelegramConfig.mockResolvedValue(configuredTelegram);
+    vi.mocked(sendTelegram).mockResolvedValue({ message: "sent" });
+    render(<SettingsSection />, { wrapper: createWrapper() });
+
+    const sendTest = await screen.findByRole("button", { name: "Send Test" });
+    await waitFor(() => expect(sendTest).toBeEnabled());
+    expect(screen.queryByText(EXPLORE_TELEGRAM_HELPER)).not.toBeInTheDocument();
+    expect(screen.queryByText("Configure Telegram first")).not.toBeInTheDocument();
+
+    await user.click(sendTest);
+    await waitFor(() => {
+      expect(sendTelegram).toHaveBeenCalledWith("FlintTrade test alert — connection working!");
+    });
+  });
+
+  it("arms Send Test in Live when Telegram is configured", async () => {
+    mockReadTelegramConfig.mockResolvedValue(configuredTelegram);
+    render(<SettingsSection />, { wrapper: createWrapper() });
+
+    const sendTest = await screen.findByRole("button", { name: "Send Test" });
+    await waitFor(() => expect(sendTest).toBeEnabled());
+    expect(screen.queryByText("Configure Telegram first")).not.toBeInTheDocument();
   });
 });

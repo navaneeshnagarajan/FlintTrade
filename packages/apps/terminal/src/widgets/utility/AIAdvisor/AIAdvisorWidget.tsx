@@ -9,14 +9,13 @@
  *   - Fallback to non-streaming endpoint on 404
  *   - MCP tool confirmation cards (Approve / Reject)
  *   - Clear chat button
- *   - "Not configured" state with guidance to Settings when LLM provider is unset
- *   - Checks advisor/status on mount to sync LLM config state
+ *   - Honest LLM chrome from advisor/status (not the local settings store)
+ *   - Composer gated until the probe reports configured
  */
 
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent, memo } from "react";
-import { safeParse, sseTokenSchema, wsMessageSchema } from "@/lib/safeParse";
-import { AdvisorStatusResponseSchema, AdvisorResponseSchema } from "@/lib/schemas/ftApi";
-import { Send, Bot, User, Loader2, Settings, Trash2, History, ChevronLeft } from "lucide-react";
+import { safeParse, wsMessageSchema } from "@/lib/safeParse";
+import { Send, Bot, User, Loader2, Settings, Trash2, History, ChevronLeft, RefreshCw } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import {
   getAiSession,
@@ -27,10 +26,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useSettingsStore } from "@/stores/settingsStore";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
 import { useAuthStore } from "@/stores/authStore";
-import { getAdvisorBase } from "@/services/advisorApi";
+import { useAdvisorLlmStatus } from "@/hooks/useAdvisorLlmStatus";
+import {
+  advisorLlmChromeLabel,
+  requestAdvisorReply,
+} from "@/services/advisorChat";
 import { placeOrder } from "@/services/api";
 import { checkOrderEntryMode, checkPriceForOrderType, type GuardedOrderType } from "@/lib/orderGuards";
 import { useModeStore } from "@/stores/modeStore";
@@ -74,18 +76,6 @@ export interface ChatMessage {
   toolCall?: ToolCall;
   toolStatus?: "pending" | "approved" | "rejected" | "failed";
 }
-
-// AdvisorResponse and AdvisorStatusResponse are validated via ftApi schemas;
-// keep local type aliases for the inferred shapes used below.
-type AdvisorResponse = {
-  status: "success" | "error";
-  data?: { response: string };
-  message?: string;
-};
-type AdvisorStatusResponse = {
-  status: "success" | "error";
-  data?: { configured: boolean; provider: string; model: string };
-};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -282,39 +272,8 @@ export async function executeApprovedToolCall(toolCall: ToolCall): Promise<Appro
   }
 }
 
-/**
- * Check if the LLM provider is configured in the settings store.
- */
-function useIsAIConfigured(): boolean {
-  return useSettingsStore((s) => s.llm.provider.length > 0);
-}
-
-/**
- * Fetch advisor status from the backend and sync LLM config into the settings store.
- */
-async function fetchAdvisorStatus(): Promise<void> {
-  try {
-    const token = useAuthStore.getState().token;
-    if (!token || token === "demo-user" || token === "dev-bypass") return;
-    const base = getAdvisorBase();
-    const resp = await fetch(`${base}/api/v1/advisor/status`);
-    if (!resp.ok) return;
-    const raw: unknown = await resp.json();
-    const result = AdvisorStatusResponseSchema.safeParse(raw);
-    if (!result.success) {
-      console.error("[AIAdvisorWidget] /advisor/status shape mismatch:", result.error.issues);
-      return;
-    }
-    const json = result.data as AdvisorStatusResponse;
-    if (json.status === "success" && json.data) {
-      useSettingsStore.getState().setLLM({
-        provider: json.data.provider,
-        model: json.data.model,
-      });
-    }
-  } catch {
-    // Backend may not be running — leave settings as-is
-  }
+function openSettingsLlm(): void {
+  window.dispatchEvent(new CustomEvent("flinttrade:navigate", { detail: "/settings#llm" }));
 }
 
 function advisorRequestContext(
@@ -329,117 +288,6 @@ function advisorRequestContext(
     : "";
 }
 
-/**
- * POST full conversation to the streaming endpoint (SSE).
- * Calls onToken for each chunk. Returns full assembled text.
- * Throws if the endpoint is not available (404 triggers fallback).
- */
-async function streamAdvisorMessage(
-  messages: Array<{ role: string; content: string }>,
-  onToken: (token: string, fullText: string) => void,
-  signal?: AbortSignal,
-  sessionId?: string,
-  analysisContext?: AISymbolContext,
-): Promise<string> {
-  const base = getAdvisorBase();
-  const resp = await fetch(`${base}/api/v1/advisor/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    // session_id enables server-side session capture (AI2 recall); omitted
-    // for demo sessions so fabricated chats never persist.
-    body: JSON.stringify({
-      messages,
-      context: advisorRequestContext(analysisContext),
-      ...(sessionId ? { session_id: sessionId } : {}),
-    }),
-    signal,
-  });
-
-  if (resp.status === 404) {
-    throw new Error("STREAMING_NOT_AVAILABLE");
-  }
-
-  if (!resp.ok) {
-    throw new Error(`Advisor API: HTTP ${resp.status}`);
-  }
-
-  const reader = resp.body?.getReader();
-  if (!reader) {
-    throw new Error("No readable stream in response");
-  }
-
-  const decoder = new TextDecoder();
-  let assistantText = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      let streamDone = false;
-      for (const line of chunk.split("\n")) {
-        if (!line.startsWith("data: ")) continue;
-        const raw = line.slice(6).trim();
-        if (!raw || raw === "[DONE]") continue;
-        const data = safeParse(raw, sseTokenSchema);
-        if (!data) continue;
-        if (data.done) { streamDone = true; break; }
-        if (data.token) {
-          assistantText += data.token;
-          onToken(data.token, assistantText);
-        }
-      }
-      if (streamDone) break;
-    }
-  } finally {
-    try { await reader.cancel(); } catch { /* already cancelled */ }
-    reader.releaseLock();
-  }
-
-  return assistantText;
-}
-
-/**
- * POST full conversation to the non-streaming advisor endpoint (fallback).
- */
-async function postAdvisorMessage(
-  messages: Array<{ role: string; content: string }>,
-  signal?: AbortSignal,
-  sessionId?: string,
-  analysisContext?: AISymbolContext,
-): Promise<string> {
-  const base = getAdvisorBase();
-  const resp = await fetch(`${base}/api/v1/advisor`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      messages,
-      // Legacy single-message field for backwards compat
-      message: messages[messages.length - 1]?.content ?? "",
-      context: advisorRequestContext(analysisContext),
-      ...(sessionId ? { session_id: sessionId } : {}),
-    }),
-    signal,
-  });
-
-  if (!resp.ok) {
-    throw new Error(`Advisor API: HTTP ${resp.status}`);
-  }
-
-  const raw: unknown = await resp.json();
-  const result = AdvisorResponseSchema.safeParse(raw);
-  if (!result.success) {
-    console.error("[AIAdvisorWidget] /advisor response shape mismatch:", result.error.issues);
-    return "Unexpected response format from advisor.";
-  }
-  const json = result.data as AdvisorResponse;
-
-  if (json.status === "error") {
-    return json.message ?? "Unknown error from advisor.";
-  }
-
-  return json.data?.response ?? "No response from advisor.";
-}
 
 // ---------------------------------------------------------------------------
 // Tool Confirmation Card
@@ -596,7 +444,6 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
   // Shared conversation store (synced with AITutorPill)
   // ---------------------------------------------------------------------------
   const storeMessages = useAIConversationStore((s) => s.messages);
-  const storeIsStreaming = useAIConversationStore((s) => s.isStreaming);
   const addMessage = useAIConversationStore((s) => s.addMessage);
   const setStreaming = useAIConversationStore((s) => s.setStreaming);
   const clearMessages = useAIConversationStore((s) => s.clearMessages);
@@ -620,12 +467,8 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const configured = useIsAIConfigured();
-
-  // On mount, check backend status to sync LLM config into settings store
-  useEffect(() => {
-    void fetchAdvisorStatus();
-  }, []);
+  const { chrome, configured, refetch: refetchAdvisorStatus } = useAdvisorLlmStatus();
+  const chatReady = configured;
 
   // Auto-scroll to bottom whenever messages change
   useEffect(() => {
@@ -703,7 +546,7 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
 
   const sendMessage = useCallback(async () => {
     const text = draft.trim();
-    if (!text || sending) return;
+    if (!text || sending || !chatReady) return;
 
     setDraft("");
     setSending(true);
@@ -741,19 +584,19 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
     let replyContent = "";
 
     try {
-      replyContent = await streamAdvisorMessage(
-        conversationPayload,
-        (_token, fullText) => {
+      replyContent = await requestAdvisorReply({
+        messages: conversationPayload,
+        context: advisorRequestContext(analysisContext),
+        sessionId: captureSessionId,
+        signal: controller.signal,
+        onToken: (_token, fullText) => {
           useAIConversationStore.setState((state) => ({
             messages: state.messages.map((m) =>
               m.id === assistantId ? { ...m, content: fullText } : m,
             ),
           }));
         },
-        controller.signal,
-        captureSessionId,
-        analysisContext,
-      );
+      });
 
       // Detect tool calls in the final reply and store in local meta
       const toolCall = parseToolCall(replyContent);
@@ -772,52 +615,15 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
         ),
       }));
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-
-      if (errMsg === "STREAMING_NOT_AVAILABLE") {
-        // Remove empty placeholder, fall back to non-streaming
+      const aborted =
+        controller.signal.aborted ||
+        (err instanceof DOMException && err.name === "AbortError");
+      if (aborted) {
         useAIConversationStore.setState((state) => ({
-          messages: state.messages.filter((m) => m.id !== assistantId),
+          messages: state.messages.filter((m) => m.id !== assistantId || Boolean(m.content.trim())),
         }));
-        setStreaming(false);
-
-        try {
-          replyContent = await postAdvisorMessage(
-            conversationPayload,
-            controller.signal,
-            captureSessionId,
-            analysisContext,
-          );
-        } catch (fallbackErr: unknown) {
-          const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-          replyContent = `Error: ${fallbackMsg}`;
-        }
-
-        const toolCall = parseToolCall(replyContent);
-        const newId = generateId();
-        useAIConversationStore.setState((state) => ({
-          messages: [
-            ...state.messages,
-            {
-              id: newId,
-              role: "assistant" as const,
-              content: replyContent,
-              timestamp: Date.now(),
-              route: state.currentRoute,
-            },
-          ],
-        }));
-        if (toolCall) {
-          setToolMeta((prev) => {
-            const next = new Map(prev);
-            next.set(newId, { toolCall, toolStatus: "pending" });
-            return next;
-          });
-        }
-      } else if (controller.signal.aborted) {
-        // Component unmounted — do nothing
       } else {
-        // Real error — replace empty placeholder with error text
+        const errMsg = err instanceof Error ? err.message : String(err);
         useAIConversationStore.setState((state) => ({
           messages: state.messages.map((m) =>
             m.id === assistantId ? { ...m, content: `Error: ${errMsg}` } : m,
@@ -830,7 +636,7 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
       abortRef.current = null;
       inputRef.current?.focus();
     }
-  }, [draft, sending, addMessage, setStreaming, analysisContext]);
+  }, [draft, sending, chatReady, addMessage, setStreaming, analysisContext]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
@@ -889,15 +695,41 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
             <Trash2 size={11} />
           </button>
         )}
+        {(chrome === "unconfigured" || chrome === "disconnected" || chrome === "error") && messages.length > 0 && (
+          <>
+            <button
+              type="button"
+              onClick={() => { void refetchAdvisorStatus(); }}
+              className="p-1 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors"
+              aria-label="Retry advisor status"
+              title="Retry advisor status"
+            >
+              <RefreshCw size={11} />
+            </button>
+            <button
+              type="button"
+              onClick={openSettingsLlm}
+              className="p-1 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors"
+              aria-label="Open Settings → AI"
+              title="Open Settings → AI"
+            >
+              <Settings size={11} />
+            </button>
+          </>
+        )}
         <span
           className={[
             "text-xxs font-medium px-1.5 py-0.5 rounded border",
-            configured
+            chrome === "ready"
               ? "text-profit bg-profit/10 border-profit/30"
-              : "text-text-muted bg-surface-hover border-border-default",
+              : chrome === "unconfigured"
+                ? "text-warning bg-warning/10 border-warning/30"
+                : chrome === "loading"
+                  ? "text-text-muted bg-surface-hover border-border-default"
+                  : "text-loss bg-loss/10 border-loss/30",
           ].join(" ")}
         >
-          {configured ? "Connected" : "Not configured"}
+          {advisorLlmChromeLabel(chrome)}
         </span>
       </div>
 
@@ -994,7 +826,7 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
         )
       ) : isEmpty ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 px-4 text-center">
-          {configured ? (
+          {chrome === "ready" ? (
             <>
               <Bot size={28} className="text-text-muted" />
               <div>
@@ -1004,25 +836,72 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
                 </p>
               </div>
             </>
+          ) : chrome === "loading" ? (
+            <>
+              <Loader2 size={28} className="text-text-muted animate-spin" />
+              <p className="text-xs text-text-muted">Checking advisor…</p>
+            </>
+          ) : chrome === "unconfigured" ? (
+            <>
+              <Settings size={28} className="text-text-muted" />
+              <div>
+                <p className="text-xs text-text-secondary">LLM not configured</p>
+                <p className="text-xs text-text-muted mt-1 leading-relaxed max-w-56">
+                  Configure your LLM provider in Settings → AI to enable the AI trading advisor.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  size="sm"
+                  className="h-6 text-xs px-2.5"
+                  onClick={openSettingsLlm}
+                >
+                  Open Settings → AI
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-xs px-2.5"
+                  aria-label="Retry advisor status"
+                  onClick={() => { void refetchAdvisorStatus(); }}
+                >
+                  <RefreshCw size={12} aria-hidden="true" />
+                  Retry
+                </Button>
+              </div>
+            </>
           ) : (
             <>
               <Settings size={28} className="text-text-muted" />
               <div>
-                <p className="text-xs text-text-secondary">LLM Not Configured</p>
+                <p className="text-xs text-text-secondary">
+                  {chrome === "disconnected" ? "Disconnected" : "Error"}
+                </p>
                 <p className="text-xs text-text-muted mt-1 leading-relaxed max-w-56">
-                  Configure your LLM provider in Settings &rarr; AI to enable the AI trading advisor.
+                  {chrome === "disconnected"
+                    ? "Could not reach the AI advisor. Check Settings → AI, or retry."
+                    : "Advisor status is unavailable. Check Settings → AI, or retry."}
                 </p>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 text-xs px-2.5 border-border-default text-text-secondary hover:text-text-primary"
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent("flinttrade:navigate", { detail: "/settings" }));
-                }}
-              >
-                Open Settings
-              </Button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-xs px-2.5"
+                  aria-label="Retry advisor status"
+                  onClick={() => { void refetchAdvisorStatus(); }}
+                >
+                  <RefreshCw size={12} aria-hidden="true" />
+                  Retry
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-6 text-xs px-2.5"
+                  onClick={openSettingsLlm}
+                >
+                  Open Settings → AI
+                </Button>
+              </div>
             </>
           )}
         </div>
@@ -1041,7 +920,9 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
                   onReject={handleReject}
                 />
               ))}
-              {sending && !storeIsStreaming && (
+              {sending &&
+                (messages[messages.length - 1]?.role !== "assistant" ||
+                  !messages[messages.length - 1]?.content.trim()) && (
                 <div className="flex gap-2 px-3 py-2">
                   <div className="w-5 h-5 rounded-full bg-surface-hover flex items-center justify-center shrink-0 mt-0.5">
                     <Bot size={10} className="text-text-secondary" />
@@ -1065,14 +946,14 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={configured ? "Ask the AI advisor..." : "Configure LLM in Settings first..."}
-          disabled={sending}
+          placeholder={chatReady ? "Ask the AI advisor..." : "Configure LLM in Settings first..."}
+          disabled={!chatReady || sending}
           className="h-10 flex-1 text-sm bg-surface-card border-border-default text-text-primary placeholder-text-muted rounded focus-visible:ring-1 focus-visible:ring-accent/50 disabled:opacity-60"
         />
         <Button
           size="sm"
           onClick={() => void sendMessage()}
-          disabled={!draft.trim() || sending}
+          disabled={!chatReady || !draft.trim() || sending}
           className="bg-accent text-white rounded-md px-4 h-10 shrink-0 hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           aria-label="Send message"
         >

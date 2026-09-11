@@ -14,8 +14,8 @@ describe("settingsStore", () => {
     expect(useSettingsStore.getState().persona).toBe("trader");
   });
 
-  it("initializes with compact density", () => {
-    expect(useSettingsStore.getState().density).toBe("compact");
+  it("initializes with comfortable density for new installs", () => {
+    expect(useSettingsStore.getState().density).toBe("comfortable");
   });
 
   it("updates persona", () => {

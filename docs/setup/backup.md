@@ -42,8 +42,9 @@ with `coordinated_restore_unavailable` and does not collect credential stores.
 remain unavailable and fail closed with the same code.
 
 Secret seed files such as `master_password`, `api_key_pepper`, `jwt_secret`,
-and `totp_install_key` are never archived. `workspace.json`, `auth.db`,
-`credentials.db`, and the other registered authority namespaces are excluded.
+`totp_install_key`, and `safety_gate_secret` are never archived.
+`workspace.json`, `auth.db`, `credentials.db`, and the other registered
+authority namespaces are excluded.
 
 Each archive embeds a `manifest.json` at the root so `list` can read metadata
 without extracting the payload.

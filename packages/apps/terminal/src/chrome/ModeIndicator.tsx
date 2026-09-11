@@ -32,6 +32,7 @@ import {
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { downgradeMode, unlockWithPin } from "@/lib/modeAuth";
+import { enableFlintTradeTotp } from "@/lib/setupAccountApi";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -45,6 +46,7 @@ export default function ModeIndicator() {
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pin, setPin] = useState("");
+  const [totpCode, setTotpCode] = useState("");
   const [pinError, setPinError] = useState("");
   const [toggleError, setToggleError] = useState("");
 
@@ -65,8 +67,9 @@ export default function ModeIndicator() {
       }
       setMode("practice");
     } else {
-      // Practice → Live: requires PIN confirmation
+      // Practice → Live: requires PIN confirmation (and TOTP if deferred)
       setPin("");
+      setTotpCode("");
       setPinError("");
       setConfirmOpen(true);
     }
@@ -82,6 +85,9 @@ export default function ModeIndicator() {
     }
     try {
       const expectedGeneration = useAuthStore.getState().sessionGeneration;
+      if (totpCode.length === 6) {
+        await enableFlintTradeTotp(totpCode);
+      }
       // Explicit Live arm: unlockWithPin defaults to mode "live", so the
       // backend mints a live_mode_unlocked JWT. Capturing it is essential —
       // otherwise the in-memory token stays at the Explore/Practice JWT from
@@ -101,11 +107,12 @@ export default function ModeIndicator() {
     setPinError("");
     setConfirmOpen(false);
     setMode("live");
-  }, [pin, setMode, updateToken]);
+  }, [pin, totpCode, setMode, updateToken]);
 
   const handleCancel = useCallback(() => {
     setConfirmOpen(false);
     setPin("");
+    setTotpCode("");
     setPinError("");
   }, []);
 
@@ -147,6 +154,7 @@ export default function ModeIndicator() {
               ? "Explore mode active — sample data only. Click to set up Practice mode."
               : "Explore mode active — sample data only. Click to switch to Practice mode."
           }
+          data-testid="execution-mode"
           className="h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-text-muted/15 text-text-secondary border border-text-muted/20 hover:bg-text-muted/25 hover:text-text-primary"
         >
           <Compass size={11} aria-hidden="true" />
@@ -171,6 +179,7 @@ export default function ModeIndicator() {
           variant="ghost"
           onClick={handleToggle}
           aria-label="Practice mode active — virtual capital. Click to switch to Live trading."
+          data-testid="execution-mode"
           className="h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 hover:text-amber-400"
         >
           <FlaskConical size={11} aria-hidden="true" />
@@ -188,6 +197,28 @@ export default function ModeIndicator() {
                     orders will be executed with <strong>real money</strong>{" "}
                     through your broker.
                   </p>
+                  <div>
+                    <label
+                      htmlFor="mode-totp"
+                      className="text-xs font-medium text-text-secondary block mb-1.5"
+                    >
+                      Authenticator code
+                    </label>
+                    <Input
+                      id="mode-totp"
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={totpCode}
+                      onChange={(e) => {
+                        setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                        if (pinError) setPinError("");
+                      }}
+                      placeholder="6-digit code if not enrolled yet"
+                      aria-label="Enter your authenticator code to enrol before Live"
+                      className="text-center font-mono text-lg tracking-widest max-w-40"
+                    />
+                  </div>
                   <div>
                     <label
                       htmlFor="mode-pin"
@@ -248,6 +279,7 @@ export default function ModeIndicator() {
         variant="ghost"
         onClick={handleToggle}
         aria-label="Live trading mode active — real money. Click to switch to Practice mode."
+        data-testid="execution-mode"
         className="h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-profit/20 text-profit border border-profit/40 hover:bg-profit/30 hover:text-profit"
       >
         <Zap size={11} aria-hidden="true" />

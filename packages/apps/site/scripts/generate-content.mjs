@@ -62,7 +62,7 @@ const fallbackScreenshotFiles = [
 const rootDocs = [
   ['docs/README.md', 'index', 'Docs', 'Project documentation index'],
   ['docs/INVENTORY.md', 'inventory', 'Docs', 'Build-status inventory: built & working, built but untested, referenced but not built'],
-  ['disclaimer.md', 'disclaimer', 'Safety', 'Alpha-stage, no-advice, trading-risk, and user-responsibility notice'],
+  ['disclaimer.md', 'disclaimer', 'Safety', 'Beta-stage, no-advice, trading-risk, and user-responsibility notice'],
   ['docs/DESKTOP.md', 'desktop', 'Setup', 'End-user desktop app install, uninstall, configuration, and local build guide'],
   ['docs/USER_GUIDE.md', 'user-guide', 'Docs', 'User guide for local setup and FlintTrade workspaces'],
   ['docs/DEVELOPER_GUIDE.md', 'developer-guide', 'Contributing', 'Contributor setup and extension guide'],

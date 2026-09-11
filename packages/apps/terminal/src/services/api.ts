@@ -44,6 +44,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { buildCompactOptionSymbol, normaliseExpiryForOptionSymbol } from "@/lib/optionSymbols";
+import { sampleChainOptionLtp } from "@/lib/sampleOptionChain";
 import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import {
   requireCurrentBrokerCapabilityScope,
@@ -1954,15 +1955,59 @@ function findMockQuote(symbol = "NIFTY", exchange = "NSE_INDEX"): Quote {
   };
 }
 
-function makeMockHistory(symbol?: string, exchange?: string): OHLCVBar[] {
+function makeMockSearch(
+  query: string,
+  exchange?: string,
+): Array<{ symbol: string; exchange: string }> {
+  const needle = query.trim().toUpperCase();
+  if (!needle) return [];
+  const exchangeFilter = exchange?.trim().toUpperCase();
+  return mockDataEngine.getSnapshot()
+    .filter((tick) => {
+      if (!tick.symbol.toUpperCase().includes(needle)) return false;
+      if (exchangeFilter && tick.exchange.toUpperCase() !== exchangeFilter) return false;
+      return true;
+    })
+    .map((tick) => ({ symbol: tick.symbol, exchange: tick.exchange }));
+}
+
+const MOCK_HISTORY_BAR_COUNT = 96;
+
+/** Seconds per Explore sample bar. Unknown intervals keep the historic 5-minute step. */
+const MOCK_HISTORY_INTERVAL_SECONDS: Record<string, number> = {
+  "1m": 60,
+  "3m": 180,
+  "5m": 300,
+  "15m": 900,
+  "30m": 1_800,
+  "1h": 3_600,
+  "4h": 14_400,
+  "1D": 86_400,
+  "1d": 86_400,
+  D: 86_400,
+  "1W": 604_800,
+  "1w": 604_800,
+  W: 604_800,
+};
+
+function mockHistoryIntervalSeconds(interval?: string): number {
+  if (!interval) return 300;
+  return MOCK_HISTORY_INTERVAL_SECONDS[interval] ?? 300;
+}
+
+function makeMockHistory(symbol?: string, exchange?: string, interval?: string): OHLCVBar[] {
   const quote = findMockQuote(symbol, exchange);
+  const step = mockHistoryIntervalSeconds(interval);
   const now = Math.floor(Date.now() / 1000);
-  return Array.from({ length: 96 }, (_, index) => {
+  // Calendar intervals align to midnight UTC so the time scale shows dates,
+  // not an 8-hour intraday clock leftover from the 5-minute sample.
+  const end = step >= 86_400 ? now - (now % 86_400) : now;
+  return Array.from({ length: MOCK_HISTORY_BAR_COUNT }, (_, index) => {
     const drift = Math.sin(index / 6) * quote.ltp * 0.002;
     const open = quote.ltp + drift;
     const close = open + Math.cos(index / 5) * quote.ltp * 0.0015;
     return {
-      timestamp: now - (95 - index) * 300,
+      timestamp: end - (MOCK_HISTORY_BAR_COUNT - 1 - index) * step,
       open,
       high: Math.max(open, close) + quote.ltp * 0.001,
       low: Math.min(open, close) - quote.ltp * 0.001,
@@ -2001,9 +2046,8 @@ function makeMockOptionChain(symbol = "NIFTY", exchange = "NSE_INDEX"): Record<s
     const offset = index - 10;
     const strike = atm + offset * step;
     const distance = Math.abs(offset);
-    const timeValue = step * 0.9 * Math.exp(-distance / 5);
-    const makeLeg = (intrinsic: number, oiBias: number) => ({
-      ltp: Math.round((Math.max(intrinsic, 0) + timeValue) * 100) / 100,
+    const makeLeg = (optionType: "CE" | "PE", oiBias: number) => ({
+      ltp: sampleChainOptionLtp(spot, strike, step, optionType),
       oi: Math.round((120_000 - distance * 8_000 + oiBias) * (1 + (distance % 3) * 0.1)),
       volume: Math.max(500, 40_000 - distance * 3_200),
       iv: Math.round((12 + distance * distance * 0.18 + (oiBias > 0 ? 0.6 : 0)) * 100) / 100,
@@ -2014,8 +2058,8 @@ function makeMockOptionChain(symbol = "NIFTY", exchange = "NSE_INDEX"): Record<s
     });
     return {
       strike,
-      ce: makeLeg(spot - strike, offset > 0 ? 15_000 : 0),
-      pe: makeLeg(strike - spot, offset < 0 ? 15_000 : 0),
+      ce: makeLeg("CE", offset > 0 ? 15_000 : 0),
+      pe: makeLeg("PE", offset < 0 ? 15_000 : 0),
     };
   });
   const totalCallOi = chain.reduce((sum, row) => sum + row.ce.oi, 0);
@@ -2328,13 +2372,19 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
       }));
       return { results } as T;
     }
-    case "history":
-      return makeMockHistory(symbol, exchange) as T;
+    case "history": {
+      const interval = typeof params.interval === "string" ? params.interval : undefined;
+      return makeMockHistory(symbol, exchange, interval) as T;
+    }
     case "expiry":
       return { expiry: makeMockExpiries() } as T;
     case "optionchain": {
       const underlying = typeof params.underlying === "string" ? params.underlying : symbol;
       return makeMockOptionChain(underlying, exchange) as T;
+    }
+    case "search": {
+      const query = typeof params.query === "string" ? params.query : "";
+      return makeMockSearch(query, exchange) as T;
     }
     case "symbol":
       return {
@@ -2537,11 +2587,36 @@ function exactOrderAuthorityMatchesCurrent(
     && nativeTarget.accountId === authority.accountId;
 }
 
+/**
+ * Explore paper fill. Never contacts the order proxy, SafetySystem, or a
+ * broker — Explore has no live session.
+ */
+function placeExploreSampleOrder(params: PlaceOrderParams): { orderId: string } {
+  const stamp = Date.now().toString(36).toUpperCase();
+  const symbol = params.symbol.replace(/[^A-Z0-9]/gi, "").slice(0, 12) || "ORDER";
+  return { orderId: `SAMPLE-${symbol}-${stamp}` };
+}
+
 async function postOrder<T>(
   ftEndpoint: string,
   body: object = {},
   authority?: PostOrderAuthorityPin,
 ): Promise<T> {
+  // Explore paper fill for place only. Checked before the generic mode-pin
+  // mismatch so Order Pad can confirm with a Practice pin while the store is
+  // still Explore. Live pins are still refused. The `placeOrder` export must
+  // stay a brace-depth-0 `postOrder("place", …)` call so the orders-contract
+  // lexer keeps seeing the Live frontend caller.
+  const currentModeForExplore = useModeStore.getState().mode;
+  if (currentModeForExplore === "explore" && ftEndpoint === "place") {
+    if (authority?.mode === "live") {
+      throw new Error(
+        `Order blocked: mode changed from ${authority.mode} to ${currentModeForExplore} before submission.`,
+      );
+    }
+    return placeExploreSampleOrder(body as PlaceOrderParams) as T;
+  }
+
   // Apply the order rate limit (10/s) — identical to OpenAlgo direct calls
   if (!orderLimiter.tryConsume()) {
     throw new Error(`Rate limit exceeded for ${ftEndpoint} (order: 10/s)`);

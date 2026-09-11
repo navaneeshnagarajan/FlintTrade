@@ -5,11 +5,44 @@ import { formatCurrency as formatINRCanonical } from "@/lib/formatters";
 
 import type { Leg, PayoffPoint, EquityPoint, PerfMetrics, Underlying } from "./types";
 
+/** Summary cards show this instead of modelling a blank premium as ₹0. */
+export const UNSET_PREMIUM_HELPER = "Enter premium to model payoff";
+
+/** Chip on Explore Long Call after seeding sample-chain LTP. */
+export const SAMPLE_PREMIUM_HELPER = "Sample premium — edit to model";
+
+/** Warning when the operator types an explicit ₹0. */
+export const ZERO_PREMIUM_WARNING = "Premium is ₹0 — payoff treats cost as free";
+
+/** True when any leg still has an unknown (null/blank) premium. */
+export function hasUnsetPremium(legs: readonly Leg[]): boolean {
+  return legs.some((leg) => !isPricedPremium(leg.premium));
+}
+
+/** True when any leg has an explicit typed ₹0 — distinct from unset. */
+export function hasExplicitZeroPremium(legs: readonly Leg[]): boolean {
+  return legs.some((leg) => leg.premium === 0);
+}
+
+export function isPricedPremium(premium: number | null | undefined): premium is number {
+  return typeof premium === "number" && Number.isFinite(premium);
+}
+
+/** Parse the premium input: blank → unset, `0` → explicit zero. */
+export function parsePremiumInput(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value)) return null;
+  return Math.max(0, value);
+}
+
 // Adapted from strategyTemplates.js — calculateNetPremium
-export function calculateNetPremium(legs: Leg[]): number {
+export function calculateNetPremium(legs: Leg[]): number | null {
+  if (hasUnsetPremium(legs)) return null;
   return legs.reduce((total, leg) => {
     const multiplier = leg.action === "BUY" ? 1 : -1;
-    return total + multiplier * leg.lots * leg.premium;
+    return total + multiplier * leg.lots * (leg.premium as number);
   }, 0);
 }
 
@@ -20,7 +53,10 @@ export function validateLegs(legs: Leg[]): { valid: boolean; error: string | nul
   for (let i = 0; i < legs.length; i++) {
     if (legs[i].strike <= 0)  return { valid: false, error: `Leg ${i + 1}: strike must be > 0` };
     if (legs[i].lots < 1)     return { valid: false, error: `Leg ${i + 1}: lots must be >= 1` };
-    if (legs[i].premium < 0)  return { valid: false, error: `Leg ${i + 1}: premium must be >= 0` };
+    const premium = legs[i].premium;
+    if (isPricedPremium(premium) && premium < 0) {
+      return { valid: false, error: `Leg ${i + 1}: premium must be >= 0` };
+    }
   }
   return { valid: true, error: null };
 }
@@ -33,6 +69,117 @@ export function formatINR(v: number): string {
   return formatINRCanonical(v);
 }
 
+/** Per-unit expiry P&L (lots included, contract lot-size not). */
+export function pnlAtExpiry(legs: Leg[], price: number): number {
+  let pnl = 0;
+  for (const leg of legs) {
+    if (!isPricedPremium(leg.premium)) continue;
+    const multiplier = leg.action === "BUY" ? 1 : -1;
+    const intrinsic =
+      leg.optionType === "CE"
+        ? Math.max(0, price - leg.strike)
+        : Math.max(0, leg.strike - price);
+    pnl += multiplier * leg.lots * (intrinsic - leg.premium);
+  }
+  return pnl;
+}
+
+export interface PayoffSummary {
+  /** +Infinity when the right-hand slope is positive (naked long calls, long straddles, …). */
+  maxProfit: number;
+  /** −Infinity when the right-hand slope is negative (naked short calls, short straddles, …). */
+  maxLoss: number;
+  breakevens: number[];
+}
+
+const PNL_EPS = 1e-9;
+
+/** Net call exposure — the slope of expiry P&L as spot → +∞. */
+function rightHandSlope(legs: Leg[]): number {
+  return legs.reduce((acc, leg) => {
+    if (leg.optionType !== "CE") return acc;
+    return acc + (leg.action === "BUY" ? 1 : -1) * leg.lots;
+  }, 0);
+}
+
+function uniqueStrikes(legs: Leg[]): number[] {
+  return [...new Set(legs.map((leg) => leg.strike).filter((strike) => strike > 0))].sort(
+    (a, b) => a - b,
+  );
+}
+
+/**
+ * Analytical expiry summary: evaluate kinks (spot 0 and every strike) and
+ * inspect the right-hand slope instead of taking min/max of a sampled curve.
+ *
+ * A ±15% scan caps unbounded legs (FT-LAB-001: NIFTY 22,500 ATM long call
+ * reported ₹2,53,125) and misses breakevens that sit on a flat-zero segment
+ * (zero-premium long call never changes sign).
+ */
+export function computePayoffSummary(legs: Leg[]): PayoffSummary | null {
+  if (legs.length === 0) {
+    return { maxProfit: 0, maxLoss: 0, breakevens: [] };
+  }
+  // Blank premium is unknown — do not model it as a free (₹0) long call.
+  if (hasUnsetPremium(legs)) return null;
+
+  const strikes = uniqueStrikes(legs);
+  const nodes = [0, ...strikes];
+  const pnls = nodes.map((price) => pnlAtExpiry(legs, price));
+  const slope = rightHandSlope(legs);
+
+  let maxProfit = -Infinity;
+  let maxLoss = Infinity;
+  for (const pnl of pnls) {
+    if (pnl > maxProfit) maxProfit = pnl;
+    if (pnl < maxLoss) maxLoss = pnl;
+  }
+  if (slope > PNL_EPS) maxProfit = Infinity;
+  else if (slope < -PNL_EPS) maxLoss = -Infinity;
+
+  return { maxProfit, maxLoss, breakevens: findBreakevens(nodes, pnls, slope) };
+}
+
+function findBreakevens(nodes: number[], pnls: number[], slope: number): number[] {
+  const candidates: number[] = [];
+
+  for (let i = 0; i < nodes.length - 1; i++) {
+    const pa = pnls[i];
+    const pb = pnls[i + 1];
+    if ((pa < -PNL_EPS && pb > PNL_EPS) || (pa > PNL_EPS && pb < -PNL_EPS)) {
+      candidates.push(nodes[i] + (-pa / (pb - pa)) * (nodes[i + 1] - nodes[i]));
+    }
+  }
+
+  const last = nodes[nodes.length - 1];
+  const pLast = pnls[pnls.length - 1];
+  if (Math.abs(slope) > PNL_EPS) {
+    const crossing = last - pLast / slope;
+    if (crossing > last + PNL_EPS) candidates.push(crossing);
+  }
+
+  for (let i = 0; i < nodes.length; i++) {
+    if (Math.abs(pnls[i]) > PNL_EPS) continue;
+    const leftZero = i === 0 || Math.abs(pnls[i - 1]) <= PNL_EPS;
+    const rightZero =
+      i === nodes.length - 1
+        ? Math.abs(slope) <= PNL_EPS
+        : Math.abs(pnls[i + 1]) <= PNL_EPS;
+    const leavesLeft = i > 0 && !leftZero;
+    const leavesRight = !rightZero;
+    if (leavesLeft || leavesRight) candidates.push(nodes[i]);
+  }
+
+  candidates.sort((a, b) => a - b);
+  const deduped: number[] = [];
+  for (const value of candidates) {
+    if (deduped.length === 0 || Math.abs(value - deduped[deduped.length - 1]) > 1e-6) {
+      deduped.push(value);
+    }
+  }
+  return deduped;
+}
+
 export function computePayoff(legs: Leg[], spotPrice: number): PayoffPoint[] {
   const range = spotPrice * 0.15;
   const steps = 40;
@@ -41,16 +188,7 @@ export function computePayoff(legs: Leg[], spotPrice: number): PayoffPoint[] {
 
   for (let i = 0; i <= steps; i++) {
     const price = spotPrice - range + i * step;
-    let pnl = 0;
-    for (const leg of legs) {
-      const multiplier = leg.action === "BUY" ? 1 : -1;
-      const intrinsic =
-        leg.optionType === "CE"
-          ? Math.max(0, price - leg.strike)
-          : Math.max(0, leg.strike - price);
-      pnl += multiplier * leg.lots * (intrinsic - leg.premium);
-    }
-    points.push({ price, pnl });
+    points.push({ price, pnl: pnlAtExpiry(legs, price) });
   }
   return points;
 }
@@ -67,7 +205,7 @@ export function estimateMargin(legs: Leg[], underlying: Underlying): number {
     if (leg.action === "SELL") {
       const notionalPerLot = leg.strike * underlying.lotSize;
       margin += 0.15 * notionalPerLot * leg.lots;
-    } else {
+    } else if (isPricedPremium(leg.premium)) {
       margin += leg.premium * leg.lots * underlying.lotSize;
     }
   }

@@ -17,7 +17,7 @@
  *     mode-preserving idle unlock that must NOT silently escalate to Live.
  *     Session-bound (policy D6): the backend requires the CURRENT session JWT
  *     alongside the PIN — a PIN alone can never mint a session, so the daily
- *     password+TOTP login stays mandatory after the token's 08:00 IST expiry.
+ *     daily password login stays mandatory after the token's 08:00 IST expiry.
  */
 
 import { useAuthStore } from "@/stores/authStore";

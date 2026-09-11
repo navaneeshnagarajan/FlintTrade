@@ -19,10 +19,13 @@ import React from "react";
 // ---------------------------------------------------------------------------
 
 const mockNavigate = vi.fn();
+const { mockLocation } = vi.hoisted(() => ({
+  mockLocation: { pathname: "/trade" },
+}));
 
 vi.mock("react-router", () => ({
   Outlet: () => <div data-testid="outlet-content">Page Content</div>,
-  useLocation: () => ({ pathname: "/trade" }),
+  useLocation: () => ({ pathname: mockLocation.pathname }),
   useNavigate: () => mockNavigate,
 }));
 
@@ -82,6 +85,27 @@ vi.mock("@/hooks/usePrevClose", () => ({
   usePrevClose: vi.fn(),
 }));
 
+const { mockBrokerConnected } = vi.hoisted(() => ({
+  mockBrokerConnected: { value: true },
+}));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: () => mockBrokerConnected.value,
+  useDirectBrokerConnected: () => mockBrokerConnected.value,
+}));
+
+vi.mock("@/services/ftApi", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/ftApi")>();
+  return {
+    ...actual,
+    getSafetyConfig: vi.fn().mockResolvedValue({
+      kill_switch_active: false,
+      daily_loss_hard_stop_active: false,
+      daily_loss_pause_active: false,
+    }),
+  };
+});
+
 vi.mock("@/hooks/useGlobalKeys", () => ({
   default: vi.fn(),
 }));
@@ -138,6 +162,9 @@ vi.mock("@/stores/authStore", () => ({
 
 import AppLayout from "../AppLayout";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
+import { useSettingsStore } from "@/stores/settingsStore";
+import { useDeskChromeStore } from "@/stores/deskChromeStore";
+import { useTradingStore } from "@/stores/tradingStore";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const appLayoutSource = () =>
@@ -182,6 +209,14 @@ describe("AppLayout", () => {
     localStorage.clear();
     // Ensure window.innerWidth is large enough to skip small screen overlay
     Object.defineProperty(window, "innerWidth", { value: 1920, writable: true });
+    useSettingsStore.setState({
+      density: "comfortable",
+      riskLimits: { ...useSettingsStore.getState().riskLimits, mtmStoploss: 0 },
+    });
+    useDeskChromeStore.setState({ toolsExpanded: false });
+    mockBrokerConnected.value = true;
+    useTradingStore.setState({ totalPnl: 0 });
+    mockLocation.pathname = "/trade";
   });
 
   it("renders header with TopBar and TickerBar, and a main landmark", () => {
@@ -211,8 +246,67 @@ describe("AppLayout", () => {
 
     renderApp();
 
+    expect(screen.getByTestId("primary-banner")).toHaveAttribute("data-banner-kind", "practice_sample");
     expect(screen.getByText(/practice mode/i)).toBeInTheDocument();
     expect(screen.getByText(/simulated/i)).toBeInTheDocument();
+  });
+
+  it("shows exactly one Explore sample banner and never a Live-risk stack", () => {
+    mockModeStore.mockImplementation((selector: (s: Record<string, unknown>) => unknown) =>
+      selector({ mode: "explore" }),
+    );
+
+    renderApp();
+
+    const banners = screen.getAllByTestId("primary-banner");
+    expect(banners).toHaveLength(1);
+    expect(banners[0]).toHaveAttribute("data-banner-kind", "explore_sample");
+    expect(banners[0]).toHaveTextContent(/sample only/i);
+    expect(banners[0]).not.toHaveTextContent(/Live/i);
+  });
+
+  it("shows the Live feed-disconnected banner when the feed is down", () => {
+    mockBrokerConnected.value = false;
+    renderApp();
+
+    const banners = screen.getAllByTestId("primary-banner");
+    expect(banners).toHaveLength(1);
+    expect(banners[0]).toHaveAttribute("data-banner-kind", "feed_disconnected");
+    expect(banners[0]).toHaveTextContent(/feed disconnected/i);
+  });
+
+  it("shows Live risk instead of feed-disconnected when daily-loss is active", () => {
+    mockBrokerConnected.value = false;
+    useSettingsStore.setState({
+      riskLimits: { ...useSettingsStore.getState().riskLimits, mtmStoploss: 5000 },
+    });
+    useTradingStore.setState({ totalPnl: -2500 });
+    renderApp();
+
+    const banners = screen.getAllByTestId("primary-banner");
+    expect(banners).toHaveLength(1);
+    expect(banners[0]).toHaveAttribute("data-banner-kind", "live_risk");
+    expect(banners[0]).toHaveTextContent(/Live risk/i);
+  });
+
+  it("hides the ticker strip on Compact desk until desk tools expand", () => {
+    useSettingsStore.setState({ density: "compact" });
+    renderApp();
+
+    expect(screen.queryByTestId("tickerbar")).not.toBeInTheDocument();
+
+    act(() => {
+      useDeskChromeStore.getState().setToolsExpanded(true);
+    });
+    expect(screen.getByTestId("tickerbar")).toBeInTheDocument();
+  });
+
+  it("keeps the ticker on Compact Home — disclosure is Trade-only", () => {
+    mockLocation.pathname = "/home";
+    useSettingsStore.setState({ density: "compact" });
+    renderApp();
+
+    expect(screen.getByTestId("tickerbar")).toBeInTheDocument();
   });
 
   it("does not show the daily welcome card in explore mode", () => {
