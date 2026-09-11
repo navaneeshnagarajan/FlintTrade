@@ -137,7 +137,7 @@ endpoints are marked.
 
 | Endpoint | Purpose |
 |---|---|
-| `gex` (**POST**) | Gamma Exposure dashboard data (alternative to the OpenAlgo passthrough; computed locally on historical chains). |
+| `gex` (**POST**) | FlintTrade analysis route: Gamma Exposure dashboard data, computed locally on historical chains. |
 | `volsurface` (**POST**) | Volatility surface across strikes and expiries. |
 | `ivsmile` (**POST**) | IV smile curve. |
 | `straddlepnl` (**POST**) | Live straddle P&L for an at-the-money pair. |

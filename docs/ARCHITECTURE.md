@@ -561,8 +561,11 @@ config.workspace.get("ui.theme")  # dot-notation access
 Feature packages do not read `os.environ` for data paths themselves. They
 use the `Workspace` class, which resolves the platform workspace directory
 (`FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME`, then the OS default)
-and honours explicit server overrides such as `DATA_DIR`, `AUDIT_LOG_DIR`,
-and `DUCKDB_PATH` (see `.env.example`).
+and `storage.fast` / `storage.archive` from `workspace.json`. Those workspace
+paths are distinct from specialised env overrides: `DATA_DIR` only affects
+`ditto_accounts_path()` and does not rewrite `config.workspace.fast_data_dir`;
+`AUDIT_LOG_DIR` is read by `audit_log_dir()`; `DUCKDB_PATH` is read by
+`duckdb_path()`.
 
 ---
 

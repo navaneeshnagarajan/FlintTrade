@@ -155,16 +155,18 @@ limits, broker-side position checks, and manual review of live-mode settings.
 
 ## Audit Logging
 
-FlintTrade writes local audit events for order and safety activity. The archive
-path is configurable and defaults to `archive/audit/` inside your workspace
-directory, which is platform-specific:
+FlintTrade writes local audit events for order and safety activity. The audit
+directory is resolved by `audit_log_dir()`: `AUDIT_LOG_DIR` (direct directory),
+then `<storage.archive>/audit` when `workspace.json` sets `storage.archive`,
+then `archive/audit/` inside the workspace directory
+(`FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME`, then the OS default):
 
 | Platform | Default audit archive |
 |---|---|
 | Linux | `~/.flinttrade/archive/audit/` |
 | macOS | `~/Library/Application Support/flinttrade/archive/audit/` |
 | Windows | `%APPDATA%\flinttrade\archive\audit\` |
-| Override | `AUDIT_LOG_DIR` (direct directory), otherwise `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME` |
+| Override | `AUDIT_LOG_DIR`, then `<storage.archive>/audit`, then the workspace `archive/audit/` path above |
 
 | Event | Typical fields |
 |---|---|
