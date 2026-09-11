@@ -52,6 +52,15 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Mutual Fund NAV dates look stale vs daily-update claim (FT-INVEST-001).**
+  Explore `/invest#mutual-funds` still shows NAV dates of
+  08-Apr-2026 while the app calendar is 11-Sep-2026, yet
+  copy claims “Updated daily after market close.” Expected:
+  dates consistent with that freshness claim, or Explore
+  sample copy that does not claim daily updates when the
+  fixture is months old. Product fix waits for the UI/UX
+  Designer call on refresh fixture vs soften Explore copy.
+
 - **Options Builder Explore Long Call no longer looks zero-risk (FT-LAB-003).**
   Explore `/lab` Options Builder now treats a blank premium as
   unknown: Payoff summary cards show `—` and
