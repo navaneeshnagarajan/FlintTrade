@@ -60,6 +60,7 @@ import type { WidgetProps } from "@/types/widgets";
 import { isMarketHours, tickKeyFor } from "@/lib/market";
 import {
   SESSION_OPEN_LABEL,
+  optionPremiumHint,
   orderPadCtaLabel,
   orderSuccessNotificationBody,
   orderSuccessNotificationTitle,
@@ -1051,14 +1052,7 @@ function OrderPadWidget(props: WidgetProps) {
               Option Premium
             </span>
             <p className="text-xxs text-text-muted">
-              {ltp > 0 ? (
-                <>
-                  Live premium ₹{ltp.toLocaleString("en-IN", { maximumFractionDigits: 2 })} — prefills
-                  the LIMIT/SL price field.
-                </>
-              ) : (
-                "Live premium unavailable — enter the limit price manually."
-              )}
+              {optionPremiumHint(appMode, ltp)}
             </p>
           </div>
         )}

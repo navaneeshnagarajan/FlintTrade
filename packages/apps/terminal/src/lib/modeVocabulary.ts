@@ -66,3 +66,21 @@ export function orderSuccessNotificationBody(mode: AppMode, orderId?: string): s
 
 /** Order Pad session chip — session status, never Live mode. */
 export const SESSION_OPEN_LABEL = "Session open";
+
+/** Options premium hint. Explore never says Live. */
+export function optionPremiumHint(mode: AppMode, ltp: number): string {
+  const amount = ltp.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  if (mode === "explore") {
+    return ltp > 0
+      ? `Sample premium ₹${amount} — prefills the LIMIT/SL price field.`
+      : "Sample premium unavailable — enter the limit price manually.";
+  }
+  if (mode === "practice") {
+    return ltp > 0
+      ? `Sandbox premium ₹${amount} — prefills the LIMIT/SL price field.`
+      : "Sandbox premium unavailable — enter the limit price manually.";
+  }
+  return ltp > 0
+    ? `Live premium ₹${amount} — prefills the LIMIT/SL price field.`
+    : "Live premium unavailable — enter the limit price manually.";
+}

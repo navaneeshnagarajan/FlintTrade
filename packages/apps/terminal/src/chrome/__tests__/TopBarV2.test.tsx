@@ -126,6 +126,7 @@ vi.mock("@/hooks/useSkillContent", () => ({
 
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
+import { useModeStore } from "@/stores/modeStore";
 import TopBarV2 from "../TopBarV2";
 
 function renderTopBarV2(tickerMode?: "off" | "pinned" | "scroll" | "marquee") {
@@ -175,6 +176,7 @@ describe("TopBarV2", () => {
     mockTimingsQuery.isLoading = false;
     useSettingsStore.setState({ density: "comfortable", tickerMode: "marquee" });
     useDeskChromeStore.setState({ toolsExpanded: false });
+    useModeStore.setState({ mode: "explore" });
   });
 
   afterEach(() => {
@@ -362,12 +364,25 @@ describe("TopBarV2", () => {
 
   it("keeps the terminal connected when a direct broker session exists and OpenAlgo ping fails", async () => {
     mockDirectBrokerConnected.value = true;
+    useModeStore.setState({ mode: "live" });
 
     renderTopBarV2();
 
     await waitFor(() => {
       expect(mockSetConnectionStatus).toHaveBeenCalledWith("connected");
     });
+  });
+
+  it("never paints Connected in Explore even if a leftover broker session exists", async () => {
+    mockDirectBrokerConnected.value = true;
+    useModeStore.setState({ mode: "explore" });
+
+    renderTopBarV2();
+
+    await waitFor(() => {
+      expect(mockSetConnectionStatus).toHaveBeenCalledWith("disconnected");
+    });
+    expect(mockSetConnectionStatus).not.toHaveBeenCalledWith("connected");
   });
 
   it("renders the fullscreen button", () => {

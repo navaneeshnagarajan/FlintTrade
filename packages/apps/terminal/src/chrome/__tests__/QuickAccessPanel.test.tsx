@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useModeStore } from "@/stores/modeStore";
 import QuickAccessPanel from "../QuickAccessPanel";
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,7 @@ beforeEach(() => {
     })),
   });
   mockNavigate.mockClear();
+  useModeStore.setState({ mode: "explore" });
 });
 
 // ---------------------------------------------------------------------------
@@ -107,7 +109,15 @@ describe("QuickAccessPanel", () => {
     expect(dialog).toBeInTheDocument();
   });
 
-  it("shows connection status text when connected", () => {
+  it("labels Explore as sample data, never Connected/green", () => {
+    useModeStore.setState({ mode: "explore" });
+    renderPanel();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+  });
+
+  it("shows connection status text when connected in Live", () => {
+    useModeStore.setState({ mode: "live" });
     renderPanel();
     expect(screen.getByText("Connected")).toBeInTheDocument();
   });

@@ -319,7 +319,9 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   // demo ping.
   useEffect(() => {
     if (mode === "explore") {
-      setStatus(directBrokerConnected ? "connected" : "disconnected");
+      // Explore is broker-free. A leftover native session must not paint
+      // Connected/green — same honesty as FT-AI-002 / FT-AUTO-002.
+      setStatus("disconnected");
       return;
     }
     const check = async () => {

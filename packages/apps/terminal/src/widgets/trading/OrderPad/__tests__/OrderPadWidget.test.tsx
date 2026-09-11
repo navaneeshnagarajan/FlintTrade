@@ -345,12 +345,22 @@ describe("OrderPadWidget options premium prefill", () => {
     expect(Number(priceInput.value)).toBe(623.45);
   });
 
-  it("shows the live premium hint on options exchanges", () => {
+  it("shows the sandbox premium hint on options exchanges in Practice", () => {
+    mockMode.current = "practice";
     vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 623.45 });
     renderOptionsPad();
 
     expect(screen.getByText("Option Premium")).toBeInTheDocument();
-    expect(screen.getByText(/Live premium ₹623.45/)).toBeInTheDocument();
+    expect(screen.getByText(/Sandbox premium ₹623.45/)).toBeInTheDocument();
+  });
+
+  it("labels Explore option premium as sample, not Live", () => {
+    mockMode.current = "explore";
+    vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 623.45 });
+    renderOptionsPad();
+
+    expect(screen.getByText(/Sample premium ₹623.45/)).toBeInTheDocument();
+    expect(screen.queryByText(/Live premium/i)).not.toBeInTheDocument();
   });
 
   it("leaves the price empty and asks for manual entry when no premium is available", () => {

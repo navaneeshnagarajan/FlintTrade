@@ -28,8 +28,9 @@ import KeyboardShortcutsDialog from "@/components/KeyboardShortcuts/KeyboardShor
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import { appendAISymbolContext } from "@/lib/aiSymbolContext";
-import { primaryBannerCopy, selectPrimaryBanner } from "@/lib/primaryBanner";
+import { primaryBannerCopy } from "@/lib/primaryBanner";
 import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
+import { usePrimaryBannerKind } from "@/hooks/usePrimaryBannerKind";
 
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
@@ -433,7 +434,7 @@ export default function AppLayout() {
     setShowWelcome(false);
   }, []);
 
-  const primaryBannerKind = selectPrimaryBanner({ mode });
+  const primaryBannerKind = usePrimaryBannerKind();
   const primaryBannerText = primaryBannerCopy(primaryBannerKind);
 
   return (
@@ -481,14 +482,18 @@ export default function AppLayout() {
           className={
             primaryBannerKind === "explore_sample"
               ? "bg-text-muted/10 border-b border-text-muted/20 px-4 py-1 text-center"
-              : "bg-amber-500/10 border-b border-amber-500/20 px-4 py-1 text-center"
+              : primaryBannerKind === "live_risk" || primaryBannerKind === "feed_disconnected"
+                ? "bg-loss/10 border-b border-loss/20 px-4 py-1 text-center"
+                : "bg-amber-500/10 border-b border-amber-500/20 px-4 py-1 text-center"
           }
         >
           <p
             className={
               primaryBannerKind === "explore_sample"
                 ? "text-xs text-text-muted"
-                : "text-xs text-amber-400"
+                : primaryBannerKind === "live_risk" || primaryBannerKind === "feed_disconnected"
+                  ? "text-xs text-loss"
+                  : "text-xs text-amber-400"
             }
           >
             {primaryBannerText}
@@ -528,7 +533,7 @@ export default function AppLayout() {
       {showWelcome && mode !== "explore" && (
         <DailyWelcome onDismiss={handleDismissWelcome} />
       )}
-      <NoConnectionOverlay />
+      <NoConnectionOverlay suppress={primaryBannerKind === "live_risk"} />
       {authStatus === "pin-required" && <LockScreen />}
       <KeyboardShortcutsDialog
         isOpen={showShortcuts}

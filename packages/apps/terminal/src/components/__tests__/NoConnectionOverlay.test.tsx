@@ -139,6 +139,14 @@ describe("NoConnectionOverlay", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 
+  it("does not stack on the Live-risk primary banner", () => {
+    render(<NoConnectionOverlay suppress />);
+    act(() => {
+      vi.advanceTimersByTime(5100);
+    });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
   it.each(["explore", "practice"])(
     "does not block the %s workspace when broker data is unavailable",
     (mode) => {

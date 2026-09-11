@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SESSION_OPEN_LABEL,
+  optionPremiumHint,
   orderPadCtaLabel,
   orderReviewConfirmAria,
   orderReviewDescription,
@@ -45,5 +46,13 @@ describe("FT-UX-001 mode vocabulary", () => {
   it("session-open chip is session status, not Live mode", () => {
     expect(SESSION_OPEN_LABEL).toBe("Session open");
     expect(SESSION_OPEN_LABEL).not.toMatch(/Live/i);
+  });
+
+  it("Explore option premium is labelled sample, not Live", () => {
+    expect(optionPremiumHint("explore", 623.45)).toMatch(/Sample premium ₹623.45/);
+    expect(optionPremiumHint("explore", 623.45)).not.toMatch(/Live|Practice/i);
+    expect(optionPremiumHint("explore", 0)).toMatch(/Sample premium unavailable/);
+    expect(optionPremiumHint("practice", 623.45)).toMatch(/Sandbox premium/);
+    expect(optionPremiumHint("live", 623.45)).toMatch(/Live premium ₹623.45/);
   });
 });
