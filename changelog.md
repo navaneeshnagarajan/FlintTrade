@@ -29,6 +29,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
+- **Learn Glossary Lot Size freshness (FT-LEARN-002).**
+  Explore `/learn` → Glossary → Lot Size still teaches
+  `NIFTY=25`, `BANKNIFTY=15`, which is stale versus current
+  NSE F&O lot sizes and can mis-size risk. Expected: current
+  lot sizes, or a dated “as of” plus a link to the exchange
+  circular, so Learn does not teach wrong sizing. Product
+  work waits on this same PR after the UI/UX Designer call
+  on copy/date honesty for Learn Glossary market facts.
+  Independent of #213 (FT-UX-001).
+
 - **OpenAlgo-style password-first Explore; TOTP only before Live (FT-SETUP-002).**
   Setup and daily login are password-only for Explore and Practice.
   Authenticator enrolment is optional (“Set up later”) on day one.

@@ -326,6 +326,14 @@ Settings → Brokers (`/settings#brokers`). Point the Broker Gateway at
 that OpenAlgo Practice instance, trade against virtual funds, review
 P&L, then point OpenAlgo at live credentials when ready.
 
+**Pending (FT-LEARN-002).** Explore `/learn` → Glossary → Lot Size still
+shows `NIFTY=25`, `BANKNIFTY=15`. Those figures are stale versus current
+NSE F&O lot sizes and can mis-size risk. Product copy must use current
+lot sizes or a dated “as of” plus a link to the exchange circular. The
+UI/UX Designer call on copy/date honesty for Learn Glossary market facts
+lands on this same PR; do not treat the Glossary figures as live contract
+sizes until then.
+
 ---
 
 ## 4. Live-mode safeguard verification
