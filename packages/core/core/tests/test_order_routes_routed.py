@@ -6,9 +6,9 @@ BrokerNotFoundError -> 503, safety-layer block -> 403, bad body -> 400, happy
 path -> 200) now that both the routed endpoint and the legacy ``/place`` flow
 through the shared ``_dispatch_live_order`` helper.
 
-A minimal Flask app (no full create_flask_app) with a mocked BrokerRouter +
-SafetySystem is sufficient because the JWT secret is a process-global lazily
-loaded by ``auth_routes._get_jwt_secret`` (no app context required).
+A minimal Flask app (no full create_flask_app) uses a mocked BrokerRouter with
+a real test-owned backend lease. Safety gates remain real; the JWT secret is
+loaded lazily by ``auth_routes._get_jwt_secret`` (no app context required).
 """
 
 from __future__ import annotations
@@ -45,10 +45,12 @@ def _bind_secret() -> None:
     set_safety_gate_secret(_SECRET)
 
 
-def _app(broker_router: object | None = None, safety: object | None = None) -> Flask:
+def _app(backend_lease_proof, broker_router: object | None = None, safety: object | None = None) -> Flask:
     if safety is None:
         safety = _passing_safety()
     app = Flask(__name__)
+    if broker_router is not None:
+        broker_router.backend_lease_proof = backend_lease_proof
     app.config["BROKER_ROUTER"] = broker_router
     app.config["SAFETY"] = safety
     app.config["SAFETY_CONFIG_READY"] = safety is not None
@@ -89,14 +91,14 @@ def _router_with_execution_default(selector: str) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
-def test_routed_order_requires_auth() -> None:
-    client = _app().test_client()
+def test_routed_order_requires_auth(backend_lease_proof) -> None:
+    client = _app(backend_lease_proof).test_client()
     resp = client.post("/api/v1/orders/dhan/place", json={"symbol": "RELIANCE"})
     assert resp.status_code == 401
 
 
-def test_routed_order_route_is_registered() -> None:
-    rules = {r.rule for r in _app().url_map.iter_rules()}
+def test_routed_order_route_is_registered(backend_lease_proof) -> None:
+    rules = {r.rule for r in _app(backend_lease_proof).url_map.iter_rules()}
     assert "/api/v1/orders/<broker>/place" in rules
     assert "/api/v1/orders/<broker>/modify" in rules
     assert "/api/v1/orders/<broker>/cancel" in rules
@@ -107,17 +109,17 @@ def test_routed_order_route_is_registered() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_routed_order_no_broker_router_returns_503() -> None:
-    client = _app(broker_router=None, safety=_passing_safety()).test_client()
+def test_routed_order_no_broker_router_returns_503(backend_lease_proof) -> None:
+    client = _app(backend_lease_proof, broker_router=None, safety=_passing_safety()).test_client()
     resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 503
     assert "routing unavailable" in resp.get_json()["message"].lower()
 
 
-def test_routed_order_refuses_unvalidated_safety_runtime() -> None:
+def test_routed_order_refuses_unvalidated_safety_runtime(backend_lease_proof) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
-    app = _app(broker_router=router, safety=_passing_safety())
+    app = _app(backend_lease_proof, broker_router=router, safety=_passing_safety())
     app.config["SAFETY_CONFIG_READY"] = False
 
     response = app.test_client().post(
@@ -131,16 +133,16 @@ def test_routed_order_refuses_unvalidated_safety_runtime() -> None:
     router.place_order.assert_not_called()
 
 
-def test_routed_order_safety_bypass_returns_403() -> None:
+def test_routed_order_safety_bypass_returns_403(backend_lease_proof) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(side_effect=SafetyBypassError("actor not authorised"))
-    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
     resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 403
     assert "refused" in resp.get_json()["message"].lower()
 
 
-def test_routed_order_algo_tag_limit_returns_429() -> None:
+def test_routed_order_algo_tag_limit_returns_429(backend_lease_proof) -> None:
     """The router's algo-tag guard refusing a dispatch (per-exchange per-second
     algo ceiling, G10) maps to 429 — a throttle refusal callers should retry,
     not a 403 safety bypass and not a 500."""
@@ -148,22 +150,22 @@ def test_routed_order_algo_tag_limit_returns_429() -> None:
 
     router = MagicMock()
     router.place_order = AsyncMock(side_effect=AlgoTagLimitError("dhan/NSE algo ceiling reached"))
-    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
     resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 429
     assert "refused" in resp.get_json()["message"].lower()
 
 
-def test_routed_order_broker_not_found_returns_503() -> None:
+def test_routed_order_broker_not_found_returns_503(backend_lease_proof) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(side_effect=BrokerNotFoundError("no session for openalgo:default"))
-    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
     resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 503
     assert "not connected" in resp.get_json()["message"].lower()
 
 
-def test_routed_order_safety_layer_block_returns_403() -> None:
+def test_routed_order_safety_layer_block_returns_403(backend_lease_proof) -> None:
     blocked = MagicMock()
     blocked.passed = False
     blocked.layer = "L5_KILL"
@@ -172,14 +174,14 @@ def test_routed_order_safety_layer_block_returns_403() -> None:
     safety.check_order.return_value = [blocked]
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
-    client = _app(broker_router=router, safety=safety).test_client()
+    client = _app(backend_lease_proof, broker_router=router, safety=safety).test_client()
     resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 403
     assert "L5_KILL" in resp.get_json()["message"]
     router.place_order.assert_not_called()  # blocked before any dispatch
 
 
-def test_routed_order_checks_prospective_greeks_before_router(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_routed_order_checks_prospective_greeks_before_router(monkeypatch: pytest.MonkeyPatch, backend_lease_proof) -> None:
     from flinttrade_core import order_routes
 
     blocked = MagicMock(
@@ -209,7 +211,7 @@ def test_routed_order_checks_prospective_greeks_before_router(monkeypatch: pytes
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
 
-    response = _app(broker_router=router, safety=safety).test_client().post(
+    response = _app(backend_lease_proof, broker_router=router, safety=safety).test_client().post(
         "/api/v1/orders/openalgo/place",
         json=_LIVE_BODY,
         headers=_live_headers(),
@@ -221,10 +223,10 @@ def test_routed_order_checks_prospective_greeks_before_router(monkeypatch: pytes
     router.place_order.assert_not_called()
 
 
-def test_routed_order_invalid_body_returns_400() -> None:
+def test_routed_order_invalid_body_returns_400(backend_lease_proof) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="X")
-    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
     bad = {**_LIVE_BODY, "action": "SIDEWAYS"}  # not BUY/SELL — enum coercion fails
     resp = client.post("/api/v1/orders/openalgo/place", json=bad, headers=_live_headers())
     assert resp.status_code == 400
@@ -232,12 +234,12 @@ def test_routed_order_invalid_body_returns_400() -> None:
     router.place_order.assert_not_called()
 
 
-def test_routed_order_non_integer_quantity_returns_400() -> None:
+def test_routed_order_non_integer_quantity_returns_400(backend_lease_proof) -> None:
     # A fat-finger non-integer quantity must be a clean 400, not a 500 from the
     # int(...) coercion inside SafetySystem.check_order (re-audit MEDIUM).
     router = MagicMock()
     router.place_order = AsyncMock(return_value="X")
-    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
     bad = {**_LIVE_BODY, "quantity": "10.5"}
     resp = client.post("/api/v1/orders/openalgo/place", json=bad, headers=_live_headers())
     assert resp.status_code == 400
@@ -245,10 +247,10 @@ def test_routed_order_non_integer_quantity_returns_400() -> None:
     router.place_order.assert_not_called()
 
 
-def test_routed_happy_path_returns_200() -> None:
+def test_routed_happy_path_returns_200(backend_lease_proof) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="OA-999")
-    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
     resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
     assert resp.status_code == 200
     data = resp.get_json()
@@ -265,12 +267,14 @@ def test_routed_happy_path_returns_200() -> None:
     dispatched = router.place_order.await_args.kwargs["order"]
     assert isinstance(dispatched, Order)
     assert dispatched.symbol == "RELIANCE"
+    assert router.place_order.await_args.kwargs["safety_ctx"].backend_incarnation == str(backend_lease_proof.incarnation)
 
 
-def test_legacy_place_uses_configured_execution_default_when_target_omitted() -> None:
+def test_legacy_place_uses_configured_execution_default_when_target_omitted(backend_lease_proof) -> None:
     router = _router_with_execution_default("upstox:U1")
     router.place_order = AsyncMock(return_value="UP-1")
     app, _adapter, _registry = _app_with_native_state(
+        backend_lease_proof,
         router,
         _passing_safety(),
         adapter_id="upstox",
@@ -301,13 +305,14 @@ def _real_safety(**cfg):
     return SafetySystem(SafetyConfig(check_market_hours=False, **cfg))
 
 
-def _app_with_client(router, safety, client):
-    app = _app(broker_router=router, safety=safety)
+def _app_with_client(backend_lease_proof, router, safety, client):
+    app = _app(backend_lease_proof, broker_router=router, safety=safety)
     app.config["OPENALGO_CLIENT"] = client
     return app
 
 
 def _app_with_native_state(
+    backend_lease_proof,
     router,
     safety,
     *,
@@ -320,7 +325,7 @@ def _app_with_native_state(
     trades=None,
     quotes=None,
 ):
-    app = _app(broker_router=router, safety=safety)
+    app = _app(backend_lease_proof, broker_router=router, safety=safety)
     session = object()
     registry = MagicMock()
     registry.get_session_for.return_value = session
@@ -442,7 +447,7 @@ def _pos(symbol, qty):
     return Position(symbol=symbol, exchange="NSE", product="MIS", quantity=str(qty))
 
 
-def test_L4_uses_local_tradebook_mtm_and_never_activates_L5() -> None:
+def test_L4_uses_local_tradebook_mtm_and_never_activates_L5(backend_lease_proof) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     safety = _real_safety(pnl_pause_pct=5.0, pnl_kill_pct=50.0)
@@ -468,7 +473,7 @@ def test_L4_uses_local_tradebook_mtm_and_never_activates_L5() -> None:
             },
         ],
     )
-    app = _app_with_client(router, safety, client)
+    app = _app_with_client(backend_lease_proof, router, safety, client)
 
     first = app.test_client().post(
         "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
@@ -486,7 +491,7 @@ def test_L4_uses_local_tradebook_mtm_and_never_activates_L5() -> None:
     router.place_order.assert_not_called()
 
 
-def test_L4_local_tradebook_hard_stop_never_dispatches_L5() -> None:
+def test_L4_local_tradebook_hard_stop_never_dispatches_L5(backend_lease_proof) -> None:
     from flinttrade_engine.safety import SafetyConfig, SafetySystem
 
     router = MagicMock()
@@ -511,7 +516,7 @@ def test_L4_local_tradebook_hard_stop_never_dispatches_L5() -> None:
         ],
         quotes=[{"symbol": "INFY", "exchange": "NSE", "ltp": 90, "prev_close": 80}],
     )
-    app = _app_with_client(router, safety, client)
+    app = _app_with_client(backend_lease_proof, router, safety, client)
 
     response = app.test_client().post(
         "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
@@ -525,14 +530,14 @@ def test_L4_local_tradebook_hard_stop_never_dispatches_L5() -> None:
     router.place_order.assert_not_called()
 
 
-def test_L2_blocks_when_at_max_positions_from_live_state() -> None:
+def test_L2_blocks_when_at_max_positions_from_live_state(backend_lease_proof) -> None:
     """With real live positions ≥ the configured max, L2 blocks the order —
     previously L2 ran on an empty list and never fired."""
     router = MagicMock()
     router.place_order = AsyncMock(return_value="X")
     safety = _real_safety(max_positions=1)
     client = _fake_client([_pos("INFY", 50)])  # already 1 open position; max is 1
-    app = _app_with_client(router, safety, client)
+    app = _app_with_client(backend_lease_proof, router, safety, client)
     resp = app.test_client().post(
         "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
     )
@@ -541,13 +546,13 @@ def test_L2_blocks_when_at_max_positions_from_live_state() -> None:
     router.place_order.assert_not_called()
 
 
-def test_L2_blocks_when_margin_over_limit_from_live_funds() -> None:
+def test_L2_blocks_when_margin_over_limit_from_live_funds(backend_lease_proof) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="X")
     safety = _real_safety(max_positions=10, max_margin_pct=60.0)
     # 80% margin used → over the 60% cap.
     client = _fake_client([], used_margin="80000", total_balance="100000")
-    app = _app_with_client(router, safety, client)
+    app = _app_with_client(backend_lease_proof, router, safety, client)
     resp = app.test_client().post(
         "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
     )
@@ -556,26 +561,26 @@ def test_L2_blocks_when_margin_over_limit_from_live_funds() -> None:
     router.place_order.assert_not_called()
 
 
-def test_L2_float_string_quantity_tolerated() -> None:
+def test_L2_float_string_quantity_tolerated(backend_lease_proof) -> None:
     """A position quantity like "50.0" must not 500 the order (L2 tolerant parse)."""
     router = MagicMock()
     router.place_order = AsyncMock(return_value="OA-1")
     safety = _real_safety(max_positions=10)
     client = _fake_client([_pos("INFY", "50.0")])
-    app = _app_with_client(router, safety, client)
+    app = _app_with_client(backend_lease_proof, router, safety, client)
     resp = app.test_client().post(
         "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
     )
     assert resp.status_code == 200
 
 
-def test_non_finite_position_quantity_fails_closed_without_500() -> None:
+def test_non_finite_position_quantity_fails_closed_without_500(backend_lease_proof) -> None:
     """A non-finite quantity cannot become a zero-loss L4 snapshot."""
     router = MagicMock()
     router.place_order = AsyncMock(return_value="OA-3")
     safety = _real_safety(max_positions=10)
     client = _fake_client([_pos("INFY", "Infinity")])
-    app = _app_with_client(router, safety, client)
+    app = _app_with_client(backend_lease_proof, router, safety, client)
     resp = app.test_client().post(
         "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
     )
@@ -584,7 +589,7 @@ def test_non_finite_position_quantity_fails_closed_without_500() -> None:
     router.place_order.assert_not_called()
 
 
-def test_gather_l2_state_uses_selector_matched_broker_state() -> None:
+def test_gather_l2_state_uses_selector_matched_broker_state(backend_lease_proof) -> None:
     """_gather_l2_state must read the selector's broker account.
 
     OpenAlgo state is valid only for ``openalgo:*``; native selectors must use
@@ -594,6 +599,7 @@ def test_gather_l2_state_uses_selector_matched_broker_state() -> None:
     from flinttrade_core.order_routes import _gather_l2_state
 
     app, adapter, registry = _app_with_native_state(
+        backend_lease_proof,
         MagicMock(),
         _passing_safety(),
         positions=[_pos("TCS", 25)],
@@ -621,7 +627,7 @@ def test_gather_l2_state_uses_selector_matched_broker_state() -> None:
         openalgo_client.funds.assert_not_awaited()
 
 
-def test_portfolio_state_fetch_failure_blocks_order() -> None:
+def test_portfolio_state_fetch_failure_blocks_order(backend_lease_proof) -> None:
     """An unreadable portfolio must not be interpreted as zero daily loss."""
     router = MagicMock()
     router.place_order = AsyncMock(return_value="OA-2")
@@ -629,7 +635,7 @@ def test_portfolio_state_fetch_failure_blocks_order() -> None:
     client = MagicMock()
     client.positionbook = AsyncMock(side_effect=RuntimeError("broker down"))
     client.funds = AsyncMock(return_value=None)
-    app = _app_with_client(router, safety, client)
+    app = _app_with_client(backend_lease_proof, router, safety, client)
     resp = app.test_client().post(
         "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
     )
@@ -637,12 +643,13 @@ def test_portfolio_state_fetch_failure_blocks_order() -> None:
     router.place_order.assert_not_called()
 
 
-def test_native_L2_blocks_when_at_max_positions_from_live_state() -> None:
+def test_native_L2_blocks_when_at_max_positions_from_live_state(backend_lease_proof) -> None:
     """Native routed orders feed native live positions into L2 before dispatch."""
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     safety = _real_safety(max_positions=1)
     app, adapter, _registry = _app_with_native_state(
+        backend_lease_proof,
         router,
         safety,
         positions=[_pos("INFY", 50)],
@@ -660,11 +667,12 @@ def test_native_L2_blocks_when_at_max_positions_from_live_state() -> None:
     adapter.funds.assert_awaited_once()
 
 
-def test_native_L2_blocks_when_margin_over_limit_from_live_funds() -> None:
+def test_native_L2_blocks_when_margin_over_limit_from_live_funds(backend_lease_proof) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     safety = _real_safety(max_positions=10, max_margin_pct=60.0)
     app, adapter, _registry = _app_with_native_state(
+        backend_lease_proof,
         router,
         safety,
         positions=[],
@@ -682,11 +690,12 @@ def test_native_L2_blocks_when_margin_over_limit_from_live_funds() -> None:
     adapter.funds.assert_awaited_once()
 
 
-def test_native_portfolio_state_fetch_failure_blocks_order() -> None:
+def test_native_portfolio_state_fetch_failure_blocks_order(backend_lease_proof) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="DH-1")
     safety = _real_safety(max_positions=1)
     app, adapter, _registry = _app_with_native_state(
+        backend_lease_proof,
         router,
         safety,
         positions_side_effect=RuntimeError("broker read unavailable"),
@@ -702,7 +711,7 @@ def test_native_portfolio_state_fetch_failure_blocks_order() -> None:
     adapter.positions.assert_awaited_once()
 
 
-def test_routed_happy_path_feeds_latency_monitor(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_routed_happy_path_feeds_latency_monitor(monkeypatch: pytest.MonkeyPatch, backend_lease_proof) -> None:
     """H5: a successful live dispatch records per-broker order RTT.
 
     Without this producer the order-latency stats stayed empty forever, so the
@@ -717,7 +726,7 @@ def test_routed_happy_path_feeds_latency_monitor(monkeypatch: pytest.MonkeyPatch
 
     router = MagicMock()
     router.place_order = AsyncMock(return_value="OA-999")
-    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
     resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
 
     assert resp.status_code == 200
@@ -729,7 +738,7 @@ def test_routed_happy_path_feeds_latency_monitor(monkeypatch: pytest.MonkeyPatch
 
 
 def test_routed_happy_path_feeds_the_persistent_latency_monitor(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, backend_lease_proof,
 ) -> None:
     """U12: the same producer feeds the DuckDB-backed admin history.
 
@@ -743,7 +752,7 @@ def test_routed_happy_path_feeds_the_persistent_latency_monitor(
 
     router = MagicMock()
     router.place_order = AsyncMock(return_value="OA-999")
-    app = _app(broker_router=router, safety=_passing_safety())
+    app = _app(backend_lease_proof, broker_router=router, safety=_passing_safety())
     persistent = MagicMock()
     app.config["LATENCY_MONITOR"] = persistent
     resp = app.test_client().post(
@@ -759,7 +768,7 @@ def test_routed_happy_path_feeds_the_persistent_latency_monitor(
     assert kwargs.get("symbol") == "RELIANCE"
 
 
-def test_latency_recording_failure_never_breaks_the_order(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_latency_recording_failure_never_breaks_the_order(monkeypatch: pytest.MonkeyPatch, backend_lease_proof) -> None:
     """H5: monitoring is strictly best-effort — a tracker blow-up still 200s."""
     import flinttrade_core.monitoring_routes as mon
 
@@ -770,7 +779,7 @@ def test_latency_recording_failure_never_breaks_the_order(monkeypatch: pytest.Mo
 
     router = MagicMock()
     router.place_order = AsyncMock(return_value="OA-777")
-    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    client = _app(backend_lease_proof, broker_router=router, safety=_passing_safety()).test_client()
     resp = client.post("/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers())
 
     assert resp.status_code == 200
@@ -784,7 +793,7 @@ def test_latency_recording_failure_never_breaks_the_order(monkeypatch: pytest.Mo
 # ---------------------------------------------------------------------------
 
 
-def test_routed_happy_path_journals_the_trade(tmp_path: object) -> None:
+def test_routed_happy_path_journals_the_trade(tmp_path: object, backend_lease_proof) -> None:
     """A successful live order is appended to the shared trade store."""
     import threading
     from flinttrade_data.storage import StorageManager
@@ -794,7 +803,7 @@ def test_routed_happy_path_journals_the_trade(tmp_path: object) -> None:
 
     router = MagicMock()
     router.place_order = AsyncMock(return_value="OA-555")
-    app = _app(broker_router=router, safety=_passing_safety())
+    app = _app(backend_lease_proof, broker_router=router, safety=_passing_safety())
     app.config["TRADE_STORAGE"] = store
     app.config["TRADE_STORAGE_LOCK"] = threading.Lock()
 
@@ -816,7 +825,7 @@ def test_routed_happy_path_journals_the_trade(tmp_path: object) -> None:
     assert row["strategy"] == "manual"
 
 
-def test_journal_failure_never_breaks_the_order() -> None:
+def test_journal_failure_never_breaks_the_order(backend_lease_proof) -> None:
     """H-class best-effort: a journal store that raises still returns 200."""
     import threading
 
@@ -825,7 +834,7 @@ def test_journal_failure_never_breaks_the_order() -> None:
 
     router = MagicMock()
     router.place_order = AsyncMock(return_value="OA-444")
-    app = _app(broker_router=router, safety=_passing_safety())
+    app = _app(backend_lease_proof, broker_router=router, safety=_passing_safety())
     app.config["TRADE_STORAGE"] = bad_store
     app.config["TRADE_STORAGE_LOCK"] = threading.Lock()
 
@@ -837,11 +846,11 @@ def test_journal_failure_never_breaks_the_order() -> None:
     bad_store.insert_trade.assert_called_once()
 
 
-def test_routed_happy_path_does_not_duplicate_router_owned_lifecycle_recording() -> None:
+def test_routed_happy_path_does_not_duplicate_router_owned_lifecycle_recording(backend_lease_proof) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="OA-LIFE-1")
     provider = MagicMock()
-    app = _app(broker_router=router, safety=_passing_safety())
+    app = _app(backend_lease_proof, broker_router=router, safety=_passing_safety())
     app.config["LOCAL_STATE_PROVIDER"] = provider
 
     resp = app.test_client().post(
@@ -871,16 +880,17 @@ _MODIFY_BODY = {
 }
 
 
-def test_modify_happy_path_returns_200() -> None:
+def test_modify_happy_path_returns_200(backend_lease_proof) -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
-    client = _app(broker_router=router).test_client()
+    client = _app(backend_lease_proof, broker_router=router).test_client()
     resp = client.post("/api/v1/orders/modify", json=_MODIFY_BODY, headers=_live_headers())
     assert resp.status_code == 200
     assert resp.get_json()["orderid"] == "OA-1"
     router.modify_order.assert_awaited_once()
     kw = router.modify_order.await_args.kwargs
     assert kw["order_id"] == "OA-1"
+    assert kw["safety_ctx"].backend_incarnation == str(backend_lease_proof.incarnation)
     assert kw["changes"]["symbol"] == "RELIANCE"
     # The gated fingerprint is the canonical modify dict (mint == verify object).
     assert kw["order"]["_op"] == "modify"
@@ -896,10 +906,10 @@ def test_modify_happy_path_returns_200() -> None:
     assert "_requested_change_fields" not in kw["changes"]
 
 
-def test_modify_forwards_trigger_price_and_disclosed_quantity() -> None:
+def test_modify_forwards_trigger_price_and_disclosed_quantity(backend_lease_proof) -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
-    client = _app(broker_router=router).test_client()
+    client = _app(backend_lease_proof, broker_router=router).test_client()
     resp = client.post(
         "/api/v1/orders/modify",
         json={
@@ -917,10 +927,11 @@ def test_modify_forwards_trigger_price_and_disclosed_quantity() -> None:
     assert "trigger_price" in kw["order"]["_requested_change_fields"]
 
 
-def test_routed_modify_happy_path_targets_named_broker_account() -> None:
+def test_routed_modify_happy_path_targets_named_broker_account(backend_lease_proof) -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
     app, _adapter, _registry = _app_with_native_state(
+        backend_lease_proof,
         router,
         _passing_safety(),
         adapter_id="upstox",
@@ -941,7 +952,7 @@ def test_routed_modify_happy_path_targets_named_broker_account() -> None:
     assert kw["hint"].account_id == "U1"
 
 
-def test_modify_quantity_increase_runs_full_safety_before_router() -> None:
+def test_modify_quantity_increase_runs_full_safety_before_router(backend_lease_proof) -> None:
     blocked = MagicMock(passed=False, layer="L2_POSITION", reason="margin limit")
     safety = _passing_safety()
     safety.check_order.return_value = [blocked]
@@ -975,7 +986,7 @@ def test_modify_quantity_increase_runs_full_safety_before_router() -> None:
     openalgo.multi_quotes = AsyncMock(
         return_value=[SimpleNamespace(symbol="RELIANCE", exchange="NSE", ltp=100)]
     )
-    app = _app_with_client(router, safety, openalgo)
+    app = _app_with_client(backend_lease_proof, router, safety, openalgo)
 
     response = app.test_client().post(
         "/api/v1/orders/modify",
@@ -989,7 +1000,7 @@ def test_modify_quantity_increase_runs_full_safety_before_router() -> None:
     router.modify_order.assert_not_called()
 
 
-def test_modify_quantity_reduction_proves_no_increase_before_dispatch() -> None:
+def test_modify_quantity_reduction_proves_no_increase_before_dispatch(backend_lease_proof) -> None:
     safety = MagicMock()
     safety.l5_kill.validate.return_value = MagicMock(passed=True)
     safety.check_order.side_effect = AssertionError("no-increase modify entered L1-L4")
@@ -1014,7 +1025,7 @@ def test_modify_quantity_reduction_proves_no_increase_before_dispatch() -> None:
         ]
     )
     openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
-    app = _app_with_client(router, safety, openalgo)
+    app = _app_with_client(backend_lease_proof, router, safety, openalgo)
 
     response = app.test_client().post(
         "/api/v1/orders/modify",
@@ -1029,7 +1040,7 @@ def test_modify_quantity_reduction_proves_no_increase_before_dispatch() -> None:
     router.modify_order.assert_awaited_once()
 
 
-def test_modify_recovers_omitted_trigger_and_disclosed_from_orderbook() -> None:
+def test_modify_recovers_omitted_trigger_and_disclosed_from_orderbook(backend_lease_proof) -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
     safety = _passing_safety()
@@ -1054,7 +1065,7 @@ def test_modify_recovers_omitted_trigger_and_disclosed_from_orderbook() -> None:
         ]
     )
     openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
-    app = _app_with_client(router, safety, openalgo)
+    app = _app_with_client(backend_lease_proof, router, safety, openalgo)
 
     response = app.test_client().post(
         "/api/v1/orders/modify",
@@ -1070,12 +1081,13 @@ def test_modify_recovers_omitted_trigger_and_disclosed_from_orderbook() -> None:
     assert "disclosed_quantity" not in kw["order"]["_requested_change_fields"]
 
 
-def test_groww_modify_without_disclosed_quantity_still_dispatches() -> None:
+def test_groww_modify_without_disclosed_quantity_still_dispatches(backend_lease_proof) -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
     safety = _passing_safety()
     safety.l5_kill.validate.return_value = MagicMock(passed=True)
     app, adapter, _registry = _app_with_native_state(
+        backend_lease_proof,
         router,
         safety,
         adapter_id="groww",
@@ -1109,7 +1121,7 @@ def test_groww_modify_without_disclosed_quantity_still_dispatches() -> None:
     assert "disclosed_quantity" not in router.modify_order.await_args.kwargs["changes"]
 
 
-def test_modify_without_recoverable_disclosed_quantity_fails_closed() -> None:
+def test_modify_without_recoverable_disclosed_quantity_fails_closed(backend_lease_proof) -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
     safety = _passing_safety()
@@ -1132,7 +1144,7 @@ def test_modify_without_recoverable_disclosed_quantity_fails_closed() -> None:
         ]
     )
     openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
-    app = _app_with_client(router, safety, openalgo)
+    app = _app_with_client(backend_lease_proof, router, safety, openalgo)
 
     response = app.test_client().post(
         "/api/v1/orders/modify",
@@ -1145,7 +1157,7 @@ def test_modify_without_recoverable_disclosed_quantity_fails_closed() -> None:
     router.modify_order.assert_not_called()
 
 
-def test_modify_stop_loss_without_recoverable_trigger_fails_closed() -> None:
+def test_modify_stop_loss_without_recoverable_trigger_fails_closed(backend_lease_proof) -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
     safety = _passing_safety()
@@ -1169,7 +1181,7 @@ def test_modify_stop_loss_without_recoverable_trigger_fails_closed() -> None:
         ]
     )
     openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
-    app = _app_with_client(router, safety, openalgo)
+    app = _app_with_client(backend_lease_proof, router, safety, openalgo)
 
     response = app.test_client().post(
         "/api/v1/orders/modify",
@@ -1182,7 +1194,7 @@ def test_modify_stop_loss_without_recoverable_trigger_fails_closed() -> None:
     router.modify_order.assert_not_called()
 
 
-def test_modify_unknown_current_order_fails_closed_before_router() -> None:
+def test_modify_unknown_current_order_fails_closed_before_router(backend_lease_proof) -> None:
     safety = _passing_safety()
     safety.l5_kill.validate.return_value = MagicMock(passed=True)
     router = MagicMock()
@@ -1190,7 +1202,7 @@ def test_modify_unknown_current_order_fails_closed_before_router() -> None:
     openalgo = _fake_client([])
     openalgo.orderbook = AsyncMock(return_value=[])
     openalgo.margin = AsyncMock(return_value={"data": {"required_margin": "100"}})
-    app = _app_with_client(router, safety, openalgo)
+    app = _app_with_client(backend_lease_proof, router, safety, openalgo)
 
     response = app.test_client().post(
         "/api/v1/orders/modify",
@@ -1207,40 +1219,41 @@ def test_modify_unknown_current_order_fails_closed_before_router() -> None:
     router.modify_order.assert_not_called()
 
 
-def test_modify_missing_orderid_returns_400() -> None:
+def test_modify_missing_orderid_returns_400(backend_lease_proof) -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
-    client = _app(broker_router=router).test_client()
+    client = _app(backend_lease_proof, broker_router=router).test_client()
     body = {k: v for k, v in _MODIFY_BODY.items() if k != "orderid"}
     resp = client.post("/api/v1/orders/modify", json=body, headers=_live_headers())
     assert resp.status_code == 400
     router.modify_order.assert_not_called()
 
 
-def test_modify_safety_bypass_returns_403() -> None:
+def test_modify_safety_bypass_returns_403(backend_lease_proof) -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(side_effect=SafetyBypassError("actor not authorised"))
-    client = _app(broker_router=router).test_client()
+    client = _app(backend_lease_proof, broker_router=router).test_client()
     resp = client.post("/api/v1/orders/modify", json=_MODIFY_BODY, headers=_live_headers())
     assert resp.status_code == 403
     assert "refused" in resp.get_json()["message"].lower()
 
 
-def test_cancel_happy_path_returns_200() -> None:
+def test_cancel_happy_path_returns_200(backend_lease_proof) -> None:
     router = MagicMock()
     router.cancel_order = AsyncMock(return_value=None)
-    client = _app(broker_router=router).test_client()
+    client = _app(backend_lease_proof, broker_router=router).test_client()
     resp = client.post("/api/v1/orders/cancel", json={"orderid": "OA-7"}, headers=_live_headers())
     assert resp.status_code == 200
     assert resp.get_json()["orderid"] == "OA-7"
     router.cancel_order.assert_awaited_once()
+    assert router.cancel_order.await_args.kwargs["safety_ctx"].backend_incarnation == str(backend_lease_proof.incarnation)
     assert router.cancel_order.await_args.kwargs["order_id"] == "OA-7"
 
 
-def test_routed_cancel_happy_path_targets_named_broker_account() -> None:
+def test_routed_cancel_happy_path_targets_named_broker_account(backend_lease_proof) -> None:
     router = MagicMock()
     router.cancel_order = AsyncMock(return_value=None)
-    client = _app(broker_router=router).test_client()
+    client = _app(backend_lease_proof, broker_router=router).test_client()
     resp = client.post(
         "/api/v1/orders/groww/cancel",
         json={"orderid": "GW-7", "account_id": "G1", "segment": "FNO"},
@@ -1257,10 +1270,10 @@ def test_routed_cancel_happy_path_targets_named_broker_account() -> None:
     assert kw["order"]["segment"] == "FNO"
 
 
-def test_routed_cancel_ignores_segment_for_non_groww_brokers() -> None:
+def test_routed_cancel_ignores_segment_for_non_groww_brokers(backend_lease_proof) -> None:
     router = MagicMock()
     router.cancel_order = AsyncMock(return_value=None)
-    client = _app(broker_router=router).test_client()
+    client = _app(backend_lease_proof, broker_router=router).test_client()
     resp = client.post(
         "/api/v1/orders/upstox/cancel",
         json={"orderid": "UP-7", "account_id": "U1", "segment": "FNO"},
@@ -1272,10 +1285,32 @@ def test_routed_cancel_ignores_segment_for_non_groww_brokers() -> None:
     assert "segment" not in kw["order"]
 
 
-def test_cancel_missing_orderid_returns_400() -> None:
+def test_cancel_missing_orderid_returns_400(backend_lease_proof) -> None:
     router = MagicMock()
     router.cancel_order = AsyncMock(return_value=None)
-    client = _app(broker_router=router).test_client()
+    client = _app(backend_lease_proof, broker_router=router).test_client()
     resp = client.post("/api/v1/orders/cancel", json={}, headers=_live_headers())
     assert resp.status_code == 400
     router.cancel_order.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "endpoint,body,method",
+    [
+        ("/api/v1/orders/openalgo/place", _LIVE_BODY, "place_order"),
+        ("/api/v1/orders/modify", _MODIFY_BODY, "modify_order"),
+        ("/api/v1/orders/cancel", {"orderid": "OA-7"}, "cancel_order"),
+    ],
+)
+def test_routed_mutations_without_backend_proof_never_dispatch(endpoint, body, method) -> None:
+    """Supplying no owner proof must still fail at the real safety gate."""
+    router = MagicMock()
+    dispatch = AsyncMock(return_value="SHOULD-NOT-REACH")
+    setattr(router, method, dispatch)
+    client = _app(None, broker_router=router).test_client()
+
+    response = client.post(endpoint, json=body, headers=_live_headers())
+
+    assert response.status_code == 403
+    assert "refused" in response.get_json()["message"].lower()
+    dispatch.assert_not_awaited()

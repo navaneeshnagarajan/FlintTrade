@@ -786,25 +786,30 @@ def test_flask_factory_installs_signal_hub_and_ml_source(monkeypatch, tmp_path) 
     from flinttrade_ai.pipeline import SignalPipeline
     from flinttrade_ai.signal_pipeline import LiveSignalPipeline
     from flinttrade_core.app import create_flask_app
+    from flinttrade_core.backend_instance import acquire_backend_instance_lease
 
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     master_password = tmp_path / "master_password"
     master_password.write_text("signal-test-master-password\n", encoding="utf-8")
     master_password.chmod(0o600)
     openalgo_client = MagicMock()
-    app = create_flask_app(client=openalgo_client)
+    backend_lease = acquire_backend_instance_lease()
+    try:
+        app = create_flask_app(client=openalgo_client, backend_lease_proof=backend_lease.proof)
 
-    hub = app.config["SIGNAL_HUB"]
-    ml_pipeline = app.config["ML_SIGNAL_PIPELINE"]
-    assert isinstance(hub, LiveSignalPipeline)
-    assert isinstance(ml_pipeline, SignalPipeline)
-    assert ml_pipeline._openalgo_client is openalgo_client
-    assert ml_pipeline._signal_sink.__self__ is hub
-    assert ml_pipeline._signal_sink.__func__ is hub.ingest_ml_cycle.__func__
-    rules = {rule.rule for rule in app.url_map.iter_rules()}
-    assert "/api/v1/signals/recent" in rules
-    assert "/api/v1/signals/active" not in rules
-    assert "/api/v1/signals" not in rules
+        hub = app.config["SIGNAL_HUB"]
+        ml_pipeline = app.config["ML_SIGNAL_PIPELINE"]
+        assert isinstance(hub, LiveSignalPipeline)
+        assert isinstance(ml_pipeline, SignalPipeline)
+        assert ml_pipeline._openalgo_client is openalgo_client
+        assert ml_pipeline._signal_sink.__self__ is hub
+        assert ml_pipeline._signal_sink.__func__ is hub.ingest_ml_cycle.__func__
+        rules = {rule.rule for rule in app.url_map.iter_rules()}
+        assert "/api/v1/signals/recent" in rules
+        assert "/api/v1/signals/active" not in rules
+        assert "/api/v1/signals" not in rules
+    finally:
+        backend_lease.release()
 
 
 def test_runtime_registers_five_minute_per_exchange_market_hours_ml_job(tmp_path) -> None:
