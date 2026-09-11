@@ -36,6 +36,7 @@ describe("PracticeOrderReviewStage", () => {
     const onConfirm = vi.fn();
     render(
       <PracticeOrderReviewStage
+        mode="practice"
         review={review}
         confirming={false}
         onBack={vi.fn()}
@@ -66,6 +67,7 @@ describe("PracticeOrderReviewStage", () => {
     const onConfirm = vi.fn();
     render(
       <PracticeOrderReviewStage
+        mode="practice"
         review={review}
         confirming={false}
         onBack={onBack}
@@ -82,6 +84,7 @@ describe("PracticeOrderReviewStage", () => {
   it("disables both actions while one confirmation is in flight", () => {
     render(
       <PracticeOrderReviewStage
+        mode="practice"
         review={review}
         confirming
         onBack={vi.fn()}
@@ -92,5 +95,23 @@ describe("PracticeOrderReviewStage", () => {
     expect(screen.getByRole("button", { name: "Back to edit" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Confirm simulated Practice order" }))
       .toHaveAttribute("aria-busy", "true");
+  });
+
+  it("uses sample wording under Explore, not Practice Buy or Live", () => {
+    render(
+      <PracticeOrderReviewStage
+        mode="explore"
+        review={review}
+        confirming={false}
+        onBack={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("dialog", { name: "Review sample order" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm sample order" })).toBeInTheDocument();
+    expect(screen.getByText(/sample only/i)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /practice/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Live/i)).not.toBeInTheDocument();
   });
 });

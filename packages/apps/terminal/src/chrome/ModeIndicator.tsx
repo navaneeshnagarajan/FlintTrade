@@ -154,6 +154,7 @@ export default function ModeIndicator() {
               ? "Explore mode active — sample data only. Click to set up Practice mode."
               : "Explore mode active — sample data only. Click to switch to Practice mode."
           }
+          data-testid="execution-mode"
           className="h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-text-muted/15 text-text-secondary border border-text-muted/20 hover:bg-text-muted/25 hover:text-text-primary"
         >
           <Compass size={11} aria-hidden="true" />
@@ -178,6 +179,7 @@ export default function ModeIndicator() {
           variant="ghost"
           onClick={handleToggle}
           aria-label="Practice mode active — virtual capital. Click to switch to Live trading."
+          data-testid="execution-mode"
           className="h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 hover:text-amber-400"
         >
           <FlaskConical size={11} aria-hidden="true" />
@@ -277,6 +279,7 @@ export default function ModeIndicator() {
         variant="ghost"
         onClick={handleToggle}
         aria-label="Live trading mode active — real money. Click to switch to Practice mode."
+        data-testid="execution-mode"
         className="h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-profit/20 text-profit border border-profit/40 hover:bg-profit/30 hover:text-profit"
       >
         <Zap size={11} aria-hidden="true" />

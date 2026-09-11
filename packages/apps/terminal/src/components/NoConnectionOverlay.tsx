@@ -46,7 +46,7 @@ const SUPPRESSED_ROUTE_PREFIXES = [
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export function NoConnectionOverlay() {
+export function NoConnectionOverlay({ suppress = false }: { suppress?: boolean }) {
   const isBrokerConnected = useBrokerConnected();
   const mode = useModeStore((s) => s.mode);
   const [showOverlay, setShowOverlay] = useState(false);
@@ -60,14 +60,14 @@ export function NoConnectionOverlay() {
   );
 
   useEffect(() => {
-    if (!isBrokerConnected && mode === "live" && !isSuppressedRoute) {
+    if (!suppress && !isBrokerConnected && mode === "live" && !isSuppressedRoute) {
       const timer = setTimeout(() => setShowOverlay(true), DELAY_MS);
       return () => clearTimeout(timer);
     }
     // Explore and Practice remain usable without broker data. Only Live mode
     // owns the blocking disconnection gate.
     setShowOverlay(false);
-  }, [isBrokerConnected, isSuppressedRoute, mode]);
+  }, [isBrokerConnected, isSuppressedRoute, mode, suppress]);
 
   // Issue #56 — Auto-focus the first interactive element when the overlay opens.
   useEffect(() => {
@@ -116,7 +116,7 @@ export function NoConnectionOverlay() {
     }
   }, []);
 
-  if (!showOverlay || isSuppressedRoute || mode !== "live") return null;
+  if (suppress || !showOverlay || isSuppressedRoute || mode !== "live") return null;
 
   return (
     <div

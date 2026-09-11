@@ -682,6 +682,7 @@ describe("PositionsWidget", () => {
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByText("Sample")).toBeInTheDocument();
     expect(screen.getByText(/Sample data — connect a broker/i)).toBeInTheDocument();
+    expect(screen.queryByText("Live only")).toBeNull();
   });
 
   // ── Excel export ─────────────────────────────────────────────────────────

@@ -39,6 +39,7 @@ vi.mock("@/components/help/UpgradeSuggestion", () => ({
 import RootLayout from "../RootLayout";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { FONT_SCALE_ATTRIBUTE } from "@/hooks/useApplyFontScale";
+import { DENSITY_ATTRIBUTE } from "@/lib/applyDensity";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -52,6 +53,8 @@ describe("RootLayout", () => {
 
   afterEach(() => {
     document.documentElement.removeAttribute(FONT_SCALE_ATTRIBUTE);
+    document.documentElement.removeAttribute(DENSITY_ATTRIBUTE);
+    document.documentElement.classList.remove("density-compact", "density-comfortable");
   });
 
   it("renders children via Outlet", () => {
@@ -74,5 +77,12 @@ describe("RootLayout", () => {
     render(<RootLayout />);
 
     expect(document.documentElement.getAttribute(FONT_SCALE_ATTRIBUTE)).toBe("large");
+  });
+
+  it("mirrors Comfortable density onto <html> for new installs", () => {
+    render(<RootLayout />);
+
+    expect(document.documentElement.getAttribute(DENSITY_ATTRIBUTE)).toBe("comfortable");
+    expect(document.documentElement.classList.contains("density-comfortable")).toBe(true);
   });
 });

@@ -37,6 +37,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import type { WsFailure } from "@/services/websocket";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThemeStore } from "@/stores/themeStore";
+import { selectDeskDensity } from "@/hooks/useDeskDensityChrome";
 import { motionConfig } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
@@ -131,19 +132,24 @@ const ModeButton = forwardRef<HTMLButtonElement, ModeButtonProps>(
 interface ConnectionCardProps {
   connected: boolean;
   practiceMode: boolean;
+  exploreMode: boolean;
   /** Latest WebSocket failure from the connection store — null when healthy. */
   wsFailure: WsFailure | null;
 }
 
-function ConnectionCard({ connected, practiceMode, wsFailure }: ConnectionCardProps) {
+function ConnectionCard({ connected, practiceMode, exploreMode, wsFailure }: ConnectionCardProps) {
   // An auth rejection is more actionable than a bare "Disconnected" — name it,
   // and show the server's reason so the operator knows which key to fix.
-  const authFailed = !connected && wsFailure?.kind === "auth";
-  const label = connected
-    ? "Connected"
-    : authFailed
-      ? "Authentication failed"
-      : "Disconnected";
+  // Explore has no broker subsystem — never green / Connected (FT-UX-001).
+  const authFailed = !exploreMode && !connected && wsFailure?.kind === "auth";
+  const label = exploreMode
+    ? "Sample data"
+    : connected
+      ? "Connected"
+      : authFailed
+        ? "Authentication failed"
+        : "Disconnected";
+  const showConnected = connected && !exploreMode;
   return (
     <div
       className="p-2.5 rounded-lg border border-border-default"
@@ -154,13 +160,15 @@ function ConnectionCard({ connected, practiceMode, wsFailure }: ConnectionCardPr
           <div
             className={cn(
               "w-2 h-2 rounded-full shrink-0 transition-colors",
-              connected
+              showConnected
                 ? "bg-profit ring-2 ring-profit/20 animate-[pulse-glow_2s_ease-in-out_infinite]"
-                : "bg-loss",
+                : exploreMode
+                  ? "bg-text-muted"
+                  : "bg-loss",
             )}
             aria-hidden="true"
           />
-          <span className={cn("text-xs font-medium", connected ? "text-profit" : "text-loss")}>
+          <span className={cn("text-xs font-medium", showConnected ? "text-profit" : exploreMode ? "text-text-secondary" : "text-loss")}>
             {label}
           </span>
         </div>
@@ -202,18 +210,18 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
   const panelRef = useRef<HTMLDivElement>(null);
   const firstModeButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Connection state
-  const status = useConnectionStore((s) => s.status);
-  const wsFailure = useConnectionStore((s) => s.wsFailure);
-  const connected = status === "connected";
-
-  // Settings store — density only; mode is owned by modeStore
-  const density = useSettingsStore((s) => s.density);
-  const setDensity = useSettingsStore((s) => s.setDensity);
-
   // Mode store — current trading mode (switched from the TopBar ModeIndicator)
   const appMode = useModeStore((s) => s.mode);
   const isPractice = appMode === "practice";
+  const isExplore = appMode === "explore";
+
+  // Connection state — Explore never reports Connected/green (FT-UX-001).
+  const status = useConnectionStore((s) => s.status);
+  const wsFailure = useConnectionStore((s) => s.wsFailure);
+  const connected = !isExplore && status === "connected";
+
+  // Settings store — density only; mode is owned by modeStore
+  const density = useSettingsStore((s) => s.density);
 
   // Theme store — active theme for dot selection
   const activeThemeId = useThemeStore((s) => s.activeThemeId);
@@ -375,7 +383,12 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
         {/* ------------------------------------------------------------------ */}
         {/* Connection status card                                               */}
         {/* ------------------------------------------------------------------ */}
-        <ConnectionCard connected={connected} practiceMode={isPractice} wsFailure={wsFailure ?? null} />
+        <ConnectionCard
+          connected={connected}
+          practiceMode={isPractice}
+          exploreMode={isExplore}
+          wsFailure={wsFailure ?? null}
+        />
 
         {/* ------------------------------------------------------------------ */}
         {/* Dark / Light / System mode segment                                   */}
@@ -465,7 +478,9 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
                 role="radio"
                 aria-checked={density === d}
                 tabIndex={density === d ? 0 : -1}
-                onClick={() => setDensity(d)}
+                onClick={() => {
+                  selectDeskDensity(d);
+                }}
                 onKeyDown={(e) => handleDensityKeyDown(e, index)}
                 className={cn(
                   "flex-1 py-1.5 text-xs font-medium transition-colors capitalize",

@@ -273,19 +273,33 @@ Before enabling any order-capable integration, exercise the order path in
 
 | Mode | Order behaviour | Best for |
 |---|---|---|
-| **Explore** | Demo/sample data; no Live broker order authority. On `/trade`, Order Pad **Practice Buy** opens a Practice review and records a local sample fill (no broker) | First-time visitors, screenshots, docs |
+| **Explore** | Demo/sample data; no Live broker order authority. On `/trade`, Order Pad **Sample Buy** opens a sample review and records a local sample fill (no broker) | First-time visitors, screenshots, docs |
 | **Practice** | Orders simulated by FlintTrade's native sandbox | Strategy tests and integration checks |
 | **Live** | Real orders sent through the configured broker path | Gated broker integration, only after user review |
 
 The current mode is shown in the top bar and is server-enforced via the JWT
 claim — switching to Live requires a deliberate confirmation step.
 
+**Mode vs session vs sample (FT-UX-001).** The Explore / Practice / Live chips
+mean execution mode only. Market open/closed is session status, never Live
+mode. Explore Order Pad uses **Sample Buy** / **Sample Sell** (a local sample
+fill after review). Practice keeps **Practice Buy** / **Practice Sell**. Live
+uses **Place BUY Order**. Connected / green is never shown for an
+unconfigured subsystem.
+
+**Compact / Comfortable.** New installs default to Comfortable (full labels).
+Compact on a desk Trade viewport (~1280 and wider) keeps chart, order pad,
+and positions primary; the ticker strip, full tool ribbon, and watchlist /
+indices / advanced tools start collapsed behind **Watchlist & tools** /
+**Desk tools**. Selecting Compact again re-collapses that disclosure.
+Phone layouts are unchanged.
+
 ### Walkthrough
 
 1. Open `/trade` (http://127.0.0.1:5100/trade on the installed web app;
    http://localhost:5173/trade on the Vite dev server).
 2. If the badge shows **EXPLORE**, you can stay there and try Order Pad
-   **Practice Buy** — Practice review, then a local sample fill (no broker).
+   **Sample Buy** — sample review, then a local sample fill (no broker).
    For the full native-sandbox path this walkthrough uses, click the
    badge once to switch to Practice. There is no confirmation dialog.
    The UI calls `POST /v1/auth/mode` so the JWT matches.
@@ -294,7 +308,7 @@ claim — switching to Live requires a deliberate confirmation step.
 4. Type `NIFTY` into the symbol field; FlintTrade autocompletes the current
    front-month future. Select it.
 5. Set Quantity = 1 lot (50). Choose **MARKET**. Side = **BUY**.
-6. Click **Practice Buy** and confirm the Practice review. The order
+6. Click **Sample Buy** (Explore) or **Practice Buy** (Practice) and confirm the review. The order
    appears in the **Positions** widget immediately; the **Orders**
    widget shows it as filled (simulated).
 7. Close the position from the Positions widget. Confirm your simulated
@@ -870,7 +884,7 @@ when it detects the 401.
 
 1. Check the mode badge in the top bar. **Explore** has no Live broker
    order authority — Live-intent submits are blocked. Order Pad
-   **Practice Buy** on `/trade` records a local sample fill after Practice
+   **Sample Buy** on `/trade` records a local sample fill after sample
    review (no broker). Switch to **Practice** for the native sandbox
    path, or unlock **Live** for a real broker order.
 2. Open the **Orders** widget and look at the rejection reason column.

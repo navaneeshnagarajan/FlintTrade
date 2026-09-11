@@ -592,6 +592,20 @@ function buildThreePanel(): IJsonModel {
 // tables and funds cards were duplicates of the Positions, Orders and Risk
 // widgets; the index cards were the part a beginner layout needs at a glance).
 // ---------------------------------------------------------------------------
+export function buildCompactDesk(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(70, [
+        tabsetJson(100, [tabJson("chart", "Chart")]),
+      ]),
+      rowJson(30, [
+        tabsetJson(55, [tabJson("orderpad", "Order Pad")]),
+        tabsetJson(45, [tabJson("positions", "Positions")]),
+      ]),
+    ]),
+  );
+}
+
 export function buildBeginnerCore(): IJsonModel {
   return workspaceJson(
     rowJson(100, [
@@ -744,6 +758,7 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
  */
 export function buildPresetJsonById(presetId: string): IJsonModel | undefined {
   if (presetId === "beginner-core") return buildBeginnerCore();
+  if (presetId === "compact-desk") return buildCompactDesk();
   return WORKSPACE_PRESETS.find((p) => p.id === presetId)?.build();
 }
 
