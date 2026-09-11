@@ -280,6 +280,13 @@ Before enabling any order-capable integration, exercise the order path in
 The current mode is shown in the top bar and is server-enforced via the JWT
 claim — switching to Live requires a deliberate confirmation step.
 
+**Pending (FT-UX-001).** Mode vocabulary honesty and Compact / Comfortable
+Trade desk density are tracked on this contract. Product copy must keep
+Explore / Practice / Live distinct from sample, market-session, and
+Connected labels (no **Live** / **Practice Buy** confusion in Explore). The
+full design draft stays with the UI/UX Designer until that alignment
+lands on this same PR.
+
 ### Walkthrough
 
 1. Open `/trade` (http://127.0.0.1:5100/trade on the installed web app;
