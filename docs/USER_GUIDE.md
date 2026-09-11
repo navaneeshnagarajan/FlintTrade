@@ -549,19 +549,21 @@ and Options Builder.
    (pure Python by default). Install the optional VectorBT extra for
    vectorised exploration, or opt in to the Rust `ticks` engine for
    tick-level precision.
-5. **Review.** Equity curve, Sharpe, Sortino, max drawdown, win rate,
-   trade list, Monte Carlo confidence band.
+5. **Review.** **Total Return (%)**, **Net trade P&L (₹)**, equity curve,
+   Sharpe, Sortino, max drawdown, win rate, trade list, Monte Carlo
+   confidence band.
 
-**Total Return vs Net trade P&L (FT-LAB-004).** Explore `/lab` backtest
-results show labelled dual metrics. **Total Return (%)** is the
-equity-curve start→end figure (subtitle `Equity curve · start→end`),
-not a sum of trades. **Net trade P&L (₹)** is the Trade Log P&L sum on
-the same rupee basis as the table. When that sum matches the equity
-change, a quiet `Reconciles with trade log` note appears; when they
-diverge (fees, open marks, partial fills) both numbers stay visible
+After a backtest run on Explore `/lab`, Review shows labelled dual
+metrics. **Total Return (%)** is the equity-curve start→end percentage,
+with subtitle `Equity curve · start→end` — not a sum of trades.
+**Net trade P&L (₹)** is the Trade Log P&L sum on the same rupee basis
+as the trade table. When Net trade P&L matches the equity-curve rupee
+change, a quiet `Reconciles with trade log` note appears. When they
+diverge (fees, open marks, partial fills), both numbers stay visible
 with `Trade log sum ≠ equity change — fees / open marks`. The helper
-is omitted when the trade log or equity curve is empty. Monthly P&L
-stays trade-based (sums Trade Log P&L).
+is omitted when the trade log or equity curve is empty — nothing to
+reconcile. Monthly P&L stays labelled
+`Trade-based · sums Trade Log P&L` so the chart matches the log.
 
 ### Forward Test
 
