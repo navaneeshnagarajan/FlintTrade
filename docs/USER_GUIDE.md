@@ -337,7 +337,8 @@ software safeguards, prompts, and recovery controls in a local setup.
       authenticator code in the Live switch dialog (if you chose **Set up
       later** during setup). Explore and Practice stay password-only until
       enrolment.
-- [ ] A 6-digit PIN is set under Settings → Security.
+- [ ] An **exactly 6-digit** Security PIN is set under Settings → Security
+      (`/settings#security`). Live cannot be armed until this PIN exists.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
 - [ ] Daily P&L pause and hard-stop percentages are configured in Settings → Risk.
@@ -348,14 +349,15 @@ software safeguards, prompts, and recovery controls in a local setup.
 
 1. Click the **PRACTICE** badge in the top bar, or select **Live** on
    the welcome mode picker. The dialog warns that real orders will be
-   placed and asks for an **authenticator code** and your **6-digit PIN**.
-   Live unlock requires both — a confirmed authenticator enrolment plus
-   the PIN. If you deferred 2FA with **Set up later**, enter a one-time
-   authenticator code in the dialog to enrol, then the PIN.
-   `POST /v1/auth/pin` with `mode: "live"` refuses 403
+   placed and asks for an **authenticator code** and your **exactly
+   6-digit PIN**. Live unlock requires both — a confirmed authenticator
+   enrolment plus the PIN. If you deferred 2FA with **Set up later**,
+   enter a one-time authenticator code in the dialog to enrol, then the
+   PIN. `POST /v1/auth/pin` with `mode: "live"` refuses 403
    `totp_required` until the authenticator is enabled. The PIN
-   alone is not enough. Set a PIN under Settings → Security first
-   if you have not already.
+   alone is not enough. Set the PIN under Settings → Security
+   (`/settings#security`) first if you have not already — see
+   [Settings reference](#11-settings-reference).
 2. Cancel the modal unless you are deliberately performing your own broker-side
    test outside this guide.
 3. Confirm the UI clearly shows Live mode, the active account, and the
@@ -720,6 +722,16 @@ Settings panels:
 | **LLM Config** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
 | **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives on Automate → Settings → Telegram Alerts (**Send Test**); Explore keeps that control disarmed. |
 | **Risk Limits** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
+
+On `/settings#security`, **Quick-unlock PIN** is the Live-arming
+re-auth factor (it can also unlock an idle session). The PIN is optional
+at account setup, but Live cannot be armed until one exists. New and
+Confirm accept digits only (`maxLength` 6). **Set PIN** / **Change PIN**
+stays disabled until the account password is present, both fields are
+exactly six digits, and they match. Leaving (blur) a field with 1–5
+digits shows `PIN must be exactly 6 digits`; leaving Confirm when both
+fields are filled and different shows `PINs do not match`.
+`POST /v1/auth/pin/set` rejects anything that is not `^[0-9]{6}$`.
 
 On Explore `/settings` → **LLM Config**, a demo or unconfigured session
 shows the empty state "No LLM provider configured", with **Retry** and
