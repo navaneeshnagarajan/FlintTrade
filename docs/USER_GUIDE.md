@@ -307,12 +307,11 @@ refresh of Positions and Orders. No real money moved.
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
 
-On Explore `/trade` Positions → Heat, **Group by Exchange** currently
-leaves the treemap visually undifferentiated — there are no group labels
-or clear separators, so the selected grouping is not apparent
-(FT-TRADE-005). Labels versus separators versus an honest empty (if
-Explore cannot group sample positions) wait for the UI/UX Designer
-call.
+On Explore `/trade` Positions → Heat, **Group by Exchange** and
+**Group by Sector** draw a labelled band per group (name chip plus
+exposure when there is room). Flat stays leaf-only. Positions with no
+exchange metadata show `No exchange groups in these positions` instead
+of an undifferentiated treemap.
 
 ### Learn → Practice Trading (OpenAlgo)
 

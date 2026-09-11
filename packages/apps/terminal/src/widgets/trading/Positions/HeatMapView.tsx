@@ -7,6 +7,10 @@
  * TerminalRoute — the older `flinttrade:navigate` event carried no `path`, so
  * the listener resolved null and the click was a dead no-op).
  *
+ * Group by Exchange / Sector draws a labelled band per group (name chip plus
+ * optional exposure) so grouping is visible at a glance — not a silent
+ * re-sort of the same P&L-coloured tiles (FT-TRADE-005). Flat stays leaf-only.
+ *
  * Cell AREA is {@link PositionRow.exposure} and cell COLOUR is the row's P&L%,
  * both from the shared kernel — the same numbers the other two views show.
  */
@@ -14,8 +18,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import type { MouseEvent } from "react";
 import { SquareStack } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { divergingColourScaleRange } from "@/lib/colourScale";
-import { fmtPnl, fmtPnlPct, type PositionRow } from "./positionBook";
+import { fmtExposure, fmtPnl, fmtPnlPct, type PositionRow } from "./positionBook";
 import { squarifiedTreemap } from "./treemap";
 
 // ---------------------------------------------------------------------------
@@ -39,8 +44,59 @@ export function resolveGroupMode(value: unknown): GroupMode {
     : "sector";
 }
 
+/** Honest empty when Group by Exchange cannot form a real group. */
+export const NO_EXCHANGE_GROUPS_MESSAGE = "No exchange groups in these positions";
+
 /** Cells smaller than this are invisible noise — no label is drawn. */
 const MIN_CELL_PX = 4;
+
+/** Gutter between group bands — stronger than the 1px leaf-tile border. */
+const GROUP_GUTTER_PX = 8;
+
+/** Header strip reserved for the group-name chip (and optional exposure). */
+const GROUP_HEADER_PX = 22;
+
+/** Inner padding from the group border to the leaf tiles. */
+const GROUP_PAD_PX = 3;
+
+export interface HeatGroup {
+  key: string;
+  members: PositionRow[];
+  exposure: number;
+}
+
+/**
+ * Real group key for a heat cell. Exchange grouping never invents a default
+ * (the old `|| "NSE"` fallback made missing metadata look like one silent
+ * group). Sector uses the kernel classification, which is already filled in.
+ */
+export function heatGroupKey(row: PositionRow, groupMode: Exclude<GroupMode, "flat">): string | null {
+  const raw = groupMode === "exchange" ? row.exchange : row.sector;
+  const key = raw.trim();
+  return key.length > 0 ? key : null;
+}
+
+/** Bucket cells into labelled groups; rows without a real key are dropped. */
+export function collectHeatGroups(
+  cells: readonly PositionRow[],
+  groupMode: Exclude<GroupMode, "flat">,
+): HeatGroup[] {
+  const groups = new Map<string, PositionRow[]>();
+  cells.forEach((cell) => {
+    const key = heatGroupKey(cell, groupMode);
+    if (!key) return;
+    const bucket = groups.get(key) ?? [];
+    bucket.push(cell);
+    groups.set(key, bucket);
+  });
+  return [...groups.entries()]
+    .map(([key, members]) => ({
+      key,
+      members,
+      exposure: members.reduce((sum, member) => sum + member.exposure, 0),
+    }))
+    .sort((a, b) => b.exposure - a.exposure);
+}
 
 // ---------------------------------------------------------------------------
 // Tooltip
@@ -107,6 +163,14 @@ function CellTooltip({ cell, x, y, containerWidth }: TooltipProps) {
 
 type LaidOutCell = PositionRow & { value: number; x: number; y: number; width: number; height: number };
 
+type LaidOutGroup = HeatGroup & { x: number; y: number; width: number; height: number };
+
+type HeatLayout =
+  | { kind: "empty-book" }
+  | { kind: "empty-exchange" }
+  | { kind: "flat"; cells: LaidOutCell[] }
+  | { kind: "grouped"; groups: LaidOutGroup[]; cells: LaidOutCell[] };
+
 export interface HeatMapViewProps {
   rows: PositionRow[];
   groupMode: GroupMode;
@@ -157,61 +221,97 @@ function HeatMapView({ rows, groupMode, emptyMessage, emptyHint, onOpenChart }: 
     return { pnlMin: -bound, pnlMax: bound };
   }, [cells]);
 
-  const heatmapCells = useMemo<LaidOutCell[]>(() => {
+  const heatLayout = useMemo<HeatLayout>(() => {
+    if (cells.length === 0) return { kind: "empty-book" };
+
+    if (groupMode !== "flat") {
+      const groups = collectHeatGroups(cells, groupMode);
+      if (groupMode === "exchange" && groups.length === 0) {
+        return { kind: "empty-exchange" };
+      }
+    }
+
     const { width, height } = dimensions;
-    if (width < 10 || height < 10 || cells.length === 0) return [];
+    if (width < 10 || height < 10) {
+      return groupMode === "flat" ? { kind: "flat", cells: [] } : { kind: "grouped", groups: [], cells: [] };
+    }
 
     if (groupMode === "flat") {
       const sorted = [...cells].sort((a, b) => b.exposure - a.exposure);
-      return squarifiedTreemap(
-        sorted.map((cell) => ({ ...cell, value: cell.exposure })),
-        0,
-        0,
-        width,
-        height,
-      );
+      return {
+        kind: "flat",
+        cells: squarifiedTreemap(
+          sorted.map((cell) => ({ ...cell, value: cell.exposure })),
+          0,
+          0,
+          width,
+          height,
+        ),
+      };
     }
 
-    const groups = new Map<string, PositionRow[]>();
-    cells.forEach((cell) => {
-      const key = groupMode === "exchange" ? (cell.exchange || "NSE") : cell.sector;
-      const bucket = groups.get(key) ?? [];
-      bucket.push(cell);
-      groups.set(key, bucket);
-    });
-
-    interface GroupNode {
-      value: number;
-      key: string;
-      members: PositionRow[];
+    const groups = collectHeatGroups(cells, groupMode);
+    if (groups.length === 0) {
+      const sorted = [...cells].sort((a, b) => b.exposure - a.exposure);
+      return {
+        kind: "flat",
+        cells: squarifiedTreemap(
+          sorted.map((cell) => ({ ...cell, value: cell.exposure })),
+          0,
+          0,
+          width,
+          height,
+        ),
+      };
     }
-    const groupNodes: GroupNode[] = [...groups.entries()]
-      .map(([key, members]) => ({
-        key,
-        members,
-        value: members.reduce((sum, member) => sum + member.exposure, 0),
-      }))
-      .sort((a, b) => b.value - a.value);
 
-    const groupLayout = squarifiedTreemap(groupNodes, 0, 0, width, height);
+    const groupLayout = squarifiedTreemap(
+      groups.map((group) => ({ ...group, value: group.exposure })),
+      0,
+      0,
+      width,
+      height,
+    );
 
+    const laidOutGroups: LaidOutGroup[] = [];
     const result: LaidOutCell[] = [];
     groupLayout.forEach((group) => {
+      const gx = group.x + GROUP_GUTTER_PX / 2;
+      const gy = group.y + GROUP_GUTTER_PX / 2;
+      const gw = Math.max(0, group.width - GROUP_GUTTER_PX);
+      const gh = Math.max(0, group.height - GROUP_GUTTER_PX);
+      laidOutGroups.push({
+        key: group.key,
+        members: group.members,
+        exposure: group.exposure,
+        x: gx,
+        y: gy,
+        width: gw,
+        height: gh,
+      });
+
       const members = [...group.members].sort((a, b) => b.exposure - a.exposure);
-      const BORDER = 1; // pixel gutter between the group and its cells
+      const innerX = gx + GROUP_PAD_PX;
+      const innerY = gy + GROUP_HEADER_PX;
+      const innerW = gw - GROUP_PAD_PX * 2;
+      const innerH = gh - GROUP_HEADER_PX - GROUP_PAD_PX;
       result.push(
         ...squarifiedTreemap(
           members.map((member) => ({ ...member, value: member.exposure })),
-          group.x + BORDER,
-          group.y + BORDER,
-          group.width - BORDER * 2,
-          group.height - BORDER * 2,
+          innerX,
+          innerY,
+          innerW,
+          innerH,
         ),
       );
     });
 
-    return result;
+    return { kind: "grouped", groups: laidOutGroups, cells: result };
   }, [cells, dimensions, groupMode]);
+
+  const heatmapCells = heatLayout.kind === "flat" || heatLayout.kind === "grouped" ? heatLayout.cells : [];
+  const groupBands = heatLayout.kind === "grouped" ? heatLayout.groups : [];
+  const showExchangeEmpty = heatLayout.kind === "empty-exchange";
 
   const handleMouseMove = useCallback((event: MouseEvent<HTMLDivElement>, cell: PositionRow) => {
     const rect = containerRef.current?.getBoundingClientRect();
@@ -223,14 +323,48 @@ function HeatMapView({ rows, groupMode, emptyMessage, emptyHint, onOpenChart }: 
 
   return (
     <div className="flex-1 min-h-0 relative" ref={containerRef} onMouseLeave={handleMouseLeave}>
-      {cells.length === 0 ? (
+      {cells.length === 0 || showExchangeEmpty ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-muted">
           <SquareStack size={28} className="text-text-disabled" />
-          <span className="text-sm">{emptyMessage}</span>
-          <span className="text-xxs text-text-disabled">{emptyHint}</span>
+          <span className="text-sm">{showExchangeEmpty ? NO_EXCHANGE_GROUPS_MESSAGE : emptyMessage}</span>
+          {!showExchangeEmpty && <span className="text-xxs text-text-disabled">{emptyHint}</span>}
         </div>
       ) : (
         <div className="absolute inset-0 overflow-hidden">
+          {groupBands.map((group) => {
+            const showExposure = group.width >= 88;
+            return (
+              <div
+                key={`heat-group-${group.key}`}
+                role="group"
+                aria-label={`${group.key} group`}
+                data-testid="heat-group-band"
+                data-heat-group={group.key}
+                className="absolute rounded-sm border-2 border-border-default bg-surface-elevated/50 pointer-events-none overflow-hidden"
+                style={{
+                  left: group.x,
+                  top: group.y,
+                  width: group.width,
+                  height: group.height,
+                }}
+              >
+                <div className="absolute left-1 top-0.5 right-1 flex items-center gap-1 min-w-0">
+                  <Badge
+                    variant="outline"
+                    data-testid={`heat-group-chip-${group.key}`}
+                    className="h-4 px-1.5 text-xxs font-semibold text-text-primary bg-surface-card/95 border-border-default"
+                  >
+                    {group.key}
+                  </Badge>
+                  {showExposure && (
+                    <span className="text-xxs text-text-muted truncate font-mono">
+                      {fmtExposure(group.exposure)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
           {heatmapCells.map((cell) => {
             if (cell.width < MIN_CELL_PX || cell.height < MIN_CELL_PX) return null;
 
