@@ -42,7 +42,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { getTradeJournal } from "@/services/ftApi";
+import { getTradeJournal, TRADE_JOURNAL_MAX_LIMIT } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import { type Props } from "./types";
 import { todayISO, sevenDaysAgoISO } from "./utils";
@@ -74,7 +74,7 @@ export default function TradeJournalTool({ onClose }: Props) {
   } = useQuery({
     queryKey: ["tradeJournal", queryStart, queryEnd, queryStrategy],
     queryFn: () =>
-      getTradeJournal(queryStart, queryEnd, queryStrategy || undefined, 200),
+      getTradeJournal(queryStart, queryEnd, queryStrategy || undefined, TRADE_JOURNAL_MAX_LIMIT),
     enabled: !!queryStart && !isExploreMode,
   });
 
@@ -276,6 +276,7 @@ export default function TradeJournalTool({ onClose }: Props) {
             trades={trades}
             rangeStart={queryStart}
             rangeEnd={queryEnd}
+            rangeTotal={isExploreMode ? sampleTrades.length : data?.total}
           />
         </TabsContent>
 

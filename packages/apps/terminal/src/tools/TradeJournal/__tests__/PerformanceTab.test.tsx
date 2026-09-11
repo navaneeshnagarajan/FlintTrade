@@ -26,6 +26,7 @@ import "@testing-library/jest-dom";
 
 vi.mock("@/services/ftApi", () => ({
   getTradeJournal: vi.fn(() => Promise.resolve({ trades: [], total: 0 })),
+  TRADE_JOURNAL_MAX_LIMIT: 1000,
 }));
 
 import { getTradeJournal, type JournalTrade } from "@/services/ftApi";
@@ -36,6 +37,7 @@ import {
   computeEquitySeries,
   computeMonthlyReturns,
   formatPerformanceWindow,
+  journalSliceNote,
   ytdIstRange,
 } from "../PerformanceTab";
 
@@ -59,9 +61,14 @@ const RANGE_START = "2026-03-01";
 const RANGE_END = "2026-03-07";
 const REVIEW_CHIP = "Review range · 01 Mar–07 Mar 2026";
 
-function renderPerf(trades: JournalTrade[] = []) {
+function renderPerf(trades: JournalTrade[] = [], rangeTotal?: number) {
   return renderTab(
-    <PerformanceTab trades={trades} rangeStart={RANGE_START} rangeEnd={RANGE_END} />,
+    <PerformanceTab
+      trades={trades}
+      rangeStart={RANGE_START}
+      rangeEnd={RANGE_END}
+      rangeTotal={rangeTotal}
+    />,
   );
 }
 
@@ -140,6 +147,20 @@ describe("ytdIstRange", () => {
   });
 });
 
+describe("journalSliceNote", () => {
+  it("is silent when the fetched page covers the untruncated total", () => {
+    expect(journalSliceNote(12, 12)).toBeNull();
+    expect(journalSliceNote(12, undefined)).toBeNull();
+    expect(journalSliceNote(12, 11)).toBeNull();
+  });
+
+  it("names the earliest-page prefix when the labelled window is larger", () => {
+    expect(journalSliceNote(1000, 1420)).toBe(
+      "Metrics use the first 1,000 of 1,420 fills in this window.",
+    );
+  });
+});
+
 describe("formatPerformanceWindow", () => {
   it("formats a same-year Review or YTD window as DD MMM–DD MMM YYYY", () => {
     expect(formatPerformanceWindow("2026-01-01", "2026-09-11")).toBe("01 Jan–11 Sep 2026");
@@ -211,7 +232,32 @@ describe("PerformanceTab", () => {
     expect(mockJournal).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "YTD" }));
     await vi.waitFor(() => expect(mockJournal).toHaveBeenCalled());
+    expect(mockJournal).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      undefined,
+      1000,
+    );
     expect(await screen.findByText(/No closed trades yet this year/i)).toBeTruthy();
+  });
+
+  it("REGRESSION: discloses a truncated analytics slice instead of claiming the full labelled window", () => {
+    renderPerf([jt({ pnl: 800 })], 250);
+    expect(screen.getByRole("button", { name: REVIEW_CHIP })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/Metrics use the first 1 of 250 fills in this window/i)).toBeTruthy();
+  });
+
+  it("omits the truncation note when the fetched Review-range rows are complete", () => {
+    renderPerf([jt({ pnl: 800 })], 1);
+    expect(screen.queryByText(/fills in this window/i)).toBeNull();
+  });
+
+  it("REGRESSION: YTD discloses a truncated analytics slice", async () => {
+    mockJournal.mockResolvedValue({ trades: [jt({ pnl: 800 })], total: 250 });
+    const user = userEvent.setup();
+    renderPerf();
+    await user.click(screen.getByRole("button", { name: "YTD" }));
+    expect(await screen.findByText(/Metrics use the first 1 of 250 fills in this window/i)).toBeTruthy();
   });
 
   it("never queries the backend in explore mode and renders the sample prop rows", () => {

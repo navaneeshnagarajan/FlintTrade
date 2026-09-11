@@ -16,13 +16,17 @@
  *
  * Timeframe scope (FT-TRADE-006):
  *   - "Review range" (default) — the tool's committed header date range,
- *     sharing the tool's main query. Opening Performance never auto-jumps
- *     to YTD; an empty Review window is an honest empty for that window.
+ *     sharing the tool's main analytics query (``TRADE_JOURNAL_MAX_LIMIT``,
+ *     1000). Opening Performance never auto-jumps to YTD; an empty Review
+ *     window is an honest empty for that window.
  *   - "YTD" — explicit opt-in. Own query for 1 January → the IST trading
- *     day. The active chip always labels the effective window
- *     (``YTD · 01 Jan–11 Sep 2026``). The retired widget's
- *     ``toISOString().slice`` end date silently excluded the current
- *     session through the whole IST early morning.
+ *     day, also at the analytics page size. The active chip always labels
+ *     the effective window (``YTD · 01 Jan–11 Sep 2026``). The retired
+ *     widget's ``toISOString().slice`` end date silently excluded the
+ *     current session through the whole IST early morning.
+ *   - If the labelled window has more fills than one page, a status note
+ *     discloses the earliest-page prefix instead of silently claiming the
+ *     whole chip window.
  * Explore mode renders the tool's disclosed sample trades for both scopes and
  * never queries the backend.
  */
@@ -46,7 +50,7 @@ import {
   getLongestLossStreak,
   getLongestWinStreak,
 } from "@/lib/journalAnalytics";
-import { getTradeJournal, type JournalTrade } from "@/services/ftApi";
+import { getTradeJournal, TRADE_JOURNAL_MAX_LIMIT, type JournalTrade } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import { StatCard } from "./StatCard";
 
@@ -131,6 +135,18 @@ export type PerformanceScope = "ytd" | "range";
 function scopeChipLabel(active: PerformanceScope, value: PerformanceScope, window: string): string {
   const name = value === "ytd" ? "YTD" : "Review range";
   return active === value ? `${name} · ${window}` : name;
+}
+
+/**
+ * Honest slice note when analytics rows are a prefix of the labelled window.
+ *
+ * ``/trades/journal`` is chronological (oldest first) and caps at
+ * {@link TRADE_JOURNAL_MAX_LIMIT}; without this, a full-window chip would
+ * silently describe only the earliest page.
+ */
+export function journalSliceNote(fetched: number, total: number | undefined): string | null {
+  if (total === undefined || !Number.isFinite(total) || total <= fetched) return null;
+  return `Metrics use the first ${fetched.toLocaleString("en-IN")} of ${total.toLocaleString("en-IN")} fills in this window.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,9 +245,11 @@ export interface PerformanceTabProps {
   rangeStart: string;
   /** Committed Review end date (``YYYY-MM-DD``), shared with Log. */
   rangeEnd: string;
+  /** Untruncated Review-range match count from ``/trades/journal``. */
+  rangeTotal?: number;
 }
 
-export function PerformanceTab({ trades, rangeStart, rangeEnd }: PerformanceTabProps) {
+export function PerformanceTab({ trades, rangeStart, rangeEnd, rangeTotal }: PerformanceTabProps) {
   const isExplore = useModeStore((s) => s.mode === "explore");
   const [scope, setScope] = useState<PerformanceScope>("range");
 
@@ -239,7 +257,7 @@ export function PerformanceTab({ trades, rangeStart, rangeEnd }: PerformanceTabP
   const ytdEnabled = !isExplore && scope === "ytd";
   const { data: ytdResp } = useQuery({
     queryKey: ["tradeJournal", "perf", start, end],
-    queryFn: () => getTradeJournal(start, end),
+    queryFn: () => getTradeJournal(start, end, undefined, TRADE_JOURNAL_MAX_LIMIT),
     enabled: ytdEnabled,
     refetchInterval: ytdEnabled ? 30_000 : false,
   });
@@ -251,6 +269,12 @@ export function PerformanceTab({ trades, rangeStart, rangeEnd }: PerformanceTabP
     if (scope === "ytd") return ytdResp?.trades ?? [];
     return trades;
   }, [isExplore, scope, trades, ytdResp]);
+  const windowTotal = isExplore
+    ? trades.length
+    : scope === "ytd"
+      ? ytdResp?.total
+      : rangeTotal;
+  const sliceNote = journalSliceNote(rows.length, windowTotal);
 
   const analytics = useMemo(() => computeAnalytics(rows), [rows]);
   const closed = useMemo(() => closedChronological(rows), [rows]);
@@ -328,6 +352,11 @@ export function PerformanceTab({ trades, rangeStart, rangeEnd }: PerformanceTabP
           })}
         </div>
       </div>
+      {sliceNote && (
+        <p className="flex-none px-3 py-1 text-xxs text-text-muted border-b border-border-default" role="status">
+          {sliceNote}
+        </p>
+      )}
 
       {!isExplore && !hasData ? (
         <div

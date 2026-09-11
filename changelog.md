@@ -84,7 +84,10 @@ changelog rebuilds itself from the first release cut after this baseline.
   always shows the effective window (for example
   `YTD · 01 Jan–11 Sep 2026`). Opening Performance no longer
   auto-jumps to YTD. An empty range or no fills is an honest
-  empty for that window, not a quiet YTD fallback.
+  empty for that window, not a quiet YTD fallback. Metrics
+  cover the labelled window up to the journal's 1,000-fill
+  analytics page; a larger window is disclosed rather than
+  silently sliced.
 
 - **Heatmap Group by Exchange shows labelled group bands (FT-TRADE-005).**
   Explore `/trade` Positions → Heat → Group by Exchange (and
