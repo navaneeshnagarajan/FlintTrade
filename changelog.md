@@ -37,8 +37,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   new-install default. Compact Trade at ~1280 and wider keeps
   chart, order pad, and positions primary, with ticker, tool
   ribbon, and watchlist collapsed behind one desk-tools toggle.
-  At most one primary banner (Explore sample > Live risk >
-  feed disconnected). External-action gates stay fail-closed
+  At most one primary banner (Explore sample > Practice sample >
+  Live risk > feed disconnected). External-action gates stay fail-closed
   in Explore. Phone product and the marketing site are unchanged.
 
 - **OpenAlgo-style password-first Explore; TOTP only before Live (FT-SETUP-002).**
