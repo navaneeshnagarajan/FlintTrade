@@ -10,12 +10,14 @@ import {
   SAMPLE_PREMIUM_HELPER,
   UNSET_PREMIUM_HELPER,
   ZERO_PREMIUM_WARNING,
+  POSITION_BASIS_TAG,
   validateLegs,
-  calculateNetPremium,
+  calculatePositionNetPremium,
   computePayoff,
   computePayoffSummary,
   estimateMargin,
   formatINR,
+  formatPositionSublabel,
   hasExplicitZeroPremium,
   hasUnsetPremium,
 } from "./utils";
@@ -35,6 +37,23 @@ function dashCard(label: string) {
         <div className="text-base font-bold font-mono tabular-nums text-text-muted">—</div>
       </CardContent>
     </Card>
+  );
+}
+
+function BasisNote({
+  legs,
+  lotSize,
+  positionRupees,
+}: {
+  legs: Leg[];
+  lotSize: number;
+  positionRupees: number | null;
+}) {
+  const sublabel = formatPositionSublabel(legs, lotSize, positionRupees);
+  return (
+    <div className="text-xxs text-text-muted mt-0.5">
+      {sublabel ?? POSITION_BASIS_TAG}
+    </div>
   );
 }
 
@@ -62,7 +81,7 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
   const minPnl = summary?.maxLoss ?? null;
   const bepPoints = summary?.breakevens ?? [];
 
-  const netPremium = calculateNetPremium(legs);
+  const positionNet = calculatePositionNetPremium(legs, underlying.lotSize);
 
   if (!valid || legs.length === 0) {
     return (
@@ -97,6 +116,13 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
             <div className={`text-base font-bold font-mono tabular-nums ${(maxPnl ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
               {maxPnl === Infinity ? "Unlimited" : formatINR((maxPnl ?? 0) * underlying.lotSize)}
             </div>
+            {maxPnl !== Infinity && (
+              <BasisNote
+                legs={legs}
+                lotSize={underlying.lotSize}
+                positionRupees={maxPnl == null ? null : maxPnl * underlying.lotSize}
+              />
+            )}
           </CardContent>
         </Card>
         <Card className="bg-surface-card border-border-default">
@@ -105,15 +131,23 @@ export function PayoffTab({ legs, atm, underlying }: Props) {
             <div className={`text-base font-bold font-mono tabular-nums ${(minPnl ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
               {minPnl === -Infinity ? "Unlimited" : formatINR((minPnl ?? 0) * underlying.lotSize)}
             </div>
+            {minPnl !== -Infinity && (
+              <BasisNote
+                legs={legs}
+                lotSize={underlying.lotSize}
+                positionRupees={minPnl == null ? null : minPnl * underlying.lotSize}
+              />
+            )}
           </CardContent>
         </Card>
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Net Premium</div>
-            <div className={`text-base font-bold font-mono tabular-nums ${(netPremium ?? 0) <= 0 ? "text-emerald-400" : "text-red-400"}`}>
-              {formatINR(netPremium ?? 0)}
+            <div className={`text-base font-bold font-mono tabular-nums ${(positionNet ?? 0) <= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              {formatINR(positionNet ?? 0)}
             </div>
-            <div className="text-xxs text-text-muted">{(netPremium ?? 0) <= 0 ? "Credit" : "Debit"}</div>
+            <div className="text-xxs text-text-muted">{(positionNet ?? 0) <= 0 ? "Credit" : "Debit"}</div>
+            <BasisNote legs={legs} lotSize={underlying.lotSize} positionRupees={positionNet} />
           </CardContent>
         </Card>
         <Card className="bg-surface-card border-border-default">

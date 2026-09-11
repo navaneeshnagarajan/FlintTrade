@@ -589,13 +589,13 @@ premium blank so Payoff stays on that helper instead of modelling ₹0.
 Typing an explicit ₹0 is allowed. Payoff then treats cost as free and
 warns `Premium is ₹0 — payoff treats cost as free`.
 
-**Pending (FT-LAB-005).** Options Builder debit/credit and max loss
-are position totals: Net Debit/Credit, Max Loss, and Max Profit use
-premium × lots × lot size. For a long call, Max Loss equals Net Debit.
-A muted sublabel `₹X per lot · N lots · lot size L` is optional, never
-the only number. Header and Legs chips use the same position basis as
-Payoff. If figures still cannot be reconciled, both are tagged
-`per lot` or `position` — never two unlabelled ₹.
+Debit/credit and max loss are position totals: Net Debit/Credit, Max
+Loss, and Max Profit use premium × lots × lot size. For a long call,
+Max Loss equals Net Debit. A muted sublabel
+`₹X per lot · N lots · lot size L` is optional, never the only number.
+Header and Legs chips use the same position basis as Payoff. If figures
+still cannot be reconciled, both are tagged `per lot` or `position` —
+never two unlabelled ₹.
 
 ![Lab](screenshots/06-lab.png)
 
