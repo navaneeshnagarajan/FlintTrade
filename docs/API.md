@@ -376,7 +376,7 @@ documented in-memory `pnl-tracker` endpoints were unfed and were removed.)
 
 | Endpoint | Purpose |
 |---|---|
-| `trades/journal` (**GET**) | Recorded trades. No params → today; `start_date`+`end_date` → history window across all strategies; `+strategy` → that strategy only. Rows are keyed `timestamp` (ISO, IST), with `symbol`, `action`, `quantity`, `price`, `pnl`, `strategy`, `orderid`. |
+| `trades/journal` (**GET**) | Recorded trades. No params → today; `start_date`+`end_date` → history window across all strategies; `+strategy` → that strategy only. `limit` defaults to 100 and caps at 1000 (oldest-first). `data.total` is the untruncated match count. Rows are keyed `timestamp` (ISO, IST), with `symbol`, `action`, `quantity`, `price`, `pnl`, `strategy`, `orderid`. |
 
 ### Safety (`/api/v1/safety/*`)
 

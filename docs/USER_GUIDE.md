@@ -327,6 +327,17 @@ exposure when there is room). Flat stays leaf-only. Positions with no
 exchange metadata show `No exchange groups in these positions` instead
 of an undifferentiated treemap.
 
+On `/trade` Trade Review, **Performance** uses the same date range as
+Log and the other Review tabs. Changing Review dates updates
+Performance. A visible **Review range** | **YTD** control keeps YTD as
+an explicit choice; the active chip shows the effective window (for
+example `Review range · 05 Sep–11 Sep 2026` or
+`YTD · 01 Jan–11 Sep 2026`). Opening Performance stays on the Review
+range rather than jumping to YTD. An empty range or no fills is an
+honest empty for that window, not a quiet YTD fallback. Metrics cover
+the labelled window up to the journal's 1,000-fill analytics page; a
+larger window is disclosed rather than silently sliced.
+
 ### Learn → Practice Trading (OpenAlgo)
 
 This is a different path from the native Practice-mode sandbox on
