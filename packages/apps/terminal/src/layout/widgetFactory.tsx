@@ -206,7 +206,7 @@ export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
     movedTo: { destination: "Trade Review (Tools menu)" },
     note:
       "Performance metrics now live in the Trade Review tool's Performance "
-      + "tab with a Range/YTD scope toggle, routed through "
+      + "tab with a Review-range/YTD scope toggle, routed through "
       + "lib/journalAnalytics — which fixed an equity curve running backwards "
       + "(the journal returns newest-first and this widget summed in array "
       + "order), a YTD end date computed in UTC that excluded the current "

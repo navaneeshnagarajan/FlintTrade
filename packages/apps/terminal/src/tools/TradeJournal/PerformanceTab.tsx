@@ -14,13 +14,15 @@
  *   - avg-loss sign: ``computeAnalytics`` reports the signed average; R:R and
  *     expectancy take the absolute value explicitly.
  *
- * Timeframe scope (the SessionStats ↔ TradePerformance merge ruling):
- *   - "YTD" (default) — the widget's year-to-date window, via its own query.
- *     The YTD end date is the IST trading day (the widget's
- *     ``toISOString().slice`` end date silently excluded the current session
- *     through the whole IST early morning).
- *   - "Range" — the tool's committed header date range (the old Analytics
- *     tab's scope), sharing the tool's main query.
+ * Timeframe scope (FT-TRADE-006):
+ *   - "Review range" (default) — the tool's committed header date range,
+ *     sharing the tool's main query. Opening Performance never auto-jumps
+ *     to YTD; an empty Review window is an honest empty for that window.
+ *   - "YTD" — explicit opt-in. Own query for 1 January → the IST trading
+ *     day. The active chip always labels the effective window
+ *     (``YTD · 01 Jan–11 Sep 2026``). The retired widget's
+ *     ``toISOString().slice`` end date silently excluded the current
+ *     session through the whole IST early morning.
  * Explore mode renders the tool's disclosed sample trades for both scopes and
  * never queries the backend.
  */
@@ -101,6 +103,35 @@ export function ytdIstRange(): { start: string; end: string } {
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * Human-readable Performance window, e.g. ``01 Jan–11 Sep 2026``.
+ *
+ * Same-year ranges keep the year once at the end; a year-boundary window
+ * spells both years so the chip cannot be read as a single calendar year.
+ */
+export function formatPerformanceWindow(start: string, end: string): string {
+  const parse = (iso: string): { day: string; month: string; year: string } => {
+    const [year, month, day] = iso.split("-");
+    const monthName = MONTHS[(Number(month) - 1 + 12) % 12] ?? month;
+    return { day, month: monthName, year };
+  };
+  const from = parse(start);
+  const to = parse(end);
+  const left = `${from.day} ${from.month}`;
+  const right = `${to.day} ${to.month}`;
+  if (from.year === to.year) {
+    return `${left}–${right} ${to.year}`;
+  }
+  return `${left} ${from.year}–${right} ${to.year}`;
+}
+
+export type PerformanceScope = "ytd" | "range";
+
+function scopeChipLabel(active: PerformanceScope, value: PerformanceScope, window: string): string {
+  const name = value === "ytd" ? "YTD" : "Review range";
+  return active === value ? `${name} · ${window}` : name;
+}
 
 // ---------------------------------------------------------------------------
 // Equity curve
@@ -191,18 +222,18 @@ function MonthlyHeatmap({ returns }: { returns: Record<string, number> }) {
 // Main tab
 // ---------------------------------------------------------------------------
 
-export type PerformanceScope = "ytd" | "range";
-
 export interface PerformanceTabProps {
   /** The tool's committed-range journal rows (sample rows in explore mode). */
   trades: JournalTrade[];
-  /** Human-readable committed range, e.g. "2026-07-19 → 2026-07-25". */
-  rangeLabel: string;
+  /** Committed Review start date (``YYYY-MM-DD``), shared with Log. */
+  rangeStart: string;
+  /** Committed Review end date (``YYYY-MM-DD``), shared with Log. */
+  rangeEnd: string;
 }
 
-export function PerformanceTab({ trades, rangeLabel }: PerformanceTabProps) {
+export function PerformanceTab({ trades, rangeStart, rangeEnd }: PerformanceTabProps) {
   const isExplore = useModeStore((s) => s.mode === "explore");
-  const [scope, setScope] = useState<PerformanceScope>("ytd");
+  const [scope, setScope] = useState<PerformanceScope>("range");
 
   const { start, end } = useMemo(() => ytdIstRange(), []);
   const ytdEnabled = !isExplore && scope === "ytd";
@@ -264,30 +295,37 @@ export function PerformanceTab({ trades, rangeLabel }: PerformanceTabProps) {
       <div className="flex-none flex items-center gap-2 px-3 py-1.5 bg-surface-card border-b border-border-default">
         <Trophy size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Performance</span>
-        <span className="text-xxs text-text-muted font-mono">
-          {scope === "ytd" ? `${start} → ${end}` : rangeLabel}
-        </span>
         <div className="flex-1" />
         <div className="flex gap-1" role="group" aria-label="Performance timeframe">
           {([
-            { value: "range", label: "Range" },
-            { value: "ytd", label: "YTD" },
-          ] as const).map(({ value, label }) => (
-            <Button
-              key={value}
-              variant="ghost"
-              size="sm"
-              aria-pressed={scope === value}
-              className={`h-5 px-2 text-xxs ${
-                scope === value
-                  ? "bg-surface-elevated text-text-primary"
-                  : "text-text-muted hover:text-text-primary"
-              }`}
-              onClick={() => setScope(value)}
-            >
-              {label}
-            </Button>
-          ))}
+            {
+              value: "range" as const,
+              window: formatPerformanceWindow(rangeStart, rangeEnd),
+            },
+            {
+              value: "ytd" as const,
+              window: formatPerformanceWindow(start, end),
+            },
+          ]).map(({ value, window }) => {
+            const label = scopeChipLabel(scope, value, window);
+            return (
+              <Button
+                key={value}
+                variant="ghost"
+                size="sm"
+                aria-pressed={scope === value}
+                aria-label={label}
+                className={`h-5 px-2 text-xxs ${
+                  scope === value
+                    ? "bg-surface-elevated text-text-primary"
+                    : "text-text-muted hover:text-text-primary"
+                }`}
+                onClick={() => setScope(value)}
+              >
+                {label}
+              </Button>
+            );
+          })}
         </div>
       </div>
 

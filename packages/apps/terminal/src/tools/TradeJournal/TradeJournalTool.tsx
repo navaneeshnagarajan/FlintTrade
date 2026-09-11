@@ -6,9 +6,10 @@
  *                   committed header window; replaced the old TradeLogTab.
  *   - Session     — today's session statistics (absorbed the SessionStats
  *                   widget: FIFO round trips via lib/pnl).
- *   - Performance — longer-horizon metrics with a Range/YTD scope toggle
- *                   (absorbed the TradePerformance widget and the old
+ *   - Performance — longer-horizon metrics with a Review-range/YTD scope
+ *                   toggle (absorbed the TradePerformance widget and the old
  *                   Analytics tab; metrics via lib/journalAnalytics).
+ *                   Defaults to the committed Review dates; YTD is explicit.
  *   - Calendar    — daily P&L heat calendar over real journalled trades
  *                   (absorbed the P&L Dashboard Calendar tab's data plane and
  *                   the HeatCalendar widget's rendering affordances).
@@ -271,7 +272,11 @@ export default function TradeJournalTool({ onClose }: Props) {
           value="performance"
           className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden"
         >
-          <PerformanceTab trades={trades} rangeLabel={`${queryStart} → ${queryEnd}`} />
+          <PerformanceTab
+            trades={trades}
+            rangeStart={queryStart}
+            rangeEnd={queryEnd}
+          />
         </TabsContent>
 
         <TabsContent

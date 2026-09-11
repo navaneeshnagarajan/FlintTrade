@@ -264,12 +264,27 @@ describe("TradeJournalTool (Trade Review)", () => {
     expect(screen.getByText("Sample data")).toBeInTheDocument();
   });
 
-  it("mounts the Performance tab with an honest empty state when live with no trades", async () => {
+  it("REGRESSION: Performance follows the Review range on open, not a silent YTD jump", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-11T04:30:00Z")); // 10:00 IST on 11 Sep
     render(<TradeJournalTool />);
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("tab", { name: "Performance" }));
+    fireEvent.change(screen.getByLabelText("Start date"), {
+      target: { value: "2026-09-05" },
+    });
+    fireEvent.change(screen.getByLabelText("End date"), {
+      target: { value: "2026-09-11" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
-    expect(screen.getByText(/No closed trades yet this year/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Performance" }));
+
+    const review = screen.getByRole("button", { name: "Review range · 05 Sep–11 Sep 2026" });
+    expect(review).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "YTD" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText(/No closed trades in the selected range/i)).toBeInTheDocument();
+    expect(screen.queryByText(/No closed trades yet this year/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^YTD ·/ })).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it("mounts the Calendar tab with month navigation", async () => {
