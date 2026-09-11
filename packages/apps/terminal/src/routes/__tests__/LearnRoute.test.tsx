@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
@@ -158,5 +160,42 @@ describe("LearnRoute", () => {
       return /(?:^|\s)whitespace-nowrap(?:\s|$)/.test(cls) && !cls.includes("whitespace-normal");
     });
     expect(nowrapLeftovers).toEqual([]);
+  });
+
+  it("teaches dated Jan 2026 NSE-cycle index lots, not retired NIFTY=25 / BANKNIFTY=15", () => {
+    renderLearnRoute();
+    fireEvent.click(screen.getByRole("tab", { name: "Glossary" }));
+
+    const lotSize = screen.getByText("Lot Size");
+    fireEvent.click(lotSize);
+
+    expect(screen.getAllByText(/NIFTY 65/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/BANKNIFTY 30/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/FINNIFTY 60/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/MIDCPNIFTY 120/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/as of Jan 2026 NSE cycle/i).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(/NIFTY\s*=\s*25/)).toHaveLength(0);
+    expect(screen.queryAllByText(/BANKNIFTY\s*=\s*15/)).toHaveLength(0);
+
+    const verify = screen.getByRole("link", { name: /verify on nse/i });
+    expect(verify).toHaveAttribute(
+      "href",
+      "https://nsearchives.nseindia.com/content/circulars/FAOP70616.pdf",
+    );
+    expect(verify).toHaveAttribute("target", "_blank");
+    expect(verify).toHaveAttribute("rel", expect.stringContaining("noopener"));
+  });
+
+  it("keeps Lot Size source dated so NIFTY=25 / BANKNIFTY=15 cannot regress", () => {
+    const src = readFileSync(join(process.cwd(), "src/routes/LearnRoute.tsx"), "utf8");
+    expect(src).not.toMatch(/NIFTY\s*=\s*25/);
+    expect(src).not.toMatch(/BANKNIFTY\s*=\s*15/);
+    expect(src).toMatch(/NIFTY 65/);
+    expect(src).toMatch(/BANKNIFTY 30/);
+    expect(src).toMatch(/FINNIFTY 60/);
+    expect(src).toMatch(/MIDCPNIFTY 120/);
+    expect(src).toMatch(/as of Jan 2026 NSE cycle/);
+    expect(src).toMatch(/Verify on NSE/);
+    expect(src).toMatch(/nsearchives\.nseindia\.com\/content\/circulars\/FAOP70616\.pdf/);
   });
 });

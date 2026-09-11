@@ -29,16 +29,6 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
-- **Learn Glossary Lot Size freshness (FT-LEARN-002).**
-  Explore `/learn` → Glossary → Lot Size still teaches
-  `NIFTY=25`, `BANKNIFTY=15`, which is stale versus current
-  NSE F&O lot sizes and can mis-size risk. Expected: current
-  lot sizes, or a dated “as of” plus a link to the exchange
-  circular, so Learn does not teach wrong sizing. Product
-  work waits on this same PR after the UI/UX Designer call
-  on copy/date honesty for Learn Glossary market facts.
-  Independent of #213 (FT-UX-001).
-
 - **OpenAlgo-style password-first Explore; TOTP only before Live (FT-SETUP-002).**
   Setup and daily login are password-only for Explore and Practice.
   Authenticator enrolment is optional (“Set up later”) on day one.
@@ -61,6 +51,16 @@ changelog rebuilds itself from the first release cut after this baseline.
   `gate_broker_write` → `BrokerRouter`) stay unchanged.
 
 ### Fixed
+
+- **Learn Glossary Lot Size freshness (FT-LEARN-002).**
+  Explore `/learn` → Glossary → Lot Size now teaches the
+  Jan 2026 NSE-cycle index lots — NIFTY 65, BANKNIFTY 30,
+  FINNIFTY 60, MIDCPNIFTY 120 — with an explicit “as of”
+  date and a Verify on NSE link to circular NSE/FAOP/70616
+  (3 Oct 2025). Stale `NIFTY=25` / `BANKNIFTY=15` copy is
+  gone. Learn market facts that exchanges revise must ship
+  dated, not as forever hardcodes. Independent of #213
+  (FT-UX-001).
 
 - **Heatmap Group by Exchange shows labelled group bands (FT-TRADE-005).**
   Explore `/trade` Positions → Heat → Group by Exchange (and
