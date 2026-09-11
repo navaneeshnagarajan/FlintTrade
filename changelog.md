@@ -66,6 +66,20 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Backtest headline P&L vs trade-log (FT-LAB-004).**
+  Explore `/lab` → `sma_crossover` → run backtest:
+  headline **Total Return** does not clearly
+  reconcile with the trade-log P&L sum. Displayed
+  totals can look inconsistent and undermine
+  confidence in the result. Expected: headline
+  metrics match the trade log on the same
+  currency and basis, or an explicit note when
+  the headline uses a different definition
+  (equity curve versus sum of fills). Product
+  work waits on this same PR after the UI/UX
+  Designer call on reconcile copy versus dual
+  metrics labelling.
+
 - **Learn Glossary Lot Size freshness (FT-LEARN-002).**
   Explore `/learn` → Glossary → Lot Size now teaches the
   Jan 2026 NSE-cycle index lots — NIFTY 65, BANKNIFTY 30,

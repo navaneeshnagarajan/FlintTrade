@@ -552,6 +552,14 @@ and Options Builder.
 5. **Review.** Equity curve, Sharpe, Sortino, max drawdown, win rate,
    trade list, Monte Carlo confidence band.
 
+**Pending (FT-LAB-004).** Explore `/lab` → select `sma_crossover` → run
+backtest: headline **Total Return** does not clearly reconcile with the
+trade-log P&L sum. Headline metrics must match the trade log on the same
+currency and basis, or carry an explicit note when the headline uses a
+different definition (equity curve versus sum of fills). The UI/UX
+Designer call on reconcile copy versus dual metrics labelling lands on
+this same PR; do not treat the two totals as the same figure until then.
+
 ### Forward Test
 
 Same as Backtest, but runs in Practice mode against live ticks. Use it to
