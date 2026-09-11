@@ -52,6 +52,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Explore Mutual Fund NAVs no longer claim a daily AMFI feed (FT-INVEST-001).**
+  Explore `/invest#mutual-funds` now labels the fixture
+  `Sample NAVs · as of 10-Sep-2026` and drops “Updated daily
+  after market close.” The sample date was refreshed once so
+  the as-of is not months stale; it does not auto-update.
+  Practice and Live keep the daily-update sentence when the
+  live AMFI feed is in use.
+
 - **Options Builder Explore Long Call no longer looks zero-risk (FT-LAB-003).**
   Explore `/lab` Options Builder now treats a blank premium as
   unknown: Payoff summary cards show `—` and

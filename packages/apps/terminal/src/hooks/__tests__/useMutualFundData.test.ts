@@ -79,7 +79,7 @@ vi.mock("@/services/ftApi", () => ({
 // Import hooks after mocks
 // ---------------------------------------------------------------------------
 
-import { useMFSearch, useMFCategories, useMFNAV } from "../useMutualFundData";
+import { useMFSearch, useMFCategories, useMFNAV, EXPLORE_SAMPLE_NAV_DATE } from "../useMutualFundData";
 
 // ---------------------------------------------------------------------------
 // Wrapper
@@ -118,6 +118,7 @@ describe("useMFSearch", () => {
     expect(result.current.isLoading).toBe(false);
     expect(result.current.funds.length).toBeGreaterThan(0);
     expect(result.current.funds[0].scheme_name).toContain("Axis Bluechip");
+    expect(result.current.funds.every((fund) => fund.nav_date === EXPLORE_SAMPLE_NAV_DATE)).toBe(true);
     expect(searchMock).not.toHaveBeenCalled();
   });
 

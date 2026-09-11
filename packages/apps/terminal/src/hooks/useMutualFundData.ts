@@ -21,6 +21,9 @@ import {
 // Explore-mode fallback data (representative Indian mutual funds)
 // ---------------------------------------------------------------------------
 
+/** Static Explore fixture as-of date (AMFI ``DD-Mon-YYYY``). Does not auto-refresh. */
+export const EXPLORE_SAMPLE_NAV_DATE = "10-Sep-2026";
+
 const FALLBACK_FUNDS: MutualFundEntry[] = [
   {
     scheme_code: 120503,
@@ -28,7 +31,7 @@ const FALLBACK_FUNDS: MutualFundEntry[] = [
     amc: "Axis Mutual Fund",
     category: "Equity Scheme - Large Cap Fund",
     nav: 62.45,
-    nav_date: "08-Apr-2026",
+    nav_date: EXPLORE_SAMPLE_NAV_DATE,
     scheme_type: "Open Ended",
   },
   {
@@ -37,7 +40,7 @@ const FALLBACK_FUNDS: MutualFundEntry[] = [
     amc: "PPFAS Mutual Fund",
     category: "Equity Scheme - Flexi Cap Fund",
     nav: 89.12,
-    nav_date: "08-Apr-2026",
+    nav_date: EXPLORE_SAMPLE_NAV_DATE,
     scheme_type: "Open Ended",
   },
   {
@@ -46,7 +49,7 @@ const FALLBACK_FUNDS: MutualFundEntry[] = [
     amc: "SBI Mutual Fund",
     category: "Equity Scheme - Small Cap Fund",
     nav: 178.34,
-    nav_date: "08-Apr-2026",
+    nav_date: EXPLORE_SAMPLE_NAV_DATE,
     scheme_type: "Open Ended",
   },
   {
@@ -55,7 +58,7 @@ const FALLBACK_FUNDS: MutualFundEntry[] = [
     amc: "HDFC Mutual Fund",
     category: "Equity Scheme - Mid Cap Fund",
     nav: 145.67,
-    nav_date: "08-Apr-2026",
+    nav_date: EXPLORE_SAMPLE_NAV_DATE,
     scheme_type: "Open Ended",
   },
   {
@@ -64,7 +67,7 @@ const FALLBACK_FUNDS: MutualFundEntry[] = [
     amc: "Mirae Asset Mutual Fund",
     category: "Equity Scheme - Large Cap Fund",
     nav: 105.23,
-    nav_date: "08-Apr-2026",
+    nav_date: EXPLORE_SAMPLE_NAV_DATE,
     scheme_type: "Open Ended",
   },
   {
@@ -73,7 +76,7 @@ const FALLBACK_FUNDS: MutualFundEntry[] = [
     amc: "UTI Mutual Fund",
     category: "Other Scheme - Index Funds",
     nav: 156.89,
-    nav_date: "08-Apr-2026",
+    nav_date: EXPLORE_SAMPLE_NAV_DATE,
     scheme_type: "Open Ended",
   },
   {
@@ -82,7 +85,7 @@ const FALLBACK_FUNDS: MutualFundEntry[] = [
     amc: "Kotak Mahindra Mutual Fund",
     category: "Equity Scheme - Mid Cap Fund",
     nav: 112.56,
-    nav_date: "08-Apr-2026",
+    nav_date: EXPLORE_SAMPLE_NAV_DATE,
     scheme_type: "Open Ended",
   },
   {
@@ -91,7 +94,7 @@ const FALLBACK_FUNDS: MutualFundEntry[] = [
     amc: "ICICI Prudential Mutual Fund",
     category: "Equity Scheme - Large Cap Fund",
     nav: 98.41,
-    nav_date: "08-Apr-2026",
+    nav_date: EXPLORE_SAMPLE_NAV_DATE,
     scheme_type: "Open Ended",
   },
 ];
