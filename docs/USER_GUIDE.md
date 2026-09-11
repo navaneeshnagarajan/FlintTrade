@@ -327,6 +327,16 @@ exposure when there is room). Flat stays leaf-only. Positions with no
 exchange metadata show `No exchange groups in these positions` instead
 of an undifferentiated treemap.
 
+On `/trade` Trade Review, **Performance** currently ignores the Review
+date range and silently falls back to YTD (FT-TRADE-006). The locked
+call: Performance follows Review dates unless **YTD** is selected.
+Changing Review dates updates Performance. A YTD scope needs a visible
+**Review range** | **YTD** control with an active chip for the
+effective window (for example `YTD · 01 Jan–11 Sep 2026`). Opening
+Performance must not auto-jump to YTD without labelling that the Review
+range was left behind. An empty range or no fills is an honest empty
+for that window, not a quiet YTD fallback.
+
 ### Learn → Practice Trading (OpenAlgo)
 
 This is a different path from the native Practice-mode sandbox on

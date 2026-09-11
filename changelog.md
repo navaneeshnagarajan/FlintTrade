@@ -76,6 +76,19 @@ changelog rebuilds itself from the first release cut after this baseline.
   dated, not as forever hardcodes. Independent of #213
   (FT-UX-001).
 
+- **Performance silently ignores Review date range (FT-TRADE-006).**
+  Trade Review **Performance** currently falls back to YTD
+  without labelling that the Review range was left behind.
+  Locked UX: Performance uses the same date range as Trade
+  Review by default; changing Review dates updates
+  Performance. If YTD stays, a visible **Review range** |
+  **YTD** control shows the effective window on an active
+  chip (for example `YTD · 01 Jan–11 Sep 2026`). Opening
+  Performance must never auto-jump to YTD unlabelled. An
+  empty range or no fills is an honest empty for that
+  window, not a quiet YTD fallback. Product fix follows
+  this locked call on this same PR.
+
 - **Heatmap Group by Exchange shows labelled group bands (FT-TRADE-005).**
   Explore `/trade` Positions → Heat → Group by Exchange (and
   Group by Sector) now draws a labelled band per group: a
