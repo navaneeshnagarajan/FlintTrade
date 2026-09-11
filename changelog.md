@@ -66,6 +66,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Learn Glossary Lot Size freshness (FT-LEARN-002).**
+  Explore `/learn` → Glossary → Lot Size now teaches the
+  Jan 2026 NSE-cycle index lots — NIFTY 65, BANKNIFTY 30,
+  FINNIFTY 60, MIDCPNIFTY 120 — with an explicit “as of”
+  date and a Verify on NSE link to circular NSE/FAOP/70616
+  (3 Oct 2025). Stale `NIFTY=25` / `BANKNIFTY=15` copy is
+  gone. Learn market facts that exchanges revise must ship
+  dated, not as forever hardcodes. Independent of #213
+  (FT-UX-001).
+
 - **Heatmap Group by Exchange shows labelled group bands (FT-TRADE-005).**
   Explore `/trade` Positions → Heat → Group by Exchange (and
   Group by Sector) now draws a labelled band per group: a

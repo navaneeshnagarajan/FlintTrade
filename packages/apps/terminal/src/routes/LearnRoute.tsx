@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   Clock,
   ChevronDown,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +43,9 @@ interface TabDef {
 interface GlossaryEntry {
   term: string;
   definition: string;
+  /** Exchange circular or contract file for figures that get revised. */
+  verifyHref?: string;
+  verifyLabel?: string;
 }
 
 interface StrategyCard {
@@ -132,6 +136,13 @@ const BASICS_SECTIONS: BasicsSection[] = [
   },
 ];
 
+/**
+ * Learn Glossary entries. Any figure an exchange revises must ship with an
+ * “as of” date and a verify link — stale undated lots are a bug (FT-LEARN-002).
+ */
+const LEARN_INDEX_LOT_VERIFY_HREF =
+  "https://nsearchives.nseindia.com/content/circulars/FAOP70616.pdf";
+
 const GLOSSARY: GlossaryEntry[] = [
   { term: "ATM",        definition: "At The Money — option strike closest to current market price" },
   { term: "Bid/Ask",    definition: "Bid is the highest buy price, Ask is the lowest sell price" },
@@ -142,7 +153,13 @@ const GLOSSARY: GlossaryEntry[] = [
   { term: "Gamma",      definition: "Rate of change of Delta — measures acceleration of price change" },
   { term: "Hedge",      definition: "A position taken to offset potential losses in another position" },
   { term: "IV",         definition: "Implied Volatility — market's expectation of future price movement" },
-  { term: "Lot Size",   definition: "Minimum quantity for F&O trading. NIFTY=25, BANKNIFTY=15" },
+  {
+    term: "Lot Size",
+    definition:
+      "Minimum quantity for F&O trading. NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 · MIDCPNIFTY 120 (as of Jan 2026 NSE cycle).",
+    verifyHref: LEARN_INDEX_LOT_VERIFY_HREF,
+    verifyLabel: "Verify on NSE",
+  },
   { term: "Margin",     definition: "Deposit required to open F&O positions. Can be SPAN + Exposure." },
   { term: "MTM",        definition: "Mark To Market — daily P&L calculation based on closing price" },
   { term: "NRML",       definition: "Normal position — can be carried overnight, higher margin" },
@@ -365,14 +382,13 @@ function GlossaryItem({ entry }: GlossaryItemProps) {
   const [open, setOpen] = useState(false);
 
   return (
-    <button
-      type="button"
-      onClick={() => setOpen((v) => !v)}
-      aria-expanded={open}
-      className="w-full text-left"
-    >
-      <GlassCard className="rounded-lg p-0 overflow-hidden hover:border-border-strong transition-colors duration-150">
-        {/* Accordion header */}
+    <GlassCard className="rounded-lg p-0 hover:border-border-strong transition-colors duration-150">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full text-left"
+      >
         <div className="flex items-center gap-3 px-4 py-3">
           <span className="text-sm font-mono font-semibold text-accent shrink-0 w-28 truncate">
             {entry.term}
@@ -388,28 +404,39 @@ function GlossaryItem({ entry }: GlossaryItemProps) {
             <ChevronDown className="w-3.5 h-3.5 text-text-muted" />
           </motion.div>
         </div>
+      </button>
 
-        {/* Accordion body — smooth height reveal */}
-        <AnimatePresence initial={false}>
-          {open && (
-            <motion.div
-              key="body"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: motionConfig.duration.normal, ease: motionConfig.ease.enter }}
-              style={{ overflow: "hidden" }}
-            >
-              <div className="px-4 pb-3 pt-0 border-t border-border-default/50">
-                <p className="text-sm text-text-secondary leading-relaxed text-left">
-                  {entry.definition}
-                </p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </GlassCard>
-    </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="body"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: motionConfig.duration.normal, ease: motionConfig.ease.enter }}
+            style={{ overflow: "hidden" }}
+          >
+            <div className="flex flex-col gap-2 border-t border-border-default/50 px-4 pb-3 pt-2">
+              <p className="text-left text-sm leading-relaxed text-text-secondary">
+                {entry.definition}
+              </p>
+              {entry.verifyHref && entry.verifyLabel && (
+                <Button asChild variant="link" size="sm" className="h-auto w-fit px-0">
+                  <a
+                    href={entry.verifyHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <ExternalLink data-icon="inline-start" />
+                    {entry.verifyLabel}
+                  </a>
+                </Button>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </GlassCard>
   );
 }
 

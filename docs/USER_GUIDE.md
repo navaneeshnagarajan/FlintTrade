@@ -340,6 +340,12 @@ Settings → Brokers (`/settings#brokers`). Point the Broker Gateway at
 that OpenAlgo Practice instance, trade against virtual funds, review
 P&L, then point OpenAlgo at live credentials when ready.
 
+On Explore `/learn` → Glossary → Lot Size, the glossary teaches dated
+Jan 2026 NSE-cycle index lots (`NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 ·
+MIDCPNIFTY 120 (as of Jan 2026 NSE cycle)`) plus a **Verify on NSE**
+link to circular NSE/FAOP/70616. Learn market facts that exchanges
+revise must ship dated, not as forever hardcodes.
+
 ---
 
 ## 4. Live-mode safeguard verification
