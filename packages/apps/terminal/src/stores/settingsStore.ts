@@ -116,7 +116,7 @@ interface SettingsStore {
 
 const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (set) => ({
   persona: "trader",
-  density: "compact",
+  density: "comfortable",
   fontSize: "normal",
   defaultExchange: "NFO",
   defaultProduct: "MIS",

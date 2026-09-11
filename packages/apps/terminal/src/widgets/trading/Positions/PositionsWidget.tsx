@@ -851,6 +851,8 @@ function PositionsWidget(props: WidgetProps) {
 
   const renderRowActions = useCallback((position: PositionRow) => {
     if (!(canSquareOff || canUseNativePositionVerbs)) {
+      // Explore/Practice books are not Live — omit the Live-only hint.
+      if (isExplore || appMode === "practice") return null;
       return <span className="text-xxs text-text-muted">Live only</span>;
     }
     return (
@@ -887,7 +889,7 @@ function PositionsWidget(props: WidgetProps) {
         )}
       </span>
     );
-  }, [canSquareOff, canUseNativePositionVerbs, readIdentity]);
+  }, [appMode, canSquareOff, canUseNativePositionVerbs, isExplore, readIdentity]);
 
   const narrowCards = useMemo(
     () => rows.map((row) => ({
@@ -1022,7 +1024,7 @@ function PositionsWidget(props: WidgetProps) {
             <span
               className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
               role="status"
-              aria-label="Broker connection required for live positions"
+              aria-label="Broker connection required for real positions"
             >
               Broker required
             </span>
@@ -1283,7 +1285,7 @@ function PositionsWidget(props: WidgetProps) {
       {/* Explore-mode watermark */}
       {isExplore && (
         <div className="shrink-0 px-3 py-1 border-t border-border-subtle text-xxs text-text-disabled text-center">
-          Sample data — connect a broker to see live positions
+          Sample data — connect a broker to see your positions
         </div>
       )}
 

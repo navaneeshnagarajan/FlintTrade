@@ -9,7 +9,7 @@ FlintTrade distinguishes operating modes from data provenance. Provenance is ind
 
 ## Operating Modes
 
-- **Explore**: sample-data discovery; no Live broker order authority. On `/trade`, Order Pad Practice Buy opens a Practice review and records a local sample fill (no broker, order-proxy, or SafetySystem). Live-intent submits remain blocked.
+- **Explore**: sample-data discovery; no Live broker order authority. On `/trade`, Order Pad **Sample Buy** opens a sample review and records a local sample fill (no broker, order-proxy, or SafetySystem). Live-intent submits remain blocked.
 - **Practice**: simulated execution via the native Practice simulation; no real broker order or capital movement.
 - **Live**: real broker order authority only after explicit user unlock and server-side safety gates.
 

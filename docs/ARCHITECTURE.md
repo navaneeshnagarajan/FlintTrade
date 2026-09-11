@@ -406,7 +406,7 @@ stateDiagram-v2
 
     state Explore {
         [*] --> noLiveOrders
-        noLiveOrders: No Live broker order authority.\nBackend and Live-intent paths:\nHTTP 403 mode_blocked;\nno broker call.\nException: /trade Order Pad\nPractice Buy is a local\nclient sample fill
+        noLiveOrders: No Live broker order authority.\nBackend and Live-intent paths:\nHTTP 403 mode_blocked;\nno broker call.\nException: /trade Order Pad\nSample Buy is a local\nclient sample fill
     }
     state Practice {
         [*] --> sandbox
@@ -428,7 +428,7 @@ downgrade is available on the API. The guard lives at
 
 Explore has no Live broker order authority: backend and Live-intent
 order paths still refuse with `mode_blocked` and never call a broker.
-The exception is Order Pad Practice Buy on `/trade`, which records a
+The exception is Order Pad Sample Buy on `/trade`, which records a
 local client-side sample fill (no HTTP order route, no SafetySystem,
 no broker). Practice remains the native sandbox; Live remains the
 gated broker path.
@@ -593,7 +593,7 @@ Every HTTP order-path endpoint asks `mode_guard` whether the JWT permits a
 live action. Trying to place a live order on a Practice JWT is rejected 403
 immediately with code `practice_unsupported`. Explore JWTs yield
 `mode_blocked` on those same server routes — the request never reaches
-OpenAlgo or a broker. That does not cover Order Pad Practice Buy on
+OpenAlgo or a broker. That does not cover Order Pad Sample Buy on
 `/trade` in Explore, which records a local client-side sample fill
 without calling an HTTP order route, SafetySystem, or a broker.
 

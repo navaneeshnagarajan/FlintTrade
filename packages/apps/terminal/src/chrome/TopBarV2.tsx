@@ -54,6 +54,7 @@ import type { TickerMode } from "./TickerMarquee";
 import ToolsDropdown from "./ToolsDropdown";
 import TopBarMoreSheet, { MoreRow } from "./TopBarMoreSheet";
 import { useChromeCollapse } from "./useChromeCollapse";
+import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
 
 // ---------------------------------------------------------------------------
 // ISTClock
@@ -290,13 +291,22 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   const tickerMode: TickerMode = tickerModeProp ?? storedTickerMode;
   const { availableTools } = useSkillContent();
   const { hideTickerByDefault, collapseOverflow } = useChromeCollapse();
+  const {
+    showTicker: showDeskTicker,
+    showToolRibbon,
+    setToolsExpanded,
+  } = useDeskDensityChrome();
   const [quickSettingsOpen, setQuickSettingsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [tickerForcedOnNarrow, setTickerForcedOnNarrow] = useState(false);
   const gearRef = useRef<HTMLButtonElement>(null);
   const toolsRef = useRef<HTMLButtonElement>(null);
-  const showTicker = tickerMode !== "off" && (!hideTickerByDefault || tickerForcedOnNarrow);
+  const showTicker =
+    tickerMode !== "off"
+    && (!hideTickerByDefault || tickerForcedOnNarrow)
+    && showDeskTicker;
+  const hideDeskRibbon = !showToolRibbon && !collapseOverflow;
 
   // Maintain broker connection status from either OpenAlgo bridge ping or a
   // live native/gateway broker session. This store still drives older widgets.
@@ -309,7 +319,9 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   // demo ping.
   useEffect(() => {
     if (mode === "explore") {
-      setStatus(directBrokerConnected ? "connected" : "disconnected");
+      // Explore is broker-free. A leftover native session must not paint
+      // Connected/green — same honesty as FT-AI-002 / FT-AUTO-002.
+      setStatus("disconnected");
       return;
     }
     const check = async () => {
@@ -429,36 +441,54 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
           </>
         ) : (
           <>
-            <SearchButton />
-            <Button
-              ref={toolsRef}
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 gap-1.5 text-text-muted hover:text-text-primary shrink-0"
-              onClick={() => {
-                setToolsOpen((open) => !open);
-                setQuickSettingsOpen(false);
-              }}
-              aria-label="Tools"
-              aria-expanded={toolsOpen}
-              aria-haspopup="menu"
-              data-testid="tools-btn"
-            >
-              <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
-              <span className="text-xs hidden md:inline">Tools</span>
-            </Button>
+            {!hideDeskRibbon && <SearchButton />}
+            {!hideDeskRibbon && (
+              <Button
+                ref={toolsRef}
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 gap-1.5 text-text-muted hover:text-text-primary shrink-0"
+                onClick={() => {
+                  setToolsOpen((open) => !open);
+                  setQuickSettingsOpen(false);
+                }}
+                aria-label="Tools"
+                aria-expanded={toolsOpen}
+                aria-haspopup="menu"
+                data-testid="tools-btn"
+              >
+                <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+                <span className="text-xs hidden md:inline">Tools</span>
+              </Button>
+            )}
+            {hideDeskRibbon && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 gap-1 text-text-muted hover:text-text-primary shrink-0"
+                onClick={() => setToolsExpanded(true)}
+                aria-label="Watchlist and desk tools"
+                data-testid="topbar-desk-tools-btn"
+              >
+                <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+                <span className="text-xs">Desk tools</span>
+              </Button>
+            )}
             <NotificationBell />
             <AccountSwitcher />
-            <WorkspaceSwitcher />
+            {!hideDeskRibbon && <WorkspaceSwitcher />}
             <ModeIndicator />
             <Divider />
-            <FullscreenButton />
-            <div className="hidden lg:block">
+            {!hideDeskRibbon && <FullscreenButton />}
+            <div className={hideDeskRibbon ? undefined : "hidden lg:block"}>
               <MarketSessionStatus />
             </div>
-            <div className="hidden xl:block">
-              <ISTClock />
-            </div>
+            {!hideDeskRibbon && (
+              <div className="hidden xl:block">
+                <ISTClock />
+              </div>
+            )}
             <Avatar />
           </>
         )}

@@ -125,15 +125,20 @@ vi.mock("@/hooks/useSkillContent", () => ({
 // ---------------------------------------------------------------------------
 
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useDeskChromeStore } from "@/stores/deskChromeStore";
+import { useModeStore } from "@/stores/modeStore";
 import TopBarV2 from "../TopBarV2";
 
-function renderTopBarV2(tickerMode?: "off" | "pinned" | "scroll" | "marquee") {
+function renderTopBarV2(
+  tickerMode?: "off" | "pinned" | "scroll" | "marquee",
+  path = "/trade",
+) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={["/trade"]}>
+      <MemoryRouter initialEntries={[path]}>
         <TopBarV2 tickerMode={tickerMode} />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -172,6 +177,9 @@ describe("TopBarV2", () => {
     mockTimingsQuery.dataUpdatedAt = 0;
     mockTimingsQuery.isError = false;
     mockTimingsQuery.isLoading = false;
+    useSettingsStore.setState({ density: "comfortable", tickerMode: "marquee" });
+    useDeskChromeStore.setState({ toolsExpanded: false });
+    useModeStore.setState({ mode: "explore" });
   });
 
   afterEach(() => {
@@ -359,12 +367,25 @@ describe("TopBarV2", () => {
 
   it("keeps the terminal connected when a direct broker session exists and OpenAlgo ping fails", async () => {
     mockDirectBrokerConnected.value = true;
+    useModeStore.setState({ mode: "live" });
 
     renderTopBarV2();
 
     await waitFor(() => {
       expect(mockSetConnectionStatus).toHaveBeenCalledWith("connected");
     });
+  });
+
+  it("never paints Connected in Explore even if a leftover broker session exists", async () => {
+    mockDirectBrokerConnected.value = true;
+    useModeStore.setState({ mode: "explore" });
+
+    renderTopBarV2();
+
+    await waitFor(() => {
+      expect(mockSetConnectionStatus).toHaveBeenCalledWith("disconnected");
+    });
+    expect(mockSetConnectionStatus).not.toHaveBeenCalledWith("connected");
   });
 
   it("renders the fullscreen button", () => {
@@ -626,5 +647,55 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     const root = screen.getByTestId("topbar-more-root");
     expect(root.className).toMatch(/z-\[110]/);
     expect(root.className).not.toMatch(/z-\[121]/);
+  });
+});
+
+describe("FT-UX-001 Compact desk chrome at 1280", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ density: "compact", tickerMode: "marquee" });
+    useDeskChromeStore.setState({ toolsExpanded: false });
+    stubViewportWidth(1280);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    stubViewportWidth(1024);
+    useSettingsStore.setState({ density: "comfortable" });
+    useDeskChromeStore.setState({ toolsExpanded: false });
+  });
+
+  it("keeps Mode and market-session copy distinct and hides the ticker", () => {
+    setOpenMarketTestTime();
+    setExploreHhmmTimings();
+    mockTimingsQuery.dataUpdatedAt = Date.now();
+    renderTopBarV2();
+
+    expect(screen.getByText("EXPLORE")).toBeVisible();
+    const session = screen.getByTestId("market-session-status");
+    expect(session).toHaveAccessibleName(/market status: market open/i);
+    expect(session).toHaveTextContent(/market open/i);
+    expect(session).not.toHaveTextContent(/Live/i);
+    expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
+    expect(screen.getByTestId("topbar-desk-tools-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("tools-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
+  });
+
+  it("Comfortable restores the tool ribbon without changing Mode honesty", () => {
+    useSettingsStore.setState({ density: "comfortable" });
+    renderTopBarV2();
+
+    expect(screen.getByText("EXPLORE")).toBeVisible();
+    expect(screen.getByTestId("tools-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument();
+    expect(screen.queryByTestId("topbar-desk-tools-btn")).not.toBeInTheDocument();
+  });
+
+  it("does not collapse the tool ribbon on Compact Home", () => {
+    renderTopBarV2("marquee", "/home");
+
+    expect(screen.getByTestId("tools-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument();
+    expect(screen.queryByTestId("topbar-desk-tools-btn")).not.toBeInTheDocument();
   });
 });

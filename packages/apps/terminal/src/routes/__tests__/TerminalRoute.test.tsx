@@ -46,9 +46,14 @@ const mockLayoutState = vi.hoisted(() => {
 const mockNavigate = vi.fn();
 const mockGetSafetyConfig = vi.hoisted(() => vi.fn());
 const mockActivateKillSwitch = vi.hoisted(() => vi.fn());
+const mockSettingsState = vi.hoisted(() => ({
+  density: "comfortable" as "compact" | "comfortable",
+  riskLimits: { mtmStoploss: 5000 },
+}));
 
 vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
+  useLocation: () => ({ pathname: "/trade" }),
 }));
 
 vi.mock("@/services/ftApi", () => ({
@@ -135,8 +140,19 @@ vi.mock("@/stores/tradingStore", () => ({
 }));
 
 vi.mock("@/stores/settingsStore", () => ({
-  useSettingsStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ riskLimits: { mtmStoploss: mockTradingState.mtmStoploss } }),
+  useSettingsStore: Object.assign(
+    vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
+      selector({
+        density: mockSettingsState.density,
+        riskLimits: mockSettingsState.riskLimits,
+      }),
+    ),
+    {
+      getState: () => ({
+        density: mockSettingsState.density,
+        riskLimits: mockSettingsState.riskLimits,
+      }),
+    },
   ),
 }));
 
@@ -194,6 +210,8 @@ vi.mock("@/layout/widgetFactory", () => ({
 // ---------------------------------------------------------------------------
 
 import TerminalRoute from "../TerminalRoute";
+import { useDeskChromeStore } from "@/stores/deskChromeStore";
+import { buildBeginnerCore } from "@/layout/workspacePresets";
 
 const inactiveSafetyConfig = {
   check_market_hours: true,
@@ -254,10 +272,13 @@ describe("TerminalRoute", () => {
     mockTradingState.totalPnl = 0;
     mockTradingState.mtmStoploss = 5000;
     mockTradingState.mode = "live";
+    mockSettingsState.density = "comfortable";
+    mockSettingsState.riskLimits = { mtmStoploss: mockTradingState.mtmStoploss };
     mockLayoutState.workspaceApi = null;
     mockLayoutState.widgetPickerOpen = false;
     mockLayoutState.presetPickerOpen = false;
     mockLayoutState.getTabLayout.mockReturnValue(null);
+    useDeskChromeStore.setState({ toolsExpanded: false });
     vi.clearAllMocks();
     mockGetSafetyConfig.mockReset().mockResolvedValue({ ...inactiveSafetyConfig });
     mockActivateKillSwitch.mockReset();
@@ -604,8 +625,10 @@ describe("TerminalRoute saved-layout restore", () => {
   beforeEach(() => {
     setViewportWidth(1280);
     mockTradingState.mode = "live";
+    mockSettingsState.density = "comfortable";
     mockLayoutState.workspaceApi = null;
     mockLayoutState.getTabLayout.mockReturnValue(null);
+    useDeskChromeStore.setState({ toolsExpanded: false });
     vi.clearAllMocks();
     mockGetSafetyConfig.mockReset().mockResolvedValue({ ...inactiveSafetyConfig });
   });
@@ -774,5 +797,41 @@ describe("TerminalRoute saved-layout restore", () => {
       .toHaveTextContent("Workspace layout could not be saved: quota exceeded");
     expect(JSON.stringify(registeredApi().toJSON())).toContain('"riskdashboard"');
     mockLayoutState.activeTabId = "default";
+  });
+
+  it("Compact @ 1280 first visit uses compact-desk — no watchlist or indices", async () => {
+    mockSettingsState.density = "compact";
+    renderTerminalRoute();
+
+    await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
+    const doc = JSON.stringify(registeredApi().toJSON());
+    expect(doc).toContain('"chart"');
+    expect(doc).toContain('"orderpad"');
+    expect(doc).toContain('"positions"');
+    expect(doc).not.toContain('"watchlist"');
+    expect(doc).not.toContain('"indexstrip"');
+    const toggle = screen.getByTestId("desk-tools-toggle");
+    expect(toggle).toHaveTextContent("Watchlist & tools");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("Compact @ 1280 collapses a saved beginner-core desk by default", async () => {
+    mockSettingsState.density = "compact";
+    mockLayoutState.getTabLayout.mockReturnValue(
+      buildBeginnerCore() as unknown as Record<string, unknown>,
+    );
+    renderTerminalRoute();
+
+    await waitFor(() => {
+      const doc = JSON.stringify(registeredApi().toJSON());
+      expect(doc).toContain('"chart"');
+      expect(doc).toContain('"orderpad"');
+      expect(doc).toContain('"positions"');
+      expect(doc).not.toContain('"watchlist"');
+      expect(doc).not.toContain('"indexstrip"');
+    });
+    const toggle = screen.getByTestId("desk-tools-toggle");
+    expect(toggle).toHaveTextContent("Watchlist & tools");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
   });
 });

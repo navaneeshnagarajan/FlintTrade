@@ -70,7 +70,9 @@ const defaultProps = makeWidgetPanelProps();
 
 async function reviewAndConfirmPractice(buttonName: RegExp = /practice (buy|sell)/i): Promise<void> {
   fireEvent.click(screen.getByRole("button", { name: buttonName }));
-  const confirm = await screen.findByRole("button", { name: /confirm simulated practice order/i });
+  const confirm = await screen.findByRole("button", {
+    name: /confirm (simulated practice|sample) order/i,
+  });
   fireEvent.click(confirm);
 }
 
@@ -319,6 +321,7 @@ describe("OrderPadWidget", () => {
 describe("OrderPadWidget options premium prefill", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockMode.current = "practice";
   });
 
   function renderOptionsPad(): void {
@@ -343,12 +346,22 @@ describe("OrderPadWidget options premium prefill", () => {
     expect(Number(priceInput.value)).toBe(623.45);
   });
 
-  it("shows the live premium hint on options exchanges", () => {
+  it("shows the sandbox premium hint on options exchanges in Practice", () => {
+    mockMode.current = "practice";
     vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 623.45 });
     renderOptionsPad();
 
     expect(screen.getByText("Option Premium")).toBeInTheDocument();
-    expect(screen.getByText(/Live premium ₹623.45/)).toBeInTheDocument();
+    expect(screen.getByText(/Sandbox premium ₹623.45/)).toBeInTheDocument();
+  });
+
+  it("labels Explore option premium as sample, not Live", () => {
+    mockMode.current = "explore";
+    vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 623.45 });
+    renderOptionsPad();
+
+    expect(screen.getByText(/Sample premium ₹623.45/)).toBeInTheDocument();
+    expect(screen.queryByText(/Live premium/i)).not.toBeInTheDocument();
   });
 
   it("leaves the price empty and asks for manual entry when no premium is available", () => {
@@ -379,6 +392,7 @@ describe("OrderPadWidget options premium prefill", () => {
 describe("OrderPadWidget F&O lot-size validation", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockMode.current = "practice";
     vi.spyOn(jotai, "useAtomValue").mockReturnValue(null);
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
@@ -477,23 +491,25 @@ describe("OrderPadWidget shared pre-trade guards", () => {
     mockMode.current = "practice";
   });
 
-  it("opens the Practice review from Explore Practice Buy without requiring a broker", async () => {
+  it("opens the sample review from Explore Sample Buy without requiring a broker", async () => {
     mockMode.current = "explore";
     render(<OrderPadWidget {...defaultProps} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    expect(screen.getByRole("button", { name: /sample buy/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /practice buy/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /sample buy/i }));
 
-    expect(await screen.findByRole("dialog", { name: /review practice order/i })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /review sample order/i })).toBeInTheDocument();
     expect(screen.queryByText(/connect a broker to place orders/i)).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
-  it("confirms an Explore Practice Buy on the paper path, never as a live order", async () => {
+  it("confirms an Explore Sample Buy on the paper path, never as a live order", async () => {
     mockMode.current = "explore";
     mockPlaceOrder.mockResolvedValue({ orderId: "SAMPLE-EXPLORE" });
     render(<OrderPadWidget {...defaultProps} />);
 
-    await reviewAndConfirmPractice(/practice buy/i);
+    await reviewAndConfirmPractice(/sample buy/i);
 
     await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
     expect(mockPlaceOrder).toHaveBeenCalledWith(
