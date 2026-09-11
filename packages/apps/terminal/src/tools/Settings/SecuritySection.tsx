@@ -71,6 +71,18 @@ function StatTile({
 // Quick-unlock PIN block
 // ---------------------------------------------------------------------------
 
+const PIN_PATTERN = /^\d{6}$/;
+const PIN_LENGTH_ERROR = "PIN must be exactly 6 digits";
+const PIN_MISMATCH_ERROR = "PINs do not match";
+
+function isExactPin(value: string): boolean {
+  return PIN_PATTERN.test(value);
+}
+
+function digitsOnlyPin(value: string): string {
+  return value.replace(/\D/g, "").slice(0, 6);
+}
+
 /**
  * Set/change the quick-unlock PIN (the Live-arming re-auth factor).
  *
@@ -84,6 +96,8 @@ function QuickUnlockPinBlock() {
   const [password, setPassword]     = useState("");
   const [newPin, setNewPin]         = useState("");
   const [confirmPin, setConfirmPin] = useState("");
+  const [newPinError, setNewPinError] = useState<string | null>(null);
+  const [confirmPinError, setConfirmPinError] = useState<string | null>(null);
   const [pinFormError, setPinFormError] = useState<string | null>(null);
   const [pinSaved, setPinSaved]     = useState<string | null>(null);
 
@@ -103,6 +117,8 @@ function QuickUnlockPinBlock() {
       setPassword("");
       setNewPin("");
       setConfirmPin("");
+      setNewPinError(null);
+      setConfirmPinError(null);
       setPinFormError(null);
       setPinSaved(
         hasPin
@@ -118,25 +134,75 @@ function QuickUnlockPinBlock() {
     },
   });
 
+  const pinReady = isExactPin(newPin) && newPin === confirmPin;
+  const canSubmit = password.length > 0 && pinReady && !pinMutation.isPending;
+
+  const clearResolvedPinErrors = useCallback((nextNew: string, nextConfirm: string) => {
+    if (isExactPin(nextNew)) {
+      setNewPinError(null);
+    }
+    if (isExactPin(nextConfirm) && nextConfirm === nextNew) {
+      setConfirmPinError(null);
+    } else if (isExactPin(nextConfirm) && confirmPinError === PIN_LENGTH_ERROR) {
+      setConfirmPinError(null);
+    }
+    if (
+      pinFormError === PIN_LENGTH_ERROR
+      && isExactPin(nextNew)
+      && isExactPin(nextConfirm)
+    ) {
+      setPinFormError(null);
+    }
+    if (pinFormError === PIN_MISMATCH_ERROR && nextNew === nextConfirm) {
+      setPinFormError(null);
+    }
+  }, [confirmPinError, pinFormError]);
+
+  const handleNewPinChange = useCallback((val: string) => {
+    const next = digitsOnlyPin(val);
+    setNewPin(next);
+    clearResolvedPinErrors(next, confirmPin);
+  }, [clearResolvedPinErrors, confirmPin]);
+
+  const handleConfirmPinChange = useCallback((val: string) => {
+    const next = digitsOnlyPin(val);
+    setConfirmPin(next);
+    clearResolvedPinErrors(newPin, next);
+  }, [clearResolvedPinErrors, newPin]);
+
+  const handleNewPinBlur = useCallback(() => {
+    if (newPin.length >= 1 && newPin.length <= 5) {
+      setNewPinError(PIN_LENGTH_ERROR);
+    }
+  }, [newPin]);
+
+  const handleConfirmPinBlur = useCallback(() => {
+    if (confirmPin.length >= 1 && confirmPin.length <= 5) {
+      setConfirmPinError(PIN_LENGTH_ERROR);
+      return;
+    }
+    if (newPin.length > 0 && confirmPin.length > 0 && newPin !== confirmPin) {
+      setConfirmPinError(PIN_MISMATCH_ERROR);
+    }
+  }, [confirmPin, newPin]);
+
   const handleSavePin = useCallback(() => {
     setPinSaved(null);
     if (!password) {
       setPinFormError("Account password is required.");
       return;
     }
-    if (!/^\d{6}$/.test(newPin)) {
-      setPinFormError("PIN must be exactly 6 digits.");
+    if (!isExactPin(newPin) || !isExactPin(confirmPin)) {
+      setPinFormError(PIN_LENGTH_ERROR);
       return;
     }
     if (newPin !== confirmPin) {
-      setPinFormError("PINs do not match.");
+      setPinFormError(PIN_MISMATCH_ERROR);
       return;
     }
     setPinFormError(null);
     pinMutation.mutate({ password, pin: newPin });
   }, [password, newPin, confirmPin, pinMutation]);
-
-  const digitsOnly = (val: string) => val.replace(/\D/g, "").slice(0, 6);
 
   return (
     <div className="rounded border border-border-default bg-surface-card p-4 space-y-3">
@@ -186,20 +252,44 @@ function QuickUnlockPinBlock() {
           placeholder="Account password"
           aria-label="Account password"
         />
-        <TextInput
-          type="password"
-          value={newPin}
-          onChange={(val) => setNewPin(digitsOnly(val))}
-          placeholder="New 6-digit PIN"
-          aria-label="New 6-digit PIN"
-        />
-        <TextInput
-          type="password"
-          value={confirmPin}
-          onChange={(val) => setConfirmPin(digitsOnly(val))}
-          placeholder="Confirm new PIN"
-          aria-label="Confirm new PIN"
-        />
+        <div className="space-y-1">
+          <TextInput
+            type="password"
+            inputMode="numeric"
+            maxLength={6}
+            value={newPin}
+            onChange={handleNewPinChange}
+            onBlur={handleNewPinBlur}
+            placeholder="New 6-digit PIN"
+            aria-label="New 6-digit PIN"
+            aria-invalid={Boolean(newPinError)}
+            aria-describedby={newPinError ? "security-new-pin-error" : undefined}
+          />
+          {newPinError && (
+            <p id="security-new-pin-error" className="text-xxs text-loss" role="alert">
+              {newPinError}
+            </p>
+          )}
+        </div>
+        <div className="space-y-1">
+          <TextInput
+            type="password"
+            inputMode="numeric"
+            maxLength={6}
+            value={confirmPin}
+            onChange={handleConfirmPinChange}
+            onBlur={handleConfirmPinBlur}
+            placeholder="Confirm new PIN"
+            aria-label="Confirm new PIN"
+            aria-invalid={Boolean(confirmPinError)}
+            aria-describedby={confirmPinError ? "security-confirm-pin-error" : undefined}
+          />
+          {confirmPinError && (
+            <p id="security-confirm-pin-error" className="text-xxs text-loss" role="alert">
+              {confirmPinError}
+            </p>
+          )}
+        </div>
         {pinFormError && (
           <p className="text-xxs text-loss" role="alert">{pinFormError}</p>
         )}
@@ -210,7 +300,7 @@ function QuickUnlockPinBlock() {
           variant="outline"
           size="sm"
           onClick={handleSavePin}
-          disabled={pinMutation.isPending}
+          disabled={!canSubmit}
           className="flex items-center gap-1.5 text-xs h-7"
         >
           {pinMutation.isPending ? (

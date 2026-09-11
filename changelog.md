@@ -52,6 +52,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Security PIN requires exactly six digits (FT-SET-003).**
+  Explore `/settings#security` keeps New and Confirm as digits-only
+  fields with `maxLength` 6. Set/Change PIN stays disabled until the
+  account password is present, both fields are exactly six digits,
+  and they match. Blurring a field with 1–5 digits shows
+  `PIN must be exactly 6 digits`; blurring Confirm when both are
+  filled and different shows `PINs do not match`. A five-digit value
+  no longer looks valid. `POST /v1/auth/pin/set` still rejects
+  anything that is not `^\d{6}$`.
+
 - **Progressive TopBar collapse at ~390px (FT-MOBILE-002).**
   The terminal chrome no longer clips workspace, status, or ticker
   behind a horizontal TopBar scroll at about 390px. Logo mark, Mode

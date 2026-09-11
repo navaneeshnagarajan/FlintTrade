@@ -349,13 +349,22 @@ class TestPinSetEndpoint:
                       headers=_session_headers())
         assert resp.status_code == 401
 
-    def test_set_pin_rejects_malformed_pin(self, client):
+    @pytest.mark.parametrize("pin", [
+        "12345",
+        "1234567",
+        "12ab56",
+        "abcdef",
+        "１２３４５６",
+    ])
+    def test_set_pin_rejects_non_six_digit_pin(self, client, pin):
+        """FT-SET-003: /v1/auth/pin/set stays fail-closed on anything but ^\\d{6}$."""
         c, _ = client
         self._setup_without_pin(c)
         resp = c.post("/v1/auth/pin/set",
-                      json={"password": "StrongP@ss123!", "pin": "12ab56"},
+                      json={"password": "StrongP@ss123!", "pin": pin},
                       headers=_session_headers())
         assert resp.status_code == 400
+        assert "exactly 6 digits" in resp.get_json()["message"]
 
     def test_set_pin_then_live_unlock_works(self, client):
         """End-to-end recovery for the skipped-PIN account: set a PIN over a
