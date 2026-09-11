@@ -20,6 +20,11 @@ import { fmtInr, fmtPct, fmtNum } from "./formatters";
 import { AnimatedMetricCard, MetricCard } from "./MetricCards";
 import { EquityCurve } from "./EquityCurve";
 import { RobustnessCard } from "./RobustnessCard";
+import {
+  backtestPnlHelper,
+  equityCurveDelta,
+  sumTradeLogPnl,
+} from "./backtestPnlReconcile";
 
 export interface BacktestResultDisplayProps {
   result: BacktestResult;
@@ -102,6 +107,9 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
   const totalReturnPositive = metrics.total_return >= 0;
   const initialEquity =
     equity_curve.length > 0 ? equity_curve[0].equity : final_equity;
+  const netTradePnl = useMemo(() => sumTradeLogPnl(trades), [trades]);
+  const equityDelta = equityCurveDelta(equity_curve, final_equity);
+  const pnlHelper = backtestPnlHelper(netTradePnl, equityDelta);
 
   const monthlyPnl = useMemo(() => {
     const grouped: Record<string, number> = {};
@@ -152,7 +160,13 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
           <MetricCard
             label="Total Return"
             value={fmtPct(metrics.total_return)}
+            subtitle="Equity curve · start→end"
             positive={totalReturnPositive}
+          />
+          <MetricCard
+            label="Net trade P&L"
+            value={fmtInr(netTradePnl)}
+            positive={netTradePnl >= 0}
           />
           <MetricCard
             label="Final Equity"
@@ -175,6 +189,7 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
             positive={metrics.expectancy >= 0}
           />
         </div>
+        <p className="text-xxs text-text-muted">{pnlHelper}</p>
       </GlassCard>
 
       {equity_curve.length > 0 && (
@@ -192,6 +207,9 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
         <GlassCard className="p-5 gap-3">
           <h4 className="font-heading font-semibold text-sm text-text-primary">
             Monthly P&L
+            <span className="ml-2 text-xs text-text-muted font-normal">
+              Trade-based · sums Trade Log P&L
+            </span>
           </h4>
           <MonthlyPnlChart data={monthlyPnl} />
         </GlassCard>

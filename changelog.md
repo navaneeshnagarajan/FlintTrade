@@ -67,18 +67,18 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Backtest headline P&L vs trade-log (FT-LAB-004).**
-  Explore `/lab` → `sma_crossover` → run backtest:
-  headline **Total Return** does not clearly
-  reconcile with the trade-log P&L sum. Displayed
-  totals can look inconsistent and undermine
-  confidence in the result. Expected: headline
-  metrics match the trade log on the same
-  currency and basis, or an explicit note when
-  the headline uses a different definition
-  (equity curve versus sum of fills). Product
-  work waits on this same PR after the UI/UX
-  Designer call on reconcile copy versus dual
-  metrics labelling.
+  Explore `/lab` backtest results now show labelled
+  dual metrics: **Total Return (%)** is the equity
+  curve start→end, with subtitle `Equity curve ·
+  start→end`. **Net trade P&L (₹)** is the Trade
+  Log P&L sum on the same rupee basis as the table.
+  When that sum matches the equity change, a quiet
+  `Reconciles with trade log` note appears; when
+  they diverge (fees, open marks, partial fills)
+  both numbers stay visible with
+  `Trade log sum ≠ equity change — fees / open
+  marks`. Monthly P&L stays trade-based so the
+  chart matches the log.
 
 - **Learn Glossary Lot Size freshness (FT-LEARN-002).**
   Explore `/learn` → Glossary → Lot Size now teaches the
