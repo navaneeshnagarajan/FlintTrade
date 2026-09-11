@@ -37,7 +37,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import type { WsFailure } from "@/services/websocket";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThemeStore } from "@/stores/themeStore";
-import { applyDensityToDocument } from "@/lib/applyDensity";
+import { selectDeskDensity } from "@/hooks/useDeskDensityChrome";
 import { motionConfig } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
@@ -222,7 +222,6 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
 
   // Settings store — density only; mode is owned by modeStore
   const density = useSettingsStore((s) => s.density);
-  const setDensity = useSettingsStore((s) => s.setDensity);
 
   // Theme store — active theme for dot selection
   const activeThemeId = useThemeStore((s) => s.activeThemeId);
@@ -480,8 +479,7 @@ export default function QuickAccessPanel({ onClose, triggerRef, anchorRect }: Qu
                 aria-checked={density === d}
                 tabIndex={density === d ? 0 : -1}
                 onClick={() => {
-                  setDensity(d);
-                  applyDensityToDocument(d);
+                  selectDeskDensity(d);
                 }}
                 onKeyDown={(e) => handleDensityKeyDown(e, index)}
                 className={cn(

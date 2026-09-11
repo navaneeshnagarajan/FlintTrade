@@ -47,14 +47,17 @@ vi.mock("@/stores/connectionStore", () => ({
   ),
 }));
 
+const mockSettingsState = vi.hoisted(() => ({
+  density: "compact" as "compact" | "comfortable",
+  setDensity: vi.fn(),
+  sandboxMode: false,
+  setSandboxMode: vi.fn(),
+}));
+
 vi.mock("@/stores/settingsStore", () => ({
-  useSettingsStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({
-      density: "compact",
-      setDensity: vi.fn(),
-      sandboxMode: false,
-      setSandboxMode: vi.fn(),
-    }),
+  useSettingsStore: Object.assign(
+    vi.fn((selector: (s: unknown) => unknown) => selector(mockSettingsState)),
+    { getState: () => mockSettingsState },
   ),
 }));
 

@@ -4,7 +4,8 @@ import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
-import { useDeskDensityChrome } from "../useDeskDensityChrome";
+import { useLayoutStore } from "@/stores/layoutStore";
+import { selectDeskDensity, useDeskDensityChrome } from "../useDeskDensityChrome";
 
 function wrapperFor(path: string) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -36,6 +37,50 @@ describe("useDeskDensityChrome", () => {
     });
     expect(result.current.showTicker).toBe(true);
     expect(result.current.showToolRibbon).toBe(true);
+  });
+
+  it("selecting Compact at 1280 on Trade collapses a beginner-core desk by default", () => {
+    Object.defineProperty(window, "innerWidth", { value: 1280, writable: true });
+    window.history.replaceState({}, "", "/trade");
+    useSettingsStore.setState({ density: "comfortable" });
+    useDeskChromeStore.setState({ toolsExpanded: true });
+
+    const beginnerCore = {
+      layout: {
+        children: [
+          { component: "indexstrip" },
+          { component: "chart" },
+          { component: "positions" },
+          { component: "watchlist" },
+          { component: "orderpad" },
+        ],
+      },
+    };
+    let current = beginnerCore as Record<string, unknown>;
+    const previousApi = useLayoutStore.getState().workspaceApi;
+    useLayoutStore.setState({
+      workspaceApi: {
+        addPanel: () => undefined,
+        toJSON: () => current,
+        loadModelJson: (json: Record<string, unknown>) => {
+          current = json;
+        },
+      } as unknown as ReturnType<typeof useLayoutStore.getState>["workspaceApi"],
+    });
+
+    try {
+      selectDeskDensity("compact");
+      expect(useSettingsStore.getState().density).toBe("compact");
+      expect(useDeskChromeStore.getState().toolsExpanded).toBe(false);
+      expect(current).toEqual(expect.objectContaining({
+        global: expect.any(Object),
+      }));
+      expect(JSON.stringify(current)).not.toContain('"watchlist"');
+      expect(JSON.stringify(current)).not.toContain('"indexstrip"');
+      expect(JSON.stringify(current)).toContain('"orderpad"');
+    } finally {
+      useLayoutStore.setState({ workspaceApi: previousApi });
+    }
   });
 
   it("does not collapse chrome on Compact Home", () => {

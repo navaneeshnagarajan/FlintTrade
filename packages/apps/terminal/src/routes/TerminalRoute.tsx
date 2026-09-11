@@ -674,6 +674,15 @@ export default function TerminalRoute() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadModel, setWorkspaceApi, flushPendingSave, reportLayoutPersistenceError, quarantineLayout]);
 
+  // Compact desk default: hide watchlist / indices / ticker / ladder even
+  // when a Comfortable beginner-core (or market-watch) document was saved.
+  useEffect(() => {
+    if (!progressive || toolsExpanded || !model) return;
+    const api = useLayoutStore.getState().workspaceApi;
+    if (!api) return;
+    applyCompactDeskToolsDisclosure(api, false, buildCompactDesk);
+  }, [progressive, toolsExpanded, model]);
+
   // React to workspace-tab switches (including Delete Workspace, which
   // activates the surviving tab): flush the outgoing tab's pending save,
   // then load the newly active tab's layout. Skipped when the current model

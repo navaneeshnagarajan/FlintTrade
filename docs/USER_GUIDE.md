@@ -290,7 +290,8 @@ unconfigured subsystem.
 **Compact / Comfortable.** New installs default to Comfortable (full labels).
 Compact on a desk Trade viewport (~1280 and wider) keeps chart, order pad,
 and positions primary; the ticker strip, full tool ribbon, and watchlist /
-advanced tools stay collapsed behind **Watchlist & tools** / **Desk tools**.
+indices / advanced tools start collapsed behind **Watchlist & tools** /
+**Desk tools**. Selecting Compact again re-collapses that disclosure.
 Phone layouts are unchanged.
 
 ### Walkthrough

@@ -6,10 +6,12 @@ import {
   DESK_COMPACT_FOCUS_MAX_WIDTH,
   DESK_MIN_WIDTH,
   applyCompactDeskToolsDisclosure,
+  applyDeskDensitySelection,
   collectWorkspaceComponents,
   defaultTradePresetId,
   isTradePath,
   resolveDockMode,
+  restoreComfortableDeskLayout,
   showFullToolRibbon,
   showTickerChrome,
   usesCompactProgressiveDisclosure,
@@ -32,7 +34,7 @@ describe("FT-UX-001 Compact Trade disclosure", () => {
     expect(defaultTradePresetId("beginner", "compact", 1280)).toBe(COMPACT_DESK_PRESET_ID);
     expect([...COMPACT_DESK_PRIMARY_WIDGETS]).toEqual(["chart", "orderpad", "positions"]);
     expect([...COMPACT_DESK_COLLAPSED_WIDGETS]).toEqual(
-      expect.arrayContaining(["watchlist", "orderladder", "ticker"]),
+      expect.arrayContaining(["watchlist", "orderladder", "ticker", "indexstrip"]),
     );
   });
 
@@ -126,6 +128,118 @@ describe("FT-UX-001 Compact Trade disclosure", () => {
       },
       false,
       () => ({ restored: true }),
+    );
+    expect(loaded).toEqual([]);
+  });
+
+  it("collapses a beginner-core desk (watchlist + indices) to compact-desk", () => {
+    const beginnerCore = {
+      layout: {
+        children: [
+          { component: "indexstrip" },
+          { component: "chart" },
+          { component: "positions" },
+          { component: "watchlist" },
+          { component: "orderpad" },
+        ],
+      },
+    };
+    const loaded: Array<Record<string, unknown>> = [];
+    applyCompactDeskToolsDisclosure(
+      {
+        addPanel: () => undefined,
+        toJSON: () => beginnerCore,
+        loadModelJson: (json) => {
+          loaded.push(json);
+        },
+      },
+      false,
+      () => ({ restored: "compact-desk" }),
+    );
+    expect(loaded).toEqual([{ restored: "compact-desk" }]);
+  });
+
+  it("selecting Compact at 1280 collapses desk tools and resets the toggle", () => {
+    const beginnerCore = {
+      layout: {
+        children: [
+          { component: "indexstrip" },
+          { component: "chart" },
+          { component: "positions" },
+          { component: "watchlist" },
+          { component: "orderpad" },
+        ],
+      },
+    };
+    let current = beginnerCore as Record<string, unknown>;
+    const loaded: Array<Record<string, unknown>> = [];
+    let toolsExpanded = true;
+    applyDeskDensitySelection("compact", {
+      viewportWidth: DESK_MIN_WIDTH,
+      onTrade: true,
+      layout: {
+        addPanel: () => undefined,
+        toJSON: () => current,
+        loadModelJson: (json) => {
+          loaded.push(json);
+          current = json;
+        },
+      },
+      loadCompactDesk: () => ({ restored: "compact-desk" }),
+      loadComfortableDesk: () => ({ restored: "beginner-core" }),
+      setToolsExpanded: (expanded) => {
+        toolsExpanded = expanded;
+      },
+    });
+    expect(toolsExpanded).toBe(false);
+    expect(loaded).toEqual([{ restored: "compact-desk" }]);
+  });
+
+  it("Comfortable restores the skill-level desk when only primary and desk tools are present", () => {
+    const compactDesk = {
+      layout: {
+        children: [
+          { component: "chart" },
+          { component: "orderpad" },
+          { component: "positions" },
+        ],
+      },
+    };
+    const loaded: Array<Record<string, unknown>> = [];
+    restoreComfortableDeskLayout(
+      {
+        addPanel: () => undefined,
+        toJSON: () => compactDesk,
+        loadModelJson: (json) => {
+          loaded.push(json);
+        },
+      },
+      () => ({ restored: "beginner-core" }),
+    );
+    expect(loaded).toEqual([{ restored: "beginner-core" }]);
+  });
+
+  it("Comfortable does not wipe a desk with custom extras", () => {
+    const custom = {
+      layout: {
+        children: [
+          { component: "chart" },
+          { component: "orderpad" },
+          { component: "positions" },
+          { component: "news" },
+        ],
+      },
+    };
+    const loaded: unknown[] = [];
+    restoreComfortableDeskLayout(
+      {
+        addPanel: () => undefined,
+        toJSON: () => custom,
+        loadModelJson: (json) => {
+          loaded.push(json);
+        },
+      },
+      () => ({ restored: "beginner-core" }),
     );
     expect(loaded).toEqual([]);
   });

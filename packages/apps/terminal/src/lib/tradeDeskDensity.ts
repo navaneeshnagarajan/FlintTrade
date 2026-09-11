@@ -93,7 +93,8 @@ export function showFullToolRibbon(
   return true;
 }
 
-const DISCLOSE_SAFE_WIDGETS = new Set<string>([...COMPACT_DESK_PRIMARY_WIDGETS, "watchlist"]);
+const PRIMARY_WIDGETS = new Set<string>(COMPACT_DESK_PRIMARY_WIDGETS);
+const DESK_TOOL_WIDGETS = new Set<string>(COMPACT_DESK_COLLAPSED_WIDGETS);
 
 /** Collect FlexLayout tab `component` ids from a workspace JSON document. */
 export function collectWorkspaceComponents(json: Record<string, unknown> | null | undefined): string[] {
@@ -117,12 +118,21 @@ export interface CompactDeskToolsApi<TLayout = Record<string, unknown>> {
   loadModelJson: (json: TLayout) => void;
 }
 
+function workspaceExtras(components: Iterable<string>): string[] {
+  return [...components].filter((id) => !PRIMARY_WIDGETS.has(id) && !DESK_TOOL_WIDGETS.has(id));
+}
+
+function hasCollapsibleDeskTools(components: Iterable<string>): boolean {
+  return [...components].some((id) => DESK_TOOL_WIDGETS.has(id));
+}
+
 /**
- * Reveal or hide the watchlist for a stock Compact desk.
+ * Reveal or hide watchlist / indices / ticker / ladder on a stock Compact desk.
  *
  * Expand adds Watchlist when the canvas does not already have one. Collapse
- * restores `compact-desk` only when the layout is still chart + pad +
- * positions (+ optional watchlist) so a customised desk is not wiped.
+ * restores `compact-desk` when the only extras are desk tools (watchlist,
+ * indices strip, ticker, ladder) so a customised desk (news, scalper, …)
+ * is not wiped.
  */
 export function applyCompactDeskToolsDisclosure<TLayout>(
   api: CompactDeskToolsApi<TLayout>,
@@ -136,8 +146,54 @@ export function applyCompactDeskToolsDisclosure<TLayout>(
     }
     return;
   }
-  const extras = [...components].filter((id) => !DISCLOSE_SAFE_WIDGETS.has(id));
-  if (extras.length === 0 && components.has("watchlist")) {
+  if (workspaceExtras(components).length === 0 && hasCollapsibleDeskTools(components)) {
     api.loadModelJson(loadCompactDesk());
+  }
+}
+
+/**
+ * Comfortable returns the skill-level default when the canvas is still a
+ * stock desk (primary widgets and/or collapsible desk tools only).
+ */
+export function restoreComfortableDeskLayout<TLayout>(
+  api: CompactDeskToolsApi<TLayout>,
+  loadSkillDefault: () => TLayout,
+): void {
+  const components = collectWorkspaceComponents(api.toJSON());
+  if (workspaceExtras(components).length > 0) return;
+  api.loadModelJson(loadSkillDefault());
+}
+
+export interface DeskDensitySelectionOptions<TLayout = Record<string, unknown>> {
+  viewportWidth: number;
+  onTrade: boolean;
+  layout: CompactDeskToolsApi<TLayout> | null | undefined;
+  loadCompactDesk: () => TLayout;
+  loadComfortableDesk: () => TLayout;
+  setToolsExpanded: (expanded: boolean) => void;
+}
+
+/**
+ * Apply Compact / Comfortable canvas disclosure.
+ *
+ * Compact always starts collapsed (tools toggle off) on a desk Trade
+ * viewport. Comfortable restores the skill-level layout when safe.
+ */
+export function applyDeskDensitySelection<TLayout>(
+  density: UiDensity,
+  options: DeskDensitySelectionOptions<TLayout>,
+): void {
+  if (density === "compact") {
+    options.setToolsExpanded(false);
+    if (
+      options.layout
+      && usesCompactProgressiveDisclosure(density, options.viewportWidth, options.onTrade)
+    ) {
+      applyCompactDeskToolsDisclosure(options.layout, false, options.loadCompactDesk);
+    }
+    return;
+  }
+  if (options.layout) {
+    restoreComfortableDeskLayout(options.layout, options.loadComfortableDesk);
   }
 }
