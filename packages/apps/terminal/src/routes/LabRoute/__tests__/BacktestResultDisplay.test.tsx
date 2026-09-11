@@ -98,6 +98,7 @@ vi.mock("@/hooks/useChartTheme", () => ({
 import { BacktestResultDisplay } from "../BacktestResultDisplay";
 import { fmtInr } from "../formatters";
 
+/** Equity Δ is ₹4,500; trade-log sum is ₹1,500 — intentional diverge fixture. */
 const result: BacktestResult = {
   final_equity: 104500,
   total_bars: 300,
@@ -291,5 +292,21 @@ describe("BacktestResultDisplay", () => {
 
     expect(screen.getByText("Monthly P&L")).toBeInTheDocument();
     expect(screen.getByText("Trade-based · sums Trade Log P&L")).toBeInTheDocument();
+  });
+
+  it("omits the reconcile helper when there is no trade log or equity curve to compare", () => {
+    const empty: BacktestResult = {
+      ...result,
+      trades: [],
+      equity_curve: [],
+      metrics: { ...result.metrics, total_trades: 0 },
+    };
+    renderResult(empty);
+
+    expect(screen.getByText("Net trade P&L")).toBeInTheDocument();
+    expect(screen.queryByText("Reconciles with trade log")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Trade log sum ≠ equity change — fees / open marks"),
+    ).not.toBeInTheDocument();
   });
 });

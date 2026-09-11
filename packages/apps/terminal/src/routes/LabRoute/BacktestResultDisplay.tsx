@@ -189,7 +189,9 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
             positive={metrics.expectancy >= 0}
           />
         </div>
-        <p className="text-xxs text-text-muted">{pnlHelper}</p>
+        {trades.length > 0 && equity_curve.length > 0 ? (
+          <p className="text-xxs text-text-muted">{pnlHelper}</p>
+        ) : null}
       </GlassCard>
 
       {equity_curve.length > 0 && (
