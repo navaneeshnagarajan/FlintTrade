@@ -176,6 +176,8 @@ describe("LearnRoute", () => {
     expect(screen.getAllByText(/as of Jan 2026 NSE cycle/i).length).toBeGreaterThan(0);
     expect(screen.queryAllByText(/NIFTY\s*=\s*25/)).toHaveLength(0);
     expect(screen.queryAllByText(/BANKNIFTY\s*=\s*15/)).toHaveLength(0);
+    expect(screen.queryAllByText(/\bNIFTY\s+25\b/)).toHaveLength(0);
+    expect(screen.queryAllByText(/\bBANKNIFTY\s+15\b/)).toHaveLength(0);
 
     const verify = screen.getByRole("link", { name: /verify on nse/i });
     expect(verify).toHaveAttribute(
@@ -184,12 +186,15 @@ describe("LearnRoute", () => {
     );
     expect(verify).toHaveAttribute("target", "_blank");
     expect(verify).toHaveAttribute("rel", expect.stringContaining("noopener"));
+    expect(verify.closest("button")).toBeNull();
   });
 
   it("keeps Lot Size source dated so NIFTY=25 / BANKNIFTY=15 cannot regress", () => {
     const src = readFileSync(join(process.cwd(), "src/routes/LearnRoute.tsx"), "utf8");
     expect(src).not.toMatch(/NIFTY\s*=\s*25/);
     expect(src).not.toMatch(/BANKNIFTY\s*=\s*15/);
+    expect(src).not.toMatch(/\bNIFTY\s+25\b/);
+    expect(src).not.toMatch(/\bBANKNIFTY\s+15\b/);
     expect(src).toMatch(/NIFTY 65/);
     expect(src).toMatch(/BANKNIFTY 30/);
     expect(src).toMatch(/FINNIFTY 60/);
