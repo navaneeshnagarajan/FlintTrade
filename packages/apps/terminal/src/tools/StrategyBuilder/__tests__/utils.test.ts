@@ -15,8 +15,10 @@ import {
   UNSET_PREMIUM_HELPER,
   ZERO_PREMIUM_WARNING,
   calculateNetPremium,
+  calculatePositionNetPremium,
   computePayoff,
   computePayoffSummary,
+  formatPositionSublabel,
   hasExplicitZeroPremium,
   hasUnsetPremium,
   pnlAtExpiry,
@@ -158,5 +160,61 @@ describe("premium honesty copy", () => {
     expect(UNSET_PREMIUM_HELPER).toBe("Enter premium to model payoff");
     expect(SAMPLE_PREMIUM_HELPER).toBe("Sample premium — edit to model");
     expect(ZERO_PREMIUM_WARNING).toBe("Premium is ₹0 — payoff treats cost as free");
+  });
+});
+
+describe("position rupee basis (FT-LAB-005)", () => {
+  const niftyLot = 75;
+
+  it("scales a long-call net debit to position rupees so it equals max loss", () => {
+    const call = leg({ action: "BUY", optionType: "CE", strike: 22500, premium: 45 });
+    const summary = pricedSummary([call]);
+    const positionDebit = calculatePositionNetPremium([call], niftyLot);
+
+    expect(calculateNetPremium([call])).toBe(45);
+    expect(positionDebit).toBe(45 * 1 * niftyLot);
+    expect(summary.maxLoss * niftyLot).toBe(-positionDebit!);
+  });
+
+  it("builds the muted per-lot sublabel from uniform lots", () => {
+    const oneLot = leg({ action: "BUY", optionType: "CE", strike: 22500, premium: 45 });
+    expect(formatPositionSublabel([oneLot], niftyLot)).toBe(
+      "₹3,375.00 per lot · 1 lots · lot size 75",
+    );
+
+    const twoLots = leg({ action: "BUY", optionType: "CE", strike: 22500, premium: 45, lots: 2 });
+    expect(calculatePositionNetPremium([twoLots], niftyLot)).toBe(6_750);
+    expect(formatPositionSublabel([twoLots], niftyLot)).toBe(
+      "₹3,375.00 per lot · 2 lots · lot size 75",
+    );
+  });
+
+  it("breaks a bounded max-profit figure down per lot, not as the net debit", () => {
+    const legs = [
+      leg({ id: "long", action: "BUY", optionType: "CE", strike: 22500, premium: 100 }),
+      leg({ id: "short", action: "SELL", optionType: "CE", strike: 22600, premium: 40 }),
+    ];
+    expect(formatPositionSublabel(legs, niftyLot)).toBe("₹4,500.00 per lot · 1 lots · lot size 75");
+    expect(formatPositionSublabel(legs, niftyLot, 40 * niftyLot)).toBe(
+      "₹3,000.00 per lot · 1 lots · lot size 75",
+    );
+    expect(formatPositionSublabel(legs, niftyLot, -60 * niftyLot)).toBe(
+      "₹4,500.00 per lot · 1 lots · lot size 75",
+    );
+  });
+
+  it("omits the per-lot sublabel when lot counts differ", () => {
+    const legs = [
+      leg({ id: "a", action: "BUY", optionType: "CE", strike: 22500, premium: 45, lots: 1 }),
+      leg({ id: "b", action: "SELL", optionType: "CE", strike: 22600, premium: 20, lots: 2 }),
+    ];
+    expect(formatPositionSublabel(legs, niftyLot)).toBeNull();
+    expect(calculatePositionNetPremium(legs, niftyLot)).toBe((45 - 40) * niftyLot);
+  });
+
+  it("leaves an unset premium unknown on the position basis too", () => {
+    const unset = leg({ action: "BUY", optionType: "CE", strike: 22500, premium: null });
+    expect(calculatePositionNetPremium([unset], niftyLot)).toBeNull();
+    expect(formatPositionSublabel([unset], niftyLot)).toBeNull();
   });
 });

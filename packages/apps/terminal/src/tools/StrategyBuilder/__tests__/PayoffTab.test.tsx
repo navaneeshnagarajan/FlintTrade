@@ -66,6 +66,44 @@ describe("PayoffTab", () => {
 
     expect(screen.getByText("Max Profit").nextElementSibling).toHaveTextContent("Unlimited");
     expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("-₹13,500.00");
+    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent("₹13,500.00");
     expect(screen.getByText("BEP(s)").nextElementSibling).toHaveTextContent("22680");
+  });
+
+  it("shows Long Call Net Debit and Max Loss on the same position basis (FT-LAB-005)", () => {
+    render(<PayoffTab legs={[callLeg(45)]} atm={22500} underlying={nifty} />);
+
+    const maxLoss = screen.getByText("Max Loss").nextElementSibling;
+    const netPremium = screen.getByText("Net Premium").nextElementSibling;
+    expect(maxLoss).toHaveTextContent("-₹3,375.00");
+    expect(netPremium).toHaveTextContent("₹3,375.00");
+    expect(netPremium).not.toHaveTextContent("₹45.00");
+    expect(screen.getAllByText("₹3,375.00 per lot · 1 lots · lot size 75").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("₹45.00 per lot · 1 lots · lot size 75")).not.toBeInTheDocument();
+  });
+
+  it("scales a two-lot long call and keeps the per-lot amount in the sublabel only", () => {
+    render(<PayoffTab legs={[callLeg(45, { lots: 2 })]} atm={22500} underlying={nifty} />);
+
+    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("-₹6,750.00");
+    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent("₹6,750.00");
+    expect(screen.getAllByText("₹3,375.00 per lot · 2 lots · lot size 75").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("tags mixed-lot figures as position when a single per-lot breakdown cannot be formed", () => {
+    render(
+      <PayoffTab
+        legs={[
+          callLeg(45, { id: "long", lots: 1 }),
+          callLeg(20, { id: "short", action: "SELL", strike: 22600, lots: 2 }),
+        ]}
+        atm={22500}
+        underlying={nifty}
+      />,
+    );
+
+    expect(screen.queryByText(/per lot ·/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("position").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent("₹375.00");
   });
 });

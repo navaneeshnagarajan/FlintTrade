@@ -66,6 +66,26 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Options Builder Net Debit and Max Loss share a position ₹ basis (FT-LAB-005).**
+  Explore `/lab` Options Builder now shows Net
+  Debit/Credit, Max Loss, and Max Profit on a
+  shared position ₹ basis. Net Debit/Credit is
+  the signed premium × lots × lot size. Max
+  Loss and Max Profit are expiry-payoff results
+  (intrinsic at the strikes, strike width, or
+  unlimited) scaled to that same position basis
+  — not premium × lots × lot size on every card.
+  For a long call, Max Loss equals the Net Debit
+  (the premium paid for the position). A muted
+  sublabel `₹X per lot · N lots · lot size L`
+  sits under those figures and is never the only
+  number. Header and Legs chips use the same
+  position basis as Payoff. When lots differ and
+  a single per-lot breakdown cannot be formed,
+  the primary figure is tagged `position` —
+  never two unlabelled ₹ on mixed bases.
+  Blank premiums still show `—` (FT-LAB-003).
+
 - **Learn Glossary Lot Size freshness (FT-LEARN-002).**
   Explore `/learn` → Glossary → Lot Size now teaches the
   Jan 2026 NSE-cycle index lots — NIFTY 65, BANKNIFTY 30,

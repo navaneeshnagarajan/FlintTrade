@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { UNDERLYINGS } from "./types";
 import type { Leg, Underlying } from "./types";
 import { builderLegsFor, getStrategyTemplate } from "@/lib/strategyTemplates";
-import { calculateNetPremium, formatINR, genId } from "./utils";
+import { calculatePositionNetPremium, formatINR, genId } from "./utils";
 import { sampleChainOptionLtp } from "@/lib/sampleOptionChain";
 import {
   LOAD_TEMPLATE_EVENT,
@@ -39,7 +39,7 @@ export default function StrategyBuilderTool({ onClose }: Props) {
   const [atm, setAtm] = useState(UNDERLYINGS[0].symbol === "NIFTY" ? 22500 : 48000);
   const [strikeGap, setStrikeGap] = useState(UNDERLYINGS[0].strikeGap);
 
-  const netPremium = calculateNetPremium(legs);
+  const positionNet = calculatePositionNetPremium(legs, underlying.lotSize);
 
   const handleUnderlyingChange = (symbol: string) => {
     const u = UNDERLYINGS.find((u) => u.symbol === symbol) ?? UNDERLYINGS[0];
@@ -145,12 +145,12 @@ export default function StrategyBuilderTool({ onClose }: Props) {
           <Badge variant="outline" className="text-xxs border-border-default text-text-muted font-normal">
             {underlying.symbol}
           </Badge>
-          {legs.length > 0 && netPremium != null && (
+          {legs.length > 0 && positionNet != null && (
             <Badge
               variant="outline"
-              className={`text-xxs px-1.5 border-0 font-mono ${netPremium <= 0 ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}
+              className={`text-xxs px-1.5 border-0 font-mono ${positionNet <= 0 ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}
             >
-              {netPremium <= 0 ? "Credit" : "Debit"} {formatINR(Math.abs(netPremium))}
+              {positionNet <= 0 ? "Credit" : "Debit"} {formatINR(Math.abs(positionNet))}
             </Badge>
           )}
         </div>
