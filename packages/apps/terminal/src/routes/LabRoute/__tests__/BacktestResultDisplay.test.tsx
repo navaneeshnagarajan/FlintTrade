@@ -96,7 +96,9 @@ vi.mock("@/hooks/useChartTheme", () => ({
 }));
 
 import { BacktestResultDisplay } from "../BacktestResultDisplay";
+import { fmtInr } from "../formatters";
 
+/** Equity Δ is ₹4,500; trade-log sum is ₹1,500 — intentional diverge fixture. */
 const result: BacktestResult = {
   final_equity: 104500,
   total_bars: 300,
@@ -231,5 +233,129 @@ describe("BacktestResultDisplay", () => {
     expect(sharpe).not.toMatch(/0\.00/);
     expect(winRate).not.toMatch(/0\.00%/);
     expect(profitFactor).not.toMatch(/0\.00/);
+  });
+
+  function renderResult(value: BacktestResult = result) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <BacktestResultDisplay result={value} />
+      </QueryClientProvider>,
+    );
+  }
+
+  function metricCardText(label: string): string {
+    const labelEl = screen.getByText(label);
+    const card = labelEl.parentElement;
+    expect(card).not.toBeNull();
+    return (card?.textContent ?? "").replace(/\s+/g, " ").trim();
+  }
+
+  it("labels Total Return as initial capital → final equity, not a sum of trades", () => {
+    renderResult();
+
+    expect(metricCardText("Total Return")).toContain("4.50%");
+    expect(screen.getByText("Initial capital → final equity")).toBeInTheDocument();
+    expect(screen.queryByText(/sum of trades/i)).not.toBeInTheDocument();
+  });
+
+  it("does not double-scale a live percentage-point total_return", () => {
+    renderResult({
+      ...result,
+      metrics: { ...result.metrics, total_return: 4.5 },
+    });
+
+    expect(metricCardText("Total Return")).toContain("4.50%");
+    expect(metricCardText("Total Return")).not.toContain("450");
+  });
+
+  it("keeps the demo fraction total_return at 4.50%", () => {
+    renderResult();
+
+    expect(metricCardText("Total Return")).toContain("4.50%");
+    expect(metricCardText("Total Return")).not.toContain("450");
+  });
+
+  it("uses final equity after a forced close, not the last pre-liquidation curve point", () => {
+    renderResult({
+      ...result,
+      metrics: { ...result.metrics, total_return: 4.5 },
+      equity_curve: [
+        { timestamp: "2024-01-01T00:00:00.000Z", equity: 100000 },
+        { timestamp: "2024-02-01T00:00:00.000Z", equity: 102000 },
+        { timestamp: "2024-03-01T00:00:00.000Z", equity: 104000 },
+      ],
+      final_equity: 104500,
+    });
+
+    expect(metricCardText("Total Return")).toContain("4.50%");
+    expect(screen.getByText("Initial capital → final equity")).toBeInTheDocument();
+  });
+
+  it("does not label a gross Trade Log sum as Net trade P&L", () => {
+    renderResult();
+
+    expect(screen.queryByText("Net trade P&L")).not.toBeInTheDocument();
+    expect(metricCardText("Trade log P&L")).toContain(fmtInr(1500));
+    expect(screen.getByText("Gross — net P&L not in result")).toBeInTheDocument();
+    expect(
+      screen.getByText("Trade log sum ≠ equity change — fees / open marks"),
+    ).toBeInTheDocument();
+  });
+
+  it("sums net_pnl for Net trade P&L, not gross pnl", () => {
+    const withNet: BacktestResult = {
+      ...result,
+      trades: result.trades.map((trade, i) => ({
+        ...trade,
+        net_pnl: [1960, 960, -1540][i],
+      })),
+    };
+    renderResult(withNet);
+
+    expect(metricCardText("Net trade P&L")).toContain(fmtInr(1380));
+    expect(metricCardText("Net trade P&L")).not.toContain(fmtInr(1500));
+    expect(screen.queryByText("Gross — net P&L not in result")).not.toBeInTheDocument();
+  });
+
+  it("quietly notes when Net trade P&L matches the equity-curve change", () => {
+    const reconciled: BacktestResult = {
+      ...result,
+      trades: [
+        { ...result.trades[0], net_pnl: 2000 },
+        { ...result.trades[1], net_pnl: 1000 },
+        { ...result.trades[2], pnl: 1500, net_pnl: 1500 },
+      ],
+    };
+    renderResult(reconciled);
+
+    expect(metricCardText("Net trade P&L")).toContain(fmtInr(4500));
+    expect(screen.getByText("Reconciles with trade log")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Trade log sum ≠ equity change — fees / open marks"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("labels Monthly P&L as trade-based so the chart matches the Trade Log", () => {
+    renderResult();
+
+    expect(screen.getByText("Monthly P&L")).toBeInTheDocument();
+    expect(screen.getByText("Trade-based · sums Trade Log P&L")).toBeInTheDocument();
+  });
+
+  it("omits the reconcile helper when there is no trade log or equity curve to compare", () => {
+    const empty: BacktestResult = {
+      ...result,
+      trades: [],
+      equity_curve: [],
+      metrics: { ...result.metrics, total_trades: 0 },
+    };
+    renderResult(empty);
+
+    expect(screen.getByText("Net trade P&L")).toBeInTheDocument();
+    expect(screen.queryByText("Reconciles with trade log")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Trade log sum ≠ equity change — fees / open marks"),
+    ).not.toBeInTheDocument();
   });
 });

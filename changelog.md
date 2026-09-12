@@ -66,6 +66,25 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Backtest headline P&L vs trade-log (FT-LAB-004).**
+  Explore `/lab` backtest results now show labelled
+  dual metrics. **Total Return (%)** is initial
+  capital → final equity (including a forced last-bar
+  close), with subtitle `Initial capital → final
+  equity`. Live `total_return` percentage points are
+  not passed through `fmtPct` a second time.
+  **Net trade P&L (₹)** sums Trade Log `net_pnl`
+  when present; if `net_pnl` is missing the card is
+  labelled **Trade log P&L** with `Gross — net P&L
+  not in result` rather than calling a gross sum net.
+  When that sum matches the equity change, a quiet
+  `Reconciles with trade log` note appears; when
+  they diverge (fees, open marks, partial fills)
+  both numbers stay visible with
+  `Trade log sum ≠ equity change — fees / open
+  marks`. Monthly P&L stays trade-based so the
+  chart matches the log.
+
 - **Learn Glossary Lot Size freshness (FT-LEARN-002).**
   Explore `/learn` → Glossary → Lot Size now teaches the
   Jan 2026 NSE-cycle index lots — NIFTY 65, BANKNIFTY 30,
