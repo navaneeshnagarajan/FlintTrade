@@ -206,6 +206,11 @@ def test_proofless_factory_does_not_construct_scheduler_or_rotation_owners(monke
     def forbidden(*args, **kwargs):
         pytest.fail("proofless construction acquired scheduling ownership")
 
+    # Sibling xdist modules assign OPENALGO_API_KEY / FLINTTRADE_API_KEY on
+    # os.environ directly. A leftover key 401s this probe before the
+    # proofless 503 can be observed.
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     for owner in ("TimeScheduler", "CronStrategyScheduler"):
         monkeypatch.setattr(scheduling, owner, forbidden)
     monkeypatch.setattr(background, "BackgroundScheduler", forbidden)
@@ -391,6 +396,10 @@ def test_proofless_flask_factory_serves_without_broker_authorities(monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("proofless factory constructed broker authority")
 
+    # docs/API.md keeps /healthz API-key-gated when a key is configured.
+    # Isolate leaked worker keys so this probe uses the loopback-no-key path.
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.setattr(module, "CredentialStore", forbidden)
     monkeypatch.setattr(module, "create_owned_registry", forbidden)
     monkeypatch.setattr(module, "OpenAlgoClient", forbidden)
