@@ -1638,6 +1638,7 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
         return jsonify({
             "status": "error",
             "message": "Orders are not available in Explore mode. Switch to Practice or Live to trade.",
+            "code": "mode_blocked",
         }), 403
 
     # ------------------------------------------------------------------

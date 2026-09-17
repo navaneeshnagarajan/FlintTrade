@@ -243,6 +243,19 @@ class TestExploreModeBlocked:
         )
         assert resp.status_code == 403
 
+    def test_explore_order_attempt_is_mode_blocked(self, client):
+        """FT-TRADE-009: backend rejects Explore orders if the UI slips."""
+        resp = client.post(
+            "/api/v1/orders/place",
+            json=_SAMPLE_ORDER_BODY,
+            headers=_auth_headers(mode="explore"),
+        )
+        assert resp.status_code == 403
+        data = resp.get_json()
+        assert data["status"] == "error"
+        assert data["code"] == "mode_blocked"
+        assert "Explore mode" in data["message"]
+
 
 # ---------------------------------------------------------------------------
 # 2. Missing / invalid mode header
