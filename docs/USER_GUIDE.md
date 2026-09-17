@@ -836,9 +836,13 @@ stays muted and disabled — the same honesty class as Telegram
 (sample-only). Switch to Practice or Live with broker accounts
 connected." Practice and Live arm Start only when a source
 account, at least one target, and broker accounts are ready.
-An empty account list is an honest empty state, not a silent
-blank targets block. The backend rejects Explore or incomplete
-starts if the UI slips (FT-DITTO-001).
+Otherwise the helpers are "Select a source account and at least
+one target to start mirroring." (missing source or targets) and
+"Connect a source and at least one target account to start
+mirroring." (no accounts). An empty account list is an honest
+empty state, not a silent blank targets block. The backend
+rejects Explore or incomplete starts if the UI slips
+(FT-DITTO-002).
 
 On Explore `/ditto` Risk, **Kill All Positions** is disabled when there are
 no managed accounts (empty state "No managed accounts"; no confirm). The
