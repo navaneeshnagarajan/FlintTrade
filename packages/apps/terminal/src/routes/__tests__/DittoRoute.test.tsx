@@ -97,6 +97,17 @@ const testDir = dirname(fileURLToPath(import.meta.url));
 const dittoRouteSource = () =>
   readFileSync(resolve(testDir, "../DittoRoute.tsx"), "utf8");
 
+// Radix Select uses ResizeObserver / pointer capture when the source list opens.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver = ResizeObserverStub;
+window.HTMLElement.prototype.hasPointerCapture = vi.fn();
+window.HTMLElement.prototype.setPointerCapture = vi.fn();
+window.HTMLElement.prototype.releasePointerCapture = vi.fn();
+
 function createWrapper() {
   const qc = new QueryClient({
     defaultOptions: {
@@ -185,10 +196,11 @@ async function openMirrorTab() {
 }
 
 async function selectSourceAndTarget() {
-  const user = userEvent.setup();
-  await user.click(screen.getAllByRole("combobox")[0]);
-  await user.click(await screen.findByRole("option", { name: /Client: Rajesh Mehta/ }));
-  await user.click(screen.getByRole("button", { name: /Client: Priya Sharma/ }));
+  const trigger = screen.getAllByRole("combobox")[0];
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("option", { name: /Client: Rajesh Mehta/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Client: Priya Sharma/ }));
 }
 
 beforeEach(() => {
