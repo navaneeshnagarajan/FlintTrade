@@ -351,6 +351,12 @@ OI is an honest empty — `No expiries for this symbol` or
 `No OI for this expiry` — with no bars and no PCR/max-pain stats.
 The widget never pairs “No expiries” with generic or sample bars.
 
+On Explore `/trade` Watchlist, checked LTP and % change columns
+paint their headers and cells. Those values use the same sample
+quotes as the ticker tape (Sample data badge). A missing quote
+shows `—` after a brief `…`, never a silent blank. Unchecking a
+column hides it (FT-TRADE-008).
+
 ### Learn → Practice Trading (OpenAlgo)
 
 This is a different path from the native Practice-mode sandbox on
@@ -491,6 +497,11 @@ from the widget registry
   Strategy Templates, Audit Trail, Economic Calendar, Expiry Countdown,
   Market Clock, Trade Ideas, Tick Speed, and Journal Entries
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
+
+On Explore `/trade` Watchlist, checked LTP and % change columns
+use the same sample quotes as the ticker tape (Sample data badge).
+A missing quote shows `—` after a brief `…`, never a silent blank
+(FT-TRADE-008).
 
 News Feed loads headlines only through the FlintTrade backend (`GET /api/v1/news`).
 There is no browser-side RSS or CORS-proxy fallback. If the backend cannot

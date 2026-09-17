@@ -3,6 +3,7 @@ import {
   addSymbolToWatchlist,
   loadTabs,
   saveTabs,
+  resolveWatchlistQuoteFields,
   LS_KEY_LEGACY,
 } from "../types";
 
@@ -42,5 +43,38 @@ describe("addSymbolToWatchlist", () => {
 
     const matches = loadTabs()[0].symbols.filter((s) => s.symbol === "SBIN");
     expect(matches).toHaveLength(1);
+  });
+});
+
+describe("resolveWatchlistQuoteFields", () => {
+  it("prefers the ticker tick-atom LTP and prevClose over a REST quote", () => {
+    const fields = resolveWatchlistQuoteFields(
+      { symbol: "NIFTY", exchange: "NSE_INDEX", ltp: 24150, prevClose: 24000, pct: 0.625 },
+      { symbol: "NIFTY", exchange: "NSE_INDEX", ltp: 1, prev_close: 1 },
+    );
+    expect(fields.ltp).toBe(24150);
+    expect(fields.prevClose).toBe(24000);
+    expect(fields.chgAbs).toBe(150);
+    expect(fields.chgPct).toBeCloseTo(0.625);
+  });
+
+  it("falls back to the REST quote when no tick has arrived", () => {
+    const fields = resolveWatchlistQuoteFields(null, {
+      symbol: "SBIN",
+      exchange: "NSE",
+      ltp: 780,
+      prev_close: 770,
+    });
+    expect(fields.ltp).toBe(780);
+    expect(fields.chgPct).toBeCloseTo((10 / 770) * 100);
+  });
+
+  it("returns nulls when neither a tick nor a REST quote is present", () => {
+    expect(resolveWatchlistQuoteFields(null, null)).toEqual({
+      ltp: null,
+      prevClose: null,
+      chgAbs: null,
+      chgPct: null,
+    });
   });
 });

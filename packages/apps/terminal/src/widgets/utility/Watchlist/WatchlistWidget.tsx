@@ -31,6 +31,7 @@ import { DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import { instrumentContext } from "@/services/fdc3/contexts";
 import { useBroadcastInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { raiseIntent } from "@/services/fdc3/intents";
+import { useModeStore } from "@/stores/modeStore";
 import type { WidgetProps } from "@/types/widgets";
 
 import {
@@ -105,7 +106,9 @@ function WatchlistWidget({ params, api }: WidgetProps) {
   const activeTab = tabs[activeTabIdx] ?? tabs[0];
   const watchlist = activeTab?.symbols ?? [];
 
-  const { quotes, sparkHistory, fetchError } = useWatchlistPolling(watchlist);
+  const { quotes, sparkHistory, fetchError, isLoading } = useWatchlistPolling(watchlist);
+  const isExplore = useModeStore((s) => s.mode === "explore");
+  const visible = new Set(viewSettings.visibleColumns);
 
   // ---------------------------------------------------------------------------
   // Tab management
@@ -300,6 +303,16 @@ function WatchlistWidget({ params, api }: WidgetProps) {
         {count > 0 && (
           <span className="text-xxs font-mono bg-surface-hover text-text-muted border border-border-default rounded px-1 leading-4">
             {count}
+          </span>
+        )}
+
+        {isExplore && (
+          <span
+            role="status"
+            className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+            title="Explore uses the same sample quotes as the ticker tape"
+          >
+            Sample data
           </span>
         )}
 
@@ -503,23 +516,68 @@ function WatchlistWidget({ params, api }: WidgetProps) {
             </Button>
           </div>
         ) : (
-          watchlist.map((item) => {
-            const key = `${item.symbol}:${item.exchange}`;
-            return (
-              <SymbolRow
-                key={key}
-                item={item}
-                quote={quotes[key] ?? null}
-                sparkPrices={sparkHistory[key] ?? []}
-                visibleColumns={viewSettings.visibleColumns}
-                formula={viewSettings.formula}
-                customFormulas={viewSettings.customFormulas}
-                onSelect={handleSelect}
-                onRemove={openSymbolCtxMenu}
-                onQuickTrade={handleQuickTrade}
-              />
-            );
-          })
+          <>
+            <div
+              role="row"
+              className="flex items-center gap-2 px-2 py-1 border-b border-border-default bg-surface-card shrink-0"
+            >
+              <span role="columnheader" className="min-w-0 flex-1 text-xxs uppercase tracking-wider text-text-muted">
+                Symbol
+              </span>
+              {visible.has("sparkline") && (
+                <span role="columnheader" className="w-10 shrink-0 text-center text-xxs uppercase tracking-wider text-text-muted">
+                  Sparkline
+                </span>
+              )}
+              {visible.has("volume") && (
+                <span role="columnheader" className="hidden min-w-12 shrink-0 text-right text-xxs uppercase tracking-wider text-text-muted sm:block">
+                  Volume
+                </span>
+              )}
+              {visible.has("changeAbs") && (
+                <span role="columnheader" className="hidden min-w-14 shrink-0 text-right text-xxs uppercase tracking-wider text-text-muted md:block">
+                  Net change
+                </span>
+              )}
+              {visible.has("formula") && (
+                <span role="columnheader" className="hidden min-w-16 shrink-0 text-right text-xxs uppercase tracking-wider text-text-muted lg:block">
+                  Formula
+                </span>
+              )}
+              {(visible.has("price") || visible.has("changePct")) && (
+                <div className="flex min-w-16 shrink-0 flex-col items-end">
+                  {visible.has("price") && (
+                    <span role="columnheader" className="text-xxs uppercase tracking-wider text-text-muted">
+                      LTP
+                    </span>
+                  )}
+                  {visible.has("changePct") && (
+                    <span role="columnheader" className="text-xxs uppercase tracking-wider text-text-muted">
+                      % change
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            {watchlist.map((item) => {
+              const key = `${item.symbol}:${item.exchange}`;
+              return (
+                <SymbolRow
+                  key={key}
+                  item={item}
+                  quote={quotes[key] ?? null}
+                  sparkPrices={sparkHistory[key] ?? []}
+                  visibleColumns={viewSettings.visibleColumns}
+                  formula={viewSettings.formula}
+                  customFormulas={viewSettings.customFormulas}
+                  isLoading={isLoading}
+                  onSelect={handleSelect}
+                  onRemove={openSymbolCtxMenu}
+                  onQuickTrade={handleQuickTrade}
+                />
+              );
+            })}
+          </>
         )}
       </div>
 
