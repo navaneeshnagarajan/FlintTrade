@@ -66,7 +66,7 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
-- **OI Chart has no expiry selector / shows “No expiries” (FT-TRADE-007).**
+- **OI Chart shares Option Chain expiries (FT-TRADE-007).**
   Explore `/trade` Analysis layout → maximize OI Chart
   now shares Option Chain expiries for the
   symbol/exchange. A non-empty list shows the

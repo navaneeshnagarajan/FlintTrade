@@ -54,6 +54,7 @@ vi.mock("@/components/charts/PlotlyChart", () => ({
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
+import { useOptionExpiryStore } from "@/stores/optionExpiryStore";
 import OIChartWidget from "../OIChartWidget";
 import { SAMPLE_PAIN_ROWS, SAMPLE_STRIKE_CELLS, SAMPLE_MAX_PAIN } from "../sampleData";
 
@@ -100,6 +101,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useOptionExpiryStore.setState({ selectedByIdentity: {} });
   mockMode.current = "live";
   mockUseBrokerConnected.mockReturnValue(false);
   apiMocks.getExpiry.mockResolvedValue(["2026-03-27"]);
@@ -183,13 +185,14 @@ describe("OI Analytics Max Pain view", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the sample curve when disconnected, and never fetches", async () => {
+  it("does not invent a sample pain curve when disconnected", async () => {
     mockUseBrokerConnected.mockReturnValue(false);
+    apiMocks.getExpiry.mockResolvedValue([]);
     renderPain();
 
+    expect(await screen.findByText("No expiries for this symbol")).toBeInTheDocument();
+    expect(screen.queryByText("Total pain")).not.toBeInTheDocument();
     expect(apiMocks.getMaxPain).not.toHaveBeenCalled();
-    expect(screen.getByText("Total pain")).toBeInTheDocument();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
   });
 
   it("derives the sample curve from the sample chain, so the two cannot disagree", () => {
@@ -235,8 +238,9 @@ describe("OI Analytics Max Pain view", () => {
     expect(screen.queryByText("Total")).not.toBeInTheDocument();
   });
 
-  it("explains what pain means so the trough is not misread", () => {
+  it("explains what pain means so the trough is not misread", async () => {
+    mockUseBrokerConnected.mockReturnValue(true);
     renderPain();
-    expect(screen.getByText(/option writers would pay out/i)).toBeInTheDocument();
+    expect(await screen.findByText(/option writers would pay out/i)).toBeInTheDocument();
   });
 });

@@ -104,7 +104,8 @@ import {
   type OIFilter,
   type StrikeCell,
 } from "./oiStrikes";
-import { SAMPLE_ATM, SAMPLE_MAX_PAIN, SAMPLE_PAIN_ROWS, SAMPLE_STRIKE_CELLS } from "./sampleData";
+import { parseExpiryList, pickListedExpiry } from "@/lib/optionExpiry";
+import { useOptionExpiryStore, useSharedOptionExpirySelection } from "@/stores/optionExpiryStore";
 import { FlowTapeSection } from "./FlowTape";
 import { SAMPLE_ANALYSIS, SAMPLE_UNUSUAL } from "./oiSignalsSample";
 import { SPOT_INTERVALS, type SpotInterval } from "./spotIntervals";
@@ -396,10 +397,15 @@ function OIChartWidget(props: WidgetProps) {
   // The exact market-data authority owns every cache, request, and displayed
   // value. A connected A -> connected B transition must retire A just as
   // decisively as a disconnect or symbol change.
-  const identityKey = `${dataScope}:${isConnected}:${symDef.label}:${exchange}`;
+  const identityKey = `${dataScope}:${symDef.label}:${exchange}`;
+  const { sharedSelected, publishSelected } = useSharedOptionExpirySelection(
+    dataScope,
+    symDef.label,
+    exchange,
+  );
   const currentExpiries = expiryIdentity === identityKey ? expiries : [];
   const expiryCandidate = typeof selectedExpiryValue === "string" ? selectedExpiryValue.trim() : "";
-  const selectedExpiry = currentExpiries.includes(expiryCandidate) ? expiryCandidate : null;
+  const selectedExpiry = pickListedExpiry(currentExpiries, expiryCandidate ?? sharedSelected);
   const requestKey = `${identityKey}:${selectedExpiry ?? ""}`;
 
   // Two independent guards over one identity: max pain deliberately polls on
@@ -421,6 +427,9 @@ function OIChartWidget(props: WidgetProps) {
   }, [requestKey]);
 
   // ---- Expiries ------------------------------------------------------------
+  // Same `getExpiry` identity as Option Chain (symbol/exchange/options/scope).
+  // Explore is broker-free (`useBrokerConnected` is false) but still has a
+  // sample expiry list; do not skip the fetch or the two widgets diverge.
   useEffect(() => {
     setExpiries([]);
     setSelectedExpiry(null);
@@ -432,7 +441,6 @@ function OIChartWidget(props: WidgetProps) {
     setLoading(false);
     setError(null);
     setLastRefresh(null);
-    if (!isConnected) return;
 
     let cancelled = false;
     const controller = new AbortController();
@@ -446,19 +454,18 @@ function OIChartWidget(props: WidgetProps) {
           dataScope,
         );
         if (cancelled || controller.signal.aborted) return;
-        const rawList = Array.isArray(data)
-          ? data
-          : ((data as { expiry?: unknown[] })?.expiry ?? []);
-        const list = rawList.flatMap((value) => {
-          if (typeof value !== "string") return [];
-          const expiry = value.trim();
-          return expiry ? [expiry] : [];
-        });
+        const list = parseExpiryList(data);
+        const preferred = useOptionExpiryStore.getState().selectedByIdentity[identityKey] ?? null;
+        const next = pickListedExpiry(list, preferred);
         setExpiries(list);
         setExpiryIdentity(identityKey);
-        setSelectedExpiry(list[0] ?? null);
+        setSelectedExpiry(next);
+        publishSelected(next);
       } catch (e) {
         if (!cancelled && !controller.signal.aborted) {
+          setExpiries([]);
+          setExpiryIdentity(identityKey);
+          setSelectedExpiry(null);
           setError(`Expiry load failed: ${(e as Error).message}`);
         }
       }
@@ -468,11 +475,20 @@ function OIChartWidget(props: WidgetProps) {
       cancelled = true;
       controller.abort();
     };
-  }, [identityKey, symDef.label, exchange, isConnected, dataScope]);
+  }, [identityKey, symDef.label, exchange, dataScope, publishSelected]);
+
+  // Follow Option Chain (or another OI Chart) when the operator picks a
+  // still-listed expiry on the shared identity.
+  useEffect(() => {
+    if (!sharedSelected || expiryIdentity !== identityKey) return;
+    if (!expiries.includes(sharedSelected)) return;
+    if (selectedExpiryValue === sharedSelected) return;
+    setSelectedExpiry(sharedSelected);
+  }, [sharedSelected, expiryIdentity, identityKey, expiries, selectedExpiryValue]);
 
   // ---- Chain + spot --------------------------------------------------------
   const fetchData = useCallback(async () => {
-    if (!isConnected || !selectedExpiry) return;
+    if (!selectedExpiry) return;
     const ticket = chainRequests.begin(requestKey);
     if (!ticket) return;
     chainControllerRef.current?.abort();
@@ -507,12 +523,12 @@ function OIChartWidget(props: WidgetProps) {
       }
     }
   }, [
-    chainRequests, requestKey, isConnected, selectedExpiry,
+    chainRequests, requestKey, selectedExpiry,
     symDef.label, symDef.spotSymbol, symDef.spotExchange, exchange, dataScope,
   ]);
 
   useEffect(() => {
-    if (!isConnected || !selectedExpiry) return;
+    if (!selectedExpiry) return;
     void fetchData();
     const id = setInterval(() => void fetchData(), refreshIntervalMs());
     return () => {
@@ -521,11 +537,11 @@ function OIChartWidget(props: WidgetProps) {
       chainControllerRef.current = null;
       chainRequests.invalidate();
     };
-  }, [chainRequests, fetchData, isConnected, selectedExpiry]);
+  }, [chainRequests, fetchData, selectedExpiry]);
 
   // ---- Max pain (independent 60 s clock) -----------------------------------
   const fetchMaxPain = useCallback(async () => {
-    if (!isConnected || !selectedExpiry) return;
+    if (!selectedExpiry) return;
     const ticket = maxPainRequests.begin(requestKey);
     if (!ticket) return;
     maxPainControllerRef.current?.abort();
@@ -571,10 +587,10 @@ function OIChartWidget(props: WidgetProps) {
       }
       ticket.settle();
     }
-  }, [maxPainRequests, requestKey, isConnected, selectedExpiry, symDef.label, exchange, dataScope]);
+  }, [maxPainRequests, requestKey, selectedExpiry, symDef.label, exchange, dataScope]);
 
   useEffect(() => {
-    if (!isConnected || !selectedExpiry) return;
+    if (!selectedExpiry) return;
     void fetchMaxPain();
     const id = setInterval(() => void fetchMaxPain(), 60_000);
     return () => {
@@ -630,31 +646,38 @@ function OIChartWidget(props: WidgetProps) {
     [chain, spotLtp],
   );
 
-  // Explore mode reports a connection while `services/api` serves a mock chain,
-  // so "connected" alone is not evidence of live data.
+  // Explore is always sample. Live disconnected is not a licence to invent
+  // bars — the chain on screen is whatever `getOptionChain` returned for the
+  // selected expiry, or an honest empty.
   const showingSampleChain = !isConnected || isExplore;
-  const usingSampleCells = !isConnected;
+  const allCells = liveCells;
+  const atmStrike = liveAtm;
+  const hasPositiveOi = chainHasPositiveOi(allCells);
+  const hasExpiries = currentExpiries.length > 0;
 
-  const allCells = usingSampleCells ? SAMPLE_STRIKE_CELLS : liveCells;
-  const atmStrike = usingSampleCells ? SAMPLE_ATM : liveAtm;
+  const rows = useMemo(
+    () => (hasPositiveOi ? filterStrikeCells(allCells, filter) : []),
+    [allCells, filter, hasPositiveOi],
+  );
+  const summary = useMemo(
+    () => (hasPositiveOi ? summariseStrikeCells(rows) : summariseStrikeCells([])),
+    [hasPositiveOi, rows],
+  );
 
-  const rows = useMemo(() => filterStrikeCells(allCells, filter), [allCells, filter]);
-  const summary = useMemo(() => summariseStrikeCells(rows), [rows]);
-
-  const visibleMaxPainStrike = usingSampleCells
-    ? SAMPLE_MAX_PAIN
-    : chain !== null && !loading && !error && chainHasPositiveOi(allCells)
-      ? maxPainStrike
-      : null;
+  const visibleMaxPainStrike = selectedExpiry
+    && chain !== null
+    && !loading
+    && !error
+    && hasPositiveOi
+    ? maxPainStrike
+    : null;
 
   // ---- Max pain curve (the "pain" view) ------------------------------------
-  // The sample curve rides the sample chain, exactly as the sample max-pain
-  // rule does, so the two can never disagree about the sample.
-  // Memoised so the `?? []` fallback keeps a stable identity; without it the
-  // two memos below recomputed on every render of a chain without pain rows.
+  // Only the attested live curve is drawn. Explore and an unattested response
+  // stay empty rather than overlaying a generic sample basin.
   const painRows: MaxPainData["strikes"] = useMemo(
-    () => (usingSampleCells ? SAMPLE_PAIN_ROWS : maxPainRows ?? []),
-    [usingSampleCells, maxPainRows],
+    () => (hasPositiveOi ? maxPainRows ?? [] : []),
+    [hasPositiveOi, maxPainRows],
   );
   const painMax = useMemo(
     () => painRows.reduce((max, row) => Math.max(max, row.total_pain), 0),
@@ -684,8 +707,22 @@ function OIChartWidget(props: WidgetProps) {
         ? "mixed"
         : "sample";
 
-  const analysis = analysisQuery.data ?? SAMPLE_ANALYSIS;
-  const unusual = unusualQuery.data ?? SAMPLE_UNUSUAL;
+  const analysis = analysisQuery.data
+    ?? (selectedExpiry
+      ? SAMPLE_ANALYSIS
+      : {
+          is_sample_data: true,
+          signals: [],
+          long_buildups: [],
+          short_coverings: [],
+          short_buildups: [],
+          long_unwindings: [],
+          summary: {},
+        });
+  const unusual = unusualQuery.data
+    ?? (selectedExpiry
+      ? SAMPLE_UNUSUAL
+      : { is_sample_data: true, unusual: [], count: 0, threshold: 2 });
   const signalRows: OIChangeSignalRow[] = useMemo(
     () => [...analysis.signals].sort((a, b) => a.strike - b.strike),
     [analysis],
@@ -1158,9 +1195,11 @@ function OIChartWidget(props: WidgetProps) {
     <div className="flex-1 min-h-0 overflow-auto">
       {painRows.length === 0 ? (
         <p className="text-xs text-text-muted text-center py-8">
-          {isConnected && !selectedExpiry
-            ? "Select an expiry to load the pain distribution"
-            : `No attested max-pain distribution for ${symDef.label}.`}
+          {!hasExpiries
+            ? "No expiries for this symbol"
+            : !selectedExpiry
+              ? "Select an expiry to load the pain distribution"
+              : `No attested max-pain distribution for ${symDef.label}.`}
         </p>
       ) : (
         <>
@@ -1255,9 +1294,21 @@ function OIChartWidget(props: WidgetProps) {
     </div>
   );
 
+  const emptyChartReason = !hasExpiries
+    ? "No expiries for this symbol"
+    : !selectedExpiry
+      ? "Select an expiry to load OI data"
+      : filter !== "All"
+        ? "No strikes match the filter"
+        : "No OI for this expiry";
+
   const chartBody = (
     <div className="flex-1 min-h-0 overflow-hidden">
-      {isConnected && !selectedExpiry && !loading ? (
+      {!hasExpiries && !loading ? (
+        <div className="h-full flex items-center justify-center text-text-muted text-xs">
+          No expiries for this symbol
+        </div>
+      ) : !selectedExpiry && !loading ? (
         <div className="h-full flex items-center justify-center text-text-muted text-xs">
           Select an expiry to load OI data
         </div>
@@ -1268,7 +1319,7 @@ function OIChartWidget(props: WidgetProps) {
         </div>
       ) : rows.length === 0 ? (
         <div className="h-full flex items-center justify-center text-text-muted text-xs">
-          {filter !== "All" ? "No strikes match the filter" : "No OI data"}
+          {emptyChartReason}
         </div>
       ) : (
         <Suspense fallback={chartFallback}>
@@ -1287,7 +1338,7 @@ function OIChartWidget(props: WidgetProps) {
     <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
       {loading && !chain
         ? <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" />Loading OI data...</span>
-        : filter !== "All" ? "No strikes match the filter" : "Select symbol and expiry to view the OI heat grid"}
+        : emptyChartReason}
     </div>
   );
 
@@ -1354,13 +1405,13 @@ function OIChartWidget(props: WidgetProps) {
           </span>
 
           <div className="flex items-center gap-1" data-testid="expiry-strip">
-            {expiryButtons.length === 0 && !loading && (
-              <span className="text-xs text-text-muted px-1">No expiries</span>
-            )}
             {expiryButtons.map((exp) => (
               <button
                 key={exp}
-                onClick={() => setSelectedExpiry(exp)}
+                onClick={() => {
+                  setSelectedExpiry(exp);
+                  publishSelected(exp);
+                }}
                 className={`px-2 py-0.5 text-xs font-medium rounded border transition-colors ${
                   exp === selectedExpiry
                     ? "bg-accent/15 border-accent/60 text-accent"
@@ -1407,7 +1458,7 @@ function OIChartWidget(props: WidgetProps) {
 
           <button
             onClick={handleRefresh}
-            disabled={!isConnected || loading || !selectedExpiry}
+            disabled={loading || !selectedExpiry}
             className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-40"
             title="Refresh"
             data-testid="refresh-btn"

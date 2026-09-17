@@ -11,9 +11,11 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import type { Quote } from "@/types/api";
 import { getExpiry, getOptionChain, getQuotes } from "@/services/api";
+import { parseExpiryList, pickListedExpiry } from "@/lib/optionExpiry";
 import { isMarketHours } from "@/lib/market";
 import { useMarketDataScope } from "@/hooks/useDataScope";
 import { useLatestRequest } from "@/hooks/useLatestRequest";
+import { useOptionExpiryStore, useSharedOptionExpirySelection } from "@/stores/optionExpiryStore";
 import type {
   SymbolDef,
   RawOptionChain,
@@ -82,8 +84,13 @@ export function useOptionChainData(
   exchange: string,
 ): OptionChainData {
   const dataScope = useMarketDataScope();
+  const { sharedSelected, publishSelected } = useSharedOptionExpirySelection(
+    dataScope,
+    symDef.label,
+    exchange,
+  );
   const [expiries, setExpiries]           = useState<string[]>([]);
-  const [selectedExpiryValue, setSelectedExpiry] = useState<string | null>(null);
+  const [selectedExpiryValue, setSelectedExpiryValue] = useState<string | null>(null);
   const [expiryIdentity, setExpiryIdentity] = useState<string | null>(null);
   const [chain, setChain]                 = useState<RawOptionChain | null>(null);
   const [chainIdentity, setChainIdentity] = useState<string | null>(null);
@@ -95,7 +102,7 @@ export function useOptionChainData(
   const identityKey = `${dataScope}:${symDef.label}:${exchange}`;
   const currentExpiries = expiryIdentity === identityKey ? expiries : [];
   const expiryCandidate = typeof selectedExpiryValue === "string" ? selectedExpiryValue.trim() : "";
-  const selectedExpiry = currentExpiries.includes(expiryCandidate) ? expiryCandidate : null;
+  const selectedExpiry = pickListedExpiry(currentExpiries, expiryCandidate || sharedSelected);
   const requestKey = `${identityKey}:${selectedExpiry ?? ""}`;
   // State setters retire in passive effects, but render-time identity tagging
   // prevents even the first paint under authority B from exposing A's values.
@@ -125,7 +132,7 @@ export function useOptionChainData(
   // Fetch expiries when symbol/exchange changes
   useEffect(() => {
     setExpiries([]);
-    setSelectedExpiry(null);
+    setSelectedExpiryValue(null);
     setExpiryIdentity(null);
     setChain(null);
     setError(null);
@@ -141,24 +148,31 @@ export function useOptionChainData(
           dataScope,
         );
         if (controller.signal.aborted) return;
-        const rawList = Array.isArray(data)
-          ? data
-          : ((data as { expiry?: unknown[] })?.expiry ?? []);
-        const list = rawList.flatMap((value) => {
-          if (typeof value !== "string") return [];
-          const expiry = value.trim();
-          return expiry ? [expiry] : [];
-        });
+        const list = parseExpiryList(data);
+        const preferred = useOptionExpiryStore.getState().selectedByIdentity[identityKey] ?? null;
+        const next = pickListedExpiry(list, preferred);
         setExpiries(list);
         setExpiryIdentity(identityKey);
-        setSelectedExpiry(list[0] ?? null);
+        setSelectedExpiryValue(next);
+        publishSelected(next);
       } catch (e) {
         if (!controller.signal.aborted) setError(`Failed to load expiries: ${(e as Error).message}`);
       }
     })();
     return () => controller.abort();
-   
-  }, [identityKey, symDef.label, exchange, dataScope]);
+  }, [identityKey, symDef.label, exchange, dataScope, publishSelected]);
+
+  useEffect(() => {
+    if (!sharedSelected || expiryIdentity !== identityKey) return;
+    if (!expiries.includes(sharedSelected)) return;
+    if (selectedExpiryValue === sharedSelected) return;
+    setSelectedExpiryValue(sharedSelected);
+  }, [sharedSelected, expiryIdentity, identityKey, expiries, selectedExpiryValue]);
+
+  const setSelectedExpiry = useCallback((value: string | null) => {
+    setSelectedExpiryValue(value);
+    publishSelected(value);
+  }, [publishSelected]);
 
   const fetchData = useCallback(async () => {
     if (!selectedExpiry) return;
