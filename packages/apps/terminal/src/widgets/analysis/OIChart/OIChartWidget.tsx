@@ -77,7 +77,9 @@ import { getExpiry, getOptionChain, getQuotes, getMaxPain } from "@/services/api
 import {
   getOIChangeAnalysis,
   getUnusualOI,
+  type OIChangeAnalysisData,
   type OIChangeSignalRow,
+  type UnusualOIData,
 } from "@/services/ftApi";
 import type { MaxPainData, Quote } from "@/types/api";
 import type { RawOptionChain } from "@/widgets/analysis/OptionChain/types";
@@ -132,6 +134,29 @@ const SpotPricePane = lazy(() =>
  * grid scrolls horizontally at this width.
  */
 const STRIKES_AROUND_ATM = 15;
+
+/**
+ * Honest empty analytics when no expiry is selected. Kept at module scope so
+ * `useMemo(..., [analysis])` sees a stable identity — an inline object would
+ * be a new reference every render and trip react-hooks/exhaustive-deps.
+ * Never substitute SAMPLE_* here: empty means no fake signals or chips.
+ */
+const EMPTY_ANALYSIS: OIChangeAnalysisData = {
+  is_sample_data: true,
+  signals: [],
+  long_buildups: [],
+  short_coverings: [],
+  short_buildups: [],
+  long_unwindings: [],
+  summary: {},
+};
+
+const EMPTY_UNUSUAL: UnusualOIData = {
+  is_sample_data: true,
+  unusual: [],
+  count: 0,
+  threshold: 2,
+};
 
 /** Underlyings, and their F&O + spot exchanges, from the canonical table. */
 const SYMBOL_CHOICES = SYMBOLS;
@@ -708,21 +733,9 @@ function OIChartWidget(props: WidgetProps) {
         : "sample";
 
   const analysis = analysisQuery.data
-    ?? (selectedExpiry
-      ? SAMPLE_ANALYSIS
-      : {
-          is_sample_data: true,
-          signals: [],
-          long_buildups: [],
-          short_coverings: [],
-          short_buildups: [],
-          long_unwindings: [],
-          summary: {},
-        });
+    ?? (selectedExpiry ? SAMPLE_ANALYSIS : EMPTY_ANALYSIS);
   const unusual = unusualQuery.data
-    ?? (selectedExpiry
-      ? SAMPLE_UNUSUAL
-      : { is_sample_data: true, unusual: [], count: 0, threshold: 2 });
+    ?? (selectedExpiry ? SAMPLE_UNUSUAL : EMPTY_UNUSUAL);
   const signalRows: OIChangeSignalRow[] = useMemo(
     () => [...analysis.signals].sort((a, b) => a.strike - b.strike),
     [analysis],
