@@ -80,16 +80,18 @@ changelog rebuilds itself from the first release cut after this baseline.
   this expiry` — with no bars and no PCR/max-pain
   stats, never “No expiries” over fake charts.
 
-- **Watchlist LTP / % change columns blank (FT-TRADE-008).**
+- **Watchlist LTP / % change use ticker sample quotes (FT-TRADE-008).**
   Explore `/trade` → Watchlist with Sparkline + LTP +
-  % change checked still shows symbols (NIFTY,
-  BANKNIFTY, SBIN, RELIANCE, HDFCBANK) but LTP and
-  % change headers and cells are blank. The ticker
-  tape above has sample prices and percentages.
-  Expected: checked LTP and % change render values,
-  or an honest empty/loading state. Product fix
-  waits for the UI/UX Designer call on empty/render
-  honesty for Watchlist LTP/%.
+  % change checked now paints those column headers
+  and cells. LTP and % change read the same sample
+  quote source as the ticker tape (Jotai tick atoms
+  from the Explore demo feed) for NIFTY, BANKNIFTY,
+  SBIN, RELIANCE, HDFCBANK, and any other symbol on
+  that feed. A Sample data badge discloses this.
+  Missing quotes show `—` (or a brief `…` while the
+  first fetch is in flight), never silent blank
+  chrome. Unchecking a column hides it; checking it
+  again shows the sample value or the honest empty.
 
 - **Options Builder Net Debit and Max Loss share a position ₹ basis (FT-LAB-005).**
   Explore `/lab` Options Builder now shows Net

@@ -351,12 +351,11 @@ OI is an honest empty — `No expiries for this symbol` or
 `No OI for this expiry` — with no bars and no PCR/max-pain stats.
 The widget never pairs “No expiries” with generic or sample bars.
 
-On Explore `/trade` Watchlist, symbols show (NIFTY, BANKNIFTY,
-SBIN, RELIANCE, HDFCBANK) but LTP and % change headers and cells
-stay blank even when those columns are checked (FT-TRADE-008).
-The ticker tape above has sample prices and percentages. Rendering
-values versus an honest empty/loading state waits for the UI/UX
-Designer call.
+On Explore `/trade` Watchlist, checked LTP and % change columns
+paint their headers and cells. Those values use the same sample
+quotes as the ticker tape (Sample data badge). A missing quote
+shows `—` after a brief `…`, never a silent blank. Unchecking a
+column hides it (FT-TRADE-008).
 
 ### Learn → Practice Trading (OpenAlgo)
 
@@ -500,9 +499,9 @@ from the widget registry
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
 
 On Explore `/trade` Watchlist, checked LTP and % change columns
-currently leave headers and cells blank while symbols and the ticker
-tape still show (FT-TRADE-008). Values versus an honest empty/loading
-state wait for the UI/UX Designer call.
+use the same sample quotes as the ticker tape (Sample data badge).
+A missing quote shows `—` after a brief `…`, never a silent blank
+(FT-TRADE-008).
 
 News Feed loads headlines only through the FlintTrade backend (`GET /api/v1/news`).
 There is no browser-side RSS or CORS-proxy fallback. If the backend cannot

@@ -31,9 +31,13 @@ vi.mock("@/services/api", () => ({
   searchSymbol:   vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock("@/lib/market", () => ({
-  isMarketHours: () => false,
-}));
+vi.mock("@/lib/market", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/market")>();
+  return {
+    ...actual,
+    isMarketHours: () => false,
+  };
+});
 
 // Mock localStorage
 const mockLocalStorage: Record<string, string> = {};
@@ -51,7 +55,8 @@ vi.stubGlobal("localStorage", {
 import { createStore, Provider } from "jotai";
 import WatchlistWidget from "../WatchlistWidget";
 import { getMultiQuotes } from "@/services/api";
-import { selectedSymbolAtom } from "@/atoms/marketAtoms";
+import { selectedSymbolAtom, tickAtomFamily } from "@/atoms/marketAtoms";
+import { useModeStore } from "@/stores/modeStore";
 import {
   channelInstrumentAtoms,
   DEFAULT_CHANNEL_ID,
@@ -99,6 +104,7 @@ describe("WatchlistWidget", () => {
     delete mockLocalStorage["flinttrade:watchlist"];
     delete mockLocalStorage["flinttrade:watchlist:view"];
     mockGetMultiQuotes.mockResolvedValue([]);
+    useModeStore.setState({ mode: "explore" });
   });
 
   // --- Existing tests preserved ---
@@ -439,5 +445,89 @@ describe("WatchlistWidget", () => {
       expect(store.get(channelInstrumentAtoms[meta.id])).toBeNull();
     }
     stop();
+  });
+
+  // ── FT-TRADE-008: LTP / % change columns ────────────────────────────────
+
+  it("renders ticker-aligned sample LTP and % change in Explore when those columns are checked", async () => {
+    useModeStore.setState({ mode: "explore" });
+    const { store } = renderWidget();
+    store.set(tickAtomFamily("NSE_INDEX:NIFTY"), {
+      symbol: "NIFTY",
+      exchange: "NSE_INDEX",
+      ltp: 24150,
+      prevClose: 24000,
+    });
+    store.set(tickAtomFamily("NSE_INDEX:BANKNIFTY"), {
+      symbol: "BANKNIFTY",
+      exchange: "NSE_INDEX",
+      ltp: 51200,
+      prevClose: 51000,
+    });
+    store.set(tickAtomFamily("NSE:SBIN"), {
+      symbol: "SBIN",
+      exchange: "NSE",
+      ltp: 780,
+      prevClose: 770,
+    });
+    store.set(tickAtomFamily("NSE:RELIANCE"), {
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      ltp: 2850,
+      prevClose: 2840,
+    });
+    store.set(tickAtomFamily("NSE:HDFCBANK"), {
+      symbol: "HDFCBANK",
+      exchange: "NSE",
+      ltp: 1680,
+      prevClose: 1660,
+    });
+
+    expect(await screen.findByRole("columnheader", { name: "LTP" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "% change" })).toBeInTheDocument();
+    expect(await screen.findByLabelText("NIFTY LTP")).toHaveTextContent("24,150.00");
+    expect(screen.getByLabelText("NIFTY % change")).toHaveTextContent("+0.63%");
+    expect(screen.getByLabelText("BANKNIFTY LTP")).toHaveTextContent("51,200.00");
+    expect(screen.getByLabelText("SBIN LTP")).toHaveTextContent("780.00");
+    expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("2,850.00");
+    expect(screen.getByLabelText("HDFCBANK LTP")).toHaveTextContent("1,680.00");
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+  });
+
+  it("shows an honest em dash when LTP is checked but no quote is available", async () => {
+    renderWidget();
+
+    expect(await screen.findByRole("columnheader", { name: "LTP" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "% change" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByLabelText("NIFTY LTP")).toHaveTextContent("—");
+      expect(screen.getByLabelText("NIFTY % change")).toHaveTextContent("—");
+    });
+  });
+
+  it("hides LTP and % change when those columns are unchecked, and restores them when checked", async () => {
+    renderWidget();
+
+    expect(await screen.findByRole("columnheader", { name: "LTP" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByLabelText("More options"));
+    await userEvent.click(screen.getByRole("menuitem", { name: /manage columns/i }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "LTP column" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "% change column" }));
+
+    expect(screen.queryByRole("columnheader", { name: "LTP" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "% change" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("NIFTY LTP")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("NIFTY % change")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "LTP column" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "% change column" }));
+
+    expect(screen.getByRole("columnheader", { name: "LTP" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "% change" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByLabelText("NIFTY LTP")).toHaveTextContent("—");
+      expect(screen.getByLabelText("NIFTY % change")).toHaveTextContent("—");
+    });
   });
 });
