@@ -357,6 +357,17 @@ quotes as the ticker tape (Sample data badge). A missing quote
 shows `—` after a brief `…`, never a silent blank. Unchecking a
 column hides it (FT-TRADE-008).
 
+On Explore `/trade` → Scalper, **Buy CE**, **Sell**, and **1-CLICK**
+stay disarmed — the same honesty class as Automate Telegram
+**Send Test**. They never open Confirm Order and never place.
+Helper: "Orders blocked in Explore (sample-only). Switch to
+Practice or Live with a broker connected to trade." **1-CLICK**
+stays OFF and disabled; its title is "One-click unavailable in
+Explore". Sample quote preview is allowed; there is no Confirm
+BUY / Confirm SELL chrome. Practice and Live open Confirm only
+when the mode allows it and a gateway is configured. The
+backend rejects Explore orders if the UI slips (FT-TRADE-009).
+
 ### Learn → Practice Trading (OpenAlgo)
 
 This is a different path from the native Practice-mode sandbox on
@@ -502,6 +513,12 @@ On Explore `/trade` Watchlist, checked LTP and % change columns
 use the same sample quotes as the ticker tape (Sample data badge).
 A missing quote shows `—` after a brief `…`, never a silent blank
 (FT-TRADE-008).
+
+On Explore `/trade` Scalper (including the Scalper Zone preset),
+**Buy CE**, **Sell**, and **1-CLICK** stay disarmed. Helper:
+"Orders blocked in Explore (sample-only). Switch to Practice or
+Live with a broker connected to trade." There is no Confirm Order
+path from Explore (FT-TRADE-009).
 
 News Feed loads headlines only through the FlintTrade backend (`GET /api/v1/news`).
 There is no browser-side RSS or CORS-proxy fallback. If the backend cannot

@@ -640,7 +640,7 @@ the guard returns one of three verdicts:
 
 | Verdict | Behaviour |
 |---|---|
-| `explore` | Reject order placement with HTTP 403. Explore is for reading, learning, and demo data only. |
+| `explore` | Reject order placement with HTTP 403 and `code: "mode_blocked"`. Explore is for reading, learning, and demo data only. |
 | `practice` | Route supported single-leg order flows to FlintTrade's native `SandboxEngine`; never touch OpenAlgo or a broker. Advanced executor-direct routes that do not yet have sandbox parity fail closed with `practice_unsupported`. |
 | `live` | Require a JWT with `live_mode_unlocked=true`. The core `/orders/place`, modify, cancel, and `cancel-all` paths go through the gated `BrokerRouter`. Other legacy write verbs (`open-position`, `close-position`, and similar) return HTTP 501 until they have a gated `BrokerRouter` verb — they do not forward ungated to OpenAlgo. |
 
@@ -849,16 +849,19 @@ Every endpoint returns one of two shapes.
 ```
 
 Most handlers return only `status` + `message`. The core
-`/api/v1/orders/*` proxy is message-only: Explore is HTTP 403 with
-"Orders are not available in Explore mode…", and a Live JWT without PIN
-unlock is HTTP 403 with "Live mode not unlocked — verify PIN first". A
-`code` field is emitted on `mode_guard`-decorated engine routes (brackets
-and other executor-direct paths) and on `POST /api/v1/telegram` Explore
-refusals, not on that core proxy. Not every endpoint emits `code`:
+`/api/v1/orders/*` proxy rejects Explore (`/orders/place`, modify,
+cancel, `cancel-all`, and the other verbs that share that mode gate)
+with HTTP 403, message "Orders are not available in Explore mode…", and
+`code: "mode_blocked"`. A Live JWT without PIN unlock on that same
+proxy is still message-only: HTTP 403 with "Live mode not unlocked —
+verify PIN first". A `code` field is also emitted on
+`mode_guard`-decorated engine routes (brackets and other
+executor-direct paths) and on `POST /api/v1/telegram` Explore refusals.
+Not every endpoint emits `code`:
 
 | Code or status | Meaning |
 |---|---|
-| `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers `mode_guard` order-capable engine routes and FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`. |
+| `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, and FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`. |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
 | `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true` (PIN unlock). |
 | HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |

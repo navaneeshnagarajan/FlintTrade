@@ -66,6 +66,21 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Explore Scalper fail-closed order path (FT-TRADE-009).**
+  Explore `/trade` → Scalper is disarmed —
+  Buy CE / Sell / 1-CLICK never open Confirm
+  Order and never place. Buy/Sell stay disabled.
+  Helper: `Orders blocked in Explore
+  (sample-only). Switch to Practice or Live with
+  a broker connected to trade.` 1-CLICK stays
+  OFF / disabled; title `One-click unavailable
+  in Explore`. Sample quote preview is allowed;
+  Confirm BUY / Confirm SELL chrome is not.
+  Practice and Live use Confirm only when the
+  mode allows it and a gateway is configured.
+  The backend rejects Explore orders with
+  `code: mode_blocked` if the UI slips.
+
 - **OI Chart shares Option Chain expiries (FT-TRADE-007).**
   Explore `/trade` Analysis layout → maximize OI Chart
   now shares Option Chain expiries for the

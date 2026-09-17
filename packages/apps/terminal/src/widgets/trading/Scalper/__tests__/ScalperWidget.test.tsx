@@ -252,6 +252,81 @@ describe("ScalperWidget", () => {
     expect(mockGetExpiry).not.toHaveBeenCalled();
   });
 
+  // ── FT-TRADE-009: Explore external-action gate (Telegram Send Test class) ─
+
+  const EXPLORE_SCALPER_HELPER =
+    "Orders blocked in Explore (sample-only). Switch to Practice or Live with a broker connected to trade.";
+  const EXPLORE_ONE_CLICK_TITLE = "One-click unavailable in Explore";
+
+  async function renderExploreScalper(): Promise<void> {
+    mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
+      selector({ mode: "explore" }),
+    );
+    render(<ScalperWidget {...defaultProps} />);
+    await waitFor(() => {
+      expect(screen.getByText("Buy CE").closest("button")).not.toBeNull();
+    });
+  }
+
+  it("never opens Confirm Order from Buy CE / Sell in Explore", async () => {
+    await renderExploreScalper();
+
+    fireEvent.click(screen.getByText("Buy CE"));
+    fireEvent.click(screen.getByText("Sell CE"));
+    fireEvent.click(screen.getByText("Buy PE"));
+    fireEvent.click(screen.getByText("Sell PE"));
+
+    expect(screen.queryByText("Confirm Order")).not.toBeInTheDocument();
+    expect(screen.queryByText("Confirm BUY")).not.toBeInTheDocument();
+    expect(screen.queryByText("Confirm SELL")).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(mockPlaceBracketOrder).not.toHaveBeenCalled();
+  });
+
+  it("shows the locked Explore helper and keeps Buy/Sell disarmed", async () => {
+    await renderExploreScalper();
+
+    expect(screen.getByText(EXPLORE_SCALPER_HELPER)).toBeInTheDocument();
+    expect(screen.getByText("Buy CE").closest("button")).toBeDisabled();
+    expect(screen.getByText("Sell CE").closest("button")).toBeDisabled();
+    expect(screen.getByText("Buy PE").closest("button")).toBeDisabled();
+    expect(screen.getByText("Sell PE").closest("button")).toBeDisabled();
+  });
+
+  it("keeps 1-CLICK OFF, disabled, and titled exactly in Explore", async () => {
+    await renderExploreScalper();
+
+    const toggleBtn = screen.getByRole("button", { name: /1-CLICK/ });
+    expect(toggleBtn).toHaveTextContent("1-CLICK");
+    expect(toggleBtn).toBeDisabled();
+    expect(toggleBtn).toHaveAttribute("title", EXPLORE_ONE_CLICK_TITLE);
+
+    fireEvent.click(toggleBtn);
+    expect(toggleBtn).toHaveTextContent("1-CLICK");
+    expect(screen.queryByText("1-CLICK ON")).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/one-click on/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Confirm Order")).not.toBeInTheDocument();
+  });
+
+  it("still opens Confirm Order in Practice when the mode allows it", async () => {
+    mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
+      selector({ mode: "practice" }),
+    );
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+
+    await waitFor(() => {
+      const btn = screen.getByText("Buy CE").closest("button") as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+    fireEvent.click(screen.getByText("Buy CE"));
+
+    expect(await screen.findByText("Confirm Order")).toBeInTheDocument();
+    expect(screen.getByText("Confirm BUY")).toBeInTheDocument();
+    expect(screen.queryByText(EXPLORE_SCALPER_HELPER)).not.toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
   // ── Order safety tests ─────────────────────────────────────────────────────
 
   /** Wait for the CE contract to resolve, click Buy CE, confirm the modal. */
