@@ -2625,6 +2625,47 @@ class TestDittoAccountCrud:
 class TestDittoMirrorStart:
     """POST /api/v1/ditto/mirror/start — start position mirroring."""
 
+    def test_explore_session_is_mode_blocked(self, flask_app, client):
+        runtime = _FakeDittoRuntime()
+        original = flask_app.config.get("DITTO_RUNTIME")
+        flask_app.config["DITTO_RUNTIME"] = runtime
+        try:
+            resp = client.post(
+                "/api/v1/ditto/mirror/start",
+                json={
+                    "source_account": "acc_1",
+                    "target_accounts": ["acc_2"],
+                    "mode": "weighted",
+                },
+                headers=_session_headers("explore"),
+            )
+            assert resp.status_code == 403
+            body = resp.get_json()
+            assert body["status"] == "error"
+            assert body["code"] == "mode_blocked"
+            assert runtime.start_calls == []
+        finally:
+            flask_app.config["DITTO_RUNTIME"] = original
+
+    def test_explore_mode_header_is_mode_blocked(self, flask_app, client):
+        runtime = _FakeDittoRuntime()
+        original = flask_app.config.get("DITTO_RUNTIME")
+        flask_app.config["DITTO_RUNTIME"] = runtime
+        try:
+            resp = client.post(
+                "/api/v1/ditto/mirror/start",
+                json={
+                    "source_account": "acc_1",
+                    "target_accounts": ["acc_2"],
+                },
+                headers={**_auth_headers(), "X-FlintTrade-Mode": "explore"},
+            )
+            assert resp.status_code == 403
+            assert resp.get_json()["code"] == "mode_blocked"
+            assert runtime.start_calls == []
+        finally:
+            flask_app.config["DITTO_RUNTIME"] = original
+
     def test_missing_source_returns_400(self, client):
         resp = client.post(
             "/api/v1/ditto/mirror/start",

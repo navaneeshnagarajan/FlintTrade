@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 
@@ -63,6 +64,7 @@ import {
   get,
   getDittoAccounts,
   getDittoMirrorStatus,
+  startDittoMirror,
   getDittoRisk,
   dittoKillAll,
   removeDittoAccount,
@@ -72,6 +74,12 @@ import { listBrokerRecommendations } from "@/services/ftApi.native";
 import { readOpenAlgoConfig } from "@/services/ftApi.openalgo";
 import { DEFAULT_OPENALGO_HOST } from "@/lib/openAlgoDefaults";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useModeStore } from "@/stores/modeStore";
+import {
+  EXPLORE_MIRROR_START_HELPER,
+  MIRROR_START_CONNECT_HELPER,
+  MIRROR_START_SELECT_HELPER,
+} from "../mirrorStartGate";
 
 const mockGet = get as unknown as ReturnType<typeof vi.fn>;
 const mockGetAccounts = getDittoAccounts as ReturnType<typeof vi.fn>;
@@ -79,6 +87,7 @@ const mockAddAccount = addDittoAccount as ReturnType<typeof vi.fn>;
 const mockRemoveAccount = removeDittoAccount as ReturnType<typeof vi.fn>;
 const mockSetAccountEnabled = setDittoAccountEnabled as ReturnType<typeof vi.fn>;
 const mockGetMirrorStatus = getDittoMirrorStatus as ReturnType<typeof vi.fn>;
+const mockStartMirror = startDittoMirror as ReturnType<typeof vi.fn>;
 const mockGetRisk = getDittoRisk as ReturnType<typeof vi.fn>;
 const mockKillAll = dittoKillAll as ReturnType<typeof vi.fn>;
 const mockListBrokerRecommendations = listBrokerRecommendations as unknown as ReturnType<typeof vi.fn>;
@@ -170,8 +179,21 @@ const sampleRisk = {
   ],
 };
 
+async function openMirrorTab() {
+  fireEvent.click(screen.getByRole("tab", { name: "Position Mirror" }));
+  return screen.findByRole("button", { name: "Start Position Mirroring" });
+}
+
+async function selectSourceAndTarget() {
+  const user = userEvent.setup();
+  await user.click(screen.getAllByRole("combobox")[0]);
+  await user.click(await screen.findByRole("option", { name: /Client: Rajesh Mehta/ }));
+  await user.click(screen.getByRole("button", { name: /Client: Priya Sharma/ }));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  useModeStore.setState({ mode: "explore" });
   useConnectionStore.setState(useConnectionStore.getInitialState());
   mockGet.mockImplementation((path: string) => {
     if (path === "accounts/status") {
@@ -202,6 +224,13 @@ beforeEach(() => {
   mockRemoveAccount.mockResolvedValue({ id: "acc_2", removed: true });
   mockSetAccountEnabled.mockResolvedValue(sampleAccounts.accounts[0]);
   mockGetMirrorStatus.mockResolvedValue(sampleMirrorStatus);
+  mockStartMirror.mockResolvedValue({
+    active: true,
+    source_account: "acc_1",
+    target_accounts: ["acc_2"],
+    mode: "weighted",
+    started_at: "2026-09-17T10:00:00+05:30",
+  });
   mockGetRisk.mockResolvedValue(sampleRisk);
   mockKillAll.mockResolvedValue({
     complete: true,
@@ -457,6 +486,93 @@ describe("DittoRoute", () => {
     });
     expect(dittoRouteSource()).toContain("Copy 1:1 (full quantity to each target)");
     expect(dittoRouteSource()).toContain("By allocation weight (split quantity)");
+  });
+
+  it("always disarms Start in Explore and shows the locked helper (FT-DITTO-002)", async () => {
+    const user = userEvent.setup();
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    const start = await openMirrorTab();
+
+    expect(start).toBeDisabled();
+    expect(start).toHaveAttribute("data-variant", "outline");
+    expect(start).toHaveAttribute("title", EXPLORE_MIRROR_START_HELPER);
+    expect(screen.getByText(EXPLORE_MIRROR_START_HELPER)).toBeInTheDocument();
+    expect(screen.queryByText(MIRROR_START_SELECT_HELPER)).not.toBeInTheDocument();
+    expect(screen.queryByText(MIRROR_START_CONNECT_HELPER)).not.toBeInTheDocument();
+
+    await selectSourceAndTarget();
+    expect(start).toBeDisabled();
+    expect(start).toHaveAttribute("data-variant", "outline");
+    expect(screen.getByText(EXPLORE_MIRROR_START_HELPER)).toBeInTheDocument();
+
+    await user.click(start);
+    expect(mockStartMirror).not.toHaveBeenCalled();
+  });
+
+  it("shows an honest empty state and the Explore helper when Explore has no accounts", async () => {
+    mockGetAccounts.mockResolvedValue({ accounts: [] });
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    const start = await openMirrorTab();
+
+    expect(screen.getByText("No accounts connected")).toBeInTheDocument();
+    expect(start).toBeDisabled();
+    expect(start).toHaveAttribute("data-variant", "outline");
+    expect(start).toHaveAttribute("title", EXPLORE_MIRROR_START_HELPER);
+    expect(screen.getByText(EXPLORE_MIRROR_START_HELPER)).toBeInTheDocument();
+    expect(screen.queryByText(MIRROR_START_CONNECT_HELPER)).not.toBeInTheDocument();
+  });
+
+  it("asks Practice to connect accounts when the list is empty", async () => {
+    useModeStore.setState({ mode: "practice" });
+    mockGetAccounts.mockResolvedValue({ accounts: [] });
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    const start = await openMirrorTab();
+
+    expect(screen.getByText("No accounts connected")).toBeInTheDocument();
+    expect(start).toBeDisabled();
+    expect(start).toHaveAttribute("data-variant", "outline");
+    expect(start).toHaveAttribute("title", MIRROR_START_CONNECT_HELPER);
+    expect(screen.getByText(MIRROR_START_CONNECT_HELPER)).toBeInTheDocument();
+    expect(screen.queryByText(EXPLORE_MIRROR_START_HELPER)).not.toBeInTheDocument();
+  });
+
+  it("asks Practice to select source and a target before arming Start", async () => {
+    useModeStore.setState({ mode: "practice" });
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    const start = await openMirrorTab();
+
+    expect(start).toBeDisabled();
+    expect(start).toHaveAttribute("data-variant", "outline");
+    expect(start).toHaveAttribute("title", MIRROR_START_SELECT_HELPER);
+    expect(screen.getByText(MIRROR_START_SELECT_HELPER)).toBeInTheDocument();
+  });
+
+  it("arms Start in Practice only after source and a target are selected", async () => {
+    const user = userEvent.setup();
+    useModeStore.setState({ mode: "practice" });
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    const start = await openMirrorTab();
+
+    await selectSourceAndTarget();
+    expect(start).toBeEnabled();
+    expect(start).toHaveAttribute("data-variant", "default");
+    expect(screen.queryByText(EXPLORE_MIRROR_START_HELPER)).not.toBeInTheDocument();
+    expect(screen.queryByText(MIRROR_START_SELECT_HELPER)).not.toBeInTheDocument();
+
+    await user.click(start);
+    await waitFor(() => {
+      expect(mockStartMirror).toHaveBeenCalledWith("acc_1", ["acc_2"], "weighted");
+    });
+  });
+
+  it("arms Start in Live when source, a target, and accounts are ready", async () => {
+    useModeStore.setState({ mode: "live" });
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    const start = await openMirrorTab();
+
+    await selectSourceAndTarget();
+    expect(start).toBeEnabled();
+    expect(start).toHaveAttribute("data-variant", "default");
   });
 
   it("hydrates and locks configuration while a mirror generation is active", async () => {

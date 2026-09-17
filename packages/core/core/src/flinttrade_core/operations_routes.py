@@ -1606,6 +1606,29 @@ def api_news() -> tuple[Any, int]:
 # ------------------------------------------------------------------
 
 
+def _explore_ditto_mirror_blocked() -> tuple[Any, int] | None:
+    """Reject Explore-mode mirror starts (FT-DITTO-002).
+
+    JWT claim or ``X-FlintTrade-Mode`` header — same honesty class as Telegram.
+    """
+    from flinttrade_engine.mode_guard import current_mode  # noqa: PLC0415
+
+    jwt_mode = (current_mode() or "").strip().lower()
+    header_mode = (request.headers.get("X-FlintTrade-Mode") or "").strip().lower()
+    if jwt_mode != "explore" and header_mode != "explore":
+        return None
+    logger.info(
+        "Blocked Ditto mirror start (mode=%s header=%s)",
+        jwt_mode or "unknown",
+        header_mode or "-",
+    )
+    return jsonify({
+        "status": "error",
+        "message": "Mirroring is blocked in Explore (sample-only).",
+        "code": "mode_blocked",
+    }), 403
+
+
 def _ditto_account_response(acct: Any) -> dict[str, Any]:
     """Return a frontend-safe Ditto account payload without credentials."""
     return {
@@ -2054,6 +2077,9 @@ def ditto_mirror_status() -> tuple[Any, int]:
 @operations_bp.route("/ditto/mirror/start", methods=["POST"])
 def ditto_mirror_start() -> tuple[Any, int]:
     """Start a gated live mirror session for an authenticated operator."""
+    blocked = _explore_ditto_mirror_blocked()
+    if blocked is not None:
+        return blocked
     raw_data = request.get_json(silent=True)
     data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
     source = str(data.get("source_account") or "").strip()
