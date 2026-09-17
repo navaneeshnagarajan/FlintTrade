@@ -341,6 +341,13 @@ honest empty for that window, not a quiet YTD fallback. Metrics cover
 the labelled window up to the journal's 1,000-fill analytics page; a
 larger window is disclosed rather than silently sliced.
 
+On Explore `/trade` Analysis layout, **OI Chart** currently says
+**No expiries** while still showing generic bars and statistics,
+even when Option Chain exposes multiple expiries (FT-TRADE-007).
+Sharing Option Chain expiries versus an honest empty (if OI data is
+unavailable) waits for the UI/UX Designer call — not “No expiries”
+over fake charts.
+
 ### Learn → Practice Trading (OpenAlgo)
 
 This is a different path from the native Practice-mode sandbox on
@@ -536,6 +543,12 @@ grouped OI bars, a CE/PE butterfly **OI profile**, a strike heat grid,
 build-up/unwinding signals, and a **Max Pain** view (the strike at
 which option writers lose the least if expiry hit right now). There is
 no standalone Max Pain widget.
+
+On Explore `/trade` Analysis layout, OI Chart currently says
+**No expiries** while still drawing generic bars and statistics,
+even when Option Chain lists multiple expiries (FT-TRADE-007).
+Sharing Option Chain expiries versus an honest empty (if OI data is
+unavailable) waits for the UI/UX Designer call.
 
 ### IV Smile & Skew
 
