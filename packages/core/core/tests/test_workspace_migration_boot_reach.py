@@ -92,6 +92,7 @@ def test_boot_calls_the_flow_store_resolver(
 def test_boot_calls_the_strategies_resolver(
     workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_factory,
 ) -> None:
     """``create_flask_app`` must wire the runner from the shared resolver."""
     import flinttrade_engine.strategy_hot_reload as hot_reload
@@ -100,7 +101,7 @@ def test_boot_calls_the_strategies_resolver(
 
     from flinttrade_core.app import create_flask_app
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
 
     assert calls[0] >= 1, "the strategies resolver — and so its migration — never ran"
     runner = app.config["STRATEGY_RUNNER"]
@@ -134,6 +135,7 @@ def test_legacy_flows_are_migrated_by_the_boot_itself(
 def test_legacy_strategies_are_migrated_by_the_boot_itself(
     workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_factory,
 ) -> None:
     """A pre-workspace strategies tree lands in the workspace during boot.
 
@@ -151,7 +153,7 @@ def test_legacy_strategies_are_migrated_by_the_boot_itself(
 
     from flinttrade_core.app import create_flask_app
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
 
     runner = app.config["STRATEGY_RUNNER"]
     assert (runner._strategies_dir / "ema.py").exists(), "boot did not migrate the legacy tree"

@@ -6,12 +6,515 @@ import os
 import subprocess
 import sys
 import time
+import threading
+from contextlib import suppress
 from pathlib import Path
 from types import MethodType, SimpleNamespace
 from typing import Any
 
 import pytest
 from flask import Flask
+
+
+def test_live_proof_watch_closes_admission_before_lifecycle_callback(backend_lease_proof):
+    from flinttrade_core.app import _BackendLeaseRuntimeWatch
+    from flinttrade_core.backend_instance import BackendLeaseUnavailable, require_backend_lease_proof
+
+    app = Flask("synthetic-revocation")
+    events = []
+    stopped = threading.Event()
+
+    def revoke(*, timeout):
+        with pytest.raises(BackendLeaseUnavailable):
+            require_backend_lease_proof(backend_lease_proof)
+        assert app.config["RUNTIME_ACCEPTING_REQUESTS"] is False
+        events.append("router-revoked")
+        return True
+
+    def shutdown():
+        assert events == ["router-revoked"]
+        assert app.config["BACKEND_LEASE_READY"] is False
+        events.append("lifecycle-shutdown")
+        stopped.set()
+
+    app.config["BROKER_ROUTER"] = SimpleNamespace(revoke_and_drain=revoke)
+    watch = _BackendLeaseRuntimeWatch(app, backend_lease_proof, shutdown)
+    watch.start()
+    try:
+        backend_lease_proof.revoke()
+        assert stopped.wait(1)
+        assert events == ["router-revoked", "lifecycle-shutdown"]
+    finally:
+        assert watch.stop(timeout=1)
+
+
+def test_stopped_proof_watch_cannot_request_late_shutdown(backend_lease_proof):
+    from flinttrade_core.app import _BackendLeaseRuntimeWatch
+
+    called = threading.Event()
+    watch = _BackendLeaseRuntimeWatch(Flask("synthetic-stop"), backend_lease_proof, called.set)
+    watch.start()
+    assert watch.stop(timeout=1)
+    backend_lease_proof.revoke()
+    assert not called.is_set()
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_wsgi_revocation_snapshots_current_owners_then_requests_host_shutdown(
+    monkeypatch, backend_lease_proof, cleanup_fails,
+):
+    import flinttrade_core.app as app_module
+    import flinttrade_core.desktop as desktop_module
+
+    app = Flask("synthetic-wsgi-revocation")
+    events = []
+    terminated = threading.Event()
+    cleanup_attempted = threading.Event()
+
+    class RecoveryOwner:
+        def __init__(self, candidate):
+            assert candidate is app
+            events.append("snapshot-current-owners")
+
+        def release(self, *, deadline):
+            assert app.config["RUNTIME_ACCEPTING_REQUESTS"] is False
+            assert app.config["BACKEND_LEASE_READY"] is False
+            if cleanup_fails:
+                events.append("owners-retained")
+                cleanup_attempted.set()
+                raise desktop_module.DesktopBackendShutdownIncomplete(
+                    "Synthetic retained cleanup", recovery_owner=self,
+                )
+            events.append("owners-drained")
+
+    def shutdown():
+        assert events == ["snapshot-current-owners", "owners-drained"]
+        events.append("host-shutdown")
+        terminated.set()
+
+    monkeypatch.setattr(app_module, "_APP_CACHE", None)
+    monkeypatch.setattr(app_module, "_APP_CACHE_PID", None)
+    monkeypatch.setattr(app_module, "_WSGI_BACKEND_LEASE", None)
+    monkeypatch.setattr(app_module, "acquire_backend_instance_lease", lambda: _FakeLease([], backend_lease_proof))
+    monkeypatch.setattr(app_module, "create_flask_app", lambda **_: app)
+    monkeypatch.setattr(desktop_module, "_DesktopShutdownRecoveryOwner", RecoveryOwner)
+    try:
+        assert app_module._get_wsgi_app(shutdown_callback=shutdown) is app
+        assert events == []
+        backend_lease_proof.revoke()
+        if cleanup_fails:
+            assert cleanup_attempted.wait(1)
+            assert app_module._stop_backend_lease_watch(app, timeout=1)
+            assert not terminated.is_set()
+            assert events == ["snapshot-current-owners", "owners-retained"]
+            assert isinstance(app.extensions["flinttrade.wsgi_shutdown_owner"], RecoveryOwner)
+        else:
+            assert terminated.wait(1)
+            assert events[-1] == "host-shutdown"
+    finally:
+        assert app_module._stop_backend_lease_watch(app, timeout=1)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="actual POSIX flock failure contract")
+@pytest.mark.parametrize("stage", ["stat", "proof"])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_post_acquisition_failure_releases_or_retains_exact_kernel_owner(
+    tmp_path, monkeypatch, stage, cleanup_fails,
+):
+    import flinttrade_core.backend_instance as module
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    descriptors = []
+    original_open = os.open
+    original_stat = Path.stat
+    retained_before = tuple(module._RETAINED_FAILED_LEASES)
+
+    def record_open(*args, **kwargs):
+        descriptor = original_open(*args, **kwargs)
+        if str(args[0]).endswith("backend_instance.lock"):
+            descriptors.append(descriptor)
+        return descriptor
+
+    def fail_stat(path, *args, **kwargs):
+        if path.name == "backend_instance.lock":
+            raise PermissionError("injected post-acquisition failure")
+        return original_stat(path, *args, **kwargs)
+
+    def fail_proof(*args, **kwargs):
+        raise PermissionError("injected post-acquisition failure")
+
+    try:
+        with monkeypatch.context() as fault:
+            fault.setattr(os, "open", record_open)
+            fault.setattr(Path, "stat", fail_stat) if stage == "stat" else fault.setattr(
+                module, "BackendLeaseProof", fail_proof,
+            )
+            if cleanup_fails:
+                fault.setattr(module._PosixBackendFileLease, "release", lambda self: (_ for _ in ()).throw(
+                    OSError("injected cleanup failure"),
+                ))
+            with pytest.raises((PermissionError, OSError)):
+                module.acquire_backend_instance_lease()
+        retained = [owner for owner in module._RETAINED_FAILED_LEASES if owner not in retained_before]
+        if cleanup_fails:
+            assert len(retained) == 1
+            with pytest.raises(module.BackendInstanceAlreadyRunning):
+                module.acquire_backend_instance_lease()
+            module.release_retained_backend_instance_lease(retained[0])
+        else:
+            with pytest.raises(OSError):
+                os.fstat(descriptors[0])
+        successor = module.acquire_backend_instance_lease()
+        successor.release()
+    finally:
+        for owner in tuple(module._RETAINED_FAILED_LEASES):
+            if owner not in retained_before:
+                module.release_retained_backend_instance_lease(owner)
+        for descriptor in descriptors:
+            with suppress(OSError):
+                os.close(descriptor)
+
+
+@pytest.mark.parametrize("stage", ["ContractManager", "create_owned_registry", "_initialise_rag_runtime"])
+def test_partial_standalone_construction_closes_actual_vault_before_lease_release(monkeypatch, stage):
+    import flinttrade_core.app as module
+    from flinttrade_core.backend_instance import acquire_backend_instance_lease
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected late constructor failure")
+
+    runtime = module.FlintTradeApp()
+    monkeypatch.setattr(module, stage, fail)
+    try:
+        with pytest.raises(RuntimeError, match="injected late constructor failure"):
+            runtime.run()
+        assert runtime.credential_store._poisoned is True
+        assert runtime._stop_completed is True
+        successor = acquire_backend_instance_lease()
+        successor.release()
+    finally:
+        if runtime.credential_store is not None:
+            runtime.credential_store.close()
+
+
+def test_proofless_factory_does_not_construct_scheduler_or_rotation_owners(monkeypatch):
+    import flinttrade_core.app as module
+    import flinttrade_engine.scheduler as scheduling
+    import flinttrade_gateway.credentials_rotation as rotation
+    from apscheduler.schedulers import background
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("proofless construction acquired scheduling ownership")
+
+    for owner in ("TimeScheduler", "CronStrategyScheduler"):
+        monkeypatch.setattr(scheduling, owner, forbidden)
+    monkeypatch.setattr(background, "BackgroundScheduler", forbidden)
+    monkeypatch.setattr(rotation, "CredentialsRotator", forbidden)
+    app = module.create_flask_app()
+    assert app.config.get("TIME_SCHEDULER") is None
+    assert app.config.get("CRON_SCHEDULER") is None
+    assert app.config.get("ROTATION_SCHEDULER") is None
+    assert app.config.get("CREDENTIALS_ROTATOR") is None
+    response = app.test_client().get("/admin/credentials/rotation/status")
+    assert response.status_code == 503
+    assert response.json["error"] == "backend_lease_unavailable"
+
+
+def test_partial_vault_close_failure_retains_lease_until_exact_owner_recovers(monkeypatch):
+    import flinttrade_core.app as module
+    from flinttrade_core.backend_instance import BackendInstanceAlreadyRunning, acquire_backend_instance_lease
+
+    runtime = module.FlintTradeApp()
+    allow_close = False
+    original_close = module.CredentialStore.close
+
+    def close(store):
+        if not allow_close:
+            raise OSError("injected vault close failure")
+        original_close(store)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected late constructor failure")
+
+    monkeypatch.setattr(module.CredentialStore, "close", close)
+    monkeypatch.setattr(module, "ContractManager", fail)
+    try:
+        with pytest.raises(RuntimeError, match="injected late constructor failure"):
+            runtime.run()
+        assert runtime._stop_completed is False
+        assert runtime._startup_recovery_pending is True
+        with pytest.raises(BackendInstanceAlreadyRunning):
+            acquire_backend_instance_lease()
+        allow_close = True
+        runtime.retry_recovery()
+        assert runtime.credential_store._poisoned is True
+        assert runtime._stop_completed is True
+        successor = acquire_backend_instance_lease()
+        successor.release()
+    finally:
+        allow_close = True
+        if runtime._requires_runtime_recovery():
+            runtime.retry_recovery()
+
+
+def test_kernel_lease_proof_is_opaque_and_revoked_before_unlock(tmp_path, monkeypatch):
+    import flinttrade_core.backend_instance as module
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    lease = module.acquire_backend_instance_lease()
+    try:
+        assert hasattr(lease, "proof"), "kernel ownership must mint an explicit live proof"
+        proof = lease.proof
+        assert module.require_backend_lease_proof(proof) is proof
+        assert proof.incarnation.version == 4
+        for forged in (None, True, object(), object.__new__(type(proof))):
+            with pytest.raises(module.BackendLeaseUnavailable):
+                module.require_backend_lease_proof(forged)
+        original_release = lease._raw_lease.release
+
+        def observe_release():
+            with pytest.raises(module.BackendLeaseUnavailable):
+                module.require_backend_lease_proof(proof)
+            original_release()
+
+        monkeypatch.setattr(lease._raw_lease, "release", observe_release)
+    finally:
+        lease.release()
+    with pytest.raises(module.BackendLeaseUnavailable):
+        module.require_backend_lease_proof(proof)
+
+
+def test_manually_wrapped_lock_cannot_mint_backend_proof():
+    import flinttrade_core.backend_instance as module
+
+    lease = module.BackendInstanceLease(SimpleNamespace(release=lambda: None))
+    assert hasattr(type(lease), "proof"), "a proof must distinguish kernel acquisition from a wrapper"
+    with pytest.raises(module.BackendLeaseUnavailable):
+        _ = lease.proof
+
+
+def test_unissued_handoff_cannot_mint_a_proof():
+    import flinttrade_core.backend_instance as module
+
+    forged = object.__new__(module.BackendLeaseHandoff)
+    with pytest.raises(module.BackendLeaseUnavailable):
+        forged.claim()
+
+
+def test_same_process_filelock_branch_requires_live_kernel_owner(tmp_path, monkeypatch):
+    """Exercise the Windows ownership contract; native byte locks remain CI work."""
+    import flinttrade_core.backend_instance as module
+
+    class SameProcessPlatform:
+        name = "nt"
+
+        def __getattr__(self, name):
+            return getattr(os, name)
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setattr(module, "os", SameProcessPlatform())
+    lease = module.acquire_backend_instance_lease()
+    proof = lease.proof
+    try:
+        assert module.require_backend_lease_proof(proof) is proof
+        lease._raw_lease.release()
+        with pytest.raises(module.BackendLeaseUnavailable):
+            module.require_backend_lease_proof(proof)
+    finally:
+        lease.release()
+
+
+def test_factory_rejects_forged_proof_and_proofless_injected_broker_owner():
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_core.backend_instance import BackendLeaseUnavailable
+
+    with pytest.raises(BackendLeaseUnavailable):
+        create_flask_app(backend_lease_proof=True)
+    with pytest.raises(BackendLeaseUnavailable):
+        create_flask_app(client=object())
+
+
+def test_backend_proof_cannot_construct_a_different_workspaces_runtime(tmp_path, monkeypatch):
+    from flinttrade_core import backend_instance
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path / "first"))
+    lease = backend_instance.acquire_backend_instance_lease()
+    proof = lease.proof
+    try:
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path / "second"))
+        with pytest.raises(backend_instance.BackendLeaseUnavailable):
+            backend_instance.require_backend_lease_proof(proof)
+    finally:
+        lease.release()
+
+
+def test_standalone_construction_defers_broker_owners(monkeypatch):
+    import flinttrade_core.app as module
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("broker authority constructed before backend ownership")
+
+    monkeypatch.setattr(module, "OpenAlgoClient", forbidden)
+    monkeypatch.setattr(module, "CredentialStore", forbidden)
+    monkeypatch.setattr(module, "create_owned_registry", forbidden)
+    runtime = module.FlintTradeApp()
+    assert runtime.client is None
+    assert runtime.registry is None
+    assert runtime.scheduler is None
+
+
+def test_standalone_partial_construction_closes_owners_before_releasing_lease(monkeypatch):
+    import flinttrade_core.app as module
+    from flinttrade_core.backend_instance import require_backend_lease_proof
+
+    runtime = module.FlintTradeApp()
+    events = []
+
+    async def close_client():
+        require_backend_lease_proof(runtime._backend_lease_proof)
+        events.append("client-closed")
+
+    def initialise():
+        runtime.client = SimpleNamespace(close=close_client)
+        runtime.audit = SimpleNamespace(close=lambda: events.append("audit-closed"))
+        raise RuntimeError("construction interrupted")
+
+    monkeypatch.setattr(runtime, "_initialise_runtime", initialise)
+    with pytest.raises(RuntimeError, match="construction interrupted"):
+        runtime.run()
+    assert events == ["client-closed", "audit-closed"]
+
+
+def test_proofless_flask_factory_serves_without_broker_authorities(monkeypatch):
+    import flinttrade_core.app as module
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("proofless factory constructed broker authority")
+
+    monkeypatch.setattr(module, "CredentialStore", forbidden)
+    monkeypatch.setattr(module, "create_owned_registry", forbidden)
+    monkeypatch.setattr(module, "OpenAlgoClient", forbidden)
+    app = module.create_flask_app()
+    assert app.config["REGISTRY"] is None
+    assert app.config["CREDENTIAL_STORE"] is None
+    assert app.config["CLIENT"] is None
+    assert app.config["BROKER_ROUTER"] is None
+    assert app.config["BACKEND_LEASE_READY"] is False
+    assert app.test_client().get("/healthz").status_code == 200
+
+
+def test_desktop_validates_live_proof_before_its_runtime_factory(tmp_path, monkeypatch):
+    import flinttrade_core.backend_instance as ownership
+    import flinttrade_core.desktop as desktop
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    lease = ownership.acquire_backend_instance_lease()
+    calls = []
+
+    def serve(port, **kwargs):
+        calls.append(ownership.require_backend_lease_proof(kwargs["backend_lease_proof"]))
+
+    monkeypatch.setattr(desktop, "_serve_owned", serve)
+    try:
+        desktop.serve(0, backend_lease_proof=lease.proof)
+        assert calls == [lease.proof]
+        with pytest.raises(ownership.BackendLeaseUnavailable):
+            desktop.serve(0, backend_lease_proof=True)
+        proof = lease.proof
+    finally:
+        lease.release()
+    with pytest.raises(ownership.BackendLeaseUnavailable):
+        desktop.serve(0, backend_lease_proof=proof)
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="real POSIX inherited anonymous pipe")
+@pytest.mark.parametrize("termination", ["release", "revoke"])
+def test_guardian_handoff_binds_child_and_revokes_on_parent_release(tmp_path, monkeypatch, termination):
+    import flinttrade_core.backend_instance as module
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    lease = module.acquire_backend_instance_lease()
+    assert hasattr(module, "prepare_backend_lease_handoff"), "guardian ownership needs a one-time transport"
+    handoff = module.prepare_backend_lease_handoff(lease)
+    result_read, result_write = os.pipe()
+    child = os.fork()
+    if child == 0:
+        os.close(result_read)
+        try:
+            proof = handoff.claim()
+            module.require_backend_lease_proof(proof)
+            with pytest.raises(module.BackendLeaseUnavailable):
+                handoff.claim()
+            os.write(result_write, b"live")
+            assert proof.wait_revoked(5), "EOF must revoke without another request"
+            with pytest.raises(module.BackendLeaseUnavailable):
+                module.require_backend_lease_proof(proof)
+            os._exit(0)
+        except BaseException:
+            os._exit(1)
+    os.close(result_write)
+    try:
+        handoff.publish(child)
+        import select
+        assert select.select([result_read], [], [], 5)[0]
+        assert os.read(result_read, 4) == b"live"
+        if termination == "release":
+            lease.release()
+        else:
+            lease.proof.revoke()
+        assert os.waitpid(child, 0)[1] == 0
+    finally:
+        lease.release()
+        os.close(result_read)
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="real POSIX inherited transport")
+@pytest.mark.parametrize("tamper", ["nonce", "owner", "child", "inherited_local_proof"])
+def test_guardian_rejects_substituted_handoff_and_forked_local_proof(tmp_path, monkeypatch, tamper):
+    import flinttrade_core.backend_instance as module
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    lease = module.acquire_backend_instance_lease()
+    local_proof = lease.proof
+    handoff = module.prepare_backend_lease_handoff(lease)
+    child = os.fork()
+    if child == 0:
+        try:
+            if tamper == "nonce":
+                handoff._nonce = b"x" * 32
+            elif tamper == "owner":
+                handoff._owner_pid += 1
+            try:
+                if tamper == "inherited_local_proof":
+                    module.require_backend_lease_proof(local_proof)
+                else:
+                    handoff.claim()
+            except module.BackendLeaseUnavailable:
+                os._exit(0)
+            os._exit(1)
+        except BaseException:
+            os._exit(2)
+    try:
+        handoff.publish(child + 1 if tamper == "child" else child)
+        with pytest.raises(module.BackendLeaseUnavailable):
+            handoff.publish(child)
+        assert os.waitpid(child, 0)[1] == 0
+    finally:
+        lease.release()
+
+
+def test_replaced_kernel_lock_revokes_live_guardian_channel(tmp_path, monkeypatch):
+    import flinttrade_core.backend_instance as module
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    lease = module.acquire_backend_instance_lease()
+    proof = lease.proof
+    try:
+        (tmp_path / "backend_instance.lock").unlink()
+        (tmp_path / "backend_instance.lock").touch()
+        assert proof.wait_revoked(2), "loss of the kernel-owned inode must revoke without a request"
+    finally:
+        lease.release()
 
 
 _HOLD_BACKEND_LEASE = """
@@ -131,8 +634,8 @@ def probe():
 app_module._APP_CACHE = None
 app_module._APP_CACHE_PID = None
 app_module._WSGI_BACKEND_LEASE = None
-app_module.create_flask_app = lambda: flask_app
-preloaded_app = app_module._get_wsgi_app()
+app_module.create_flask_app = lambda **kwargs: flask_app
+preloaded_app = app_module._get_wsgi_app(shutdown_callback=lambda: None)
 owner_response = preloaded_app.test_client().get("/probe")
 if owner_response.status_code != 200 or route_calls != [os.getpid()]:
     app_module._WSGI_BACKEND_LEASE.release()
@@ -499,8 +1002,9 @@ def test_different_workspaces_can_hold_independent_backend_leases(
 
 
 class _FakeLease:
-    def __init__(self, events: list[str]) -> None:
+    def __init__(self, events: list[str], proof: object) -> None:
         self._events = events
+        self.proof = proof
 
     def release(self) -> None:
         self._events.append("release")
@@ -509,11 +1013,13 @@ class _FakeLease:
 @pytest.mark.unit
 def test_standalone_run_claims_before_start_and_releases_after_failure(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     import flinttrade_core.app as app_module
 
     events: list[str] = []
     runtime = app_module.FlintTradeApp.__new__(app_module.FlintTradeApp)
+    runtime._initialise_runtime = lambda: None
     runtime._shutdown_task = None
     runtime._shutdown_request_task = None
 
@@ -525,7 +1031,7 @@ def test_standalone_run_claims_before_start_and_releases_after_failure(
     monkeypatch.setattr(
         app_module,
         "acquire_backend_instance_lease",
-        lambda: events.append("acquire") or _FakeLease(events),
+        lambda: events.append("acquire") or _FakeLease(events, backend_lease_proof),
     )
 
     with pytest.raises(RuntimeError, match="startup failed"):
@@ -537,11 +1043,13 @@ def test_standalone_run_claims_before_start_and_releases_after_failure(
 @pytest.mark.unit
 def test_standalone_run_retains_lease_when_live_owner_teardown_is_incomplete(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     import flinttrade_core.app as app_module
 
     events: list[str] = []
     runtime = app_module.FlintTradeApp.__new__(app_module.FlintTradeApp)
+    runtime._initialise_runtime = lambda: None
     runtime._flask_app = Flask("failed-runtime-owner")
     runtime._stop_completed = False
 
@@ -550,7 +1058,7 @@ def test_standalone_run_retains_lease_when_live_owner_teardown_is_incomplete(
         raise RuntimeError("shutdown encountered errors")
 
     runtime._run_owned = MethodType(fail_run, runtime)
-    lease = _FakeLease(events)
+    lease = _FakeLease(events, backend_lease_proof)
     monkeypatch.setattr(
         app_module,
         "acquire_backend_instance_lease",
@@ -595,12 +1103,12 @@ def test_standalone_contention_prevents_start(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.unit
-def test_wsgi_retains_one_lease_for_the_cached_app(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wsgi_retains_one_lease_for_the_cached_app(monkeypatch: pytest.MonkeyPatch, backend_lease_proof) -> None:
     import flinttrade_core.app as app_module
 
     events: list[str] = []
     flask_app = Flask("wsgi-backend-lease")
-    lease = _FakeLease(events)
+    lease = _FakeLease(events, backend_lease_proof)
     monkeypatch.setattr(app_module, "_APP_CACHE", None)
     monkeypatch.setattr(app_module, "_APP_CACHE_PID", None, raising=False)
     monkeypatch.setattr(app_module, "_WSGI_BACKEND_LEASE", None)
@@ -612,22 +1120,23 @@ def test_wsgi_retains_one_lease_for_the_cached_app(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(
         app_module,
         "create_flask_app",
-        lambda: events.append("factory") or flask_app,
+        lambda **kwargs: events.append("factory") or flask_app,
     )
 
-    assert app_module._get_wsgi_app() is flask_app
-    assert app_module._get_wsgi_app() is flask_app
+    assert app_module._get_wsgi_app(shutdown_callback=lambda: None) is flask_app
+    assert app_module._get_wsgi_app(shutdown_callback=lambda: None) is flask_app
+    assert app_module._stop_backend_lease_watch(flask_app, timeout=1)
     assert app_module._WSGI_BACKEND_LEASE is lease
     assert events == ["acquire", "factory"]
 
 
 @pytest.mark.unit
-def test_wsgi_rejects_an_app_cache_inherited_across_fork(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wsgi_rejects_an_app_cache_inherited_across_fork(monkeypatch: pytest.MonkeyPatch, backend_lease_proof) -> None:
     import flinttrade_core.app as app_module
 
     events: list[str] = []
     flask_app = Flask("inherited-wsgi-app")
-    lease = _FakeLease(events)
+    lease = _FakeLease(events, backend_lease_proof)
     monkeypatch.setattr(app_module, "_APP_CACHE", flask_app)
     monkeypatch.setattr(app_module, "_APP_CACHE_PID", 101, raising=False)
     monkeypatch.setattr(app_module, "_WSGI_BACKEND_LEASE", lease)
@@ -659,7 +1168,7 @@ def test_preloaded_wsgi_callable_rejects_a_real_forked_request(tmp_path: Path) -
 
 
 @pytest.mark.unit
-def test_wsgi_releases_lease_when_factory_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wsgi_releases_lease_when_factory_fails(monkeypatch: pytest.MonkeyPatch, backend_lease_proof) -> None:
     import flinttrade_core.app as app_module
 
     events: list[str] = []
@@ -669,10 +1178,10 @@ def test_wsgi_releases_lease_when_factory_fails(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(
         app_module,
         "acquire_backend_instance_lease",
-        lambda: events.append("acquire") or _FakeLease(events),
+        lambda: events.append("acquire") or _FakeLease(events, backend_lease_proof),
     )
 
-    def fail_factory() -> Flask:
+    def fail_factory(**kwargs) -> Flask:
         events.append("factory")
         raise RuntimeError("factory failed")
 
@@ -689,6 +1198,7 @@ def test_wsgi_releases_lease_when_factory_fails(monkeypatch: pytest.MonkeyPatch)
 @pytest.mark.unit
 def test_desktop_serve_holds_lease_until_server_and_cleanup_finish(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     import flinttrade_core.desktop as desktop
 
@@ -698,9 +1208,9 @@ def test_desktop_serve_holds_lease_until_server_and_cleanup_finish(
     monkeypatch.setattr(
         desktop,
         "acquire_backend_instance_lease",
-        lambda: events.append("acquire") or _FakeLease(events),
+        lambda: events.append("acquire") or _FakeLease(events, backend_lease_proof),
     )
-    monkeypatch.setattr(desktop, "_build_app", lambda: events.append("build") or flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda proof: events.append("build") or flask_app)
     monkeypatch.setattr(
         "waitress.server.create_server",
         lambda *_args, **_kwargs: SimpleNamespace(
@@ -717,6 +1227,7 @@ def test_desktop_serve_holds_lease_until_server_and_cleanup_finish(
 @pytest.mark.unit
 def test_desktop_serve_releases_lease_when_app_build_fails(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     import flinttrade_core.desktop as desktop
 
@@ -724,10 +1235,10 @@ def test_desktop_serve_releases_lease_when_app_build_fails(
     monkeypatch.setattr(
         desktop,
         "acquire_backend_instance_lease",
-        lambda: events.append("acquire") or _FakeLease(events),
+        lambda: events.append("acquire") or _FakeLease(events, backend_lease_proof),
     )
 
-    def fail_build() -> Flask:
+    def fail_build(proof) -> Flask:
         events.append("build")
         raise RuntimeError("build failed")
 
@@ -742,11 +1253,12 @@ def test_desktop_serve_releases_lease_when_app_build_fails(
 @pytest.mark.unit
 def test_desktop_serve_retains_lease_when_shutdown_is_incomplete(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     import flinttrade_core.desktop as desktop
 
     events: list[str] = []
-    lease = _FakeLease(events)
+    lease = _FakeLease(events, backend_lease_proof)
     monkeypatch.setattr(
         desktop,
         "acquire_backend_instance_lease",

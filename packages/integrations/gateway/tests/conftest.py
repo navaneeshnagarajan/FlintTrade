@@ -20,6 +20,28 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture
+def backend_lease_factory(monkeypatch):
+    """Explicit real ownership acquired after the test selects its workspace."""
+    from flinttrade_core.backend_instance import acquire_backend_instance_lease
+    from flinttrade_core.workspace import workspace_dir
+
+    leases = {}
+
+    def acquire():
+        path = workspace_dir().resolve()
+        if path not in leases:
+            leases[path] = acquire_backend_instance_lease()
+        return leases[path].proof
+
+    try:
+        yield acquire
+    finally:
+        monkeypatch.undo()
+        for lease in leases.values():
+            lease.release()
+
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))

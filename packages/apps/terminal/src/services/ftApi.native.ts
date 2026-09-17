@@ -7,7 +7,7 @@
  * POSTed straight to the local backend — they never leave the machine.
  */
 
-import { get, post, del } from "./ftApi.helpers";
+import { get, accountMutation } from "./ftApi.helpers";
 
 export interface NativeAuthField {
   name: string;
@@ -232,10 +232,12 @@ export async function connectNativeAccount(input: {
   label?: string;
   credentials: Record<string, string>;
   is_primary?: boolean;
-}): Promise<ConnectResult> {
+}, idempotencyKey: string): Promise<ConnectResult> {
   // A failed connect is a non-2xx, so `post` throws the backend message before
   // returning; a 2xx always carries connected:true.
-  const r = await post<{ connected: boolean; login: string }>("native/accounts", input);
+  const r = await accountMutation<{ connected: boolean; login: string }>(
+    "api/v1", "POST", "native/accounts", idempotencyKey, input,
+  );
   return { connected: !!r?.connected, login: r?.login ?? "" };
 }
 
@@ -253,18 +255,20 @@ export async function oauthStartNativeAccount(input: {
   api_secret: string;
   label?: string;
   is_primary?: boolean;
-}): Promise<OAuthStartResult> {
-  const r = await post<OAuthStartResult>("native/oauth/start", input);
+}, idempotencyKey: string): Promise<OAuthStartResult> {
+  const r = await accountMutation<OAuthStartResult>("api/v1", "POST", "native/oauth/start", idempotencyKey, input);
   if (!r?.auth_url) throw new Error("Could not start OAuth login");
   return r;
 }
 
-export async function removeNativeAccount(adapterId: string, accountId: string): Promise<void> {
-  await del(`native/accounts/${encodeURIComponent(adapterId)}/${encodeURIComponent(accountId)}`);
+export async function removeNativeAccount(adapterId: string, accountId: string, idempotencyKey: string): Promise<void> {
+  await accountMutation("api/v1", "DELETE",
+    `native/accounts/${encodeURIComponent(adapterId)}/${encodeURIComponent(accountId)}`, idempotencyKey);
 }
 
-export async function setPrimaryNativeAccount(adapterId: string, accountId: string): Promise<void> {
-  await post(`native/accounts/${encodeURIComponent(adapterId)}/${encodeURIComponent(accountId)}/set-primary`);
+export async function setPrimaryNativeAccount(adapterId: string, accountId: string, idempotencyKey: string): Promise<void> {
+  await accountMutation("api/v1", "POST",
+    `native/accounts/${encodeURIComponent(adapterId)}/${encodeURIComponent(accountId)}/set-primary`, idempotencyKey, {});
 }
 
 export interface ReloginResult {
@@ -282,10 +286,12 @@ export interface ReloginResult {
 export async function reloginNativeAccount(
   adapterId: string,
   accountId: string,
-  credentials?: Record<string, string>,
+  credentials: Record<string, string> | undefined,
+  idempotencyKey: string,
 ): Promise<ReloginResult> {
-  const r = await post<{ session: ReloginResult; login?: string }>(
-    `native/accounts/${encodeURIComponent(adapterId)}/${encodeURIComponent(accountId)}/login`,
+  const r = await accountMutation<{ session: ReloginResult; login?: string }>(
+    "api/v1", "POST", `native/accounts/${encodeURIComponent(adapterId)}/${encodeURIComponent(accountId)}/login`,
+    idempotencyKey,
     credentials ? { credentials } : {},
   );
   const session = r?.session;

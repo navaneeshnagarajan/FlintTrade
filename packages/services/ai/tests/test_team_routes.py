@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -104,6 +105,94 @@ def client(app):
 
 
 class TestTeamAnalyse:
+    @pytest.mark.parametrize("endpoint", ["analyse", "analyse/stream"])
+    def test_configured_context_reaches_model_with_input_receipt(self, client, endpoint):
+        team = _make_team()
+        context = {"quote": {"ltp": 1200.0}, "execution_selector": "kotakneo:execution"}
+        receipt = {"event_id": "receipt-example", "input_digest": "a" * 64}
+        snapshot = SimpleNamespace(market_data=context, receipt=receipt)
+        with (
+            patch("flinttrade_ai.team_routes._get_team", return_value=team),
+            patch("flinttrade_ai.team_routes._collect_configured_context", return_value=snapshot) as collect,
+        ):
+            response = client.post(
+                f"/api/v1/ai/team/{endpoint}",
+                json={"symbol": "RELIANCE", "exchange": "NSE", "context_source": "configured_brokers"},
+                buffered=True,
+            )
+        assert response.status_code == 200
+        if endpoint.endswith("stream"):
+            frames = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+            payload = next(frame["data"] for frame in frames if frame["type"] == "result")
+        else:
+            payload = response.get_json()["data"]
+        assert payload["input_receipt"] == receipt
+        collect.assert_called_once_with("RELIANCE", "NSE")
+        assert team.analyse_async.await_args.args == ("RELIANCE", "NSE", context)
+
+    @pytest.mark.parametrize("endpoint", ["analyse", "analyse/stream"])
+    def test_failed_configured_context_prevents_analysis(self, client, endpoint, caplog):
+        team = _make_team()
+        private_detail = "private-provider-response-must-not-be-logged"
+        with (
+            patch("flinttrade_ai.team_routes._get_team", return_value=team),
+            patch(
+                "flinttrade_ai.team_routes._collect_configured_context",
+                side_effect=RuntimeError(private_detail),
+            ),
+        ):
+            response = client.post(
+                f"/api/v1/ai/team/{endpoint}",
+                json={"symbol": "RELIANCE", "exchange": "NSE", "context_source": "configured_brokers"},
+                buffered=True,
+            )
+        assert response.status_code == 503
+        assert response.get_json()["code"] == "broker_context_unavailable"
+        assert private_detail not in response.text + caplog.text
+        team.analyse_async.assert_not_awaited()
+
+    @pytest.mark.parametrize("endpoint", ["analyse", "analyse/stream"])
+    @pytest.mark.parametrize("code,status", [
+        ("broker_context_authentication_required", 401),
+        ("broker_context_forbidden", 403),
+        ("broker_context_stale", 409),
+    ])
+    def test_context_authority_errors_preserve_public_status(self, client, endpoint, code, status):
+        from flinttrade_core.ai_broker_context import BrokerContextError
+
+        team = _make_team()
+        with (
+            patch("flinttrade_ai.team_routes._get_team", return_value=team),
+            patch("flinttrade_ai.team_routes._collect_configured_context", side_effect=BrokerContextError(code)),
+        ):
+            response = client.post(
+                f"/api/v1/ai/team/{endpoint}",
+                json={"symbol": "RELIANCE", "exchange": "NSE", "context_source": "configured_brokers"},
+                buffered=True,
+            )
+        assert response.status_code == status
+        assert response.get_json()["code"] == code
+        team.analyse_async.assert_not_awaited()
+
+    @pytest.mark.parametrize("endpoint", ["analyse", "analyse/stream"])
+    @pytest.mark.parametrize("extra", [
+        {"context_source": "unknown"},
+        {"context_source": None},
+        {"context_source": "configured_brokers", "market_data": {}},
+        {"context_source": "configured_brokers", "market_data": None},
+        {"context_source": "configured_brokers", "mode": "sequential"},
+    ])
+    def test_invalid_context_source_never_reaches_model(self, client, endpoint, extra):
+        team = _make_team()
+        with patch("flinttrade_ai.team_routes._get_team", return_value=team):
+            response = client.post(
+                f"/api/v1/ai/team/{endpoint}",
+                json={"symbol": "RELIANCE", "exchange": "NSE", **extra},
+                buffered=True,
+            )
+        assert response.status_code == 400
+        team.analyse_async.assert_not_awaited()
+
     def test_no_llm_returns_503(self, client) -> None:
         """Missing LLM configuration returns HTTP 503.
 

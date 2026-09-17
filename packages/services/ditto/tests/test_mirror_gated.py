@@ -93,8 +93,10 @@ def _allow_complete_admission(_account_id: str, _order: Order):
     yield lease, []
 
 
-def _make_gated_mirror(*args, **kwargs) -> PositionMirror:  # noqa: ANN002, ANN003
+def _make_gated_mirror(*args, backend_lease_factory, **kwargs) -> PositionMirror:  # noqa: ANN002, ANN003
     kwargs.setdefault("admit_order", _allow_complete_admission)
+    if kwargs.get("broker_router") is not None:
+        kwargs["broker_router"].backend_lease_proof = backend_lease_factory()
     return PositionMirror(*args, **kwargs)
 
 
@@ -163,12 +165,12 @@ def _explode_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
 class TestGatedMirrorDispatch:
     """PositionMirror routes through the safety-gated BrokerRouter (G6/T9)."""
 
-    def test_routes_once_per_enabled_account(self, _explode_httpx: None) -> None:
+    def test_routes_once_per_enabled_account(self, _explode_httpx: None, *, backend_lease_factory) -> None:
         """One router call per enabled slave account, EQUAL allocation."""
         router = _FakeRouter()
         accounts = [_make_account("acc_a"), _make_account("acc_b")]
         mirror = _make_gated_mirror(
-            accounts, mode=AllocationMode.EQUAL, broker_router=router
+            accounts, mode=AllocationMode.EQUAL, broker_router=router, backend_lease_factory=backend_lease_factory
         )
 
         result = mirror.execute(_make_order(qty="3"))
@@ -179,7 +181,7 @@ class TestGatedMirrorDispatch:
         assert result.successful == 2
         assert result.failed == 0
 
-    def test_non_live_operator_mode_fails_closed(self, _explode_httpx: None) -> None:
+    def test_non_live_operator_mode_fails_closed(self, _explode_httpx: None, *, backend_lease_factory) -> None:
         """A Practice/Explore operator mode refuses the mirror — no router call.
 
         The gated dispatch targets a live OpenAlgo account directly (never the
@@ -188,7 +190,7 @@ class TestGatedMirrorDispatch:
         router = _FakeRouter()
         accounts = [_make_account("acc_a"), _make_account("acc_b")]
         mirror = _make_gated_mirror(
-            accounts, mode=AllocationMode.EQUAL, broker_router=router, trading_mode="practice"
+            accounts, mode=AllocationMode.EQUAL, broker_router=router, trading_mode="practice", backend_lease_factory=backend_lease_factory
         )
 
         result = mirror.execute(_make_order(qty="3"))
@@ -199,13 +201,13 @@ class TestGatedMirrorDispatch:
         assert all("not 'live'" in (r.error or "") for r in result.results)
 
     def test_explicit_target_is_openalgo_and_account_id(
-        self, _explode_httpx: None
+        self, _explode_httpx: None, *, backend_lease_factory
     ) -> None:
         """Every call carries an explicit adapter and account target."""
         router = _FakeRouter()
         accounts = [_make_account("acc_a"), _make_account("acc_b")]
         mirror = _make_gated_mirror(
-            accounts, mode=AllocationMode.EQUAL, broker_router=router
+            accounts, mode=AllocationMode.EQUAL, broker_router=router, backend_lease_factory=backend_lease_factory
         )
 
         mirror.execute(_make_order(qty="3"))
@@ -215,7 +217,7 @@ class TestGatedMirrorDispatch:
         assert adapters == {"openalgo"}
         assert accts == {"acc_a", "acc_b"}
 
-    def test_uses_injected_account_loop_runner(self, _explode_httpx: None) -> None:
+    def test_uses_injected_account_loop_runner(self, _explode_httpx: None, *, backend_lease_factory) -> None:
         """Each router coroutine runs through its target account's owner loop."""
         router = _FakeRouter()
         account_ids: list[str] = []
@@ -228,7 +230,7 @@ class TestGatedMirrorDispatch:
             [_make_account("acc_a"), _make_account("acc_b")],
             mode=AllocationMode.EQUAL,
             broker_router=router,
-            run_router_call=run_router_call,
+            run_router_call=run_router_call, backend_lease_factory=backend_lease_factory
         )
 
         result = mirror.execute(_make_order(qty="2"))
@@ -237,7 +239,7 @@ class TestGatedMirrorDispatch:
         assert sorted(account_ids) == ["acc_a", "acc_b"]
 
     def test_per_account_allocated_quantity_reaches_router(
-        self, _explode_httpx: None
+        self, _explode_httpx: None, *, backend_lease_factory
     ) -> None:
         """The WEIGHTED per-account quantity is exactly what the router sees."""
         router = _FakeRouter()
@@ -247,7 +249,7 @@ class TestGatedMirrorDispatch:
             _make_account("acc_small", weight=1.0),
         ]
         mirror = _make_gated_mirror(
-            accounts, mode=AllocationMode.WEIGHTED, broker_router=router
+            accounts, mode=AllocationMode.WEIGHTED, broker_router=router, backend_lease_factory=backend_lease_factory
         )
 
         mirror.execute(_make_order(qty="4"))
@@ -259,7 +261,7 @@ class TestGatedMirrorDispatch:
         assert all(isinstance(q, str) for q in qty_by_acct.values())
 
     def test_request_context_carries_selector_and_agent_actor(
-        self, _explode_httpx: None
+        self, _explode_httpx: None, *, backend_lease_factory
     ) -> None:
         """The minted RequestContext binds the openalgo:<acct> selector as agent."""
         router = _FakeRouter()
@@ -268,7 +270,7 @@ class TestGatedMirrorDispatch:
             accounts,
             mode=AllocationMode.EQUAL,
             broker_router=router,
-            actor_id="ditto",
+            actor_id="ditto", backend_lease_factory=backend_lease_factory
         )
 
         mirror.execute(_make_order(qty="2"))
@@ -279,7 +281,7 @@ class TestGatedMirrorDispatch:
         assert ctx.actor_id == "ditto"
         assert ctx.selector == "openalgo:acc_a"
 
-    def test_authenticated_human_actor_is_preserved(self, _explode_httpx: None) -> None:
+    def test_authenticated_human_actor_is_preserved(self, _explode_httpx: None, *, backend_lease_factory) -> None:
         """A runtime-starting human remains the signed mirror principal."""
         router = _FakeRouter()
         mirror = _make_gated_mirror(
@@ -287,7 +289,7 @@ class TestGatedMirrorDispatch:
             mode=AllocationMode.EQUAL,
             broker_router=router,
             actor_id="operator-1",
-            actor_type="human",
+            actor_type="human", backend_lease_factory=backend_lease_factory
         )
 
         result = mirror.execute(_make_order(qty="1"))
@@ -297,7 +299,7 @@ class TestGatedMirrorDispatch:
         assert router.contexts[0].actor_id == "operator-1"
 
     def test_disabled_and_master_accounts_are_not_routed(
-        self, _explode_httpx: None
+        self, _explode_httpx: None, *, backend_lease_factory
     ) -> None:
         """Disabled accounts and the master are excluded from router dispatch."""
         router = _FakeRouter()
@@ -307,7 +309,7 @@ class TestGatedMirrorDispatch:
             _make_account("the_master", is_master=True),
         ]
         mirror = _make_gated_mirror(
-            accounts, mode=AllocationMode.EQUAL, broker_router=router
+            accounts, mode=AllocationMode.EQUAL, broker_router=router, backend_lease_factory=backend_lease_factory
         )
 
         result = mirror.execute(_make_order(qty="2"))
@@ -316,7 +318,7 @@ class TestGatedMirrorDispatch:
         assert accts == {"live_slave"}
         assert result.total_accounts == 1
 
-    def test_no_httpx_when_router_present(self, _explode_httpx: None) -> None:
+    def test_no_httpx_when_router_present(self, _explode_httpx: None, *, backend_lease_factory) -> None:
         """A successful gated run never constructs an httpx client.
 
         ``_explode_httpx`` makes ``httpx.Client`` raise; reaching success here
@@ -325,7 +327,7 @@ class TestGatedMirrorDispatch:
         router = _FakeRouter()
         accounts = [_make_account("acc_a")]
         mirror = _make_gated_mirror(
-            accounts, mode=AllocationMode.EQUAL, broker_router=router
+            accounts, mode=AllocationMode.EQUAL, broker_router=router, backend_lease_factory=backend_lease_factory
         )
 
         result = mirror.execute(_make_order(qty="1"))
@@ -358,6 +360,7 @@ class TestGatedMirrorFailureIsolation:
         monkeypatch.setattr(safety_module, "gate_order", recording_gate_order)
         router = _FakeRouter()
         mirror = PositionMirror(
+            # This direct-construction case uses the same explicit proof seam.
             [_make_account("acc_a")],
             mode=AllocationMode.EQUAL,
             broker_router=router,
@@ -409,7 +412,7 @@ class TestGatedMirrorFailureIsolation:
     def test_complete_admission_receives_allocated_order_before_gate(
         self,
         _explode_httpx: None,
-        monkeypatch: pytest.MonkeyPatch,
+        monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory
     ) -> None:
         """Admission is target-scoped and evaluates the allocated child order."""
         from flinttrade_engine import safety as safety_module
@@ -429,6 +432,7 @@ class TestGatedMirrorFailureIsolation:
 
         monkeypatch.setattr(safety_module, "gate_order", recording_gate_order)
         router = _FakeRouter()
+        router.backend_lease_proof = backend_lease_factory()
         mirror = PositionMirror(
             [_make_account("acc_a", weight=3), _make_account("acc_b", weight=1)],
             mode=AllocationMode.WEIGHTED,
@@ -445,13 +449,13 @@ class TestGatedMirrorFailureIsolation:
             )
 
     def test_safety_bypass_becomes_account_error(
-        self, _explode_httpx: None
+        self, _explode_httpx: None, *, backend_lease_factory
     ) -> None:
         """SafetyBypassError becomes a generic per-account refusal."""
         router = _RefusingRouter()
         accounts = [_make_account("acc_a")]
         mirror = _make_gated_mirror(
-            accounts, mode=AllocationMode.EQUAL, broker_router=router
+            accounts, mode=AllocationMode.EQUAL, broker_router=router, backend_lease_factory=backend_lease_factory
         )
 
         result = mirror.execute(_make_order(qty="2"))
@@ -490,7 +494,7 @@ class TestGatedMirrorFailureIsolation:
     def test_router_refusal_redacts_account_and_broker_detail_but_keeps_routing_id(
         self,
         _explode_httpx: None,
-        caplog: pytest.LogCaptureFixture,
+        caplog: pytest.LogCaptureFixture, *, backend_lease_factory
     ) -> None:
         """Logs and status errors are redacted without changing internal routing IDs."""
         private_account_id = "private-target-7491"
@@ -514,7 +518,7 @@ class TestGatedMirrorFailureIsolation:
         mirror = _make_gated_mirror(
             [_make_account(private_account_id)],
             mode=AllocationMode.EQUAL,
-            broker_router=_SensitiveRouter(),
+            broker_router=_SensitiveRouter(), backend_lease_factory=backend_lease_factory
         )
 
         result = mirror.execute(_make_order(qty="1"))
@@ -530,7 +534,7 @@ class TestGatedMirrorFailureIsolation:
     def test_unexpected_worker_exception_is_redacted_from_result(
         self,
         _explode_httpx: None,
-        monkeypatch: pytest.MonkeyPatch,
+        monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory
     ) -> None:
         """Executor failures expose neither broker payloads nor account IDs as error text."""
         private_account_id = "private-target-8624"
@@ -538,7 +542,7 @@ class TestGatedMirrorFailureIsolation:
         mirror = _make_gated_mirror(
             [_make_account(private_account_id)],
             mode=AllocationMode.EQUAL,
-            broker_router=_FakeRouter(),
+            broker_router=_FakeRouter(), backend_lease_factory=backend_lease_factory
         )
 
         def fail_dispatch(*_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202
@@ -555,7 +559,7 @@ class TestGatedMirrorFailureIsolation:
         assert result.results[0].success is False
 
     def test_one_account_refused_other_succeeds(
-        self, _explode_httpx: None
+        self, _explode_httpx: None, *, backend_lease_factory
     ) -> None:
         """A refusal on one account does not block dispatch to the others."""
 
@@ -581,7 +585,7 @@ class TestGatedMirrorFailureIsolation:
             _make_account("bad_acct"),
         ]
         mirror = _make_gated_mirror(
-            accounts, mode=AllocationMode.EQUAL, broker_router=router
+            accounts, mode=AllocationMode.EQUAL, broker_router=router, backend_lease_factory=backend_lease_factory
         )
 
         result = mirror.execute(_make_order(qty="2"))

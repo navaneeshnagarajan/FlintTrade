@@ -111,26 +111,26 @@ export function selectNativeReadAccount(
   ));
 }
 
-export async function removeBrokerAccount(account: BrokerAccountRef): Promise<void> {
+export async function removeBrokerAccount(account: BrokerAccountRef, idempotencyKey: string): Promise<void> {
   if (account.source === "native") {
-    await removeNativeAccount(account.broker, account.account_id);
+    await removeNativeAccount(account.broker, account.account_id, idempotencyKey);
     return;
   }
-  await gatewayApi.removeAccount(account.account_id);
+  await gatewayApi.removeAccount(account.account_id, idempotencyKey);
 }
 
-export async function reconnectBrokerAccount(account: BrokerAccountRef): Promise<void> {
+export async function reconnectBrokerAccount(account: BrokerAccountRef, idempotencyKey: string): Promise<void> {
   if (account.source === "native") {
-    await reloginNativeAccount(account.broker, account.account_id);
+    await reloginNativeAccount(account.broker, account.account_id, undefined, idempotencyKey);
     return;
   }
-  await gatewayApi.reconnectAccount(account.account_id);
+  await gatewayApi.reconnectAccount(account.account_id, idempotencyKey);
 }
 
-export async function setPrimaryBrokerAccount(account: BrokerAccountRef): Promise<void> {
+export async function setPrimaryBrokerAccount(account: BrokerAccountRef, idempotencyKey: string): Promise<void> {
   if (account.source === "native") {
-    await setPrimaryNativeAccount(account.broker, account.account_id);
+    await setPrimaryNativeAccount(account.broker, account.account_id, idempotencyKey);
     return;
   }
-  await gatewayApi.setPrimary(account.account_id);
+  await gatewayApi.setPrimary(account.account_id, idempotencyKey);
 }

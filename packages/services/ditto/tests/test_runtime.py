@@ -153,10 +153,12 @@ class _FakeRouterOwner:
         failed_kill_accounts: set[str] | None = None,
         admission_error_accounts: set[str] | None = None,
         close_results: list[bool | Exception] | None = None,
+        backend_lease_proof=None,
     ) -> None:
         self.accounts = accounts
         self.actor_id = actor_id
         self.router = _FakeRouter()
+        self.router.backend_lease_proof = backend_lease_proof
         self.closed = False
         self.risk_by_account = risk_by_account or {}
         self.failed_kill_accounts = failed_kill_accounts or set()
@@ -233,7 +235,7 @@ class _FakeRouterOwner:
         return closed
 
 
-def test_start_controls_real_position_mirror_and_reports_active() -> None:
+def test_start_controls_real_position_mirror_and_reports_active(*, backend_lease_factory) -> None:
     accounts = [_account("master", is_master=True), _account("one"), _account("two")]
     watchers: list[_FakeWatcher] = []
     owners: list[_FakeRouterOwner] = []
@@ -244,7 +246,7 @@ def test_start_controls_real_position_mirror_and_reports_active() -> None:
         return watcher
 
     def owner_factory(selected: list[BrokerAccount], actor_id: str) -> _FakeRouterOwner:
-        owner = _FakeRouterOwner(selected, actor_id)
+        owner = _FakeRouterOwner(selected, actor_id, backend_lease_proof=backend_lease_factory())
         owners.append(owner)
         return owner
 
@@ -332,14 +334,14 @@ def test_runtime_accepts_lowercase_mode_aliases_and_returns_stable_api_value(
     ],
 )
 def test_target_risk_failure_pauses_delta_before_any_dispatch(
-    risk_value: dict[str, Any] | Exception,
+    risk_value: dict[str, Any] | Exception, *, backend_lease_factory
 ) -> None:
     accounts = [_account("master", is_master=True), _account("target")]
     watcher = _FakeWatcher(accounts[0])
     owner = _FakeRouterOwner(
         accounts[1:],
         "operator-1",
-        risk_by_account={"target": risk_value},
+        risk_by_account={"target": risk_value}, backend_lease_proof=backend_lease_factory()
     )
     runtime = DittoRuntime(
         account_provider=lambda: accounts,
@@ -372,7 +374,7 @@ def test_target_risk_failure_pauses_delta_before_any_dispatch(
     runtime.stop()
 
 
-def test_zero_daily_loss_cap_still_requires_risk_but_does_not_limit_loss() -> None:
+def test_zero_daily_loss_cap_still_requires_risk_but_does_not_limit_loss(*, backend_lease_factory) -> None:
     accounts = [
         _account("master", is_master=True),
         _account("target", max_loss_daily=0.0),
@@ -381,7 +383,7 @@ def test_zero_daily_loss_cap_still_requires_risk_but_does_not_limit_loss() -> No
     owner = _FakeRouterOwner(
         accounts[1:],
         "operator-1",
-        risk_by_account={"target": {"pnl_today": -1_000_000.0}},
+        risk_by_account={"target": {"pnl_today": -1_000_000.0}}, backend_lease_proof=backend_lease_factory()
     )
     runtime = DittoRuntime(
         account_provider=lambda: accounts,
@@ -410,10 +412,10 @@ def test_zero_daily_loss_cap_still_requires_risk_but_does_not_limit_loss() -> No
     runtime.stop()
 
 
-def test_runtime_tracks_same_symbol_products_as_independent_legs() -> None:
+def test_runtime_tracks_same_symbol_products_as_independent_legs(*, backend_lease_factory) -> None:
     accounts = [_account("master", is_master=True), _account("target")]
     watcher = _CompositeWatcher(accounts[0])
-    owner = _FakeRouterOwner(accounts[1:], "operator-1")
+    owner = _FakeRouterOwner(accounts[1:], "operator-1", backend_lease_proof=backend_lease_factory())
     runtime = DittoRuntime(
         account_provider=lambda: accounts,
         watcher_factory=lambda _account: watcher,
@@ -444,10 +446,10 @@ def test_runtime_tracks_same_symbol_products_as_independent_legs() -> None:
     runtime.stop()
 
 
-def test_source_poll_failure_pauses_generation_and_blocks_later_dispatch() -> None:
+def test_source_poll_failure_pauses_generation_and_blocks_later_dispatch(*, backend_lease_factory) -> None:
     accounts = [_account("master", is_master=True), _account("target")]
     watcher = _ErrorAwareWatcher(accounts[0])
-    owner = _FakeRouterOwner(accounts[1:], "operator-1")
+    owner = _FakeRouterOwner(accounts[1:], "operator-1", backend_lease_proof=backend_lease_factory())
     runtime = DittoRuntime(
         account_provider=lambda: accounts,
         watcher_factory=lambda _account: watcher,
@@ -483,7 +485,7 @@ def test_source_poll_failure_pauses_generation_and_blocks_later_dispatch() -> No
     assert owner.closed is True
 
 
-def test_status_exposes_starting_lifecycle_before_owner_is_ready() -> None:
+def test_status_exposes_starting_lifecycle_before_owner_is_ready(*, backend_lease_factory) -> None:
     accounts = [_account("master", is_master=True), _account("target")]
     factory_entered = threading.Event()
     release_factory = threading.Event()
@@ -492,7 +494,7 @@ def test_status_exposes_starting_lifecycle_before_owner_is_ready() -> None:
     def owner_factory(selected: list[BrokerAccount], actor_id: str) -> _FakeRouterOwner:
         factory_entered.set()
         assert release_factory.wait(timeout=2.0)
-        return _FakeRouterOwner(selected, actor_id)
+        return _FakeRouterOwner(selected, actor_id, backend_lease_proof=backend_lease_factory())
 
     runtime = DittoRuntime(
         account_provider=lambda: accounts,
@@ -534,7 +536,7 @@ def test_status_exposes_starting_lifecycle_before_owner_is_ready() -> None:
         runtime.stop()
 
 
-def test_start_rejects_master_target_without_creating_router_owner() -> None:
+def test_start_rejects_master_target_without_creating_router_owner(*, backend_lease_factory) -> None:
     accounts = [
         _account("source", is_master=True),
         _account("other-master", is_master=True),
@@ -543,7 +545,7 @@ def test_start_rejects_master_target_without_creating_router_owner() -> None:
 
     def owner_factory(selected: list[BrokerAccount], _actor_id: str) -> _FakeRouterOwner:
         owner_calls.append(selected)
-        return _FakeRouterOwner(selected, "operator-1")
+        return _FakeRouterOwner(selected, "operator-1", backend_lease_proof=backend_lease_factory())
 
     runtime = DittoRuntime(
         account_provider=lambda: accounts,
@@ -590,7 +592,7 @@ def test_start_rejects_any_master_target_before_using_valid_targets() -> None:
     assert runtime.status()["lifecycle"] == "idle"
 
 
-def test_simultaneous_starts_create_only_one_runtime_generation() -> None:
+def test_simultaneous_starts_create_only_one_runtime_generation(*, backend_lease_factory) -> None:
     accounts = [_account("master", is_master=True), _account("target")]
     owner_factory_entered = threading.Event()
     release_first_factory = threading.Event()
@@ -607,7 +609,7 @@ def test_simultaneous_starts_create_only_one_runtime_generation() -> None:
         if call_number == 1:
             owner_factory_entered.set()
             assert release_first_factory.wait(timeout=2.0)
-        owner = _FakeRouterOwner(selected, actor_id)
+        owner = _FakeRouterOwner(selected, actor_id, backend_lease_proof=backend_lease_factory())
         owners.append(owner)
         return owner
 
@@ -660,7 +662,7 @@ def test_simultaneous_starts_create_only_one_runtime_generation() -> None:
             owner.close()
 
 
-def test_partial_dispatch_failure_pauses_before_source_reversal() -> None:
+def test_partial_dispatch_failure_pauses_before_source_reversal(*, backend_lease_factory) -> None:
     rejected_id = "target-private-4821"
     accounts = [_account("master", is_master=True), _account("one"), _account(rejected_id)]
     watchers: list[_FakeWatcher] = []
@@ -675,7 +677,7 @@ def test_partial_dispatch_failure_pauses_before_source_reversal() -> None:
         owner = _FakeRouterOwner(
             selected,
             actor_id,
-            admission_error_accounts={rejected_id},
+            admission_error_accounts={rejected_id}, backend_lease_proof=backend_lease_factory()
         )
         owners.append(owner)
         return owner
@@ -728,10 +730,10 @@ def test_partial_dispatch_failure_pauses_before_source_reversal() -> None:
     assert stopped["lifecycle"] == "reconciliation-needed"
 
 
-def test_malformed_position_change_pauses_without_dispatching() -> None:
+def test_malformed_position_change_pauses_without_dispatching(*, backend_lease_factory) -> None:
     accounts = [_account("master", is_master=True), _account("target")]
     watcher = _FakeWatcher(accounts[0])
-    owner = _FakeRouterOwner(accounts[1:], "operator-1")
+    owner = _FakeRouterOwner(accounts[1:], "operator-1", backend_lease_proof=backend_lease_factory())
     runtime = DittoRuntime(
         account_provider=lambda: accounts,
         watcher_factory=lambda _account: watcher,
@@ -762,7 +764,7 @@ def test_malformed_position_change_pauses_without_dispatching() -> None:
     runtime.stop()
 
 
-def test_status_exposes_stopping_while_watcher_shutdown_is_in_progress() -> None:
+def test_status_exposes_stopping_while_watcher_shutdown_is_in_progress(*, backend_lease_factory) -> None:
     accounts = [_account("master", is_master=True), _account("target")]
     stop_entered = threading.Event()
     release_stop = threading.Event()
@@ -776,7 +778,7 @@ def test_status_exposes_stopping_while_watcher_shutdown_is_in_progress() -> None
             return True
 
     watcher = _BlockingWatcher(accounts[0])
-    owner = _FakeRouterOwner(accounts[1:], "operator-1")
+    owner = _FakeRouterOwner(accounts[1:], "operator-1", backend_lease_proof=backend_lease_factory())
     runtime = DittoRuntime(
         account_provider=lambda: accounts,
         watcher_factory=lambda _account: watcher,
@@ -814,7 +816,7 @@ def test_status_exposes_stopping_while_watcher_shutdown_is_in_progress() -> None
     assert runtime.status()["lifecycle"] == "idle"
 
 
-def test_stop_timeout_retains_generation_for_retry() -> None:
+def test_stop_timeout_retains_generation_for_retry(*, backend_lease_factory) -> None:
     accounts = [_account("master", is_master=True), _account("target")]
     watchers: list[_FakeWatcher] = []
     owners: list[_FakeRouterOwner] = []
@@ -825,7 +827,7 @@ def test_stop_timeout_retains_generation_for_retry() -> None:
         return watcher
 
     def owner_factory(selected: list[BrokerAccount], actor_id: str) -> _FakeRouterOwner:
-        owner = _FakeRouterOwner(selected, actor_id)
+        owner = _FakeRouterOwner(selected, actor_id, backend_lease_proof=backend_lease_factory())
         owners.append(owner)
         return owner
 
@@ -862,10 +864,10 @@ def test_stop_timeout_retains_generation_for_retry() -> None:
     assert owners[0].closed is True
 
 
-def test_router_drain_timeout_retains_owner_and_watcher_for_retry() -> None:
+def test_router_drain_timeout_retains_owner_and_watcher_for_retry(*, backend_lease_factory) -> None:
     accounts = [_account("master", is_master=True), _account("target")]
     watcher = _FakeWatcher(accounts[0])
-    owner = _FakeRouterOwner(accounts[1:], "operator-1", close_results=[False, True])
+    owner = _FakeRouterOwner(accounts[1:], "operator-1", close_results=[False, True], backend_lease_proof=backend_lease_factory())
     runtime = DittoRuntime(
         account_provider=lambda: accounts,
         watcher_factory=lambda _account: watcher,
@@ -896,7 +898,7 @@ def test_router_drain_timeout_retains_owner_and_watcher_for_retry() -> None:
     assert owner.closed is True
 
 
-def test_stale_watcher_callback_cannot_drive_restarted_generation() -> None:
+def test_stale_watcher_callback_cannot_drive_restarted_generation(*, backend_lease_factory) -> None:
     accounts = [_account("master", is_master=True), _account("target")]
     watchers: list[_FakeWatcher] = []
     owners: list[_FakeRouterOwner] = []
@@ -907,7 +909,7 @@ def test_stale_watcher_callback_cannot_drive_restarted_generation() -> None:
         return watcher
 
     def owner_factory(selected: list[BrokerAccount], actor_id: str) -> _FakeRouterOwner:
-        owner = _FakeRouterOwner(selected, actor_id)
+        owner = _FakeRouterOwner(selected, actor_id, backend_lease_proof=backend_lease_factory())
         owners.append(owner)
         return owner
 
@@ -1305,12 +1307,12 @@ def test_router_owner_cleanup_returns_at_deadline_when_client_close_hangs(
     assert owner.router is None
 
 
-def test_start_fails_closed_when_source_cannot_be_primed() -> None:
+def test_start_fails_closed_when_source_cannot_be_primed(*, backend_lease_factory) -> None:
     accounts = [_account("master", is_master=True), _account("one")]
     owners: list[_FakeRouterOwner] = []
 
     def owner_factory(selected: list[BrokerAccount], actor_id: str) -> _FakeRouterOwner:
-        owner = _FakeRouterOwner(selected, actor_id)
+        owner = _FakeRouterOwner(selected, actor_id, backend_lease_proof=backend_lease_factory())
         owners.append(owner)
         return owner
 
@@ -1336,7 +1338,7 @@ def test_start_fails_closed_when_source_cannot_be_primed() -> None:
     assert owners[0].closed is True
 
 
-def test_risk_snapshot_uses_real_managed_account_state() -> None:
+def test_risk_snapshot_uses_real_managed_account_state(*, backend_lease_factory) -> None:
     accounts = [_account("one"), _account("two", enabled=False)]
     readings = {
         "one": {
@@ -1357,7 +1359,7 @@ def test_risk_snapshot_uses_real_managed_account_state() -> None:
     owners: list[_FakeRouterOwner] = []
 
     def owner_factory(selected: list[BrokerAccount], actor_id: str) -> _FakeRouterOwner:
-        owner = _FakeRouterOwner(selected, actor_id, risk_by_account=readings)
+        owner = _FakeRouterOwner(selected, actor_id, risk_by_account=readings, backend_lease_proof=backend_lease_factory())
         owners.append(owner)
         return owner
 
@@ -1376,7 +1378,7 @@ def test_risk_snapshot_uses_real_managed_account_state() -> None:
     assert owners[0].closed is True
 
 
-def test_risk_snapshot_is_unavailable_when_any_account_read_fails() -> None:
+def test_risk_snapshot_is_unavailable_when_any_account_read_fails(*, backend_lease_factory) -> None:
     accounts = [_account("one"), _account("two")]
     readings: dict[str, dict[str, Any] | Exception] = {
         "one": {
@@ -1394,7 +1396,7 @@ def test_risk_snapshot_is_unavailable_when_any_account_read_fails() -> None:
         router_owner_factory=lambda selected, actor_id: _FakeRouterOwner(
             selected,
             actor_id,
-            risk_by_account=readings,
+            risk_by_account=readings, backend_lease_proof=backend_lease_factory()
         ),
     )
 
@@ -1402,7 +1404,7 @@ def test_risk_snapshot_is_unavailable_when_any_account_read_fails() -> None:
         runtime.risk_snapshot()
 
 
-def test_risk_snapshot_retains_failed_router_cleanup_and_retries_it() -> None:
+def test_risk_snapshot_retains_failed_router_cleanup_and_retries_it(*, backend_lease_factory) -> None:
     private_account_id = "private-risk-account-6721"
     private_detail = "broker loop close exposed private credentials"
     accounts = [_account(private_account_id)]
@@ -1425,7 +1427,7 @@ def test_risk_snapshot_retains_failed_router_cleanup_and_retries_it() -> None:
             selected,
             actor_id,
             risk_by_account=readings,
-            close_results=close_results,
+            close_results=close_results, backend_lease_proof=backend_lease_factory()
         )
         owners.append(owner)
         return owner
@@ -1454,7 +1456,7 @@ def test_risk_snapshot_retains_failed_router_cleanup_and_retries_it() -> None:
     assert runtime.status()["lifecycle"] == "idle"
 
 
-def test_kill_all_waits_for_in_flight_delta_and_blocks_callbacks_after_flatten() -> None:
+def test_kill_all_waits_for_in_flight_delta_and_blocks_callbacks_after_flatten(*, backend_lease_factory) -> None:
     accounts = [_account("master", is_master=True), _account("target")]
     watcher = _FakeWatcher(accounts[0])
     admission_entered = threading.Event()
@@ -1477,8 +1479,9 @@ def test_kill_all_waits_for_in_flight_delta_and_blocks_callbacks_after_flatten()
         owner: _FakeRouterOwner
         if not owners:
             owner = _BlockingMirrorOwner(selected, actor_id)
+            owner.router.backend_lease_proof = backend_lease_factory()
         else:
-            owner = _FakeRouterOwner(selected, actor_id)
+            owner = _FakeRouterOwner(selected, actor_id, backend_lease_proof=backend_lease_factory())
         owners.append(owner)
         return owner
 
@@ -1558,12 +1561,12 @@ def test_kill_all_waits_for_in_flight_delta_and_blocks_callbacks_after_flatten()
     assert owners[0].router.calls == [("openalgo", "target", 2)]
 
 
-def test_kill_all_deactivates_the_mirror_when_quiesce_refuses() -> None:
+def test_kill_all_deactivates_the_mirror_when_quiesce_refuses(*, backend_lease_factory) -> None:
     accounts = [_account("master", is_master=True), _account("target")]
     runtime = DittoRuntime(
         account_provider=lambda: accounts,
         watcher_factory=lambda _account: _FakeWatcher(accounts[0]),
-        router_owner_factory=lambda selected, actor: _FakeRouterOwner(selected, actor),
+        router_owner_factory=lambda selected, actor: _FakeRouterOwner(selected, actor, backend_lease_proof=backend_lease_factory()),
     )
 
     def _refuse(*, timeout: float) -> dict[str, Any]:
@@ -1583,7 +1586,7 @@ def test_kill_all_deactivates_the_mirror_when_quiesce_refuses() -> None:
     assert runtime._active is False  # noqa: SLF001
 
 
-def test_kill_all_includes_disabled_accounts_and_reports_partial_outcome() -> None:
+def test_kill_all_includes_disabled_accounts_and_reports_partial_outcome(*, backend_lease_factory) -> None:
     accounts = [_account("one"), _account("two", enabled=False), _account("three")]
     owners: list[_FakeRouterOwner] = []
 
@@ -1591,7 +1594,7 @@ def test_kill_all_includes_disabled_accounts_and_reports_partial_outcome() -> No
         owner = _FakeRouterOwner(
             selected,
             actor_id,
-            failed_kill_accounts={"two"},
+            failed_kill_accounts={"two"}, backend_lease_proof=backend_lease_factory()
         )
         owners.append(owner)
         return owner
@@ -1619,7 +1622,7 @@ def test_kill_all_includes_disabled_accounts_and_reports_partial_outcome() -> No
     assert owners[0].closed is True
 
 
-def test_kill_all_reports_incomplete_until_retained_router_cleanup_succeeds() -> None:
+def test_kill_all_reports_incomplete_until_retained_router_cleanup_succeeds(*, backend_lease_factory) -> None:
     accounts = [_account("one")]
     owners: list[_FakeRouterOwner] = []
 
@@ -1627,7 +1630,7 @@ def test_kill_all_reports_incomplete_until_retained_router_cleanup_succeeds() ->
         owner = _FakeRouterOwner(
             selected,
             actor_id,
-            close_results=[False, True] if not owners else None,
+            close_results=[False, True] if not owners else None, backend_lease_proof=backend_lease_factory()
         )
         owners.append(owner)
         return owner

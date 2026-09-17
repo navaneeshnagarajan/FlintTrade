@@ -31,6 +31,7 @@ function envelope(data: unknown, status = 200): Response {
 }
 
 let fetchSpy: MockInstance<typeof globalThis.fetch>;
+const actionKey = "00000000-0000-4000-8000-000000000001";
 
 beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -132,7 +133,7 @@ describe("ftApi.native envelope unwrapping", () => {
       adapter_id: "dhan",
       account_id: "A1",
       credentials: { access_token: "t" },
-    });
+    }, actionKey);
     expect(r.connected).toBe(true);
     expect(r.login).toBe("ok");
   });
@@ -162,7 +163,7 @@ describe("ftApi.native envelope unwrapping", () => {
 
   it("setPrimaryNativeAccount posts to the selector-scoped primary route", async () => {
     fetchSpy.mockResolvedValueOnce(envelope({ account: { adapter_id: "upstox", account_id: "U1" } }));
-    await setPrimaryNativeAccount("upstox", "U1");
+    await setPrimaryNativeAccount("upstox", "U1", actionKey);
     expect(fetchSpy).toHaveBeenCalledWith(
       expect.stringContaining("/api/v1/native/accounts/upstox/U1/set-primary"),
       expect.objectContaining({ method: "POST" }),
@@ -183,20 +184,20 @@ describe("ftApi.native envelope unwrapping", () => {
       account_id: "U1",
       api_key: "K",
       api_secret: "S",
-    });
+    }, actionKey);
     expect(r.auth_url).toContain("upstox.com");
     expect(r.postback_uri).toBe("http://postback");
   });
 
   it("reloginNativeAccount resolves a live session from {data:{session}}", async () => {
     fetchSpy.mockResolvedValueOnce(envelope({ login: "ok", session: { has_session: true, expires_at: 1, read_only: true } }));
-    const s = await reloginNativeAccount("dhan", "A1");
+    const s = await reloginNativeAccount("dhan", "A1", undefined, actionKey);
     expect(s.has_session).toBe(true);
     expect(s.read_only).toBe(true);
   });
 
   it("reloginNativeAccount throws when the session did not establish", async () => {
     fetchSpy.mockResolvedValueOnce(envelope({ login: "login-failed", session: { has_session: false } }));
-    await expect(reloginNativeAccount("dhan", "A1")).rejects.toThrow(/fresh credentials/i);
+    await expect(reloginNativeAccount("dhan", "A1", undefined, actionKey)).rejects.toThrow(/fresh credentials/i);
   });
 });

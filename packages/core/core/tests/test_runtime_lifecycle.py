@@ -17,12 +17,14 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def _runtime_app() -> object:
+def _runtime_app(backend_lease_proof=None) -> object:
     """Build the lifecycle shell without running the heavyweight constructor."""
     from flinttrade_core.app import FlintTradeApp
     from flinttrade_gateway.registry import create_owned_registry
 
     app = FlintTradeApp.__new__(FlintTradeApp)
+    app._backend_lease_proof = backend_lease_proof
+    app._initialise_runtime = lambda: None
     app.safety = MagicMock()
     app.safety_config_ready = True
     app.scheduler = MagicMock(stop_all=AsyncMock())
@@ -109,6 +111,7 @@ def test_owned_schedulers_start_under_a_fail_closed_calendar() -> None:
 async def test_stop_during_holiday_load_prevents_startup_from_resuming(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    backend_lease_factory,
 ) -> None:
     """A stop that wins an await boundary must own the rest of the lifecycle."""
     import flinttrade_core.app as app_module
@@ -130,6 +133,7 @@ async def test_stop_during_holiday_load_prevents_startup_from_resuming(
     flask_app.config["RUNTIME_ACCEPTING_REQUESTS"] = True
 
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    app._backend_lease_proof = backend_lease_factory()
     monkeypatch.setattr(app_module, "create_flask_app", lambda **_kwargs: flask_app)
     monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
@@ -755,6 +759,7 @@ async def test_agent_shutdown_failure_preserves_dependencies_for_retry(
 async def test_concurrent_start_is_rejected_before_a_second_flask_generation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    backend_lease_factory,
 ) -> None:
     import flinttrade_core.app as app_module
 
@@ -780,6 +785,7 @@ async def test_concurrent_start_is_rejected_before_a_second_flask_generation(
     runtime.cron.holiday_year = None
     runtime.cron.load_holidays = load_holidays
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    runtime._backend_lease_proof = backend_lease_factory()
     monkeypatch.setattr(app_module, "create_flask_app", create_app)
     monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
@@ -807,6 +813,7 @@ async def test_concurrent_start_is_rejected_before_a_second_flask_generation(
 async def test_a_rejected_duplicate_start_never_rolls_back_the_running_runtime(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    backend_lease_factory,
 ) -> None:
     """A duplicate start acquired nothing, so it must not tear the live runtime down.
 
@@ -829,6 +836,7 @@ async def test_a_rejected_duplicate_start_never_rolls_back_the_running_runtime(
 
     runtime.cron.load_holidays = load_holidays
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    runtime._backend_lease_proof = backend_lease_factory()
     monkeypatch.setattr(app_module, "create_flask_app", lambda **_kwargs: Flask("duplicate-start"))
     monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
@@ -924,6 +932,7 @@ async def test_tick_storage_finalisation_does_not_use_the_default_executor(
 async def test_start_injects_and_starts_shared_strategy_cron_scheduler(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    backend_lease_factory,
 ) -> None:
     """Strategy schedules use the same live calendar owner as the app runtime."""
     import flinttrade_core.app as app_module
@@ -945,6 +954,7 @@ async def test_start_injects_and_starts_shared_strategy_cron_scheduler(
     app.strategy_cron_scheduler.start.side_effect = start_strategy_cron
     app.cron.start.side_effect = app._stop_event.set
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    app._backend_lease_proof = backend_lease_factory()
     monkeypatch.setattr(app_module, "create_flask_app", create_app)
     monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
@@ -963,6 +973,7 @@ async def test_start_injects_and_starts_shared_strategy_cron_scheduler(
 async def test_failed_initial_calendar_load_does_not_replace_the_calendar(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    backend_lease_factory,
 ) -> None:
     """An unauthenticated holiday response is not an authoritative empty year."""
     import flinttrade_core.app as app_module
@@ -977,6 +988,7 @@ async def test_failed_initial_calendar_load_does_not_replace_the_calendar(
     flask_app = Flask("failed-calendar-load")
 
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    app._backend_lease_proof = backend_lease_factory()
     monkeypatch.setattr(app_module, "create_flask_app", lambda **_kwargs: flask_app)
     monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
@@ -1354,6 +1366,7 @@ async def test_shutdown_stops_managed_local_ai_before_another_quiesce_owner_can_
 async def test_start_applies_cron_holidays_to_time_scheduler(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    backend_lease_factory,
 ) -> None:
     """The market-hours owner receives the calendar fetched at startup."""
     import flinttrade_core.app as app_module
@@ -1390,6 +1403,7 @@ async def test_start_applies_cron_holidays_to_time_scheduler(
 
     app.time_scheduler.set_holidays = MagicMock(side_effect=apply_holidays)
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    app._backend_lease_proof = backend_lease_factory()
     monkeypatch.setattr(app_module, "create_flask_app", lambda **_kwargs: flask_app)
     monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
@@ -1594,11 +1608,12 @@ async def test_shutdown_deadline_retains_cancelled_task_until_ordinary_retry(
 @pytest.mark.asyncio
 async def test_full_app_startup_failure_after_smart_admission_rolls_back_owned_dependencies(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     import flinttrade_core.app as app_module
     import flinttrade_core.smart_order_routes as smart_order_routes
 
-    runtime = _runtime_app()
+    runtime = _runtime_app(backend_lease_proof)
     events: list[str] = []
 
     monkeypatch.setattr(
@@ -1738,6 +1753,7 @@ async def test_sync_root_stop_finishing_at_the_deadline_remains_unproved(
 async def test_full_app_startup_stops_local_ai_before_reverse_rolling_back_other_owners(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    backend_lease_factory,
 ) -> None:
     import flinttrade_core.app as app_module
     import flinttrade_core.local_ai_routes as local_ai_routes
@@ -1795,6 +1811,7 @@ async def test_full_app_startup_stops_local_ai_before_reverse_rolling_back_other
     recorder = Recorder()
     checkpoint_owner = CheckpointOwner()
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    runtime._backend_lease_proof = backend_lease_factory()
     monkeypatch.setattr(app_module, "create_flask_app", lambda **_kwargs: flask_app)
     monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "_bind_runtime_emergency_dispatcher", lambda *_args: None)
@@ -2146,6 +2163,7 @@ def test_flask_server_owner_does_not_claim_stuck_waitress_workers_are_stopped() 
 
 def test_wsgi_post_factory_failure_cleans_runtime_before_releasing_lease(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     import atexit
 
@@ -2154,13 +2172,13 @@ def test_wsgi_post_factory_failure_cleans_runtime_before_releasing_lease(
 
     events: list[str] = []
     flask_app = Flask("wsgi-post-factory-failure")
-    lease = MagicMock()
+    lease = MagicMock(proof=backend_lease_proof)
     monkeypatch.setattr(app_module, "_APP_CACHE", None)
     monkeypatch.setattr(app_module, "_APP_CACHE_PID", None)
     monkeypatch.setattr(app_module, "_WSGI_BACKEND_LEASE", None)
     monkeypatch.setattr(app_module, "_WSGI_STARTUP_RECOVERY", None, raising=False)
     monkeypatch.setattr(app_module, "acquire_backend_instance_lease", lambda: lease)
-    monkeypatch.setattr(app_module, "create_flask_app", lambda: flask_app)
+    monkeypatch.setattr(app_module, "create_flask_app", lambda **kwargs: flask_app)
     monkeypatch.setattr(
         local_ai_routes,
         "start_configured_local_ai_runtime",
@@ -2211,6 +2229,7 @@ def test_wsgi_post_factory_failure_cleans_runtime_before_releasing_lease(
 
 def test_wsgi_post_factory_cleanup_failure_retains_exact_recovery_authority(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_proof,
 ) -> None:
     import atexit
 
@@ -2219,14 +2238,14 @@ def test_wsgi_post_factory_cleanup_failure_retains_exact_recovery_authority(
 
     events: list[str] = []
     flask_app = Flask("wsgi-post-factory-recovery")
-    lease = MagicMock()
+    lease = MagicMock(proof=backend_lease_proof)
     ditto_results = iter((False, True))
     monkeypatch.setattr(app_module, "_APP_CACHE", None)
     monkeypatch.setattr(app_module, "_APP_CACHE_PID", None)
     monkeypatch.setattr(app_module, "_WSGI_BACKEND_LEASE", None)
     monkeypatch.setattr(app_module, "_WSGI_STARTUP_RECOVERY", None, raising=False)
     monkeypatch.setattr(app_module, "acquire_backend_instance_lease", lambda: lease)
-    monkeypatch.setattr(app_module, "create_flask_app", lambda: flask_app)
+    monkeypatch.setattr(app_module, "create_flask_app", lambda **kwargs: flask_app)
     monkeypatch.setattr(local_ai_routes, "start_configured_local_ai_runtime", lambda _app: True)
     monkeypatch.setattr(
         local_ai_routes,

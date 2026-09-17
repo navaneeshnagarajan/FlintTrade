@@ -62,6 +62,78 @@ def entry_fixture() -> ModuleType:
 
 
 @pytest.fixture
+def guardian_proof_transport(monkeypatch, tmp_path):
+    """Real local proof with a deliberately injected no-fork transport seam."""
+    from flinttrade_core import backend_instance
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path / "workspace"))
+    lease = backend_instance.acquire_backend_instance_lease()
+
+    def prepare(owner):
+        assert backend_instance.require_backend_lease_proof(owner.proof) is lease.proof
+        return SimpleNamespace(claim=lambda: lease.proof)
+
+    monkeypatch.setattr(backend_instance, "prepare_backend_lease_handoff", prepare)
+    try:
+        yield lease.proof
+    finally:
+        monkeypatch.undo()
+        lease.release()
+
+
+def test_core_desktop_receives_validated_capability_not_guardian_boolean(entry, monkeypatch, tmp_path):
+    from flinttrade_core import backend_instance, desktop
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    lease = backend_instance.acquire_backend_instance_lease()
+    seen = []
+
+    def main(argv, *, shutdown_signal, backend_lease_proof):
+        seen.append(backend_instance.require_backend_lease_proof(backend_lease_proof))
+
+    monkeypatch.setattr(desktop, "main", main)
+    try:
+        entry._run_core_desktop([], shutdown_signal=entry._ShutdownCoordinator(), backend_lease_proof=lease.proof)
+        assert seen == [lease.proof]
+    finally:
+        lease.release()
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(os.name == "nt", reason="POSIX external guardian transport")
+def test_real_guardian_transfers_proof_and_retains_kernel_ownership(tmp_path, serial_posix_guardian):
+    script = textwrap.dedent(
+        f"""
+        import importlib.util, os
+        from flinttrade_core.backend_instance import (
+            acquire_backend_instance_lease, prepare_backend_lease_handoff,
+            require_backend_lease_proof, BackendInstanceAlreadyRunning,
+        )
+        os.environ["FLINTTRADE_WORKSPACE_DIR"] = {str(tmp_path)!r}
+        spec = importlib.util.spec_from_file_location("desktop_backend_entry", {str(ENTRY_SCRIPT)!r})
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        lease = acquire_backend_instance_lease()
+        handoff = prepare_backend_lease_handoff(lease)
+        assert mod._prepare_owned_process_tree(
+            cleanup_complete=lease.release, lease_handoff=handoff,
+        ) is not None
+        proof = handoff.claim()
+        require_backend_lease_proof(proof)
+        try:
+            acquire_backend_instance_lease()
+        except BackendInstanceAlreadyRunning:
+            print("PROVED_GUARDIAN_OWNERSHIP", flush=True)
+        else:
+            raise AssertionError("guardian released its kernel lease before backend exit")
+        """
+    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert "PROVED_GUARDIAN_OWNERSHIP" in result.stdout
+
+
+@pytest.fixture
 def serial_posix_guardian(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     """Serialise drills that inspect the machine-wide POSIX process table."""
     if os.name == "nt":
@@ -1394,11 +1466,13 @@ def test_source_guardian_acquires_lease_before_record_containment_and_backend_im
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    guardian_proof_transport,
 ) -> None:
     events: list[str] = []
     cleanup_callbacks: list[object] = []
 
     class Lease:
+        proof = guardian_proof_transport
         owner_pid = os.getpid()
 
         def release(self) -> None:
@@ -1442,6 +1516,7 @@ def test_source_guardian_acquires_lease_before_record_containment_and_backend_im
         publish_application_identity: object | None = None,
         *,
         cleanup_complete: object | None = None,
+        lease_handoff: object | None = None,
     ) -> object:
         events.append("prepare-containment")
         assert publish_application_identity is None
@@ -1456,7 +1531,7 @@ def test_source_guardian_acquires_lease_before_record_containment_and_backend_im
     monkeypatch.setattr(
         entry,
         "_run_core_desktop",
-        lambda argv, **kwargs: events.append(f"core:{argv}:{kwargs['guardian_owned_lease']}"),
+        lambda argv, **kwargs: events.append(f"core:{argv}:{bool(kwargs['backend_lease_proof'])}"),
     )
 
     assert entry.run_desktop_backend(["--port", "0"]) == 0
@@ -1490,13 +1565,14 @@ def test_source_guardian_acquires_lease_before_record_containment_and_backend_im
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("failure", ["return-none", "raise"])
+@pytest.mark.parametrize("failure", ["return-none", "raise", "handoff"])
 def test_source_guardian_containment_setup_failure_is_proved_finalisable_and_releases_lease(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     failure: str,
+    guardian_proof_transport,
 ) -> None:
     token = "a" * 64
     record = tmp_path / "desktop_backend.pid"
@@ -1504,6 +1580,7 @@ def test_source_guardian_containment_setup_failure_is_proved_finalisable_and_rel
     released: list[str] = []
 
     class Lease:
+        proof = guardian_proof_transport
         owner_pid = guardian_pid
 
         def release(self) -> None:
@@ -1526,7 +1603,16 @@ def test_source_guardian_containment_setup_failure_is_proved_finalisable_and_rel
         return None
 
     monkeypatch.setattr(entry, "_prepare_owned_process_tree", fail_containment)
-    if failure == "raise":
+    if failure == "handoff":
+        if os.name == "nt":
+            pytest.skip("Windows keeps same-process ownership without a fork hand-off")
+        from flinttrade_core import backend_instance
+
+        def fail_handoff(_lease):
+            raise OSError("injected containment failure")
+
+        monkeypatch.setattr(backend_instance, "prepare_backend_lease_handoff", fail_handoff)
+    if failure in {"raise", "handoff"}:
         with pytest.raises(OSError, match="injected containment failure"):
             entry.run_desktop_backend(["--port", "0"])
     else:
@@ -1619,10 +1705,12 @@ def test_source_guardian_lease_failure_exposes_only_the_exception_class(
 def test_stale_sys_frozen_cannot_bypass_source_guardian_parent_and_lease_checks(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
+    guardian_proof_transport,
 ) -> None:
     events: list[str] = []
 
     class Lease:
+        proof = guardian_proof_transport
         owner_pid = os.getpid()
 
         def release(self) -> None:
@@ -1662,7 +1750,7 @@ def test_stale_sys_frozen_cannot_bypass_source_guardian_parent_and_lease_checks(
     monkeypatch.setattr(
         entry,
         "_run_core_desktop",
-        lambda argv, **kwargs: events.append(f"core:{argv}:{kwargs['guardian_owned_lease']}"),
+        lambda argv, **kwargs: events.append(f"core:{argv}:{bool(kwargs['backend_lease_proof'])}"),
     )
 
     assert entry.run_desktop_backend(["--port", "0"]) == 0

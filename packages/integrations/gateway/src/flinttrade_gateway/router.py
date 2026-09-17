@@ -13,6 +13,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, ContextManager
 
+from flinttrade_core.backend_instance import BackendLeaseProof
 from flinttrade_core.exceptions import UnsupportedCapabilityError
 from flinttrade_engine.request_context import RequestContext, parse_selector
 from flinttrade_engine.safety import (
@@ -23,6 +24,7 @@ from flinttrade_engine.safety import (
     EmergencyWritePolicy,
     SafetyBypassError,
     SafetyContext,
+    require_backend_write_proof,
 )
 
 from .brokers._base import ROUTER_TOKEN as _ROUTER_TOKEN, AdapterSessionView, BrokerAdapter
@@ -425,7 +427,9 @@ class BrokerRouter:
         algo_tag_guard: Any | None = None,
         write_admission: Callable[[bool, str], ContextManager[None]] | None = None,
         lifecycle_store: Any | None = None,
+        backend_lease_proof: BackendLeaseProof | None = None,
     ) -> None:
+        self._backend_lease_proof = require_backend_write_proof(backend_lease_proof)
         self._adapters = adapters
         self._session_provider = session_provider
         # The HMAC secret now lives process-wide in flinttrade_engine.safety
@@ -477,9 +481,25 @@ class BrokerRouter:
     def _admit_write(self) -> None:
         """Admit one write unless this router generation was revoked."""
         with self._write_condition:
+            self._require_backend_proof()
             if self._writes_revoked:
                 raise SafetyBypassError("BrokerRouter generation has been revoked")
             self._admitted_writes += 1
+
+    def _require_backend_proof(self, safety_ctx: SafetyContext | None = None) -> BackendLeaseProof:
+        try:
+            proof = require_backend_write_proof(self._backend_lease_proof)
+        except SafetyBypassError:
+            self.revoke_and_drain(timeout=0)
+            raise
+        if safety_ctx is not None and safety_ctx.backend_incarnation != str(proof.incarnation):
+            raise SafetyBypassError("SafetyContext backend incarnation mismatch")
+        return proof
+
+    @property
+    def backend_lease_proof(self) -> BackendLeaseProof:
+        """The exact live owner supplied by app composition, never an adapter."""
+        return self._require_backend_proof()
 
     def _release_write(self) -> None:
         """Release one admitted write and wake drain waiters at zero."""
@@ -717,11 +737,14 @@ class BrokerRouter:
         external_callback: _AdapterInvokeCallback,
         emergency: bool,
         invoked: list[bool],
+        safety_ctx: SafetyContext,
     ) -> Callable[[], None]:
         """Build the exact-boundary callback shared by every gated write verb."""
         def callback() -> None:
+            self._require_backend_proof(safety_ctx)
             if external_callback is not None:
                 external_callback()
+            self._require_backend_proof(safety_ctx)
             if attempt_id is not None:
                 try:
                     self._lifecycle_store.mark_invoked(attempt_id)
@@ -734,6 +757,7 @@ class BrokerRouter:
                         "Emergency lifecycle invocation marker failed: %s",
                         type(exc).__name__,
                     )
+            self._require_backend_proof(safety_ctx)
             invoked[0] = True
 
         return callback
@@ -964,6 +988,7 @@ class BrokerRouter:
                     result = await _invoke_adapter(
                         self._adapters[adapter_id].place_order,
                         self._invocation_callback(
+                            safety_ctx=safety_ctx,
                             attempt_id=attempt_id,
                             external_callback=None,
                             emergency=False,
@@ -1047,6 +1072,7 @@ class BrokerRouter:
                     result = await _invoke_adapter(
                         self._adapters[adapter_id].modify_order,
                         self._invocation_callback(
+                            safety_ctx=safety_ctx,
                             attempt_id=attempt_id,
                             external_callback=None,
                             emergency=False,
@@ -1150,6 +1176,7 @@ class BrokerRouter:
                     result = await _invoke_adapter(
                         self._adapters[adapter_id].cancel_order,
                         self._invocation_callback(
+                            safety_ctx=safety_ctx,
                             attempt_id=attempt_id,
                             external_callback=on_adapter_invoke,
                             emergency=emergency_intent,
@@ -1266,6 +1293,7 @@ class BrokerRouter:
                         session,
                         signed_payload,
                         self._invocation_callback(
+                            safety_ctx=safety_ctx,
                             attempt_id=attempt_id,
                             external_callback=on_adapter_invoke,
                             emergency=emergency_intent,
@@ -1383,6 +1411,7 @@ class BrokerRouter:
         adapter_id: str,
         account_id: str,
     ) -> None:
+        self._require_backend_proof(safety_ctx)
         # 1. cryptographic + field-by-field verification against THIS order,
         #    mode, caller, actor, and resolved (adapter_id, account_id) selector
         #    (contract §8.0 S1/S10 + identity X7).

@@ -182,7 +182,7 @@ class AuthService:
             pass
         try:
             self._db.execute(
-                "ALTER TABLE account ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"
+                "ALTER TABLE account ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 1"
             )
         except sqlite3.OperationalError:
             pass

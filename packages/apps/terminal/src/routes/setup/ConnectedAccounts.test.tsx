@@ -58,10 +58,10 @@ describe("ConnectedAccounts", () => {
     expect(screen.queryByLabelText(/Set Upstox main as primary account/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText(/Reconnect Upstox main/i));
-    await waitFor(() => expect(mocks.reconnectBroker).toHaveBeenCalledWith(mocks.accounts[0]));
+    await waitFor(() => expect(mocks.reconnectBroker).toHaveBeenCalledWith(mocks.accounts[0], expect.any(String)));
 
     fireEvent.click(screen.getByLabelText(/Remove Upstox main/i));
-    await waitFor(() => expect(mocks.removeBroker).toHaveBeenCalledWith(mocks.accounts[0]));
+    await waitFor(() => expect(mocks.removeBroker).toHaveBeenCalledWith(mocks.accounts[0], expect.any(String)));
     expect(mocks.refetch).toHaveBeenCalledTimes(2);
   });
 
@@ -81,7 +81,7 @@ describe("ConnectedAccounts", () => {
 
     fireEvent.click(screen.getByLabelText(/Set Upstox main as primary account/i));
 
-    await waitFor(() => expect(mocks.setPrimaryBroker).toHaveBeenCalledWith(mocks.accounts[0]));
+    await waitFor(() => expect(mocks.setPrimaryBroker).toHaveBeenCalledWith(mocks.accounts[0], expect.any(String)));
     expect(mocks.refetch).toHaveBeenCalledTimes(1);
   });
 

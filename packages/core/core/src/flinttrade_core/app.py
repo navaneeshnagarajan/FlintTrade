@@ -91,7 +91,11 @@ from sentry_sdk.integrations.flask import FlaskIntegration  # noqa: E402
 from werkzeug.utils import safe_join as _safe_join  # noqa: E402
 
 from .backend_instance import (  # noqa: E402
+    BackendLeaseProof,
+    BackendLeaseUnavailable,
     acquire_backend_instance_lease,
+    initialise_backend_runtime,
+    require_backend_lease_proof,
     release_retained_backend_instance_lease,
     retain_backend_instance_lease,
 )
@@ -324,6 +328,56 @@ def _close_runtime_request_admission(app: Flask) -> Any:
         # must never reopen admission or prevent later teardown attempts.
         app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
     return tracker
+
+
+class _BackendLeaseRuntimeWatch:
+    """App-owned liveness relay; entrypoints own the controlled shutdown callback."""
+
+    def __init__(self, app: Flask, proof: BackendLeaseProof, on_revoked: Callable[[], None]) -> None:
+        self._proof = require_backend_lease_proof(proof)
+        self._app = app
+        self._on_revoked = on_revoked
+        self._stopped = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="backend-runtime-watch", daemon=True)
+
+    def start(self) -> None:
+        self._app.extensions["flinttrade.backend_lease_watch"] = self
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stopped.is_set():
+            if not self._proof.wait_revoked(0.05):
+                continue
+            if self._stopped.is_set():
+                return
+            self._app.config["BACKEND_LEASE_READY"] = False
+            self._app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
+            try:
+                router = self._app.config.get("BROKER_ROUTER")
+                if router is not None:
+                    router.revoke_and_drain(timeout=0.0)
+                _close_runtime_request_admission(self._app)
+            except Exception as exc:  # noqa: BLE001 - refusal must still reach lifecycle cleanup
+                logger.error("Backend lease admission retirement failed (%s)", type(exc).__name__)
+            try:
+                self._on_revoked()
+            except BaseException as exc:  # noqa: BLE001 - retain app-owned recovery state
+                logger.critical("Backend lease shutdown remains incomplete (%s)", type(exc).__name__)
+            return
+
+    def stop(self, *, timeout: float) -> bool:
+        """Disarm normal teardown; never join the callback's own watcher thread."""
+        self._stopped.set()
+        if self._thread is threading.current_thread():
+            return True
+        if self._thread.ident is not None:
+            self._thread.join(timeout=max(0.0, timeout))
+        return not self._thread.is_alive()
+
+
+def _stop_backend_lease_watch(app: Flask, *, timeout: float) -> bool:
+    watch = app.extensions.get("flinttrade.backend_lease_watch")
+    return watch is None or watch.stop(timeout=timeout)
 
 
 def _rag_auto_index_enabled() -> bool:
@@ -2357,6 +2411,7 @@ def _build_broker_router_from_dependencies(
     dependencies: _BrokerRuntimeDependencies,
     *,
     write_admission: Callable[[bool, str], ContextManager[None]] | None = None,
+    backend_lease_proof: BackendLeaseProof | None = None,
 ) -> Any:
     """Build only the gated write router from one prepared dependency record."""
     from flinttrade_engine.safety import SafetyGate  # noqa: PLC0415
@@ -2428,6 +2483,7 @@ def _build_broker_router_from_dependencies(
     return BrokerRouter(
         resolved_adapters,
         dependencies.session_provider,
+        backend_lease_proof=backend_lease_proof,
         consume_gate=gate.consume,
         config=config,
         rate_limiter=dependencies.rate_limiter,
@@ -2454,8 +2510,10 @@ def build_broker_router(
     workspace_path: Path | None = None,
     registry_publication_owner: RegistryPublicationOwner | None = None,
     credential_version_for: Callable | None = None,
+    backend_lease_proof: BackendLeaseProof | None = None,
 ) -> Any:
     """Construct a router through exactly one shared dependency preparation."""
+    require_backend_lease_proof(backend_lease_proof)
     dependencies = _prepare_broker_dependencies(
         registry,
         brokers_config,
@@ -2480,7 +2538,9 @@ def build_broker_router(
             on_adapters_activated(dict(dependencies.adapters))
         except Exception as exc:  # pragma: no cover - observability only
             logger.warning("Adapter activation sink failed (%s)", type(exc).__name__)
-    return _build_broker_router_from_dependencies(dependencies, write_admission=write_admission)
+    return _build_broker_router_from_dependencies(
+        dependencies, write_admission=write_admission, backend_lease_proof=backend_lease_proof,
+    )
 
 
 def _broker_router_drain_timeout(app: Flask) -> float:
@@ -2711,6 +2771,10 @@ def broker_reads_published_without_writes(
 
 
 def _broker_write_readiness(app: Flask) -> tuple[Any, Callable[[bool, str], ContextManager[None]]] | None:
+    try:
+        require_backend_lease_proof(app.config.get("BACKEND_LEASE_PROOF"))
+    except BackendLeaseUnavailable:
+        return None
     safety = app.config.get("SAFETY")
     write_admission = getattr(safety, "broker_write_admission", None)
     if (
@@ -2797,6 +2861,7 @@ def _configure_broker_writes(app: Flask, dependencies: _BrokerRuntimeDependencie
             router = _build_broker_router_from_dependencies(
                 dependencies,
                 write_admission=write_admission,
+                backend_lease_proof=app.config.get("BACKEND_LEASE_PROOF"),
             )
             reconcile_targets = _build_reconcile_targets_provider(
                 dependencies.registry,
@@ -3502,6 +3567,7 @@ def create_flask_app(
     service_connection_store: ServiceConnectionStore | None = None,
     broker_account_mutation_admission: MutationAdmission = require_broker_account_mutations,
     registry_publication_owner: RegistryPublicationOwner | None = None,
+    backend_lease_proof: BackendLeaseProof | None = None,
 ) -> Flask:
     """Create the Flask app with FlintTrade API routes.
 
@@ -3522,13 +3588,24 @@ def create_flask_app(
         service_provider_catalogue: Optional immutable static provider catalogue.
         service_connection_store: Optional preconstructed inert connection authority.
         broker_account_mutation_admission: Explicit dependency for isolated legacy tests; production denies mutations.
+        backend_lease_proof: Live process ownership required for broker runtime construction; omit for read-only setup.
 
     Returns:
         Flask application with all FlintTrade API endpoints registered.
     """
-    if registry is None and registry_publication_owner is None:
+    runtime_ready = backend_lease_proof is not None
+    if runtime_ready:
+        require_backend_lease_proof(backend_lease_proof)
+    elif any(value is not None for value in (
+        client, registry, registry_publication_owner, credential_store, scheduler, cron,
+        telegram, cron_strategy_scheduler, time_scheduler,
+    )):
+        raise BackendLeaseUnavailable
+    if runtime_ready and registry is None and registry_publication_owner is None:
         registry, registry_publication_owner = create_owned_registry(mutation_admission=broker_account_mutation_admission)
-    elif type(registry_publication_owner) is not RegistryPublicationOwner or not registry_publication_owner.owns(registry):
+    elif runtime_ready and (
+        type(registry_publication_owner) is not RegistryPublicationOwner or not registry_publication_owner.owns(registry)
+    ):
         from flinttrade_core.account_mutation_contracts import RegistrySessionUnavailable
         raise RegistrySessionUnavailable
 
@@ -3646,6 +3723,19 @@ def create_flask_app(
     # through CSP nonce injection. A second Flask static route could expose the
     # raw document with a nonce-bearing CSP header that blocks its scripts.
     app = Flask(__name__, static_folder=None)
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_proof
+    app.config["BACKEND_LEASE_READY"] = runtime_ready
+
+    def _guard_backend_broker_mutations() -> Any | None:
+        if request.method in {"GET", "HEAD", "OPTIONS"}:
+            return None
+        if request.path in {"/v1/config/openalgo", "/v1/test-connection"}:
+            try:
+                require_backend_lease_proof(backend_lease_proof)
+            except BackendLeaseUnavailable:
+                app.config["BACKEND_LEASE_READY"] = False
+                return jsonify({"error": "backend_lease_unavailable"}), 503
+        return None
     app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = broker_account_mutation_admission
     if service_provider_catalogue is None:
         from flinttrade_ai.service_profiles import ai_service_descriptors  # noqa: PLC0415
@@ -4049,7 +4139,7 @@ def create_flask_app(
         app.config["DAILY_PNL_STATE_STORE"] = daily_pnl_state_store
         app.config["DAILY_PNL_STATE_READY"] = True
 
-    if credential_store is None:
+    if runtime_ready and credential_store is None:
         flinttrade_dir = _workspace_dir()
         master_password = _get_master_password()
         credential_store = CredentialStore(flinttrade_dir / "credentials.db", master_password)
@@ -4085,11 +4175,12 @@ def create_flask_app(
     # authenticate each ditto:openalgo row as a bridge session. Optional: a
     # missing vault must never block startup (Ditto routes 503 without it).
     try:
-        app.config["DITTO_CREDENTIAL_STORE"] = _open_ditto_credential_store()
+        app.config["DITTO_CREDENTIAL_STORE"] = _open_ditto_credential_store() if runtime_ready else None
     except Exception as exc:  # noqa: BLE001 - Ditto is optional
         logger.warning("Ditto credential vault unavailable (%s)", type(exc).__name__)
         app.config["DITTO_CREDENTIAL_STORE"] = None
-    _configure_ditto_runtime(app, safety)
+    if runtime_ready:
+        _configure_ditto_runtime(app, safety)
 
     # --- Broker router (selector-bound principal; contract §13 / §11.4) ---
     # Best-effort like the other startup steps: a malformed brokers block must
@@ -4111,13 +4202,17 @@ def create_flask_app(
                 "Emergency dispatcher failed startup binding (%s); live routing remains disabled",
                 type(exc).__name__,
             )
-    configure_broker_router(app, registry, credential_store, client)
+    if runtime_ready:
+        configure_broker_router(app, registry, credential_store, client)
+    else:
+        app.config["BROKER_ROUTER"] = None
     # Re-establish native sessions for any selector whose credentials are
     # already in the vault (a restart after the operator connected a broker
     # earlier). First boot with an empty vault is a no-op. Best-effort — a
     # broker whose token expired overnight is marked as needing re-login while
     # transient service-window/network failures keep the session.
-    _reestablish_native_sessions(app, verify=True)
+    if runtime_ready:
+        _reestablish_native_sessions(app, verify=True)
 
     # Store RAG instance
     app.config["RAG"] = rag
@@ -4149,7 +4244,19 @@ def create_flask_app(
     # unstarted; _run_flask_server starts it on the serve path only.
     from .native_rotation import configure_session_rotation  # noqa: PLC0415
 
-    rotation_bp = configure_session_rotation(app)
+    if runtime_ready:
+        rotation_bp = configure_session_rotation(app)
+    else:
+        from flinttrade_gateway.rotation_routes import create_rotation_blueprint  # noqa: PLC0415
+
+        app.config["CREDENTIALS_ROTATOR"] = None
+        app.config["ROTATION_SCHEDULER"] = None
+        rotation_bp = create_rotation_blueprint(None)
+
+        @rotation_bp.before_request
+        def _rotation_runtime_unavailable() -> Any:
+            return {"status": "error", "error": "backend_lease_unavailable"}, 503
+
     if rotation_bp is not None:
         app.register_blueprint(rotation_bp)
 
@@ -4378,7 +4485,7 @@ def create_flask_app(
     # only place a running backend resolves the strategies directory, so
     # open-coding ``_workspace_dir() / "strategies"`` (as this call used to)
     # left the migration unreachable in production.
-    if "STRATEGY_RUNNER" not in app.config:
+    if runtime_ready and "STRATEGY_RUNNER" not in app.config:
         try:
             from flinttrade_engine.strategy_hot_reload import default_strategies_dir  # noqa: PLC0415
             from flinttrade_engine.strategy_runner import UserStrategyRunner  # noqa: PLC0415
@@ -4392,7 +4499,7 @@ def create_flask_app(
     resolved_time_scheduler = time_scheduler
     if cron_strategy_scheduler is not None:
         resolved_time_scheduler = getattr(cron_strategy_scheduler, "time_scheduler", None) or resolved_time_scheduler
-    if resolved_time_scheduler is None:
+    if runtime_ready and resolved_time_scheduler is None:
         try:
             from flinttrade_engine.scheduler import TimeScheduler  # noqa: PLC0415
 
@@ -4402,7 +4509,7 @@ def create_flask_app(
                 "Time scheduler wiring failed (%s); market-aware work will 503",
                 type(exc).__name__,
             )
-    if "CRON_SCHEDULER" not in app.config:
+    if runtime_ready and "CRON_SCHEDULER" not in app.config:
         try:
             from flinttrade_engine.scheduler import CronStrategyScheduler  # noqa: PLC0415
 
@@ -6015,6 +6122,8 @@ def create_flask_app(
             # Otherwise serve index.html (SPA client-side routing) with the CSP nonce.
             return _serve_index_with_nonce()
 
+    # Preserve the existing auth/content-type/account-cutover precedence.
+    app.before_request(_guard_backend_broker_mutations)
     return app
 
 
@@ -6368,6 +6477,23 @@ class FlintTradeApp:
 
     def __init__(self) -> None:
         self.version = _read_version()
+        self._backend_lease_proof: BackendLeaseProof | None = None
+        self._runtime_constructed = False
+        self.client = None
+        self.registry = None
+        self.credential_store = None
+        self.scheduler = None
+        self.cron = None
+        self.telegram = None
+        self.audit = None
+        self._initialise_lifecycle_state()
+
+    def _initialise_runtime(self) -> None:
+        """Construct shared owners only inside the verified runtime boundary."""
+        require_backend_lease_proof(self._backend_lease_proof)
+        if self._runtime_constructed:
+            raise RuntimeError("backend runtime already constructed")
+        self._runtime_constructed = True
 
         # Audit logger first — must be available before anything else
         self.audit = AuditLogger()
@@ -6453,6 +6579,8 @@ class FlintTradeApp:
         # would add 2-5 s to startup time even when the AI features are unused.
         self.rag = _initialise_rag_runtime(flinttrade_dir)
 
+    def _initialise_lifecycle_state(self) -> None:
+        """Allocate inert lifecycle bookkeeping without opening authorities."""
         # Live tick capture (opt-in via FLINTTRADE_TICK_CAPTURE) — wired in start().
         self._tick_recorder: Any | None = None
         self._tick_recorder_task: Any | None = None
@@ -6738,6 +6866,8 @@ class FlintTradeApp:
             return stopped
 
         if flask_app is not None:
+            if not _stop_backend_lease_watch(flask_app, timeout=deadline.remaining()):
+                return False
             tracker = flask_app.config.get("RUNTIME_REQUEST_TRACKER")
             wait_for_idle = getattr(tracker, "wait_for_idle", None)
             if callable(wait_for_idle) and not await stop_sync(
@@ -6788,7 +6918,7 @@ class FlintTradeApp:
             ):
                 return False
 
-        if not await stop_async(
+        if self.scheduler is not None and not await stop_async(
             "startup-scheduler",
             "scheduler",
             self.scheduler.stop_all,
@@ -6814,7 +6944,17 @@ class FlintTradeApp:
             ):
                 return False
 
+        # The vault is acquired before contracts, registry and RAG. A failure
+        # in any later constructor still owns its hardened directory handles.
+        credential_store = getattr(self, "credential_store", None)
+        if credential_store is not None and not await stop_sync(
+            "startup-credential-store", "credential store", credential_store.close,
+        ):
+            return False
+
         async def close_openalgo_client() -> None:
+            if self.client is None:
+                return
             if isinstance(self.client, OpenAlgoClient):
                 await self.client.shutdown()
                 return
@@ -6825,7 +6965,7 @@ class FlintTradeApp:
             "OpenAlgo client",
             close_openalgo_client,
         )
-        audit_closed = await stop_sync(
+        audit_closed = self.audit is None or await stop_sync(
             "startup-audit-logger",
             "audit logger",
             self.audit.close,
@@ -6917,6 +7057,7 @@ class FlintTradeApp:
         ledger = _AcquiredOwnerLedger()
         self._startup_owner_ledger = ledger
         try:
+            initialise_backend_runtime(self._backend_lease_proof, self._initialise_runtime)
             await self._start_owned(ledger)
         except BaseException:
             if self._stop_started:
@@ -6968,6 +7109,7 @@ class FlintTradeApp:
 
         # Start FlintTrade API server (Flask, configurable loopback port).
         flask_app = create_flask_app(
+            backend_lease_proof=self._backend_lease_proof,
             safety=self.safety,
             safety_config_ready=self.safety_config_ready,
             scheduler=self.scheduler,
@@ -6984,6 +7126,13 @@ class FlintTradeApp:
             telegram=self.telegram,
         )
         self._flask_app = flask_app
+        def request_lease_shutdown() -> None:
+            def schedule_stop() -> None:
+                task = runtime_loop.create_task(self.stop())
+                self._shutdown_request_task = task
+            runtime_loop.call_soon_threadsafe(schedule_stop)
+
+        _BackendLeaseRuntimeWatch(flask_app, self._backend_lease_proof, request_lease_shutdown).start()
         from .local_ai_routes import (  # noqa: PLC0415
             shutdown_local_ai_runtime,
             start_configured_local_ai_runtime,
@@ -7569,6 +7718,8 @@ class FlintTradeApp:
         deadline = getattr(self, "_active_shutdown_deadline", None)
         if deadline is None:
             deadline = _LifecycleDeadline.after(60.0)
+        if flask_app is not None and not _stop_backend_lease_watch(flask_app, timeout=deadline.remaining()):
+            raise RuntimeError("backend lease watcher did not stop")
         if getattr(self, "_startup_recovery_pending", False):
             if not await self._recover_startup_rollback(deadline):
                 raise RuntimeError("shutdown encountered errors: startup rollback incomplete")
@@ -8141,6 +8292,7 @@ class FlintTradeApp:
         """Run the application while owning this workspace's backend lease."""
         backend_lease = acquire_backend_instance_lease()
         try:
+            self._backend_lease_proof = backend_lease.proof
             self._run_owned()
         except BaseException:
             if self._requires_runtime_recovery():
@@ -8311,7 +8463,12 @@ class _ProcessBoundWSGIApp:
         return self._inner(environ, start_response)
 
 
-def _get_wsgi_app() -> Flask:
+def _request_wsgi_shutdown() -> None:
+    """Ask the WSGI host to terminate this worker, after app-owned cleanup."""
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+def _get_wsgi_app(*, shutdown_callback: Callable[[], None] | None = None) -> Flask:
     """Lazily construct (and cache) the WSGI Flask app."""
     global _APP_CACHE, _APP_CACHE_PID, _WSGI_BACKEND_LEASE
     current_pid = os.getpid()
@@ -8330,7 +8487,10 @@ def _get_wsgi_app() -> Flask:
                     recovery.retry_recovery()
                 backend_lease = acquire_backend_instance_lease()
                 try:
-                    candidate = create_flask_app()
+                    candidate = initialise_backend_runtime(
+                        backend_lease.proof,
+                        lambda: create_flask_app(backend_lease_proof=backend_lease.proof),
+                    )
                 except BaseException:
                     backend_lease.release()
                     raise
@@ -8348,6 +8508,19 @@ def _get_wsgi_app() -> Flask:
                         owner_pid=current_pid,
                         backend_lease=backend_lease,
                     )
+                    from .desktop import _DesktopShutdownRecoveryOwner  # noqa: PLC0415
+
+                    def stop_revoked_worker() -> None:
+                        recovery_owner = candidate.extensions.get("flinttrade.wsgi_shutdown_owner")
+                        if recovery_owner is None:
+                            recovery_owner = _DesktopShutdownRecoveryOwner(candidate)
+                            candidate.extensions["flinttrade.wsgi_shutdown_owner"] = recovery_owner
+                        recovery_owner.release(deadline=time.monotonic() + 60.0)
+                        (shutdown_callback or _request_wsgi_shutdown)()
+
+                    watch = _BackendLeaseRuntimeWatch(candidate, backend_lease.proof, stop_revoked_worker)
+                    watch.start()
+                    atexit.register(watch.stop, timeout=1.0)
                 except BaseException:
                     recovery = _WSGIStartupRecovery(candidate, backend_lease)
                     recovery.retain()

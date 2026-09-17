@@ -531,7 +531,7 @@ def test_facade_funds_uses_v3_sdk_method_without_v2_version_argument():
     assert facade._user.calls == 1
 
 
-def _run_emergency_dispatch(mock, **dispatcher_kwargs):
+def _run_emergency_dispatch(mock, *, backend_lease_factory, **dispatcher_kwargs):
     import asyncio
     from datetime import datetime, timezone
 
@@ -565,7 +565,7 @@ def _run_emergency_dispatch(mock, **dispatcher_kwargs):
     router = BrokerRouter(
         {"upstox": adapter},
         lambda _request_ctx, _adapter_id, _account_id: session,
-        consume_gate=consume,
+        consume_gate=consume, backend_lease_proof=backend_lease_factory()
     )
     request_ctx = RequestContext(
         jti="upstox-planned-emergency",
@@ -1097,7 +1097,7 @@ async def test_emergency_planner_rejects_malformed_success_snapshot(malformed_so
         },
     ],
 )
-def test_emergency_dispatcher_marks_invalid_upstox_sweep_failed(response):
+def test_emergency_dispatcher_marks_invalid_upstox_sweep_failed(response, *, backend_lease_factory):
     import asyncio
     from datetime import datetime, timezone
 
@@ -1151,7 +1151,7 @@ def test_emergency_dispatcher_marks_invalid_upstox_sweep_failed(response):
     router = BrokerRouter(
         {"upstox": adapter},
         lambda _request_ctx, _adapter_id, _account_id: session,
-        consume_gate=safety_gate.consume,
+        consume_gate=safety_gate.consume, backend_lease_proof=backend_lease_factory()
     )
     request_ctx = RequestContext(
         jti="emergency-jti",
@@ -1184,7 +1184,7 @@ def test_emergency_dispatcher_marks_invalid_upstox_sweep_failed(response):
     ]
 
 
-def test_emergency_cancel_enumerates_over_ten_and_gates_each_reducing_chunk():
+def test_emergency_cancel_enumerates_over_ten_and_gates_each_reducing_chunk(*, backend_lease_factory):
     class OverLimitOrdersUpstox(MockUpstox):
         def __init__(self):
             super().__init__()
@@ -1231,7 +1231,7 @@ def test_emergency_cancel_enumerates_over_ten_and_gates_each_reducing_chunk():
             }
 
     mock = OverLimitOrdersUpstox()
-    result, consumed_gate_ids = _run_emergency_dispatch(mock)
+    result, consumed_gate_ids = _run_emergency_dispatch(mock, backend_lease_factory=backend_lease_factory)
 
     mutations = [call for call in mock.calls if call[0] in {"cancel", "cancel_multi", "exit_positions", "place"}]
     assert result.complete
@@ -1243,7 +1243,7 @@ def test_emergency_cancel_enumerates_over_ten_and_gates_each_reducing_chunk():
     assert len(consumed_gate_ids) == len(set(consumed_gate_ids)) == len(mutations)
 
 
-def test_emergency_exit_gates_each_of_over_ten_positions_exactly():
+def test_emergency_exit_gates_each_of_over_ten_positions_exactly(*, backend_lease_factory):
     class OverLimitPositionsUpstox(MockUpstox):
         def __init__(self):
             super().__init__()
@@ -1294,7 +1294,7 @@ def test_emergency_exit_gates_each_of_over_ten_positions_exactly():
             raise AssertionError("every Upstox emergency exit must be exact and tagged")
 
     mock = OverLimitPositionsUpstox()
-    result, consumed_gate_ids = _run_emergency_dispatch(mock)
+    result, consumed_gate_ids = _run_emergency_dispatch(mock, backend_lease_factory=backend_lease_factory)
 
     mutations = [call for call in mock.calls if call[0] in {"place", "exit_positions"}]
     assert result.complete
@@ -1302,7 +1302,7 @@ def test_emergency_exit_gates_each_of_over_ten_positions_exactly():
     assert len(consumed_gate_ids) == len(set(consumed_gate_ids)) == len(mutations)
 
 
-def test_emergency_delivery_eq_uses_one_strictly_reducing_gated_opposite_order():
+def test_emergency_delivery_eq_uses_one_strictly_reducing_gated_opposite_order(*, backend_lease_factory):
     class DeliveryPositionUpstox(MockUpstox):
         def __init__(self):
             super().__init__()
@@ -1356,7 +1356,7 @@ def test_emergency_delivery_eq_uses_one_strictly_reducing_gated_opposite_order()
             raise AssertionError("Delivery EQ must not use Upstox exit-all")
 
     mock = DeliveryPositionUpstox()
-    result, consumed_gate_ids = _run_emergency_dispatch(mock)
+    result, consumed_gate_ids = _run_emergency_dispatch(mock, backend_lease_factory=backend_lease_factory)
 
     mutations = [call for call in mock.calls if call[0] == "place"]
     assert result.complete
@@ -1364,7 +1364,7 @@ def test_emergency_delivery_eq_uses_one_strictly_reducing_gated_opposite_order()
     assert len(consumed_gate_ids) == len(set(consumed_gate_ids)) == 1
 
 
-def test_emergency_readback_restarts_quiet_window_when_order_reopens():
+def test_emergency_readback_restarts_quiet_window_when_order_reopens(*, backend_lease_factory):
     class ReopeningOrderUpstox(MockUpstox):
         def __init__(self):
             super().__init__()
@@ -1414,7 +1414,7 @@ def test_emergency_readback_restarts_quiet_window_when_order_reopens():
             raise AssertionError("No position mutation is needed")
 
     mock = ReopeningOrderUpstox()
-    result, consumed_gate_ids = _run_emergency_dispatch(mock)
+    result, consumed_gate_ids = _run_emergency_dispatch(mock, backend_lease_factory=backend_lease_factory)
 
     cancel_calls = [call for call in mock.calls if call[0] == "cancel_multi"]
     assert result.complete
@@ -1426,7 +1426,7 @@ def test_emergency_readback_restarts_quiet_window_when_order_reopens():
     assert len(consumed_gate_ids) == len(set(consumed_gate_ids)) == 2
 
 
-def test_invisible_exit_order_is_not_duplicated_or_reported_complete():
+def test_invisible_exit_order_is_not_duplicated_or_reported_complete(*, backend_lease_factory):
     class DelayedExitVisibilityUpstox(MockUpstox):
         def __init__(self):
             super().__init__()
@@ -1465,14 +1465,14 @@ def test_invisible_exit_order_is_not_duplicated_or_reported_complete():
             return {**_OK, "data": {"order_ids": ["EXIT-DELAYED-1"]}}
 
     mock = DelayedExitVisibilityUpstox()
-    result, consumed_gate_ids = _run_emergency_dispatch(mock)
+    result, consumed_gate_ids = _run_emergency_dispatch(mock, backend_lease_factory=backend_lease_factory)
 
     assert not result.complete
     assert mock.exit_calls == 1
     assert len(consumed_gate_ids) == 1
 
 
-def test_invisible_partially_filled_fte_does_not_trigger_a_duplicate_residual_exit():
+def test_invisible_partially_filled_fte_does_not_trigger_a_duplicate_residual_exit(*, backend_lease_factory):
     class InvisiblePartialExitUpstox(MockUpstox):
         def __init__(self):
             super().__init__()
@@ -1512,7 +1512,7 @@ def test_invisible_partially_filled_fte_does_not_trigger_a_duplicate_residual_ex
     result, consumed_gate_ids = _run_emergency_dispatch(
         mock,
         planned_readback_attempts=8,
-        planned_readback_delay_seconds=0,
+        planned_readback_delay_seconds=0, backend_lease_factory=backend_lease_factory
     )
 
     placements = [call for call in mock.calls if call[0] == "place"]
@@ -1523,7 +1523,7 @@ def test_invisible_partially_filled_fte_does_not_trigger_a_duplicate_residual_ex
     assert len(consumed_gate_ids) == 1
 
 
-def test_emergency_delivery_exit_does_not_duplicate_while_completed_order_position_is_stale():
+def test_emergency_delivery_exit_does_not_duplicate_while_completed_order_position_is_stale(*, backend_lease_factory):
     class StaleCompletedDeliveryExitUpstox(MockUpstox):
         def __init__(self):
             super().__init__()
@@ -1586,14 +1586,14 @@ def test_emergency_delivery_exit_does_not_duplicate_while_completed_order_positi
             raise AssertionError("Delivery EQ must not use Upstox exit-all")
 
     mock = StaleCompletedDeliveryExitUpstox()
-    result, consumed_gate_ids = _run_emergency_dispatch(mock)
+    result, consumed_gate_ids = _run_emergency_dispatch(mock, backend_lease_factory=backend_lease_factory)
 
     assert result.complete
     assert mock.exit_calls == 1
     assert len(consumed_gate_ids) == 1
 
 
-def test_completed_fte_order_is_not_replayed_or_reported_complete_while_position_is_stale():
+def test_completed_fte_order_is_not_replayed_or_reported_complete_while_position_is_stale(*, backend_lease_factory):
     class ProcessBoundaryDeliveryExitUpstox(MockUpstox):
         def __init__(self):
             super().__init__()
@@ -1646,8 +1646,8 @@ def test_completed_fte_order_is_not_replayed_or_reported_complete_while_position
         "planned_readback_delay_seconds": 0,
     }
 
-    first, first_gate_ids = _run_emergency_dispatch(mock, **dispatcher_settings)
-    second, second_gate_ids = _run_emergency_dispatch(mock, **dispatcher_settings)
+    first, first_gate_ids = _run_emergency_dispatch(mock, **dispatcher_settings, backend_lease_factory=backend_lease_factory)
+    second, second_gate_ids = _run_emergency_dispatch(mock, **dispatcher_settings, backend_lease_factory=backend_lease_factory)
 
     placements = [call for call in mock.calls if call[0] == "place"]
     assert not first.complete
@@ -1667,7 +1667,7 @@ def test_completed_fte_order_is_not_replayed_or_reported_complete_while_position
 def test_completed_fte_evidence_does_not_suppress_resized_or_reversed_position(
     next_symbol,
     next_quantity,
-    next_action,
+    next_action, *, backend_lease_factory
 ):
     """A second dispatcher emits a new FTE intent when exposure has changed."""
 
@@ -1736,9 +1736,9 @@ def test_completed_fte_evidence_does_not_suppress_resized_or_reversed_position(
 
     mock = ChangedPositionUpstox()
     settings = {"planned_readback_attempts": 8, "planned_readback_delay_seconds": 0}
-    first, first_gate_ids = _run_emergency_dispatch(mock, **settings)
+    first, first_gate_ids = _run_emergency_dispatch(mock, **settings, backend_lease_factory=backend_lease_factory)
     mock.set_exposure(symbol=next_symbol, quantity=next_quantity)
-    second, second_gate_ids = _run_emergency_dispatch(mock, **settings)
+    second, second_gate_ids = _run_emergency_dispatch(mock, **settings, backend_lease_factory=backend_lease_factory)
 
     placements = [call[1] for call in mock.calls if call[0] == "place"]
     assert first.complete
@@ -1750,7 +1750,7 @@ def test_completed_fte_evidence_does_not_suppress_resized_or_reversed_position(
     assert len(second_gate_ids) == 1
 
 
-def test_old_completed_fte_does_not_suppress_reopened_identical_exposure():
+def test_old_completed_fte_does_not_suppress_reopened_identical_exposure(*, backend_lease_factory):
     """Accounting fingerprints distinguish a reopened same-symbol, same-size position."""
 
     class ReopenedIdenticalExposureUpstox(MockUpstox):
@@ -1815,9 +1815,9 @@ def test_old_completed_fte_does_not_suppress_reopened_identical_exposure():
     mock = ReopenedIdenticalExposureUpstox()
     settings = {"planned_readback_attempts": 8, "planned_readback_delay_seconds": 0}
 
-    first, first_gate_ids = _run_emergency_dispatch(mock, **settings)
+    first, first_gate_ids = _run_emergency_dispatch(mock, **settings, backend_lease_factory=backend_lease_factory)
     mock.reopen_identical_exposure()
-    second, second_gate_ids = _run_emergency_dispatch(mock, **settings)
+    second, second_gate_ids = _run_emergency_dispatch(mock, **settings, backend_lease_factory=backend_lease_factory)
 
     placements = [call[1] for call in mock.calls if call[0] == "place"]
     assert first.complete
@@ -2124,7 +2124,7 @@ async def test_reducing_write_rejects_same_size_exposure_episode_change_before_b
         )
 
 
-def test_conflicting_active_fte_is_cancelled_then_replanned_through_fresh_gates():
+def test_conflicting_active_fte_is_cancelled_then_replanned_through_fresh_gates(*, backend_lease_factory):
     """A mismatched active FTE is gated off before the exact residual exit is gated."""
 
     class ConflictingActiveExitUpstox(MockUpstox):
@@ -2218,7 +2218,7 @@ def test_conflicting_active_fte_is_cancelled_then_replanned_through_fresh_gates(
     result, consumed_gate_ids = _run_emergency_dispatch(
         mock,
         planned_readback_attempts=8,
-        planned_readback_delay_seconds=0,
+        planned_readback_delay_seconds=0, backend_lease_factory=backend_lease_factory
     )
 
     mutations = [call for call in mock.calls if call[0] in {"cancel", "place"}]

@@ -121,6 +121,7 @@ class GatedStrategyDispatcher:
             safety_ctx = gate_order(
                 order,
                 request_ctx,
+                backend_lease_proof=router.backend_lease_proof,
                 adapter_id=self._adapter_id,
                 account_id=self._account_id,
             )

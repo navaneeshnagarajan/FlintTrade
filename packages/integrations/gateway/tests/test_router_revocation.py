@@ -138,45 +138,45 @@ class _RaisingAdapter(_RecordingAdapter):
         self._raise()
 
 
-def _router(adapter: object) -> BrokerRouter:
-    return BrokerRouter({"dhan": adapter}, _session)
+def _router(adapter: object, *, backend_lease_factory) -> BrokerRouter:
+    return BrokerRouter({"dhan": adapter}, _session, backend_lease_proof=backend_lease_factory())
 
 
-async def _place(router: BrokerRouter, order: Order) -> Any:
+async def _place(router: BrokerRouter, order: Order, *, backend_lease_factory) -> Any:
     return await router.place_order(
         _request_ctx(),
         adapter_id="dhan",
         account_id="acct-1",
         order=order,
-        safety_ctx=gate_order(order, _request_ctx(), "dhan", account_id="acct-1"),
+        safety_ctx=gate_order(order, _request_ctx(), "dhan", account_id="acct-1", backend_lease_proof=backend_lease_factory()),
     )
 
 
-async def test_revoked_stale_router_fails_closed_before_adapter_dispatch() -> None:
+async def test_revoked_stale_router_fails_closed_before_adapter_dispatch(*, backend_lease_factory) -> None:
     """A reference retained across router replacement cannot keep writing."""
     stale_adapter = _RecordingAdapter()
-    stale_router = _router(stale_adapter)
-    replacement_router = _router(_RecordingAdapter())
+    stale_router = _router(stale_adapter, backend_lease_factory=backend_lease_factory)
+    replacement_router = _router(_RecordingAdapter(), backend_lease_factory=backend_lease_factory)
 
     assert stale_router.revoke_and_drain(timeout=0.1) is True
     assert replacement_router is not stale_router
 
     with pytest.raises(SafetyBypassError, match="revoked"):
-        await _place(stale_router, _order())
+        await _place(stale_router, _order(), backend_lease_factory=backend_lease_factory)
     assert stale_adapter.calls == []
 
 
-async def test_revoke_blocks_new_writes_and_boundedly_drains_an_admitted_write() -> None:
+async def test_revoke_blocks_new_writes_and_boundedly_drains_an_admitted_write(*, backend_lease_factory) -> None:
     adapter = _BlockingAdapter()
-    router = _router(adapter)
-    admitted_write = asyncio.create_task(_place(router, _order()))
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
+    admitted_write = asyncio.create_task(_place(router, _order(), backend_lease_factory=backend_lease_factory))
     await adapter.entered.wait()
 
     # The adapter call is already admitted, so a zero-timeout revoke reports
     # that it did not drain while atomically closing admission to later calls.
     assert router.revoke_and_drain(timeout=0) is False
     with pytest.raises(SafetyBypassError, match="revoked"):
-        await _place(router, _order("2"))
+        await _place(router, _order("2"), backend_lease_factory=backend_lease_factory)
 
     waiter = asyncio.create_task(asyncio.to_thread(router.revoke_and_drain, timeout=1.0))
     await asyncio.sleep(0.02)
@@ -189,9 +189,9 @@ async def test_revoke_blocks_new_writes_and_boundedly_drains_an_admitted_write()
 
 
 @pytest.mark.parametrize("write_kind", ["place", "modify", "cancel", "extended"])
-async def test_every_failed_write_releases_its_admission(write_kind: str) -> None:
+async def test_every_failed_write_releases_its_admission(write_kind: str, *, backend_lease_factory) -> None:
     adapter = _RaisingAdapter()
-    router = _router(adapter)
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
     request_ctx = _request_ctx()
 
     with pytest.raises(RuntimeError, match="adapter failed"):
@@ -202,7 +202,7 @@ async def test_every_failed_write_releases_its_admission(write_kind: str) -> Non
                 adapter_id="dhan",
                 account_id="acct-1",
                 order=order,
-                safety_ctx=gate_order(order, request_ctx, "dhan", account_id="acct-1"),
+                safety_ctx=gate_order(order, request_ctx, "dhan", account_id="acct-1", backend_lease_proof=backend_lease_factory()),
             )
         elif write_kind == "modify":
             payload = {"_op": "modify", "order_id": "OID-1", "price": "101"}
@@ -213,7 +213,7 @@ async def test_every_failed_write_releases_its_admission(write_kind: str) -> Non
                 order=payload,
                 order_id="OID-1",
                 changes={"price": "101"},
-                safety_ctx=gate_order(payload, request_ctx, "dhan", account_id="acct-1"),
+                safety_ctx=gate_order(payload, request_ctx, "dhan", account_id="acct-1", backend_lease_proof=backend_lease_factory()),
             )
         elif write_kind == "cancel":
             payload = {"_op": "cancel", "order_id": "OID-1"}
@@ -223,7 +223,7 @@ async def test_every_failed_write_releases_its_admission(write_kind: str) -> Non
                 account_id="acct-1",
                 order=payload,
                 order_id="OID-1",
-                safety_ctx=gate_order(payload, request_ctx, "dhan", account_id="acct-1"),
+                safety_ctx=gate_order(payload, request_ctx, "dhan", account_id="acct-1", backend_lease_proof=backend_lease_factory()),
             )
         else:
             payload = {"_op": "cancel_all_orders"}
@@ -234,7 +234,7 @@ async def test_every_failed_write_releases_its_admission(write_kind: str) -> Non
                 verb="cancel_all_orders",
                 payload=payload,
                 safety_ctx=gate_broker_write(
-                    "cancel_all_orders", payload, request_ctx, "dhan", account_id="acct-1"
+                    "cancel_all_orders", payload, request_ctx, "dhan", account_id="acct-1", backend_lease_proof=backend_lease_factory()
                 ),
             )
 

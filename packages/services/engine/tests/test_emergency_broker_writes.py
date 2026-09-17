@@ -266,7 +266,7 @@ def _router(
     *,
     allowed_actor: str = "operator",
     write_admission: Any = None,
-    algo_tag_guard: Any = None,
+    algo_tag_guard: Any = None, backend_lease_factory
 ) -> BrokerRouter:
     gate = SafetyGate()
     return BrokerRouter(
@@ -274,7 +274,7 @@ def _router(
         _session_provider(allowed_actor),
         consume_gate=gate.consume,
         write_admission=write_admission,
-        algo_tag_guard=algo_tag_guard,
+        algo_tag_guard=algo_tag_guard, backend_lease_proof=backend_lease_factory()
     )
 
 
@@ -290,9 +290,9 @@ def _dispatcher(
     )
 
 
-def test_l5_policy_mints_one_gate_per_verb_and_reaches_only_token_adapter() -> None:
+def test_l5_policy_mints_one_gate_per_verb_and_reaches_only_token_adapter(*, backend_lease_factory) -> None:
     adapter = _EmergencyAdapter()
-    router = _router(adapter)
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
     provider_calls = 0
 
     def current_router() -> BrokerRouter:
@@ -312,7 +312,7 @@ def test_l5_policy_mints_one_gate_per_verb_and_reaches_only_token_adapter() -> N
     assert provider_calls == 6, "planner reads and concrete writes must observe the current router generation"
 
 
-def test_l5_latch_time_journal_failure_degrades_to_dispatcher_fallback() -> None:
+def test_l5_latch_time_journal_failure_degrades_to_dispatcher_fallback(*, backend_lease_factory) -> None:
     """A dead durable journal at LATCH time must not veto the flatten.
 
     The kill switch previously returned ``intent_journal_unavailable`` without
@@ -330,7 +330,7 @@ def test_l5_latch_time_journal_failure_degrades_to_dispatcher_fallback() -> None
             raise OSError("durable journal volume unavailable")
 
     adapter = _EmergencyAdapter()
-    router = _router(adapter)
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
     safety = SafetySystem()
     safety.bind_emergency_journal(DeadEpisodeJournal())
     dispatcher = GatedEmergencyBrokerDispatcher(
@@ -375,7 +375,7 @@ def test_l5_latch_time_journal_failure_still_fails_closed_without_a_fallback() -
     assert "intent_journal_unavailable" in str(result.as_dict())
 
 
-def test_emergency_flatten_uses_process_fallback_when_journal_storage_fails() -> None:
+def test_emergency_flatten_uses_process_fallback_when_journal_storage_fails(*, backend_lease_factory) -> None:
     from flinttrade_engine.emergency_intents import InMemoryEmergencyIntentJournal
 
     class FailingReserveJournal(InMemoryEmergencyIntentJournal):
@@ -383,7 +383,7 @@ def test_emergency_flatten_uses_process_fallback_when_journal_storage_fails() ->
             raise OSError("durable journal volume unavailable")
 
     adapter = _EmergencyAdapter()
-    router = _router(adapter)
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
         target_provider=_target,
@@ -401,7 +401,7 @@ def test_emergency_flatten_uses_process_fallback_when_journal_storage_fails() ->
     assert dispatcher.intent_journal_degraded is True
 
 
-def test_emergency_intent_conflict_never_degrades_to_fallback() -> None:
+def test_emergency_intent_conflict_never_degrades_to_fallback(*, backend_lease_factory) -> None:
     from flinttrade_engine.emergency_intents import (
         EmergencyIntentConflict,
         InMemoryEmergencyIntentJournal,
@@ -412,7 +412,7 @@ def test_emergency_intent_conflict_never_degrades_to_fallback() -> None:
             raise EmergencyIntentConflict("concurrent reservation changed")
 
     adapter = _EmergencyAdapter()
-    router = _router(adapter)
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
         target_provider=_target,
@@ -430,7 +430,7 @@ def test_emergency_intent_conflict_never_degrades_to_fallback() -> None:
     assert dispatcher.intent_journal_degraded is False
 
 
-def test_dispatcher_generation_lease_spans_target_snapshot_and_every_write() -> None:
+def test_dispatcher_generation_lease_spans_target_snapshot_and_every_write(*, backend_lease_factory) -> None:
     events: list[str] = []
 
     class RecordingAdapter(_EmergencyAdapter):
@@ -451,7 +451,7 @@ def test_dispatcher_generation_lease_spans_target_snapshot_and_every_write() -> 
             events.append("lease-exit")
 
     adapter = RecordingAdapter()
-    router = _router(adapter)
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
         target_provider=lambda: events.append("targets") or _target(),
@@ -465,7 +465,7 @@ def test_dispatcher_generation_lease_spans_target_snapshot_and_every_write() -> 
     assert events == ["lease-enter", "targets", "cancel", "exit", "lease-exit"]
 
 
-def test_l5_policy_sweeps_every_supplied_target_and_reports_each_selector() -> None:
+def test_l5_policy_sweeps_every_supplied_target_and_reports_each_selector(*, backend_lease_factory) -> None:
     dhan = _EmergencyAdapter()
     upstox = _EmergencyAdapter()
 
@@ -481,7 +481,7 @@ def test_l5_policy_sweeps_every_supplied_target_and_reports_each_selector() -> N
     router = BrokerRouter(
         {"dhan": dhan, "upstox": upstox},
         session_provider,
-        consume_gate=SafetyGate().consume,
+        consume_gate=SafetyGate().consume, backend_lease_proof=backend_lease_factory()
     )
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
@@ -507,7 +507,7 @@ def test_l5_policy_sweeps_every_supplied_target_and_reports_each_selector() -> N
     assert all(target["complete"] for target in payload["targets"])
 
 
-def test_mtm_breaker_dispatches_only_the_breaching_account_selector() -> None:
+def test_mtm_breaker_dispatches_only_the_breaching_account_selector(*, backend_lease_factory) -> None:
     class AccountRecordingAdapter(_EmergencyAdapter):
         def __init__(self) -> None:
             super().__init__()
@@ -529,7 +529,7 @@ def test_mtm_breaker_dispatches_only_the_breaching_account_selector() -> None:
     router = BrokerRouter(
         {"dhan": adapter},
         _session_provider(),
-        consume_gate=SafetyGate().consume,
+        consume_gate=SafetyGate().consume, backend_lease_proof=backend_lease_factory()
     )
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
@@ -607,7 +607,7 @@ def test_mtm_breaker_rejects_a_result_for_the_wrong_policy_or_account(
     assert set(breaker.last_emergency_result.failure_codes) == {"invalid_dispatch_result"}
 
 
-def test_mtm_latch_blocks_later_normal_router_writes_for_the_breached_selector() -> None:
+def test_mtm_latch_blocks_later_normal_router_writes_for_the_breached_selector(*, backend_lease_factory) -> None:
     from flinttrade_engine.safety import SafetySystem
 
     class CompleteDispatcher:
@@ -639,10 +639,10 @@ def test_mtm_latch_blocks_later_normal_router_writes_for_the_breached_selector()
         )
     )
     adapter = PlacingAdapter()
-    router = _router(adapter, write_admission=safety.broker_write_admission)
+    router = _router(adapter, write_admission=safety.broker_write_admission, backend_lease_factory=backend_lease_factory)
     request_ctx = _request_ctx()
     order = SimpleNamespace(symbol="RELIANCE", quantity=1, exchange="NSE")
-    safety_ctx = gate_order(order, request_ctx, "dhan", account_id="acct-1")
+    safety_ctx = gate_order(order, request_ctx, "dhan", account_id="acct-1", backend_lease_proof=backend_lease_factory())
 
     with pytest.raises(SafetyBypassError, match="MTM circuit breaker"):
         asyncio.run(
@@ -657,7 +657,7 @@ def test_mtm_latch_blocks_later_normal_router_writes_for_the_breached_selector()
     assert adapter.calls == []
 
 
-def test_mtm_latch_does_not_block_a_different_account_selector() -> None:
+def test_mtm_latch_does_not_block_a_different_account_selector(*, backend_lease_factory) -> None:
     from flinttrade_engine.safety import SafetySystem
 
     class CompleteDispatcher:
@@ -689,10 +689,10 @@ def test_mtm_latch_does_not_block_a_different_account_selector() -> None:
         )
     )
     adapter = PlacingAdapter()
-    router = _router(adapter, write_admission=safety.broker_write_admission)
+    router = _router(adapter, write_admission=safety.broker_write_admission, backend_lease_factory=backend_lease_factory)
     request_ctx = _target_for("dhan", "acct-2").request_ctx
     order = SimpleNamespace(symbol="RELIANCE", quantity=1, exchange="NSE")
-    safety_ctx = gate_order(order, request_ctx, "dhan", account_id="acct-2")
+    safety_ctx = gate_order(order, request_ctx, "dhan", account_id="acct-2", backend_lease_proof=backend_lease_factory())
 
     result = asyncio.run(
         router.place_order(
@@ -708,7 +708,7 @@ def test_mtm_latch_does_not_block_a_different_account_selector() -> None:
     assert adapter.calls == ["acct-2"]
 
 
-def test_mtm_breach_drains_an_admitted_account_write_before_flattening() -> None:
+def test_mtm_breach_drains_an_admitted_account_write_before_flattening(*, backend_lease_factory) -> None:
     from flinttrade_engine.safety import SafetySystem
 
     write_entered = threading.Event()
@@ -741,10 +741,10 @@ def test_mtm_breach_drains_an_admitted_account_write_before_flattening() -> None
 
     safety = SafetySystem(emergency_dispatcher=CompleteDispatcher())
     adapter = BlockingAdapter()
-    router = _router(adapter, write_admission=safety.broker_write_admission)
+    router = _router(adapter, write_admission=safety.broker_write_admission, backend_lease_factory=backend_lease_factory)
     request_ctx = _request_ctx()
     order = SimpleNamespace(symbol="RELIANCE", quantity=1, exchange="NSE")
-    safety_ctx = gate_order(order, request_ctx, "dhan", account_id="acct-1")
+    safety_ctx = gate_order(order, request_ctx, "dhan", account_id="acct-1", backend_lease_proof=backend_lease_factory())
     write_errors: list[BaseException] = []
     breach_errors: list[BaseException] = []
     breach_results: list[bool] = []
@@ -1127,9 +1127,9 @@ def test_mtm_episode_is_durable_before_dispatcher_entry() -> None:
     breaker.reset_daily()
 
 
-def test_adapter_declared_partial_batch_is_not_reported_as_complete() -> None:
+def test_adapter_declared_partial_batch_is_not_reported_as_complete(*, backend_lease_factory) -> None:
     adapter = _PartialEmergencyAdapter()
-    router = _router(adapter)
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
 
     result = _dispatcher(lambda: router).dispatch(
         L5_EMERGENCY_POLICY,
@@ -1142,7 +1142,7 @@ def test_adapter_declared_partial_batch_is_not_reported_as_complete() -> None:
     assert result.succeeded("exit_all_positions")
 
 
-def test_explicit_broker_error_status_is_not_reported_as_success() -> None:
+def test_explicit_broker_error_status_is_not_reported_as_success(*, backend_lease_factory) -> None:
     class ErrorStatusRouter:
         def __init__(self) -> None:
             self.calls = 0
@@ -1170,6 +1170,7 @@ def test_explicit_broker_error_status_is_not_reported_as_success() -> None:
             }
 
     router = ErrorStatusRouter()
+    router.backend_lease_proof = backend_lease_factory()
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
         target_provider=_target,
@@ -1187,7 +1188,7 @@ def test_explicit_broker_error_status_is_not_reported_as_success() -> None:
     assert router.calls == 1
 
 
-def test_gate_preparation_failure_does_not_reserve_an_emergency_intent(monkeypatch) -> None:
+def test_gate_preparation_failure_does_not_reserve_an_emergency_intent(monkeypatch, *, backend_lease_factory) -> None:
     import flinttrade_engine.safety as safety_module
     from flinttrade_engine.emergency_intents import InMemoryEmergencyIntentJournal
 
@@ -1213,6 +1214,7 @@ def test_gate_preparation_failure_does_not_reserve_an_emergency_intent(monkeypat
 
     journal = InMemoryEmergencyIntentJournal()
     router = PlanningRouter()
+    router.backend_lease_proof = backend_lease_factory()
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
         target_provider=_target,
@@ -1233,7 +1235,7 @@ def test_gate_preparation_failure_does_not_reserve_an_emergency_intent(monkeypat
     assert journal.unresolved("dhan:acct-1", policy.verbs, source="adhoc") == ()
 
 
-def test_pre_adapter_refusal_releases_intent_for_a_later_retry() -> None:
+def test_pre_adapter_refusal_releases_intent_for_a_later_retry(*, backend_lease_factory) -> None:
     from flinttrade_engine.emergency_intents import InMemoryEmergencyIntentJournal
 
     adapter = _EmergencyAdapter()
@@ -1251,7 +1253,7 @@ def test_pre_adapter_refusal_releases_intent_for_a_later_retry() -> None:
             adapter_id=adapter_id,
         )
 
-    router = BrokerRouter({"dhan": adapter}, session_provider)
+    router = BrokerRouter({"dhan": adapter}, session_provider, backend_lease_proof=backend_lease_factory())
     journal = InMemoryEmergencyIntentJournal()
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
@@ -1274,7 +1276,7 @@ def test_pre_adapter_refusal_releases_intent_for_a_later_retry() -> None:
     assert journal.unresolved("dhan:acct-1", policy.verbs, source="adhoc") == ()
 
 
-def test_planned_exit_accepts_complete_broker_summary_without_order_ids() -> None:
+def test_planned_exit_accepts_complete_broker_summary_without_order_ids(*, backend_lease_factory) -> None:
     class SummaryExitRouter:
         def __init__(self) -> None:
             self.pending = True
@@ -1301,6 +1303,7 @@ def test_planned_exit_accepts_complete_broker_summary_without_order_ids() -> Non
             return {"errors": [], "total": 2, "success": 2}
 
     router = SummaryExitRouter()
+    router.backend_lease_proof = backend_lease_factory()
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
         target_provider=_target,
@@ -1317,7 +1320,7 @@ def test_planned_exit_accepts_complete_broker_summary_without_order_ids() -> Non
     assert router.exit_calls == 1
 
 
-def test_planned_partial_cancel_continues_through_later_bounded_batches() -> None:
+def test_planned_partial_cancel_continues_through_later_bounded_batches(*, backend_lease_factory) -> None:
     class PlanningRouter:
         def __init__(self) -> None:
             self.active = {f"O{index:02d}" for index in range(12)}
@@ -1349,6 +1352,7 @@ def test_planned_partial_cancel_continues_through_later_bounded_batches() -> Non
             self.active.remove(order_id)
 
     router = PlanningRouter()
+    router.backend_lease_proof = backend_lease_factory()
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
         target_provider=_target,
@@ -1368,7 +1372,7 @@ def test_planned_partial_cancel_continues_through_later_bounded_batches() -> Non
     assert len(set(router.gate_ids)) == 12
 
 
-def test_successful_planned_cancellation_is_not_replayed_during_stale_readback() -> None:
+def test_successful_planned_cancellation_is_not_replayed_during_stale_readback(*, backend_lease_factory) -> None:
     class StickyCancellationRouter:
         def __init__(self) -> None:
             self.cancel_calls: list[str] = []
@@ -1400,6 +1404,7 @@ def test_successful_planned_cancellation_is_not_replayed_during_stale_readback()
             self.cancel_calls.append(order_id)
 
     router = StickyCancellationRouter()
+    router.backend_lease_proof = backend_lease_factory()
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
         target_provider=_target,
@@ -1498,7 +1503,7 @@ def test_newly_reserved_exit_tag_protects_lost_response_before_same_dispatch_rep
     )
 
 
-def test_unidentified_bulk_exit_blocks_cancellation_until_joint_readback_is_quiet() -> None:
+def test_unidentified_bulk_exit_blocks_cancellation_until_joint_readback_is_quiet(*, backend_lease_factory) -> None:
     class LostBulkExitRouter:
         def __init__(self) -> None:
             self.accepted = False
@@ -1549,6 +1554,7 @@ def test_unidentified_bulk_exit_blocks_cancellation_until_joint_readback_is_quie
             self.cancelled = True
 
     router = LostBulkExitRouter()
+    router.backend_lease_proof = backend_lease_factory()
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
         target_provider=_target,
@@ -1573,7 +1579,7 @@ def test_fractional_batch_counts_are_an_invalid_broker_result() -> None:
 
 
 @pytest.mark.parametrize("ambiguous_result", [None, {"status": "ok"}])
-def test_bulk_write_requires_an_explicit_complete_summary(ambiguous_result) -> None:
+def test_bulk_write_requires_an_explicit_complete_summary(ambiguous_result, *, backend_lease_factory) -> None:
     class AmbiguousBulkRouter:
         def __init__(self) -> None:
             self.pending = True
@@ -1596,6 +1602,7 @@ def test_bulk_write_requires_an_explicit_complete_summary(ambiguous_result) -> N
             return ambiguous_result
 
     router = AmbiguousBulkRouter()
+    router.backend_lease_proof = backend_lease_factory()
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
         target_provider=_target,
@@ -1612,7 +1619,7 @@ def test_bulk_write_requires_an_explicit_complete_summary(ambiguous_result) -> N
     assert result.failure_codes == ("invalid_broker_result",)
 
 
-def test_exact_reduction_requires_exactly_one_broker_order_id() -> None:
+def test_exact_reduction_requires_exactly_one_broker_order_id(*, backend_lease_factory) -> None:
     class MultipleIdRouter:
         async def plan_emergency_reduction(self, _request_ctx, **_kwargs):
             return EmergencyReductionPlan(
@@ -1637,6 +1644,7 @@ def test_exact_reduction_requires_exactly_one_broker_order_id() -> None:
             return {"order_ids": ["EXIT-1", "EXIT-2"]}
 
     router = MultipleIdRouter()
+    router.backend_lease_proof = backend_lease_factory()
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
         target_provider=_target,
@@ -1652,7 +1660,7 @@ def test_exact_reduction_requires_exactly_one_broker_order_id() -> None:
     assert result.failure_codes == ("invalid_broker_result",)
 
 
-def test_lost_exit_response_is_not_replayed_after_dispatcher_restart(tmp_path) -> None:
+def test_lost_exit_response_is_not_replayed_after_dispatcher_restart(tmp_path, *, backend_lease_factory) -> None:
     from flinttrade_engine.emergency_intents import EmergencyIntentJournal
 
     state = {"quantity": 5, "calls": []}
@@ -1689,6 +1697,7 @@ def test_lost_exit_response_is_not_replayed_after_dispatcher_restart(tmp_path) -
     journal_path = tmp_path / "emergency-intents.sqlite"
     policy = EmergencyWritePolicy(name="durable_exit", verbs=("exit_all_positions",))
     router = ResidualExitRouter()
+    router.backend_lease_proof = backend_lease_factory()
 
     first = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
@@ -1819,17 +1828,17 @@ def test_planned_settlement_conflict_fails_closed() -> None:
     assert result.failure_codes == ("intent_journal_conflict",)
 
 
-def test_kill_activation_drains_admitted_normal_write_before_emergency_sweep() -> None:
+def test_kill_activation_drains_admitted_normal_write_before_emergency_sweep(*, backend_lease_factory) -> None:
     adapter = _BlockingNormalWriteAdapter()
     kill_switch = KillSwitch(normal_write_drain_timeout=1.0)
-    router = _router(adapter, write_admission=kill_switch.broker_write_admission)
+    router = _router(adapter, write_admission=kill_switch.broker_write_admission, backend_lease_factory=backend_lease_factory)
     request_ctx = _request_ctx()
     order = SimpleNamespace(symbol="RELIANCE", quantity=1, exchange="NSE")
     safety_ctx = gate_order(
         order,
         request_ctx,
         "dhan",
-        account_id="acct-1",
+        account_id="acct-1", backend_lease_proof=backend_lease_factory()
     )
     normal_errors: list[BaseException] = []
 
@@ -1876,18 +1885,18 @@ def test_kill_activation_drains_admitted_normal_write_before_emergency_sweep() -
     assert adapter.calls == ["cancel_all_orders", "exit_all_positions"]
 
 
-def test_normal_context_minted_before_kill_cannot_dispatch_after_sweep() -> None:
+def test_normal_context_minted_before_kill_cannot_dispatch_after_sweep(*, backend_lease_factory) -> None:
     adapter = _BlockingNormalWriteAdapter()
     adapter.release_normal_write.set()
     kill_switch = KillSwitch()
-    router = _router(adapter, write_admission=kill_switch.broker_write_admission)
+    router = _router(adapter, write_admission=kill_switch.broker_write_admission, backend_lease_factory=backend_lease_factory)
     request_ctx = _request_ctx()
     order = SimpleNamespace(symbol="RELIANCE", quantity=1, exchange="NSE")
     safety_ctx = gate_order(
         order,
         request_ctx,
         "dhan",
-        account_id="acct-1",
+        account_id="acct-1", backend_lease_proof=backend_lease_factory()
     )
 
     emergency_result = kill_switch.activate(
@@ -1909,7 +1918,7 @@ def test_normal_context_minted_before_kill_cannot_dispatch_after_sweep() -> None
     assert adapter.placed == []
 
 
-def test_l5_refuses_normal_write_before_session_and_generation_admission() -> None:
+def test_l5_refuses_normal_write_before_session_and_generation_admission(*, backend_lease_factory) -> None:
     adapter = _BlockingNormalWriteAdapter()
     adapter.release_normal_write.set()
     kill_switch = KillSwitch()
@@ -1923,11 +1932,11 @@ def test_l5_refuses_normal_write_before_session_and_generation_admission() -> No
         {"dhan": adapter},
         session_provider,
         consume_gate=SafetyGate().consume,
-        write_admission=kill_switch.broker_write_admission,
+        write_admission=kill_switch.broker_write_admission, backend_lease_proof=backend_lease_factory()
     )
     request_ctx = _request_ctx()
     order = SimpleNamespace(symbol="RELIANCE", quantity=1, exchange="NSE")
-    safety_ctx = gate_order(order, request_ctx, "dhan", account_id="acct-1")
+    safety_ctx = gate_order(order, request_ctx, "dhan", account_id="acct-1", backend_lease_proof=backend_lease_factory())
 
     assert kill_switch.activate(
         "refuse delayed normal order",
@@ -1951,10 +1960,10 @@ def test_l5_refuses_normal_write_before_session_and_generation_admission() -> No
     assert adapter.placed == []
 
 
-def test_normal_cancellations_cannot_remove_protective_orders_while_l5_is_latched() -> None:
+def test_normal_cancellations_cannot_remove_protective_orders_while_l5_is_latched(*, backend_lease_factory) -> None:
     adapter = _EmergencyAdapter()
     kill_switch = KillSwitch()
-    router = _router(adapter, write_admission=kill_switch.broker_write_admission)
+    router = _router(adapter, write_admission=kill_switch.broker_write_admission, backend_lease_factory=backend_lease_factory)
     request_ctx = _request_ctx()
 
     assert kill_switch.activate(
@@ -1968,7 +1977,7 @@ def test_normal_cancellations_cannot_remove_protective_orders_while_l5_is_latche
         cancel_fingerprint,
         request_ctx,
         "dhan",
-        account_id="acct-1",
+        account_id="acct-1", backend_lease_proof=backend_lease_factory()
     )
     with pytest.raises(SafetyBypassError, match="kill switch"):
         asyncio.run(
@@ -1988,7 +1997,7 @@ def test_normal_cancellations_cannot_remove_protective_orders_while_l5_is_latche
         forever_payload,
         request_ctx,
         "dhan",
-        account_id="acct-1",
+        account_id="acct-1", backend_lease_proof=backend_lease_factory()
     )
     with pytest.raises(SafetyBypassError, match="kill switch"):
         asyncio.run(
@@ -2005,9 +2014,9 @@ def test_normal_cancellations_cannot_remove_protective_orders_while_l5_is_latche
     assert adapter.calls == []
 
 
-def test_overlapping_selector_activations_share_one_inflight_flatten() -> None:
+def test_overlapping_selector_activations_share_one_inflight_flatten(*, backend_lease_factory) -> None:
     adapter = _BlockingEmergencyAdapter()
-    router = _router(adapter)
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
     dispatcher = _dispatcher(lambda: router)
     kill_switch = KillSwitch(normal_write_drain_timeout=1.0)
     results: list[EmergencyDispatchResult] = []
@@ -2036,7 +2045,7 @@ def test_overlapping_selector_activations_share_one_inflight_flatten() -> None:
     assert adapter.calls == ["cancel_all_orders", "exit_all_positions"]
 
 
-def test_partially_overlapping_activation_dispatches_free_selector_immediately() -> None:
+def test_partially_overlapping_activation_dispatches_free_selector_immediately(*, backend_lease_factory) -> None:
     dhan = _BlockingEmergencyAdapter()
     upstox = _EmergencyAdapter()
 
@@ -2051,7 +2060,7 @@ def test_partially_overlapping_activation_dispatches_free_selector_immediately()
     router = BrokerRouter(
         {"dhan": dhan, "upstox": upstox},
         session_provider,
-        consume_gate=SafetyGate().consume,
+        consume_gate=SafetyGate().consume, backend_lease_proof=backend_lease_factory()
     )
     first_dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,
@@ -2095,9 +2104,9 @@ def test_partially_overlapping_activation_dispatches_free_selector_immediately()
     assert dhan.calls == ["cancel_all_orders", "exit_all_positions"]
 
 
-def test_overlap_timeout_does_not_outrank_owners_later_success() -> None:
+def test_overlap_timeout_does_not_outrank_owners_later_success(*, backend_lease_factory) -> None:
     adapter = _BlockingEmergencyAdapter()
-    router = _router(adapter)
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
     dispatcher = _dispatcher(lambda: router)
     kill_switch = KillSwitch(normal_write_drain_timeout=0.01)
     owner_results: list[EmergencyDispatchResult] = []
@@ -2187,7 +2196,7 @@ def test_malformed_dispatch_result_cannot_leak_selector_reservation() -> None:
     assert kill_switch._selectors_in_progress == set()
 
 
-def test_emergency_reductions_do_not_consume_or_hit_algo_placement_ceiling() -> None:
+def test_emergency_reductions_do_not_consume_or_hit_algo_placement_ceiling(*, backend_lease_factory) -> None:
     from flinttrade_engine.algo_tag_guard import AlgoTagConfig, AlgoTagGuard
 
     adapter = _EmergencyAdapter()
@@ -2197,7 +2206,7 @@ def test_emergency_reductions_do_not_consume_or_hit_algo_placement_ceiling() -> 
             "dhan": AlgoTagConfig(algo_id="ALGO-1", max_orders_per_sec=1),
         }
     )
-    router = _router(adapter, algo_tag_guard=guard)
+    router = _router(adapter, algo_tag_guard=guard, backend_lease_factory=backend_lease_factory)
 
     result = _dispatcher(lambda: router).dispatch(
         L5_EMERGENCY_POLICY,
@@ -2263,7 +2272,7 @@ def test_targeted_retry_cannot_hide_another_selectors_failed_flatten() -> None:
     assert kill_switch.is_active
 
 
-def test_l5_policy_reaches_openalgo_through_authoritative_planned_writes(tmp_path) -> None:
+def test_l5_policy_reaches_openalgo_through_authoritative_planned_writes(tmp_path, *, backend_lease_factory) -> None:
     class _OpenAlgoClient:
         def __init__(self) -> None:
             self.calls: list[tuple[str, str]] = []
@@ -2335,7 +2344,7 @@ def test_l5_policy_reaches_openalgo_through_authoritative_planned_writes(tmp_pat
     router = BrokerRouter(
         {"openalgo": adapter},
         session_provider,
-        consume_gate=SafetyGate().consume,
+        consume_gate=SafetyGate().consume, backend_lease_proof=backend_lease_factory()
     )
     request_ctx = RequestContext(
         jti="openalgo-emergency-jti",
@@ -2362,9 +2371,9 @@ def test_l5_policy_reaches_openalgo_through_authoritative_planned_writes(tmp_pat
     assert not {"cancel_all_orders", "close_position"}.intersection(call[0] for call in client.calls)
 
 
-def test_selector_acl_refusal_never_reaches_adapter() -> None:
+def test_selector_acl_refusal_never_reaches_adapter(*, backend_lease_factory) -> None:
     adapter = _EmergencyAdapter()
-    router = _router(adapter, allowed_actor="different-operator")
+    router = _router(adapter, allowed_actor="different-operator", backend_lease_factory=backend_lease_factory)
 
     result = _dispatcher(lambda: router).dispatch(
         L5_EMERGENCY_POLICY,
@@ -2397,9 +2406,9 @@ def test_missing_target_fails_closed_without_router_or_default_fallback() -> Non
     assert router_calls == 0
 
 
-def test_revoked_generation_fails_before_token_adapter_dispatch() -> None:
+def test_revoked_generation_fails_before_token_adapter_dispatch(*, backend_lease_factory) -> None:
     adapter = _EmergencyAdapter()
-    retired_router = _router(adapter)
+    retired_router = _router(adapter, backend_lease_factory=backend_lease_factory)
     assert retired_router.revoke_and_drain(timeout=0.1)
 
     result = _dispatcher(lambda: retired_router).dispatch(
@@ -2412,11 +2421,11 @@ def test_revoked_generation_fails_before_token_adapter_dispatch() -> None:
     assert adapter.calls == []
 
 
-def test_concurrent_retirement_moves_second_verb_to_current_generation() -> None:
+def test_concurrent_retirement_moves_second_verb_to_current_generation(*, backend_lease_factory) -> None:
     old_adapter = _BlockingEmergencyAdapter()
-    old_router = _router(old_adapter)
+    old_router = _router(old_adapter, backend_lease_factory=backend_lease_factory)
     new_adapter = _EmergencyAdapter()
-    new_router = _router(new_adapter)
+    new_router = _router(new_adapter, backend_lease_factory=backend_lease_factory)
     provider_lock = threading.Lock()
     current = old_router
 

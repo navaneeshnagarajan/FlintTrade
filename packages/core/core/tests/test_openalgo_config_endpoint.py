@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 
-def test_openalgo_config_requires_auth_after_operator_setup(monkeypatch, tmp_path):
+def test_openalgo_config_requires_auth_after_operator_setup(monkeypatch, tmp_path, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
@@ -20,7 +20,7 @@ def test_openalgo_config_requires_auth_after_operator_setup(monkeypatch, tmp_pat
     from flinttrade_core.app import create_flask_app
     from flinttrade_core.workspace import Workspace
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
     app.config["AUTH_SERVICE"].is_setup = MagicMock(return_value=True)
     Workspace().set("openalgo.api_key", "operator-bridge-secret")
@@ -34,7 +34,7 @@ def test_openalgo_config_requires_auth_after_operator_setup(monkeypatch, tmp_pat
     assert "operator-bridge-secret" not in response.get_data(as_text=True)
 
 
-def test_openalgo_config_pre_setup_status_never_returns_raw_key(monkeypatch, tmp_path):
+def test_openalgo_config_pre_setup_status_never_returns_raw_key(monkeypatch, tmp_path, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
@@ -43,7 +43,7 @@ def test_openalgo_config_pre_setup_status_never_returns_raw_key(monkeypatch, tmp
     from flinttrade_core.app import create_flask_app
     from flinttrade_core.workspace import Workspace
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
     app.config["AUTH_SERVICE"].is_setup = MagicMock(return_value=False)
     Workspace().set("openalgo.api_key", "pre-setup-bridge-secret")
@@ -58,7 +58,7 @@ def test_openalgo_config_pre_setup_status_never_returns_raw_key(monkeypatch, tmp
     assert "pre-setup-bridge-secret" not in response.get_data(as_text=True)
 
 
-def test_openalgo_config_operator_session_can_rehydrate_raw_key(monkeypatch, tmp_path):
+def test_openalgo_config_operator_session_can_rehydrate_raw_key(monkeypatch, tmp_path, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
@@ -68,7 +68,7 @@ def test_openalgo_config_operator_session_can_rehydrate_raw_key(monkeypatch, tmp
     from flinttrade_core.app import create_flask_app
     from flinttrade_core.workspace import Workspace
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
     app.config["AUTH_SERVICE"].is_setup = MagicMock(return_value=True)
     Workspace().set("openalgo.api_key", "operator-session-secret")
@@ -84,7 +84,7 @@ def test_openalgo_config_operator_session_can_rehydrate_raw_key(monkeypatch, tmp
     assert response.get_json()["data"]["api_key"] == "operator-session-secret"
 
 
-def test_openalgo_config_endpoint_persists_telegram_username(monkeypatch, tmp_path):
+def test_openalgo_config_endpoint_persists_telegram_username(monkeypatch, tmp_path, backend_lease_factory):
     """The UI config surface can provide the username required by /telegram/notify."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
@@ -92,7 +92,7 @@ def test_openalgo_config_endpoint_persists_telegram_username(monkeypatch, tmp_pa
 
     from flinttrade_core.app import create_flask_app
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
 
     response = app.test_client().post(
@@ -116,7 +116,7 @@ def test_openalgo_config_endpoint_persists_telegram_username(monkeypatch, tmp_pa
     assert get_response.get_json()["data"]["telegram_username"] == "linked-trader"
 
 
-def test_openalgo_config_telegram_save_keeps_env_bridge_endpoint(monkeypatch, tmp_path):
+def test_openalgo_config_telegram_save_keeps_env_bridge_endpoint(monkeypatch, tmp_path, backend_lease_factory):
     """A Telegram-only save must not redirect OpenAlgo traffic onto localhost defaults."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
@@ -128,7 +128,7 @@ def test_openalgo_config_telegram_save_keeps_env_bridge_endpoint(monkeypatch, tm
 
     from flinttrade_core.app import create_flask_app
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
 
     response = app.test_client().post(
@@ -145,7 +145,7 @@ def test_openalgo_config_telegram_save_keeps_env_bridge_endpoint(monkeypatch, tm
     assert app.config["CLIENT"]._base == "http://bridge.example:5000/api/v1"
 
 
-def test_openalgo_config_telegram_save_preserves_shared_broker_dependency_generation(monkeypatch, tmp_path):
+def test_openalgo_config_telegram_save_preserves_shared_broker_dependency_generation(monkeypatch, tmp_path, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
@@ -164,7 +164,7 @@ def test_openalgo_config_telegram_save_preserves_shared_broker_dependency_genera
         config["brokers"]["account_acls"] = {"openalgo": {"default": ["operator"]}}
 
     workspace.update(configure_account)
-    app = create_flask_app(client=OpenAlgoClient(Settings.from_workspace_data(workspace.as_dict())))
+    app = create_flask_app(backend_lease_proof=backend_lease_factory(), client=OpenAlgoClient(Settings.from_workspace_data(workspace.as_dict())))
     app.config["TESTING"] = True
     before_workspace = read_workspace_snapshot(tmp_path)
     dependencies = app.extensions["flinttrade_broker_dependencies"]
@@ -210,7 +210,7 @@ def test_openalgo_config_telegram_save_preserves_shared_broker_dependency_genera
     assert broker_workspace_version(after_workspace) == broker_workspace_version(before_workspace)
 
 
-def test_openalgo_config_endpoint_initialises_fresh_workspace(monkeypatch, tmp_path):
+def test_openalgo_config_endpoint_initialises_fresh_workspace(monkeypatch, tmp_path, backend_lease_factory):
     """A native first run can save OpenAlgo settings without a pre-existing workspace.json."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
@@ -222,7 +222,7 @@ def test_openalgo_config_endpoint_initialises_fresh_workspace(monkeypatch, tmp_p
 
     from flinttrade_core.app import create_flask_app
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
 
     response = app.test_client().post(
@@ -292,7 +292,7 @@ def test_openalgo_config_endpoint_initialises_fresh_workspace(monkeypatch, tmp_p
     }
 
 
-def test_openalgo_config_hot_reload_reconfigures_the_shared_client_in_place(monkeypatch, tmp_path):
+def test_openalgo_config_hot_reload_reconfigures_the_shared_client_in_place(monkeypatch, tmp_path, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
@@ -304,7 +304,7 @@ def test_openalgo_config_hot_reload_reconfigures_the_shared_client_in_place(monk
     shared_client = OpenAlgoClient(
         Settings(openalgo_host="http://127.0.0.1", openalgo_api_key="old-openalgo-key")
     )
-    app = create_flask_app(client=shared_client)
+    app = create_flask_app(backend_lease_proof=backend_lease_factory(), client=shared_client)
     app.config["TESTING"] = True
     shared_router_client = app.config["OPENALGO_CLIENT"]
 
@@ -326,7 +326,7 @@ def test_openalgo_config_hot_reload_reconfigures_the_shared_client_in_place(monk
     assert shared_client._base == "https://openalgo.example:5443/api/v1"
 
 
-def test_openalgo_key_reload_drains_old_router_before_reconfiguring_and_rebinds(monkeypatch, tmp_path):
+def test_openalgo_key_reload_drains_old_router_before_reconfiguring_and_rebinds(monkeypatch, tmp_path, backend_lease_factory):
     from flinttrade_core import app as app_module
     from flinttrade_core.workspace import Workspace
     from flinttrade_core.openalgo_client import OpenAlgoClient
@@ -339,7 +339,7 @@ def test_openalgo_key_reload_drains_old_router_before_reconfiguring_and_rebinds(
     workspace.initialise()
     workspace.set("openalgo.api_key", "old-key")
     shared = OpenAlgoClient(Settings(openalgo_api_key="old-key"))
-    app = app_module.create_flask_app(client=shared)
+    app = app_module.create_flask_app(backend_lease_proof=backend_lease_factory(), client=shared)
     before_reconfigure = []
     reconfigured = []
     class Router:
@@ -368,14 +368,14 @@ def test_openalgo_key_reload_drains_old_router_before_reconfiguring_and_rebinds(
 
 
 @pytest.mark.parametrize("capture_failure", [False, True])
-def test_openalgo_config_reports_failed_router_rebuild_without_rolling_back_saved_config(monkeypatch, tmp_path, capture_failure):
+def test_openalgo_config_reports_failed_router_rebuild_without_rolling_back_saved_config(monkeypatch, tmp_path, capture_failure, backend_lease_factory):
     from flinttrade_core import app as app_module
     from flinttrade_core.workspace import Workspace
 
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "fixture-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password")
-    app = app_module.create_flask_app()
+    app = app_module.create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["EMERGENCY_RUNTIME_READY"] = False
     if capture_failure:
         recorder = MagicMock()
@@ -403,7 +403,7 @@ def test_openalgo_config_reports_failed_router_rebuild_without_rolling_back_save
     assert saved.get("workspace_generation") == before + 1
 
 
-def test_openalgo_config_refreshes_reads_when_execution_default_is_blank(monkeypatch, tmp_path):
+def test_openalgo_config_refreshes_reads_when_execution_default_is_blank(monkeypatch, tmp_path, backend_lease_factory):
     from flinttrade_core import app as app_module
     from flinttrade_core.config import Settings
     from flinttrade_core.openalgo_client import OpenAlgoClient
@@ -422,7 +422,7 @@ def test_openalgo_config_refreshes_reads_when_execution_default_is_blank(monkeyp
 
     workspace.update(configure_reads_only)
     shared = OpenAlgoClient(Settings.from_workspace_data(workspace.as_dict()))
-    app = app_module.create_flask_app(client=shared)
+    app = app_module.create_flask_app(backend_lease_proof=backend_lease_factory(), client=shared)
     prior = app.extensions["flinttrade_broker_dependencies"]
     assert app.config.get("BROKER_ROUTER") is None
 
@@ -444,14 +444,14 @@ def test_openalgo_config_refreshes_reads_when_execution_default_is_blank(monkeyp
     assert app.config.get("BROKER_ROUTER") is None
 
 
-def test_openalgo_telegram_save_refuses_busy_client_replacement_before_workspace_mutation(monkeypatch, tmp_path):
+def test_openalgo_telegram_save_refuses_busy_client_replacement_before_workspace_mutation(monkeypatch, tmp_path, backend_lease_factory):
     from flinttrade_core import app as app_module
     from flinttrade_core.workspace import Workspace
 
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "fixture-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
-    app = app_module.create_flask_app()
+    app = app_module.create_flask_app(backend_lease_proof=backend_lease_factory())
     prior_dependencies = app.extensions["flinttrade_broker_dependencies"]
     replacement_source = object()
     app.config["CLIENT"] = replacement_source
@@ -470,7 +470,7 @@ def test_openalgo_telegram_save_refuses_busy_client_replacement_before_workspace
     assert app.extensions["flinttrade_broker_dependencies"] is prior_dependencies
 
 
-def test_openalgo_telegram_save_drains_before_client_replacement(monkeypatch, tmp_path):
+def test_openalgo_telegram_save_drains_before_client_replacement(monkeypatch, tmp_path, backend_lease_factory):
     from flinttrade_core import app as app_module
     from flinttrade_core.workspace import Workspace
 
@@ -481,7 +481,7 @@ def test_openalgo_telegram_save_drains_before_client_replacement(monkeypatch, tm
     workspace.initialise()
     workspace.set("openalgo.api_key", "fixture-key")
     workspace.set("brokers.execution.default", "")
-    app = app_module.create_flask_app()
+    app = app_module.create_flask_app(backend_lease_proof=backend_lease_factory())
     prior_dependencies = app.extensions["flinttrade_broker_dependencies"]
     replacement_source = object()
     app.config["CLIENT"] = replacement_source
@@ -503,7 +503,7 @@ def test_openalgo_telegram_save_drains_before_client_replacement(monkeypatch, tm
     assert app.config.get("BROKER_ROUTER") is None
 
 
-def test_openalgo_config_unauthenticated_remote_get_rejected_without_leaking_key(monkeypatch, tmp_path):
+def test_openalgo_config_unauthenticated_remote_get_rejected_without_leaking_key(monkeypatch, tmp_path, backend_lease_factory):
     """A non-loopback GET without credentials is refused before reading secrets."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
@@ -511,7 +511,7 @@ def test_openalgo_config_unauthenticated_remote_get_rejected_without_leaking_key
 
     from flinttrade_core.app import create_flask_app
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
 
     app.test_client().post(
@@ -530,7 +530,7 @@ def test_openalgo_config_unauthenticated_remote_get_rejected_without_leaking_key
     assert "secret-bridge-key" not in response.get_data(as_text=True)
 
 
-def test_openalgo_config_authenticated_remote_get_rehydrates_key(monkeypatch, tmp_path):
+def test_openalgo_config_authenticated_remote_get_rehydrates_key(monkeypatch, tmp_path, backend_lease_factory):
     """A remote web terminal with a session JWT may rehydrate its OpenAlgo connection."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
@@ -541,7 +541,7 @@ def test_openalgo_config_authenticated_remote_get_rehydrates_key(monkeypatch, tm
     from flinttrade_core.app import create_flask_app
     from flinttrade_core.workspace import Workspace
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
     app.config["AUTH_SERVICE"].is_setup = MagicMock(return_value=True)
     Workspace().set("openalgo.api_key", "tailnet-session-secret")
@@ -557,7 +557,7 @@ def test_openalgo_config_authenticated_remote_get_rehydrates_key(monkeypatch, tm
     assert response.get_json()["data"]["api_key"] == "tailnet-session-secret"
 
 
-def test_openalgo_config_authenticated_remote_post_still_rejected(monkeypatch, tmp_path):
+def test_openalgo_config_authenticated_remote_post_still_rejected(monkeypatch, tmp_path, backend_lease_factory):
     """Writes stay loopback-only even for an authenticated remote caller."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
@@ -566,7 +566,7 @@ def test_openalgo_config_authenticated_remote_post_still_rejected(monkeypatch, t
     from flinttrade_core.app import create_flask_app
     from flinttrade_core.workspace import Workspace
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
 
     response = app.test_client().post(
@@ -580,7 +580,7 @@ def test_openalgo_config_authenticated_remote_post_still_rejected(monkeypatch, t
     assert Workspace().get("openalgo.api_key", "") != "remote-write-attempt"
 
 
-def test_openalgo_config_endpoint_rejects_invalid_ports(monkeypatch, tmp_path):
+def test_openalgo_config_endpoint_rejects_invalid_ports(monkeypatch, tmp_path, backend_lease_factory):
     """OpenAlgo config saves fail before invalid ports enter workspace.json."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
@@ -589,7 +589,7 @@ def test_openalgo_config_endpoint_rejects_invalid_ports(monkeypatch, tmp_path):
     from flinttrade_core.app import create_flask_app
     from flinttrade_core.workspace import Workspace
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
 
     response = app.test_client().post(
@@ -605,14 +605,14 @@ def test_openalgo_config_endpoint_rejects_invalid_ports(monkeypatch, tmp_path):
     assert Workspace().get("openalgo.host", "") != "https://invalid.local"
 
 
-def test_openalgo_config_endpoint_rejects_non_object_json(monkeypatch, tmp_path):
+def test_openalgo_config_endpoint_rejects_non_object_json(monkeypatch, tmp_path, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
 
     from flinttrade_core.app import create_flask_app
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
 
     response = app.test_client().post(
@@ -637,7 +637,7 @@ def test_openalgo_config_endpoint_rejects_non_object_json(monkeypatch, tmp_path)
         {"api_key": "your_openalgo_api_key_here"},
     ],
 )
-def test_openalgo_config_endpoint_validates_candidate_before_persisting(monkeypatch, tmp_path, payload):
+def test_openalgo_config_endpoint_validates_candidate_before_persisting(monkeypatch, tmp_path, payload, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
@@ -645,7 +645,7 @@ def test_openalgo_config_endpoint_validates_candidate_before_persisting(monkeypa
     from flinttrade_core.app import create_flask_app
     from flinttrade_core.workspace import Workspace
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
     before = Workspace().as_dict()
 
@@ -661,14 +661,14 @@ def test_openalgo_config_endpoint_validates_candidate_before_persisting(monkeypa
     assert Workspace().as_dict() == before
 
 
-def test_openalgo_config_endpoint_reconfigures_active_capture_and_desktop_redaction_key(monkeypatch, tmp_path):
+def test_openalgo_config_endpoint_reconfigures_active_capture_and_desktop_redaction_key(monkeypatch, tmp_path, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
 
     from flinttrade_core.app import create_flask_app
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
     recorder = MagicMock()
     runtime = MagicMock()
@@ -698,7 +698,7 @@ def test_openalgo_config_endpoint_reconfigures_active_capture_and_desktop_redact
     assert app.config["TICK_CAPTURE_ERROR"] == ""
 
 
-def test_openalgo_config_endpoint_reports_redacted_partial_capture_reconfiguration(monkeypatch, tmp_path, caplog):
+def test_openalgo_config_endpoint_reports_redacted_partial_capture_reconfiguration(monkeypatch, tmp_path, caplog, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
@@ -707,7 +707,7 @@ def test_openalgo_config_endpoint_reports_redacted_partial_capture_reconfigurati
 
     old_api_key = "previous-openalgo-key"
     api_key = "rotated-openalgo-key"
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
     old_client = MagicMock()
     old_client.settings.openalgo_api_key = old_api_key
@@ -744,14 +744,14 @@ def test_openalgo_config_endpoint_reports_redacted_partial_capture_reconfigurati
     assert old_api_key not in caplog.text
 
 
-def test_openalgo_config_endpoint_leaves_disabled_capture_alone(monkeypatch, tmp_path):
+def test_openalgo_config_endpoint_leaves_disabled_capture_alone(monkeypatch, tmp_path, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
 
     from flinttrade_core.app import create_flask_app
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
     runtime = MagicMock()
     app.config["TICK_CAPTURE_ENABLED"] = False
@@ -770,7 +770,7 @@ def test_openalgo_config_endpoint_leaves_disabled_capture_alone(monkeypatch, tmp
     runtime.update_api_key.assert_not_called()
 
 
-def test_openalgo_config_endpoint_preserves_unexpected_capture_death(monkeypatch, tmp_path, caplog):
+def test_openalgo_config_endpoint_preserves_unexpected_capture_death(monkeypatch, tmp_path, caplog, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
@@ -779,7 +779,7 @@ def test_openalgo_config_endpoint_preserves_unexpected_capture_death(monkeypatch
 
     old_api_key = "old-capture-key"
     new_api_key = "new-capture-key"
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
     old_client = MagicMock()
     old_client.settings.openalgo_api_key = old_api_key
@@ -814,14 +814,14 @@ def test_openalgo_config_endpoint_preserves_unexpected_capture_death(monkeypatch
     assert new_api_key not in response.get_data(as_text=True)
 
 
-def test_openalgo_config_endpoint_reports_enabled_failed_capture_requires_restart(monkeypatch, tmp_path):
+def test_openalgo_config_endpoint_reports_enabled_failed_capture_requires_restart(monkeypatch, tmp_path, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
 
     from flinttrade_core.app import create_flask_app
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config.update(TESTING=True, TICK_CAPTURE_ENABLED=True, TICK_CAPTURE_ERROR="recorder stopped")
 
     response = app.test_client().post(
@@ -837,7 +837,7 @@ def test_openalgo_config_endpoint_reports_enabled_failed_capture_requires_restar
     assert app.config["TICK_CAPTURE_ERROR"] == "recorder stopped"
 
 
-def test_openalgo_config_endpoint_serialises_concurrent_persist_and_reload(monkeypatch, tmp_path):
+def test_openalgo_config_endpoint_serialises_concurrent_persist_and_reload(monkeypatch, tmp_path, backend_lease_factory):
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
@@ -845,7 +845,7 @@ def test_openalgo_config_endpoint_serialises_concurrent_persist_and_reload(monke
     from flinttrade_core.app import create_flask_app
     from flinttrade_core.workspace import Workspace
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
     recorder = MagicMock()
     app.config["TICK_RECORDER"] = recorder

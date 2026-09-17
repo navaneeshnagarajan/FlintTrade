@@ -55,14 +55,14 @@ def monkeypatch_module():
     mp.undo()
 
 
-@pytest.fixture(scope="module")
-def flask_app(monkeypatch_module):
+@pytest.fixture()
+def flask_app(monkeypatch_module, backend_lease_factory):
     """Create a Flask app with operations blueprint registered."""
     monkeypatch_module.setenv("OPENALGO_API_KEY", _TEST_API_KEY)
     monkeypatch_module.setenv("FLINTTRADE_DEV", "1")
     from flinttrade_core.app import create_flask_app
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory())
     app.config["TESTING"] = True
     # Exercise retained legacy operations against synthetic dependencies.
     app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
@@ -532,7 +532,7 @@ class TestKillSwitchGatedWrites:
         return headers
 
     @staticmethod
-    def _router(adapter, *, allowed_actor: str = "testuser"):
+    def _router(adapter, *, allowed_actor: str = "testuser", backend_lease_factory):
         from datetime import datetime, timezone
 
         from flinttrade_core.exceptions import SafetyBypassError
@@ -571,10 +571,10 @@ class TestKillSwitchGatedWrites:
             {"dhan": adapter},
             session_provider,
             consume_gate=gate.consume,
-            config=config,
+            config=config, backend_lease_proof=backend_lease_factory()
         )
 
-    def test_routes_cancel_and_exit_through_gated_token_adapter(self, flask_app, client):
+    def test_routes_cancel_and_exit_through_gated_token_adapter(self, flask_app, client, backend_lease_factory):
         from flinttrade_engine.emergency_intents import InMemoryEmergencyIntentJournal
         from flinttrade_engine.safety import SafetySystem
 
@@ -598,7 +598,7 @@ class TestKillSwitchGatedWrites:
         }
         flask_app.config.update(
             SAFETY=safety,
-            BROKER_ROUTER=self._router(adapter),
+            BROKER_ROUTER=self._router(adapter, backend_lease_factory=backend_lease_factory),
             CLIENT=None,
             EMERGENCY_INTENT_JOURNAL=journal,
         )
@@ -618,7 +618,7 @@ class TestKillSwitchGatedWrites:
             safety.l5_kill.reset()
             flask_app.config.update(original)
 
-    def test_global_activation_latches_when_an_account_acl_refuses_dispatch(self, flask_app, client):
+    def test_global_activation_latches_when_an_account_acl_refuses_dispatch(self, flask_app, client, backend_lease_factory):
         from flinttrade_engine.safety import SafetySystem
 
         adapter = _EmergencyAdapter()
@@ -626,7 +626,9 @@ class TestKillSwitchGatedWrites:
         original_safety = flask_app.config.get("SAFETY")
         original_router = flask_app.config.get("BROKER_ROUTER")
         flask_app.config["SAFETY"] = safety
-        flask_app.config["BROKER_ROUTER"] = self._router(adapter, allowed_actor="someone-else")
+        flask_app.config["BROKER_ROUTER"] = self._router(
+            adapter, allowed_actor="someone-else", backend_lease_factory=backend_lease_factory,
+        )
         try:
             response = client.post(
                 "/api/v1/safety/kill-switch",
@@ -648,7 +650,7 @@ class TestKillSwitchGatedWrites:
             flask_app.config["SAFETY"] = original_safety
             flask_app.config["BROKER_ROUTER"] = original_router
 
-    def test_explicit_account_narrowing_is_refused_before_latching_l5(self, flask_app, client):
+    def test_explicit_account_narrowing_is_refused_before_latching_l5(self, flask_app, client, backend_lease_factory):
         from flinttrade_engine.safety import SafetySystem
 
         adapter = _EmergencyAdapter()
@@ -657,7 +659,9 @@ class TestKillSwitchGatedWrites:
             "SAFETY": flask_app.config.get("SAFETY"),
             "BROKER_ROUTER": flask_app.config.get("BROKER_ROUTER"),
         }
-        flask_app.config.update(SAFETY=safety, BROKER_ROUTER=self._router(adapter))
+        flask_app.config.update(
+            SAFETY=safety, BROKER_ROUTER=self._router(adapter, backend_lease_factory=backend_lease_factory),
+        )
         try:
             response = client.post(
                 "/api/v1/safety/kill-switch",
@@ -672,7 +676,7 @@ class TestKillSwitchGatedWrites:
         finally:
             flask_app.config.update(original)
 
-    def test_full_scope_activation_holds_generation_lease_through_dispatch(self, flask_app):
+    def test_full_scope_activation_holds_generation_lease_through_dispatch(self, flask_app, backend_lease_factory):
         from threading import Event, RLock, Thread
 
         from flinttrade_engine.safety import SafetySystem
@@ -695,8 +699,8 @@ class TestKillSwitchGatedWrites:
 
         adapter = BlockingEmergencyAdapter()
         safety = SafetySystem()
-        old_router = self._router(adapter)
-        replacement_router = self._router(_EmergencyAdapter())
+        old_router = self._router(adapter, backend_lease_factory=backend_lease_factory)
+        replacement_router = self._router(_EmergencyAdapter(), backend_lease_factory=backend_lease_factory)
         rebuild_lock = RLock()
         original = {
             "SAFETY": flask_app.config.get("SAFETY"),
@@ -752,7 +756,9 @@ class TestKillSwitchGatedWrites:
                 safety.l5_kill.reset()
             flask_app.config.update(original)
 
-    def test_generation_lease_timeout_latches_l5_and_defers_sweep(self, flask_app, client, monkeypatch):
+    def test_generation_lease_timeout_latches_l5_and_defers_sweep(
+        self, flask_app, client, monkeypatch, backend_lease_factory,
+    ):
         """A busy router rebuild must not prevent the L5 LATCH.
 
         Latch-before-lease: activation latches the kill switch first; only the
@@ -784,7 +790,7 @@ class TestKillSwitchGatedWrites:
         }
         flask_app.config.update(
             SAFETY=safety,
-            BROKER_ROUTER=self._router(adapter),
+            BROKER_ROUTER=self._router(adapter, backend_lease_factory=backend_lease_factory),
             BROKER_ROUTER_REBUILD_LOCK=rebuild_lock,
         )
         monkeypatch.setattr(operations_routes, "_ROUTER_GENERATION_LEASE_TIMEOUT_SECONDS", 0.01, raising=False)
@@ -837,7 +843,7 @@ class TestKillSwitchGatedWrites:
             safety.l5_kill.reset()
             flask_app.config.update(original)
 
-    def test_omitted_target_sweeps_all_actor_authorised_registered_accounts(self, flask_app, client):
+    def test_omitted_target_sweeps_all_actor_authorised_registered_accounts(self, flask_app, client, *, backend_lease_factory):
         from datetime import datetime, timezone
 
         from flinttrade_engine.safety import SafetyGate, SafetySystem
@@ -879,7 +885,7 @@ class TestKillSwitchGatedWrites:
             {"dhan": dhan, "upstox": upstox},
             session_provider,
             consume_gate=SafetyGate().consume,
-            config=config,
+            config=config, backend_lease_proof=backend_lease_factory()
         )
         safety = SafetySystem()
         original = {
@@ -908,7 +914,7 @@ class TestKillSwitchGatedWrites:
     def test_global_l5_keeps_configured_account_without_active_adapter_in_incomplete_scope(
         self,
         flask_app,
-        client,
+        client, *, backend_lease_factory
     ):
         from datetime import datetime, timezone
 
@@ -950,7 +956,7 @@ class TestKillSwitchGatedWrites:
             {"dhan": dhan},
             session_provider,
             consume_gate=SafetyGate().consume,
-            config=config,
+            config=config, backend_lease_proof=backend_lease_factory()
         )
         safety = SafetySystem()
         original = {
@@ -988,7 +994,7 @@ class TestKillSwitchGatedWrites:
     def test_global_l5_cannot_reset_after_only_the_authorised_account_flattens(
         self,
         flask_app,
-        client,
+        client, *, backend_lease_factory
     ):
         from datetime import datetime, timezone
 
@@ -1030,7 +1036,7 @@ class TestKillSwitchGatedWrites:
             {"dhan": dhan, "upstox": upstox},
             session_provider,
             consume_gate=SafetyGate().consume,
-            config=config,
+            config=config, backend_lease_proof=backend_lease_factory()
         )
         safety = SafetySystem()
         original = {
@@ -1068,7 +1074,7 @@ class TestKillSwitchGatedWrites:
             safety.l5_kill.reset()
             flask_app.config.update(original)
 
-    def test_activation_remains_truthful_when_audit_write_fails(self, flask_app, client):
+    def test_activation_remains_truthful_when_audit_write_fails(self, flask_app, client, backend_lease_factory):
         from flinttrade_engine.safety import SafetySystem
 
         adapter = _EmergencyAdapter()
@@ -1082,7 +1088,7 @@ class TestKillSwitchGatedWrites:
         }
         flask_app.config.update(
             SAFETY=safety,
-            BROKER_ROUTER=self._router(adapter),
+            BROKER_ROUTER=self._router(adapter, backend_lease_factory=backend_lease_factory),
             AUDIT=failing_audit,
         )
         try:

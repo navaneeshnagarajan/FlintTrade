@@ -211,28 +211,28 @@ def _router(
     read_only: bool = False,
     consume_gate=None,
     rate_limiter=None,
-    lifecycle_store=None,
+    lifecycle_store=None, backend_lease_factory
 ) -> BrokerRouter:
     return BrokerRouter(
         {"dhan": adapter},
         lambda _ctx, _aid, _acct: _session(read_only=read_only),
         consume_gate=consume_gate,
         rate_limiter=rate_limiter,
-        lifecycle_store=lifecycle_store,
+        lifecycle_store=lifecycle_store, backend_lease_proof=backend_lease_factory()
     )
 
 
-def _mint(order, **over) -> SafetyContext:
+def _mint(order, *, backend_lease_factory, **over) -> SafetyContext:
     kwargs = dict(mode="live", user_jti="jti-1", adapter_id="dhan", account_id="acct-1", actor_type="human")
     kwargs.update(over)
-    return SafetyContext.mint(order, **kwargs)
+    return SafetyContext.mint(order, **kwargs, backend_lease_proof=backend_lease_factory())
 
 
-async def test_place_order_dispatches_with_valid_context() -> None:
+async def test_place_order_dispatches_with_valid_context(*, backend_lease_factory) -> None:
     adapter = _FakeAdapter()
-    router = _router(adapter)
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
     order = _order()
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     result = await router.place_order(
         _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=ctx
     )
@@ -240,11 +240,11 @@ async def test_place_order_dispatches_with_valid_context() -> None:
     assert adapter.placed == [order]
 
 
-async def test_place_order_records_exact_invocation_boundary_and_acknowledgement() -> None:
+async def test_place_order_records_exact_invocation_boundary_and_acknowledgement(*, backend_lease_factory) -> None:
     events: list[str] = []
     lifecycle = _LifecycleStore(events)
     adapter = _SequencedAdapter(events)
-    router = _router(adapter, lifecycle_store=lifecycle)
+    router = _router(adapter, lifecycle_store=lifecycle, backend_lease_factory=backend_lease_factory)
     order = _order()
 
     result = await router.place_order(
@@ -252,7 +252,7 @@ async def test_place_order_records_exact_invocation_boundary_and_acknowledgement
         adapter_id="dhan",
         account_id="acct-1",
         order=order,
-        safety_ctx=_mint(order),
+        safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
     )
 
     assert result == "BROKER-OID-1"
@@ -265,11 +265,11 @@ async def test_place_order_records_exact_invocation_boundary_and_acknowledgement
     ]
 
 
-async def test_lifecycle_prepare_failure_prevents_adapter_invocation() -> None:
+async def test_lifecycle_prepare_failure_prevents_adapter_invocation(*, backend_lease_factory) -> None:
     events: list[str] = []
     lifecycle = _LifecycleStore(events, prepare_error=OSError("disk unavailable"))
     adapter = _SequencedAdapter(events)
-    router = _router(adapter, lifecycle_store=lifecycle)
+    router = _router(adapter, lifecycle_store=lifecycle, backend_lease_factory=backend_lease_factory)
     order = _order()
 
     with pytest.raises(SafetyBypassError, match="lifecycle ledger"):
@@ -278,17 +278,17 @@ async def test_lifecycle_prepare_failure_prevents_adapter_invocation() -> None:
             adapter_id="dhan",
             account_id="acct-1",
             order=order,
-            safety_ctx=_mint(order),
+            safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
         )
 
     assert "adapter" not in events
 
 
-async def test_adapter_exception_after_invocation_is_recorded_as_unknown_outcome() -> None:
+async def test_adapter_exception_after_invocation_is_recorded_as_unknown_outcome(*, backend_lease_factory) -> None:
     events: list[str] = []
     lifecycle = _LifecycleStore(events)
     adapter = _SequencedAdapter(events, place_error=TimeoutError("response lost"))
-    router = _router(adapter, lifecycle_store=lifecycle)
+    router = _router(adapter, lifecycle_store=lifecycle, backend_lease_factory=backend_lease_factory)
     order = _order()
 
     with pytest.raises(TimeoutError, match="response lost"):
@@ -297,7 +297,7 @@ async def test_adapter_exception_after_invocation_is_recorded_as_unknown_outcome
             adapter_id="dhan",
             account_id="acct-1",
             order=order,
-            safety_ctx=_mint(order),
+            safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
         )
 
     assert events[-1] == "outcome-unknown:TimeoutError"
@@ -306,11 +306,11 @@ async def test_adapter_exception_after_invocation_is_recorded_as_unknown_outcome
 @pytest.mark.parametrize("operation", ["place_order", "modify_order", "cancel_order"])
 async def test_direct_adapter_cancellation_is_durably_recorded_as_unknown_outcome(
     operation: str,
-    tmp_path,
+    tmp_path, *, backend_lease_factory
 ) -> None:
     adapter = _CancellingAdapter()
     lifecycle = OrderLifecycleLedger(ledger_path=tmp_path / "order-lifecycle.sqlite3")
-    router = _router(adapter, lifecycle_store=lifecycle)
+    router = _router(adapter, lifecycle_store=lifecycle, backend_lease_factory=backend_lease_factory)
 
     if operation == "place_order":
         order = _order()
@@ -319,7 +319,7 @@ async def test_direct_adapter_cancellation_is_durably_recorded_as_unknown_outcom
             adapter_id="dhan",
             account_id="acct-1",
             order=order,
-            safety_ctx=_mint(order),
+            safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
         )
     elif operation == "modify_order":
         order = {"_op": "modify", "order_id": "OID-1", "price": "100"}
@@ -330,7 +330,7 @@ async def test_direct_adapter_cancellation_is_durably_recorded_as_unknown_outcom
             order=order,
             order_id="OID-1",
             changes={"price": "100"},
-            safety_ctx=_mint(order),
+            safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
         )
     else:
         order = {"_op": "cancel", "order_id": "OID-1"}
@@ -340,7 +340,7 @@ async def test_direct_adapter_cancellation_is_durably_recorded_as_unknown_outcom
             account_id="acct-1",
             order=order,
             order_id="OID-1",
-            safety_ctx=_mint(order),
+            safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
         )
 
     with pytest.raises(asyncio.CancelledError):
@@ -377,11 +377,11 @@ async def test_extended_adapter_cancellation_is_durably_recorded_as_unknown_outc
     verb: str,
     payload: dict[str, object],
     intent_source: str | None,
-    tmp_path,
+    tmp_path, *, backend_lease_factory
 ) -> None:
     adapter = _CancellingAdapter()
     lifecycle = OrderLifecycleLedger(ledger_path=tmp_path / "order-lifecycle.sqlite3")
-    router = _router(adapter, lifecycle_store=lifecycle)
+    router = _router(adapter, lifecycle_store=lifecycle, backend_lease_factory=backend_lease_factory)
     request_ctx = _request_ctx(intent_source=intent_source)
 
     with pytest.raises(asyncio.CancelledError):
@@ -389,7 +389,7 @@ async def test_extended_adapter_cancellation_is_durably_recorded_as_unknown_outc
             request_ctx,
             verb=verb,
             payload=payload,
-            safety_ctx=_mint(payload, intent_source=intent_source),
+            safety_ctx=_mint(payload, intent_source=intent_source, backend_lease_factory=backend_lease_factory),
             adapter_id="dhan",
             account_id="acct-1",
         )
@@ -401,11 +401,11 @@ async def test_extended_adapter_cancellation_is_durably_recorded_as_unknown_outc
     assert attempts[0]["error_kind"] == "CancelledError"
 
 
-async def test_post_invocation_ledger_failure_returns_ack_but_blocks_next_normal_write() -> None:
+async def test_post_invocation_ledger_failure_returns_ack_but_blocks_next_normal_write(*, backend_lease_factory) -> None:
     events: list[str] = []
     lifecycle = _LifecycleStore(events, acknowledge_error=OSError("disk full"))
     adapter = _SequencedAdapter(events)
-    router = _router(adapter, lifecycle_store=lifecycle)
+    router = _router(adapter, lifecycle_store=lifecycle, backend_lease_factory=backend_lease_factory)
     order = _order()
 
     assert await router.place_order(
@@ -413,7 +413,7 @@ async def test_post_invocation_ledger_failure_returns_ack_but_blocks_next_normal
         adapter_id="dhan",
         account_id="acct-1",
         order=order,
-        safety_ctx=_mint(order),
+        safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
     ) == "BROKER-OID-1"
 
     lifecycle.acknowledge_error = None
@@ -423,18 +423,18 @@ async def test_post_invocation_ledger_failure_returns_ack_but_blocks_next_normal
             adapter_id="dhan",
             account_id="acct-1",
             order=order,
-            safety_ctx=_mint(order),
+            safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
         )
     assert events.count("adapter") == 1
     assert "outcome-unknown:OSError" in events
     assert "critical:OSError" not in events
 
 
-async def test_router_clears_only_the_exact_durably_resolved_lifecycle_fault() -> None:
+async def test_router_clears_only_the_exact_durably_resolved_lifecycle_fault(*, backend_lease_factory) -> None:
     events: list[str] = []
     lifecycle = _LifecycleStore(events)
     adapter = _SequencedAdapter(events, place_error=TimeoutError("response lost"))
-    router = _router(adapter, lifecycle_store=lifecycle)
+    router = _router(adapter, lifecycle_store=lifecycle, backend_lease_factory=backend_lease_factory)
     order = _order()
 
     with pytest.raises(TimeoutError, match="response lost"):
@@ -443,7 +443,7 @@ async def test_router_clears_only_the_exact_durably_resolved_lifecycle_fault() -
             adapter_id="dhan",
             account_id="acct-1",
             order=order,
-            safety_ctx=_mint(order),
+            safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
         )
 
     lifecycle.critical = False
@@ -462,7 +462,7 @@ async def test_router_clears_only_the_exact_durably_resolved_lifecycle_fault() -
             adapter_id="dhan",
             account_id="acct-1",
             order=order,
-            safety_ctx=_mint(order),
+            safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
         )
 
     receipt = router.clear_lifecycle_fault(
@@ -488,14 +488,14 @@ async def test_router_clears_only_the_exact_durably_resolved_lifecycle_fault() -
         adapter_id="dhan",
         account_id="acct-1",
         order=order,
-        safety_ctx=_mint(order),
+        safety_ctx=_mint(order, backend_lease_factory=backend_lease_factory),
     ) == "BROKER-OID-1"
 
 
-async def test_place_order_dispatches_detached_snapshot_after_throttle() -> None:
+async def test_place_order_dispatches_detached_snapshot_after_throttle(*, backend_lease_factory) -> None:
     adapter = _FakeAdapter()
     limiter = _BlockingLimiter()
-    router = _router(adapter, rate_limiter=limiter)
+    router = _router(adapter, rate_limiter=limiter, backend_lease_factory=backend_lease_factory)
     order = types.SimpleNamespace(
         symbol="RELIANCE",
         quantity=10,
@@ -503,7 +503,7 @@ async def test_place_order_dispatches_detached_snapshot_after_throttle() -> None
         exchange="NSE",
         metadata={"limits": {"price": "100"}},
     )
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
 
     dispatch = asyncio.create_task(
         router.place_order(
@@ -526,7 +526,7 @@ async def test_place_order_dispatches_detached_snapshot_after_throttle() -> None
     assert dispatched.metadata == {"limits": {"price": "100"}}
 
 
-async def test_rate_limiter_throttle_runs_before_dispatch() -> None:
+async def test_rate_limiter_throttle_runs_before_dispatch(*, backend_lease_factory) -> None:
     """The router throttles BELOW the gate — acquire() runs after verify, before
     the broker call, and can only delay (never bypass) a dispatch."""
     class _SpyLimiter:
@@ -541,24 +541,24 @@ async def test_rate_limiter_throttle_runs_before_dispatch() -> None:
     router = BrokerRouter(
         {"dhan": adapter},
         lambda _ctx, _aid, _acct: _session(),
-        rate_limiter=limiter,
+        rate_limiter=limiter, backend_lease_proof=backend_lease_factory()
     )
     order = _order()
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     await router.place_order(_request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=ctx)
     assert limiter.acquired == [("dhan", "order")]
     assert adapter.placed == [order]  # throttle did not block the (gated) dispatch
 
 
-async def test_place_order_rejects_adapter_mismatch() -> None:
+async def test_place_order_rejects_adapter_mismatch(*, backend_lease_factory) -> None:
     """A ctx minted for 'dhan' must not fire when the order resolves to 'upstox'."""
     adapter = _FakeAdapter()
     router = BrokerRouter(
         {"dhan": adapter, "upstox": adapter},
-        lambda _ctx, _aid, _acct: _session(),
+        lambda _ctx, _aid, _acct: _session(), backend_lease_proof=backend_lease_factory()
     )
     order = _order()
-    ctx = _mint(order, adapter_id="dhan")
+    ctx = _mint(order, adapter_id="dhan", backend_lease_factory=backend_lease_factory)
     with pytest.raises(SafetyBypassError, match="verification failed"):
         await router.place_order(
             _request_ctx(), adapter_id="upstox", account_id="acct-1", order=order, safety_ctx=ctx
@@ -566,11 +566,11 @@ async def test_place_order_rejects_adapter_mismatch() -> None:
     assert adapter.placed == []
 
 
-async def test_place_order_rejects_consumed_gate() -> None:
+async def test_place_order_rejects_consumed_gate(*, backend_lease_factory) -> None:
     adapter = _FakeAdapter()
-    router = _router(adapter, consume_gate=lambda _gate_id: False)
+    router = _router(adapter, consume_gate=lambda _gate_id: False, backend_lease_factory=backend_lease_factory)
     order = _order()
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     with pytest.raises(SafetyBypassError, match="already consumed"):
         await router.place_order(
             _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=ctx
@@ -578,11 +578,11 @@ async def test_place_order_rejects_consumed_gate() -> None:
     assert adapter.placed == []
 
 
-async def test_place_order_rejects_read_only_session() -> None:
+async def test_place_order_rejects_read_only_session(*, backend_lease_factory) -> None:
     adapter = _FakeAdapter()
-    router = _router(adapter, read_only=True)
+    router = _router(adapter, read_only=True, backend_lease_factory=backend_lease_factory)
     order = _order()
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     with pytest.raises(SafetyBypassError, match="read-only"):
         await router.place_order(
             _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=ctx
@@ -590,7 +590,7 @@ async def test_place_order_rejects_read_only_session() -> None:
     assert adapter.placed == []
 
 
-async def test_gate_consumed_exactly_once() -> None:
+async def test_gate_consumed_exactly_once(*, backend_lease_factory) -> None:
     """Second dispatch of the same gate_id must fail (one-shot)."""
     adapter = _FakeAdapter()
     consumed: set[str] = set()
@@ -601,9 +601,9 @@ async def test_gate_consumed_exactly_once() -> None:
         consumed.add(gate_id)
         return True
 
-    router = _router(adapter, consume_gate=consume)
+    router = _router(adapter, consume_gate=consume, backend_lease_factory=backend_lease_factory)
     order = _order()
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     assert await router.place_order(
         _request_ctx(), adapter_id="dhan", account_id="acct-1", order=order, safety_ctx=ctx
     ) == "BROKER-OID-1"
@@ -619,11 +619,11 @@ async def test_gate_consumed_exactly_once() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_modify_order_dispatches_with_valid_context() -> None:
+async def test_modify_order_dispatches_with_valid_context(*, backend_lease_factory) -> None:
     adapter = _FakeAdapter()
-    router = _router(adapter)
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
     order = {"_op": "modify", "order_id": "OID-1", "price": "100"}
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     await router.modify_order(
         _request_ctx(),
         adapter_id="dhan",
@@ -636,14 +636,14 @@ async def test_modify_order_dispatches_with_valid_context() -> None:
     assert adapter.modified == [("OID-1", {"price": "100"})]
 
 
-async def test_modify_order_dispatches_only_signed_detached_values_after_throttle() -> None:
+async def test_modify_order_dispatches_only_signed_detached_values_after_throttle(*, backend_lease_factory) -> None:
     adapter = _FakeAdapter()
     limiter = _BlockingLimiter()
-    router = _router(adapter, rate_limiter=limiter)
+    router = _router(adapter, rate_limiter=limiter, backend_lease_factory=backend_lease_factory)
     nested = {"levels": [{"price": "100"}]}
     order = {"_op": "modify", "order_id": "OID-1", "metadata": nested}
     changes = {"metadata": nested}
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
 
     dispatch = asyncio.create_task(
         router.modify_order(
@@ -680,12 +680,12 @@ async def test_modify_order_rejects_unsigned_compatibility_values_before_gate_co
     order: dict[str, object],
     order_id: str,
     changes: dict[str, object],
-    match: str,
+    match: str, *, backend_lease_factory
 ) -> None:
     consumed: list[str] = []
     adapter = _FakeAdapter()
-    router = _router(adapter, consume_gate=lambda gate_id: consumed.append(gate_id) or True)
-    ctx = _mint(order)
+    router = _router(adapter, consume_gate=lambda gate_id: consumed.append(gate_id) or True, backend_lease_factory=backend_lease_factory)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
 
     with pytest.raises(SafetyBypassError, match=match):
         await router.modify_order(
@@ -702,11 +702,11 @@ async def test_modify_order_rejects_unsigned_compatibility_values_before_gate_co
     assert adapter.modified == []
 
 
-async def test_modify_order_rejects_consumed_gate() -> None:
+async def test_modify_order_rejects_consumed_gate(*, backend_lease_factory) -> None:
     adapter = _FakeAdapter()
-    router = _router(adapter, consume_gate=lambda _gate_id: False)
+    router = _router(adapter, consume_gate=lambda _gate_id: False, backend_lease_factory=backend_lease_factory)
     order = {"_op": "modify", "order_id": "OID-1"}
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     with pytest.raises(SafetyBypassError, match="already consumed"):
         await router.modify_order(
             _request_ctx(),
@@ -720,11 +720,11 @@ async def test_modify_order_rejects_consumed_gate() -> None:
     assert adapter.modified == []
 
 
-async def test_cancel_order_dispatches_with_valid_context() -> None:
+async def test_cancel_order_dispatches_with_valid_context(*, backend_lease_factory) -> None:
     adapter = _FakeAdapter()
-    router = _router(adapter)
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
     order = {"_op": "cancel", "order_id": "OID-9"}
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     await router.cancel_order(
         _request_ctx(),
         adapter_id="dhan",
@@ -751,12 +751,12 @@ async def test_cancel_order_dispatches_with_valid_context() -> None:
 async def test_cancel_order_rejects_invalid_signed_identity_before_gate_consumption(
     order: dict[str, object],
     order_id: str,
-    match: str,
+    match: str, *, backend_lease_factory
 ) -> None:
     consumed: list[str] = []
     adapter = _FakeAdapter()
-    router = _router(adapter, consume_gate=lambda gate_id: consumed.append(gate_id) or True)
-    ctx = _mint(order)
+    router = _router(adapter, consume_gate=lambda gate_id: consumed.append(gate_id) or True, backend_lease_factory=backend_lease_factory)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
 
     with pytest.raises(SafetyBypassError, match=match):
         await router.cancel_order(
@@ -772,11 +772,11 @@ async def test_cancel_order_rejects_invalid_signed_identity_before_gate_consumpt
     assert adapter.cancelled == []
 
 
-async def test_cancel_order_rejects_read_only_session() -> None:
+async def test_cancel_order_rejects_read_only_session(*, backend_lease_factory) -> None:
     adapter = _FakeAdapter()
-    router = _router(adapter, read_only=True)
+    router = _router(adapter, read_only=True, backend_lease_factory=backend_lease_factory)
     order = {"_op": "cancel", "order_id": "OID-9"}
-    ctx = _mint(order)
+    ctx = _mint(order, backend_lease_factory=backend_lease_factory)
     with pytest.raises(SafetyBypassError, match="read-only"):
         await router.cancel_order(
             _request_ctx(),

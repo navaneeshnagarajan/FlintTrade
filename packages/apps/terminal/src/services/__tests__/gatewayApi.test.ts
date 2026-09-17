@@ -64,11 +64,12 @@ describe("gatewayApi", () => {
   it("removeAccount sends DELETE with URL-encoded account ID", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "deleted" }));
 
-    await gatewayApi.removeAccount("acc/special&id");
+    const actionKey = "00000000-0000-4000-8000-000000000001";
+    await gatewayApi.removeAccount("acc/special&id", actionKey);
 
     const url = fetchSpy.mock.calls[0][0] as string;
     expect(url).toBe("/ft-api/v1/accounts/acc%2Fspecial%26id");
-    expect(fetchSpy.mock.calls[0][1]).toEqual({ method: "DELETE", headers: {} });
+    expect(fetchSpy.mock.calls[0][1]).toEqual({ method: "DELETE", headers: { "Idempotency-Key": actionKey } });
   });
 
   it("attaches the session JWT on writes (backend G9 write guard)", async () => {

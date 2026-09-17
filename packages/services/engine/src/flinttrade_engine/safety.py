@@ -34,6 +34,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, AsyncIterator, ContextManager, Iterator, Literal, Protocol
 
+from flinttrade_core.backend_instance import BackendLeaseProof, BackendLeaseUnavailable, require_backend_lease_proof
 from flinttrade_core.exceptions import BrokerError, SafetyBypassError, UnsupportedCapabilityError
 from flinttrade_core.models import Order, Position
 from flinttrade_core.secure_file import harden
@@ -100,6 +101,14 @@ def bounded_generation_lease(
 _SAFETY_GATE_SECRET: bytes | None = None
 
 
+def require_backend_write_proof(proof: object) -> BackendLeaseProof:
+    """Translate lost process ownership into the existing write-refusal contract."""
+    try:
+        return require_backend_lease_proof(proof)
+    except BackendLeaseUnavailable:
+        raise SafetyBypassError("backend_lease_unavailable") from None
+
+
 def set_safety_gate_secret(secret: bytes) -> None:
     """Bind the process-wide dedicated safety-gate HMAC secret (contract §8.0b).
 
@@ -159,6 +168,7 @@ def _hmac_canonical(
     external_nonce_hash: str | None,
     failover_allowed_adapters: tuple[str, ...],
     expires_at: datetime,
+    backend_incarnation: str,
 ) -> bytes:
     """HMAC-SHA256 over the canonical signed tuple (contract §8.0).
 
@@ -182,6 +192,7 @@ def _hmac_canonical(
             external_nonce_hash,
             list(failover_allowed_adapters),
             expires_at.astimezone(UTC).isoformat(),
+            backend_incarnation,
         ],
         separators=(",", ":"),
         ensure_ascii=False,
@@ -212,6 +223,7 @@ class SafetyContext:
     failover_allowed_adapters: tuple[str, ...]  # immutable: tuple, not list
     expires_at: datetime
     signature: bytes
+    backend_incarnation: str
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Security M15: SafetyContext is final — subclassing is forbidden.
@@ -244,6 +256,7 @@ class SafetyContext:
         external_nonce_hash: str | None = None,
         failover_allowed_adapters: tuple[str, ...] = (),
         ttl_seconds: int = 10,
+        backend_lease_proof: BackendLeaseProof | None = None,
     ) -> SafetyContext:
         """Mint a fresh one-shot context. Only ``engine.safety`` mints; adapters
         MUST NOT (contract §8.1).
@@ -252,6 +265,8 @@ class SafetyContext:
         selector-bound principal); it is signed into the canonical tuple so the
         gate cannot be replayed against a different account.
         """
+        proof = require_backend_write_proof(backend_lease_proof)
+        backend_incarnation = str(proof.incarnation)
         gate_id = secrets.token_urlsafe(18)
         expires_at = datetime.now(tz=UTC) + timedelta(seconds=ttl_seconds)
         order_hash = _canonical_order_hash(order)
@@ -268,6 +283,7 @@ class SafetyContext:
             external_nonce_hash=external_nonce_hash,
             failover_allowed_adapters=failover,
             expires_at=expires_at,
+            backend_incarnation=backend_incarnation,
         )
         return cls(
             gate_id=gate_id,
@@ -282,6 +298,7 @@ class SafetyContext:
             failover_allowed_adapters=failover,
             expires_at=expires_at,
             signature=signature,
+            backend_incarnation=backend_incarnation,
         )
 
     def verify(
@@ -311,6 +328,7 @@ class SafetyContext:
             external_nonce_hash=self.external_nonce_hash,
             failover_allowed_adapters=self.failover_allowed_adapters,
             expires_at=self.expires_at,
+            backend_incarnation=self.backend_incarnation,
         )
         if not hmac.compare_digest(expected_sig, self.signature):
             return False
@@ -407,6 +425,7 @@ def gate_order(
     external_nonce: str | None = None,
     failover_allowed_adapters: tuple[str, ...] = (),
     ttl_seconds: int = 10,
+    backend_lease_proof: BackendLeaseProof | None = None,
 ) -> SafetyContext:
     """Mint the one-shot :class:`SafetyContext` that authorises a single broker write.
 
@@ -430,6 +449,7 @@ def gate_order(
         A freshly-minted ``SafetyContext`` bound to ``order``, the resolved ``adapter_id``,
         and the full signed actor-identity tuple.
     """
+    require_backend_write_proof(backend_lease_proof)
     if actor_type is not None and actor_type != request_ctx.actor_type:
         raise SafetyBypassError(
             f"gate_order: actor_type_mismatch — caller passed {actor_type!r} but "
@@ -464,6 +484,7 @@ def gate_order(
         external_nonce_hash=external_nonce_hash,
         failover_allowed_adapters=tuple(failover_allowed_adapters),
         ttl_seconds=ttl_seconds,
+        backend_lease_proof=backend_lease_proof,
     )
 
 
@@ -512,6 +533,7 @@ def gate_broker_write(
     external_nonce: str | None = None,
     failover_allowed_adapters: tuple[str, ...] = (),
     ttl_seconds: int = 10,
+    backend_lease_proof: BackendLeaseProof | None = None,
 ) -> SafetyContext:
     """Mint the one-shot :class:`SafetyContext` for an extended broker write verb.
 
@@ -548,6 +570,7 @@ def gate_broker_write(
         SafetyBypassError: For an unknown verb, a non-mapping payload, or a
             payload whose ``_op`` does not match ``verb``.
     """
+    require_backend_write_proof(backend_lease_proof)
     if verb not in GATED_WRITE_VERBS:
         raise SafetyBypassError(f"gate_broker_write: unknown gated write verb {verb!r}")
     if not isinstance(payload, Mapping):
@@ -570,6 +593,7 @@ def gate_broker_write(
         external_nonce=external_nonce,
         failover_allowed_adapters=failover_allowed_adapters,
         ttl_seconds=ttl_seconds,
+        backend_lease_proof=backend_lease_proof,
     )
 
 
@@ -827,6 +851,9 @@ class EmergencyDispatchResult:
 
 class EmergencyRouter(Protocol):
     """BrokerRouter surface required by the injected emergency dispatcher."""
+
+    @property
+    def backend_lease_proof(self) -> BackendLeaseProof: ...
 
     def plan_emergency_reduction(
         self,
@@ -1381,6 +1408,7 @@ class GatedEmergencyBrokerDispatcher:
         *,
         policy: EmergencyWritePolicy,
         reason_hash: str,
+        backend_lease_proof: BackendLeaseProof,
     ) -> tuple[dict[str, Any], SafetyContext]:
         """Canonicalise and mint before an intent can become outcome-unknown."""
         canonical: dict[str, Any] = {
@@ -1396,6 +1424,7 @@ class GatedEmergencyBrokerDispatcher:
                 canonical,
                 request_ctx,
                 target.adapter_id,
+                backend_lease_proof=backend_lease_proof,
                 account_id=target.account_id,
             )
         else:
@@ -1404,6 +1433,7 @@ class GatedEmergencyBrokerDispatcher:
                 canonical,
                 request_ctx,
                 target.adapter_id,
+                backend_lease_proof=backend_lease_proof,
                 account_id=target.account_id,
             )
         return canonical, safety_ctx
@@ -1672,6 +1702,7 @@ class GatedEmergencyBrokerDispatcher:
                             write,
                             policy=policy,
                             reason_hash=reason_hash,
+                            backend_lease_proof=router.backend_lease_proof,
                         )
                     except SafetyBypassError as exc:
                         failure_code = self._failure_code(exc)

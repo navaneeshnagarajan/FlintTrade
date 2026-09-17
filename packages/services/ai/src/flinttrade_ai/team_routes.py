@@ -18,6 +18,8 @@ from typing import Any
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
+from flinttrade_core.ai_broker_context import BrokerContextError
+
 from .llm_client import LLMClient, LLMConfig
 
 logger = logging.getLogger("flinttrade.ai.team")
@@ -82,6 +84,14 @@ def _parse_analysis_request(body: Any) -> tuple[dict[str, Any] | None, str | Non
     mode = body.get("mode", "flat")
     if not isinstance(mode, str) or mode not in AgentTeam.available_modes():
         return None, "mode is invalid"
+    context_source = body.get("context_source", "supplied")
+    if not isinstance(context_source, str) or context_source not in {"supplied", "configured_brokers"}:
+        return None, "context_source is invalid"
+    if context_source == "configured_brokers":
+        if "market_data" in body:
+            return None, "configured_brokers cannot be combined with market_data"
+        if mode == "sequential":
+            return None, "configured_brokers is not supported for sequential mode"
     preset_provided = "preset" in body
     preset = body.get("preset")
     if preset is not None and (not isinstance(preset, str) or not preset.strip()):
@@ -103,6 +113,7 @@ def _parse_analysis_request(body: Any) -> tuple[dict[str, Any] | None, str | Non
         "symbol": symbol.strip(),
         "exchange": exchange.strip(),
         "market_data": dict(market_data) if market_data is not None else None,
+        "context_source": context_source,
         "mode": mode,
         "preset": preset.strip() if preset is not None else None,
         "use_active_preset": not preset_provided,
@@ -143,13 +154,46 @@ def _public_team_analysis_payload(result: Any) -> dict[str, Any]:
     return payload
 
 
-def _team_result_payload(team: Any, result: Any) -> dict[str, Any]:
+def _collect_configured_context(symbol: str, exchange: str):
+    from flinttrade_core.ai_broker_context import collect_configured_broker_context  # noqa: PLC0415
+
+    return collect_configured_broker_context(symbol, exchange)
+
+
+def _prepare_analysis_context(analysis_request: dict[str, Any]):
+    """Receipt configured broker inputs before either JSON or SSE model work."""
+    if analysis_request["context_source"] != "configured_brokers":
+        return None, None
+    try:
+        snapshot = _collect_configured_context(analysis_request["symbol"], analysis_request["exchange"])
+    except BrokerContextError as error:
+        return None, (jsonify({
+            "status": "error",
+            "message": "Configured broker context unavailable",
+            "code": error.code,
+        }), error.status_code)
+    except Exception:
+        # Provider exceptions can contain credentials; no exception text or traceback.
+        logger.error("Configured broker context collection failed")
+        return None, (jsonify({
+            "status": "error",
+            "message": "Configured broker context unavailable",
+            "code": "broker_context_unavailable",
+        }), 503)
+    analysis_request["market_data"] = snapshot.market_data
+    return snapshot.receipt, None
+
+
+def _team_result_payload(team: Any, result: Any, input_receipt: dict[str, str] | None = None) -> dict[str, Any]:
     """Build the stable analysis/recommendation response data."""
     recommendation = team.get_recommendation(result)
-    return {
+    payload = {
         "analysis": _public_team_analysis_payload(result),
         "recommendation": recommendation.to_dict(),
     }
+    if input_receipt is not None:
+        payload["input_receipt"] = dict(input_receipt)
+    return payload
 
 
 @team_bp.route("/analyse", methods=["POST"])
@@ -160,6 +204,8 @@ def team_analyze() -> tuple[Any, int]:
         symbol (str): Instrument symbol (e.g. "NIFTY", "RELIANCE").
         exchange (str): Exchange code (e.g. "NSE_INDEX", "NSE", "NFO").
         market_data (dict, optional): Additional market context.
+        context_source (str, optional): ``configured_brokers`` collects and
+            durably records native broker context instead of supplied data.
 
     Returns:
         JSON with ``status`` and ``data`` containing the full
@@ -177,6 +223,10 @@ def team_analyze() -> tuple[Any, int]:
     if analysis_request is None:
         return jsonify({"status": "error", "message": validation_error}), 400
 
+    input_receipt, context_error = _prepare_analysis_context(analysis_request)
+    if context_error is not None:
+        return context_error
+
     try:
         result = asyncio.run(
             team.analyse_async(
@@ -193,7 +243,7 @@ def team_analyze() -> tuple[Any, int]:
         )
         return jsonify({
             "status": "success",
-            "data": _team_result_payload(team, result),
+            "data": _team_result_payload(team, result, input_receipt),
         }), 200
     except Exception:
         logger.exception("team_analyze error")
@@ -213,6 +263,10 @@ def team_analyze_stream() -> Response | tuple[Any, int]:
     analysis_request, validation_error = _parse_analysis_request(request.get_json(silent=True))
     if analysis_request is None:
         return jsonify({"status": "error", "message": validation_error}), 400
+
+    input_receipt, context_error = _prepare_analysis_context(analysis_request)
+    if context_error is not None:
+        return context_error
 
     messages: queue.Queue[tuple[str, Any]] = queue.Queue()
     disconnected = threading.Event()
@@ -253,7 +307,7 @@ def team_analyze_stream() -> Response | tuple[Any, int]:
 
             result = analysis_task.result()
             if not disconnected.is_set():
-                messages.put(("result", _team_result_payload(team, result)))
+                messages.put(("result", _team_result_payload(team, result, input_receipt)))
 
         try:
             asyncio.run(run())

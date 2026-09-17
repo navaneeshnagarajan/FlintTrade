@@ -162,6 +162,7 @@ class WebhookOrderDispatcher:
                 safety_ctx = gate_order(
                     typed_order,
                     request_ctx,
+                    backend_lease_proof=router.backend_lease_proof,
                     adapter_id=adapter_id,
                     account_id=account_id,
                     actor_type="external_intent",
@@ -327,6 +328,7 @@ class WebhookOrderDispatcher:
             safety_ctx = gate_order(
                 canonical,
                 request_ctx,
+                backend_lease_proof=router.backend_lease_proof,
                 adapter_id=adapter_id,
                 account_id=account_id,
                 actor_type="external_intent",

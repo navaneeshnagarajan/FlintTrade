@@ -702,6 +702,7 @@ def test_pre_runtime_rollback_retains_exact_storage_owner_after_close_failure(
 def test_failed_startup_rollback_retains_runtime_owner_for_process_teardown(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_factory,
 ) -> None:
     api_key = "startup-rollback-secret"
     flask_app = Flask("desktop-capture-startup-rollback")
@@ -753,13 +754,15 @@ def test_failed_startup_rollback_retains_runtime_owner_for_process_teardown(
     assert "rollback stop failed" not in caplog.text
     assert "RuntimeError" in caplog.text
 
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda _proof: flask_app)
     monkeypatch.setattr(
         "waitress.server.create_server",
         lambda *_args, **_kwargs: SimpleNamespace(effective_port=5100, run=lambda: None),
     )
 
-    desktop._serve_owned(5100, ready_writer=lambda _message: None)
+    desktop._serve_owned(
+        5100, ready_writer=lambda _message: None, backend_lease_proof=backend_lease_factory(),
+    )
 
     assert runtime.stop_calls == 2
     assert storage.closed is True
@@ -993,6 +996,7 @@ def test_missing_frozen_capture_dependency_records_failure(monkeypatch: pytest.M
 @pytest.mark.unit
 def test_build_app_configures_capture_with_the_same_settings_and_hub(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_factory,
 ) -> None:
     flask_app = Flask("desktop-build")
     signal_hub = object()
@@ -1011,7 +1015,7 @@ def test_build_app_configures_capture_with_the_same_settings_and_hub(
 
     monkeypatch.setattr(desktop, "_configure_tick_capture", configure)
 
-    assert desktop._build_app() is flask_app
+    assert desktop._build_app(backend_lease_factory()) is flask_app
     assert configured == [(flask_app, settings, signal_hub)]
 
 
@@ -1030,7 +1034,7 @@ def test_serve_announces_ready_after_capture_start_and_stops_runtime(
         def run(self) -> None:
             events.append("server-run")
 
-    def build_app():
+    def build_app(_proof):
         events.append("capture-start")
         return flask_app
 
@@ -1051,7 +1055,7 @@ def test_serve_closes_app_owned_client_and_audit(
     audit = SimpleNamespace(close=lambda: events.append("audit-close"))
     flask_app = Flask("desktop-owned-dependencies")
     flask_app.config.update(CLIENT=client, AUDIT=audit)
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda _proof: flask_app)
     monkeypatch.setattr(
         desktop,
         "client_close_sync",
@@ -1077,7 +1081,7 @@ def test_serve_reports_client_close_failure_after_closing_audit(
     audit = MagicMock()
     flask_app = Flask("desktop-client-close-failure")
     flask_app.config.update(CLIENT=object(), AUDIT=audit)
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda _proof: flask_app)
     monkeypatch.setattr(
         desktop,
         "client_close_sync",
@@ -1131,7 +1135,7 @@ def test_serve_quiesces_background_owners_and_flushes_capture_before_drain(
         ROTATION_SCHEDULER=rotation,
         BROKER_ROUTER=object(),
     )
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda _proof: flask_app)
     monkeypatch.setattr(
         agent_routes,
         "shutdown_agent_runtime",
@@ -1198,7 +1202,7 @@ def test_serve_defers_real_capture_storage_close_until_requests_drain(
         DESKTOP_TICK_CAPTURE_RUNTIME=runtime,
         RUNTIME_REQUEST_TRACKER=tracker,
     )
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda _proof: flask_app)
     monkeypatch.setattr(
         "waitress.server.create_server",
         lambda *_args, **_kwargs: SimpleNamespace(effective_port=5100, run=lambda: None),
@@ -1213,6 +1217,7 @@ def test_serve_defers_real_capture_storage_close_until_requests_drain(
 @pytest.mark.unit
 def test_one_serve_shutdown_retries_retained_flushes_before_storage_close(
     monkeypatch: pytest.MonkeyPatch,
+    backend_lease_factory,
 ) -> None:
     events: list[str] = []
     recorder = _BoundedRetryFlushRecorder(events, failures=2)
@@ -1229,13 +1234,15 @@ def test_one_serve_shutdown_retries_retained_flushes_before_storage_close(
     assert recorder.run_started.wait(timeout=1)
     flask_app = Flask("desktop-retained-flush-retry")
     flask_app.config["DESKTOP_TICK_CAPTURE_RUNTIME"] = runtime
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda _proof: flask_app)
     monkeypatch.setattr(
         "waitress.server.create_server",
         lambda *_args, **_kwargs: SimpleNamespace(effective_port=5100, run=lambda: None),
     )
 
-    desktop._serve_owned(5100, ready_writer=lambda _message: None)
+    desktop._serve_owned(
+        5100, ready_writer=lambda _message: None, backend_lease_proof=backend_lease_factory(),
+    )
 
     assert recorder.flush_calls == 3
     assert recorder.pending_tick_count == 0
@@ -1264,7 +1271,7 @@ def test_serve_drain_timeout_does_not_close_request_dependencies(
         RUNTIME_REQUEST_TRACKER=tracker,
     )
     close_client = MagicMock()
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda _proof: flask_app)
     monkeypatch.setattr(desktop, "client_close_sync", close_client)
     monkeypatch.setattr(
         "waitress.server.create_server",
@@ -1283,7 +1290,7 @@ def test_serve_stops_capture_when_waitress_bind_fails(monkeypatch: pytest.Monkey
     runtime = MagicMock()
     flask_app = Flask("desktop-bind-failure")
     flask_app.config["DESKTOP_TICK_CAPTURE_RUNTIME"] = runtime
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda _proof: flask_app)
 
     def fail_bind(*_args, **_kwargs):
         raise OSError("port unavailable")
@@ -1322,7 +1329,7 @@ def test_serve_installs_and_removes_graceful_shutdown_callback(
             self.callback = None
 
     shutdown_signal = ShutdownSignal()
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda _proof: flask_app)
     monkeypatch.setattr(
         "waitress.server.create_server",
         lambda *_args, **_kwargs: SimpleNamespace(
@@ -1378,7 +1385,7 @@ def test_graceful_shutdown_request_unwinds_server_and_flushes_capture(
         request_thread.join(timeout=1)
         threading.Event().wait(1)
 
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda _proof: flask_app)
     monkeypatch.setattr(
         "waitress.server.create_server",
         lambda *_args, **_kwargs: SimpleNamespace(effective_port=5100, run=run_server),
@@ -1406,7 +1413,7 @@ def test_serve_redacts_capture_shutdown_failure(
     runtime = SimpleNamespace(stop=fail_stop, sanitise_error=sanitise_error)
     flask_app = Flask("desktop-stop-failure")
     flask_app.config["DESKTOP_TICK_CAPTURE_RUNTIME"] = runtime
-    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(desktop, "_build_app", lambda _proof: flask_app)
     monkeypatch.setattr(
         "waitress.server.create_server",
         lambda *_args, **_kwargs: SimpleNamespace(effective_port=5100, run=lambda: None),

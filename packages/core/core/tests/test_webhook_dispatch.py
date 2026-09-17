@@ -26,7 +26,8 @@ def _safety_secret() -> None:
     set_safety_gate_secret(b"w" * 32)
 
 
-def _app(router: MagicMock) -> Flask:
+def _app(router: MagicMock, *, backend_lease_factory) -> Flask:
+    router.backend_lease_proof = backend_lease_factory()
     app = Flask("webhook-dispatch-test")
     app.config["BROKER_ROUTER"] = router
     app.config["SAFETY"] = _passing_safety()
@@ -66,10 +67,10 @@ def _dispatcher(
     return WebhookOrderDispatcher(app, authority_provider=lambda _payload: authority)
 
 
-def test_place_order_fails_closed_without_live_endpoint_authority() -> None:
+def test_place_order_fails_closed_without_live_endpoint_authority(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
-    dispatcher = WebhookOrderDispatcher(_app(router))
+    dispatcher = WebhookOrderDispatcher(_app(router, backend_lease_factory=backend_lease_factory))
     payload = WebhookPayload(
         source="custom",
         action="place_order",
@@ -87,10 +88,10 @@ def test_place_order_fails_closed_without_live_endpoint_authority() -> None:
     router.place_order.assert_not_called()
 
 
-def test_place_order_rejects_action_not_granted_by_endpoint_authority() -> None:
+def test_place_order_rejects_action_not_granted_by_endpoint_authority(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
-    dispatcher = _dispatcher(_app(router), "cancel_order")
+    dispatcher = _dispatcher(_app(router, backend_lease_factory=backend_lease_factory), "cancel_order")
     payload = WebhookPayload(
         source="custom",
         action="place_order",
@@ -108,10 +109,10 @@ def test_place_order_rejects_action_not_granted_by_endpoint_authority() -> None:
     router.place_order.assert_not_called()
 
 
-def test_place_order_rejects_invalid_authority_selector() -> None:
+def test_place_order_rejects_invalid_authority_selector(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
-    dispatcher = _dispatcher(_app(router), "place_order", selector="attacker-controlled")
+    dispatcher = _dispatcher(_app(router, backend_lease_factory=backend_lease_factory), "place_order", selector="attacker-controlled")
     payload = WebhookPayload(
         source="custom",
         action="place_order",
@@ -129,10 +130,10 @@ def test_place_order_rejects_invalid_authority_selector() -> None:
     router.place_order.assert_not_called()
 
 
-def test_custom_place_order_runs_through_gate_and_router() -> None:
+def test_custom_place_order_runs_through_gate_and_router(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="ORDER-1")
-    dispatcher = _dispatcher(_app(router), "place_order")
+    dispatcher = _dispatcher(_app(router, backend_lease_factory=backend_lease_factory), "place_order")
     payload = WebhookPayload(
         source="custom",
         action="place_order",
@@ -161,10 +162,26 @@ def test_custom_place_order_runs_through_gate_and_router() -> None:
     assert kwargs["safety_ctx"].verify(kwargs["order"], request_ctx, "openalgo", "default")
 
 
-def test_parsed_custom_place_order_threads_side_through_gate_and_router() -> None:
+def test_webhook_dispatch_refuses_revoked_backend(backend_lease_factory) -> None:
+    router = MagicMock()
+    router.place_order = AsyncMock()
+    app = _app(router, backend_lease_factory=backend_lease_factory)
+    dispatcher = _dispatcher(app, "place_order")
+    payload = WebhookPayload(
+        source="custom", action="place_order", symbol="NIFTY", exchange="NSE",
+        data={"side": "BUY", "quantity": "1"}, webhook_nonce="synthetic-revoked",
+        webhook_path="/v1/webhook/custom/test-endpoint",
+    )
+    backend_lease_factory().revoke()
+    result = asyncio.run(dispatcher.place_order(payload))
+    assert result["status"] == "error"
+    router.place_order.assert_not_called()
+
+
+def test_parsed_custom_place_order_threads_side_through_gate_and_router(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="ORDER-CUSTOM-1")
-    app = _app(router)
+    app = _app(router, backend_lease_factory=backend_lease_factory)
     dispatcher = _dispatcher(app, "place_order")
     payload = WebhookReceiver(WebhookConfig(skip_verification=True)).parse_custom({
         "action": "place_order",
@@ -184,10 +201,10 @@ def test_parsed_custom_place_order_threads_side_through_gate_and_router() -> Non
     assert router.place_order.await_args.kwargs["order"].action.value == "BUY"
 
 
-def test_place_order_rejects_conflicting_side_aliases_before_router() -> None:
+def test_place_order_rejects_conflicting_side_aliases_before_router(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
-    dispatcher = _dispatcher(_app(router), "place_order")
+    dispatcher = _dispatcher(_app(router, backend_lease_factory=backend_lease_factory), "place_order")
     payload = WebhookPayload(
         source="custom",
         action="place_order",
@@ -206,10 +223,10 @@ def test_place_order_rejects_conflicting_side_aliases_before_router() -> None:
 
 
 @pytest.mark.parametrize("price", ["-1", "nan", "inf"])
-def test_limit_order_rejects_unsafe_price_before_gate_and_router(price: str) -> None:
+def test_limit_order_rejects_unsafe_price_before_gate_and_router(price: str, *, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
-    app = _app(router)
+    app = _app(router, backend_lease_factory=backend_lease_factory)
     dispatcher = _dispatcher(app, "place_order")
     payload = WebhookPayload(
         source="custom",
@@ -244,11 +261,11 @@ def test_limit_order_rejects_unsafe_price_before_gate_and_router(price: str) -> 
 )
 def test_gtt_second_leg_rejects_unsafe_values_before_gate_and_router(
     field: str,
-    value: str,
+    value: str, *, backend_lease_factory
 ) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
-    app = _app(router)
+    app = _app(router, backend_lease_factory=backend_lease_factory)
     dispatcher = _dispatcher(app, "place_order")
     second_leg = {"price1": "101", "trigger_price1": "100", "quantity1": "1"}
     second_leg[field] = value
@@ -275,10 +292,10 @@ def test_gtt_second_leg_rejects_unsafe_values_before_gate_and_router(
     router.place_order.assert_not_called()
 
 
-def test_gtt_second_leg_cannot_exceed_l1_quantity_limit() -> None:
+def test_gtt_second_leg_cannot_exceed_l1_quantity_limit(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
-    app = _app(router)
+    app = _app(router, backend_lease_factory=backend_lease_factory)
     app.config["SAFETY"] = SafetySystem(
         SafetyConfig(qty_limits={"NSE": 1}, check_market_hours=False),
     )
@@ -308,11 +325,11 @@ def test_gtt_second_leg_cannot_exceed_l1_quantity_limit() -> None:
 
 
 def test_post_submit_reservation_failure_reports_placed_with_warning(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory
 ) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="ORDER-SUBMITTED")
-    app = _app(router)
+    app = _app(router, backend_lease_factory=backend_lease_factory)
     audit = MagicMock()
     app.config["AUDIT"] = audit
     safety = app.config["SAFETY"]
@@ -345,10 +362,10 @@ def test_post_submit_reservation_failure_reports_placed_with_warning(
     journal.assert_called_once()
 
 
-def test_place_order_refuses_unvalidated_safety_runtime() -> None:
+def test_place_order_refuses_unvalidated_safety_runtime(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
-    app = _app(router)
+    app = _app(router, backend_lease_factory=backend_lease_factory)
     app.config["SAFETY_CONFIG_READY"] = False
     dispatcher = _dispatcher(app, "place_order")
     payload = WebhookPayload(
@@ -368,7 +385,7 @@ def test_place_order_refuses_unvalidated_safety_runtime() -> None:
     router.place_order.assert_not_called()
 
 
-def test_place_order_checks_prospective_greeks_before_router(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_place_order_checks_prospective_greeks_before_router(monkeypatch: pytest.MonkeyPatch, *, backend_lease_factory) -> None:
     class _BlockingSafety:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
@@ -399,7 +416,7 @@ def test_place_order_checks_prospective_greeks_before_router(monkeypatch: pytest
     )
     router = MagicMock()
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
-    app = _app(router)
+    app = _app(router, backend_lease_factory=backend_lease_factory)
     recorder = _BlockingSafety()
     safety = _passing_safety()
     safety.check_order = recorder.check_order
@@ -428,10 +445,10 @@ def test_place_order_checks_prospective_greeks_before_router(monkeypatch: pytest
     router.place_order.assert_not_called()
 
 
-def test_custom_place_order_requires_explicit_buy_sell_side() -> None:
+def test_custom_place_order_requires_explicit_buy_sell_side(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="ORDER-1")
-    dispatcher = _dispatcher(_app(router), "place_order")
+    dispatcher = _dispatcher(_app(router, backend_lease_factory=backend_lease_factory), "place_order")
     payload = WebhookPayload(
         source="custom",
         action="place_order",
@@ -447,10 +464,10 @@ def test_custom_place_order_requires_explicit_buy_sell_side() -> None:
     router.place_order.assert_not_called()
 
 
-def test_cancel_order_runs_through_gate_and_router_with_signed_extras() -> None:
+def test_cancel_order_runs_through_gate_and_router_with_signed_extras(*, backend_lease_factory) -> None:
     router = MagicMock()
     router.cancel_order = AsyncMock(return_value=None)
-    dispatcher = _dispatcher(_app(router), "cancel_order", selector="dhan:main")
+    dispatcher = _dispatcher(_app(router, backend_lease_factory=backend_lease_factory), "cancel_order", selector="dhan:main")
     payload = WebhookPayload(
         source="custom",
         action="cancel_order",

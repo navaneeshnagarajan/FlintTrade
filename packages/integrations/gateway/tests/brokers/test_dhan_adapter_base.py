@@ -1072,7 +1072,7 @@ async def test_order_readback_reports_an_accepted_but_still_active_order():
     assert set(active) == {("regular", "1")}
 
 
-def test_dhan_emergency_cancel_mints_one_gate_per_concrete_family_and_preserves_partial_outcome():
+def test_dhan_emergency_cancel_mints_one_gate_per_concrete_family_and_preserves_partial_outcome(*, backend_lease_factory):
     import asyncio
 
     from flinttrade_core.exceptions import BrokerError
@@ -1183,7 +1183,7 @@ def test_dhan_emergency_cancel_mints_one_gate_per_concrete_family_and_preserves_
     router = BrokerRouter(
         {"dhan": adapter},
         lambda _ctx, _adapter_id, _account_id: session,
-        consume_gate=consume_gate,
+        consume_gate=consume_gate, backend_lease_proof=backend_lease_factory()
     )
     dispatcher = GatedEmergencyBrokerDispatcher(
         router_provider=lambda: router,

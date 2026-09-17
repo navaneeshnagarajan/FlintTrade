@@ -11,8 +11,8 @@ These tests pin the ``gate_order`` contract the webhook dispatch path
     (``SafetyBypassError``), so a gated context cannot be replayed against a
     different webhook payload.
 
-No live network is required: ``gate_order`` needs only the process-wide
-safety-gate secret (set in a fixture).
+No live network is required: ``gate_order`` uses a test-owned backend lease
+and the process-wide safety-gate secret (both set in fixtures).
 """
 
 from __future__ import annotations
@@ -34,7 +34,20 @@ def _safety_secret() -> None:
     set_safety_gate_secret(b"x" * 32)
 
 
-def test_gate_order_invoked_with_matching_external_intent_metadata() -> None:
+@pytest.fixture
+def backend_lease_proof(tmp_path, monkeypatch):
+    """Hold real process ownership only inside this test's temporary workspace."""
+    from flinttrade_core.backend_instance import acquire_backend_instance_lease
+
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    lease = acquire_backend_instance_lease()
+    try:
+        yield lease.proof
+    finally:
+        lease.release()
+
+
+def test_gate_order_invoked_with_matching_external_intent_metadata(backend_lease_proof) -> None:
     """Directly assert gate_order accepts matching external_intent metadata + nonce.
 
     This is the contract the webhook path relies on: the minted RequestContext
@@ -61,14 +74,16 @@ def test_gate_order_invoked_with_matching_external_intent_metadata() -> None:
         actor_type="external_intent",
         intent_source="custom",
         external_nonce=nonce,
+        backend_lease_proof=backend_lease_proof,
     )
 
     assert safety_ctx.actor_type == "external_intent"
     assert safety_ctx.intent_source == "custom"
     assert safety_ctx.external_nonce_hash == nonce_hash
+    assert safety_ctx.backend_incarnation == str(backend_lease_proof.incarnation)
 
 
-def test_gate_order_rejects_mismatched_external_nonce() -> None:
+def test_gate_order_rejects_mismatched_external_nonce(backend_lease_proof) -> None:
     """A nonce that does not match the context's external_nonce_hash is rejected.
 
     This is the replay defence: a gated external-intent context minted for one
@@ -94,4 +109,5 @@ def test_gate_order_rejects_mismatched_external_nonce() -> None:
             actor_type="external_intent",
             intent_source="custom",
             external_nonce="a-different-nonce",  # does not match real_hash
+            backend_lease_proof=backend_lease_proof,
         )

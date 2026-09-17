@@ -129,7 +129,7 @@ def projection_client(client):
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, backend_lease_factory):
     from flinttrade_core.secure_file import harden_directory
 
     harden_directory(tmp_path)
@@ -155,7 +155,10 @@ def client(tmp_path, monkeypatch):
     from flinttrade_core.app import create_flask_app
 
     native_routes._OAUTH_PENDING.clear()
-    app = create_flask_app(broker_account_mutation_admission=lambda: None)
+    app = create_flask_app(
+        broker_account_mutation_admission=lambda: None,
+        backend_lease_proof=backend_lease_factory(),
+    )
     app.config["TESTING"] = True
     # Route tests do not start the process-owned safety loop. Mark that boundary
     # explicitly so connect/relogin rebuild tests exercise routing transactions;
@@ -3303,7 +3306,7 @@ def test_connect_rejects_without_mutation_when_router_cannot_drain(client):
     assert _workspace_brokers(tmp_path) == brokers_before
 
 
-def test_connect_generation_conflict_revokes_retained_router_before_unpublish(client, monkeypatch):
+def test_connect_generation_conflict_revokes_retained_router_before_unpublish(client, monkeypatch, *, backend_lease_factory):
     c, app, _tmp_path = client
     from datetime import datetime, timezone
 
@@ -3335,7 +3338,7 @@ def test_connect_generation_conflict_revokes_retained_router_before_unpublish(cl
     retained_router = BrokerRouter(
         {"upstox": adapter},
         lambda _request_ctx, _adapter_id, _account_id: session,
-        consume_gate=SafetyGate().consume,
+        consume_gate=SafetyGate().consume, backend_lease_proof=backend_lease_factory()
     )
     app.config["BROKER_ROUTER"] = retained_router
     app.config["BROKER_ROUTER_DRAINING"] = None
@@ -3366,7 +3369,7 @@ def test_connect_generation_conflict_revokes_retained_router_before_unpublish(cl
         mode="live",
         selector="upstox:retained-account",
     )
-    safety_ctx = gate_order(order, request_ctx, "upstox", account_id="retained-account")
+    safety_ctx = gate_order(order, request_ctx, "upstox", account_id="retained-account", backend_lease_proof=backend_lease_factory())
 
     assert response.status_code == 502
     assert app.config["BROKER_ROUTER"] is None

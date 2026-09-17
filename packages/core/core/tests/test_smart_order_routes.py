@@ -150,7 +150,7 @@ def _make_app(
     adapter: _NoIoAdapter | None = None,
     adapter_id: str = "openalgo",
     openalgo_client: object = _DEFAULT_OPENALGO_CLIENT,
-    execution_default: str | None = None,
+    execution_default: str | None = None, backend_lease_factory
 ) -> tuple[Flask, _NoIoAdapter]:
     from flinttrade_gateway.routing_config import RoutingConfig
 
@@ -170,7 +170,7 @@ def _make_app(
                 "quote": execution_default,
             },
         })
-    app.config["BROKER_ROUTER"] = BrokerRouter({adapter_id: adapter}, _session, config=router_config)
+    app.config["BROKER_ROUTER"] = BrokerRouter({adapter_id: adapter}, _session, config=router_config, backend_lease_proof=backend_lease_factory())
     if openalgo_client is _DEFAULT_OPENALGO_CLIENT:
         openalgo_client = _FakeClient(asks=[(100.0, 500)], bids=[(99.5, 500)])
     app.config["OPENALGO_CLIENT"] = openalgo_client
@@ -214,8 +214,8 @@ def _wait_done(client, job_id: str, timeout: float = 5.0) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_disabled_flag_403(live_auth):
-    app, _ = _make_app(enabled=False)
+def test_disabled_flag_403(live_auth, *, backend_lease_factory):
+    app, _ = _make_app(enabled=False, backend_lease_factory=backend_lease_factory)
     resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10},
@@ -224,9 +224,9 @@ def test_disabled_flag_403(live_auth):
     assert "smart_routing.enabled" in resp.get_json()["message"]
 
 
-def test_no_jwt_401(monkeypatch):
+def test_no_jwt_401(monkeypatch, *, backend_lease_factory):
     monkeypatch.setattr(order_routes_mod, "_decode_request_payload", lambda: None)
-    app, _ = _make_app()
+    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
     resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10},
@@ -234,11 +234,11 @@ def test_no_jwt_401(monkeypatch):
     assert resp.status_code == 401
 
 
-def test_smart_route_rate_limit_uses_verified_jwt_subject(monkeypatch, tmp_path):
+def test_smart_route_rate_limit_uses_verified_jwt_subject(monkeypatch, tmp_path, *, backend_lease_factory):
     """Forged user-id headers cannot mint fresh smart-order buckets."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setattr(auth_routes_mod, "_JWT_SECRET_KEY", "smart-route-rate-limit-test-secret")
-    app, _ = _make_app(enabled=False)
+    app, _ = _make_app(enabled=False, backend_lease_factory=backend_lease_factory)
     app.config["RATE_LIMITER"] = RateLimiter(global_rate=100, per_user_rate=10)
     with app.app_context():
         token = auth_routes_mod._create_token("operator-a", mode="live")
@@ -269,13 +269,13 @@ def test_smart_route_rate_limit_uses_verified_jwt_subject(monkeypatch, tmp_path)
     assert other_status == 403
 
 
-def test_practice_mode_403(monkeypatch):
+def test_practice_mode_403(monkeypatch, *, backend_lease_factory):
     monkeypatch.setattr(
         order_routes_mod,
         "_decode_request_payload",
         lambda: {"mode": "practice", "sub": "user-1", "jti": "jti-1"},
     )
-    app, _ = _make_app()
+    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
     resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10},
@@ -284,8 +284,8 @@ def test_practice_mode_403(monkeypatch):
     assert "live mode only" in resp.get_json()["message"]
 
 
-def test_validation_400(live_auth):
-    app, _ = _make_app()
+def test_validation_400(live_auth, *, backend_lease_factory):
+    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
     client = app.test_client()
     assert client.post("/api/v1/orders/smart-route", json={}).status_code == 400
     assert client.post(
@@ -302,8 +302,8 @@ def test_validation_400(live_auth):
     ).status_code == 400
 
 
-def test_router_unavailable_503(live_auth):
-    app, _ = _make_app()
+def test_router_unavailable_503(live_auth, *, backend_lease_factory):
+    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
     app.config["BROKER_ROUTER"] = None
     resp = app.test_client().post(
         "/api/v1/orders/smart-route",
@@ -312,8 +312,8 @@ def test_router_unavailable_503(live_auth):
     assert resp.status_code == 503
 
 
-def test_unvalidated_safety_runtime_503(live_auth):
-    app, adapter = _make_app()
+def test_unvalidated_safety_runtime_503(live_auth, *, backend_lease_factory):
+    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
     app.config["SAFETY_CONFIG_READY"] = False
 
     response = app.test_client().post(
@@ -325,7 +325,7 @@ def test_unvalidated_safety_runtime_503(live_auth):
     assert adapter.orders == []
 
 
-def test_parent_checks_prospective_greeks_before_starting_job(live_auth, monkeypatch):
+def test_parent_checks_prospective_greeks_before_starting_job(live_auth, monkeypatch, *, backend_lease_factory):
     from flinttrade_core import l2_state
 
     state = SimpleNamespace(
@@ -362,7 +362,7 @@ def test_parent_checks_prospective_greeks_before_starting_job(live_auth, monkeyp
 
     monkeypatch.setattr(l2_state, "gather_safety_state", _prospective_state)
     safety = _BlockingSafety()
-    app, adapter = _make_app()
+    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
     app.config["SAFETY"] = safety
 
     response = app.test_client().post(
@@ -376,8 +376,8 @@ def test_parent_checks_prospective_greeks_before_starting_job(live_auth, monkeyp
     assert adapter.orders == []
 
 
-def test_unknown_job_404(live_auth):
-    app, _ = _make_app()
+def test_unknown_job_404(live_auth, *, backend_lease_factory):
+    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
     resp = app.test_client().get("/api/v1/orders/smart-route/nope")
     assert resp.status_code == 404
 
@@ -387,9 +387,9 @@ def test_unknown_job_404(live_auth):
 # ---------------------------------------------------------------------------
 
 
-def test_high_urgency_places_one_gated_child(live_auth):
+def test_high_urgency_places_one_gated_child(live_auth, *, backend_lease_factory):
     """A high-urgency order yields one child placed through the real gate."""
-    app, adapter = _make_app()
+    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
     client = app.test_client()
 
     resp = client.post(
@@ -417,9 +417,9 @@ def test_high_urgency_places_one_gated_child(live_auth):
     assert adapter.orders[0].quantity == "10"
 
 
-def test_native_high_urgency_does_not_require_openalgo_client(live_auth):
+def test_native_high_urgency_does_not_require_openalgo_client(live_auth, *, backend_lease_factory):
     """Native high urgency can execute through BrokerRouter without bridge data."""
-    app, adapter = _make_app(adapter_id="upstox", openalgo_client=None)
+    app, adapter = _make_app(adapter_id="upstox", openalgo_client=None, backend_lease_factory=backend_lease_factory)
     client = app.test_client()
 
     resp = client.post(
@@ -443,12 +443,12 @@ def test_native_high_urgency_does_not_require_openalgo_client(live_auth):
     assert adapter.orders[0].quantity == "3"
 
 
-def test_omitted_target_uses_configured_execution_default(live_auth):
+def test_omitted_target_uses_configured_execution_default(live_auth, *, backend_lease_factory):
     """Direct API callers inherit brokers.execution.default when target fields are absent."""
     app, adapter = _make_app(
         adapter_id="upstox",
         openalgo_client=None,
-        execution_default="upstox:U1",
+        execution_default="upstox:U1", backend_lease_factory=backend_lease_factory
     )
     client = app.test_client()
 
@@ -472,9 +472,9 @@ def test_omitted_target_uses_configured_execution_default(live_auth):
     assert adapter.sessions[0].account_id == "U1"
 
 
-def test_native_medium_urgency_fails_closed_without_openalgo_depth(live_auth):
+def test_native_medium_urgency_fails_closed_without_openalgo_depth(live_auth, *, backend_lease_factory):
     """Native medium urgency is depth-aware; no bridge depth means no dispatch."""
-    app, adapter = _make_app(adapter_id="upstox", openalgo_client=None)
+    app, adapter = _make_app(adapter_id="upstox", openalgo_client=None, backend_lease_factory=backend_lease_factory)
     client = app.test_client()
 
     resp = client.post(
@@ -497,9 +497,9 @@ def test_native_medium_urgency_fails_closed_without_openalgo_depth(live_auth):
     assert adapter.orders == []
 
 
-def test_twap_splits_into_gated_slices(live_auth):
+def test_twap_splits_into_gated_slices(live_auth, *, backend_lease_factory):
     """Low urgency TWAP: each slice is its own independently gated child."""
-    app, adapter = _make_app()  # twap_slices=2, window=1s
+    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)  # twap_slices=2, window=1s
     client = app.test_client()
 
     resp = client.post(
@@ -522,8 +522,8 @@ def test_twap_splits_into_gated_slices(live_auth):
     assert sorted(int(o.quantity) for o in adapter.orders) == [5, 5]
 
 
-def test_twap_resolves_a_rebuilt_router_before_its_next_child(live_auth):
-    app, stale_adapter = _make_app()
+def test_twap_resolves_a_rebuilt_router_before_its_next_child(live_auth, *, backend_lease_factory):
+    app, stale_adapter = _make_app( backend_lease_factory=backend_lease_factory)
     client = app.test_client()
     response = client.post(
         "/api/v1/orders/smart-route",
@@ -545,7 +545,7 @@ def test_twap_resolves_a_rebuilt_router_before_its_next_child(live_auth):
 
     stale_router = app.config["BROKER_ROUTER"]
     current_adapter = _NoIoAdapter()
-    app.config["BROKER_ROUTER"] = BrokerRouter({"openalgo": current_adapter}, _session)
+    app.config["BROKER_ROUTER"] = BrokerRouter({"openalgo": current_adapter}, _session, backend_lease_proof=backend_lease_factory())
     assert stale_router.revoke_and_drain(timeout=0.5) is True
 
     final = _wait_done(client, job_id)
@@ -554,12 +554,12 @@ def test_twap_resolves_a_rebuilt_router_before_its_next_child(live_auth):
     assert len(current_adapter.orders) == 1
 
 
-def test_status_shows_children_mid_flight(live_auth):
+def test_status_shows_children_mid_flight(live_auth, *, backend_lease_factory):
     """The live snapshot must expose children WHILE the route runs — TWAP
     jobs take minutes and the widget polls. Pins the result_observer wiring
     (deleting it would keep every end-state test green while live polling
     silently regressed to an empty list until completion)."""
-    app, _adapter = _make_app()  # twap window 1s / 2 slices
+    app, _adapter = _make_app( backend_lease_factory=backend_lease_factory)  # twap window 1s / 2 slices
     client = app.test_client()
 
     resp = client.post(
@@ -585,7 +585,7 @@ def test_status_shows_children_mid_flight(live_auth):
     _wait_done(client, job_id)
 
 
-def test_app_factory_wires_smart_routing_from_workspace(monkeypatch, tmp_path):
+def test_app_factory_wires_smart_routing_from_workspace(monkeypatch, tmp_path, *, backend_lease_factory):
     """create_flask_app must carry workspace brokers.smart_routing into
     app.config — a wiring typo would leave the feature permanently disabled
     with every route test green (they set the config key directly)."""
@@ -599,15 +599,15 @@ def test_app_factory_wires_smart_routing_from_workspace(monkeypatch, tmp_path):
     config["brokers"]["smart_routing"] = smart_routing
     Workspace().initialise(config)
 
-    app = app_mod.create_flask_app()
+    app = app_mod.create_flask_app(backend_lease_proof=backend_lease_factory())
     assert app.config["SMART_ROUTING"]["enabled"] is True
     assert app.config["SMART_ROUTING"]["twap_slices"] == 3
     dependencies = app.extensions["flinttrade_broker_dependencies"]
     assert dependencies.brokers_config["smart_routing"] == app.config["SMART_ROUTING"] == smart_routing
 
 
-def test_jobs_list_returns_snapshots(live_auth):
-    app, _ = _make_app()
+def test_jobs_list_returns_snapshots(live_auth, *, backend_lease_factory):
+    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
     client = app.test_client()
     resp = client.post(
         "/api/v1/orders/smart-route",
@@ -683,7 +683,7 @@ async def _passing_portfolio_provider(_order, _reservations=()):
     return _portfolio_state()
 
 
-async def test_executor_blocks_child_on_safety_layer():
+async def test_executor_blocks_child_on_safety_layer(*, backend_lease_factory):
     """A child failing L1–L5 returns a failed decision and never dispatches."""
 
     class _BlockingSafety:
@@ -699,7 +699,7 @@ async def test_executor_blocks_child_on_safety_layer():
     safety.check_order = _BlockingSafety().check_order
     executor = mod.GatedChildExecutor(
         safety=safety,
-        router=BrokerRouter({"openalgo": adapter}, _session),
+        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
         adapter_id="openalgo",
         account_id="default",
@@ -711,7 +711,7 @@ async def test_executor_blocks_child_on_safety_layer():
     assert adapter.orders == []
 
 
-async def test_executor_checks_prospective_greeks_before_dispatch():
+async def test_executor_checks_prospective_greeks_before_dispatch(*, backend_lease_factory):
     class _ProspectiveBlockingSafety:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
@@ -730,7 +730,7 @@ async def test_executor_checks_prospective_greeks_before_dispatch():
     safety.check_order = recorder.check_order
     executor = mod.GatedChildExecutor(
         safety=safety,
-        router=BrokerRouter({"openalgo": adapter}, _session),
+        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
         adapter_id="openalgo",
         account_id="default",
@@ -747,10 +747,11 @@ async def test_executor_checks_prospective_greeks_before_dispatch():
     assert adapter.orders == []
 
 
-async def test_executor_fails_closed_on_router_refusal():
+async def test_executor_fails_closed_on_router_refusal(*, backend_lease_factory):
     """A SafetyBypassError from the router becomes a failed child, not a crash."""
 
     class _RefusingRouter:
+        backend_lease_proof = backend_lease_factory()
         async def place_order(self, *args, **kwargs):
             raise SafetyBypassError("verification failed")
 
@@ -767,11 +768,11 @@ async def test_executor_fails_closed_on_router_refusal():
     assert "verification failed" in decision.error
 
 
-async def test_executor_passes_real_gate_and_returns_orderid():
+async def test_executor_passes_real_gate_and_returns_orderid(*, backend_lease_factory):
     adapter = _NoIoAdapter()
     executor = mod.GatedChildExecutor(
         safety=_safety(),
-        router=BrokerRouter({"openalgo": adapter}, _session),
+        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
         adapter_id="openalgo",
         account_id="default",
@@ -783,10 +784,24 @@ async def test_executor_passes_real_gate_and_returns_orderid():
     assert len(adapter.orders) == 1
 
 
-async def test_executor_resolves_the_current_router_for_each_child():
+async def test_child_executor_refuses_revoked_backend(backend_lease_factory):
+    proof = backend_lease_factory()
+    adapter = _NoIoAdapter()
+    executor = mod.GatedChildExecutor(
+        safety=_safety(), router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=proof),
+        request_ctx=_ctx(), adapter_id="openalgo", account_id="default",
+        portfolio_state_provider=_passing_portfolio_provider,
+    )
+    proof.revoke()
+    decision = await executor.route_order(_child_order())
+    assert decision.passed is False
+    assert adapter.orders == []
+
+
+async def test_executor_resolves_the_current_router_for_each_child(*, backend_lease_factory):
     stale_adapter = _NoIoAdapter()
     current_adapter = _NoIoAdapter()
-    stale_router = BrokerRouter({"openalgo": stale_adapter}, _session)
+    stale_router = BrokerRouter({"openalgo": stale_adapter}, _session, backend_lease_proof=backend_lease_factory())
     current_router = stale_router
     executor = mod.GatedChildExecutor(
         safety=_safety(),
@@ -799,7 +814,7 @@ async def test_executor_resolves_the_current_router_for_each_child():
     )
 
     first = await executor.route_order(_child_order(1))
-    current_router = BrokerRouter({"openalgo": current_adapter}, _session)
+    current_router = BrokerRouter({"openalgo": current_adapter}, _session, backend_lease_proof=backend_lease_factory())
     second = await executor.route_order(_child_order(2))
 
     assert first.passed is True
@@ -808,9 +823,9 @@ async def test_executor_resolves_the_current_router_for_each_child():
     assert [order.quantity for order in current_adapter.orders] == ["2"]
 
 
-async def test_executor_fails_closed_when_current_router_was_removed():
+async def test_executor_fails_closed_when_current_router_was_removed(*, backend_lease_factory):
     stale_adapter = _NoIoAdapter()
-    stale_router = BrokerRouter({"openalgo": stale_adapter}, _session)
+    stale_router = BrokerRouter({"openalgo": stale_adapter}, _session, backend_lease_proof=backend_lease_factory())
     current_router = None
     executor = mod.GatedChildExecutor(
         safety=_safety(),
@@ -829,7 +844,7 @@ async def test_executor_fails_closed_when_current_router_was_removed():
     assert stale_adapter.orders == []
 
 
-async def test_executor_enforces_l2_from_portfolio_provider():
+async def test_executor_enforces_l2_from_portfolio_provider(*, backend_lease_factory):
     """A portfolio_state_provider returning ≥ max positions blocks the child
     at L2 (the gated-executor paths now enforce cumulative exposure too)."""
     from flinttrade_core.models import Position
@@ -837,7 +852,7 @@ async def test_executor_enforces_l2_from_portfolio_provider():
     adapter = _NoIoAdapter()
     executor = mod.GatedChildExecutor(
         safety=SafetySystem(SafetyConfig(check_market_hours=False, max_positions=1)),
-        router=BrokerRouter({"openalgo": adapter}, _session),
+        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
         adapter_id="openalgo",
         account_id="default",
@@ -851,7 +866,7 @@ async def test_executor_enforces_l2_from_portfolio_provider():
     assert adapter.orders == []  # blocked before any dispatch
 
 
-async def test_executor_portfolio_provider_failure_blocks_child():
+async def test_executor_portfolio_provider_failure_blocks_child(*, backend_lease_factory):
     """A failed local L4 snapshot must stop the child before gate minting."""
     adapter = _NoIoAdapter()
 
@@ -860,7 +875,7 @@ async def test_executor_portfolio_provider_failure_blocks_child():
 
     executor = mod.GatedChildExecutor(
         safety=_safety(),
-        router=BrokerRouter({"openalgo": adapter}, _session),
+        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
         adapter_id="openalgo",
         account_id="default",
@@ -973,7 +988,7 @@ async def test_gather_portfolio_state_uses_native_adapter_and_account():
     client.funds.assert_not_awaited()
 
 
-async def test_executor_pre_dispatch_check_aborts_before_the_gate():
+async def test_executor_pre_dispatch_check_aborts_before_the_gate(*, backend_lease_factory):
     """A failing pre-dispatch check (revocation/cancel) raises SmartRouteAbort
     BEFORE any safety/gate/broker work — the adapter must never be touched."""
     from flinttrade_engine.smart_router import SmartRouteAbort
@@ -981,7 +996,7 @@ async def test_executor_pre_dispatch_check_aborts_before_the_gate():
     adapter = _NoIoAdapter()
     executor = mod.GatedChildExecutor(
         safety=_safety(),
-        router=BrokerRouter({"openalgo": adapter}, _session),
+        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
         adapter_id="openalgo",
         account_id="default",
@@ -992,7 +1007,7 @@ async def test_executor_pre_dispatch_check_aborts_before_the_gate():
     assert adapter.orders == []
 
 
-async def test_executor_rechecks_cancel_after_awaited_portfolio_read():
+async def test_executor_rechecks_cancel_after_awaited_portfolio_read(*, backend_lease_factory):
     """Cancellation during L2 collection is an order barrier, not a hint."""
     from flinttrade_engine.smart_router import SmartRouteAbort
 
@@ -1008,7 +1023,7 @@ async def test_executor_rechecks_cancel_after_awaited_portfolio_read():
 
     executor = mod.GatedChildExecutor(
         safety=_safety(),
-        router=BrokerRouter({"openalgo": adapter}, _session),
+        router=BrokerRouter({"openalgo": adapter}, _session, backend_lease_proof=backend_lease_factory()),
         request_ctx=_ctx(),
         adapter_id="openalgo",
         account_id="default",
@@ -1026,9 +1041,9 @@ async def test_executor_rechecks_cancel_after_awaited_portfolio_read():
     assert adapter.orders == []
 
 
-def test_shutdown_owns_running_jobs_and_closes_new_submissions(live_auth):
+def test_shutdown_owns_running_jobs_and_closes_new_submissions(live_auth, *, backend_lease_factory):
     """Runtime shutdown cancels and joins workers before routing retirement."""
-    app, adapter = _make_app()
+    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
     job = mod._SmartJob(job_id="owned-worker", params={"symbol": "INFY", "action": "BUY"})  # noqa: SLF001
     worker_started = threading.Event()
 
@@ -1067,9 +1082,9 @@ def test_shutdown_owns_running_jobs_and_closes_new_submissions(live_auth):
 # ---------------------------------------------------------------------------
 
 
-def test_cancel_endpoint_aborts_a_running_twap(live_auth):
+def test_cancel_endpoint_aborts_a_running_twap(live_auth, *, backend_lease_factory):
     """Cancelling between TWAP slices stops further children."""
-    app, adapter = _make_app()  # twap window 1s / 2 slices → ~1s between slices
+    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)  # twap window 1s / 2 slices → ~1s between slices
     client = app.test_client()
 
     resp = client.post(
@@ -1098,12 +1113,12 @@ def test_cancel_endpoint_aborts_a_running_twap(live_auth):
     assert len(adapter.orders) == 1  # the second slice never dispatched
 
 
-def test_revoked_jti_aborts_mid_route(live_auth, monkeypatch):
+def test_revoked_jti_aborts_mid_route(live_auth, monkeypatch, *, backend_lease_factory):
     """Logout / mode-downgrade revoke the jti — a running job must stop."""
     import flinttrade_core.auth_routes as auth_routes_mod
 
     monkeypatch.setattr(auth_routes_mod, "_is_jti_revoked", lambda jti: True)
-    app, adapter = _make_app()
+    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
     client = app.test_client()
 
     resp = client.post(
@@ -1120,8 +1135,8 @@ def test_revoked_jti_aborts_mid_route(live_auth, monkeypatch):
     assert adapter.orders == []  # not a single child reached the broker
 
 
-def test_cancel_unknown_job_404(live_auth):
-    app, _ = _make_app()
+def test_cancel_unknown_job_404(live_auth, *, backend_lease_factory):
+    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
     resp = app.test_client().post("/api/v1/orders/smart-route/nope/cancel")
     assert resp.status_code == 404
 
@@ -1131,8 +1146,8 @@ def test_cancel_unknown_job_404(live_auth):
 # ---------------------------------------------------------------------------
 
 
-def test_running_job_cap_409(live_auth):
-    app, _ = _make_app()
+def test_running_job_cap_409(live_auth, *, backend_lease_factory):
+    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
     for i in range(mod._MAX_RUNNING_JOBS):  # noqa: SLF001
         mod._store_job(mod._SmartJob(job_id=f"running-{i}", params={"symbol": f"S{i}", "action": "BUY"}))  # noqa: SLF001
     resp = app.test_client().post(
@@ -1143,11 +1158,11 @@ def test_running_job_cap_409(live_auth):
     assert "Too many" in resp.get_json()["message"]
 
 
-def test_dup_guard_is_atomic_with_insert(live_auth):
+def test_dup_guard_is_atomic_with_insert(live_auth, *, backend_lease_factory):
     """The cap/dup check and the job insert happen in ONE lock section, so a
     job registered before the executor is built already blocks a duplicate —
     closing the check-then-insert TOCTOU window."""
-    app, _ = _make_app()
+    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
     client = app.test_client()
     # First submit registers the job atomically (status "running").
     r1 = client.post(
@@ -1164,8 +1179,8 @@ def test_dup_guard_is_atomic_with_insert(live_auth):
     _wait_done(client, r1.get_json()["data"]["job_id"])
 
 
-def test_duplicate_symbol_action_409(live_auth):
-    app, _ = _make_app()
+def test_duplicate_symbol_action_409(live_auth, *, backend_lease_factory):
+    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
     mod._store_job(mod._SmartJob(job_id="dup-1", params={"symbol": "RELIANCE", "action": "BUY"}))  # noqa: SLF001
     resp = app.test_client().post(
         "/api/v1/orders/smart-route",
@@ -1200,9 +1215,9 @@ def test_store_eviction_never_drops_a_running_job():
 # ---------------------------------------------------------------------------
 
 
-def test_status_endpoints_require_auth(monkeypatch):
+def test_status_endpoints_require_auth(monkeypatch, *, backend_lease_factory):
     monkeypatch.setattr(order_routes_mod, "_decode_request_payload", lambda: None)
-    app, _ = _make_app()
+    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
     client = app.test_client()
     assert client.get("/api/v1/orders/smart-route").status_code == 401
     assert client.get("/api/v1/orders/smart-route/xyz").status_code == 401
@@ -1214,12 +1229,12 @@ def test_status_endpoints_require_auth(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_twap_children_use_distinct_safety_contexts(live_auth):
+def test_twap_children_use_distinct_safety_contexts(live_auth, *, backend_lease_factory):
     """Each TWAP child must carry its OWN SafetyContext object — the one-shot
     gate cannot be reused, so reuse would fail the second child."""
     from flinttrade_engine.safety import SafetyContext
 
-    app, adapter = _make_app()
+    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
     router = app.config["BROKER_ROUTER"]
     seen_ctx: list[object] = []
     orig_place = router.place_order

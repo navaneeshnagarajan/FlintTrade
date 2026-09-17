@@ -28,26 +28,26 @@ def _ctx(**overrides):
     return RequestContext(**base)
 
 
-def test_gate_order_mints_a_context_that_verifies():
+def test_gate_order_mints_a_context_that_verifies(*, backend_lease_factory):
     ctx = _ctx()
-    sc = gate_order(_ORDER, ctx, "dhan")
+    sc = gate_order(_ORDER, ctx, "dhan", backend_lease_proof=backend_lease_factory())
     assert sc.verify(_ORDER, ctx, "dhan") is True
 
 
-def test_gate_order_context_is_bound_to_the_order():
+def test_gate_order_context_is_bound_to_the_order(*, backend_lease_factory):
     ctx = _ctx()
-    sc = gate_order(_ORDER, ctx, "dhan")
+    sc = gate_order(_ORDER, ctx, "dhan", backend_lease_proof=backend_lease_factory())
     other_order = {**_ORDER, "qty": 999}
     assert sc.verify(other_order, ctx, "dhan") is False
 
 
-def test_gate_order_context_is_bound_to_the_adapter():
+def test_gate_order_context_is_bound_to_the_adapter(*, backend_lease_factory):
     ctx = _ctx()
-    sc = gate_order(_ORDER, ctx, "dhan")
+    sc = gate_order(_ORDER, ctx, "dhan", backend_lease_proof=backend_lease_factory())
     assert sc.verify(_ORDER, ctx, "upstox") is False
 
 
-def test_external_intent_carries_actor_metadata():
+def test_external_intent_carries_actor_metadata(*, backend_lease_factory):
     nonce = "webhook-nonce-abc"
     nonce_hash = hashlib.sha256(nonce.encode()).hexdigest()
     ctx = _ctx(
@@ -57,7 +57,7 @@ def test_external_intent_carries_actor_metadata():
     )
     sc = gate_order(
         _ORDER, ctx, "dhan",
-        actor_type="external_intent", intent_source="webhook", external_nonce=nonce,
+        actor_type="external_intent", intent_source="webhook", external_nonce=nonce, backend_lease_proof=backend_lease_factory()
     )
     assert sc.actor_type == "external_intent"
     assert sc.intent_source == "webhook"
@@ -65,20 +65,20 @@ def test_external_intent_carries_actor_metadata():
     assert sc.verify(_ORDER, ctx, "dhan") is True
 
 
-def test_actor_type_mismatch_is_refused():
+def test_actor_type_mismatch_is_refused(*, backend_lease_factory):
     ctx = _ctx(actor_type="human")
     with pytest.raises(SafetyBypassError, match="actor_type_mismatch"):
-        gate_order(_ORDER, ctx, "dhan", actor_type="external_intent")
+        gate_order(_ORDER, ctx, "dhan", actor_type="external_intent", backend_lease_proof=backend_lease_factory())
 
 
-def test_intent_source_mismatch_is_refused():
+def test_intent_source_mismatch_is_refused(*, backend_lease_factory):
     ctx = _ctx(actor_type="external_intent", intent_source="webhook")
     with pytest.raises(SafetyBypassError, match="intent_source_mismatch"):
-        gate_order(_ORDER, ctx, "dhan", intent_source="telegram")
+        gate_order(_ORDER, ctx, "dhan", intent_source="telegram", backend_lease_proof=backend_lease_factory())
 
 
-def test_external_nonce_mismatch_is_refused():
+def test_external_nonce_mismatch_is_refused(*, backend_lease_factory):
     real_hash = hashlib.sha256(b"the-real-nonce").hexdigest()
     ctx = _ctx(actor_type="external_intent", external_nonce_hash=real_hash)
     with pytest.raises(SafetyBypassError, match="external_nonce_mismatch"):
-        gate_order(_ORDER, ctx, "dhan", external_nonce="a-different-nonce")
+        gate_order(_ORDER, ctx, "dhan", external_nonce="a-different-nonce", backend_lease_proof=backend_lease_factory())

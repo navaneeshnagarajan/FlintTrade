@@ -38,6 +38,17 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
+from flinttrade_core.service_providers import RightsResolution
+
+from .memory_ledger import MemoryReadProjection
+from .memory_rag import (
+    MEMORY_SYSTEM_PROMPT,
+    RAGDecisionInput,
+    RAGDecisionResult,
+    memory_user_message,
+    resolve_memory_context,
+)
+
 logger = logging.getLogger("flinttrade.ai.rag_pipeline")
 
 # ---------------------------------------------------------------------------
@@ -168,6 +179,21 @@ class RAGResult:
     query: str = ""
     chunks_used: list[RetrievedChunk] = field(default_factory=list)
     error: str = ""
+
+    @property
+    def provenance_kind(self) -> str:
+        """Legacy unversioned chunks are documentation, not qualified evidence."""
+        return "legacy_documentation"
+
+    @property
+    def influence_digest(self) -> str:
+        """Legacy retrieval has no authoritative influence receipt."""
+        return ""
+
+    @property
+    def rights(self) -> RightsResolution:
+        """Unversioned documentation never acquires qualification/Live rights."""
+        return RightsResolution()
 
     @property
     def success(self) -> bool:
@@ -1081,7 +1107,18 @@ class RAGPipeline:
         vector_store: VectorStore | None = None,
         domain_filter: DomainFilter | None = None,
         enable_domain_filter: bool = False,
+        *,
+        memory_reader: MemoryReadProjection | None = None,
+        model_rights: RightsResolution | None = None,
     ) -> None:
+        if memory_reader is not None and type(memory_reader) is not MemoryReadProjection:
+            raise ValueError("an exact memory read projection is required")
+        if model_rights is not None and type(model_rights) is not RightsResolution:
+            raise ValueError("model rights must be centrally resolved")
+        self._memory_reader = memory_reader
+        # Trusted composition seam only. Task 5 binds this lineage to the
+        # actual admitted model; absent lineage remains unknown/research-only.
+        self._model_rights = model_rights if model_rights is not None else RightsResolution()
         self.config = config or PipelineConfig()
 
         _embedding = embedding_provider or EmbeddingProvider(
@@ -1254,7 +1291,8 @@ class RAGPipeline:
         *,
         domain_filter: DomainFilter | None = None,
         enable_domain_filter: bool | None = None,
-    ) -> RAGResult:
+        decision: RAGDecisionInput | None = None,
+    ) -> RAGResult | RAGDecisionResult:
         """Full RAG chain: retrieve relevant chunks then generate an answer.
 
         Args:
@@ -1265,10 +1303,23 @@ class RAGPipeline:
             similarity_threshold: Override the similarity threshold.
             domain_filter:       Optional filter override for this query.
             enable_domain_filter: Enable or bypass filtering for this query.
+            decision: Optional immutable authoritative-memory request. It uses
+                its own explicit MemoryQuery; legacy retrieval options cannot
+                override its filters, scope or fixed data-only system policy.
 
         Returns:
-            RAGResult with the generated answer and source chunks.
+            Legacy RAGResult with source chunks, or immutable RAGDecisionResult
+            with canonical memory context, influence receipt and result rights.
         """
+        if decision is not None:
+            if type(decision) is not RAGDecisionInput:
+                raise ValueError("decision must be an exact RAGDecisionInput")
+            if (
+                question != decision.question or system_prompt or top_k is not None or doc_type is not None
+                or similarity_threshold is not None or domain_filter is not None or enable_domain_filter is not None
+            ):
+                return RAGDecisionResult(decision, error="Authoritative RAG input conflicts with legacy options")
+            return self._query_decision(decision)
         if self._llm is None:
             return RAGResult(query=question, error="No LLM client configured")
 
@@ -1320,6 +1371,33 @@ class RAGPipeline:
         except Exception as exc:  # noqa: BLE001
             logger.error("LLM generation failed: %s", exc)
             return RAGResult(query=question, error="RAG query failed", chunks_used=chunks)
+
+    def _query_decision(self, decision: RAGDecisionInput) -> RAGDecisionResult:
+        """Generate only after canonical context and influence receipt are verified."""
+        if self._closed or self._llm is None or self._memory_reader is None:
+            return RAGDecisionResult(decision, error="Authoritative RAG is not ready")
+        try:
+            context, rights = resolve_memory_context(self._memory_reader, decision, self._model_rights)
+            user, prompt_digest = memory_user_message(decision, context)
+        except Exception as exc:  # noqa: BLE001 - no unreceipted or partial context may reach the model
+            logger.warning("Authoritative RAG context refused (exception=%s)", type(exc).__name__)
+            return RAGDecisionResult(decision, error="Authoritative memory context refused")
+        try:
+            from .llm_client import LLMMessage
+
+            response = self._llm.chat(
+                [LLMMessage(role="system", content=MEMORY_SYSTEM_PROMPT), LLMMessage(role="user", content=user)]
+            )
+            return RAGDecisionResult(
+                decision, answer=response.content, error=response.error,
+                context=context, rights=rights, prompt_digest=prompt_digest,
+            )
+        except Exception as exc:  # noqa: BLE001 - preserve source receipts on failed generation
+            logger.warning("Authoritative RAG generation failed (exception=%s)", type(exc).__name__)
+            return RAGDecisionResult(
+                decision, error="Authoritative RAG generation failed", context=context,
+                rights=rights, prompt_digest=prompt_digest,
+            )
 
     # ------------------------------------------------------------------
     # Stats

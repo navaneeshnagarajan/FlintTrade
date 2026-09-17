@@ -450,6 +450,187 @@ async def test_codex_session_handshake_and_turn_stream() -> None:
     assert done.data["thread_id"] == "thread-1"
 
 
+class _CatalogCodexServer(_FakeCodexServer):
+    """Official catalogue/quota replies over the same synthetic wire."""
+
+    def __init__(self, *, quota_error=False, catalogue_results=None, quota_result=None):
+        super().__init__()
+        self.quota_error = quota_error
+        self.catalogue_results = catalogue_results
+        self.quota_result = quota_result
+
+    def _on_client_line(self, line: bytes) -> None:
+        msg = json.loads(line)
+        if msg.get("method") == "model/list":
+            self.received.append(msg)
+            if self.catalogue_results is not None:
+                self._feed({"id": msg["id"], "result": self.catalogue_results.pop(0)})
+                return
+            self._feed({"id": msg["id"], "result": {"data": [{
+                "id": "fixture-model", "model": "fixture-model", "displayName": "Fixture model",
+                "hidden": False, "isDefault": True, "defaultReasoningEffort": "low",
+                "supportedReasoningEfforts": [{"reasoningEffort": "low", "description": "Fixture"}],
+                "inputModalities": ["text"],
+            }], "nextCursor": None}})
+        elif msg.get("method") == "account/rateLimits/read":
+            self.received.append(msg)
+            if self.quota_result is not None:
+                self._feed({"id": msg["id"], "result": self.quota_result})
+                return
+            if self.quota_error:
+                self._feed({"id": msg["id"], "error": {"code": -32601, "message": "unsupported"}})
+            else:
+                self._feed({"id": msg["id"], "result": {
+                    "rateLimits": {"primary": {"usedPercent": 99}},
+                    "rateLimitsByLimitId": {"codex": {
+                        "limitId": "codex", "planType": "plus",
+                        "primary": {"usedPercent": 25, "windowDurationMins": 300, "resetsAt": 1789000000},
+                        "secondary": None,
+                    }},
+                }})
+        else:
+            super()._on_client_line(line)
+
+
+@pytest.mark.parametrize("fault", ["error_list", "error_code", "broken_pipe", "initialise_pipe"])
+async def test_codex_quota_faults_are_unknown_without_leaked_pending_requests(fault):
+    class FaultServer(_CatalogCodexServer):
+        def _on_client_line(self, line):
+            msg = json.loads(line)
+            if fault == "initialise_pipe" and msg.get("method") == "initialize":
+                raise BrokenPipeError("synthetic initialise pipe failure")
+            if msg.get("method") != "account/rateLimits/read":
+                return super()._on_client_line(line)
+            self.received.append(msg)
+            if fault == "broken_pipe":
+                raise BrokenPipeError("synthetic closed pipe")
+            error = ["malformed"] if fault == "error_list" else {"code": [], "message": "invalid"}
+            self._feed({"id": msg["id"], "error": error})
+
+    server = FaultServer()
+    session = CodexAppServerSession(spawn=server.spawn)
+    try:
+        assert await session.read_rate_limits() == {"status": "unknown", "buckets": {}}
+        assert session._client is None or session._client._pending == {}
+        assert not any(m.get("method") in {"thread/start", "turn/start"} for m in server.received)
+    finally:
+        await session.close()
+
+
+async def test_codex_explicit_model_and_effort_are_verified_and_sent_on_wire():
+    server = _CatalogCodexServer()
+    async with CodexAppServerSession(spawn=server.spawn, model="fixture-model", reasoning_effort="low") as session:
+        done = await session.run_turn("fixture prompt")
+    assert done.data["error"] is None
+    methods = [m.get("method") for m in server.received]
+    assert methods.index("model/list") < methods.index("thread/start")
+    thread = next(m for m in server.received if m.get("method") == "thread/start")
+    turn = next(m for m in server.received if m.get("method") == "turn/start")
+    assert thread["params"]["model"] == "fixture-model"
+    assert turn["params"]["model"] == "fixture-model"
+    assert turn["params"]["effort"] == "low"
+
+
+@pytest.mark.parametrize("model,effort", [("not-available", "low"), ("fixture-model", "ultra")])
+async def test_codex_refuses_unavailable_model_or_effort_before_starting_thread(model, effort):
+    server = _CatalogCodexServer()
+    session = CodexAppServerSession(spawn=server.spawn, model=model, reasoning_effort=effort)
+    try:
+        with pytest.raises(ValueError):
+            await session.ensure_started()
+        assert not any(m.get("method") in {"thread/start", "turn/start"} for m in server.received)
+        assert server.proc.returncode is not None
+    finally:
+        await session.close()
+
+
+async def test_codex_catalogue_and_quota_reads_do_not_start_a_thread_or_turn():
+    server = _CatalogCodexServer()
+    session = CodexAppServerSession(spawn=server.spawn)
+    try:
+        models = await session.list_models()
+        quota = await session.read_rate_limits()
+        assert models[0]["model"] == "fixture-model"
+        assert quota["status"] == "available"
+        assert quota["buckets"]["codex"]["primary"]["remaining_percent"] == 75
+        assert quota["buckets"]["codex"]["secondary"] is None
+        assert quota["buckets"]["codex"]["plan_type"] == "plus"
+        assert not any(m.get("method") in {"thread/start", "turn/start"} for m in server.received)
+        assert sum(m.get("method") == "initialize" for m in server.received) == 1
+    finally:
+        await session.close()
+
+
+async def test_codex_unavailable_quota_is_unknown_not_zero_or_unlimited():
+    server = _CatalogCodexServer(quota_error=True)
+    session = CodexAppServerSession(spawn=server.spawn)
+    try:
+        assert await session.read_rate_limits() == {"status": "unknown", "buckets": {}}
+    finally:
+        await session.close()
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"model": ""}, {"model": 1}, {"reasoning_effort": "low"},
+    {"model": "fixture", "reasoning_effort": True},
+])
+def test_codex_rejects_ambiguous_model_selection(kwargs):
+    with pytest.raises(ValueError):
+        CodexAppServerSession(**kwargs)
+
+
+async def test_codex_model_catalogue_follows_bounded_cursors_and_refuses_replay():
+    server = _CatalogCodexServer(catalogue_results=[
+        {"data": [], "nextCursor": "next"}, {"data": [], "nextCursor": "next"},
+    ])
+    session = CodexAppServerSession(spawn=server.spawn)
+    try:
+        with pytest.raises(ValueError, match="pagination"):
+            await session.list_models()
+        calls = [m for m in server.received if m.get("method") == "model/list"]
+        assert len(calls) == 2
+        assert calls[1]["params"]["cursor"] == "next"
+    finally:
+        await session.close()
+
+
+@pytest.mark.parametrize("result", [["malformed"], {"data": "malformed"}, {"data": [{"model": "incomplete"}]}])
+async def test_codex_model_catalogue_refuses_malformed_results(result):
+    server = _CatalogCodexServer(catalogue_results=[result])
+    session = CodexAppServerSession(spawn=server.spawn)
+    try:
+        with pytest.raises(ValueError):
+            await session.list_models()
+    finally:
+        await session.close()
+
+
+@pytest.mark.parametrize("result", [
+    ["malformed"], {"rateLimitsByLimitId": {"codex": {"primary": {"usedPercent": True}}}},
+])
+async def test_codex_malformed_quota_is_unknown(result):
+    server = _CatalogCodexServer(quota_result=result)
+    session = CodexAppServerSession(spawn=server.spawn)
+    try:
+        assert await session.read_rate_limits() == {"status": "unknown", "buckets": {}}
+    finally:
+        await session.close()
+
+
+async def test_codex_legacy_quota_preserves_null_and_over_limit_values():
+    server = _CatalogCodexServer(quota_result={"rateLimits": {
+        "primary": {"usedPercent": None}, "secondary": {"usedPercent": 105},
+    }})
+    session = CodexAppServerSession(spawn=server.spawn)
+    try:
+        quota = await session.read_rate_limits()
+        assert quota["buckets"]["codex"]["primary"]["remaining_percent"] is None
+        assert quota["buckets"]["codex"]["secondary"]["used_percent"] == 105
+        assert quota["buckets"]["codex"]["secondary"]["remaining_percent"] == 0
+    finally:
+        await session.close()
+
+
 async def test_codex_session_handles_server_approval_request() -> None:
     approval_req = {"id": 999, "method": "exec/approval", "params": {"command": "rm -rf /"}}
     server = _FakeCodexServer(server_request=approval_req)

@@ -68,15 +68,15 @@ def _ctx() -> RequestContext:
     return RequestContext(jti="jti-1", actor_type="human", actor_id="user-1", mode="live")
 
 
-async def _dispatch_through_router(adapter, adapter_id: str):
+async def _dispatch_through_router(adapter, adapter_id: str, *, backend_lease_factory):
     session = await adapter.login(_login_creds(adapter_id))
     router = BrokerRouter(
         {adapter_id: adapter},
-        lambda _ctx, _aid, _acct: session,
+        lambda _ctx, _aid, _acct: session, backend_lease_proof=backend_lease_factory()
     )
     order = _order()
     ctx = SafetyContext.mint(
-        order, mode="live", user_jti="jti-1", adapter_id=adapter_id, account_id="acct-1", actor_type="human",
+        order, mode="live", user_jti="jti-1", adapter_id=adapter_id, account_id="acct-1", actor_type="human", backend_lease_proof=backend_lease_factory()
     )
     return await router.place_order(
         _ctx(), adapter_id=adapter_id, account_id="acct-1", order=order, safety_ctx=ctx
@@ -90,19 +90,19 @@ def _login_creds(adapter_id: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_upstox_write_accepted_through_real_router():
+async def test_upstox_write_accepted_through_real_router(*, backend_lease_factory):
     client = _MockUpClient()
     adapter = UpstoxAdapter(client_factory=lambda _s: client, instrument_resolver=lambda s, e: "NSE_EQ|INE002A01018")
-    oid = await _dispatch_through_router(adapter, "upstox")
+    oid = await _dispatch_through_router(adapter, "upstox", backend_lease_factory=backend_lease_factory)
     assert oid == "UOID-ROUTER"
     assert len(client.placed) == 1  # the broker WAS called — no SafetyBypassError
 
 
 @pytest.mark.asyncio
-async def test_kotakneo_write_accepted_through_real_router():
+async def test_kotakneo_write_accepted_through_real_router(*, backend_lease_factory):
     client = _MockNeoClient()
     adapter = KotakNeoAdapter(client_factory=lambda _s: client, symbol_resolver=lambda s, e: "RELIANCE-EQ")
-    oid = await _dispatch_through_router(adapter, "kotakneo")
+    oid = await _dispatch_through_router(adapter, "kotakneo", backend_lease_factory=backend_lease_factory)
     assert oid == "NEO-ROUTER"
     assert len(client.placed) == 1
 

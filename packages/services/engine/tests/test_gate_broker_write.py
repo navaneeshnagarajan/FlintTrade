@@ -43,60 +43,60 @@ def _ctx(**overrides) -> RequestContext:
 
 
 @pytest.mark.parametrize("verb", sorted(GATED_WRITE_VERBS))
-def test_gate_broker_write_mints_for_every_registered_verb(verb: str) -> None:
+def test_gate_broker_write_mints_for_every_registered_verb(verb: str, *, backend_lease_factory) -> None:
     ctx = _ctx()
     payload = {"_op": verb, "order_id": "X-1"}
-    sc = gate_broker_write(verb, payload, ctx, "dhan", account_id="acct-1")
+    sc = gate_broker_write(verb, payload, ctx, "dhan", account_id="acct-1", backend_lease_proof=backend_lease_factory())
     assert sc.verify(payload, ctx, "dhan", "acct-1") is True
 
 
-def test_gate_broker_write_refuses_unknown_verb() -> None:
+def test_gate_broker_write_refuses_unknown_verb(*, backend_lease_factory) -> None:
     with pytest.raises(SafetyBypassError, match="unknown gated write verb"):
-        gate_broker_write("transfer_funds", {"_op": "transfer_funds"}, _ctx(), "dhan")
+        gate_broker_write("transfer_funds", {"_op": "transfer_funds"}, _ctx(), "dhan", backend_lease_proof=backend_lease_factory())
 
 
-def test_gate_broker_write_refuses_non_mapping_payload() -> None:
+def test_gate_broker_write_refuses_non_mapping_payload(*, backend_lease_factory) -> None:
     with pytest.raises(SafetyBypassError, match="must be a Mapping"):
-        gate_broker_write("cancel_forever", ["GTT-1"], _ctx(), "dhan")  # type: ignore[arg-type]
+        gate_broker_write("cancel_forever", ["GTT-1"], _ctx(), "dhan", backend_lease_proof=backend_lease_factory())  # type: ignore[arg-type]
 
 
-def test_gate_broker_write_refuses_op_mismatch() -> None:
+def test_gate_broker_write_refuses_op_mismatch(*, backend_lease_factory) -> None:
     with pytest.raises(SafetyBypassError, match="_op .* does not match"):
         gate_broker_write(
-            "cancel_forever", {"_op": "modify_forever", "order_id": "GTT-1"}, _ctx(), "dhan"
+            "cancel_forever", {"_op": "modify_forever", "order_id": "GTT-1"}, _ctx(), "dhan", backend_lease_proof=backend_lease_factory()
         )
 
 
-def test_gate_broker_write_refuses_missing_op() -> None:
+def test_gate_broker_write_refuses_missing_op(*, backend_lease_factory) -> None:
     with pytest.raises(SafetyBypassError, match="does not match"):
-        gate_broker_write("cancel_forever", {"order_id": "GTT-1"}, _ctx(), "dhan")
+        gate_broker_write("cancel_forever", {"order_id": "GTT-1"}, _ctx(), "dhan", backend_lease_proof=backend_lease_factory())
 
 
-def test_cross_verb_payload_does_not_verify() -> None:
+def test_cross_verb_payload_does_not_verify(*, backend_lease_factory) -> None:
     """The _op discriminator is inside the signed hash, so a gate minted for one
     verb can never verify against another verb's payload — even with identical
     remaining fields."""
     ctx = _ctx()
     cancel_payload = {"_op": "cancel_forever", "order_id": "GTT-1"}
-    sc = gate_broker_write("cancel_forever", cancel_payload, ctx, "dhan")
+    sc = gate_broker_write("cancel_forever", cancel_payload, ctx, "dhan", backend_lease_proof=backend_lease_factory())
     modify_payload = {"_op": "modify_forever", "order_id": "GTT-1"}
     assert sc.verify(modify_payload, ctx, "dhan") is False
 
 
-def test_gate_is_bound_to_the_payload_fields() -> None:
+def test_gate_is_bound_to_the_payload_fields(*, backend_lease_factory) -> None:
     ctx = _ctx()
     payload = {"_op": "convert_position", "req": {"symbol": "RELIANCE", "quantity": 5}}
-    sc = gate_broker_write("convert_position", payload, ctx, "dhan")
+    sc = gate_broker_write("convert_position", payload, ctx, "dhan", backend_lease_proof=backend_lease_factory())
     tampered = {"_op": "convert_position", "req": {"symbol": "RELIANCE", "quantity": 500}}
     assert sc.verify(tampered, ctx, "dhan") is False
 
 
-def test_gate_broker_write_actor_metadata_must_agree() -> None:
+def test_gate_broker_write_actor_metadata_must_agree(*, backend_lease_factory) -> None:
     ctx = _ctx(actor_type="human")
     with pytest.raises(SafetyBypassError, match="actor_type_mismatch"):
         gate_broker_write(
             "exit_all_positions", {"_op": "exit_all_positions"}, ctx, "dhan",
-            actor_type="external_intent",
+            actor_type="external_intent", backend_lease_proof=backend_lease_factory()
         )
 
 
@@ -123,25 +123,25 @@ def _order(**overrides) -> Order:
         ("quantity1", "5"),
     ],
 )
-def test_mutating_new_order_field_after_minting_invalidates_gate(field: str, value: str) -> None:
+def test_mutating_new_order_field_after_minting_invalidates_gate(field: str, value: str, *, backend_lease_factory) -> None:
     """Hash-coverage proof: every new optional Order field is inside the signed
     canonical hash, so post-mint mutation fails verification."""
     ctx = _ctx()
     order = _order()
-    sc = gate_order(order, ctx, "dhan")
+    sc = gate_order(order, ctx, "dhan", backend_lease_proof=backend_lease_factory())
     assert sc.verify(order, ctx, "dhan") is True
     setattr(order, field, value)
     assert sc.verify(order, ctx, "dhan") is False
 
 
-def test_orders_differing_only_in_new_fields_hash_differently() -> None:
+def test_orders_differing_only_in_new_fields_hash_differently(*, backend_lease_factory) -> None:
     ctx = _ctx()
     plain = _order()
     oco = _order(price1="2800", trigger_price1="2805", quantity1="5")
-    sc = gate_order(plain, ctx, "dhan")
+    sc = gate_order(plain, ctx, "dhan", backend_lease_proof=backend_lease_factory())
     assert sc.verify(plain, ctx, "dhan") is True
     assert sc.verify(oco, ctx, "dhan") is False
-    sc_validity = gate_order(_order(validity="GTC"), ctx, "dhan")
+    sc_validity = gate_order(_order(validity="GTC"), ctx, "dhan", backend_lease_proof=backend_lease_factory())
     assert sc_validity.verify(_order(validity="GTC"), ctx, "dhan") is True
     assert sc_validity.verify(_order(validity="DAY"), ctx, "dhan") is False
     assert sc_validity.verify(plain, ctx, "dhan") is False

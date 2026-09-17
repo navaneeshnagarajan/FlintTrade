@@ -18,6 +18,7 @@ import {
 } from "@/services/brokerAccountsApi";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { runAccountAction } from "@/services/accountMutationActions";
 import type { BrokerAccount, AccountStatus } from "@/types/broker";
 
 // ---------------------------------------------------------------------------
@@ -75,7 +76,7 @@ export function ConnectedAccounts() {
   const handleRemove = async (account: BrokerAccount) => {
     try {
       setError(null);
-      await removeBrokerAccount(account);
+      await runAccountAction(`${brokerAccountKey(account)}:remove`, (key) => removeBrokerAccount(account, key));
       await refreshAccounts();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to remove account");
@@ -85,7 +86,7 @@ export function ConnectedAccounts() {
   const handleReconnect = async (account: BrokerAccount) => {
     try {
       setError(null);
-      await reconnectBrokerAccount(account);
+      await runAccountAction(`${brokerAccountKey(account)}:reconnect`, (key) => reconnectBrokerAccount(account, key));
       await refreshAccounts();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to reconnect account");
@@ -95,7 +96,7 @@ export function ConnectedAccounts() {
   const handleSetPrimary = async (account: BrokerAccount) => {
     try {
       setError(null);
-      await setPrimaryBrokerAccount(account);
+      await runAccountAction(`${brokerAccountKey(account)}:primary`, (key) => setPrimaryBrokerAccount(account, key));
       await refreshAccounts();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to set primary account");

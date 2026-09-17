@@ -30,35 +30,35 @@ def _ctx() -> RequestContext:
     return RequestContext(jti="jti-1", actor_type="human", actor_id="user-1", mode="live")
 
 
-def test_account_id_is_signed_and_round_trips() -> None:
+def test_account_id_is_signed_and_round_trips(*, backend_lease_factory) -> None:
     order = _order()
     ctx = SafetyContext.mint(
-        order, mode="live", user_jti="jti-1", adapter_id="dhan", account_id="personal", actor_type="human"
+        order, mode="live", user_jti="jti-1", adapter_id="dhan", account_id="personal", actor_type="human", backend_lease_proof=backend_lease_factory()
     )
     assert ctx.account_id == "personal"
     assert ctx.verify(order, _ctx(), "dhan", "personal") is True
 
 
-def test_account_swap_is_rejected() -> None:
+def test_account_swap_is_rejected(*, backend_lease_factory) -> None:
     order = _order()
     ctx = SafetyContext.mint(
-        order, mode="live", user_jti="jti-1", adapter_id="dhan", account_id="personal", actor_type="human"
+        order, mode="live", user_jti="jti-1", adapter_id="dhan", account_id="personal", actor_type="human", backend_lease_proof=backend_lease_factory()
     )
     # Same adapter, DIFFERENT account — must fail (the swap vector).
     assert ctx.verify(order, _ctx(), "dhan", "family") is False
 
 
-def test_gate_order_threads_account_id() -> None:
+def test_gate_order_threads_account_id(*, backend_lease_factory) -> None:
     order = _order()
-    sc = gate_order(order, _ctx(), "dhan", account_id="personal")
+    sc = gate_order(order, _ctx(), "dhan", account_id="personal", backend_lease_proof=backend_lease_factory())
     assert sc.account_id == "personal"
     assert sc.verify(order, _ctx(), "dhan", "personal") is True
     assert sc.verify(order, _ctx(), "dhan", "family") is False
 
 
-def test_default_account_id_back_compat() -> None:
+def test_default_account_id_back_compat(*, backend_lease_factory) -> None:
     # Account-agnostic callers (no account_id) sign and verify the shared default.
     order = _order()
-    sc = gate_order(order, _ctx(), "dhan")
+    sc = gate_order(order, _ctx(), "dhan", backend_lease_proof=backend_lease_factory())
     assert sc.account_id == "default"
     assert sc.verify(order, _ctx(), "dhan") is True

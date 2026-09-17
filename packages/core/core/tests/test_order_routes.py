@@ -787,13 +787,14 @@ class TestLiveModeForwarding:
         mock_http.post.assert_not_called()
         assert resp.status_code == expected_status
 
-    def test_kotak_cancel_signs_trading_symbol_extra(self, flask_app, monkeypatch):
+    def test_kotak_cancel_signs_trading_symbol_extra(self, flask_app, monkeypatch, *, backend_lease_factory):
         """Kotak AMO cancel ``trading_symbol`` must be covered by the signed fingerprint."""
         from flinttrade_core import order_routes as routes
 
         captured: dict[str, object] = {}
 
         class CapturingRouter:
+            backend_lease_proof = backend_lease_factory()
             async def cancel_order(self, request_ctx, *, order, order_id, safety_ctx, hint, extras):
                 captured["request_ctx"] = request_ctx
                 captured["order"] = order
@@ -802,7 +803,7 @@ class TestLiveModeForwarding:
                 captured["extras"] = extras
                 captured["safety_ctx"] = safety_ctx
 
-        def gate(order, request_ctx, *, adapter_id, account_id):
+        def gate(order, request_ctx, *, adapter_id, account_id, backend_lease_proof):
             captured["gated_order"] = dict(order)
             captured["gated_adapter"] = adapter_id
             captured["gated_account"] = account_id
@@ -1147,12 +1148,13 @@ class TestAuthRequired:
         assert resp.status_code in (401, 403)
 
 
-def test_gated_verb_write_returns_bounded_broker_error(flask_app, monkeypatch):
+def test_gated_verb_write_returns_bounded_broker_error(flask_app, monkeypatch, *, backend_lease_factory):
     """Broker/adapter exception details stay out of the HTTP response."""
     from flinttrade_core.exceptions import BrokerError
     from flinttrade_core import order_routes as routes
 
     class RefusingRouter:
+        backend_lease_proof = backend_lease_factory()
         async def execute_gated(self, *_args, **_kwargs):
             raise BrokerError("Traceback\nFile \"/Users/me/secret.py\"\napi_key=leaked")
 
@@ -1202,7 +1204,7 @@ def test_redact_exc_handles_empty_account():
     assert _redact_exc(ValueError("boom"), None) == "boom"
 
 
-def test_gated_verb_write_keeps_raw_account_id_out_of_logs(flask_app, monkeypatch, caplog):
+def test_gated_verb_write_keeps_raw_account_id_out_of_logs(flask_app, monkeypatch, caplog, *, backend_lease_factory):
     """Finding #7: a broker-not-connected error must not re-leak the raw account
     id through the caught exception's message tail."""
     import logging
@@ -1214,6 +1216,7 @@ def test_gated_verb_write_keeps_raw_account_id_out_of_logs(flask_app, monkeypatc
     raw_account = "ACCT-SECRET-98765"
 
     class MissingRouter:
+        backend_lease_proof = backend_lease_factory()
         async def execute_gated(self, *_args, **_kwargs):
             raise BrokerNotFoundError(f"Account '{raw_account}' not found in registry.")
 

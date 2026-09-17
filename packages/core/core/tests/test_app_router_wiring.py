@@ -66,7 +66,7 @@ def _bridge_fixture(path, app=None):
     return fixture, client
 
 
-def _build_bridge(path, **kwargs):
+def _build_bridge(path, *, backend_lease_factory, **kwargs):
     from flinttrade_core.workspace import Workspace
     workspace = Workspace(path)
     workspace.initialise()
@@ -75,7 +75,7 @@ def _build_bridge(path, **kwargs):
     snapshot = read_workspace_snapshot(path)
     router = build_broker_router(fixture.registry, snapshot.as_dict()["brokers"],
         openalgo_client=client, workspace_snapshot=snapshot, workspace_path=path,
-        registry_publication_owner=fixture.owner, **kwargs)
+        registry_publication_owner=fixture.owner, **kwargs, backend_lease_proof=backend_lease_factory())
     return router, fixture
 
 
@@ -90,14 +90,14 @@ def _owned_registry(app):
 
 
 @pytest.mark.parametrize("composition", ["internal", "injected"])
-def test_app_constructor_retains_its_matching_publication_owner(tmp_path, monkeypatch, composition):
+def test_app_constructor_retains_its_matching_publication_owner(tmp_path, monkeypatch, composition, backend_lease_factory):
     from flinttrade_core.app import create_flask_app
     from flinttrade_gateway.registry import create_owned_registry, RegistryPublicationOwner
 
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     registry, owner = create_owned_registry()
     kwargs = {"registry": registry, "registry_publication_owner": owner} if composition == "injected" else {}
-    app = create_flask_app(**kwargs)
+    app = create_flask_app(backend_lease_proof=backend_lease_factory(), **kwargs)
     retained = app.extensions["flinttrade.registry_publication_owner"]
     assert type(retained) is RegistryPublicationOwner
     assert retained.owns(app.config["REGISTRY"])
@@ -109,8 +109,7 @@ def test_app_constructor_retains_its_matching_publication_owner(tmp_path, monkey
 @pytest.mark.parametrize("composition", ["missing", "foreign", "wrong_type", "owner_only"])
 @pytest.mark.parametrize("safety_mode", ["default", "injected"])
 def test_app_constructor_refuses_unowned_registry_before_application_work(
-    tmp_path, monkeypatch, composition, safety_mode,
-):
+    tmp_path, monkeypatch, composition, safety_mode, backend_lease_factory):
     import flinttrade_core.app as app_module
     from flinttrade_gateway.registry import create_owned_registry
 
@@ -132,13 +131,15 @@ def test_app_constructor_refuses_unowned_registry_before_application_work(
 
     # These are the first boundaries of the default and injected safety paths,
     # well before Flask, filesystem hygiene, logging and gateway construction.
+    proof = backend_lease_factory()
+    before = set(tmp_path.iterdir())
     monkeypatch.setattr(app_module, "_workspace_dir", forbidden)
     with pytest.raises(RegistrySessionUnavailable, match="^registry_session_unavailable$"):
-        app_module.create_flask_app(safety=None if safety_mode == "default" else UninspectedSafety(),
+        app_module.create_flask_app(backend_lease_proof=proof, safety=None if safety_mode == "default" else UninspectedSafety(),
             registry=None if composition == "owner_only" else registry,
             registry_publication_owner=owners[composition])
     assert downstream == []
-    assert list(tmp_path.iterdir()) == []
+    assert set(tmp_path.iterdir()) == before
 
 
 def _mark_router_prerequisites_ready(app: Flask, *, admission: object | None = None) -> object:
@@ -168,7 +169,7 @@ def _mark_router_prerequisites_ready(app: Flask, *, admission: object | None = N
     ("brokers.data.ticks", "openalgo:sibling", True),
     ("openalgo.api_key", "fixture-key", True), ("openalgo.host", "https://fixture.invalid", True),
 ])
-def test_app_rebuild_never_rebinds_managed_siblings(tmp_path, monkeypatch, key, value, stales):
+def test_app_rebuild_never_rebinds_managed_siblings(tmp_path, monkeypatch, key, value, stales, backend_lease_factory):
     import flinttrade_core.app as app_module
     from flinttrade_core.workspace import Workspace
     from flinttrade_engine.request_context import RequestContext
@@ -182,6 +183,7 @@ def test_app_rebuild_never_rebinds_managed_siblings(tmp_path, monkeypatch, key, 
         config["brokers"]["account_acls"] = {"openalgo": {"default": ["operator"], "sibling": ["operator"]}}
     ws.update(configure_accounts)
     app = Flask("workspace-liveness")
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     _mark_router_prerequisites_ready(app)
     monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
     exact, client = _bridge_fixture(tmp_path, app)
@@ -211,7 +213,7 @@ def test_app_rebuild_never_rebinds_managed_siblings(tmp_path, monkeypatch, key, 
         rebound._session_provider(context, "openalgo", "sibling")
 
 
-def test_rate_limit_endpoint_invalidates_managed_siblings(tmp_path, monkeypatch):
+def test_rate_limit_endpoint_invalidates_managed_siblings(tmp_path, monkeypatch, backend_lease_factory):
     import flinttrade_core.app as app_module
     from flinttrade_core.workspace import Workspace
     from flinttrade_engine.request_context import RequestContext
@@ -226,6 +228,7 @@ def test_rate_limit_endpoint_invalidates_managed_siblings(tmp_path, monkeypatch)
         config["brokers"]["account_acls"] = {"openalgo": {"default": ["operator"], "sibling": ["operator"]}}
     ws.update(accounts)
     app = Flask("rate-limit-rebind")
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.register_blueprint(gateway_bp)
     _mark_router_prerequisites_ready(app)
@@ -248,7 +251,7 @@ def test_rate_limit_endpoint_invalidates_managed_siblings(tmp_path, monkeypatch)
     assert rebound._session_provider.broker_workspace_version.generation == 3
 
 
-def test_rate_limit_endpoint_refreshes_reads_when_execution_default_is_blank(tmp_path, monkeypatch):
+def test_rate_limit_endpoint_refreshes_reads_when_execution_default_is_blank(tmp_path, monkeypatch, backend_lease_factory):
     import flinttrade_core.app as app_module
     from flinttrade_core.workspace import Workspace
     from flinttrade_gateway.auth import gateway_bp
@@ -264,6 +267,7 @@ def test_rate_limit_endpoint_refreshes_reads_when_execution_default_is_blank(tmp
 
     workspace.update(configure_reads_only)
     app = Flask("rate-limit-read-refresh")
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     app.config["BROKER_ACCOUNT_MUTATION_ADMISSION"] = lambda: None
     app.register_blueprint(gateway_bp)
     _mark_router_prerequisites_ready(app)
@@ -292,7 +296,7 @@ def test_rate_limit_endpoint_refreshes_reads_when_execution_default_is_blank(tmp
 
 
 @pytest.mark.parametrize("race,expected", [("service", True), ("broker", False), ("corrupt", False), ("removed", False)])
-def test_router_rebuild_rechecks_only_broker_authority_and_contains_read_failures(tmp_path, monkeypatch, race, expected):
+def test_router_rebuild_rechecks_only_broker_authority_and_contains_read_failures(tmp_path, monkeypatch, race, expected, backend_lease_factory):
     import flinttrade_core.app as app_module
     from flinttrade_core.workspace import Workspace
 
@@ -300,6 +304,7 @@ def test_router_rebuild_rechecks_only_broker_authority_and_contains_read_failure
     workspace = Workspace(tmp_path)
     workspace.initialise()
     app = Flask("rebuild-interleave")
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     _mark_router_prerequisites_ready(app)
     monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
     original_prepare = app_module._prepare_broker_dependencies
@@ -355,11 +360,12 @@ def _call_while_lock_is_held(lock: Any, callback: Callable[[], bool]) -> tuple[b
 
 @pytest.mark.unit
 def test_configure_broker_router_revokes_old_generation_before_publish(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-generation-swap")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     old_router = MagicMock()
     old_router.revoke_and_drain.side_effect = (
         lambda **_kwargs: app.config["BROKER_ROUTER"] is None
@@ -388,8 +394,7 @@ def test_configure_broker_router_revokes_old_generation_before_publish(
 
 @pytest.mark.unit
 def test_configure_broker_router_forwards_composite_safety_admission_to_every_generation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     guard = MagicMock(name="broker_write_admission")
@@ -398,6 +403,7 @@ def test_configure_broker_router_forwards_composite_safety_admission_to_every_ge
     second = MagicMock(name="second_router")
     build = MagicMock(side_effect=[first, second])
     app = Flask("router-safety-admission")
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     _mark_router_prerequisites_ready(app, admission=guard)
     monkeypatch.setattr(
         app_module,
@@ -426,14 +432,14 @@ def test_configure_broker_router_forwards_composite_safety_admission_to_every_ge
 
 @pytest.mark.unit
 def test_configure_broker_router_binds_lifecycle_audit_receipt_verifier(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     router = MagicMock(name="router")
     lifecycle_store = MagicMock(name="lifecycle_store")
     audit = MagicMock(name="audit")
     app = Flask("router-audit-receipt")
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     _mark_router_prerequisites_ready(app)
     app.config.update(ORDER_LIFECYCLE_LEDGER=lifecycle_store, AUDIT=audit)
     monkeypatch.setattr(
@@ -454,11 +460,12 @@ def test_configure_broker_router_binds_lifecycle_audit_receipt_verifier(
 
 @pytest.mark.unit
 def test_configure_broker_router_build_failure_revokes_and_fails_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-generation-build-failure")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     old_router = MagicMock()
     old_router.revoke_and_drain.return_value = True
     app.config["BROKER_ROUTER"] = old_router
@@ -477,11 +484,12 @@ def test_configure_broker_router_build_failure_revokes_and_fails_closed(
 
 @pytest.mark.unit
 def test_configure_broker_router_refuses_an_unhealthy_emergency_journal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-emergency-journal-failure")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     old_router = MagicMock()
     old_router.revoke_and_drain.return_value = True
     build = MagicMock(return_value=object())
@@ -507,11 +515,12 @@ def test_configure_broker_router_refuses_an_unhealthy_emergency_journal(
 
 @pytest.mark.unit
 def test_configure_broker_router_refuses_an_unhealthy_daily_pnl_store(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-daily-pnl-store-failure")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     old_router = MagicMock()
     old_router.revoke_and_drain.return_value = True
     build = MagicMock(return_value=object())
@@ -537,11 +546,12 @@ def test_configure_broker_router_refuses_an_unhealthy_daily_pnl_store(
 
 @pytest.mark.unit
 def test_configure_broker_router_refuses_invalid_durable_safety_config(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-safety-config-failure")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     old_router = MagicMock()
     old_router.revoke_and_drain.return_value = True
     build = MagicMock(return_value=object())
@@ -559,11 +569,12 @@ def test_configure_broker_router_refuses_invalid_durable_safety_config(
 
 @pytest.mark.unit
 def test_configure_broker_router_refuses_non_durable_order_reservations(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-reservation-store-failure")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     build = MagicMock(return_value=object())
     _mark_router_prerequisites_ready(app)
     app.config["SAFETY"] = SimpleNamespace(
@@ -580,11 +591,12 @@ def test_configure_broker_router_refuses_non_durable_order_reservations(
 
 @pytest.mark.unit
 def test_configure_broker_router_refuses_publication_without_emergency_runtime(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-emergency-runtime-failure")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     app.config.update(
         EMERGENCY_INTENT_JOURNAL_READY=True,
         EMERGENCY_INTENT_JOURNAL=object(),
@@ -632,11 +644,12 @@ def test_configure_broker_router_refuses_publication_without_emergency_runtime(
 )
 def test_configure_broker_router_requires_explicit_journal_and_safety_readiness(
     monkeypatch: pytest.MonkeyPatch,
-    config: dict[str, object],
-) -> None:
+    config: dict[str, object], backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-explicit-readiness")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     app.config.update(config)
     build = MagicMock(return_value=object())
     monkeypatch.setattr(app_module, "_build_broker_router_from_dependencies", build)
@@ -649,11 +662,12 @@ def test_configure_broker_router_requires_explicit_journal_and_safety_readiness(
 
 @pytest.mark.unit
 def test_configure_broker_router_snapshots_before_publication_and_fails_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-snapshot-publication")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     candidate = object()
     _mark_router_prerequisites_ready(app)
     monkeypatch.setattr(
@@ -676,11 +690,12 @@ def test_configure_broker_router_snapshots_before_publication_and_fails_closed(
 
 @pytest.mark.unit
 def test_configure_broker_router_drain_timeout_never_publishes_candidate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-generation-drain-timeout")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     old_router = MagicMock()
     old_router.revoke_and_drain.return_value = False
     candidate = object()
@@ -699,10 +714,12 @@ def test_configure_broker_router_drain_timeout_never_publishes_candidate(
 
 
 @pytest.mark.unit
-def test_retire_broker_router_generation_times_out_waiting_for_rebuild_lease() -> None:
+def test_retire_broker_router_generation_times_out_waiting_for_rebuild_lease(backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-rebuild-lease-retire-timeout")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     lock = threading.RLock()
     router = MagicMock()
     app.config.update(
@@ -724,11 +741,12 @@ def test_retire_broker_router_generation_times_out_waiting_for_rebuild_lease() -
 
 @pytest.mark.unit
 def test_configure_broker_router_times_out_waiting_for_rebuild_lease(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-rebuild-lease-configure-timeout")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     lock = threading.RLock()
     router = MagicMock()
     build = MagicMock()
@@ -751,11 +769,12 @@ def test_configure_broker_router_times_out_waiting_for_rebuild_lease(
 
 @pytest.mark.unit
 def test_configure_broker_router_retries_retained_generation_before_build(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-generation-drain-retry")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     old_router = MagicMock()
     old_router.revoke_and_drain.side_effect = [False, True]
     candidate = object()
@@ -788,11 +807,12 @@ def test_configure_broker_router_retries_retained_generation_before_build(
 
 @pytest.mark.unit
 def test_configure_broker_router_refuses_and_retires_during_shutdown(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("router-rebuild-during-shutdown")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     router = MagicMock()
     router.revoke_and_drain.return_value = True
     build = MagicMock()
@@ -813,8 +833,7 @@ def test_configure_broker_router_refuses_and_retires_during_shutdown(
 @pytest.mark.unit
 def test_configure_publishes_reads_before_independent_write_readiness(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
     from flinttrade_core.workspace import Workspace
 
@@ -822,6 +841,7 @@ def test_configure_publishes_reads_before_independent_write_readiness(
     workspace = Workspace(tmp_path)
     workspace.initialise()
     app = Flask("read-before-write-readiness")
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     registry = _owned_registry(app)
     monkeypatch.setattr(app_module, "_native_activation_checks", lambda _store: (lambda _aid: False, lambda _aid: False))
 
@@ -851,7 +871,7 @@ def test_configure_publishes_reads_before_independent_write_readiness(
         "foreign_app_registry",
     ],
 )
-def test_dependency_publication_refuses_owner_or_registry_mismatch_without_partial_publication(composition) -> None:
+def test_dependency_publication_refuses_owner_or_registry_mismatch_without_partial_publication(composition, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
     from flinttrade_gateway.registry import create_owned_registry
 
@@ -866,6 +886,7 @@ def test_dependency_publication_refuses_owner_or_registry_mismatch_without_parti
         else owner
     )
     app = Flask(f"publication-{composition}")
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     if composition != "missing_app_owner":
         app.extensions["flinttrade.registry_publication_owner"] = (
             foreign_owner if composition == "replaced_app_owner" else owner
@@ -940,12 +961,13 @@ def _published_write_dependency_fixture(app: Flask, app_module, *, ready: bool =
 @pytest.mark.parametrize("replacement", ["owner", "registry"])
 def test_write_configuration_retires_exact_stale_dependency_before_build(
     monkeypatch: pytest.MonkeyPatch,
-    replacement,
-) -> None:
+    replacement, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
     from flinttrade_gateway.registry import create_owned_registry
 
     app = Flask(f"write-stale-before-{replacement}")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     dependencies, read_owner, borrowed_client, old_router = _published_write_dependency_fixture(app, app_module)
     foreign_registry, foreign_owner = create_owned_registry()
     if replacement == "owner":
@@ -970,12 +992,13 @@ def test_write_configuration_retires_exact_stale_dependency_before_build(
 @pytest.mark.parametrize("replacement", ["owner", "registry"])
 def test_write_configuration_rechecks_dependency_authority_after_candidate_build(
     monkeypatch: pytest.MonkeyPatch,
-    replacement,
-) -> None:
+    replacement, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
     from flinttrade_gateway.registry import create_owned_registry
 
     app = Flask(f"write-stale-during-{replacement}")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     dependencies, read_owner, borrowed_client, old_router = _published_write_dependency_fixture(app, app_module)
     foreign_registry, foreign_owner = create_owned_registry()
     candidate = object()
@@ -1000,11 +1023,12 @@ def test_write_configuration_rechecks_dependency_authority_after_candidate_build
 
 
 def test_write_configuration_holds_rebuild_lock_through_build_and_both_publications(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("write-transaction-lock")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     dependencies, _read_owner, _borrowed_client, _old_router = _published_write_dependency_fixture(app, app_module)
     rebuild_lock = app.config["BROKER_ROUTER_REBUILD_LOCK"]
     candidate = object()
@@ -1029,11 +1053,12 @@ def test_write_configuration_holds_rebuild_lock_through_build_and_both_publicati
 
 
 def test_stale_supplied_dependency_cannot_retire_a_newer_current_generation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("write-stale-supplied-record")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     current, read_owner, _borrowed_client, current_router = _published_write_dependency_fixture(app, app_module)
     stale = app_module._BrokerRuntimeDependencies(
         registry=current.registry,
@@ -1063,11 +1088,12 @@ def test_stale_supplied_dependency_cannot_retire_a_newer_current_generation(
 
 
 def test_runtime_staleness_retires_reads_but_readiness_only_failure_preserves_them(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     stale_app = Flask("write-runtime-stale")
+
+    stale_app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     stale, stale_reads, _client, stale_router = _published_write_dependency_fixture(stale_app, app_module)
     stale_app.config["RUNTIME_ACCEPTING_REQUESTS"] = False
     build = MagicMock()
@@ -1080,6 +1106,8 @@ def test_runtime_staleness_retires_reads_but_readiness_only_failure_preserves_th
     build.assert_not_called()
 
     readiness_app = Flask("write-readiness-only")
+
+    readiness_app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     valid, valid_reads, _client, valid_router = _published_write_dependency_fixture(
         readiness_app,
         app_module,
@@ -1094,11 +1122,12 @@ def test_runtime_staleness_retires_reads_but_readiness_only_failure_preserves_th
 
 @pytest.mark.unit
 def test_write_only_retry_reuses_the_published_dependency_identity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("write-only-retry")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     _mark_router_prerequisites_ready(app)
     dependencies = app_module._BrokerRuntimeDependencies(
         registry=_owned_registry(app),
@@ -1124,16 +1153,19 @@ def test_write_only_retry_reuses_the_published_dependency_identity(
     build.assert_called_once_with(
         dependencies,
         write_admission=app.config["SAFETY"].broker_write_admission,
+        backend_lease_proof=app.config["BACKEND_LEASE_PROOF"],
     )
     assert app.extensions["flinttrade_broker_dependencies"] is dependencies
     assert app.config["BROKER_ROUTER"] is router
 
 
 @pytest.mark.unit
-def test_combined_retirement_retains_and_retries_the_exact_timed_out_record() -> None:
+def test_combined_retirement_retains_and_retries_the_exact_timed_out_record(backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("combined-retirement")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     read_owner = MagicMock()
     read_owner.close.side_effect = [False, True, True]
     router = MagicMock()
@@ -1166,8 +1198,7 @@ def test_combined_retirement_retains_and_retries_the_exact_timed_out_record() ->
 
 @pytest.mark.parametrize("failure_stage", ["read_lookup", "read_close", "write_lookup", "write_revoke"])
 def test_combined_retirement_contains_each_ordinary_invalidation_exception_and_attempts_both_sides(
-    failure_stage,
-) -> None:
+    failure_stage, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     events: list[str] = []
@@ -1203,6 +1234,8 @@ def test_combined_retirement_contains_each_ordinary_invalidation_exception_and_a
             return revoke
 
     app = Flask(f"combined-retirement-{failure_stage}")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     dependencies = Dependencies()
     router = Router()
     app.extensions["flinttrade_broker_dependencies"] = dependencies
@@ -1220,10 +1253,12 @@ def test_combined_retirement_contains_each_ordinary_invalidation_exception_and_a
     assert app.config["BROKER_ROUTER_DRAINING"] is router
 
 
-def test_combined_retirement_retries_contained_exceptions_with_one_remaining_budget() -> None:
+def test_combined_retirement_retries_contained_exceptions_with_one_remaining_budget(backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
 
     app = Flask("combined-retirement-exception-retry")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     read_owner = MagicMock()
     read_owner.close.side_effect = [RuntimeError("private read failure"), True]
     router = MagicMock()
@@ -1244,8 +1279,7 @@ def test_combined_retirement_retries_contained_exceptions_with_one_remaining_bud
 
 @pytest.mark.unit
 def test_combined_retirement_retries_the_real_read_owner_until_provider_work_releases(
-    tmp_path: Path,
-) -> None:
+    tmp_path: Path, backend_lease_factory) -> None:
     import asyncio
 
     import flinttrade_core.app as app_module
@@ -1328,6 +1362,7 @@ def test_combined_retirement_retries_the_real_read_owner_until_provider_work_rel
     dependencies.openalgo_client = borrowed_client
     router = TrackingRouter()
     app = Flask("real-combined-retirement")
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     app.extensions["flinttrade.registry_publication_owner"] = fixture.owner
     app.config.update(
         REGISTRY=fixture.registry,
@@ -1390,8 +1425,7 @@ def test_combined_retirement_retries_the_real_read_owner_until_provider_work_rel
 @pytest.mark.unit
 def test_no_execution_default_still_refreshes_reads_and_two_apps_never_share_owners(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
     from flinttrade_core.workspace import Workspace
 
@@ -1403,6 +1437,7 @@ def test_no_execution_default_still_refreshes_reads_and_two_apps_never_share_own
         workspace.set("brokers.execution.default", "")
         monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace_path))
         app = Flask(f"no-default-{name}")
+        app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
         registry = _owned_registry(app)
         monkeypatch.setattr(
             app_module,
@@ -1421,8 +1456,8 @@ def test_no_execution_default_still_refreshes_reads_and_two_apps_never_share_own
     assert records[0].read_owner is not records[1].read_owner
 
 
-def test_build_broker_router_from_default_config() -> None:
-    router = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"])
+def test_build_broker_router_from_default_config(*, backend_lease_factory) -> None:
+    router = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"], backend_lease_proof=backend_lease_factory())
     assert isinstance(router, BrokerRouter)
     assert isinstance(router._config, RoutingConfig)
     assert isinstance(router._session_provider, AuthenticatingSessionProvider)
@@ -1431,25 +1466,25 @@ def test_build_broker_router_from_default_config() -> None:
     assert router.default_selector == "openalgo:default"
 
 
-def test_build_broker_router_forwards_write_admission_guard() -> None:
+def test_build_broker_router_forwards_write_admission_guard(*, backend_lease_factory) -> None:
     guard = MagicMock(name="write_admission")
 
     router = build_broker_router(
         BrokerRegistry(),
         default_workspace_config()["brokers"],
-        write_admission=guard,
+        write_admission=guard, backend_lease_proof=backend_lease_factory()
     )
 
     assert router._write_admission is guard
 
 
-def test_build_broker_router_invalid_config_raises() -> None:
+def test_build_broker_router_invalid_config_raises(*, backend_lease_factory) -> None:
     bad = {**default_workspace_config()["brokers"], "execution": {"default": "dhan"}}  # no colon
     with pytest.raises(RoutingConfigError):
-        build_broker_router(BrokerRegistry(), bad)
+        build_broker_router(BrokerRegistry(), bad, backend_lease_proof=backend_lease_factory())
 
 
-def test_build_broker_router_threads_account_acls() -> None:
+def test_build_broker_router_threads_account_acls(*, backend_lease_factory) -> None:
     brokers = {
         "registered": ["dhan:personal"],
         "account_acls": {"dhan": {"personal": ["nava@flinttrade.local"]}},
@@ -1463,7 +1498,7 @@ def test_build_broker_router_threads_account_acls() -> None:
         "failover": {"enabled": False, "order": []},
         "cost_aware": {"enabled": False, "tasks": []},
     }
-    router = build_broker_router(BrokerRegistry(), brokers)
+    router = build_broker_router(BrokerRegistry(), brokers, backend_lease_proof=backend_lease_factory())
     assert router._session_provider._acls == {"dhan": {"personal": ["nava@flinttrade.local"]}}
 
 
@@ -1504,16 +1539,16 @@ def test_safety_gate_prune_does_not_evict_live_marker() -> None:
     assert gate.consume("live") is False
 
 
-def test_openalgo_client_registers_bridge_adapter_and_session(tmp_path) -> None:
-    router, fixture = _build_bridge(tmp_path)
+def test_openalgo_client_registers_bridge_adapter_and_session(tmp_path, *, backend_lease_factory) -> None:
+    router, fixture = _build_bridge(tmp_path, backend_lease_factory=backend_lease_factory)
     assert "openalgo" in router._adapters
     assert type(router._adapters["openalgo"]).__name__ == "OpenAlgoAdapter"
     assert fixture.registry.snapshot_exact_state(BrokerSelector("openalgo", "default")).status == "connected"
 
 
-def test_no_openalgo_client_leaves_adapters_empty() -> None:
+def test_no_openalgo_client_leaves_adapters_empty(*, backend_lease_factory) -> None:
     # Back-compat: the create_flask_app path passes client=None in most tests.
-    router = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"])
+    router = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"], backend_lease_proof=backend_lease_factory())
     assert router._adapters == {}
 
 
@@ -1551,25 +1586,26 @@ def _all_native_brokers_cfg() -> dict:
     }
 
 
-def test_natives_stay_dormant_without_activation_checks() -> None:
+def test_natives_stay_dormant_without_activation_checks(*, backend_lease_factory) -> None:
     # Default: no native_* callables → no native adapter constructed.
-    router = build_broker_router(BrokerRegistry(), _native_brokers_cfg())
+    router = build_broker_router(BrokerRegistry(), _native_brokers_cfg(), backend_lease_proof=backend_lease_factory())
     assert router._adapters == {}
 
 
-def test_native_activates_only_when_attested_and_credentialled() -> None:
+def test_native_activates_only_when_attested_and_credentialled(*, backend_lease_factory) -> None:
     router = build_broker_router(
         BrokerRegistry(),
         _native_brokers_cfg(),
         native_attest_ok=lambda b: b in {"dhan", "upstox"},
         native_has_credentials=lambda b: b == "dhan",  # only dhan has creds
+        backend_lease_proof=backend_lease_factory(),
     )
     # dhan passes both gates; upstox is attested but has no creds → dormant.
     assert set(router._adapters) == {"dhan"}
     assert type(router._adapters["dhan"]).__name__ == "DhanAdapter"
 
 
-def test_only_connectable_natives_activate_from_registered_selectors() -> None:
+def test_only_connectable_natives_activate_from_registered_selectors(*, backend_lease_factory) -> None:
     """Boot activation follows the activation-cleared native set, not stale rows.
 
     Kotak Neo, INDmoney, and Groww are built/catalogued but still
@@ -1582,7 +1618,7 @@ def test_only_connectable_natives_activate_from_registered_selectors() -> None:
         BrokerRegistry(),
         _all_native_brokers_cfg(),
         native_attest_ok=lambda _b: True,
-        native_has_credentials=lambda _b: True,
+        native_has_credentials=lambda _b: True, backend_lease_proof=backend_lease_factory()
     )
     assert set(router._adapters) == {"dhan", "upstox"}
     assert "indmoney" not in router._adapters
@@ -1590,24 +1626,24 @@ def test_only_connectable_natives_activate_from_registered_selectors() -> None:
     assert "groww" not in router._adapters
 
 
-def test_native_activation_gates_fail_closed() -> None:
+def test_native_activation_gates_fail_closed(*, backend_lease_factory) -> None:
     router = build_broker_router(
         BrokerRegistry(),
         _native_brokers_cfg(),
         native_attest_ok=lambda _b: False,
-        native_has_credentials=lambda _b: True,
+        native_has_credentials=lambda _b: True, backend_lease_proof=backend_lease_factory()
     )
     assert router._adapters == {}
 
 
-def test_injected_adapter_wins_over_factory() -> None:
+def test_injected_adapter_wins_over_factory(*, backend_lease_factory) -> None:
     sentinel = object()
     router = build_broker_router(
         BrokerRegistry(),
         _native_brokers_cfg(),
         adapters={"dhan": sentinel},
         native_attest_ok=lambda _b: True,
-        native_has_credentials=lambda _b: True,
+        native_has_credentials=lambda _b: True, backend_lease_proof=backend_lease_factory()
     )
     # Explicit injection takes precedence; the factory does not overwrite it.
     assert router._adapters["dhan"] is sentinel
@@ -1649,7 +1685,7 @@ def test_native_activation_checks_no_vault_fails_closed() -> None:
     assert has_credentials("indmoney") is False
 
 
-def test_dhan_activates_end_to_end_when_sdk_present() -> None:
+def test_dhan_activates_end_to_end_when_sdk_present(*, backend_lease_factory) -> None:
     """Real bridge: with dhanhq installed (pin match) + creds in the vault, the
     router registers a live DhanAdapter via the activation factory.
 
@@ -1671,7 +1707,7 @@ def test_dhan_activates_end_to_end_when_sdk_present() -> None:
         BrokerRegistry(),
         _native_brokers_cfg(),
         native_attest_ok=attest_ok,
-        native_has_credentials=has_credentials,
+        native_has_credentials=has_credentials, backend_lease_proof=backend_lease_factory()
     )
     assert "dhan" in router._adapters
     assert type(router._adapters["dhan"]).__name__ == "DhanAdapter"
@@ -1681,7 +1717,7 @@ def test_dhan_activates_end_to_end_when_sdk_present() -> None:
 
 
 @pytest.mark.unit
-def test_native_adapter_kwargs_thread_local_state_provider() -> None:
+def test_native_adapter_kwargs_thread_local_state_provider(*, backend_lease_factory) -> None:
     """The §14 wiring: adapter_kwargs reaches the native constructor, so the
     journal-backed ``local_state_provider`` lands on the adapter."""
     sentinel_provider = lambda _session: None  # noqa: E731 - shape only; never called
@@ -1691,7 +1727,7 @@ def test_native_adapter_kwargs_thread_local_state_provider() -> None:
         _native_brokers_cfg(),
         native_attest_ok=lambda b: b == "dhan",
         native_has_credentials=lambda b: b == "dhan",
-        native_adapter_kwargs=lambda _b: {"local_state_provider": sentinel_provider},
+        native_adapter_kwargs=lambda _b: {"local_state_provider": sentinel_provider}, backend_lease_proof=backend_lease_factory()
     )
     assert router._adapters["dhan"]._local_state_provider is sentinel_provider
 
@@ -1734,7 +1770,7 @@ def test_native_adapter_kwargs_adds_cached_dhan_security_resolver(monkeypatch) -
 
 
 @pytest.mark.unit
-def test_on_native_activated_sink_receives_active_natives_only() -> None:
+def test_on_native_activated_sink_receives_active_natives_only(*, backend_lease_factory) -> None:
     """The sink sees exactly the ACTIVE native map — bridge excluded, injected
     natives included — so the reconciliation runner can enumerate them."""
 
@@ -1749,7 +1785,7 @@ def test_on_native_activated_sink_receives_active_natives_only() -> None:
         openalgo_client=object(),
         native_attest_ok=lambda b: b == "dhan",
         native_has_credentials=lambda b: b == "dhan",
-        on_native_activated=activated.update,
+        on_native_activated=activated.update, backend_lease_proof=backend_lease_factory()
     )
     assert set(activated) == {"dhan", "upstox"}
     assert "openalgo" not in activated  # bridge never qualifies
@@ -1757,21 +1793,21 @@ def test_on_native_activated_sink_receives_active_natives_only() -> None:
 
 
 @pytest.mark.unit
-def test_all_adapter_sink_includes_openalgo_for_reconciliation(tmp_path) -> None:
+def test_all_adapter_sink_includes_openalgo_for_reconciliation(tmp_path, *, backend_lease_factory) -> None:
     active = {}
-    router, fixture = _build_bridge(tmp_path, on_adapters_activated=active.update)
+    router, fixture = _build_bridge(tmp_path, on_adapters_activated=active.update, backend_lease_factory=backend_lease_factory)
     assert set(active) == {"openalgo"}
     assert active["openalgo"] is router._adapters["openalgo"]
 
 
 @pytest.mark.unit
-def test_on_native_activated_sink_empty_when_dormant() -> None:
+def test_on_native_activated_sink_empty_when_dormant(*, backend_lease_factory) -> None:
     activated: dict[str, object] = {}
     build_broker_router(
         BrokerRegistry(),
         _native_brokers_cfg(),
         openalgo_client=object(),
-        on_native_activated=activated.update,
+        on_native_activated=activated.update, backend_lease_proof=backend_lease_factory()
     )
     assert activated == {}
 
@@ -1795,13 +1831,15 @@ def test_reconcile_targets_provider_refuses_unversioned_native_read(tmp_path) ->
 
 
 @pytest.mark.unit
-def test_current_reconcile_helpers_follow_router_rebuilds() -> None:
+def test_current_reconcile_helpers_follow_router_rebuilds(backend_lease_factory) -> None:
     from flinttrade_core.app import (
         _current_reconcile_targets,
         _record_current_reconcile_snapshot,
     )
 
     app = Flask("dynamic-reconcile-provider")
+
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     first_targets = [(object(), object())]
     second_targets = [(object(), object())]
     ditto_targets = [(object(), object())]
@@ -1827,11 +1865,11 @@ def test_current_reconcile_helpers_follow_router_rebuilds() -> None:
     second_recorder.assert_called_once()
 
 @pytest.mark.unit
-def test_create_flask_app_defaults_reconcile_config_keys() -> None:
+def test_create_flask_app_defaults_reconcile_config_keys(backend_lease_factory) -> None:
     """A bare WSGI factory remains read-only without an emergency runtime."""
     from flinttrade_core.app import create_flask_app
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory(), )
     assert app.config["NATIVE_ADAPTERS"] == {}
     from flinttrade_engine.emergency_intents import EmergencyIntentJournal
     from flinttrade_engine.daily_pnl_state import DailyPnLStateStore
@@ -1850,8 +1888,7 @@ def test_create_flask_app_defaults_reconcile_config_keys() -> None:
 @pytest.mark.unit
 def test_create_flask_app_marks_memory_only_injected_safety_unready(
     tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     from flinttrade_core.app import create_flask_app
     from flinttrade_engine.safety import SafetySystem
 
@@ -1860,7 +1897,7 @@ def test_create_flask_app_marks_memory_only_injected_safety_unready(
     master_password.write_text("memory-only-safety-test-password", encoding="utf-8")
     master_password.chmod(0o600)
 
-    app = create_flask_app(safety=SafetySystem())
+    app = create_flask_app(backend_lease_proof=backend_lease_factory(), safety=SafetySystem())
 
     assert app.config["SAFETY_CONFIG_READY"] is False
     assert app.config.get("BROKER_ROUTER") is None
@@ -1869,8 +1906,7 @@ def test_create_flask_app_marks_memory_only_injected_safety_unready(
 @pytest.mark.unit
 def test_create_flask_app_keeps_routing_disabled_for_invalid_safety_config(
     tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     from flinttrade_core.app import create_flask_app
 
     from flinttrade_core.workspace import Workspace
@@ -1882,7 +1918,7 @@ def test_create_flask_app_keeps_routing_disabled_for_invalid_safety_config(
     master_password.chmod(0o600)
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
 
-    app = create_flask_app()
+    app = create_flask_app(backend_lease_proof=backend_lease_factory(), )
 
     assert app.config["SAFETY_CONFIG_READY"] is False
     assert app.config.get("BROKER_ROUTER") is None
@@ -1894,8 +1930,7 @@ def test_create_flask_app_keeps_routing_disabled_for_invalid_safety_config(
 
 @pytest.mark.unit
 def test_configure_ditto_runtime_forwards_complete_safety_dependencies(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, backend_lease_factory) -> None:
     import flinttrade_core.app as app_module
     import flinttrade_ditto.runtime as runtime_module
 
@@ -1917,6 +1952,7 @@ def test_configure_ditto_runtime_forwards_complete_safety_dependencies(
 
     monkeypatch.setattr(runtime_module, "DittoRouterOwner", _Owner)
     app = Flask("ditto-complete-safety")
+    app.config["BACKEND_LEASE_PROOF"] = backend_lease_factory()
     app.config.update(
         DITTO_CREDENTIAL_STORE=object(),
         RUNTIME_ACCEPTING_REQUESTS=True,
@@ -1948,11 +1984,11 @@ def test_configure_ditto_runtime_forwards_complete_safety_dependencies(
     }
 
 
-def test_authorise_default_actor_trust_on_first_use(tmp_path) -> None:
+def test_authorise_default_actor_trust_on_first_use(tmp_path, *, backend_lease_factory) -> None:
     """A freshly authenticated operator claims the default execution selector once."""
     from flinttrade_engine.request_context import RequestContext
 
-    router, fixture = _build_bridge(tmp_path)
+    router, fixture = _build_bridge(tmp_path, backend_lease_factory=backend_lease_factory)
     # Default execution selector is openalgo:default with an empty ACL.
     assert router._config.execution.default == "openalgo:default"
 
@@ -1965,7 +2001,7 @@ def test_authorise_default_actor_trust_on_first_use(tmp_path) -> None:
     assert router.authorise_default_actor("someone-else") is None
 
 
-def test_build_broker_router_builds_algo_tag_guard_from_config() -> None:
+def test_build_broker_router_builds_algo_tag_guard_from_config(*, backend_lease_factory) -> None:
     """workspace brokers.algo_tags builds an engine AlgoTagGuard on the router
     (G10 — algo-id relay + per-exchange per-second ceiling for algo_tag_required
     natives). Without the block the router stays untagged (retail defaults)."""
@@ -1975,17 +2011,17 @@ def test_build_broker_router_builds_algo_tag_guard_from_config() -> None:
         **default_workspace_config()["brokers"],
         "algo_tags": {"dhan": {"algo_id": "ALGO-REG-1", "max_orders_per_sec": 8}},
     }
-    router = build_broker_router(BrokerRegistry(), brokers)
+    router = build_broker_router(BrokerRegistry(), brokers, backend_lease_proof=backend_lease_factory())
     guard = router._algo_tag_guard
     assert isinstance(guard, AlgoTagGuard)
     assert guard.algo_id_for("dhan") == "ALGO-REG-1"
 
-    untagged = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"])
+    untagged = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"], backend_lease_proof=backend_lease_factory())
     assert untagged._algo_tag_guard is None
 
 
 @pytest.mark.unit
-def test_build_broker_router_malformed_algo_tags_are_dropped_not_fatal() -> None:
+def test_build_broker_router_malformed_algo_tags_are_dropped_not_fatal(*, backend_lease_factory) -> None:
     """A malformed algo_tags entry is DROPPED (loud error log), never raised —
     a bad compliance-config block must not brick broker reads/reconciliation/
     dispatch (audit finding: over-broad blast radius). The adapter/mapping
@@ -2000,12 +2036,12 @@ def test_build_broker_router_malformed_algo_tags_are_dropped_not_fatal() -> None
         {"dhan": "not-an-object"},
         {"dhan": {"algo_id": "A", "max_orders_per_sec": "not-an-int"}},
     ):
-        router = build_broker_router(BrokerRegistry(), {**base, "algo_tags": bad})
+        router = build_broker_router(BrokerRegistry(), {**base, "algo_tags": bad}, backend_lease_proof=backend_lease_factory())
         assert isinstance(router, BrokerRouter)
         assert router._algo_tag_guard is None  # the only entry was dropped
 
     mixed = {"dhan": {"algo_id": "OK", "max_orders_per_sec": 5}, "indmoney": "bad"}
-    router = build_broker_router(BrokerRegistry(), {**base, "algo_tags": mixed})
+    router = build_broker_router(BrokerRegistry(), {**base, "algo_tags": mixed}, backend_lease_proof=backend_lease_factory())
     assert isinstance(router._algo_tag_guard, AlgoTagGuard)
     assert router._algo_tag_guard.algo_id_for("dhan") == "OK"
     assert router._algo_tag_guard.algo_id_for("indmoney") is None
