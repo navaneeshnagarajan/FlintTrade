@@ -82,6 +82,7 @@ vi.mock("@/components/charts/PlotlyChart", () => ({
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
+import { useOptionExpiryStore } from "@/stores/optionExpiryStore";
 import OIChartWidget from "../OIChartWidget";
 
 const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
@@ -116,6 +117,7 @@ describe("OI Analytics — shell and bars view", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     plotlyMocks.reset();
+    useOptionExpiryStore.setState({ selectedByIdentity: {} });
     mockMode.current = "live";
     dataScopeState.current = "live:native:dhan:A1";
     mockUseBrokerConnected.mockReturnValue(true);
@@ -427,14 +429,11 @@ describe("OI Analytics — shell and bars view", () => {
 
     renderWidget();
 
-    await waitFor(() => {
-      expect(plotlyMocks.state.latestData?.[0]).toMatchObject({ y: [0, 0] });
-      expect(plotlyMocks.state.latestData?.[1]).toMatchObject({ y: [0, 0] });
-    });
-    expect(screen.getByText("CE 0")).toBeInTheDocument();
-    expect(screen.getByText("PE 0")).toBeInTheDocument();
+    expect(await screen.findByText("No OI for this expiry")).toBeInTheDocument();
+    expect(screen.queryByTestId("plotly-chart")).not.toBeInTheDocument();
     expect(screen.queryByText(/^R /)).not.toBeInTheDocument();
     expect(screen.queryByText(/^S /)).not.toBeInTheDocument();
+    expect(screen.queryByText(/PCR:/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Max Pain:/)).not.toBeInTheDocument();
   });
 
@@ -639,7 +638,7 @@ describe("OI Analytics — shell and bars view", () => {
     expect(screen.queryByText("Max Pain: 24,900")).not.toBeInTheDocument();
   });
 
-  it("aborts Live option requests and starts no protected refresh when Explore wins", async () => {
+  it("aborts Live option requests and continues the Explore sample expiry fetch", async () => {
     const pendingExpiry = deferred<{ expiry: string[] }>();
     apiMocks.getExpiry.mockReturnValue(pendingExpiry.promise);
 
@@ -654,16 +653,18 @@ describe("OI Analytics — shell and bars view", () => {
 
     expect(liveSignal?.aborted).toBe(true);
     expect(screen.getByText("Spot: —")).toBeInTheDocument();
-    expect(apiMocks.getExpiry).toHaveBeenCalledTimes(1);
-    expect(apiMocks.getOptionChain).not.toHaveBeenCalled();
-    expect(apiMocks.getQuotes).not.toHaveBeenCalled();
-    expect(apiMocks.getMaxPain).not.toHaveBeenCalled();
+    expect(apiMocks.getExpiry).toHaveBeenCalledTimes(2);
+    expect(apiMocks.getExpiry).toHaveBeenLastCalledWith(
+      "NIFTY", "NFO", "options", expect.any(AbortSignal), "explore:mock",
+    );
 
     await act(async () => {
       pendingExpiry.resolve({ expiry: ["2026-07-30"] });
       await pendingExpiry.promise;
     });
-    expect(apiMocks.getOptionChain).not.toHaveBeenCalled();
+    await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "2026-07-30", expect.any(AbortSignal), "explore:mock",
+    ));
   });
 
   it("does not request a new symbol with the previous symbol's expiry", async () => {
@@ -823,6 +824,7 @@ describe("OI Analytics data provenance", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     plotlyMocks.reset();
+    useOptionExpiryStore.setState({ selectedByIdentity: {} });
     mockMode.current = "live";
     dataScopeState.current = "live:native:dhan:A1";
     mockUseBrokerConnected.mockReturnValue(true);
@@ -855,16 +857,24 @@ describe("OI Analytics data provenance", () => {
     expect(screen.queryByRole("status", { name: /sample data/i })).toBeNull();
   });
 
-  it("does not reach the network at all while disconnected", () => {
+  it("asks getExpiry while disconnected, like Option Chain, and does not invent bars", async () => {
     mockUseBrokerConnected.mockReturnValue(false);
+    apiMocks.getExpiry.mockResolvedValue([]);
     renderWidget();
-    expect(apiMocks.getExpiry).not.toHaveBeenCalled();
+    await waitFor(() => expect(apiMocks.getExpiry).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "options", expect.any(AbortSignal), dataScopeState.current,
+    ));
+    expect(await screen.findByText("No expiries for this symbol")).toBeInTheDocument();
+    expect(screen.queryByTestId("plotly-chart")).not.toBeInTheDocument();
     expect(apiMocks.getOptionChain).not.toHaveBeenCalled();
   });
 
-  it("disables refresh while disconnected", () => {
+  it("disables refresh until a listed expiry is selected", async () => {
     mockUseBrokerConnected.mockReturnValue(false);
+    apiMocks.getExpiry.mockResolvedValue([]);
     renderWidget();
+    expect(screen.getByTestId("refresh-btn")).toBeDisabled();
+    expect(await screen.findByText("No expiries for this symbol")).toBeInTheDocument();
     expect(screen.getByTestId("refresh-btn")).toBeDisabled();
   });
 

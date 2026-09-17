@@ -62,6 +62,7 @@ vi.mock("@/components/charts/PlotlyChart", () => ({
 }));
 
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
+import { useOptionExpiryStore } from "@/stores/optionExpiryStore";
 import OIChartWidget from "../OIChartWidget";
 
 function analysisResponse(isSampleData?: boolean) {
@@ -121,6 +122,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useOptionExpiryStore.setState({ selectedByIdentity: {} });
   state.connected = false;
   mockMode.current = "live";
   dataScopeState.current = "live:native:dhan:A1";
@@ -135,17 +137,17 @@ beforeEach(() => {
 });
 
 describe("OI Analytics signals view", () => {
-  it("renders the signal table header", () => {
+  it("renders the signal table header", async () => {
     renderSignals();
-    expect(screen.getByText("Strike")).toBeInTheDocument();
+    expect(await screen.findByText("Strike")).toBeInTheDocument();
     expect(screen.getByText("Signal")).toBeInTheDocument();
   });
 
-  it("shows the Sample data badge and sample signals when disconnected", () => {
+  it("shows the Sample data badge and sample signals when disconnected", async () => {
     renderSignals();
-    expect(screen.getByRole("status", { name: /sample data/i })).toBeInTheDocument();
+    expect(await screen.findByRole("status", { name: /sample data/i })).toBeInTheDocument();
     expect(screen.getAllByText("24500").length).toBeGreaterThan(0);
-    // The queries are gated off while disconnected.
+    // Live analytics stay gated off while disconnected.
     expect(ftApiMocks.getOIChangeAnalysis).not.toHaveBeenCalled();
     expect(ftApiMocks.getUnusualOI).not.toHaveBeenCalled();
   });
@@ -336,10 +338,10 @@ describe("OI Analytics signals view", () => {
     expect(screen.getByText(/\|z\| ≥ 2\.0/)).toBeInTheDocument();
   });
 
-  it("keeps the LB/SC/SB/LU summary chips", () => {
+  it("keeps the LB/SC/SB/LU summary chips", async () => {
     renderSignals();
     for (const short of ["LB", "SC", "SB", "LU"]) {
-      expect(screen.getAllByText(short).length).toBeGreaterThan(0);
+      expect((await screen.findAllByText(short)).length).toBeGreaterThan(0);
     }
   });
 });

@@ -341,6 +341,16 @@ honest empty for that window, not a quiet YTD fallback. Metrics cover
 the labelled window up to the journal's 1,000-fill analytics page; a
 larger window is disclosed rather than silently sliced.
 
+On Explore `/trade` Analysis layout, **OI Chart** shares the Option
+Chain expiry list for that symbol/exchange. When the list is
+non-empty, the expiry control is shown and charts/statistics cover
+only the selected expiry (the chain’s selected expiry when both
+widgets are open; otherwise the nearest listed). Explore sample
+expiries stay listed and are badged **Sample**. No expiries or no
+OI is an honest empty — `No expiries for this symbol` or
+`No OI for this expiry` — with no bars and no PCR/max-pain stats.
+The widget never pairs “No expiries” with generic or sample bars.
+
 ### Learn → Practice Trading (OpenAlgo)
 
 This is a different path from the native Practice-mode sandbox on
@@ -536,6 +546,15 @@ grouped OI bars, a CE/PE butterfly **OI profile**, a strike heat grid,
 build-up/unwinding signals, and a **Max Pain** view (the strike at
 which option writers lose the least if expiry hit right now). There is
 no standalone Max Pain widget.
+
+OI Chart shares Option Chain expiries for the symbol/exchange. The
+expiry control appears when that list is non-empty; charts and
+statistics cover only the selected expiry (the chain’s selection
+when both widgets are open; otherwise the nearest listed). Explore
+sample expiries stay listed and are badged **Sample**. Empty states
+are honest: `No expiries for this symbol` or `No OI for this expiry`,
+with no bars and no PCR/max-pain stats — never “No expiries” over
+fake or generic bars.
 
 ### IV Smile & Skew
 

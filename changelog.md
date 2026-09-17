@@ -66,6 +66,20 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **OI Chart shares Option Chain expiries (FT-TRADE-007).**
+  Explore `/trade` Analysis layout → maximize OI Chart
+  now shares Option Chain expiries for the
+  symbol/exchange. A non-empty list shows the
+  expiry control; charts and statistics cover
+  only the selected expiry (the chain’s
+  selection when both widgets are open;
+  otherwise the nearest listed). Explore sample
+  expiries stay listed and are badged Sample.
+  No expiries or no OI is an honest empty —
+  `No expiries for this symbol` or `No OI for
+  this expiry` — with no bars and no PCR/max-pain
+  stats, never “No expiries” over fake charts.
+
 - **Options Builder Net Debit and Max Loss share a position ₹ basis (FT-LAB-005).**
   Explore `/lab` Options Builder now shows Net
   Debit/Credit, Max Loss, and Max Profit on a

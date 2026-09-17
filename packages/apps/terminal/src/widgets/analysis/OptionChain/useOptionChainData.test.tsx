@@ -23,6 +23,7 @@ vi.mock("@/hooks/useDataScope", () => ({
   useMarketDataScope: () => dataScopeState.value,
 }));
 
+import { optionExpiryIdentity, useOptionExpiryStore } from "@/stores/optionExpiryStore";
 import { useOptionChainData } from "./useOptionChainData";
 import type { SymbolDef } from "./types";
 
@@ -52,6 +53,7 @@ describe("useOptionChainData", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dataScopeState.value = "live:native:upstox:U1";
+    useOptionExpiryStore.setState({ selectedByIdentity: {} });
     apiMocks.getExpiry.mockResolvedValue({ expiry: ["2026-07-30"] });
     apiMocks.getQuotes.mockResolvedValue({ ltp: 25000, close: 24900 });
   });
@@ -434,5 +436,41 @@ describe("useOptionChainData", () => {
 
     await waitFor(() => expect(result.current.error).toContain("chain unavailable"));
     expect(result.current.chain).toBeNull();
+  });
+
+  it("defaults to a still-listed shared expiry from OI Chart", async () => {
+    apiMocks.getExpiry.mockResolvedValue({ expiry: ["2026-07-30", "2026-08-06"] });
+    apiMocks.getOptionChain.mockResolvedValue({
+      chain: [{ strike: 25000, ce: { oi: 10 }, pe: { oi: 20 } }],
+    });
+    useOptionExpiryStore.getState().setSelected(
+      optionExpiryIdentity(dataScopeState.value, "NIFTY", "NFO"),
+      "2026-08-06",
+    );
+
+    const { result } = renderHook(() => useOptionChainData(NIFTY, "NFO"));
+
+    await waitFor(() => expect(result.current.selectedExpiry).toBe("2026-08-06"));
+    expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
+      "NIFTY", "NFO", "2026-08-06", expect.any(AbortSignal), dataScopeState.value,
+    );
+  });
+
+  it("publishes the selected expiry so OI Chart can follow", async () => {
+    apiMocks.getExpiry.mockResolvedValue({ expiry: ["2026-07-30", "2026-08-06"] });
+    apiMocks.getOptionChain.mockResolvedValue({
+      chain: [{ strike: 25000, ce: { oi: 10 }, pe: { oi: 20 } }],
+    });
+
+    const { result } = renderHook(() => useOptionChainData(NIFTY, "NFO"));
+    await waitFor(() => expect(result.current.selectedExpiry).toBe("2026-07-30"));
+
+    act(() => {
+      result.current.setSelectedExpiry("2026-08-06");
+    });
+
+    expect(useOptionExpiryStore.getState().selectedByIdentity[
+      optionExpiryIdentity(dataScopeState.value, "NIFTY", "NFO")
+    ]).toBe("2026-08-06");
   });
 });
