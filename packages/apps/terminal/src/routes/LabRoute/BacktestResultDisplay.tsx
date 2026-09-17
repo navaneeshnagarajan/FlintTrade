@@ -20,6 +20,13 @@ import { fmtInr, fmtPct, fmtNum } from "./formatters";
 import { AnimatedMetricCard, MetricCard } from "./MetricCards";
 import { EquityCurve } from "./EquityCurve";
 import { RobustnessCard } from "./RobustnessCard";
+import {
+  backtestPnlHelper,
+  equityCurveDelta,
+  headlineTotalReturnFraction,
+  sumTradeLogPnl,
+  tradePnlForBasis,
+} from "./backtestPnlReconcile";
 
 export interface BacktestResultDisplayProps {
   result: BacktestResult;
@@ -99,20 +106,29 @@ function MonthlyPnlChart({ data }: { data: MonthlyPnlPoint[] }) {
 
 export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
   const { metrics, trades, equity_curve, final_equity } = result;
-  const totalReturnPositive = metrics.total_return >= 0;
   const initialEquity =
     equity_curve.length > 0 ? equity_curve[0].equity : final_equity;
+  const totalReturnFraction = headlineTotalReturnFraction(
+    metrics.total_return,
+    final_equity,
+    equity_curve.length > 0 ? equity_curve[0].equity : undefined,
+  );
+  const totalReturnPositive = totalReturnFraction >= 0;
+  const tradeLogPnl = useMemo(() => sumTradeLogPnl(trades), [trades]);
+  const equityDelta = equityCurveDelta(equity_curve, final_equity);
+  const pnlHelper = backtestPnlHelper(tradeLogPnl.amount, equityDelta);
+  const tradePnlLabel = tradeLogPnl.basis === "net" ? "Net trade P&L" : "Trade log P&L";
 
   const monthlyPnl = useMemo(() => {
     const grouped: Record<string, number> = {};
     trades.forEach((t) => {
       const month = t.exit_timestamp.slice(0, 7);
-      grouped[month] = (grouped[month] ?? 0) + t.pnl;
+      grouped[month] = (grouped[month] ?? 0) + tradePnlForBasis(t, tradeLogPnl.basis);
     });
     return Object.entries(grouped)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([month, pnl]) => ({ month, pnl }));
-  }, [trades]);
+  }, [tradeLogPnl.basis, trades]);
 
   return (
     <div className="space-y-4">
@@ -151,8 +167,15 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
           />
           <MetricCard
             label="Total Return"
-            value={fmtPct(metrics.total_return)}
+            value={fmtPct(totalReturnFraction)}
+            subtitle="Initial capital → final equity"
             positive={totalReturnPositive}
+          />
+          <MetricCard
+            label={tradePnlLabel}
+            value={fmtInr(tradeLogPnl.amount)}
+            subtitle={tradeLogPnl.basis === "gross" ? "Gross — net P&L not in result" : undefined}
+            positive={tradeLogPnl.amount >= 0}
           />
           <MetricCard
             label="Final Equity"
@@ -175,6 +198,9 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
             positive={metrics.expectancy >= 0}
           />
         </div>
+        {trades.length > 0 && equity_curve.length > 0 ? (
+          <p className="text-xxs text-text-muted">{pnlHelper}</p>
+        ) : null}
       </GlassCard>
 
       {equity_curve.length > 0 && (
@@ -192,6 +218,9 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
         <GlassCard className="p-5 gap-3">
           <h4 className="font-heading font-semibold text-sm text-text-primary">
             Monthly P&L
+            <span className="ml-2 text-xs text-text-muted font-normal">
+              Trade-based · sums Trade Log P&L
+            </span>
           </h4>
           <MonthlyPnlChart data={monthlyPnl} />
         </GlassCard>
@@ -215,7 +244,9 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
                   <TableHead className="text-text-muted text-xs">Side</TableHead>
                   <TableHead className="text-text-muted text-xs text-right">Entry ₹</TableHead>
                   <TableHead className="text-text-muted text-xs text-right">Exit ₹</TableHead>
-                  <TableHead className="text-text-muted text-xs text-right">P&L</TableHead>
+                  <TableHead className="text-text-muted text-xs text-right">
+                    {tradeLogPnl.basis === "net" ? "Net P&L" : "P&L"}
+                  </TableHead>
                   <TableHead className="text-text-muted text-xs text-right">Bars</TableHead>
                 </TableRow>
               </TableHeader>
@@ -250,10 +281,10 @@ export function BacktestResultDisplay({ result }: BacktestResultDisplayProps) {
                     </TableCell>
                     <TableCell
                       className={`text-xs font-mono font-semibold text-right ${
-                        trade.pnl >= 0 ? "text-profit" : "text-loss"
+                        tradePnlForBasis(trade, tradeLogPnl.basis) >= 0 ? "text-profit" : "text-loss"
                       }`}
                     >
-                      {fmtInr(trade.pnl)}
+                      {fmtInr(tradePnlForBasis(trade, tradeLogPnl.basis))}
                     </TableCell>
                     <TableCell className="text-xxs font-mono text-text-muted text-right">
                       {trade.bars_held}

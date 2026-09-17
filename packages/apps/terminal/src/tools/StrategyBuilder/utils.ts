@@ -38,13 +38,50 @@ export function parsePremiumInput(raw: string): number | null {
 }
 
 // Adapted from strategyTemplates.js — calculateNetPremium
-export function calculateNetPremium(legs: Leg[]): number | null {
+/** Per-unit net (lots included, contract lot-size not). Positive = debit. */
+export function calculateNetPremium(legs: readonly Leg[]): number | null {
   if (hasUnsetPremium(legs)) return null;
   return legs.reduce((total, leg) => {
     const multiplier = leg.action === "BUY" ? 1 : -1;
     return total + multiplier * leg.lots * (leg.premium as number);
   }, 0);
 }
+
+/**
+ * Position rupees: per-unit net × contract lot size.
+ * This is the shared basis for Net Debit/Credit, Max Loss, and Max Profit.
+ */
+export function calculatePositionNetPremium(legs: readonly Leg[], lotSize: number): number | null {
+  const net = calculateNetPremium(legs);
+  if (net == null) return null;
+  return net * lotSize;
+}
+
+/** Shared lot count when every priced leg uses the same lots; otherwise null. */
+export function uniformLotCount(legs: readonly Leg[]): number | null {
+  if (legs.length === 0) return null;
+  const lots = legs[0].lots;
+  return legs.every((leg) => leg.lots === lots) ? lots : null;
+}
+
+/**
+ * Muted breakdown under a position-₹ primary figure.
+ * `₹X per lot · N lots · lot size L` — omitted when lots differ, the figure is
+ * unbounded, or premium is unset. `positionRupees` defaults to the net debit.
+ */
+export function formatPositionSublabel(
+  legs: readonly Leg[],
+  lotSize: number,
+  positionRupees?: number | null,
+): string | null {
+  const lots = uniformLotCount(legs);
+  const amount = positionRupees ?? calculatePositionNetPremium(legs, lotSize);
+  if (lots == null || lotSize <= 0 || amount == null || !Number.isFinite(amount)) return null;
+  return `${formatINR(Math.abs(amount / lots))} per lot · ${lots} lots · lot size ${lotSize}`;
+}
+
+/** Fallback tag when a per-lot breakdown cannot be formed. */
+export const POSITION_BASIS_TAG = "position";
 
 // Adapted from strategyTemplates.js — validateStrategy
 export function validateLegs(legs: Leg[]): { valid: boolean; error: string | null } {
