@@ -151,9 +151,24 @@ describe("StrategyBuilderTool", () => {
 
     expect(screen.getByText("Max Profit").nextElementSibling).toHaveTextContent("Unlimited");
     expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("-₹3,375.00");
+    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent("₹3,375.00");
     expect(screen.getByText("BEP(s)").nextElementSibling).toHaveTextContent("22545");
     expect(screen.getByText("Sample premium — edit to model")).toBeInTheDocument();
+    expect(screen.getAllByText("₹3,375.00 per lot · 1 lots · lot size 75").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Premium is ₹0 — payoff treats cost as free")).not.toBeInTheDocument();
+  });
+
+  it("shows header and legs chips on the same position basis as Payoff (FT-LAB-005)", async () => {
+    render(<StrategyBuilderTool />);
+    await userEvent.click(screen.getByRole("button", { name: "Long Call" }));
+
+    const chips = screen.getAllByText(/Debit ₹3,375.00/);
+    expect(chips.length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(/Debit ₹45.00/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: /Payoff/i }));
+    expect(screen.getByText("Max Loss").nextElementSibling).toHaveTextContent("-₹3,375.00");
+    expect(screen.getByText("Net Premium").nextElementSibling).toHaveTextContent("₹3,375.00");
   });
 
   it("shows em-dash payoff cards for an unset Add-Leg premium, not ₹0", async () => {

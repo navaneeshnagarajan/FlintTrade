@@ -14,7 +14,7 @@ import { analyseVerticalSpread } from "@/lib/spreadAnalysis";
 import {
   SAMPLE_PREMIUM_HELPER,
   validateLegs,
-  calculateNetPremium,
+  calculatePositionNetPremium,
   formatINR,
   parsePremiumInput,
 } from "./utils";
@@ -48,8 +48,8 @@ export function LegsTab({
   onStrikeGapChange,
 }: Props) {
   const { valid, error } = validateLegs(legs);
-  const netPremium = calculateNetPremium(legs);
-  const isDebit = netPremium != null && netPremium > 0;
+  const positionNet = calculatePositionNetPremium(legs, underlying.lotSize);
+  const isDebit = positionNet != null && positionNet > 0;
   const sampleSeeded = legs.some((leg) => leg.premiumSource === "sample");
 
   // Vertical-spread economics — carried over from the retired SpreadView
@@ -99,12 +99,12 @@ export function LegsTab({
           />
         </div>
 
-        {legs.length > 0 && netPremium != null && (
+        {legs.length > 0 && positionNet != null && (
           <Badge
             variant="outline"
             className={`text-xxs px-1.5 border-0 font-mono ml-auto ${isDebit ? "bg-red-900/40 text-red-400" : "bg-emerald-900/40 text-emerald-400"}`}
           >
-            {isDebit ? "Debit" : "Credit"} {formatINR(Math.abs(netPremium))}
+            {isDebit ? "Debit" : "Credit"} {formatINR(Math.abs(positionNet))}
           </Badge>
         )}
       </div>
