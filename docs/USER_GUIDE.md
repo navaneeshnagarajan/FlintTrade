@@ -307,7 +307,10 @@ Phone layouts are unchanged.
    (or pick a preset that contains it).
 4. Type `NIFTY` into the symbol field; FlintTrade autocompletes the current
    front-month future. Select it.
-5. Set Quantity = 1 lot (50). Choose **MARKET**. Side = **BUY**.
+5. Set Quantity to 1 lot. After you select the future, Order Pad
+   auto-fills Quantity from that instrument's current lot size — do
+   not hardcode 50. Learn Glossary teaches dated Jan 2026 NSE-cycle
+   figures separately. Choose **MARKET**. Side = **BUY**.
 6. Click **Sample Buy** (Explore) or **Practice Buy** (Practice) and confirm the review. The order
    appears in the **Positions** widget immediately; the **Orders**
    widget shows it as filled (simulated).
