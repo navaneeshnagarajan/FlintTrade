@@ -66,6 +66,22 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Position Mirror Start fail-closed gate (FT-DITTO-001).**
+  Tracking: Explore `/ditto` → Position Mirror
+  Start stays muted and disabled when
+  unavailable — never the primary green armed
+  CTA. Explore is always disarmed
+  (sample-only). Practice and Live enable Start
+  only with a source selected, at least one
+  target, and broker accounts ready. Helper:
+  `Mirroring blocked in Explore (sample-only).
+  Switch to Practice or Live with broker
+  accounts connected.` The backend rejects
+  Explore or incomplete starts (`mode_blocked`
+  or equivalent). An empty account list is an
+  honest empty state, not a silent blank
+  targets block. Product fix lands on this PR.
+
 - **Explore Scalper fail-closed order path (FT-TRADE-009).**
   Explore `/trade` → Scalper is disarmed —
   Buy CE / Sell / 1-CLICK never open Confirm
