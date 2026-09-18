@@ -292,7 +292,7 @@ session chip: **Continuous**, **CAS**, **Matching**, **Post-close**, or
 **Closed**. The chip tooltip/title is the window, for example
 `CAS · 15:15–15:35 (as of Aug 2026)`. Cash is never shown as green "open"
 after 15:15 IST; CAS is not Closed. When equity F&O still runs after cash
-CAS, a secondary `F&O open · till 15:40` chip appears. The Market Clock
+continuous ends, a secondary `F&O open · till 15:40` chip appears. The Market Clock
 widget follows the same cash timeline: Continuous (~09:15–15:15) → CAS
 15:15–15:35 → Matching → Post-close 15:50–16:00. Non-CAS cash still trades
 continuous to 15:30. There is no flat "Market open until 15:30" or "VWAP
@@ -524,7 +524,7 @@ Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.t
 Market Clock uses the same CAS-aware cash timeline as the TopBar
 (Continuous → CAS → Matching → Post-close → Closed), not a flat
 09:15–15:30 "open" window (FT-CORE-001, as of Aug 2026). When F&O
-still runs after cash CAS, the TopBar may show `F&O open · till
+still runs after cash continuous ends, the TopBar may show `F&O open · till
 15:40`. Non-CAS cash still continuous to 15:30.
 
 On Explore `/trade` Watchlist, checked LTP and % change columns

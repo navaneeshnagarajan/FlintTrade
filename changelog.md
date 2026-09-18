@@ -72,7 +72,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   Matching · Post-close · Closed (one active).
   Tooltip/title is the window, e.g.
   `CAS · 15:15–15:35 (as of Aug 2026)`. When
-  equity F&O still runs after cash CAS, a
+  equity F&O still runs after cash continuous ends, a
   secondary `F&O open · till 15:40` chip appears.
   Market Clock follows Continuous (~09:15–15:15)
   → CAS 15:15–15:35 → Matching → Post-close
