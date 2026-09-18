@@ -78,10 +78,7 @@ import { useModeStore } from "@/stores/modeStore";
 import {
   EXPLORE_MIRROR_START_HELPER,
   MIRROR_START_CONNECT_HELPER,
-  MIRROR_START_ERROR_HELPER,
-  MIRROR_START_LOADING_HELPER,
   MIRROR_START_SELECT_HELPER,
-  PRACTICE_MIRROR_START_HELPER,
 } from "../mirrorStartGate";
 
 const mockGet = get as unknown as ReturnType<typeof vi.fn>;
@@ -537,73 +534,8 @@ describe("DittoRoute", () => {
     expect(screen.queryByText(MIRROR_START_CONNECT_HELPER)).not.toBeInTheDocument();
   });
 
-  it("keeps Practice Start muted with the Live-only helper when the list is empty", async () => {
+  it("asks Practice to connect accounts when the list is empty", async () => {
     useModeStore.setState({ mode: "practice" });
-    mockGetAccounts.mockResolvedValue({ accounts: [] });
-    render(<DittoRoute />, { wrapper: createWrapper() });
-    const start = await openMirrorTab();
-
-    expect(screen.getByText("No accounts connected")).toBeInTheDocument();
-    expect(start).toBeDisabled();
-    expect(start).toHaveAttribute("data-variant", "outline");
-    expect(start).toHaveAttribute("title", PRACTICE_MIRROR_START_HELPER);
-    expect(screen.getByText(PRACTICE_MIRROR_START_HELPER)).toBeInTheDocument();
-    expect(screen.queryByText(MIRROR_START_CONNECT_HELPER)).not.toBeInTheDocument();
-    expect(screen.queryByText(EXPLORE_MIRROR_START_HELPER)).not.toBeInTheDocument();
-  });
-
-  it("always disarms Start in Practice even after source and a target are selected", async () => {
-    const user = userEvent.setup();
-    useModeStore.setState({ mode: "practice" });
-    render(<DittoRoute />, { wrapper: createWrapper() });
-    const start = await openMirrorTab();
-
-    expect(start).toBeDisabled();
-    expect(start).toHaveAttribute("data-variant", "outline");
-    expect(start).toHaveAttribute("title", PRACTICE_MIRROR_START_HELPER);
-
-    await selectSourceAndTarget();
-    expect(start).toBeDisabled();
-    expect(start).toHaveAttribute("data-variant", "outline");
-    expect(start).toHaveAttribute("title", PRACTICE_MIRROR_START_HELPER);
-    expect(screen.getByText(PRACTICE_MIRROR_START_HELPER)).toBeInTheDocument();
-    expect(screen.queryByText(MIRROR_START_SELECT_HELPER)).not.toBeInTheDocument();
-
-    await user.click(start);
-    expect(mockStartMirror).not.toHaveBeenCalled();
-  });
-
-  it("does not treat pending accounts as an empty list on Position Mirror", async () => {
-    useModeStore.setState({ mode: "live" });
-    mockGetAccounts.mockReturnValue(new Promise(() => {}));
-    render(<DittoRoute />, { wrapper: createWrapper() });
-    const start = await openMirrorTab();
-
-    expect(screen.queryByText("No accounts connected")).not.toBeInTheDocument();
-    expect(screen.getAllByText(MIRROR_START_LOADING_HELPER).length).toBeGreaterThan(0);
-    expect(start).toBeDisabled();
-    expect(start).toHaveAttribute("data-variant", "outline");
-    expect(start).toHaveAttribute("title", MIRROR_START_LOADING_HELPER);
-    expect(screen.queryByText(MIRROR_START_CONNECT_HELPER)).not.toBeInTheDocument();
-  });
-
-  it("does not treat a failed accounts query as an empty list on Position Mirror", async () => {
-    useModeStore.setState({ mode: "live" });
-    mockGetAccounts.mockRejectedValue(new Error("Network error"));
-    render(<DittoRoute />, { wrapper: createWrapper() });
-    const start = await openMirrorTab();
-
-    expect((await screen.findAllByText(/Could not load accounts/)).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Network error/)).toBeInTheDocument();
-    expect(screen.queryByText("No accounts connected")).not.toBeInTheDocument();
-    expect(start).toBeDisabled();
-    expect(start).toHaveAttribute("data-variant", "outline");
-    expect(start).toHaveAttribute("title", MIRROR_START_ERROR_HELPER);
-    expect(screen.queryByText(MIRROR_START_CONNECT_HELPER)).not.toBeInTheDocument();
-  });
-
-  it("asks Live to connect accounts only after the list loads empty", async () => {
-    useModeStore.setState({ mode: "live" });
     mockGetAccounts.mockResolvedValue({ accounts: [] });
     render(<DittoRoute />, { wrapper: createWrapper() });
     const start = await openMirrorTab();
@@ -613,18 +545,36 @@ describe("DittoRoute", () => {
     expect(start).toHaveAttribute("data-variant", "outline");
     expect(start).toHaveAttribute("title", MIRROR_START_CONNECT_HELPER);
     expect(screen.getByText(MIRROR_START_CONNECT_HELPER)).toBeInTheDocument();
+    expect(screen.queryByText(EXPLORE_MIRROR_START_HELPER)).not.toBeInTheDocument();
   });
 
-  it("keeps the Explore helper and does not show empty chrome while accounts are loading", async () => {
-    mockGetAccounts.mockReturnValue(new Promise(() => {}));
+  it("asks Practice to select source and a target before arming Start", async () => {
+    useModeStore.setState({ mode: "practice" });
     render(<DittoRoute />, { wrapper: createWrapper() });
     const start = await openMirrorTab();
 
-    expect(screen.queryByText("No accounts connected")).not.toBeInTheDocument();
     expect(start).toBeDisabled();
-    expect(start).toHaveAttribute("title", EXPLORE_MIRROR_START_HELPER);
-    expect(screen.getByText(EXPLORE_MIRROR_START_HELPER)).toBeInTheDocument();
-    expect(screen.queryByText(MIRROR_START_CONNECT_HELPER)).not.toBeInTheDocument();
+    expect(start).toHaveAttribute("data-variant", "outline");
+    expect(start).toHaveAttribute("title", MIRROR_START_SELECT_HELPER);
+    expect(screen.getByText(MIRROR_START_SELECT_HELPER)).toBeInTheDocument();
+  });
+
+  it("arms Start in Practice only after source and a target are selected", async () => {
+    const user = userEvent.setup();
+    useModeStore.setState({ mode: "practice" });
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    const start = await openMirrorTab();
+
+    await selectSourceAndTarget();
+    expect(start).toBeEnabled();
+    expect(start).toHaveAttribute("data-variant", "default");
+    expect(screen.queryByText(EXPLORE_MIRROR_START_HELPER)).not.toBeInTheDocument();
+    expect(screen.queryByText(MIRROR_START_SELECT_HELPER)).not.toBeInTheDocument();
+
+    await user.click(start);
+    await waitFor(() => {
+      expect(mockStartMirror).toHaveBeenCalledWith("acc_1", ["acc_2"], "weighted");
+    });
   });
 
   it("arms Start in Live when source, a target, and accounts are ready", async () => {
