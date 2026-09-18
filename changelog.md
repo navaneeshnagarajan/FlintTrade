@@ -73,19 +73,22 @@ changelog rebuilds itself from the first release cut after this baseline.
   always disarmed (sample-only). Helper:
   `Mirroring blocked in Explore (sample-only).
   Switch to Practice or Live with broker
-  accounts connected.` Practice and Live enable
-  Start only with a source selected, at least
-  one target, and broker accounts ready.
-  Missing source/targets: `Select a source
-  account and at least one target to start
-  mirroring.` No accounts: `Connect a source
-  and at least one target account to start
-  mirroring.` An empty account list is an
-  honest empty state (`No accounts connected`).
-  A Start failure shows `Failed to start
-  mirror: …`. The backend rejects Explore
-  (`mode_blocked`), Practice (Live session
-  required), or incomplete starts (400).
+  accounts connected.` Practice stays disarmed
+  — the backend is Live-only. Helper:
+  `Mirroring requires Live with broker accounts
+  connected.` Live enables Start only with a
+  source selected, at least one target, and
+  broker accounts ready. Missing source/targets:
+  `Select a source account and at least one
+  target to start mirroring.` A successfully
+  empty account list: `Connect a source and at
+  least one target account to start mirroring.`
+  Pending and failed account fetches stay muted
+  with `Loading accounts...` / `Could not load
+  accounts.` and never look like an empty
+  connect state. The backend rejects Explore,
+  Practice, or incomplete starts
+  (`mode_blocked` or equivalent).
 
 - **Explore Scalper fail-closed order path (FT-TRADE-009).**
   Explore `/trade` → Scalper is disarmed —

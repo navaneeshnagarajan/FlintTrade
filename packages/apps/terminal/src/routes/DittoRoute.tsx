@@ -81,7 +81,13 @@ import { DEFAULT_OPENALGO_HOST, resolveOpenAlgoHost } from "@/lib/openAlgoDefaul
 import { readOpenAlgoConfig } from "@/services/ftApi.openalgo";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
-import { mirrorStartArmed, mirrorStartHelper } from "./mirrorStartGate";
+import {
+  MIRROR_START_ERROR_HELPER,
+  MIRROR_START_LOADING_HELPER,
+  mirrorStartArmed,
+  mirrorStartHelper,
+  resolveAccountsLoadState,
+} from "./mirrorStartGate";
 
 // ─── Tab registry ────────────────────────────────────────────────────────────
 
@@ -692,7 +698,12 @@ function MirrorTab() {
   const queryClient = useQueryClient();
   const mode = useModeStore((state) => state.mode);
 
-  const { data: accounts } = useQuery({
+  const {
+    data: accounts,
+    isError: accountsFailed,
+    error: accountsError,
+    refetch: refetchAccounts,
+  } = useQuery({
     queryKey: ["ditto", "accounts"],
     queryFn: getDittoAccounts,
   });
@@ -722,20 +733,21 @@ function MirrorTab() {
     },
   });
 
+  const accountsLoadState = resolveAccountsLoadState({
+    accounts,
+    isError: accountsFailed,
+  });
   const accountList = accounts?.accounts ?? [];
   const activeAccounts = accountList.filter((account) => account.status === "active");
-  const startHelper = mirrorStartHelper({
+  const startInput = {
     mode,
     sourceAccount,
     targetCount: targetAccounts.size,
     activeAccountCount: activeAccounts.length,
-  });
-  const startArmed = mirrorStartArmed({
-    mode,
-    sourceAccount,
-    targetCount: targetAccounts.size,
-    activeAccountCount: activeAccounts.length,
-  });
+    accountsLoadState,
+  };
+  const startHelper = mirrorStartHelper(startInput);
+  const startArmed = mirrorStartArmed(startInput);
   const status: MirrorStatus = mirrorStatus ?? {
     active: false,
     source_account: null,
@@ -854,7 +866,26 @@ function MirrorTab() {
         <label className="text-xs font-medium text-text-secondary">
           Target Accounts ({targetAccounts.size} selected)
         </label>
-        {activeAccounts.length === 0 ? (
+        {accountsLoadState === "loading" ? (
+          <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-border-default py-12">
+            <RefreshCw className="size-5 text-text-muted animate-spin" />
+            <p className="text-sm text-text-muted">{MIRROR_START_LOADING_HELPER}</p>
+          </div>
+        ) : accountsLoadState === "error" ? (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-border-default py-12">
+            <AlertTriangle className="size-8 text-text-muted" />
+            <p className="text-sm text-text-secondary text-center max-w-xs">
+              {MIRROR_START_ERROR_HELPER}{" "}
+              <span className="text-text-muted">
+                {accountsError instanceof Error ? accountsError.message : "Unknown error"}
+              </span>
+            </p>
+            <Button size="sm" variant="outline" onClick={() => { void refetchAccounts(); }}>
+              <RefreshCw className="size-3.5" />
+              Retry
+            </Button>
+          </div>
+        ) : activeAccounts.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-border-default py-12">
             <Users className="size-8 text-text-muted" />
             <p className="text-sm text-text-muted">No accounts connected</p>
@@ -908,7 +939,7 @@ function MirrorTab() {
         )}
       </div>
 
-      {/* Start button — muted until Practice/Live + source + ≥1 target (FT-DITTO-002) */}
+      {/* Start button — muted until Live + source + ≥1 target (FT-DITTO-002) */}
       {!status.active && (
         <Button
           onClick={() => {

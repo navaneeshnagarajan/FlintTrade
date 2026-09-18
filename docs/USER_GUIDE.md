@@ -834,18 +834,17 @@ stays muted and disabled — the same honesty class as Telegram
 **Send Test** and Explore Scalper. Explore is always disarmed
 (sample-only). Helper: "Mirroring blocked in Explore
 (sample-only). Switch to Practice or Live with broker accounts
-connected." Practice and Live arm Start only when a source
-account, at least one target, and broker accounts are ready.
-Otherwise the helpers are "Select a source account and at least
-one target to start mirroring." (missing source or targets) and
-"Connect a source and at least one target account to start
-mirroring." (no accounts). An empty account list is an honest
-empty state ("No accounts connected"), not a silent blank
-targets block. Mirror-status loading is a full-tab spinner. A
-Start failure shows "Failed to start mirror: …". The backend
-still rejects Explore (`mode_blocked`), Practice or any other
-non-Live session (Live session required), or incomplete starts
-if the UI slips (FT-DITTO-002).
+connected." Practice stays disarmed. Helper: "Mirroring requires
+Live with broker accounts connected." Live arms Start only when a
+source account, at least one target, and broker accounts are
+ready. Otherwise the helpers are "Select a source account and at
+least one target to start mirroring." (missing source or targets)
+and "Connect a source and at least one target account to start
+mirroring." (list loaded empty). Pending or failed account
+fetches stay muted (`Loading accounts...` / `Could not load
+accounts.`) and are not empty states. The backend rejects
+Explore, Practice, or incomplete starts if the UI slips
+(FT-DITTO-002).
 
 On Explore `/ditto` Risk, **Kill All Positions** is disabled when there are
 no managed accounts (empty state "No managed accounts"; no confirm). The
