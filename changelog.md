@@ -33,11 +33,12 @@ changelog rebuilds itself from the first release cut after this baseline.
   Explore / Practice / Live chips mean execution mode only.
   Explore Order Pad uses Sample Buy / Sample Sell; Practice
   keeps Practice Buy / Sell; Live uses Place BUY/SELL Order.
-  Market open/closed stays session status. Comfortable is the
-  new-install default. Compact Trade at ~1280 and wider keeps
-  chart, order pad, and positions primary, with ticker, tool
-  ribbon, and watchlist / indices collapsed behind one desk-tools
-  toggle. Selecting Compact on Trade at ~1280 and wider always
+  TopBar session chips (Continuous · CAS · Matching ·
+  Post-close · Closed) stay session status (FT-CORE-001).
+  Comfortable is the new-install default. Compact Trade at
+  ~1280 and wider keeps chart, order pad, and positions
+  primary, with ticker, tool ribbon, and watchlist /
+  indices collapsed behind one desk-tools toggle. Selecting Compact on Trade at ~1280 and wider always
   starts with that disclosure collapsed.
   At most one primary banner (Explore sample > Practice sample >
   Live risk > feed disconnected). External-action gates stay fail-closed
@@ -65,6 +66,23 @@ changelog rebuilds itself from the first release cut after this baseline.
   `gate_broker_write` → `BrokerRouter`) stay unchanged.
 
 ### Fixed
+
+- **SEBI CAS session clock / TopBar phases (FT-CORE-001, tracking).**
+  TopBar market-status chips are Continuous · CAS ·
+  Matching · Post-close · Closed (one active).
+  Tooltip/title is the window, e.g.
+  `CAS · 15:15–15:35 (as of Aug 2026)`. When
+  equity F&O still runs after cash CAS, a
+  secondary `F&O open · till 15:40` chip appears.
+  Market Clock follows Continuous (~09:15–15:15)
+  → CAS 15:15–15:35 → Matching → Post-close
+  15:50–16:00. Non-CAS cash still continuous to
+  15:30. Cash is never green "open" after 15:15;
+  CAS is not Closed. Flat "Market open until
+  15:30" and "VWAP last 30 min" closing-price
+  copy are gone. The September 2026 consultation
+  stays out of the UI. Product fix lands on this
+  PR.
 
 - **Position Mirror Start fail-closed gate (FT-DITTO-002).**
   Explore `/ditto` → Position Mirror Start stays

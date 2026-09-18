@@ -266,6 +266,20 @@ duplicated:
 - **Zustand stores** — derived and UI state only (connection status,
   active layout, settings mirror, aggregated P&L, current mode).
 
+### Market session clock (FT-CORE-001)
+
+TopBar market status and the Market Clock widget are CAS-aware (as of
+Aug 2026). Phases are Continuous, CAS, Matching, Post-close, and Closed
+— one TopBar chip active; tooltip/title is the window (for example
+`CAS · 15:15–15:35 (as of Aug 2026)`). Cash is never green "open" after
+15:15 IST; CAS is not Closed. When equity F&O still runs after cash CAS,
+a secondary `F&O open · till 15:40` chip appears. Non-CAS cash still
+trades continuous to 15:30. The clock helpers
+(`packages/apps/terminal/src/lib/market.ts` and
+`packages/core/ticks/src/session.rs`) must not treat a flat NSE
+09:15–15:30 window as "open until 15:30". Closing-price copy is not
+"VWAP last 30 min". The September 2026 consultation stays out of the UI.
+
 ### Frontend stack
 
 | Category | Library | Why it's pinned |
