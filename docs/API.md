@@ -414,7 +414,7 @@ The operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
 
 | Endpoint | Purpose |
 |---|---|
-| `ditto/mirror/start` (**POST**) | Start position mirroring. Incomplete body (missing `source_account` / `target_accounts`) → 400. Explore-mode starts (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Mirroring is blocked in Explore (sample-only).`. |
+| `ditto/mirror/start` (**POST**) | Start position mirroring (Live-only, PIN-unlocked). Incomplete body (missing `source_account` / `target_accounts`) → 400. Explore-mode starts (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Mirroring is blocked in Explore (sample-only).`. Practice (and any other non-Live session) is refused HTTP 403 after that gate: `Protected safety actions require an authenticated Live session` (no `mode_blocked`). A Live JWT without PIN unlock is 403 (`Live mode must be PIN-unlocked before changing protected safety state`). |
 | `ditto/mirror/status` (**GET**) | Position-mirroring status across accounts. |
 | `ditto/mirror/stop` (**POST**) | Stop position mirroring. |
 
