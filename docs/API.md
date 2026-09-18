@@ -405,6 +405,19 @@ bot (terminal Automate → Settings **Send Test**), not OpenAlgo's
 |---|---|
 | `telegram` (**POST**) | Send a Telegram test message. Body requires `message`. Optional one-shot `bot_token` and `chat_id` are accepted together and are never persisted. Otherwise the route uses env/workspace bot config; disabled config → 400. Send failure → 502. Explore-mode sends (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Telegram tests are blocked in Explore (sample-only).`. |
 
+### Ditto (`/api/v1/ditto/*`)
+
+Source: `packages/core/core/src/flinttrade_core/operations_routes.py`.
+The operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
+`/ft-api/api/v1/ditto/…` and a direct backend call is
+`http://<host>:5100/api/v1/ditto/…`.
+
+| Endpoint | Purpose |
+|---|---|
+| `ditto/mirror/start` (**POST**) | Start position mirroring (Live-only, PIN-unlocked). Incomplete body (missing `source_account` / `target_accounts`) → 400. Explore-mode starts (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Mirroring is blocked in Explore (sample-only).`. Practice (and any other non-Live session) is refused HTTP 403 after that gate: `Protected safety actions require an authenticated Live session` (no `mode_blocked`). A Live JWT without PIN unlock is 403 (`Live mode must be PIN-unlocked before changing protected safety state`). |
+| `ditto/mirror/status` (**GET**) | Position-mirroring status across accounts. |
+| `ditto/mirror/stop` (**POST**) | Stop position mirroring. |
+
 ### Auth (`/ft-api/v1/auth/*`)
 
 JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
@@ -856,12 +869,13 @@ with HTTP 403, message "Orders are not available in Explore mode…", and
 proxy is still message-only: HTTP 403 with "Live mode not unlocked —
 verify PIN first". A `code` field is also emitted on
 `mode_guard`-decorated engine routes (brackets and other
-executor-direct paths) and on `POST /api/v1/telegram` Explore refusals.
+executor-direct paths), on `POST /api/v1/telegram` Explore refusals,
+and on `POST /api/v1/ditto/mirror/start` Explore refusals.
 Not every endpoint emits `code`:
 
 | Code or status | Meaning |
 |---|---|
-| `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, and FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`. |
+| `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, and `POST /api/v1/ditto/mirror/start` Explore refusals (same header/claim gate). |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
 | `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true` (PIN unlock). |
 | HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |

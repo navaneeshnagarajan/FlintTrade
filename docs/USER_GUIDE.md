@@ -829,6 +829,23 @@ workspace.
 - **Risk** — per-account risk limits, kill-switch propagation, trailing
   stop-loss governor.
 
+On Explore `/ditto` Position Mirror, **Start Position Mirroring**
+stays muted and disabled — the same honesty class as Telegram
+**Send Test** and Explore Scalper. Explore is always disarmed
+(sample-only). Helper: "Mirroring blocked in Explore
+(sample-only). Switch to Practice or Live with broker accounts
+connected." Practice stays disarmed. Helper: "Mirroring requires
+Live with broker accounts connected." Live arms Start only when a
+source account, at least one target, and broker accounts are
+ready. Otherwise the helpers are "Select a source account and at
+least one target to start mirroring." (missing source or targets)
+and "Connect a source and at least one target account to start
+mirroring." (list loaded empty). Pending or failed account
+fetches stay muted (`Loading accounts...` / `Could not load
+accounts.`) and are not empty states. The backend rejects
+Explore, Practice, or incomplete starts if the UI slips
+(FT-DITTO-002).
+
 On Explore `/ditto` Risk, **Kill All Positions** is disabled when there are
 no managed accounts (empty state "No managed accounts"; no confirm). The
 control stays armed when accounts are listed or the risk snapshot fails.
