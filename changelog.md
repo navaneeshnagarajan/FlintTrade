@@ -67,7 +67,7 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
-- **SEBI CAS session clock / TopBar phases (FT-CORE-001, tracking).**
+- **SEBI CAS session clock / TopBar phases (FT-CORE-001).**
   TopBar market-status chips are Continuous · CAS ·
   Matching · Post-close · Closed (one active).
   Tooltip/title is the window, e.g.
@@ -81,8 +81,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   CAS is not Closed. Flat "Market open until
   15:30" and "VWAP last 30 min" closing-price
   copy are gone. The September 2026 consultation
-  stays out of the UI. Product fix lands on this
-  PR.
+  stays out of the UI.
 
 - **Position Mirror Start fail-closed gate (FT-DITTO-002).**
   Explore `/ditto` → Position Mirror Start stays

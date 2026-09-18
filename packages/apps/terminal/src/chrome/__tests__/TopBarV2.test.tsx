@@ -251,7 +251,7 @@ describe("TopBarV2", () => {
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
   });
 
-  it("names a trustworthy in-session result Market open rather than Live", () => {
+  it("names a trustworthy in-session result Continuous rather than Live", () => {
     setOpenMarketTestTime();
     const now = Date.now();
     mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 60_000, end_time: now + 60_000 }];
@@ -259,54 +259,75 @@ describe("TopBarV2", () => {
 
     const { unmount } = renderTopBarV2();
 
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market open");
-    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
+    const chip = screen.getByTestId("market-session-status");
+    expect(chip).toHaveTextContent("Continuous");
+    expect(chip).toHaveAttribute("title", "Continuous · 09:15–15:15 (as of Aug 2026)");
+    expect(chip).not.toHaveTextContent("Live");
+    expect(chip).not.toHaveTextContent("Market open");
     unmount();
   });
 
-  it("names a trustworthy weekday out-of-session result Market closed", () => {
-    setOpenMarketTestTime();
+  it("names a trustworthy weekday out-of-session result Closed", () => {
+    setIstInstant("2026-08-10T12:30:00.000Z"); // Monday 18:00 IST
     const now = Date.now();
     mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 120_000, end_time: now - 60_000 }];
     mockTimingsQuery.dataUpdatedAt = now;
 
     const { unmount } = renderTopBarV2();
 
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Closed");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
     unmount();
   });
 
-  it("shows Market open for Explore HHMM timings at Thursday mid-session IST", () => {
+  it("shows Continuous for Explore HHMM timings at Thursday mid-session IST", () => {
     // 10 Sep 2026 12:08 IST — the FT-TRADE-004 observation window.
     setIstInstant("2026-09-10T06:38:00.000Z");
     setExploreHhmmTimings();
 
     renderTopBarV2();
 
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market open");
-    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market closed");
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Continuous");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Closed");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent(/demo/i);
   });
 
-  it("shows Market closed for Explore HHMM timings after 15:30 IST on a weekday", () => {
+  it("shows Matching at 15:45 IST — not Closed and not green Continuous", () => {
     setIstInstant("2026-09-10T10:15:00.000Z"); // Thursday 15:45 IST
     setExploreHhmmTimings();
 
     renderTopBarV2();
 
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
-    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
+    const chip = screen.getByTestId("market-session-status");
+    expect(chip).toHaveTextContent("Matching");
+    expect(chip).toHaveAttribute("title", "Matching · 15:35–15:50 (as of Aug 2026)");
+    expect(chip).not.toHaveTextContent("Closed");
+    expect(chip).not.toHaveTextContent("Continuous");
+    expect(screen.queryByTestId("fo-session-status")).not.toBeInTheDocument();
   });
 
-  it("shows Market closed for Explore HHMM timings on an IST weekend", () => {
+  it("shows CAS at 15:20 IST with the F&O secondary chip", () => {
+    setIstInstant("2026-09-10T09:50:00.000Z"); // Thursday 15:20 IST
+    setExploreHhmmTimings();
+
+    renderTopBarV2();
+
+    const chip = screen.getByTestId("market-session-status");
+    expect(chip).toHaveTextContent("CAS");
+    expect(chip).toHaveAttribute("title", "CAS · 15:15–15:35 (as of Aug 2026)");
+    expect(chip).not.toHaveTextContent("Closed");
+    expect(chip).not.toHaveTextContent("Continuous");
+    expect(screen.getByTestId("fo-session-status")).toHaveTextContent("F&O open · till 15:40");
+  });
+
+  it("shows Closed for Explore HHMM timings on an IST weekend", () => {
     setIstInstant("2026-09-12T06:38:00.000Z"); // Saturday 12:08 IST
     setExploreHhmmTimings();
 
     renderTopBarV2();
 
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
-    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Closed");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Continuous");
   });
 
   it("uses the shared timing truth TTL rather than a drifting local limit", () => {
@@ -672,8 +693,8 @@ describe("FT-UX-001 Compact desk chrome at 1280", () => {
 
     expect(screen.getByText("EXPLORE")).toBeVisible();
     const session = screen.getByTestId("market-session-status");
-    expect(session).toHaveAccessibleName(/market status: market open/i);
-    expect(session).toHaveTextContent(/market open/i);
+    expect(session).toHaveAccessibleName(/market status: continuous/i);
+    expect(session).toHaveTextContent(/continuous/i);
     expect(session).not.toHaveTextContent(/Live/i);
     expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
     expect(screen.getByTestId("topbar-desk-tools-btn")).toBeInTheDocument();

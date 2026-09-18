@@ -65,8 +65,8 @@ class SpecialTradingSession:
 STANDARD_HOURS: dict[str, tuple[time, time]] = {
     "NSE": (time(9, 15), time(15, 30)),
     "BSE": (time(9, 15), time(15, 30)),
-    "NFO": (time(9, 15), time(15, 30)),
-    "BFO": (time(9, 15), time(15, 30)),
+    "NFO": (time(9, 15), time(15, 40)),
+    "BFO": (time(9, 15), time(15, 40)),
     "CDS": (time(9, 0), time(17, 0)),
     "BCD": (time(9, 0), time(17, 0)),
     "MCX": (time(9, 0), time(23, 30)),
@@ -164,6 +164,24 @@ def is_special_session(
             return session
 
     return None
+
+
+def nse_cash_phase(minutes_from_midnight: int) -> str:
+    """Return the NSE cash session phase (FT-CORE-001, as of Aug 2026).
+
+    Continuous 09:15–15:15, CAS 15:15–15:35, Matching 15:35–15:50,
+    Post-close 15:50–16:00. Cash is never Continuous after 15:15; CAS is
+    not Closed. The September 2026 consultation is not product UI.
+    """
+    if 9 * 60 + 15 <= minutes_from_midnight < 15 * 60 + 15:
+        return "continuous"
+    if 15 * 60 + 15 <= minutes_from_midnight < 15 * 60 + 35:
+        return "cas"
+    if 15 * 60 + 35 <= minutes_from_midnight < 15 * 60 + 50:
+        return "matching"
+    if 15 * 60 + 50 <= minutes_from_midnight < 16 * 60:
+        return "post-close"
+    return "closed"
 
 
 def get_standard_hours(exchange: str) -> tuple[time, time]:
