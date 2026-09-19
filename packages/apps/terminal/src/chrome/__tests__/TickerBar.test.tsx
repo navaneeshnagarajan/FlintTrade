@@ -36,6 +36,7 @@ vi.mock("@/lib/market", () => ({
   isMarketHours: (...args: unknown[]) => mockIsMarketHours(...args),
 }));
 
+import { useModeStore } from "@/stores/modeStore";
 import TickerBar from "../TickerBar";
 
 function renderTickerBar() {
@@ -59,6 +60,7 @@ describe("TickerBar", () => {
     vi.restoreAllMocks();
     mockIndicesData.length = 0;
     mockIsMarketHours.mockReturnValue(false);
+    useModeStore.setState({ mode: "explore" });
   });
 
   it("renders without crashing", () => {
@@ -96,6 +98,16 @@ describe("TickerBar", () => {
 
     // LTP formatted as en-IN with 2 decimal places
     expect(screen.getAllByText("23,500.50").length).toBeGreaterThan(0);
+  });
+
+  it("shows a Sample feed-source chip in Explore (FT-CORE-002)", () => {
+    setIndices([]);
+    renderTickerBar();
+
+    const chip = screen.getByTestId("feed-freshness-chip");
+    expect(chip).toHaveTextContent("Sample");
+    expect(chip).toHaveAttribute("data-state", "sample");
+    expect(chip).not.toHaveTextContent("Live");
   });
 
   it("has the market indices region landmark", () => {

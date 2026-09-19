@@ -3,7 +3,7 @@
  *
  * Layout (left → right):
  *   [FlintLogo] | [SearchBtn Ctrl+K] [Tools overflow] [Bell] [Account]
- *   [Workspace] [ModeIndicator] [Fullscreen] [MarketSessionStatus] [ClockIST] [Avatar]
+ *   [Workspace] [ModeIndicator] [FeedFreshness] [Fullscreen] [MarketSessionStatus] [ClockIST] [Avatar]
  *
  * FT-UX-002: TopBar is not a quote rail. The dedicated scrolling ticker
  * lives under this bar (TickerBar / TickerStrip). Settings lives inside
@@ -48,6 +48,7 @@ import {
 } from "@/lib/market";
 import type { ToolId } from "@/types/widgets";
 import NotificationBell from "@/components/NotificationCentre/NotificationCentre";
+import FeedFreshnessChip from "@/components/FeedFreshnessChip";
 import AccountSwitcher from "./AccountSwitcher";
 import ModeIndicator from "./ModeIndicator";
 import type { TickerMode } from "./TickerMarquee";
@@ -407,6 +408,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
         {collapseOverflow ? (
           <>
             <ModeIndicator />
+            <FeedFreshnessChip />
             <MarketSessionStatus compact />
             <Button
               variant="ghost"
@@ -463,6 +465,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
             <AccountSwitcher />
             {!hideDeskRibbon && <WorkspaceSwitcher />}
             <ModeIndicator />
+            <FeedFreshnessChip />
             <Divider />
             {!hideDeskRibbon && <FullscreenButton />}
             <div className={hideDeskRibbon ? undefined : "hidden lg:block"}>
