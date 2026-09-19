@@ -93,7 +93,6 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Leverage tab content or honest empty (FT-SET-004).**
-  Locked UX (product not in this tip):
   `/settings#leverage` shows real leverage content when
   the broker snapshot is available. When leverage cannot
   be shown — unsupported broker, missing snapshot, or

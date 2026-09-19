@@ -1024,7 +1024,6 @@ Live and Practice still disable editing on a real load failure ("AI
 settings could not be loaded") to protect a saved configuration, and
 offer **Retry**.
 
-Locked UX for FT-SET-004 (product not yet on the Settings pane):
 `/settings#leverage` always shows real leverage content or an honest
 empty. When the broker snapshot is available, the tiles show the
 current margin or leverage figures (read-only — change leverage on the
@@ -1163,8 +1162,7 @@ ensure the running user has write access.
 
 ### "Leverage settings unavailable." or a blank Leverage pane
 
-Locked UX for FT-SET-004 (product not yet on the Settings pane): a
-highlighted Leverage tab on `/settings#leverage` must never sit over a
+A highlighted Leverage tab on `/settings#leverage` must never sit over a
 blank pane. The pane shows real leverage content, or the honest empty
 `Leverage settings unavailable.` plus **Retry**. Leverage is a read-only
 broker snapshot — change it on the broker platform, not in FlintTrade.

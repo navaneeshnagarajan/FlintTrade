@@ -120,7 +120,13 @@ vi.mock("@/services/ftApi.skillDrafts", () => ({
 
 // Store/hook deps for the heavier sections.
 vi.mock("@/hooks/useBrokerCapabilities", () => ({
-  useBrokerCapabilities: () => ({ data: undefined, isLoading: false, capabilities: null }),
+  useBrokerCapabilities: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    capabilities: null,
+    refetch: vi.fn(),
+  }),
 }));
 vi.mock("@/components/sandbox/SandboxControls", () => ({
   default: () => <div data-testid="sandbox-controls" />,
@@ -487,10 +493,10 @@ describe("Section smoke renders (crash guard)", () => {
     expect(container.firstChild).toBeTruthy();
   });
 
-  it("LeverageSection renders without throwing", () => {
-    // Renders a null/empty state under the mocked (data-less) query — the guard
-    // is that it does not THROW during render.
-    expect(() => render(<LeverageSection />)).not.toThrow();
+  it("LeverageSection shows honest empty + Retry instead of a blank pane", () => {
+    render(<LeverageSection />);
+    expect(screen.getByText("Leverage settings unavailable.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
   it("PracticeSection renders", () => {
