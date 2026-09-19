@@ -92,6 +92,20 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Explore Stock Baskets show a card-level Sample chip (FT-INVEST-002).**
+  Explore `/invest#basket` seeded cards (NIFTY IT,
+  Banking, and any other sample set) now carry a muted
+  **Sample** chip next to Invested / Current / P&L. The
+  distant Explore banner is not enough on its own. Edit
+  and Delete on seeded Sample cards are disabled, with
+  title helper `Sample basket — editing unavailable in
+  Explore` (a labelled demo dead-end is acceptable if
+  disable is not feasible). User-created Practice/Live
+  baskets keep full Edit/Delete and no Sample chip.
+  Empty Explore is an honest empty or a clearly labelled
+  sample set — never bare rupee / P&L figures without
+  Sample.
+
 - **Feed-freshness honesty (FT-CORE-002).**
   Explore: the global
   `EXPLORE MODE — All data shown is sample only`
