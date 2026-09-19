@@ -1,11 +1,17 @@
 /**
  * Auth session store — manages JWT token, login state, and idle timeout.
  *
- * Token stored in memory only (never localStorage) for security.
- * Session expires at 08:00 IST daily (enforced via startExpiryTimer).
+ * Token is held in memory and mirrored to tab-scoped sessionStorage so a
+ * same-tab address-bar load, refresh, or bookmark of `/home` can restore the
+ * session (FT-HOME-003). Never localStorage. Session expires at 08:00 IST
+ * daily (enforced via startExpiryTimer).
  */
 import { create } from "zustand";
 import { clearDemoSession } from "@/lib/demoSession";
+import {
+  clearPersistedAuthSession,
+  writePersistedAuthSession,
+} from "@/lib/homeEntry";
 import { purgeAuthenticatedQueryCache } from "@/lib/authenticatedQueryCache";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useTradingStore } from "@/stores/tradingStore";
@@ -161,7 +167,10 @@ export const useAuthStore = create<AuthState>((set, get) => {
         lastActivity: Date.now(),
       };
     });
-    if (installed) get().startExpiryTimer();
+    if (installed) {
+      writePersistedAuthSession({ token, username, expiresAt });
+      get().startExpiryTimer();
+    }
     return installed;
   };
 
@@ -200,6 +209,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       const existing = get()._expiryTimerId;
       if (existing !== null) clearTimeout(existing);
       clearDemoSession();
+      clearPersistedAuthSession();
       set((state) => ({
         status: "logged-out", token: null, reauthToken: null, username: null,
         expiresAt: null, _expiryTimerId: null,
@@ -212,6 +222,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     // the active `token` so nothing makes authenticated calls while locked).
     setPinRequired: () => {
       const reauthToken = get().token ?? get().reauthToken;
+      clearPersistedAuthSession();
       set((state) => ({
         status: "pin-required",
         token: null,
@@ -222,6 +233,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     },
 
     setSetupRequired: () => {
+      clearPersistedAuthSession();
       set((state) => ({
         status: "setup-required",
         token: null,
@@ -268,6 +280,12 @@ export const useAuthStore = create<AuthState>((set, get) => {
           lastActivity: Date.now(),
         };
       });
+      if (updated) {
+        const { username, expiresAt } = get();
+        if (username) {
+          writePersistedAuthSession({ token, username, expiresAt: expiresAt ?? "" });
+        }
+      }
       return updated;
     },
 

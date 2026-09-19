@@ -8,6 +8,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import { isDemoSessionActive } from "@/lib/demoSession";
+import { decideHomeEntry, readPersistedAuthSession, WELCOME_GATE_PATH } from "@/lib/homeEntry";
 import {
   captureAuthSessionFence,
   isAuthSessionFenceCurrent,
@@ -26,6 +27,18 @@ export function useAuthGuard(): {
   useEffect(() => {
     if (status === "unknown") {
       const probeFence = captureAuthSessionFence();
+      const persisted = readPersistedAuthSession();
+      if (persisted) {
+        useAuthStore
+          .getState()
+          .setLoggedInIfCurrent(
+            persisted.token,
+            persisted.username,
+            persisted.expiresAt,
+            probeFence,
+          );
+        return;
+      }
       if (isDemoSessionActive()) {
         useAuthStore
           .getState()
@@ -82,12 +95,9 @@ export function useAuthGuard(): {
       return;
     }
 
-    if (status === "setup-required") {
-      navigate("/welcome", { replace: true });
-    } else if (status === "logged-out") {
-      navigate("/welcome", { replace: true });
-    } else if (status === "pin-required") {
-      navigate("/welcome", { replace: true });
+    const entry = decideHomeEntry(status);
+    if (entry.kind === "gate") {
+      navigate(WELCOME_GATE_PATH, { replace: true });
     }
   }, [status, navigate]);
 

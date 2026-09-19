@@ -122,6 +122,8 @@ describe("authStore", () => {
       expect(state.token).toBe("jwt-abc-123");
       expect(state.username).toBe("alice");
       expect(state.expiresAt).toBe("2026-04-09T02:30:00Z");
+      expect(sessionStorage.getItem("flinttrade:auth-session")).toContain("jwt-abc-123");
+      expect(localStorage.getItem("flinttrade:auth-session")).toBeNull();
     });
 
     it("clears a lingering demo session for a real login but keeps it for the demo user", () => {
@@ -242,6 +244,7 @@ describe("authStore", () => {
       expect(state.username).toBeNull();
       expect(state.expiresAt).toBeNull();
       expect(state._expiryTimerId).toBeNull();
+      expect(sessionStorage.getItem("flinttrade:auth-session")).toBeNull();
     });
 
     it("does not reset mode on logout (mode is managed separately)", () => {

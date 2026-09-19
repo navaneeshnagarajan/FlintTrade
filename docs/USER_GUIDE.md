@@ -528,12 +528,11 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
 
-A signed-in operator who opens `/home` (address bar, refresh, or
-bookmark) sees the same Home / Welcome dashboard as sidebar Home,
-Alt+H, or the TopBar logo — never the password Welcome Back gate.
-That gate stays on `/welcome` for unauthenticated visitors only.
-If `/home` is a legacy path, it redirects to the canonical home
-route rather than the gate (FT-HOME-003).
+`/home` is the canonical Home / Welcome dashboard. A signed-in
+operator who opens it (address bar, refresh, or same-tab bookmark)
+sees the same Home as sidebar Home, Alt+H, or the TopBar logo —
+never the password Welcome Back gate. That gate stays on `/welcome`
+for unauthenticated visitors only (FT-HOME-003).
 
 On Explore `/invest#mutual-funds`, Mutual Fund Explorer labels the static
 fixture `Sample NAVs · as of 10-Sep-2026` (from `EXPLORE_SAMPLE_NAV_DATE`)

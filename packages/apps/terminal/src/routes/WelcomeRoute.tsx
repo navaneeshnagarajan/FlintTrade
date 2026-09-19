@@ -26,6 +26,7 @@ import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 import { isDemoSessionActive, markDemoSessionActive } from "@/lib/demoSession";
+import { readPersistedAuthSession } from "@/lib/homeEntry";
 import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThemeStore } from "@/stores/themeStore";
@@ -303,6 +304,15 @@ export default function WelcomeRoute() {
     // Explore-first / Try with sample data persist a demo session. Restore it
     // before the public auth probe, or is_setup=true logs the operator out
     // onto the daily login wall and /home bounces back here.
+    const persisted = readPersistedAuthSession();
+    if (persisted) {
+      useAuthStore.getState().setLoggedIn(
+        persisted.token,
+        persisted.username,
+        persisted.expiresAt,
+      );
+      return;
+    }
     if (isDemoSessionActive()) {
       useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
       return;

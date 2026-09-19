@@ -93,13 +93,12 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Authed `/home` skips password Welcome Back (FT-HOME-003).**
-  A signed-in operator who opens `/home` (address bar,
-  refresh, or bookmark) sees the same Home / Welcome
-  dashboard as SPA nav (sidebar, Alt+H, TopBar) — not
-  the password Welcome Back gate. That gate is for
-  unauthenticated visitors only. If `/home` is treated
-  as a legacy path, it redirects to the canonical home
-  route instead of the gate.
+  `/home` is the canonical Home / Welcome dashboard.
+  A signed-in operator who opens it (address bar,
+  refresh, or same-tab bookmark) sees the same Home
+  as SPA nav (sidebar, Alt+H, TopBar) — not the
+  password Welcome Back gate. That gate stays on
+  `/welcome` for unauthenticated visitors only.
 
 - **Leverage tab content or honest empty (FT-SET-004).**
   `/settings#leverage` shows real leverage content when
