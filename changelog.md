@@ -27,6 +27,13 @@ changelog rebuilds itself from the first release cut after this baseline.
   contract (quotes, depth, history, balances, books, and related methods) —
   not a restored terminal Brokers screen or a new public HTTP read family.
 
+- **Shared symbol bus from Watchlist (FT-TRADE-011).**
+  Selecting a symbol in `/trade` Watchlist retargets
+  Chart, Option Chain, and Scalper to that symbol —
+  no retype. Keyboard retarget is optional later.
+  Explore retarget is allowed and keeps Sample labels.
+  An empty watchlist never silently retargets.
+
 ### Changed
 
 - **Mode vocabulary and Trade desk density (FT-UX-001).**
