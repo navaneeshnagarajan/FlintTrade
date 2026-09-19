@@ -17,6 +17,7 @@ import {
 import { useHoldings } from "@/hooks/useHoldings";
 import { useFunds } from "@/hooks/useFunds";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
 import { classifySector } from "@/lib/sectors";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
@@ -35,7 +36,7 @@ export interface PortfolioSummary {
 }
 
 export interface InvestContextValue {
-  /** Holdings shown on the Invest route (demo book in Explore, live otherwise). */
+  /** Holdings shown on the Invest route (sample book or live). */
   holdings: Holding[];
   /** Aggregated portfolio numbers derived from holdings + funds. */
   summary: PortfolioSummary;
@@ -43,7 +44,7 @@ export interface InvestContextValue {
   isLoading: boolean;
   /** True when holdings query has errored. */
   isError: boolean;
-  /** True when the exposed book is the labelled Explore sample feed. */
+  /** True when the exposed book is the labelled sample feed. */
   isSampleData: boolean;
   /** Force-refetch holdings from the active broker data source. */
   refetchHoldings: () => void;
@@ -52,15 +53,20 @@ export interface InvestContextValue {
 /**
  * Resolve the Invest-route holdings book.
  *
- * Explore owns a labelled sample feed (`getDemoHoldings`) so the dashboard
- * header count matches the listed sample stocks. Practice and Live keep the
- * live query result — an empty funded book stays at 0.
+ * Explore always uses the labelled sample feed (`getDemoHoldings`). Practice
+ * with no broker and an empty live book uses the same sample so the header
+ * badge matches the Holdings table. A connected broker keeps the live query
+ * result — an empty funded book stays at 0 (FT-TRADE-010).
  */
 export function resolveInvestHoldings(
   mode: AppMode,
   liveHoldings: Holding[],
+  brokerConnected = false,
 ): { holdings: Holding[]; isSampleData: boolean } {
   if (mode === "explore") {
+    return { holdings: getDemoHoldings(), isSampleData: true };
+  }
+  if (mode === "practice" && !brokerConnected && liveHoldings.length === 0) {
     return { holdings: getDemoHoldings(), isSampleData: true };
   }
   return { holdings: liveHoldings, isSampleData: false };
@@ -75,6 +81,7 @@ const InvestContext = createContext<InvestContextValue | null>(null);
 export function InvestProvider({ children }: { children: ReactNode }) {
   const mode = useModeStore((s) => s.mode);
   const accountReadsEnabled = useAccountReadsEnabled();
+  const brokerConnected = useBrokerConnected();
   const {
     data: liveHoldings = [],
     isLoading: holdingsLoading,
@@ -84,8 +91,8 @@ export function InvestProvider({ children }: { children: ReactNode }) {
 
   const { data: funds, isLoading: fundsLoading } = useFunds({ enabled: accountReadsEnabled });
 
-  const { holdings, isSampleData } = resolveInvestHoldings(mode, liveHoldings);
-  const isLoading = mode === "explore" ? false : holdingsLoading || fundsLoading;
+  const { holdings, isSampleData } = resolveInvestHoldings(mode, liveHoldings, brokerConnected);
+  const isLoading = mode === "explore" || isSampleData ? false : holdingsLoading || fundsLoading;
   const availableCash = mode === "explore" ? getDemoFunds().availableCash : (funds?.availableCash ?? 0);
 
   // Derive portfolio totals — memoised so tabs get stable references
