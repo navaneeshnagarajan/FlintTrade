@@ -111,8 +111,8 @@ class ExchangeSchedule:
 EXCHANGE_SCHEDULES: dict[str, ExchangeSchedule] = {
     "NSE": ExchangeSchedule("NSE", time(9, 15), time(15, 30), time(15, 15)),
     "BSE": ExchangeSchedule("BSE", time(9, 15), time(15, 30), time(15, 15)),
-    "NFO": ExchangeSchedule("NFO", time(9, 15), time(15, 30), time(15, 15)),
-    "BFO": ExchangeSchedule("BFO", time(9, 15), time(15, 30), time(15, 15)),
+    "NFO": ExchangeSchedule("NFO", time(9, 15), time(15, 40), time(15, 15)),
+    "BFO": ExchangeSchedule("BFO", time(9, 15), time(15, 40), time(15, 15)),
     "CDS": ExchangeSchedule("CDS", time(9, 0), time(17, 0), time(16, 45)),
     "BCD": ExchangeSchedule("BCD", time(9, 0), time(17, 0), time(16, 45)),
     "MCX": ExchangeSchedule("MCX", time(9, 0), time(23, 55), time(23, 30)),

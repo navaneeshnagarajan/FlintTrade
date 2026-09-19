@@ -798,7 +798,7 @@ class TestTimeScheduler:
         from flinttrade_engine.scheduler import EXCHANGE_SCHEDULES
         sched = EXCHANGE_SCHEDULES["BFO"]
         assert sched.market_open == time(9, 15)
-        assert sched.market_close == time(15, 30)
+        assert sched.market_close == time(15, 40)
 
     def test_ncdex_market_hours(self):
         from flinttrade_engine.scheduler import EXCHANGE_SCHEDULES

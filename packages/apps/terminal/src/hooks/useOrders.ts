@@ -16,7 +16,8 @@ interface BrokerDataQueryOptions {
 
 /**
  * Exchanges whose sessions define the order-book auto-refresh window.
- * The union covers the NSE/BSE equity + F&O day session (9:15–15:30 IST),
+ * The union covers the NSE/BSE equity day session (Continuous + CAS book)
+ * and equity F&O to 15:40 IST,
  * the currency session (CDS 9:00–17:00 IST) and the commodity evening
  * session (MCX 9:00–23:30 IST) — NOT just NSE, so an MCX/CDS order book
  * keeps refreshing after the equity close.
