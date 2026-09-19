@@ -549,15 +549,14 @@ under a failed load. A connected broker with no positions shows
 table under a zero badge. Connected positions use the live count only,
 with no Sample chip (FT-TRADE-010).
 
-On Explore `/invest#basket` (Stock Baskets), every seeded sample card
-shows a muted **Sample** chip next to Invested / Current / P&L. The
-page-level Explore banner is not enough on its own. Seeded Sample
-cards disable **Edit** and **Delete**, with title helper
-`Sample basket — editing unavailable in Explore` (a labelled demo
-dead-end is acceptable if disable is not feasible). User-created
-Practice or Live baskets keep full Edit/Delete and no Sample chip.
-Empty Explore is an honest empty state or a clearly labelled sample
-set — never bare rupee or P&L figures without Sample (FT-INVEST-002).
+On Explore `/invest#basket` (Stock Baskets), the global Explore sample
+banner (`EXPLORE MODE — All data shown is sample only`) owns disclosure —
+seeded cards do **not** carry a card-level Sample chip. Bare ₹ / P&L
+under that banner is acceptable once **Edit** and **Delete** cannot look
+live. Seeded Explore baskets disable **Edit** and **Delete**, with title
+helper `Sample basket — editing unavailable in Explore`. User-created
+Practice or Live baskets keep full Edit/Delete. Empty Explore is an
+honest empty state or a clearly labelled sample set (FT-INVEST-002).
 
 ### The widgets (71)
 
