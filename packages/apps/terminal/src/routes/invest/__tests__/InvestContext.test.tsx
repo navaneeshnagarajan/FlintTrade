@@ -14,13 +14,15 @@ import { getDemoHoldings } from "@/hooks/useModeData";
 import { useModeStore } from "@/stores/modeStore";
 import type { Holding } from "@/types/api";
 
+const holdingsQuery = vi.hoisted(() => ({
+  data: undefined as Holding[] | undefined,
+  isLoading: false,
+  isError: false,
+  refetch: vi.fn(),
+}));
+
 vi.mock("@/hooks/useHoldings", () => ({
-  useHoldings: () => ({
-    data: undefined,
-    isLoading: false,
-    isError: false,
-    refetch: vi.fn(),
-  }),
+  useHoldings: () => holdingsQuery,
 }));
 
 vi.mock("@/hooks/useFunds", () => ({
@@ -40,12 +42,13 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
 import { InvestProvider, useInvest } from "../InvestContext";
 
 function HoldingsCountProbe() {
-  const { holdings, summary, isSampleData } = useInvest();
+  const { holdings, summary, isSampleData, isLoading } = useInvest();
   return (
     <div>
       <span data-testid="holding-count">{holdings.length} holdings</span>
       <span data-testid="summary-count">{summary.holdingCount}</span>
       <span data-testid="sample-flag">{String(isSampleData)}</span>
+      <span data-testid="loading-flag">{String(isLoading)}</span>
     </div>
   );
 }
@@ -65,6 +68,9 @@ function renderProbe() {
 
 afterEach(() => {
   brokerConnected.current = false;
+  holdingsQuery.data = undefined;
+  holdingsQuery.isLoading = false;
+  holdingsQuery.isError = false;
   useModeStore.setState({ mode: "explore" });
 });
 
@@ -123,6 +129,34 @@ describe("InvestContext sample holdings count (FT-DEMO-001)", () => {
     expect(screen.getByTestId("summary-count")).toHaveTextContent("0");
     expect(screen.getByTestId("sample-flag")).toHaveTextContent("false");
   });
+
+  it("does not classify Practice as sample while the holdings query is still pending", () => {
+    useModeStore.setState({ mode: "practice" });
+    brokerConnected.current = false;
+    holdingsQuery.isLoading = true;
+    holdingsQuery.data = undefined;
+
+    renderProbe();
+
+    expect(screen.getByTestId("holding-count")).toHaveTextContent("0 holdings");
+    expect(screen.getByTestId("summary-count")).toHaveTextContent("0");
+    expect(screen.getByTestId("sample-flag")).toHaveTextContent("false");
+    expect(screen.getByTestId("loading-flag")).toHaveTextContent("true");
+  });
+
+  it("does not classify Practice as sample when the holdings query errored empty", () => {
+    useModeStore.setState({ mode: "practice" });
+    brokerConnected.current = false;
+    holdingsQuery.isError = true;
+    holdingsQuery.data = undefined;
+
+    renderProbe();
+
+    expect(screen.getByTestId("holding-count")).toHaveTextContent("0 holdings");
+    expect(screen.getByTestId("summary-count")).toHaveTextContent("0");
+    expect(screen.getByTestId("sample-flag")).toHaveTextContent("false");
+    expect(screen.getByTestId("loading-flag")).toHaveTextContent("false");
+  });
 });
 
 describe("resolveInvestHoldings", () => {
@@ -174,5 +208,14 @@ describe("resolveInvestHoldings", () => {
     expect(resolved.isSampleData).toBe(true);
     expect(resolved.holdings).toHaveLength(demo.length);
     expect(resolved.holdings.map((h) => h.symbol)).toEqual(demo.map((h) => h.symbol));
+  });
+
+  it("does not substitute sample in practice until the holdings query has settled empty", async () => {
+    const { resolveInvestHoldings } = await import("../InvestContext");
+
+    expect(resolveInvestHoldings("practice", [], false, false)).toEqual({
+      holdings: [],
+      isSampleData: false,
+    });
   });
 });

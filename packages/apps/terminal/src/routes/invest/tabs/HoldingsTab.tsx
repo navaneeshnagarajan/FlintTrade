@@ -19,7 +19,7 @@ import {
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";
-import { Download, Printer, RefreshCw } from "lucide-react";
+import { AlertCircle, Download, Printer, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -114,7 +114,7 @@ function buildColumns(): ColumnDef<Holding>[] {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function HoldingsTab() {
-  const { holdings, isLoading, isSampleData, refetchHoldings } = useInvest();
+  const { holdings, isLoading, isError, isSampleData, refetchHoldings } = useInvest();
   const { isNarrow, containerRef } = useNarrowLayout<HTMLDivElement>();
   const [sorting, setSorting] = useState<SortingState>([]);
   const columns = useMemo(() => buildColumns(), []);
@@ -160,6 +160,20 @@ export function HoldingsTab() {
         <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
           <RefreshCw className="size-5 animate-spin" />
           <span className="text-sm">Fetching holdings from your active broker...</span>
+        </div>
+      ) : isError && holdings.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
+          <AlertCircle className="size-6" aria-hidden="true" />
+          <span className="text-sm">Failed to load holdings</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={refetchHoldings}
+            className="text-xs text-text-muted h-6 px-2 gap-1"
+          >
+            <RefreshCw className="size-3" />
+            Refresh
+          </Button>
         </div>
       ) : holdings.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 gap-2 text-text-muted">

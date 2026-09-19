@@ -54,19 +54,26 @@ export interface InvestContextValue {
  * Resolve the Invest-route holdings book.
  *
  * Explore always uses the labelled sample feed (`getDemoHoldings`). Practice
- * with no broker and an empty live book uses the same sample so the header
- * badge matches the Holdings table. A connected broker keeps the live query
- * result — an empty funded book stays at 0 (FT-TRADE-010).
+ * with no broker uses the same sample only after the sandbox holdings query
+ * has settled empty — a cold load must not flash sample over a pending book.
+ * A connected broker keeps the live query result — an empty funded book
+ * stays at 0 (FT-TRADE-010).
  */
 export function resolveInvestHoldings(
   mode: AppMode,
   liveHoldings: Holding[],
   brokerConnected = false,
+  holdingsQuerySettled = true,
 ): { holdings: Holding[]; isSampleData: boolean } {
   if (mode === "explore") {
     return { holdings: getDemoHoldings(), isSampleData: true };
   }
-  if (mode === "practice" && !brokerConnected && liveHoldings.length === 0) {
+  if (
+    mode === "practice"
+    && !brokerConnected
+    && holdingsQuerySettled
+    && liveHoldings.length === 0
+  ) {
     return { holdings: getDemoHoldings(), isSampleData: true };
   }
   return { holdings: liveHoldings, isSampleData: false };
@@ -91,7 +98,17 @@ export function InvestProvider({ children }: { children: ReactNode }) {
 
   const { data: funds, isLoading: fundsLoading } = useFunds({ enabled: accountReadsEnabled });
 
-  const { holdings, isSampleData } = resolveInvestHoldings(mode, liveHoldings, brokerConnected);
+  // Practice sandbox reads are enabled with no broker. Do not treat the
+  // default empty array as sample while the query is still pending or has
+  // errored — that flash would overlay a real Practice book (or hide a
+  // failure) behind the labelled sample feed.
+  const holdingsQuerySettled = !holdingsLoading && !holdingsError;
+  const { holdings, isSampleData } = resolveInvestHoldings(
+    mode,
+    liveHoldings,
+    brokerConnected,
+    holdingsQuerySettled,
+  );
   const isLoading = mode === "explore" || isSampleData ? false : holdingsLoading || fundsLoading;
   const availableCash = mode === "explore" ? getDemoFunds().availableCash : (funds?.availableCash ?? 0);
 

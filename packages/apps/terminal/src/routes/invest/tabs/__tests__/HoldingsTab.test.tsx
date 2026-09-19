@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import type { Holding } from "@/types/api";
 
@@ -93,6 +93,7 @@ describe("HoldingsTab", () => {
     investState.isError = false;
     investState.isSampleData = false;
     investState.summary.holdingCount = SAMPLE_ROWS.length;
+    investState.refetchHoldings.mockClear();
   });
 
   it("renders the holdings table with symbols", () => {
@@ -166,5 +167,23 @@ describe("HoldingsTab", () => {
     expect(screen.queryByText(/stocks$/)).not.toBeInTheDocument();
     expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("shows failure and Refresh when the broker holdings query errored with an empty book", () => {
+    investState.holdings = [];
+    investState.isError = true;
+    investState.isSampleData = false;
+
+    render(<HoldingsTab />);
+
+    expect(screen.getByText("Failed to load holdings")).toBeInTheDocument();
+    expect(screen.getByText("Refresh")).toBeInTheDocument();
+    expect(screen.queryByText("No holdings")).not.toBeInTheDocument();
+    expect(screen.queryByText("RELIANCE")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Refresh"));
+    expect(investState.refetchHoldings).toHaveBeenCalledTimes(1);
   });
 });

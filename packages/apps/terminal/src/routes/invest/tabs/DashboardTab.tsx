@@ -32,9 +32,7 @@ import { formatINR, formatINRCompact, formatPercent } from "../formatters";
 import { maskValue, VALUE_MASK } from "@/lib/formatters";
 import { useValueVisibilityStore } from "@/stores/valueVisibilityStore";
 
-// ─── Sample hero figures (Explore / Practice with no broker) ──────────────────
-
-const DEMO_NET_WORTH = 845000;
+// ─── Sample XIRR cash flows (Explore / Practice with no broker) ──────────────
 
 /** Sample cash flows for XIRR demo — negative = outflow, positive = current value. */
 const DEMO_CASH_FLOWS: { date: Date; amount: number }[] = [
@@ -76,7 +74,9 @@ export function DashboardTab() {
   const totalPnl = liveSummary.totalPnl;
   const totalPnlPercent = liveSummary.totalPnlPercent;
   const availableCash = liveSummary.availableCash;
-  const netWorth = isDemo ? DEMO_NET_WORTH : currentValue + availableCash;
+  // Sample and live share the same sum: InvestContext already derives
+  // currentValue from the exposed book (getDemoHoldings when sample).
+  const netWorth = currentValue + availableCash;
 
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);
   // Wrap the compact-INR formatter so masked mode hides the figure everywhere it
