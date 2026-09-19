@@ -1414,6 +1414,38 @@ describe("ChartWidget selection-follow (selectedSymbolAtom)", () => {
     expect(screen.queryByText("NIFTY")).not.toBeInTheDocument();
   });
 
+  it("keeps Explore Sample history after a shared-bus retarget", async () => {
+    dataScopeState.value = "explore:mock";
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <ChartWidget />
+      </Provider>,
+    );
+    expect(screen.getByText("Sample history")).toBeInTheDocument();
+
+    act(() => {
+      store.set(selectedSymbolAtom, { symbol: "TCS", exchange: "NSE" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("TCS")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Sample history")).toBeInTheDocument();
+  });
+
+  it("does not silently retarget when the shared bus is empty", () => {
+    const store = createStore();
+    expect(store.get(selectedSymbolAtom)).toBeNull();
+    render(
+      <Provider store={store}>
+        <ChartWidget />
+      </Provider>,
+    );
+    expect(screen.getByText("NIFTY")).toBeInTheDocument();
+    expect(store.get(selectedSymbolAtom)).toBeNull();
+  });
+
   it("keeps a pinned chart's instrument when the selection changes", async () => {
     const store = createStore();
     render(

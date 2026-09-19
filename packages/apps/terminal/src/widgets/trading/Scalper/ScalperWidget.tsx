@@ -20,6 +20,7 @@ import {
 } from "@/services/ftApi";
 import useWebSocket from "@/hooks/useWebSocket";
 import { useVoiceAlert } from "@/hooks/useVoiceAlert";
+import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { useModeStore } from "@/stores/modeStore";
 import { checkOrderEntryMode, checkPriceForOrderType } from "@/lib/orderGuards";
 import type { PlaceOrderParams, WsInstrument } from "@/types/api";
@@ -89,11 +90,30 @@ function snapToTick(price: number): number {
   return Math.round(price * 20) / 20;
 }
 
-function ScalperWidget(_props: WidgetProps) {
+function ScalperWidget(props: WidgetProps) {
   const mode = useModeStore((s) => s.mode);
   const isExplore = mode === "explore";
   const ordersArmed = scalperOrdersArmed(mode);
-  const [symbol, setSymbol] = useState(DEFAULT_SYMBOL);
+  const pinnedSymbol = typeof props.params?.symbol === "string" ? props.params.symbol : undefined;
+  const isPinned = typeof pinnedSymbol === "string" && pinnedSymbol in INDEX_CONFIG;
+  const [symbol, setSymbol] = useState(isPinned ? pinnedSymbol : DEFAULT_SYMBOL);
+
+  // FT-TRADE-011: unpinned Scalper follows the same FDC3 user channel
+  // Watchlist broadcasts on (red = selectedSymbolAtom). A null bus —
+  // empty watchlist, no click yet — must not silently retarget.
+  const liveChannel = useChannelMembership(props.api.id, props.params);
+  const channelId = isPinned ? null : liveChannel;
+  const channelInstrument = useChannelInstrument(channelId);
+  const followedSymbolRef = useRef(symbol);
+  useEffect(() => {
+    followedSymbolRef.current = symbol;
+  }, [symbol]);
+  useEffect(() => {
+    if (!channelInstrument) return;
+    const next = channelInstrument.symbol;
+    if (!(next in INDEX_CONFIG) || next === followedSymbolRef.current) return;
+    setSymbol(next);
+  }, [channelInstrument]);
   const [lots, setLots] = useState(1);
   const [product, setProduct] = useState<ProductType>("MIS");
   const [orderType, setOrderType] = useState<OrderTypeValue>("MARKET");
@@ -655,6 +675,7 @@ function ScalperWidget(_props: WidgetProps) {
           setOneClick((v) => !v);
         }}
         ordersArmed={ordersArmed}
+        isExplore={isExplore}
       />
 
       <ScalperChartPanel

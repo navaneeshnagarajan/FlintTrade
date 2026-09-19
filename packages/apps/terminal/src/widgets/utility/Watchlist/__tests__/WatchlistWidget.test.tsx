@@ -148,6 +148,45 @@ describe("WatchlistWidget", () => {
     expect(addButtons.length).toBeGreaterThanOrEqual(1);
   });
 
+  it("empty watchlist never writes the shared symbol bus", () => {
+    mockLocalStorage["flinttrade:watchlists"] = JSON.stringify([
+      { id: "t1", name: "Watchlist 1", symbols: [] },
+    ]);
+    const { store } = renderWidget();
+    expect(screen.getByText(/Add symbols to Watchlist 1/i)).toBeInTheDocument();
+    expect(store.get(selectedSymbolAtom)).toBeNull();
+    for (const meta of USER_CHANNELS) {
+      expect(store.get(channelInstrumentAtoms[meta.id])).toBeNull();
+    }
+  });
+
+  it("Clear all and tab switch never silently retarget the shared bus", async () => {
+    mockLocalStorage["flinttrade:watchlists"] = JSON.stringify([
+      { id: "t1", name: "Watchlist 1", symbols: [{ symbol: "NIFTY", exchange: "NSE_INDEX" }] },
+      { id: "t2", name: "Empty", symbols: [] },
+    ]);
+    const { store } = renderWidget();
+    expect(store.get(selectedSymbolAtom)).toBeNull();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Empty" }));
+    expect(store.get(selectedSymbolAtom)).toBeNull();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Watchlist 1" }));
+    await userEvent.click(screen.getByRole("button", { name: "More options" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /Clear all/i }));
+    expect(screen.getByText(/Add symbols to Watchlist 1/i)).toBeInTheDocument();
+    expect(store.get(selectedSymbolAtom)).toBeNull();
+  });
+
+  it("keeps Explore Sample data after an explicit select writes the bus", async () => {
+    useModeStore.setState({ mode: "explore" });
+    const { store } = renderWidget();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "BANKNIFTY" }));
+    expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "BANKNIFTY", exchange: "NSE_INDEX" });
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+  });
+
   // --- Multi-tab tests ---
 
   it("renders the default tab pill labelled 'Watchlist 1'", () => {

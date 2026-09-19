@@ -8,9 +8,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { createStore, Provider } from "jotai";
+import { selectedSymbolAtom } from "@/atoms/marketAtoms";
+import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
+import { EXPLORE_SCALPER_ORDER_HELPER } from "../exploreGate";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -63,9 +67,12 @@ vi.mock("@/components/Chart", () => ({
   default: () => <div data-testid="mock-chart" />,
 }));
 
-// Mock radix Select to avoid complex portal/popover rendering in JSDOM
+// Mock radix Select to avoid complex portal/popover rendering in JSDOM.
+// Expose the current value so channel-follow tests can assert retarget.
 vi.mock("@/components/ui/select", () => ({
-  Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Select: ({ children, value }: { children: React.ReactNode; value?: string }) => (
+    <div data-testid="scalper-select" data-value={value}>{children}</div>
+  ),
   SelectTrigger: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
   SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SelectItem: ({ children, value }: { children: React.ReactNode; value: string }) => (
@@ -254,8 +261,7 @@ describe("ScalperWidget", () => {
 
   // ── FT-TRADE-009: Explore external-action gate (Telegram Send Test class) ─
 
-  const EXPLORE_SCALPER_HELPER =
-    "Orders blocked in Explore (sample-only). Switch to Practice or Live with a broker connected to trade.";
+  const EXPLORE_SCALPER_HELPER = EXPLORE_SCALPER_ORDER_HELPER;
   const EXPLORE_ONE_CLICK_TITLE = "One-click unavailable in Explore";
 
   async function renderExploreScalper(): Promise<void> {
@@ -659,5 +665,120 @@ describe("ScalperWidget", () => {
 
     await screen.findByText("SL (bracket leg)");
     expect(screen.getByText("20 pts")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FT-TRADE-011: shared symbol bus (FDC3 red channel / selectedSymbolAtom)
+// ---------------------------------------------------------------------------
+
+const SCALPER_INDEXES = new Set(["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"]);
+
+function scalperIndexValue(): string | null {
+  const match = screen.getAllByTestId("scalper-select").find((el) =>
+    SCALPER_INDEXES.has(el.getAttribute("data-value") ?? ""),
+  );
+  return match?.getAttribute("data-value") ?? null;
+}
+
+function renderScalperOnBus(
+  store = createStore(),
+  props: ReturnType<typeof makeWidgetPanelProps> = makeWidgetPanelProps(),
+) {
+  const view = render(
+    <Provider store={store}>
+      <ScalperWidget {...props} />
+    </Provider>,
+  );
+  return { ...view, store };
+}
+
+describe("ScalperWidget — FT-TRADE-011 shared symbol bus", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTicks.current = {};
+    mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
+      selector({ mode: "live" }),
+    );
+    mockGetExpiry.mockResolvedValue(["2026-04-10", "2026-04-17"]);
+    mockGetQuotes.mockResolvedValue({ ltp: 24000 });
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY10APR2624000CE",
+      name: "NIFTY",
+      exchange: "NFO",
+      instrumenttype: "OPTIDX",
+      lotsize: 75,
+      tick_size: 0.05,
+    });
+    mockGetLotSize.mockResolvedValue({
+      symbol: "NIFTY",
+      exchange: "NFO",
+      lot_size: 75,
+      is_sample_data: true,
+    });
+  });
+
+  it("follows a Watchlist selection on the shared red channel", async () => {
+    const { store } = renderScalperOnBus();
+    expect(scalperIndexValue()).toBe("NIFTY");
+
+    act(() => {
+      broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "BANKNIFTY", exchange: "NSE_INDEX" });
+    });
+
+    await waitFor(() => expect(scalperIndexValue()).toBe("BANKNIFTY"));
+    expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "BANKNIFTY", exchange: "NSE_INDEX" });
+  });
+
+  it("does not silently retarget when the shared bus is empty", async () => {
+    const store = createStore();
+    expect(store.get(selectedSymbolAtom)).toBeNull();
+    renderScalperOnBus(store);
+    expect(scalperIndexValue()).toBe("NIFTY");
+    await waitFor(() => expect(store.get(selectedSymbolAtom)).toBeNull());
+    expect(scalperIndexValue()).toBe("NIFTY");
+  });
+
+  it("keeps the current index when the broadcast is not a Scalper underlying", async () => {
+    const { store } = renderScalperOnBus();
+    act(() => {
+      store.set(selectedSymbolAtom, { symbol: "RELIANCE", exchange: "NSE" });
+    });
+    await waitFor(() => {
+      expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "RELIANCE", exchange: "NSE" });
+    });
+    expect(scalperIndexValue()).toBe("NIFTY");
+  });
+
+  it("ignores the bus when joined to no channel", async () => {
+    const { store } = renderScalperOnBus(
+      createStore(),
+      makeWidgetPanelProps({ params: { channel: "none" } }),
+    );
+    act(() => {
+      broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "BANKNIFTY", exchange: "NSE_INDEX" });
+    });
+    await waitFor(() => {
+      expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "BANKNIFTY", exchange: "NSE_INDEX" });
+    });
+    expect(scalperIndexValue()).toBe("NIFTY");
+  });
+
+  it("keeps Explore Sample labels after a retarget", async () => {
+    mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
+      selector({ mode: "explore" }),
+    );
+    const { store } = renderScalperOnBus();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.getByText(EXPLORE_SCALPER_ORDER_HELPER)).toBeInTheDocument();
+
+    act(() => {
+      broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "SENSEX", exchange: "BSE_INDEX" });
+    });
+
+    await waitFor(() => expect(scalperIndexValue()).toBe("SENSEX"));
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.getByText(EXPLORE_SCALPER_ORDER_HELPER)).toBeInTheDocument();
+    expect(screen.getByText("Buy CE").closest("button")).toBeDisabled();
   });
 });

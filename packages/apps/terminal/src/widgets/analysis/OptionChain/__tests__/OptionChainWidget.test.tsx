@@ -149,6 +149,7 @@ import {
   MarketDataAuthorityChangedError,
   placeOrder,
 } from "@/services/api";
+import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { useModeStore } from "@/stores/modeStore";
@@ -820,6 +821,29 @@ describe("OptionChainWidget — FDC3 channel following", () => {
       expect.any(AbortSignal),
       dataScopeState.value,
     ));
+  });
+
+  it("keeps Explore Sample data after a shared-bus retarget", async () => {
+    useModeStore.setState({ mode: "explore" });
+    const store = createStore();
+    render(<OptionChainWidget {...makeWidgetPanelProps()} />, {
+      wrapper: channelWrapper(store),
+    });
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, BANKNIFTY));
+
+    expect(screen.getByText(/strikes loaded for BANKNIFTY/)).toBeInTheDocument();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+  });
+
+  it("does not silently retarget when the shared bus is empty", () => {
+    const store = createStore();
+    render(<OptionChainWidget {...makeWidgetPanelProps()} />, {
+      wrapper: channelWrapper(store),
+    });
+    expect(screen.getByText(/strikes loaded for NIFTY/)).toBeInTheDocument();
+    expect(store.get(selectedSymbolAtom)).toBeNull();
   });
 
   it("adopts the channel's current context on mount", async () => {
