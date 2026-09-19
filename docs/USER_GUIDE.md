@@ -878,15 +878,26 @@ Returning to Chat after you save Settings → AI re-checks readiness (advisor
 and Settings hydration), so the **Not configured** gate should not stay stuck
 on an outdated result.
 
-When unconfigured, the warning badge is **Not configured**, the empty state is
-**LLM not configured**, the primary CTA **Open Settings → AI** opens
+Locked UX for install state (FT-AI-004; product not in this tip): when
+Settings → AI shows Managed Ollama **Not installed**, AI Hub `/ai` Chat
+must not show a green **Connected** badge. The badge follows the real
+LLM status: **Not configured** / **Not installed**, with the primary
+**Open Settings → AI** CTA to `/settings#llm`. Composer input and Send stay
+disabled until the runtime is installed and configured — the same bar as
+FT-AI-002. A provider string of ollama is not Connected while the managed
+runtime is absent.
+
+When unconfigured or not installed, the warning badge is **Not configured**
+or **Not installed**, the empty state is **LLM not configured** (or
+**Not installed**), the primary CTA **Open Settings → AI** opens
 `/settings#llm`, and an outline **Retry** re-probes advisor status and
 Settings `#llm` hydration. Composer input and Send stay disabled; there is no
 send-then-no-reply path.
 
 If leftover transcript messages hide that empty state while Chat is still
-unconfigured, disconnected, or in error, the header still offers **Retry**
-(re-check advisor status and Settings hydration) and **Open Settings → AI**.
+unconfigured, not installed, disconnected, or in error, the header still
+offers **Retry** (re-check advisor status and Settings hydration) and
+**Open Settings → AI**.
 
 A configured but broken probe shows **Error** or **Disconnected** with
 **Retry** — never a green **Connected**. Explore does not show a fake
@@ -1037,7 +1048,11 @@ guidance that Explore cannot load or persist LLM secrets. This is not a
 broken session; configure a provider in Live or Practice on this machine.
 Live and Practice still disable editing on a real load failure ("AI
 settings could not be loaded") to protect a saved configuration, and
-offer **Retry**.
+offer **Retry**. Selecting Managed Ollama while the runtime is absent
+shows **Not installed** — that is not a Connected advisor. Locked UX
+(FT-AI-004; product not in this tip): AI Hub `/ai` Chat follows that
+install state and must not paint green **Connected** until the runtime
+is installed and configured.
 
 `/settings#leverage` always shows real leverage content or an honest
 empty. When the broker snapshot is available, the tiles show the
@@ -1116,19 +1131,27 @@ provider in Live or Practice on this machine.
 On Live or Practice, "AI settings could not be loaded" disables editing
 to protect a saved configuration. Use **Retry**.
 
-On `/ai` Chat, an unconfigured LLM shows **LLM not configured** (badge
-**Not configured**) with **Open Settings → AI** and an outline **Retry**
-that re-probes advisor status and Settings `#llm` hydration. Composer
-input and Send stay disabled. Chat also looks unconfigured when Explore
-Settings `#llm` looks empty ("No LLM provider configured") — **Connected**
-must not appear from an env-default advisor `configured` while Settings
-looks empty. If leftover transcript messages hide that empty state, the
-header still offers **Retry** and **Open Settings → AI**. The Settings
-empty-state wording stays distinct from Chat's **LLM not configured**; they
-are aligned for readiness. A configured but broken probe shows
-**Error** or **Disconnected** with **Retry**. Returning to Chat after
-saving Settings → AI re-checks readiness (advisor and Settings hydration),
-so the gate should not stay stuck on an outdated **Not configured**.
+On `/ai` Chat (AI Hub), an unconfigured LLM shows **LLM not configured**
+(badge **Not configured**) with **Open Settings → AI** and an outline
+**Retry** that re-probes advisor status and Settings `#llm` hydration.
+Composer input and Send stay disabled. Chat also looks unconfigured when
+Explore Settings `#llm` looks empty ("No LLM provider configured") —
+**Connected** must not appear from an env-default advisor `configured`
+while Settings looks empty. If leftover transcript messages hide that
+empty state, the header still offers **Retry** and **Open Settings → AI**.
+The Settings empty-state wording stays distinct from Chat's **LLM not
+configured**; they are aligned for readiness.
+
+Locked UX when Settings → AI shows Managed Ollama **Not installed**
+(FT-AI-004; product not in this tip): AI Hub must not show a green
+**Connected** badge in that state. The badge is **Not configured** /
+**Not installed**, the Settings CTA stays visible, and the composer
+stays gated until the runtime is installed and configured. A provider
+string of ollama is not Connected while the managed runtime is absent.
+A configured but broken probe shows **Error** or **Disconnected** with
+**Retry**. Returning to Chat after saving Settings → AI re-checks
+readiness (advisor and Settings hydration), so the gate should not stay
+stuck on an outdated **Not configured**.
 
 ### "Token expired" when placing an order
 
