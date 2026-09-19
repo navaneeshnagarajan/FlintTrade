@@ -299,12 +299,16 @@ continuous to 15:30. There is no flat "Market open until 15:30" or "VWAP
 last 30 min" closing-price copy. The September 2026 consultation stays out
 of the UI.
 
-**Feed freshness (FT-CORE-002).** TopBar, the ticker strip, and Market Clock
-show a source chip: **Live**, **Delayed**, or **Sample**. Quotes are never
-silently stale. When the feed is stale or the source is unknown, those
-surfaces show muted **Stale** or **Unknown** plus the age when it is known.
-This is provenance, not execution mode — Live mode does not imply a Live
-feed (Mode honesty).
+**Feed freshness (FT-CORE-002).** Explore already discloses sample data
+with the global banner `EXPLORE MODE — All data shown is sample only`,
+plus per-widget **Sample** chips and age when known. That is enough —
+per-symbol ticker Sample chips are optional, and the Market Clock
+freshness chip appears only when that widget is mounted. Practice and
+Live have no Explore banner to lean on: TopBar or the ticker strip must
+show **Live**, **Delayed**, or **Sample** (and muted **Stale** /
+**Unknown** plus age when known). Silent-stale is a fail. This is
+provenance, not execution mode — Live mode does not imply a Live feed
+(Mode honesty).
 
 **Compact / Comfortable.** New installs default to Comfortable (full labels).
 Compact on a desk Trade viewport (~1280 and wider) keeps chart, order pad,
@@ -577,11 +581,15 @@ Market Clock uses the same CAS-aware cash timeline as the TopBar
 still runs after cash continuous ends, the TopBar may show `F&O open · till
 15:40`. Non-CAS cash still continuous to 15:30.
 
-Market Clock, TopBar, and the ticker strip also show feed freshness
-(FT-CORE-002): **Live**, **Delayed**, or **Sample**. Stale or unknown
-quotes show muted **Stale** / **Unknown** plus age when known — never a
-silent-stale tape. This is independent of Explore / Practice / Live
-execution mode.
+Feed freshness (FT-CORE-002) is mode-split. In Explore, the global
+`EXPLORE MODE — All data shown is sample only` banner plus per-widget
+**Sample** chips and age when known is enough; per-symbol ticker Sample
+chips are optional, and the Market Clock freshness chip appears only
+when that widget is mounted. In Practice and Live, TopBar or the ticker
+must show **Live**, **Delayed**, or **Sample** (and muted **Stale** /
+**Unknown** plus age when known) — there is no Explore banner to lean
+on, so silent-stale is a fail. Feed provenance is independent of
+Explore / Practice / Live execution mode.
 
 On Explore `/trade` Watchlist, checked LTP and % change columns
 use the same sample quotes as the ticker tape (Sample data badge).

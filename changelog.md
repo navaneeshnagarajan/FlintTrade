@@ -93,12 +93,18 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Feed-freshness honesty (FT-CORE-002).**
-  TopBar, ticker, and Market Clock show a source
-  chip: Live · Delayed · Sample — never silent-stale.
-  Stale or unknown feeds show muted Stale / Unknown
-  plus age when known. Feed provenance stays
-  separate from Explore / Practice / Live mode
-  (Mode honesty).
+  Explore: the global
+  `EXPLORE MODE — All data shown is sample only`
+  banner plus per-widget Sample chips and age
+  when known is enough. Per-symbol ticker Sample
+  chips are optional. The Market Clock freshness
+  chip appears only when that widget is mounted.
+  Practice / Live: TopBar or the ticker must show
+  Live · Delayed · Sample (and muted Stale /
+  Unknown plus age when known). There is no
+  Explore banner to lean on — silent-stale is a
+  fail. Feed provenance stays separate from
+  Explore / Practice / Live mode (Mode honesty).
 
 - **Resource Hub User Guide first-open honesty (FT-LEARN-003).**
   Explore `/learn` → Resource Hub → User Guide shows
