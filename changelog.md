@@ -35,10 +35,11 @@ changelog rebuilds itself from the first release cut after this baseline.
   An empty watchlist never silently retargets.
 
 - **Option Chain OI profile + PCR strip (FT-TRADE-012).**
-  The Option Chain strip shows OI profile + PCR for
-  the selected expiry/symbol. Explore keeps a Sample
-  badge and never invents live OI. An empty expiry
-  is an honest empty, not zeros-as-data.
+  Locked UX (product not in this tip): Option Chain
+  strip shows OI profile + PCR for the selected
+  expiry/symbol. Explore keeps a Sample badge and
+  never invents live OI. An empty expiry is an
+  honest empty, not zeros-as-data.
 
 ### Changed
 
