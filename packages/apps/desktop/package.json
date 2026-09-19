@@ -44,7 +44,7 @@
     "@types/node": "^26.1.2",
     "@types/snappyjs": "0.7.1",
     "@types/yauzl": "^3.4.0",
-    "electron": "43.2.0",
+    "electron": "44.4.1",
     "electron-builder": "^26.8.1",
     "electron-builder-squirrel-windows": "^26.8.1",
     "esbuild": "^0.28.1",
