@@ -965,8 +965,13 @@ Explore, Practice, or incomplete starts if the UI slips
 (FT-DITTO-002).
 
 On Explore `/ditto` Risk, **Kill All Positions** is disabled when there are
-no managed accounts (empty state "No managed accounts"; no confirm). The
-control stays armed when accounts are listed or the risk snapshot fails.
+no managed accounts (empty state "No managed accounts"; no confirm).
+Whenever the risk runtime is unavailable — including Explore — Kill All
+stays muted and disabled with helper "Risk runtime unavailable — Kill All
+disabled." It is never the armed red emergency CTA in that state. The
+backend rejects a Kill All if the UI slips (FT-DITTO-003). Live and
+Practice with a live runtime and managed accounts still keep the armed
+control.
 
 Position mirroring patterns originally came from AlgoMirror; they now run
 in-process inside `packages/services/ditto/` (no external service required).
