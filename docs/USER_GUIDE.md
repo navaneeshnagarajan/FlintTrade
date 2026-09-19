@@ -597,6 +597,11 @@ On Explore `/trade` Scalper (including the Scalper Zone preset),
 Live with a broker connected to trade." There is no Confirm Order
 path from Explore (FT-TRADE-009).
 
+On Explore `/trade` Option Chain, the strip shows OI profile
++ PCR for the selected expiry/symbol. Explore keeps a Sample
+badge and never invents live OI. An empty expiry is an honest
+empty, not zeros-as-data (FT-TRADE-012).
+
 News Feed loads headlines only through the FlintTrade backend (`GET /api/v1/news`).
 There is no browser-side RSS or CORS-proxy fallback. If the backend cannot
 serve articles, the widget reports that news is unavailable from the
@@ -637,6 +642,11 @@ Streaming option-chain widget rendered with
 [Glide Data Grid](https://github.com/glideapps/glide-data-grid) for
 60+ FPS updates even on a 50-strike chain. The header also shows a
 Max Pain badge derived from the same chain.
+
+The Option Chain strip shows **OI profile + PCR** for the
+selected expiry and symbol (FT-TRADE-012). Explore keeps a
+**Sample** badge and never invents live OI. An empty expiry
+is an honest empty — not zeros painted as data.
 
 1. Drag the **Option Chain** widget into the workspace.
 2. Pick a symbol (e.g. `NIFTY`, `BANKNIFTY`, `RELIANCE`).
