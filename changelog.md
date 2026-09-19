@@ -67,6 +67,18 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Explore Execution Logs mode honesty (FT-AUTO-003).**
+  Explore `/automate` → Execution Logs shows the muted
+  empty state `No execution logs in Explore (sample-only).
+  Switch to Practice or Live to see real run history.`
+  and never the outage line on a healthy sample session.
+  Practice/Live with a 200 OK and 0 rows use
+  `No execution logs for this date.` — not an outage.
+  The red `Failed to load logs. Backend may be offline.`
+  copy (with Retry) is reserved for a real load failure.
+  Loading shows a spinner / `Loading logs…` and never
+  flashes the outage line.
+
 - **SEBI CAS session clock / TopBar phases (FT-CORE-001).**
   TopBar market-status chips are Continuous · CAS ·
   Matching · Post-close · Closed (one active).
