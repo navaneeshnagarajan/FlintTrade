@@ -29,17 +29,20 @@ const IST_OFFSET_SECS: i64 = 5 * 3600 + 30 * 60;
 
 /// Market session configuration.
 ///
-/// Defaults to NSE equity hours (09:15–15:30 IST, squareoff at 15:25).
+/// Defaults to NSE equity hours. Continuous ends 15:15 on CAS names
+/// (as of Aug 2026); `market_close_minutes` remains 15:30 for the CAS
+/// book / non-CAS CTS close. Squareoff defaults to 15:25.
 #[pyclass(get_all, set_all, from_py_object)]
 #[derive(Clone, Debug)]
 pub struct SessionConfig {
     /// Market open in minutes from midnight (IST). NSE = 9*60+15 = 555.
     pub market_open_minutes: u32,
-    /// Market close in minutes from midnight (IST). NSE = 15*60+30 = 930.
+    /// Market close in minutes from midnight (IST). NSE cash book / non-CAS
+    /// CTS = 15:30; green "open" UI must use [`nse_cash_phase`], not this flat close.
     pub market_close_minutes: u32,
     /// Pre-market start in minutes from midnight. NSE = 9*60 = 540.
     pub pre_market_start_minutes: u32,
-    /// Post-market end in minutes from midnight. NSE = 15*60+45 = 945.
+    /// Post-market end in minutes from midnight. NSE post-close ends 16:00.
     pub post_market_end_minutes: u32,
     /// Minutes before close at which squareoff is triggered. Default = 5.
     pub squareoff_buffer_minutes: u32,
@@ -58,7 +61,7 @@ impl SessionConfig {
         market_open_minutes = 555,
         market_close_minutes = 930,
         pre_market_start_minutes = 540,
-        post_market_end_minutes = 945,
+        post_market_end_minutes = 960,
         squareoff_buffer_minutes = 5
     ))]
     pub fn new(
@@ -90,13 +93,14 @@ impl SessionConfig {
 }
 
 impl SessionConfig {
-    /// NSE equity (09:15–15:30 IST, squareoff at 15:25).
+    /// NSE equity. Continuous 09:15–15:15; CAS book / non-CAS CTS to 15:30;
+    /// post-close ends 16:00 (as of Aug 2026). Squareoff at 15:25.
     pub fn nse_equity() -> Self {
         Self {
             market_open_minutes: 9 * 60 + 15,
             market_close_minutes: 15 * 60 + 30,
             pre_market_start_minutes: 9 * 60,
-            post_market_end_minutes: 15 * 60 + 45,
+            post_market_end_minutes: 16 * 60,
             squareoff_buffer_minutes: 5,
         }
     }
@@ -425,6 +429,24 @@ impl SessionTracker {
     }
 }
 
+/// NSE cash session phase (FT-CORE-001, as of Aug 2026).
+///
+/// Continuous 09:15–15:15, CAS 15:15–15:35, Matching 15:35–15:50,
+/// Post-close 15:50–16:00. Never treat 15:20 as Closed or as green Continuous.
+pub fn nse_cash_phase(minutes_from_midnight: u32) -> &'static str {
+    if (9 * 60 + 15..15 * 60 + 15).contains(&minutes_from_midnight) {
+        "continuous"
+    } else if (15 * 60 + 15..15 * 60 + 35).contains(&minutes_from_midnight) {
+        "cas"
+    } else if (15 * 60 + 35..15 * 60 + 50).contains(&minutes_from_midnight) {
+        "matching"
+    } else if (15 * 60 + 50..16 * 60).contains(&minutes_from_midnight) {
+        "post-close"
+    } else {
+        "closed"
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -520,14 +542,16 @@ mod tests {
     #[test]
     fn test_after_hours_not_market() {
         let mut tracker = SessionTracker::new(SessionConfig::nse_equity());
-        // 15:35 IST — after market close (15:30) but before post_market_end (15:45)
+        // 15:35 IST — Matching (CAS clock). Book close is 15:30 so this is
+        // not continuous market hours; post-close window runs to 16:00.
         let ts = make_ts_ns(15, 35);
         let state = tracker.update(0, ts, 100.0, 100.5, 99.5, 100.2, None, None);
-        assert!(!state.is_market_hours, "15:35 should not be market hours");
+        assert!(!state.is_market_hours, "15:35 should not be continuous hours");
         assert!(!state.is_pre_market, "15:35 should not be pre-market");
-        assert!(state.is_post_market, "15:35 should be post-market");
+        assert!(state.is_post_market, "15:35 is after the 15:30 book close");
+        assert_eq!(nse_cash_phase(15 * 60 + 35), "matching");
 
-        // 16:00 IST — after post_market_end (15:45)
+        // 16:00 IST — after post-close
         let ts2 = make_ts_ns(16, 0);
         let mut tracker2 = SessionTracker::new(SessionConfig::nse_equity());
         let state2 = tracker2.update(0, ts2, 100.0, 100.5, 99.5, 100.2, None, None);
@@ -535,7 +559,21 @@ mod tests {
         assert!(!state2.is_pre_market);
         assert!(
             !state2.is_post_market,
-            "16:00 should be after post-market window"
+            "16:00 should be after post-close window"
         );
+        assert_eq!(nse_cash_phase(16 * 60), "closed");
+    }
+
+    #[test]
+    fn test_nse_cash_phase_cas_honesty() {
+        assert_eq!(nse_cash_phase(10 * 60), "continuous");
+        assert_eq!(nse_cash_phase(15 * 60 + 14), "continuous");
+        assert_eq!(nse_cash_phase(15 * 60 + 15), "cas");
+        assert_eq!(nse_cash_phase(15 * 60 + 30), "cas");
+        assert_eq!(nse_cash_phase(15 * 60 + 35), "matching");
+        assert_eq!(nse_cash_phase(15 * 60 + 50), "post-close");
+        assert_eq!(nse_cash_phase(16 * 60), "closed");
+        assert_ne!(nse_cash_phase(15 * 60 + 20), "closed");
+        assert_ne!(nse_cash_phase(15 * 60 + 20), "continuous");
     }
 }

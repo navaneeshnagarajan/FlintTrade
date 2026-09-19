@@ -6,6 +6,11 @@
  */
 
 import type { Holiday, MarketTiming } from "@/types/api";
+import {
+  NSE_FO_CLOSE_MIN,
+  type NseCashSessionInfo,
+  resolveNseCashSession,
+} from "@/lib/nseSession";
 
 // ---------------------------------------------------------------------------
 // Per-exchange trading hours (minutes since midnight, IST)
@@ -28,10 +33,12 @@ export interface MarketHoursInstrument {
 export type MarketHoursTarget = string | MarketHoursInstrument;
 
 const EXCHANGE_HOURS: Record<string, ExchangeHours> = {
-  NSE:          { open: 9 * 60 + 15, close: 15 * 60 + 30 },  // 9:15–15:30
+  // Cash session activity (Continuous + CAS book) through 15:30. Green "open"
+  // UI must use resolveNseCashSession — never this flat close (FT-CORE-001).
+  NSE:          { open: 9 * 60 + 15, close: 15 * 60 + 30 },
   BSE:          { open: 9 * 60 + 15, close: 15 * 60 + 30 },
-  NFO:          { open: 9 * 60 + 15, close: 15 * 60 + 30 },
-  BFO:          { open: 9 * 60 + 15, close: 15 * 60 + 30 },
+  NFO:          { open: 9 * 60 + 15, close: NSE_FO_CLOSE_MIN },
+  BFO:          { open: 9 * 60 + 15, close: NSE_FO_CLOSE_MIN },
   CDS:          { open: 9 * 60,      close: 17 * 60 },        // 9:00–17:00
   BCD:          { open: 9 * 60,      close: 17 * 60 },
   MCX:          { open: 9 * 60,      close: 23 * 60 + 30 },   // 9:00–23:30
@@ -183,19 +190,35 @@ export function isMarketHours(
   return mins >= hours.open && mins <= hours.close;
 }
 
-export type MarketSessionStatus = "open" | "closed" | "unavailable";
+export type MarketSessionStatus =
+  | NseCashSessionInfo["phase"]
+  | "unavailable";
 
 export interface MarketSessionInfo {
   status: MarketSessionStatus;
   label: string;
+  title: string;
+  foSecondary: string | null;
+  isGreenOpen: boolean;
 }
 
-const MARKET_OPEN: MarketSessionInfo = { status: "open", label: "Market open" };
-const MARKET_CLOSED: MarketSessionInfo = { status: "closed", label: "Market closed" };
 const MARKET_UNAVAILABLE: MarketSessionInfo = {
   status: "unavailable",
   label: "Market unavailable",
+  title: "Market unavailable",
+  foSecondary: null,
+  isGreenOpen: false,
 };
+
+function cashSessionToInfo(session: NseCashSessionInfo): MarketSessionInfo {
+  return {
+    status: session.phase,
+    label: session.label,
+    title: session.title,
+    foSecondary: session.foSecondary,
+    isGreenOpen: session.isGreenOpen,
+  };
+}
 
 /** Contemporary epoch-ms floor; values below this are seconds or clock encodings. */
 const EPOCH_MS_FLOOR = 100_000_000_000;
@@ -228,12 +251,16 @@ function sessionBoundToEpochMs(value: number): number | null {
 }
 
 /**
- * NSE cash regular-session status in Asia/Kolkata.
+ * NSE cash session chip in Asia/Kolkata (FT-CORE-001).
  *
- * Timing bounds may be epoch milliseconds (native brokers), epoch seconds,
- * or HHMM integers used by OpenAlgo and the Explore stub (`915` / `1530`).
- * Weekends are closed. Missing or unusable timings are unavailable rather
- * than a false closed state.
+ * Trustworthy timings confirm the calendar is usable. Phase and windows come
+ * from the CAS clock, not a flat 15:30 close. Timing bounds may be epoch
+ * milliseconds (native brokers), epoch seconds, or HHMM integers used by
+ * OpenAlgo and the Explore stub (`915` / `1530`). Weekends are Closed.
+ * Missing or unusable timings are unavailable rather than a false Closed.
+ *
+ * A short epoch window outside the regular cash day (Muhurat) is honoured as
+ * Continuous while it is live.
  */
 export function getNseCashSessionStatus(
   timings: readonly MarketTiming[] | undefined,
@@ -241,8 +268,8 @@ export function getNseCashSessionStatus(
 ): MarketSessionInfo {
   if (!timings) return MARKET_UNAVAILABLE;
 
-  const { day, minutes } = istWeekdayAndMinutes(now);
-  if (day === 0 || day === 6) return MARKET_CLOSED;
+  const { day } = istWeekdayAndMinutes(now);
+  if (day === 0 || day === 6) return cashSessionToInfo(resolveNseCashSession(now));
 
   const nseTiming = timings.find(
     (timing) => timing.exchange === "NSE" || timing.exchange === "NSE_INDEX",
@@ -251,24 +278,34 @@ export function getNseCashSessionStatus(
 
   const startMins = hhmmToMinutes(nseTiming.start_time);
   const endMins = hhmmToMinutes(nseTiming.end_time);
-  if (
+  const hhmmBounds =
     startMins !== null
     && endMins !== null
     && nseTiming.start_time < EPOCH_SECONDS_FLOOR
-    && nseTiming.end_time < EPOCH_SECONDS_FLOOR
-  ) {
-    if (minutes >= startMins && minutes <= endMins) return MARKET_OPEN;
-    return MARKET_CLOSED;
+    && nseTiming.end_time < EPOCH_SECONDS_FLOOR;
+
+  if (hhmmBounds) {
+    return cashSessionToInfo(resolveNseCashSession(now));
   }
 
   const startMs = sessionBoundToEpochMs(nseTiming.start_time);
   const endMs = sessionBoundToEpochMs(nseTiming.end_time);
   if (startMs === null || endMs === null) return MARKET_UNAVAILABLE;
 
+  const cash = resolveNseCashSession(now);
   const nowMs = now.getTime();
-  if (nowMs < startMs) return MARKET_CLOSED;
-  if (nowMs <= endMs) return MARKET_OPEN;
-  return MARKET_CLOSED;
+  if (nowMs >= startMs && nowMs <= endMs && cash.phase === "closed") {
+    return cashSessionToInfo({
+      ...cash,
+      phase: "continuous",
+      label: "Continuous",
+      title: "Continuous · special session (as of Aug 2026)",
+      foSecondary: null,
+      isGreenOpen: true,
+    });
+  }
+
+  return cashSessionToInfo(cash);
 }
 
 export type MCXMarketStatus = "open" | "pre-market" | "closed" | "weekend";

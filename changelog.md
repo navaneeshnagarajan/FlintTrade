@@ -33,11 +33,12 @@ changelog rebuilds itself from the first release cut after this baseline.
   Explore / Practice / Live chips mean execution mode only.
   Explore Order Pad uses Sample Buy / Sample Sell; Practice
   keeps Practice Buy / Sell; Live uses Place BUY/SELL Order.
-  Market open/closed stays session status. Comfortable is the
-  new-install default. Compact Trade at ~1280 and wider keeps
-  chart, order pad, and positions primary, with ticker, tool
-  ribbon, and watchlist / indices collapsed behind one desk-tools
-  toggle. Selecting Compact on Trade at ~1280 and wider always
+  TopBar session chips (Continuous · CAS · Matching ·
+  Post-close · Closed) stay session status (FT-CORE-001).
+  Comfortable is the new-install default. Compact Trade at
+  ~1280 and wider keeps chart, order pad, and positions
+  primary, with ticker, tool ribbon, and watchlist /
+  indices collapsed behind one desk-tools toggle. Selecting Compact on Trade at ~1280 and wider always
   starts with that disclosure collapsed.
   At most one primary banner (Explore sample > Practice sample >
   Live risk > feed disconnected). External-action gates stay fail-closed
@@ -65,6 +66,139 @@ changelog rebuilds itself from the first release cut after this baseline.
   `gate_broker_write` → `BrokerRouter`) stay unchanged.
 
 ### Fixed
+
+- **Explore Execution Logs mode honesty (FT-AUTO-003).**
+  Explore `/automate` → Execution Logs shows the muted
+  empty state `No execution logs in Explore (sample-only).
+  Switch to Practice or Live to see real run history.`
+  and never the outage line on a healthy sample session.
+  Practice/Live with a 200 OK and 0 rows use
+  `No execution logs for this date.` — not an outage.
+  The red `Failed to load logs. Backend may be offline.`
+  copy (with Retry) is reserved for a real load failure.
+  Loading shows a spinner / `Loading logs…` and never
+  flashes the outage line.
+
+- **SEBI CAS session clock / TopBar phases (FT-CORE-001).**
+  TopBar market-status chips are Continuous · CAS ·
+  Matching · Post-close · Closed (one active).
+  Tooltip/title is the window, e.g.
+  `CAS · 15:15–15:35 (as of Aug 2026)`. When
+  equity F&O still runs after cash continuous ends, a
+  secondary `F&O open · till 15:40` chip appears.
+  Market Clock follows Continuous (~09:15–15:15)
+  → CAS 15:15–15:35 → Matching → Post-close
+  15:50–16:00. Non-CAS cash still continuous to
+  15:30. Cash is never green "open" after 15:15;
+  CAS is not Closed. Flat "Market open until
+  15:30" and "VWAP last 30 min" closing-price
+  copy are gone. The September 2026 consultation
+  stays out of the UI.
+
+- **Position Mirror Start fail-closed gate (FT-DITTO-002).**
+  Explore `/ditto` → Position Mirror Start stays
+  muted and disabled when unavailable — never
+  the primary green armed CTA. Explore is
+  always disarmed (sample-only). Helper:
+  `Mirroring blocked in Explore (sample-only).
+  Switch to Practice or Live with broker
+  accounts connected.` Practice stays disarmed
+  — the backend is Live-only. Helper:
+  `Mirroring requires Live with broker accounts
+  connected.` Live enables Start only with a
+  source selected, at least one target, and
+  broker accounts ready. Missing source/targets:
+  `Select a source account and at least one
+  target to start mirroring.` A successfully
+  empty account list: `Connect a source and at
+  least one target account to start mirroring.`
+  Pending and failed account fetches stay muted
+  with `Loading accounts...` / `Could not load
+  accounts.` and never look like an empty
+  connect state. The backend rejects Explore,
+  Practice, or incomplete starts
+  (`mode_blocked` or equivalent).
+
+- **Explore Scalper fail-closed order path (FT-TRADE-009).**
+  Explore `/trade` → Scalper is disarmed —
+  Buy CE / Sell / 1-CLICK never open Confirm
+  Order and never place. Buy/Sell stay disabled.
+  Helper: `Orders blocked in Explore
+  (sample-only). Switch to Practice or Live with
+  a broker connected to trade.` 1-CLICK stays
+  OFF / disabled; title `One-click unavailable
+  in Explore`. Sample quote preview is allowed;
+  Confirm BUY / Confirm SELL chrome is not.
+  Practice and Live use Confirm only when the
+  mode allows it and a gateway is configured.
+  The backend rejects Explore orders with
+  `code: mode_blocked` if the UI slips.
+
+- **OI Chart shares Option Chain expiries (FT-TRADE-007).**
+  Explore `/trade` Analysis layout → maximize OI Chart
+  now shares Option Chain expiries for the
+  symbol/exchange. A non-empty list shows the
+  expiry control; charts and statistics cover
+  only the selected expiry (the chain’s
+  selection when both widgets are open;
+  otherwise the nearest listed). Explore sample
+  expiries stay listed and are badged Sample.
+  No expiries or no OI is an honest empty —
+  `No expiries for this symbol` or `No OI for
+  this expiry` — with no bars and no PCR/max-pain
+  stats, never “No expiries” over fake charts.
+
+- **Watchlist LTP / % change use ticker sample quotes (FT-TRADE-008).**
+  Explore `/trade` → Watchlist with Sparkline + LTP +
+  % change checked now paints those column headers
+  and cells. LTP and % change read the same sample
+  quote source as the ticker tape (Jotai tick atoms
+  from the Explore demo feed) for NIFTY, BANKNIFTY,
+  SBIN, RELIANCE, HDFCBANK, and any other symbol on
+  that feed. A Sample data badge discloses this.
+  Missing quotes show `—` (or a brief `…` while the
+  first fetch is in flight), never silent blank
+  chrome. Unchecking a column hides it; checking it
+  again shows the sample value or the honest empty.
+
+- **Options Builder Net Debit and Max Loss share a position ₹ basis (FT-LAB-005).**
+  Explore `/lab` Options Builder now shows Net
+  Debit/Credit, Max Loss, and Max Profit on a
+  shared position ₹ basis. Net Debit/Credit is
+  the signed premium × lots × lot size. Max
+  Loss and Max Profit are expiry-payoff results
+  (intrinsic at the strikes, strike width, or
+  unlimited) scaled to that same position basis
+  — not premium × lots × lot size on every card.
+  For a long call, Max Loss equals the Net Debit
+  (the premium paid for the position). A muted
+  sublabel `₹X per lot · N lots · lot size L`
+  sits under those figures and is never the only
+  number. Header and Legs chips use the same
+  position basis as Payoff. When lots differ and
+  a single per-lot breakdown cannot be formed,
+  the primary figure is tagged `position` —
+  never two unlabelled ₹ on mixed bases.
+  Blank premiums still show `—` (FT-LAB-003).
+
+- **Backtest headline P&L vs trade-log (FT-LAB-004).**
+  Explore `/lab` backtest results now show labelled
+  dual metrics. **Total Return (%)** is initial
+  capital → final equity (including a forced last-bar
+  close), with subtitle `Initial capital → final
+  equity`. Live `total_return` percentage points are
+  not passed through `fmtPct` a second time.
+  **Net trade P&L (₹)** sums Trade Log `net_pnl`
+  when present; if `net_pnl` is missing the card is
+  labelled **Trade log P&L** with `Gross — net P&L
+  not in result` rather than calling a gross sum net.
+  When that sum matches the equity change, a quiet
+  `Reconciles with trade log` note appears; when
+  they diverge (fees, open marks, partial fills)
+  both numbers stay visible with
+  `Trade log sum ≠ equity change — fees / open
+  marks`. Monthly P&L stays trade-based so the
+  chart matches the log.
 
 - **Learn Glossary Lot Size freshness (FT-LEARN-002).**
   Explore `/learn` → Glossary → Lot Size now teaches the

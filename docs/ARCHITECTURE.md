@@ -266,6 +266,20 @@ duplicated:
 - **Zustand stores** — derived and UI state only (connection status,
   active layout, settings mirror, aggregated P&L, current mode).
 
+### Market session clock (FT-CORE-001)
+
+TopBar market status and the Market Clock widget are CAS-aware (as of
+Aug 2026). Phases are Continuous, CAS, Matching, Post-close, and Closed
+— one TopBar chip active; tooltip/title is the window (for example
+`CAS · 15:15–15:35 (as of Aug 2026)`). Cash is never green "open" after
+15:15 IST; CAS is not Closed. When equity F&O still runs after cash
+continuous ends, a secondary `F&O open · till 15:40` chip appears.
+Non-CAS cash still trades continuous to 15:30. The clock helpers
+(`packages/apps/terminal/src/lib/market.ts` and
+`packages/core/ticks/src/session.rs`) must not treat a flat NSE
+09:15–15:30 window as "open until 15:30". Closing-price copy is not
+"VWAP last 30 min". The September 2026 consultation stays out of the UI.
+
 ### Frontend stack
 
 | Category | Library | Why it's pinned |
@@ -589,13 +603,15 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
 
 ### Server-side mode enforcement
 
-Every HTTP order-path endpoint asks `mode_guard` whether the JWT permits a
-live action. Trying to place a live order on a Practice JWT is rejected 403
-immediately with code `practice_unsupported`. Explore JWTs yield
-`mode_blocked` on those same server routes — the request never reaches
-OpenAlgo or a broker. That does not cover Order Pad Sample Buy on
-`/trade` in Explore, which records a local client-side sample fill
-without calling an HTTP order route, SafetySystem, or a broker.
+The core `/api/v1/orders/*` proxy fans out by JWT mode: Explore is
+HTTP 403 `mode_blocked`, Practice routes to the native sandbox, and
+Live requires `live_mode_unlocked` plus the gated `BrokerRouter`.
+Executor-direct engine routes (basket, split, bracket, options-strategy)
+use `mode_guard.require_live_unlocked`: Explore is `mode_blocked`,
+Practice is `practice_unsupported` (no sandbox parity yet), and Live
+without PIN unlock is `live_locked`. Order Pad Sample Buy on `/trade`
+in Explore is a local client-side sample fill — no HTTP order route,
+SafetySystem, or broker.
 
 ### OpenAlgo X-API-Key
 

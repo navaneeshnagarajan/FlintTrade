@@ -281,11 +281,23 @@ The current mode is shown in the top bar and is server-enforced via the JWT
 claim — switching to Live requires a deliberate confirmation step.
 
 **Mode vs session vs sample (FT-UX-001).** The Explore / Practice / Live chips
-mean execution mode only. Market open/closed is session status, never Live
-mode. Explore Order Pad uses **Sample Buy** / **Sample Sell** (a local sample
-fill after review). Practice keeps **Practice Buy** / **Practice Sell**. Live
-uses **Place BUY Order**. Connected / green is never shown for an
-unconfigured subsystem.
+mean execution mode only. TopBar session chips (Continuous · CAS · Matching ·
+Post-close · Closed) are session status, never Live mode. Explore Order Pad
+uses **Sample Buy** / **Sample Sell** (a local sample fill after review).
+Practice keeps **Practice Buy** / **Practice Sell**. Live uses **Place BUY
+Order**. Connected / green is never shown for an unconfigured subsystem.
+
+**Market session (FT-CORE-001, as of Aug 2026).** The TopBar shows one active
+session chip: **Continuous**, **CAS**, **Matching**, **Post-close**, or
+**Closed**. The chip tooltip/title is the window, for example
+`CAS · 15:15–15:35 (as of Aug 2026)`. Cash is never shown as green "open"
+after 15:15 IST; CAS is not Closed. When equity F&O still runs after cash
+continuous ends, a secondary `F&O open · till 15:40` chip appears. The Market Clock
+widget follows the same cash timeline: Continuous (~09:15–15:15) → CAS
+15:15–15:35 → Matching → Post-close 15:50–16:00. Non-CAS cash still trades
+continuous to 15:30. There is no flat "Market open until 15:30" or "VWAP
+last 30 min" closing-price copy. The September 2026 consultation stays out
+of the UI.
 
 **Compact / Comfortable.** New installs default to Comfortable (full labels).
 Compact on a desk Trade viewport (~1280 and wider) keeps chart, order pad,
@@ -307,7 +319,10 @@ Phone layouts are unchanged.
    (or pick a preset that contains it).
 4. Type `NIFTY` into the symbol field; FlintTrade autocompletes the current
    front-month future. Select it.
-5. Set Quantity = 1 lot (50). Choose **MARKET**. Side = **BUY**.
+5. Set Quantity to 1 lot. After you select the future, Order Pad
+   auto-fills Quantity from that instrument's current lot size — do
+   not hardcode 50. Learn Glossary teaches dated Jan 2026 NSE-cycle
+   figures separately. Choose **MARKET**. Side = **BUY**.
 6. Click **Sample Buy** (Explore) or **Practice Buy** (Practice) and confirm the review. The order
    appears in the **Positions** widget immediately; the **Orders**
    widget shows it as filled (simulated).
@@ -337,6 +352,33 @@ range rather than jumping to YTD. An empty range or no fills is an
 honest empty for that window, not a quiet YTD fallback. Metrics cover
 the labelled window up to the journal's 1,000-fill analytics page; a
 larger window is disclosed rather than silently sliced.
+
+On Explore `/trade` Analysis layout, **OI Chart** shares the Option
+Chain expiry list for that symbol/exchange. When the list is
+non-empty, the expiry control is shown and charts/statistics cover
+only the selected expiry (the chain’s selected expiry when both
+widgets are open; otherwise the nearest listed). Explore sample
+expiries stay listed and are badged **Sample**. No expiries or no
+OI is an honest empty — `No expiries for this symbol` or
+`No OI for this expiry` — with no bars and no PCR/max-pain stats.
+The widget never pairs “No expiries” with generic or sample bars.
+
+On Explore `/trade` Watchlist, checked LTP and % change columns
+paint their headers and cells. Those values use the same sample
+quotes as the ticker tape (Sample data badge). A missing quote
+shows `—` after a brief `…`, never a silent blank. Unchecking a
+column hides it (FT-TRADE-008).
+
+On Explore `/trade` → Scalper, **Buy CE**, **Sell**, and **1-CLICK**
+stay disarmed — the same honesty class as Automate Telegram
+**Send Test**. They never open Confirm Order and never place.
+Helper: "Orders blocked in Explore (sample-only). Switch to
+Practice or Live with a broker connected to trade." **1-CLICK**
+stays OFF and disabled; its title is "One-click unavailable in
+Explore". Sample quote preview is allowed; there is no Confirm
+BUY / Confirm SELL chrome. Practice and Live open Confirm only
+when the mode allows it and a gateway is configured. The
+backend rejects Explore orders if the UI slips (FT-TRADE-009).
 
 ### Learn → Practice Trading (OpenAlgo)
 
@@ -479,6 +521,23 @@ from the widget registry
   Market Clock, Trade Ideas, Tick Speed, and Journal Entries
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
 
+Market Clock uses the same CAS-aware cash timeline as the TopBar
+(Continuous → CAS → Matching → Post-close → Closed), not a flat
+09:15–15:30 "open" window (FT-CORE-001, as of Aug 2026). When F&O
+still runs after cash continuous ends, the TopBar may show `F&O open · till
+15:40`. Non-CAS cash still continuous to 15:30.
+
+On Explore `/trade` Watchlist, checked LTP and % change columns
+use the same sample quotes as the ticker tape (Sample data badge).
+A missing quote shows `—` after a brief `…`, never a silent blank
+(FT-TRADE-008).
+
+On Explore `/trade` Scalper (including the Scalper Zone preset),
+**Buy CE**, **Sell**, and **1-CLICK** stay disarmed. Helper:
+"Orders blocked in Explore (sample-only). Switch to Practice or
+Live with a broker connected to trade." There is no Confirm Order
+path from Explore (FT-TRADE-009).
+
 News Feed loads headlines only through the FlintTrade backend (`GET /api/v1/news`).
 There is no browser-side RSS or CORS-proxy fallback. If the backend cannot
 serve articles, the widget reports that news is unavailable from the
@@ -534,6 +593,15 @@ build-up/unwinding signals, and a **Max Pain** view (the strike at
 which option writers lose the least if expiry hit right now). There is
 no standalone Max Pain widget.
 
+OI Chart shares Option Chain expiries for the symbol/exchange. The
+expiry control appears when that list is non-empty; charts and
+statistics cover only the selected expiry (the chain’s selection
+when both widgets are open; otherwise the nearest listed). Explore
+sample expiries stay listed and are badged **Sample**. Empty states
+are honest: `No expiries for this symbol` or `No OI for this expiry`,
+with no bars and no PCR/max-pain stats — never “No expiries” over
+fake or generic bars.
+
 ### IV Smile & Skew
 
 Implied-volatility curve across strikes, with 25-delta skew and
@@ -560,8 +628,28 @@ and Options Builder.
    (pure Python by default). Install the optional VectorBT extra for
    vectorised exploration, or opt in to the Rust `ticks` engine for
    tick-level precision.
-5. **Review.** Equity curve, Sharpe, Sortino, max drawdown, win rate,
-   trade list, Monte Carlo confidence band.
+5. **Review.** **Total Return (%)**, **Net trade P&L (₹)** (or **Trade
+   log P&L** when net P&L is missing from the result), equity curve,
+   Sharpe, Sortino, max drawdown, win rate, trade list, Monte Carlo
+   confidence band.
+
+After a backtest run on Explore `/lab`, Review shows labelled dual
+metrics. **Total Return (%)** is initial capital → final equity
+(including a forced last-bar close), with subtitle
+`Initial capital → final equity` — not a sum of trades.
+**Net trade P&L (₹)** is the Trade Log net-P&L sum when every trade
+has net P&L. If net P&L is missing, the card is labelled **Trade log
+P&L** with subtitle `Gross — net P&L not in result` — never a gross
+sum called net. The trade table column is `Net P&L` when the basis is
+net, otherwise `P&L`. When the summed trade-log amount matches the
+equity-curve rupee change, a quiet `Reconciles with trade log` note
+appears. When they diverge (fees, open marks, partial fills), both
+numbers stay visible with
+`Trade log sum ≠ equity change — fees / open marks`. The helper
+is omitted when the trade log or equity curve is empty — nothing to
+reconcile. Monthly P&L stays labelled
+`Trade-based · sums Trade Log P&L` so the chart matches the log
+on the same basis as the table.
 
 ### Forward Test
 
@@ -588,6 +676,18 @@ premium blank so Payoff stays on that helper instead of modelling ₹0.
 
 Typing an explicit ₹0 is allowed. Payoff then treats cost as free and
 warns `Premium is ₹0 — payoff treats cost as free`.
+
+Debit/credit and max loss share a position ₹ basis. Net Debit/Credit
+is the signed premium × lots × lot size. Max Loss and Max Profit
+are expiry-payoff results (intrinsic at the strikes, strike width,
+or unlimited) shown on that same position basis — not
+premium × lots × lot size on every card. For a long call, Max Loss
+equals Net Debit. A muted sublabel
+`₹X per lot · N lots · lot size L` sits under those figures and is
+never the only number. Header and Legs chips use the same position
+basis as Payoff. When lots differ and a single per-lot breakdown
+cannot be formed, the primary figure is tagged `position` — never
+two unlabelled ₹ on mixed bases.
 
 ![Lab](screenshots/06-lab.png)
 
@@ -628,6 +728,20 @@ Explore (sample-only). Switch to Practice or Live with Telegram configured
 to send a real test." There is no confirm-and-send path from Explore.
 Practice and Live arm Send Test only when Telegram is configured; otherwise
 the helper is "Configure Telegram first".
+
+### Execution Logs
+
+**Execution Logs** is the date-paginated history of automated actions.
+On Explore `/automate` → Execution Logs, a healthy sample session shows
+the muted empty state `No execution logs in Explore (sample-only). Switch
+to Practice or Live to see real run history.` It never shows `Failed to
+load logs. Backend may be offline.` while the app is live and the Explore
+sample banner is present (FT-AUTO-003). In Practice or Live, a successful
+load with no rows for the selected date shows `No execution logs for this
+date.` — not an outage. The red `Failed to load logs. Backend may be
+offline.` line (or Retry) is reserved for a real request failure. While
+logs are loading, the view shows a spinner / `Loading logs…` and never
+flashes the outage copy.
 
 ![Automate](screenshots/07-automate.png)
 
@@ -746,6 +860,23 @@ workspace.
 - **Margin** — pre-trade margin calculator across all linked accounts.
 - **Risk** — per-account risk limits, kill-switch propagation, trailing
   stop-loss governor.
+
+On Explore `/ditto` Position Mirror, **Start Position Mirroring**
+stays muted and disabled — the same honesty class as Telegram
+**Send Test** and Explore Scalper. Explore is always disarmed
+(sample-only). Helper: "Mirroring blocked in Explore
+(sample-only). Switch to Practice or Live with broker accounts
+connected." Practice stays disarmed. Helper: "Mirroring requires
+Live with broker accounts connected." Live arms Start only when a
+source account, at least one target, and broker accounts are
+ready. Otherwise the helpers are "Select a source account and at
+least one target to start mirroring." (missing source or targets)
+and "Connect a source and at least one target account to start
+mirroring." (list loaded empty). Pending or failed account
+fetches stay muted (`Loading accounts...` / `Could not load
+accounts.`) and are not empty states. The backend rejects
+Explore, Practice, or incomplete starts if the UI slips
+(FT-DITTO-002).
 
 On Explore `/ditto` Risk, **Kill All Positions** is disabled when there are
 no managed accounts (empty state "No managed accounts"; no confirm). The

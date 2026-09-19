@@ -1,9 +1,22 @@
 /**
  * SymbolRow — individual watchlist entry with price, change, and sparkline.
+ *
+ * LTP and % change prefer the same Jotai tick atom the ticker tape reads
+ * (`tickAtomFamily` via `tickKeyFor`), then fall back to the REST quote.
  */
 
+import { useAtomValue } from "jotai";
+import { tickAtomFamily } from "@/atoms/marketAtoms";
+import { tickKeyFor } from "@/lib/market";
 import { Sparkline } from "./Sparkline";
-import { evaluateFormula, fmtCompact, fmtPrice, fmtPct, formulaLabel } from "./types";
+import {
+  evaluateFormula,
+  fmtCompact,
+  fmtPrice,
+  fmtPct,
+  formulaLabel,
+  resolveWatchlistQuoteFields,
+} from "./types";
 import type { PartialQuote, WatchlistColumnId, WatchlistCustomFormula, WatchlistItem } from "./types";
 
 export interface SymbolRowProps {
@@ -17,6 +30,8 @@ export interface SymbolRowProps {
   onRemove:    (e: React.MouseEvent, item: WatchlistItem) => void;
   /** Quick Buy/Sell: opens a prefilled (gated) order ticket. */
   onQuickTrade?: (item: WatchlistItem, side: "BUY" | "SELL") => void;
+  /** First-fetch loading — show a brief ellipsis instead of a silent blank. */
+  isLoading?: boolean;
 }
 
 export function SymbolRow({
@@ -29,11 +44,11 @@ export function SymbolRow({
   onSelect,
   onRemove,
   onQuickTrade,
+  isLoading = false,
 }: SymbolRowProps) {
-  const ltp       = quote?.ltp    ?? quote?.close ?? null;
-  const prevClose = quote?.prev_close ?? quote?.close ?? null;
-  const chgAbs    = ltp != null && prevClose != null ? ltp - prevClose : null;
-  const chgPct    = chgAbs != null && prevClose ? (chgAbs / prevClose) * 100 : null;
+  const tick = useAtomValue(tickAtomFamily(tickKeyFor(item.symbol, item.exchange)));
+  const { ltp, chgAbs, chgPct } = resolveWatchlistQuoteFields(tick, quote);
+  const pending = isLoading && ltp == null && chgPct == null;
   const isUp      = chgAbs == null ? null : chgAbs >= 0;
   const changeColor = isUp === true ? "text-profit" : isUp === false ? "text-loss" : "text-text-muted";
   const visible = new Set(visibleColumns);
@@ -107,13 +122,19 @@ export function SymbolRow({
       {(visible.has("price") || visible.has("changePct")) && (
         <div className="flex min-w-16 shrink-0 flex-col items-end">
           {visible.has("price") && (
-            <span className="text-xs font-mono tabular-nums font-semibold text-text-primary leading-tight">
-              {fmtPrice(ltp)}
+            <span
+              aria-label={`${item.symbol} LTP`}
+              className="text-xs font-mono tabular-nums font-semibold text-text-primary leading-tight"
+            >
+              {pending ? "…" : fmtPrice(ltp)}
             </span>
           )}
           {visible.has("changePct") && (
-            <span className={`text-xxs font-mono tabular-nums leading-tight ${changeColor}`}>
-              {chgPct != null ? fmtPct(chgPct) : "—"}
+            <span
+              aria-label={`${item.symbol} % change`}
+              className={`text-xxs font-mono tabular-nums leading-tight ${changeColor}`}
+            >
+              {pending ? "…" : chgPct != null ? fmtPct(chgPct) : "—"}
             </span>
           )}
         </div>

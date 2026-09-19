@@ -50,6 +50,7 @@ vi.mock("@/components/charts/PlotlyChart", () => ({
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
+import { useOptionExpiryStore } from "@/stores/optionExpiryStore";
 import OIChartWidget from "../OIChartWidget";
 import { buildSampleChain } from "../sampleData";
 
@@ -91,10 +92,18 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useOptionExpiryStore.setState({ selectedByIdentity: {} });
   mockMode.current = "live";
   mockUseBrokerConnected.mockReturnValue(false);
   apiMocks.getExpiry.mockResolvedValue({ expiry: ["24-APR-25", "01-MAY-25"] });
-  apiMocks.getOptionChain.mockResolvedValue(null);
+  apiMocks.getOptionChain.mockResolvedValue({
+    is_sample_data: true,
+    underlying_ltp: 24_750,
+    chain: Array.from({ length: 21 }, (_, index) => {
+      const strike = 24_250 + index * 50;
+      return { strike, ce: { oi: 1_000 + index }, pe: { oi: 1_100 + index } };
+    }),
+  });
   apiMocks.getQuotes.mockResolvedValue({ ltp: 0 });
   apiMocks.getMaxPain.mockResolvedValue({});
   apiMocks.getHistory.mockResolvedValue([]);
@@ -106,16 +115,16 @@ describe("OI Analytics heat view — disconnected (sample data)", () => {
     expect(screen.getByTestId("oianalytics-widget")).toBeTruthy();
   });
 
-  it("renders CE and PE row labels in the strike grid", () => {
+  it("renders CE and PE row labels in the strike grid", async () => {
     renderHeat();
-    expect(screen.getAllByText(/^CE$/i).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/^CE$/i)).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/^PE$/i).length).toBeGreaterThan(0);
   });
 
-  it("shows the colour legend (CE and PE labels in legend)", () => {
+  it("shows the colour legend (CE and PE labels in legend)", async () => {
     renderHeat();
     // At least two of each: the row label and the legend swatch label.
-    expect(screen.getAllByText(/^CE$/i).length).toBeGreaterThanOrEqual(2);
+    expect((await screen.findAllByText(/^CE$/i)).length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText(/^PE$/i).length).toBeGreaterThanOrEqual(2);
   });
 
@@ -129,8 +138,9 @@ describe("OI Analytics heat view — disconnected (sample data)", () => {
     expect(screen.getByTestId("symbol-select").textContent).toContain("NIFTY");
   });
 
-  it("renders more than 10 strike cells from the sample chain", () => {
+  it("renders more than 10 strike cells from the sample chain", async () => {
     renderHeat();
+    await screen.findByTestId("oi-heat-grid");
     const cells = screen
       .getAllByRole("generic")
       .filter((el) => el.className?.includes("tabular-nums") && /\d/.test(el.textContent ?? ""));
@@ -201,10 +211,10 @@ describe("OI Analytics heat view — connected with live data", () => {
     await waitFor(() => expect(screen.getByTestId("refresh-btn")).not.toBeDisabled());
   });
 
-  it("refresh button is disabled when disconnected", () => {
+  it("enables refresh once a listed expiry is selected, even when disconnected", async () => {
     mockUseBrokerConnected.mockReturnValue(false);
     renderHeat();
-    expect(screen.getByTestId("refresh-btn")).toBeDisabled();
+    await waitFor(() => expect(screen.getByTestId("refresh-btn")).not.toBeDisabled());
   });
 
   it("renders an absent live OI change as unavailable instead of +0", async () => {
@@ -233,14 +243,9 @@ describe("OI Analytics heat view — connected with live data", () => {
     });
     renderHeat();
 
-    const unavailable = (await screen.findAllByText("--"))[0];
-    expect(unavailable).toBeInTheDocument();
-    expect(screen.getByText("0")).toBeInTheDocument();
-    fireEvent.mouseEnter(unavailable.parentElement!);
-
-    const tooltip = await screen.findByTestId("oi-tooltip");
-    expect(tooltip.textContent).toContain("OI--");
-    expect(tooltip.textContent).not.toContain("PCR");
+    expect(await screen.findByText("No OI for this expiry")).toBeInTheDocument();
+    expect(screen.queryByTestId("oi-heat-grid")).not.toBeInTheDocument();
+    expect(screen.queryByText(/PCR:/)).not.toBeInTheDocument();
   });
 
   it("withholds max-OI markers when both live sides are incomplete", async () => {
@@ -309,10 +314,12 @@ describe("OI Analytics heat view — connected with live data", () => {
       ],
       underlying_ltp: 24750,
     });
-    const { container } = renderHeat();
+    renderHeat();
 
-    expect(await screen.findAllByText("0")).toHaveLength(4);
-    expect(container.querySelectorAll("[data-max-oi='true']")).toHaveLength(0);
+    expect(await screen.findByText("No OI for this expiry")).toBeInTheDocument();
+    expect(screen.queryByTestId("oi-heat-grid")).not.toBeInTheDocument();
+    expect(screen.queryByText(/PCR:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Max Pain:/)).not.toBeInTheDocument();
   });
 
   it("marks the strictly positive maxima when both live sides are complete", async () => {

@@ -3,6 +3,7 @@
 import { RefreshCw, TrendingDown, TrendingUp, X } from "lucide-react";
 import Chart from "@/components/Chart";
 import { ActionButton, LtpBlock } from "./ScalperPrimitives";
+import { EXPLORE_SCALPER_ORDER_HELPER } from "./exploreGate";
 import { fmtInt } from "./helpers";
 import type { IntervalValue, OrderAction, TickMap } from "./types";
 
@@ -21,6 +22,8 @@ export interface ScalperChartPanelProps {
   onOrder: (sym: string | null, exch: string, action: OrderAction) => void;
   onCloseAll: () => void;
   onCancelAll: () => void;
+  /** Explore: Buy/Sell stay disabled and never open Confirm. */
+  ordersArmed: boolean;
 }
 
 export function ScalperChartPanel({
@@ -38,6 +41,7 @@ export function ScalperChartPanel({
   onOrder,
   onCloseAll,
   onCancelAll,
+  ordersArmed,
 }: ScalperChartPanelProps) {
   const chartHeight = 120;
 
@@ -85,8 +89,8 @@ export function ScalperChartPanel({
         <div className="shrink-0 flex border-t border-border-default">
           <ActionButton
             onClick={() => onOrder(ceSymbol, optExch, "SELL")}
-            disabled={!ceSymbol}
-            title="Sell CE (Shift+←)"
+            disabled={!ordersArmed || !ceSymbol}
+            title={ordersArmed ? "Sell CE (Shift+←)" : EXPLORE_SCALPER_ORDER_HELPER}
             variant="sell"
             icon={<TrendingDown size={14} />}
             label="Sell CE"
@@ -95,8 +99,8 @@ export function ScalperChartPanel({
           />
           <ActionButton
             onClick={() => onOrder(ceSymbol, optExch, "BUY")}
-            disabled={!ceSymbol}
-            title="Buy CE (Shift+↑)"
+            disabled={!ordersArmed || !ceSymbol}
+            title={ordersArmed ? "Buy CE (Shift+↑)" : EXPLORE_SCALPER_ORDER_HELPER}
             variant="buy"
             icon={<TrendingUp size={14} />}
             label="Buy CE"
@@ -204,8 +208,8 @@ export function ScalperChartPanel({
         <div className="shrink-0 flex border-t border-border-default">
           <ActionButton
             onClick={() => onOrder(peSymbol, optExch, "BUY")}
-            disabled={!peSymbol}
-            title="Buy Put (Shift+↓)"
+            disabled={!ordersArmed || !peSymbol}
+            title={ordersArmed ? "Buy Put (Shift+↓)" : EXPLORE_SCALPER_ORDER_HELPER}
             variant="buy"
             icon={<TrendingUp size={14} />}
             label="Buy PE"
@@ -214,8 +218,8 @@ export function ScalperChartPanel({
           />
           <ActionButton
             onClick={() => onOrder(peSymbol, optExch, "SELL")}
-            disabled={!peSymbol}
-            title="Sell Put (Shift+→)"
+            disabled={!ordersArmed || !peSymbol}
+            title={ordersArmed ? "Sell Put (Shift+→)" : EXPLORE_SCALPER_ORDER_HELPER}
             variant="sell"
             icon={<TrendingDown size={14} />}
             label="Sell PE"

@@ -49,7 +49,7 @@ use strategies::spreads::{
 };
 
 // Convenience re-exports
-pub use session::{SessionConfig, SessionState, SessionTracker};
+pub use session::{nse_cash_phase, SessionConfig, SessionState, SessionTracker};
 pub use strategies::{
     options::{black_scholes_greeks, Greeks, OptionStrategyType, OptionsConfig, OptionsStrategy},
     pairs::PairsStrategy,

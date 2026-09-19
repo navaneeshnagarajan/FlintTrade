@@ -80,6 +80,14 @@ import { BrokerRateLimitsPanel } from "@/components/account/BrokerRateLimitsPane
 import { DEFAULT_OPENALGO_HOST, resolveOpenAlgoHost } from "@/lib/openAlgoDefaults";
 import { readOpenAlgoConfig } from "@/services/ftApi.openalgo";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useModeStore } from "@/stores/modeStore";
+import {
+  MIRROR_START_ERROR_HELPER,
+  MIRROR_START_LOADING_HELPER,
+  mirrorStartArmed,
+  mirrorStartHelper,
+  resolveAccountsLoadState,
+} from "./mirrorStartGate";
 
 // ─── Tab registry ────────────────────────────────────────────────────────────
 
@@ -688,8 +696,14 @@ function SummaryCard({
 
 function MirrorTab() {
   const queryClient = useQueryClient();
+  const mode = useModeStore((state) => state.mode);
 
-  const { data: accounts } = useQuery({
+  const {
+    data: accounts,
+    isError: accountsFailed,
+    error: accountsError,
+    refetch: refetchAccounts,
+  } = useQuery({
     queryKey: ["ditto", "accounts"],
     queryFn: getDittoAccounts,
   });
@@ -719,7 +733,21 @@ function MirrorTab() {
     },
   });
 
+  const accountsLoadState = resolveAccountsLoadState({
+    accounts,
+    isError: accountsFailed,
+  });
   const accountList = accounts?.accounts ?? [];
+  const activeAccounts = accountList.filter((account) => account.status === "active");
+  const startInput = {
+    mode,
+    sourceAccount,
+    targetCount: targetAccounts.size,
+    activeAccountCount: activeAccounts.length,
+    accountsLoadState,
+  };
+  const startHelper = mirrorStartHelper(startInput);
+  const startArmed = mirrorStartArmed(startInput);
   const status: MirrorStatus = mirrorStatus ?? {
     active: false,
     source_account: null,
@@ -805,13 +833,11 @@ function MirrorTab() {
               <SelectValue placeholder="Select source account" />
             </SelectTrigger>
             <SelectContent>
-              {accountList
-                .filter((a) => a.status === "active")
-                .map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.name} ({a.broker})
-                  </SelectItem>
-                ))}
+              {activeAccounts.map((a) => (
+                <SelectItem key={a.id} value={a.id}>
+                  {a.name} ({a.broker})
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -840,64 +866,98 @@ function MirrorTab() {
         <label className="text-xs font-medium text-text-secondary">
           Target Accounts ({targetAccounts.size} selected)
         </label>
-        <div className="rounded-lg border border-border-default divide-y divide-border-default">
-          {accountList
-            .filter((a) => a.status === "active" && a.id !== sourceAccount)
-            .map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                onClick={() => toggleTarget(a.id)}
-                disabled={status.active}
-                className={cn(
-                  "w-full flex items-center justify-between px-4 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-                  targetAccounts.has(a.id)
-                    ? "bg-accent/5"
-                    : "hover:bg-surface-hover",
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <div
-                    className={cn(
-                      "size-4 rounded border flex items-center justify-center",
-                      targetAccounts.has(a.id)
-                        ? "border-accent bg-accent"
-                        : "border-border-default",
-                    )}
-                  >
-                    {targetAccounts.has(a.id) && (
-                      <Check className="size-3 text-white" aria-hidden="true" strokeWidth={2} />
-                    )}
+        {accountsLoadState === "loading" ? (
+          <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-border-default py-12">
+            <RefreshCw className="size-5 text-text-muted animate-spin" />
+            <p className="text-sm text-text-muted">{MIRROR_START_LOADING_HELPER}</p>
+          </div>
+        ) : accountsLoadState === "error" ? (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-border-default py-12">
+            <AlertTriangle className="size-8 text-text-muted" />
+            <p className="text-sm text-text-secondary text-center max-w-xs">
+              {MIRROR_START_ERROR_HELPER}{" "}
+              <span className="text-text-muted">
+                {accountsError instanceof Error ? accountsError.message : "Unknown error"}
+              </span>
+            </p>
+            <Button size="sm" variant="outline" onClick={() => { void refetchAccounts(); }}>
+              <RefreshCw className="size-3.5" />
+              Retry
+            </Button>
+          </div>
+        ) : activeAccounts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-border-default py-12">
+            <Users className="size-8 text-text-muted" />
+            <p className="text-sm text-text-muted">No accounts connected</p>
+            <p className="text-xs text-text-disabled">
+              Position Mirror needs a master account and at least one follower.
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-border-default divide-y divide-border-default">
+            {activeAccounts
+              .filter((a) => a.id !== sourceAccount)
+              .map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => toggleTarget(a.id)}
+                  disabled={status.active}
+                  className={cn(
+                    "w-full flex items-center justify-between px-4 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                    targetAccounts.has(a.id)
+                      ? "bg-accent/5"
+                      : "hover:bg-surface-hover",
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={cn(
+                        "size-4 rounded border flex items-center justify-center",
+                        targetAccounts.has(a.id)
+                          ? "border-accent bg-accent"
+                          : "border-border-default",
+                      )}
+                    >
+                      {targetAccounts.has(a.id) && (
+                        <Check className="size-3 text-white" aria-hidden="true" strokeWidth={2} />
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm text-text-primary">{a.name}</p>
+                      <p className="text-xs text-text-muted">
+                        {a.broker} — Weight: {a.allocation_weight}x
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm text-text-primary">{a.name}</p>
-                    <p className="text-xs text-text-muted">
-                      {a.broker} — Weight: {a.allocation_weight}x
-                    </p>
-                  </div>
-                </div>
-                <Badge variant="outline" className="text-xxs h-5">
-                  {a.group}
-                </Badge>
-              </button>
-            ))}
-        </div>
+                  <Badge variant="outline" className="text-xxs h-5">
+                    {a.group}
+                  </Badge>
+                </button>
+              ))}
+          </div>
+        )}
       </div>
 
-      {/* Start button */}
+      {/* Start button — muted until Live + source + ≥1 target (FT-DITTO-002) */}
       {!status.active && (
         <Button
-          onClick={() => startMutation.mutate()}
-          disabled={
-            !sourceAccount ||
-            targetAccounts.size === 0 ||
-            startMutation.isPending
-          }
+          onClick={() => {
+            if (!startArmed) return;
+            startMutation.mutate();
+          }}
+          disabled={!startArmed || startMutation.isPending}
+          variant={startArmed ? "default" : "outline"}
+          title={startHelper ?? undefined}
           className="w-full"
         >
           <Play className="size-4" />
           Start Position Mirroring
         </Button>
+      )}
+
+      {startHelper && (
+        <p className="text-xs text-text-disabled">{startHelper}</p>
       )}
 
       {startMutation.isError && (

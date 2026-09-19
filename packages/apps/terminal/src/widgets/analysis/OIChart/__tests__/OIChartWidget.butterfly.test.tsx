@@ -101,6 +101,7 @@ vi.mock("lightweight-charts", () => ({
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
+import { useOptionExpiryStore } from "@/stores/optionExpiryStore";
 import OIChartWidget from "../OIChartWidget";
 
 const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
@@ -145,6 +146,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useOptionExpiryStore.setState({ selectedByIdentity: {} });
   plotlyMocks.props = [];
   chartMocks.crosshairCallbacks = [];
   chartMocks.createChartOptions = [];
@@ -177,7 +179,8 @@ describe("OI Analytics butterfly view", () => {
 
     renderButterfly();
 
-    expect(await screen.findByText(/select an expiry to load oi data/i)).toBeInTheDocument();
+    expect(await screen.findByText("No expiries for this symbol")).toBeInTheDocument();
+    expect(screen.queryByTestId("plotly-chart")).not.toBeInTheDocument();
   });
 
   it("renders the butterfly profile and the PCR / Max Pain readout from live data", async () => {

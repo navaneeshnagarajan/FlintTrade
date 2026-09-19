@@ -24,6 +24,7 @@ from flinttrade_engine.market_hours import (
     get_standard_hours,
     is_special_session,
     list_upcoming_sessions,
+    nse_cash_phase,
 )
 
 
@@ -102,6 +103,27 @@ class TestStandardHours:
     def test_unknown_exchange_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown exchange"):
             get_standard_hours("INVALID")
+
+    def test_nfo_runs_to_1540(self) -> None:
+        open_t, close_t = get_standard_hours("NFO")
+        assert open_t == time(9, 15)
+        assert close_t == time(15, 40)
+
+
+class TestNseCashPhase:
+    def test_phase_boundaries(self) -> None:
+        assert nse_cash_phase(10 * 60) == "continuous"
+        assert nse_cash_phase(15 * 60 + 14) == "continuous"
+        assert nse_cash_phase(15 * 60 + 15) == "cas"
+        assert nse_cash_phase(15 * 60 + 30) == "cas"
+        assert nse_cash_phase(15 * 60 + 35) == "matching"
+        assert nse_cash_phase(15 * 60 + 50) == "post-close"
+        assert nse_cash_phase(16 * 60) == "closed"
+
+    def test_cas_is_not_closed_or_continuous(self) -> None:
+        assert nse_cash_phase(15 * 60 + 20) == "cas"
+        assert nse_cash_phase(15 * 60 + 20) != "closed"
+        assert nse_cash_phase(15 * 60 + 20) != "continuous"
 
 
 # ---------------------------------------------------------------------------

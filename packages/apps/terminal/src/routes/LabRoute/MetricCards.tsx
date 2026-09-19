@@ -29,9 +29,11 @@ export interface MetricCardProps {
   label: string;
   value: string;
   positive?: boolean | null;
+  /** Quiet basis note under the figure (not a second mystery total). */
+  subtitle?: string;
 }
 
-export function MetricCard({ label, value, positive }: MetricCardProps) {
+export function MetricCard({ label, value, positive, subtitle }: MetricCardProps) {
   const valueColor =
     positive === true
       ? "text-profit"
@@ -46,6 +48,9 @@ export function MetricCard({ label, value, positive }: MetricCardProps) {
       <p className={`text-sm font-mono font-semibold ${valueColor}`}>
         {value}
       </p>
+      {subtitle ? (
+        <p className="text-xxs text-text-muted font-normal">{subtitle}</p>
+      ) : null}
     </GlassCard>
   );
 }

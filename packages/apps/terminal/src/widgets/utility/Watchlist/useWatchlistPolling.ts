@@ -16,12 +16,14 @@ interface UseWatchlistPollingResult {
   quotes:       QuoteMap;
   sparkHistory: SparkMap;
   fetchError:   string | null;
+  isLoading:    boolean;
 }
 
 export function useWatchlistPolling(watchlist: WatchlistItem[]): UseWatchlistPollingResult {
   const [quotes, setQuotes]           = useState<QuoteMap>({});
   const [sparkHistory, setSparkHistory] = useState<SparkMap>({});
   const [fetchError, setFetchError]   = useState<string | null>(null);
+  const [isLoading, setIsLoading]     = useState(watchlist.length > 0);
   const pollRef                       = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const watchlistRef = useRef(watchlist);
@@ -41,7 +43,10 @@ export function useWatchlistPolling(watchlist: WatchlistItem[]): UseWatchlistPol
   const fetchQuotes = useCallback(async () => {
     const currentWatchlist = watchlistRef.current;
     const symbols = instrumentsRef.current;
-    if (symbols.length === 0) return;
+    if (symbols.length === 0) {
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const data = await getMultiQuotes(symbols);
@@ -102,6 +107,8 @@ export function useWatchlistPolling(watchlist: WatchlistItem[]): UseWatchlistPol
       }
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : "Quote fetch failed");
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 
@@ -123,5 +130,5 @@ export function useWatchlistPolling(watchlist: WatchlistItem[]): UseWatchlistPol
      
   }, [fetchQuotes, instrumentsMemo]);
 
-  return { quotes, sparkHistory, fetchError };
+  return { quotes, sparkHistory, fetchError, isLoading };
 }

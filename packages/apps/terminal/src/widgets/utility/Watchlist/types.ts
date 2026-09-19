@@ -2,7 +2,7 @@
  * WatchlistWidget — shared types, constants, and helpers.
  */
 
-import type { Quote } from "@/types/api";
+import type { Quote, WsTick } from "@/types/api";
 import { z } from "zod";
 import { safeParse } from "@/lib/safeParse";
 import { compileFormula, type CompiledFormula } from "./formulaEngine";
@@ -136,6 +136,38 @@ const FMT = new Intl.NumberFormat("en-IN", {
   maximumFractionDigits: 2,
   minimumFractionDigits: 2,
 });
+
+/**
+ * Merge a ticker tick-atom (Explore demo feed / live WS) with an optional REST
+ * quote. LTP and % change prefer the tick so Watchlist matches the ticker tape.
+ */
+export function resolveWatchlistQuoteFields(
+  tick: WsTick | null | undefined,
+  quote: PartialQuote | null | undefined,
+): {
+  ltp: number | null;
+  prevClose: number | null;
+  chgAbs: number | null;
+  chgPct: number | null;
+} {
+  const ltp = tick?.ltp ?? quote?.ltp ?? quote?.close ?? null;
+  const prevClose =
+    tick?.prevClose ?? quote?.prev_close ?? tick?.close ?? quote?.close ?? null;
+  const chgAbs =
+    ltp != null && prevClose != null
+      ? ltp - prevClose
+      : tick?.change ?? quote?.change ?? null;
+  const chgPct =
+    chgAbs != null && prevClose
+      ? (chgAbs / prevClose) * 100
+      : tick?.pct ?? quote?.pct ?? null;
+  return {
+    ltp: ltp ?? null,
+    prevClose: prevClose ?? null,
+    chgAbs: chgAbs ?? null,
+    chgPct: chgPct ?? null,
+  };
+}
 
 export function fmtPrice(v: number | null | undefined): string {
   if (v == null || isNaN(v)) return "—";
