@@ -299,6 +299,13 @@ continuous to 15:30. There is no flat "Market open until 15:30" or "VWAP
 last 30 min" closing-price copy. The September 2026 consultation stays out
 of the UI.
 
+**Feed freshness (FT-CORE-002).** TopBar, the ticker strip, and Market Clock
+show a source chip: **Live**, **Delayed**, or **Sample**. Quotes are never
+silently stale. When the feed is stale or the source is unknown, those
+surfaces show muted **Stale** or **Unknown** plus the age when it is known.
+This is provenance, not execution mode — Live mode does not imply a Live
+feed (Mode honesty).
+
 **Compact / Comfortable.** New installs default to Comfortable (full labels).
 Compact on a desk Trade viewport (~1280 and wider) keeps chart, order pad,
 and positions primary; the ticker strip, full tool ribbon, and watchlist /
@@ -569,6 +576,12 @@ Market Clock uses the same CAS-aware cash timeline as the TopBar
 09:15–15:30 "open" window (FT-CORE-001, as of Aug 2026). When F&O
 still runs after cash continuous ends, the TopBar may show `F&O open · till
 15:40`. Non-CAS cash still continuous to 15:30.
+
+Market Clock, TopBar, and the ticker strip also show feed freshness
+(FT-CORE-002): **Live**, **Delayed**, or **Sample**. Stale or unknown
+quotes show muted **Stale** / **Unknown** plus age when known — never a
+silent-stale tape. This is independent of Explore / Practice / Live
+execution mode.
 
 On Explore `/trade` Watchlist, checked LTP and % change columns
 use the same sample quotes as the ticker tape (Sample data badge).

@@ -86,6 +86,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Feed-freshness honesty (FT-CORE-002).**
+  TopBar, ticker, and Market Clock show a source
+  chip: Live · Delayed · Sample — never silent-stale.
+  Stale or unknown feeds show muted Stale / Unknown
+  plus age when known. Feed provenance stays
+  separate from Explore / Practice / Live mode
+  (Mode honesty).
+
 - **Resource Hub User Guide first-open honesty (FT-LEARN-003).**
   Explore `/learn` → Resource Hub → User Guide shows
   `Loading document…` while the local backend/doc
