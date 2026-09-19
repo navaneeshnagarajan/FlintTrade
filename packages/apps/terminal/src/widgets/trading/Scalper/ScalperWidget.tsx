@@ -101,7 +101,7 @@ function ScalperWidget(props: WidgetProps) {
   // FT-TRADE-011: unpinned Scalper follows the same FDC3 user channel
   // Watchlist broadcasts on (red = selectedSymbolAtom). A null bus —
   // empty watchlist, no click yet — must not silently retarget.
-  const liveChannel = useChannelMembership(props.api.id, props.params);
+  const liveChannel = useChannelMembership(props.api?.id ?? "scalper-detached", props.params);
   const channelId = isPinned ? null : liveChannel;
   const channelInstrument = useChannelInstrument(channelId);
   const followedSymbolRef = useRef(symbol);
