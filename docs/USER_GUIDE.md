@@ -498,10 +498,16 @@ in use.
 On Practice or Explore `/invest` → Holdings with no broker, the header
 badge matches the visible table (`N holdings`) and a muted Sample chip
 discloses sample data. The badge is never `0 holdings` over a populated
-sample table. Dashboard and "N stocks" use that same N. A connected
-broker with no positions shows `0 holdings` and an honest empty state
-— no sample table under a zero badge. Connected positions use the live
-count only, with no Sample chip (FT-TRADE-010).
+sample table. Dashboard and "N stocks" use that same N. Practice waits
+until the holdings query has settled empty before the sample fallback,
+so a cold load does not flash the sample N over a pending book.
+Dashboard `Net Worth (Equity + Cash)` uses that same shared demo book
+as Holdings. A broker read failure shows muted `Failed to load holdings`
+plus `Refresh` — never `0 holdings`, `No holdings`, or a sample table
+under a failed load. A connected broker with no positions shows
+`0 holdings` and an honest empty state (`No holdings`) — no sample
+table under a zero badge. Connected positions use the live count only,
+with no Sample chip (FT-TRADE-010).
 
 ### The widgets (71)
 

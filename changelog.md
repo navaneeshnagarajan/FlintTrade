@@ -72,10 +72,17 @@ changelog rebuilds itself from the first release cut after this baseline.
   shows `N holdings` for the rows currently in the table
   plus a muted Sample chip — never `0 holdings` over a
   10-row sample table. Dashboard and "N stocks" use the
-  same N. A connected broker with no positions shows
-  `0 holdings` and an honest empty state (no sample
-  table under a zero badge). Connected positions use
-  the live count only, with no Sample chip.
+  same N. Practice waits until the holdings query has
+  settled empty before the sample fallback, so a cold
+  load does not flash the wrong N. Dashboard
+  `Net Worth (Equity + Cash)` uses the same shared demo
+  book as Holdings. A broker read failure shows muted
+  `Failed to load holdings` plus `Refresh` — never
+  `0 holdings`, `No holdings`, or a sample table under
+  a failed load. A connected broker with no positions
+  shows `0 holdings` and an honest empty state (no
+  sample table under a zero badge). Connected positions
+  use the live count only, with no Sample chip.
 
 - **Explore Execution Logs mode honesty (FT-AUTO-003).**
   Explore `/automate` → Execution Logs shows the muted
