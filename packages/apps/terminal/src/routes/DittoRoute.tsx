@@ -88,6 +88,7 @@ import {
   mirrorStartHelper,
   resolveAccountsLoadState,
 } from "./mirrorStartGate";
+import { killAllArmed, killAllHelper, resolveRiskLoadState } from "./killAllGate";
 
 // ─── Tab registry ────────────────────────────────────────────────────────────
 
@@ -974,6 +975,7 @@ function MirrorTab() {
 function RiskTab() {
   const [killDialogOpen, setKillDialogOpen] = useState(false);
   const queryClient = useQueryClient();
+  const mode = useModeStore((state) => state.mode);
 
   const { data: riskData, isLoading, isError, error } = useQuery({
     queryKey: ["ditto", "risk"],
@@ -991,8 +993,9 @@ function RiskTab() {
 
   const risk: DittoRiskData | null = riskData ?? null;
   const hasManagedAccounts = (risk?.accounts.length ?? 0) > 0;
-  // Snapshot failed: keep the emergency control available. Empty snapshot: disarm.
-  const killAllArmed = risk === null || hasManagedAccounts;
+  const riskLoadState = resolveRiskLoadState({ risk, isError });
+  const killHelper = killAllHelper({ mode, riskLoadState });
+  const killArmed = killAllArmed({ mode, riskLoadState, hasManagedAccounts });
 
   if (isLoading) {
     return (
@@ -1026,26 +1029,29 @@ function RiskTab() {
         <div
           className={cn(
             "rounded-lg border p-4",
-            killAllArmed ? "border-loss/30 bg-loss/5" : "border-border-default bg-surface-card",
+            killArmed ? "border-loss/30 bg-loss/5" : "border-border-default bg-surface-card",
           )}
         >
-          <p className={cn("text-xs mb-2", killAllArmed ? "text-loss" : "text-text-muted")}>
+          <p className={cn("text-xs mb-2", killArmed ? "text-loss" : "text-text-muted")}>
             Emergency Action
           </p>
           <Button
-            variant={killAllArmed ? "destructive" : "outline"}
+            variant={killArmed ? "destructive" : "outline"}
             size="sm"
             className="w-full"
-            disabled={!killAllArmed}
-            title={killAllArmed ? undefined : "No managed accounts to flatten"}
+            disabled={!killArmed}
+            title={killHelper ?? (killArmed ? undefined : "No managed accounts to flatten")}
             onClick={() => {
-              if (!killAllArmed) return;
+              if (!killArmed) return;
               setKillDialogOpen(true);
             }}
           >
             <AlertTriangle className="size-3.5" />
             Kill All Positions
           </Button>
+          {killHelper && (
+            <p className="mt-2 text-xs text-text-disabled">{killHelper}</p>
+          )}
         </div>
       </div>
 

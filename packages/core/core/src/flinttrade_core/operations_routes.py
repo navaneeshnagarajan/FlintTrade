@@ -1606,25 +1606,58 @@ def api_news() -> tuple[Any, int]:
 # ------------------------------------------------------------------
 
 
-def _explore_ditto_mirror_blocked() -> tuple[Any, int] | None:
-    """Reject Explore-mode mirror starts (FT-DITTO-002).
+_KILL_ALL_RUNTIME_UNAVAILABLE = "Risk runtime unavailable — Kill All disabled."
 
-    JWT claim or ``X-FlintTrade-Mode`` header — same honesty class as Telegram.
-    """
+
+def _ditto_explore_mode() -> tuple[str, str] | None:
+    """Return JWT/header Explore labels when either claims Explore."""
     from flinttrade_engine.mode_guard import current_mode  # noqa: PLC0415
 
     jwt_mode = (current_mode() or "").strip().lower()
     header_mode = (request.headers.get("X-FlintTrade-Mode") or "").strip().lower()
     if jwt_mode != "explore" and header_mode != "explore":
         return None
+    return jwt_mode or "unknown", header_mode or "-"
+
+
+def _explore_ditto_mirror_blocked() -> tuple[Any, int] | None:
+    """Reject Explore-mode mirror starts (FT-DITTO-002).
+
+    JWT claim or ``X-FlintTrade-Mode`` header — same honesty class as Telegram.
+    """
+    explore = _ditto_explore_mode()
+    if explore is None:
+        return None
+    jwt_mode, header_mode = explore
     logger.info(
         "Blocked Ditto mirror start (mode=%s header=%s)",
-        jwt_mode or "unknown",
-        header_mode or "-",
+        jwt_mode,
+        header_mode,
     )
     return jsonify({
         "status": "error",
         "message": "Mirroring is blocked in Explore (sample-only).",
+        "code": "mode_blocked",
+    }), 403
+
+
+def _explore_ditto_kill_all_blocked() -> tuple[Any, int] | None:
+    """Reject Explore-mode Kill All (FT-DITTO-003).
+
+    JWT claim or ``X-FlintTrade-Mode`` header — same honesty class as mirror Start.
+    """
+    explore = _ditto_explore_mode()
+    if explore is None:
+        return None
+    jwt_mode, header_mode = explore
+    logger.info(
+        "Blocked Ditto kill-all (mode=%s header=%s)",
+        jwt_mode,
+        header_mode,
+    )
+    return jsonify({
+        "status": "error",
+        "message": _KILL_ALL_RUNTIME_UNAVAILABLE,
         "code": "mode_blocked",
     }), 403
 
@@ -2163,6 +2196,9 @@ def ditto_risk() -> tuple[Any, int]:
 @operations_bp.route("/ditto/kill-all", methods=["POST"])
 def ditto_kill_all() -> tuple[Any, int]:
     """Cancel and flatten all managed accounts through gated emergency writes."""
+    blocked = _explore_ditto_kill_all_blocked()
+    if blocked is not None:
+        return blocked
     jwt_payload, auth_error = _authenticated_live_operator()
     if auth_error is not None:
         return auth_error

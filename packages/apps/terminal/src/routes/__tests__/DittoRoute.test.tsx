@@ -83,6 +83,7 @@ import {
   MIRROR_START_SELECT_HELPER,
   PRACTICE_MIRROR_START_HELPER,
 } from "../mirrorStartGate";
+import { RISK_RUNTIME_UNAVAILABLE_HELPER } from "../killAllGate";
 
 const mockGet = get as unknown as ReturnType<typeof vi.fn>;
 const mockGetAccounts = getDittoAccounts as ReturnType<typeof vi.fn>;
@@ -345,25 +346,55 @@ describe("DittoRoute", () => {
     const killAll = await screen.findByRole("button", { name: "Kill All Positions" });
     expect(killAll).toBeDisabled();
     expect(killAll).toHaveAttribute("data-variant", "outline");
+    expect(killAll).toHaveAttribute("title", RISK_RUNTIME_UNAVAILABLE_HELPER);
     expect(screen.getByText("No managed accounts")).toBeInTheDocument();
     expect(
       screen.getByText("Kill All stays disarmed until an account is added."),
     ).toBeInTheDocument();
+    expect(screen.getByText(RISK_RUNTIME_UNAVAILABLE_HELPER)).toBeInTheDocument();
 
     fireEvent.click(killAll);
     expect(screen.queryByText("Confirm Kill All")).not.toBeInTheDocument();
     expect(mockKillAll).not.toHaveBeenCalled();
   });
 
-  it("keeps Kill All Positions armed when managed accounts have open positions", async () => {
+  it("always disarms Kill All in Explore even when the snapshot lists accounts (FT-DITTO-003)", async () => {
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByText("Risk Dashboard"));
+
+    const killAll = await screen.findByRole("button", { name: "Kill All Positions" });
+    expect(killAll).toBeDisabled();
+    expect(killAll).toHaveAttribute("data-variant", "outline");
+    expect(killAll).toHaveAttribute("title", RISK_RUNTIME_UNAVAILABLE_HELPER);
+    expect(screen.getByText(RISK_RUNTIME_UNAVAILABLE_HELPER)).toBeInTheDocument();
+
+    fireEvent.click(killAll);
+    expect(screen.queryByText("Confirm Kill All")).not.toBeInTheDocument();
+    expect(mockKillAll).not.toHaveBeenCalled();
+  });
+
+  it("keeps Kill All Positions armed when Live has a live runtime and managed accounts", async () => {
+    useModeStore.setState({ mode: "live" });
     render(<DittoRoute />, { wrapper: createWrapper() });
     fireEvent.click(screen.getByText("Risk Dashboard"));
 
     const killAll = await screen.findByRole("button", { name: "Kill All Positions" });
     expect(killAll).toBeEnabled();
     expect(killAll).toHaveAttribute("data-variant", "destructive");
+    expect(screen.queryByText(RISK_RUNTIME_UNAVAILABLE_HELPER)).not.toBeInTheDocument();
     fireEvent.click(killAll);
     expect(screen.getByText("Confirm Kill All")).toBeInTheDocument();
+  });
+
+  it("keeps Kill All Positions armed when Practice has a live runtime and managed accounts", async () => {
+    useModeStore.setState({ mode: "practice" });
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByText("Risk Dashboard"));
+
+    const killAll = await screen.findByRole("button", { name: "Kill All Positions" });
+    expect(killAll).toBeEnabled();
+    expect(killAll).toHaveAttribute("data-variant", "destructive");
+    expect(screen.queryByText(RISK_RUNTIME_UNAVAILABLE_HELPER)).not.toBeInTheDocument();
   });
 
   it("displays aggregate P&L in risk tab", async () => {
@@ -667,10 +698,31 @@ describe("DittoRoute", () => {
       "Risk snapshot unavailable",
     );
     expect(screen.queryByText("₹0")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Kill All Positions" })).toBeEnabled();
+    const killAll = screen.getByRole("button", { name: "Kill All Positions" });
+    expect(killAll).toBeDisabled();
+    expect(killAll).toHaveAttribute("data-variant", "outline");
+    expect(screen.getByText(RISK_RUNTIME_UNAVAILABLE_HELPER)).toBeInTheDocument();
+  });
+
+  it("disarms Kill All in Live when the risk runtime is unavailable (FT-DITTO-003)", async () => {
+    useModeStore.setState({ mode: "live" });
+    mockGetRisk.mockRejectedValue(new Error("Ditto runtime unavailable"));
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByText("Risk Dashboard"));
+
+    const killAll = await screen.findByRole("button", { name: "Kill All Positions" });
+    expect(killAll).toBeDisabled();
+    expect(killAll).toHaveAttribute("data-variant", "outline");
+    expect(killAll).toHaveAttribute("title", RISK_RUNTIME_UNAVAILABLE_HELPER);
+    expect(screen.getByText(RISK_RUNTIME_UNAVAILABLE_HELPER)).toBeInTheDocument();
+
+    fireEvent.click(killAll);
+    expect(screen.queryByText("Confirm Kill All")).not.toBeInTheDocument();
+    expect(mockKillAll).not.toHaveBeenCalled();
   });
 
   it("keeps the kill confirmation open and reports an incomplete flatten", async () => {
+    useModeStore.setState({ mode: "live" });
     mockKillAll.mockRejectedValue(new Error("One or more managed accounts could not be fully flattened"));
     render(<DittoRoute />, { wrapper: createWrapper() });
     fireEvent.click(screen.getByText("Risk Dashboard"));
