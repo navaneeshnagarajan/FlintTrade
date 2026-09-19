@@ -19,6 +19,7 @@ import {
   LLM_NOT_CONFIGURED_MESSAGE,
   advisorAvailabilityToChrome,
   advisorLlmChromeLabel,
+  alignAdvisorChromeWithManagedOllama,
   alignAdvisorChromeWithSettingsHydration,
   consumeAdvisorSse,
   isAdvisorChatReady,
@@ -26,6 +27,7 @@ import {
   probeAdvisorAvailability,
   readAdvisorHttpError,
   requestAdvisorReply,
+  selectsManagedOllama,
   streamAdvisorChat,
 } from "../advisorChat";
 
@@ -77,14 +79,40 @@ describe("advisorChat", () => {
     expect(advisorAvailabilityToChrome("unknown")).toBe("error");
 
     expect(advisorLlmChromeLabel("unconfigured")).toBe("Not configured");
+    expect(advisorLlmChromeLabel("not_installed")).toBe("Not installed");
     expect(advisorLlmChromeLabel("ready")).toBe("Connected");
     expect(advisorLlmChromeLabel("disconnected")).toBe("Disconnected");
     expect(advisorLlmChromeLabel("error")).toBe("Error");
     expect(isAdvisorChatReady("unconfigured")).toBe(false);
+    expect(isAdvisorChatReady("not_installed")).toBe(false);
     expect(isAdvisorChatReady("disconnected")).toBe(false);
     expect(isAdvisorChatReady("error")).toBe(false);
     expect(isAdvisorChatReady("loading")).toBe(false);
     expect(isAdvisorChatReady("ready")).toBe(true);
+  });
+
+  it("treats a provider string of ollama as Managed Ollama", () => {
+    expect(selectsManagedOllama("ollama")).toBe(true);
+    expect(selectsManagedOllama(" Ollama ")).toBe(true);
+    expect(selectsManagedOllama("openai")).toBe(false);
+    expect(selectsManagedOllama("")).toBe(false);
+  });
+
+  it("never maps Managed Ollama Not installed to Connected", () => {
+    expect(alignAdvisorChromeWithManagedOllama("ready", "not_installed")).toBe("not_installed");
+    expect(alignAdvisorChromeWithManagedOllama("unconfigured", "not_installed")).toBe("not_installed");
+    expect(alignAdvisorChromeWithManagedOllama("loading", "not_installed")).toBe("not_installed");
+    expect(alignAdvisorChromeWithManagedOllama("ready", "installed")).toBe("ready");
+    expect(alignAdvisorChromeWithManagedOllama("unconfigured", "installed")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithManagedOllama("ready", "not_applicable")).toBe("ready");
+    expect(alignAdvisorChromeWithManagedOllama("ready", "loading")).toBe("loading");
+    expect(alignAdvisorChromeWithManagedOllama("disconnected", "loading")).toBe("disconnected");
+    expect(alignAdvisorChromeWithManagedOllama("ready", "unknown")).toBe("error");
+    expect(alignAdvisorChromeWithManagedOllama("unconfigured", "unknown")).toBe("unconfigured");
+    expect(isAdvisorChatReady(alignAdvisorChromeWithManagedOllama("ready", "not_installed"))).toBe(false);
+    expect(advisorLlmChromeLabel(alignAdvisorChromeWithManagedOllama("ready", "not_installed"))).toBe(
+      "Not installed",
+    );
   });
 
   it("does not keep Connected while a remount refetch of cached configured is in flight", () => {

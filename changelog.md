@@ -93,14 +93,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Fixed
 
 - **Connected badge matches LLM install state (FT-AI-004).**
-  Locked UX (product not in this tip): `/ai` Chat
-  (AI Hub) follows the real LLM status from
+  `/ai` Chat (AI Hub) follows the real LLM status from
   Settings → AI / `#llm`, including Managed Ollama
   install state — not a green **Connected** while
   Settings shows **Not installed**. Managed Ollama
-  **Not installed** shows **Not configured** /
-  **Not installed** with a primary **Open Settings → AI**
-  CTA to `/settings#llm`. Composer input and Send stay
+  **Not installed** shows **Not installed** (warning
+  badge, not green) with a primary **Open Settings → AI**
+  CTA to `/settings#llm`. Unconfigured stays
+  **Not configured**. Composer input and Send stay
   disabled until the runtime is installed and
   configured — the same bar as FT-AI-002. A provider
   string of ollama is not Connected while the managed

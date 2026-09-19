@@ -878,14 +878,13 @@ Returning to Chat after you save Settings → AI re-checks readiness (advisor
 and Settings hydration), so the **Not configured** gate should not stay stuck
 on an outdated result.
 
-Locked UX for install state (FT-AI-004; product not in this tip): when
-Settings → AI shows Managed Ollama **Not installed**, AI Hub `/ai` Chat
-must not show a green **Connected** badge. The badge follows the real
-LLM status: **Not configured** / **Not installed**, with the primary
-**Open Settings → AI** CTA to `/settings#llm`. Composer input and Send stay
-disabled until the runtime is installed and configured — the same bar as
-FT-AI-002. A provider string of ollama is not Connected while the managed
-runtime is absent.
+When Settings → AI shows Managed Ollama **Not installed**, AI Hub `/ai`
+Chat does not show a green **Connected** badge (FT-AI-004). The badge
+follows the real LLM status: **Not configured** / **Not installed**,
+with the primary **Open Settings → AI** CTA to `/settings#llm`.
+Composer input and Send stay disabled until the runtime is installed
+and configured — the same bar as FT-AI-002. A provider string of
+ollama is not Connected while the managed runtime is absent.
 
 When unconfigured or not installed, the warning badge is **Not configured**
 or **Not installed**, the empty state is **LLM not configured** (or
@@ -1049,10 +1048,9 @@ broken session; configure a provider in Live or Practice on this machine.
 Live and Practice still disable editing on a real load failure ("AI
 settings could not be loaded") to protect a saved configuration, and
 offer **Retry**. Selecting Managed Ollama while the runtime is absent
-shows **Not installed** — that is not a Connected advisor. Locked UX
-(FT-AI-004; product not in this tip): AI Hub `/ai` Chat follows that
-install state and must not paint green **Connected** until the runtime
-is installed and configured.
+shows **Not installed** — that is not a Connected advisor. AI Hub
+`/ai` Chat follows that install state (FT-AI-004) and does not paint
+green **Connected** until the runtime is installed and configured.
 
 `/settings#leverage` always shows real leverage content or an honest
 empty. When the broker snapshot is available, the tiles show the
@@ -1142,12 +1140,12 @@ empty state, the header still offers **Retry** and **Open Settings → AI**.
 The Settings empty-state wording stays distinct from Chat's **LLM not
 configured**; they are aligned for readiness.
 
-Locked UX when Settings → AI shows Managed Ollama **Not installed**
-(FT-AI-004; product not in this tip): AI Hub must not show a green
-**Connected** badge in that state. The badge is **Not configured** /
-**Not installed**, the Settings CTA stays visible, and the composer
-stays gated until the runtime is installed and configured. A provider
-string of ollama is not Connected while the managed runtime is absent.
+When Settings → AI shows Managed Ollama **Not installed** (FT-AI-004),
+AI Hub does not show a green **Connected** badge. The badge is
+**Not configured** / **Not installed**, the Settings CTA stays
+visible, and the composer stays gated until the runtime is installed
+and configured. A provider string of ollama is not Connected while
+the managed runtime is absent.
 A configured but broken probe shows **Error** or **Disconnected** with
 **Retry**. Returning to Chat after saving Settings → AI re-checks
 readiness (advisor and Settings hydration), so the gate should not stay

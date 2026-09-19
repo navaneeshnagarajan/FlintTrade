@@ -92,6 +92,30 @@ export function llmHydrationFailureState(): Exclude<LlmHydrationState, "loading"
   return "error";
 }
 
+export interface SettingsLlmReadiness {
+  hydration: LlmHydrationState;
+  provider: string;
+}
+
+/**
+ * Probe Settings `#llm` the same way the Settings page hydrates, including
+ * the selected provider so Chat can follow Managed Ollama install state.
+ */
+export async function probeSettingsLlmReadiness(): Promise<SettingsLlmReadiness> {
+  try {
+    const payload = await readLlmConfig();
+    if (!isAcceptedLlmConfigStatus(payload.status)) {
+      return { hydration: llmHydrationFailureState(), provider: "" };
+    }
+    return {
+      hydration: "ready",
+      provider: String(payload.data?.provider ?? "").trim(),
+    };
+  } catch {
+    return { hydration: llmHydrationFailureState(), provider: "" };
+  }
+}
+
 /**
  * Probe Settings `#llm` the same way the Settings page hydrates.
  *
@@ -99,15 +123,8 @@ export function llmHydrationFailureState(): Exclude<LlmHydrationState, "loading"
  * session. Chat uses this so it cannot look Connected while Settings is empty.
  */
 export async function probeSettingsLlmHydration(): Promise<LlmHydrationState> {
-  try {
-    const payload = await readLlmConfig();
-    if (!isAcceptedLlmConfigStatus(payload.status)) {
-      return llmHydrationFailureState();
-    }
-    return "ready";
-  } catch {
-    return llmHydrationFailureState();
-  }
+  const { hydration } = await probeSettingsLlmReadiness();
+  return hydration;
 }
 
 export interface TelegramData {

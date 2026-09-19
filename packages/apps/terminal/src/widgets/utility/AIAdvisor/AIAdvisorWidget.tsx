@@ -695,7 +695,7 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
             <Trash2 size={11} />
           </button>
         )}
-        {(chrome === "unconfigured" || chrome === "disconnected" || chrome === "error") && messages.length > 0 && (
+        {(chrome === "unconfigured" || chrome === "not_installed" || chrome === "disconnected" || chrome === "error") && messages.length > 0 && (
           <>
             <button
               type="button"
@@ -722,7 +722,7 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
             "text-xxs font-medium px-1.5 py-0.5 rounded border",
             chrome === "ready"
               ? "text-profit bg-profit/10 border-profit/30"
-              : chrome === "unconfigured"
+              : chrome === "unconfigured" || chrome === "not_installed"
                 ? "text-warning bg-warning/10 border-warning/30"
                 : chrome === "loading"
                   ? "text-text-muted bg-surface-hover border-border-default"
@@ -841,13 +841,17 @@ function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps)
               <Loader2 size={28} className="text-text-muted animate-spin" />
               <p className="text-xs text-text-muted">Checking advisor…</p>
             </>
-          ) : chrome === "unconfigured" ? (
+          ) : chrome === "unconfigured" || chrome === "not_installed" ? (
             <>
               <Settings size={28} className="text-text-muted" />
               <div>
-                <p className="text-xs text-text-secondary">LLM not configured</p>
+                <p className="text-xs text-text-secondary">
+                  {chrome === "not_installed" ? "Not installed" : "LLM not configured"}
+                </p>
                 <p className="text-xs text-text-muted mt-1 leading-relaxed max-w-56">
-                  Configure your LLM provider in Settings → AI to enable the AI trading advisor.
+                  {chrome === "not_installed"
+                    ? "Managed Ollama is not installed. Open Settings → AI to install the local runtime."
+                    : "Configure your LLM provider in Settings → AI to enable the AI trading advisor."}
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-2">

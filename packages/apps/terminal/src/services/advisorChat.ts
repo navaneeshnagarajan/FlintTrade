@@ -41,7 +41,25 @@ export type AdvisorAvailability = "configured" | "unconfigured" | "unknown" | "u
  * probe must never look green — including Explore / demo-user sessions that
  * still have a stale local provider string.
  */
-export type AdvisorLlmChrome = "loading" | "unconfigured" | "ready" | "disconnected" | "error";
+export type AdvisorLlmChrome =
+  | "loading"
+  | "unconfigured"
+  | "not_installed"
+  | "ready"
+  | "disconnected"
+  | "error";
+
+/** Managed Ollama runtime install, aligned with Settings → AI. */
+export type ManagedOllamaInstall =
+  | "loading"
+  | "not_applicable"
+  | "not_installed"
+  | "installed"
+  | "unknown";
+
+export function selectsManagedOllama(provider: string | null | undefined): boolean {
+  return (provider ?? "").trim().toLowerCase() === "ollama";
+}
 
 export function advisorAvailabilityToChrome(
   availability: AdvisorAvailability | undefined,
@@ -66,6 +84,8 @@ export function advisorLlmChromeLabel(chrome: AdvisorLlmChrome): string {
       return "Connected";
     case "unconfigured":
       return "Not configured";
+    case "not_installed":
+      return "Not installed";
     case "disconnected":
       return "Disconnected";
     case "error":
@@ -100,6 +120,27 @@ export function alignAdvisorChromeWithSettingsHydration(
   }
   if (settingsHydration === "loading") {
     return advisorChrome === "ready" ? "loading" : advisorChrome;
+  }
+  return advisorChrome;
+}
+
+/**
+ * Align Chat chrome with Settings → AI Managed Ollama install state.
+ *
+ * A leftover provider string of ollama is not Connected while the managed
+ * runtime is absent. Fail closed: an unproven install probe must not stay
+ * green while Settings would show Not installed.
+ */
+export function alignAdvisorChromeWithManagedOllama(
+  advisorChrome: AdvisorLlmChrome,
+  install: ManagedOllamaInstall,
+): AdvisorLlmChrome {
+  if (install === "not_installed") return "not_installed";
+  if (install === "loading") {
+    return advisorChrome === "ready" ? "loading" : advisorChrome;
+  }
+  if (install === "unknown") {
+    return advisorChrome === "ready" || advisorChrome === "loading" ? "error" : advisorChrome;
   }
   return advisorChrome;
 }
