@@ -369,6 +369,12 @@ quotes as the ticker tape (Sample data badge). A missing quote
 shows `—` after a brief `…`, never a silent blank. Unchecking a
 column hides it (FT-TRADE-008).
 
+Selecting a symbol in `/trade` Watchlist retargets Chart,
+Option Chain, and Scalper to that symbol — no retype.
+Explore retarget is allowed and keeps Sample labels.
+An empty watchlist never silently retargets
+(FT-TRADE-011).
+
 On Explore `/trade` → Scalper, **Buy CE**, **Sell**, and **1-CLICK**
 stay disarmed — the same honesty class as Automate Telegram
 **Send Test**. They never open Confirm Order and never place.
@@ -544,7 +550,10 @@ still runs after cash continuous ends, the TopBar may show `F&O open · till
 On Explore `/trade` Watchlist, checked LTP and % change columns
 use the same sample quotes as the ticker tape (Sample data badge).
 A missing quote shows `—` after a brief `…`, never a silent blank
-(FT-TRADE-008).
+(FT-TRADE-008). Selecting a watchlist symbol retargets Chart,
+Option Chain, and Scalper to that symbol; Explore keeps Sample
+labels. An empty watchlist never silently retargets
+(FT-TRADE-011).
 
 On Explore `/trade` Scalper (including the Scalper Zone preset),
 **Buy CE**, **Sell**, and **1-CLICK** stay disarmed. Helper:
