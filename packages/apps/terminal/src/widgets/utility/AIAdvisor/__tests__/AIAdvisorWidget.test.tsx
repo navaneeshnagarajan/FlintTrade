@@ -293,8 +293,9 @@ describe("AIAdvisorWidget", () => {
     mockGetLocalAiStatus.mockResolvedValue({ installed: false });
     render(<AIAdvisorWidget />, { wrapper: Providers });
 
-    const badge = await screen.findByText("Not installed");
-    expect(badge.className).toMatch(/warning/);
+    const labels = await screen.findAllByText("Not installed");
+    const badge = labels.find((node) => node.tagName === "SPAN");
+    expect(badge?.className).toMatch(/warning/);
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.getByText("Not installed", { selector: "p" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Open Settings → AI/i })).toBeInTheDocument();
