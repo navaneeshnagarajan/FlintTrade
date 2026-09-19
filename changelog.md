@@ -112,7 +112,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   not a production-looking Active badge. Pause on
   those jobs is disabled, with title helper `Sample
   schedule — control unavailable in Explore`.
-  Practice/Live jobs keep Pause/Resume.
+  Practice/Live jobs keep Pause/Resume. The backend
+  rejects Explore pause/resume with `mode_blocked`.
 
 - **Explore Stock Baskets disable demo Edit/Delete (FT-INVEST-002).**
   Explore `/invest#basket` seeded cards (NIFTY IT,

@@ -48,6 +48,32 @@ _WEBHOOK_REGISTRY_LOCK_TIMEOUT_SECONDS = 10.0
 # ------------------------------------------------------------------
 
 
+_EXPLORE_SCHEDULE_WRITE_BLOCKED = "Sample schedule — control unavailable in Explore"
+
+
+def _explore_schedule_write_blocked() -> tuple[Any, int] | None:
+    """Reject Explore-mode schedule pause/resume (FT-AUTO-004).
+
+    JWT claim or ``X-FlintTrade-Mode`` header — same honesty class as Telegram.
+    """
+    from flinttrade_engine.mode_guard import current_mode  # noqa: PLC0415
+
+    jwt_mode = (current_mode() or "").strip().lower()
+    header_mode = (request.headers.get("X-FlintTrade-Mode") or "").strip().lower()
+    if jwt_mode != "explore" and header_mode != "explore":
+        return None
+    logger.info(
+        "Blocked schedule write (mode=%s header=%s)",
+        jwt_mode or "unknown",
+        header_mode or "-",
+    )
+    return jsonify({
+        "status": "error",
+        "message": _EXPLORE_SCHEDULE_WRITE_BLOCKED,
+        "code": "mode_blocked",
+    }), 403
+
+
 @operations_bp.route("/cron/jobs", methods=["GET"])
 def cron_jobs_list() -> tuple[Any, int]:
     """Return all registered cron jobs with their current status.
@@ -94,6 +120,10 @@ def cron_job_pause(name: str) -> tuple[Any, int]:
     """
     from flinttrade_automation.cron_manager import CronManager  # noqa: PLC0415
 
+    blocked = _explore_schedule_write_blocked()
+    if blocked is not None:
+        return blocked
+
     _cron: CronManager | None = current_app.config.get("CRON")
     if _cron is None:
         return jsonify({"status": "error", "message": "CronManager not available"}), 503
@@ -119,6 +149,10 @@ def cron_job_resume(name: str) -> tuple[Any, int]:
         JSON with ``status`` and confirmation message.
     """
     from flinttrade_automation.cron_manager import CronManager  # noqa: PLC0415
+
+    blocked = _explore_schedule_write_blocked()
+    if blocked is not None:
+        return blocked
 
     _cron: CronManager | None = current_app.config.get("CRON")
     if _cron is None:
