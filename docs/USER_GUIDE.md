@@ -415,6 +415,19 @@ MIDCPNIFTY 120 (as of Jan 2026 NSE cycle)`) plus a **Verify on NSE**
 link to circular NSE/FAOP/70616. Learn market facts that exchanges
 revise must ship dated, not as forever hardcodes.
 
+### Learn → Resource Hub (local documents)
+
+Explore `/learn` → **Resource Hub** opens project docs from the local
+FlintTrade backend (`USER_GUIDE.md`, `ORDER_SAFETY.md`, and the other
+listed cards). First open shows `Loading document…` while that local
+load settles — it never flashes a red backend error on a cold-start
+race. A timeout or race is a muted soft fail: `Document isn’t ready
+yet.` plus a primary **Retry** (one automatic retry is allowed). The
+red `Couldn’t load this document from the local backend.` line plus
+**Retry** is reserved for a hard fail after retry is exhausted. Order
+Safety Notes already loading in the same session does not treat User
+Guide as permanently broken (FT-LEARN-003).
+
 ---
 
 ## 4. Live-mode safeguard verification

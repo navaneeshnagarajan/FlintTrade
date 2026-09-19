@@ -86,6 +86,18 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Resource Hub User Guide first-open honesty (FT-LEARN-003).**
+  Explore `/learn` → Resource Hub → User Guide shows
+  `Loading document…` while the local backend/doc
+  settles — never a red backend error on a cold race.
+  A timeout or race is a muted soft fail:
+  `Document isn’t ready yet.` plus a primary **Retry**
+  (one automatic retry is allowed). Hard fail copy
+  `Couldn’t load this document from the local backend.`
+  plus **Retry** appears only after retry is exhausted.
+  Order Safety Notes already loading in the same
+  session does not mark User Guide permanently broken.
+
 - **Holdings badge matches the visible table (FT-TRADE-010).**
   Practice/Explore `/invest` → Holdings with no broker
   shows `N holdings` for the rows currently in the table
