@@ -245,7 +245,70 @@ describe("OptionChainWidget", () => {
 
   it("shows loading state when no expiry is selected", () => {
     render(<OptionChainWidget />, { wrapper: Wrapper });
-    expect(screen.getByText("Select an expiry to load chain")).toBeInTheDocument();
+    expect(screen.getAllByText("Select an expiry to load chain").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows the OI profile + PCR strip for the selected expiry and symbol", () => {
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [{ strike: 25000, ce: { oi: 80 }, pe: { oi: 95 } }] },
+      strikes: [
+        { strike: 25000, call: { oi: 80 }, put: { oi: 95 } },
+        { strike: 25100, call: { oi: 120 }, put: { oi: 110 } },
+      ],
+      atmStrike: 25000,
+      totalCallOI: 200,
+      totalPutOI: 205,
+      pcr: 1.03,
+    };
+    useModeStore.setState({ mode: "live" });
+
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+
+    const strip = screen.getByTestId("oi-pcr-strip");
+    expect(strip).toHaveTextContent("OI profile");
+    expect(strip).toHaveTextContent("NIFTY");
+    expect(strip).toHaveTextContent("2026-04-10");
+    expect(screen.getByRole("img", { name: "OI profile by strike" })).toBeInTheDocument();
+    expect(strip).toHaveTextContent("PCR 1.03");
+    expect(screen.queryByTestId("oi-pcr-sample-badge")).not.toBeInTheDocument();
+  });
+
+  it("badges Explore OI as Sample and does not invent live OI", () => {
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [{ strike: 25000, ce: { oi: 80 }, pe: { oi: 95 } }] },
+      strikes: [{ strike: 25000, call: { oi: 80 }, put: { oi: 95 } }],
+      atmStrike: 25000,
+      pcr: 1.19,
+    };
+    useModeStore.setState({ mode: "explore" });
+
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+
+    expect(screen.getByTestId("oi-pcr-sample-badge")).toHaveTextContent("Sample");
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: /^Live/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId("oi-pcr-strip")).toHaveTextContent("PCR 1.19");
+  });
+
+  it("shows an honest empty OI/PCR strip for an empty expiry, not zeros-as-data", () => {
+    optionChainHookMocks.overrides = {
+      selectedExpiry: "2026-04-10",
+      chain: { chain: [] },
+      strikes: [
+        { strike: 25000, call: { oi: 0 }, put: { oi: 0 } },
+      ],
+      pcr: 0,
+    };
+
+    render(<OptionChainWidget />, { wrapper: Wrapper });
+
+    const strip = screen.getByTestId("oi-pcr-strip");
+    expect(strip).toHaveTextContent("No OI for this expiry");
+    expect(strip.querySelector("[data-oi-bar]")).toBeNull();
+    expect(screen.queryByText(/PCR 0/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("oi-pcr-sample-badge")).toBeInTheDocument();
   });
 
   it("renders the Build Strategy button", () => {
