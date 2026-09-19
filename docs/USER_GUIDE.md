@@ -495,6 +495,14 @@ fixture date and does not auto-update. Practice and Live keep the live
 AMFI sentence ("Updated daily after market close") when the live feed is
 in use.
 
+On Practice or Explore `/invest` → Holdings with no broker, the header
+badge matches the visible table (`N holdings`) and a muted Sample chip
+discloses sample data. The badge is never `0 holdings` over a populated
+sample table. Dashboard and "N stocks" use that same N. A connected
+broker with no positions shows `0 holdings` and an honest empty state
+— no sample table under a zero badge. Connected positions use the live
+count only, with no Sample chip (FT-TRADE-010).
+
 ### The widgets (71)
 
 Widgets are organised into three categories — Trading / Analysis / Utility —
