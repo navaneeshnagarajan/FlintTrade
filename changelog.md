@@ -36,6 +36,18 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
+- **Desk chrome: one TopBar + one ticker + flex shell (FT-UX-002).**
+  Dual TopBar index slots are replaced by one dedicated
+  scrolling TickerStrip under TopBar. TopBar keeps Mode,
+  status, and overflow — not a second quote rail. Three
+  Settings/Tools entries collapse into one Tools overflow
+  menu plus at most one primary Settings entry. App chrome
+  is a flex column: TopBar → TickerStrip → route body.
+  Trade ships first; the same shell then rolls to Invest,
+  Automate, Learn, and Ditto. Not a silent widen of
+  FT-UX-001 Compact-only-on-Trade, and not a big-bang
+  rewrite.
+
 - **Mode vocabulary and Trade desk density (FT-UX-001).**
   Explore / Practice / Live chips mean execution mode only.
   Explore Order Pad uses Sample Buy / Sample Sell; Practice

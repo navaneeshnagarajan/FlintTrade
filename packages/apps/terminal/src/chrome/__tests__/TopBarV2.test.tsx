@@ -2,14 +2,20 @@
  * TopBarV2.test.tsx
  *
  * Tests for the redesigned glass TopBarV2 chrome component.
- * Verifies: logo, search button, absence of AI pill, live badge, ticker area.
+ * Verifies: logo, search button, absence of AI pill, live badge, Tools overflow.
  */
 
+import { dirname, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { MemoryRouter, useLocation } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+const testDir = dirname(fileURLToPath(import.meta.url));
+const topBarSource = () => readFileSync(resolve(testDir, "../TopBarV2.tsx"), "utf8");
 
 const { mockSetConnectionStatus, mockDirectBrokerConnected, mockTimingsQuery } = vi.hoisted(() => ({
   mockSetConnectionStatus: vi.fn(),
@@ -40,12 +46,6 @@ vi.mock("framer-motion", async (importOriginal) => {
 // ---------------------------------------------------------------------------
 // Child component stubs
 // ---------------------------------------------------------------------------
-vi.mock("../QuickAccessPanel", () => ({
-  default: () => (
-    <div role="dialog" aria-label="Quick settings" data-testid="quick-access-panel" />
-  ),
-}));
-
 vi.mock("@/components/NotificationCentre/NotificationCentre", () => ({
   default: () => (
     <button data-testid="notification-bell" aria-label="Notifications">
@@ -60,18 +60,6 @@ vi.mock("../AccountSwitcher", () => ({
 
 vi.mock("../WorkspaceSwitcher", () => ({
   default: () => <div data-testid="workspace-switcher" />,
-}));
-
-// TickerMarquee stub — renders a simple labelled region so ticker tests pass
-vi.mock("../TickerMarquee", () => ({
-  default: ({ mode }: { mode?: string }) =>
-    mode === "off" ? null : (
-      <div
-        role="region"
-        aria-label="Ticker prices"
-        data-testid="ticker-marquee"
-      />
-    ),
 }));
 
 // ---------------------------------------------------------------------------
@@ -178,7 +166,7 @@ describe("TopBarV2", () => {
     mockTimingsQuery.isError = false;
     mockTimingsQuery.isLoading = false;
     useSettingsStore.setState({ density: "comfortable", tickerMode: "marquee" });
-    useDeskChromeStore.setState({ toolsExpanded: false });
+    useDeskChromeStore.setState({ toolsExpanded: false, tickerForcedOnNarrow: false });
     useModeStore.setState({ mode: "explore" });
   });
 
@@ -365,15 +353,11 @@ describe("TopBarV2", () => {
     expect(screen.getByLabelText("Current time in IST")).toBeInTheDocument();
   });
 
-  it("renders the ticker area (marquee mode by default)", () => {
+  it("is not a quote rail — ticker strip lives under TopBar", () => {
     renderTopBarV2();
-    expect(screen.getByTestId("ticker-marquee")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Ticker prices" })).toBeInTheDocument();
-  });
-
-  it('ticker is hidden when mode is "off"', () => {
-    renderTopBarV2("off");
     expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Ticker prices" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Market indices" })).not.toBeInTheDocument();
   });
 
   it("renders the notification bell", () => {
@@ -440,17 +424,19 @@ describe("TopBarV2", () => {
     window.removeEventListener("flinttrade:open-tool", listener);
   });
 
-  it("renders the gear/settings button", () => {
+  it("does not render a standalone Settings gear on the bar", () => {
     renderTopBarV2();
-    expect(screen.getByTestId("gear-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("gear-btn")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^settings$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /quick settings/i })).not.toBeInTheDocument();
   });
 
-  it("opens quick settings from the gear button", () => {
+  it("reaches Settings from the single Tools overflow", () => {
     renderTopBarV2();
 
-    fireEvent.click(screen.getByTestId("gear-btn"));
+    fireEvent.click(screen.getByRole("button", { name: /tools/i }));
 
-    expect(screen.getByRole("dialog", { name: /quick settings/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("menuitem", { name: /^settings$/i })).toHaveLength(1);
   });
 
   it("renders the user avatar button", () => {
@@ -541,6 +527,7 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     mockTimingsQuery.isError = false;
     mockTimingsQuery.isLoading = false;
     useSettingsStore.setState({ tickerMode: "marquee" });
+    useDeskChromeStore.setState({ toolsExpanded: false, tickerForcedOnNarrow: false });
     stubViewportWidth(390);
   });
 
@@ -566,10 +553,11 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     expect(bar.className).toMatch(/overflow-x-hidden/);
   });
 
-  it("hides the ticker strip by default under ~480px", () => {
+  it("does not host a ticker rail on the skinny TopBar", () => {
     renderTopBarV2();
 
     expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
+    expect(useDeskChromeStore.getState().tickerForcedOnNarrow).toBe(false);
   });
 
   it("keeps Workspace off the inline bar and reachable from More", () => {
@@ -615,14 +603,15 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     }
   });
 
-  it("lets settings re-enable the ticker under ~480px", () => {
+  it("lets More re-enable the dedicated ticker strip under ~480px", () => {
     renderTopBarV2();
-    expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
+    expect(useDeskChromeStore.getState().tickerForcedOnNarrow).toBe(false);
 
     fireEvent.click(screen.getByTestId("topbar-more-btn"));
     fireEvent.click(screen.getByRole("button", { name: /show ticker/i }));
 
-    expect(screen.getByTestId("ticker-marquee")).toBeInTheDocument();
+    expect(useDeskChromeStore.getState().tickerForcedOnNarrow).toBe(true);
+    expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
   });
 
   it("re-enables the ticker from More when persisted mode is off", () => {
@@ -632,8 +621,9 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     fireEvent.click(screen.getByTestId("topbar-more-btn"));
     fireEvent.click(screen.getByRole("button", { name: /show ticker/i }));
 
-    expect(screen.getByTestId("ticker-marquee")).toBeInTheDocument();
+    expect(useDeskChromeStore.getState().tickerForcedOnNarrow).toBe(true);
     expect(useSettingsStore.getState().tickerMode).toBe("marquee");
+    expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
   });
 
   it("collapses overflow at ~450px so hidden overflow cannot clip Mode", () => {
@@ -641,23 +631,21 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     renderTopBarV2();
 
     expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
+    expect(useDeskChromeStore.getState().tickerForcedOnNarrow).toBe(false);
     expect(screen.getByText("EXPLORE")).toBeVisible();
     expect(screen.getByTestId("topbar-more-btn")).toBeInTheDocument();
     expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
   });
 
-  it("dismisses Quick settings opened from More when clicking outside", () => {
+  it("reaches Settings from Tools in More without a second Settings row", () => {
     renderTopBarV2();
 
     fireEvent.click(screen.getByTestId("topbar-more-btn"));
-    fireEvent.click(screen.getByTestId("gear-btn"));
+    expect(screen.queryByTestId("gear-btn")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^settings$/i })).not.toBeInTheDocument();
 
-    expect(screen.getByRole("dialog", { name: /quick settings/i })).toBeInTheDocument();
-    expect(screen.queryByTestId("topbar-more-sheet")).not.toBeInTheDocument();
-
-    fireEvent.mouseDown(document.body);
-
-    expect(screen.queryByRole("dialog", { name: /quick settings/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("tools-btn"));
+    expect(screen.getAllByRole("menuitem", { name: /^settings$/i })).toHaveLength(1);
   });
 
   it("keeps the More sheet below nested account and notification portals", () => {
@@ -674,7 +662,7 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
 describe("FT-UX-001 Compact desk chrome at 1280", () => {
   beforeEach(() => {
     useSettingsStore.setState({ density: "compact", tickerMode: "marquee" });
-    useDeskChromeStore.setState({ toolsExpanded: false });
+    useDeskChromeStore.setState({ toolsExpanded: false, tickerForcedOnNarrow: false });
     stubViewportWidth(1280);
   });
 
@@ -718,5 +706,40 @@ describe("FT-UX-001 Compact desk chrome at 1280", () => {
     expect(screen.getByTestId("tools-btn")).toBeInTheDocument();
     expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument();
     expect(screen.queryByTestId("topbar-desk-tools-btn")).not.toBeInTheDocument();
+  });
+});
+
+describe("FT-UX-002 TopBar chrome consolidation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDirectBrokerConnected.value = false;
+    mockTimingsQuery.data = undefined;
+    mockTimingsQuery.dataUpdatedAt = 0;
+    mockTimingsQuery.isError = false;
+    mockTimingsQuery.isLoading = false;
+    useSettingsStore.setState({ density: "comfortable", tickerMode: "marquee" });
+    useDeskChromeStore.setState({ toolsExpanded: false, tickerForcedOnNarrow: false });
+    useModeStore.setState({ mode: "explore" });
+    stubViewportWidth(1280);
+  });
+
+  afterEach(() => {
+    stubViewportWidth(1024);
+    vi.useRealTimers();
+  });
+
+  it("source-guard: TopBar does not mount a ticker rail or Settings gear", () => {
+    const src = topBarSource();
+    expect(src).not.toContain("<TickerMarquee");
+    expect(src).not.toContain("gear-btn");
+    expect(src).not.toContain("QuickAccessPanel");
+  });
+
+  it("keeps one Tools overflow and no extra Settings chrome button", () => {
+    renderTopBarV2();
+
+    expect(screen.getAllByTestId("tools-btn")).toHaveLength(1);
+    expect(screen.queryByTestId("gear-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
   });
 });
