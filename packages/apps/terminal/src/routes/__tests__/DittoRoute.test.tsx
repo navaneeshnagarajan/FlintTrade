@@ -710,11 +710,13 @@ describe("DittoRoute", () => {
     render(<DittoRoute />, { wrapper: createWrapper() });
     fireEvent.click(screen.getByText("Risk Dashboard"));
 
-    const killAll = await screen.findByRole("button", { name: "Kill All Positions" });
+    expect(
+      await screen.findByText(RISK_RUNTIME_UNAVAILABLE_HELPER, {}, { timeout: 3_000 }),
+    ).toBeInTheDocument();
+    const killAll = screen.getByRole("button", { name: "Kill All Positions" });
     expect(killAll).toBeDisabled();
     expect(killAll).toHaveAttribute("data-variant", "outline");
     expect(killAll).toHaveAttribute("title", RISK_RUNTIME_UNAVAILABLE_HELPER);
-    expect(screen.getByText(RISK_RUNTIME_UNAVAILABLE_HELPER)).toBeInTheDocument();
 
     fireEvent.click(killAll);
     expect(screen.queryByText("Confirm Kill All")).not.toBeInTheDocument();
