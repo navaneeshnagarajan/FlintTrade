@@ -248,6 +248,13 @@ const RESOURCES: ResourceCard[] = [
   { title: "Developer Guide",       source: "Project docs", topic: "Contribution", path: "DEVELOPER_GUIDE.md" },
 ];
 
+/** Locked Resource Hub local-doc load copy (FT-LEARN-003). */
+export const RESOURCE_HUB_DOC_LOADING = "Loading document…";
+export const RESOURCE_HUB_DOC_SOFT_FAIL = "Document isn’t ready yet.";
+export const RESOURCE_HUB_DOC_HARD_FAIL = "Couldn’t load this document from the local backend.";
+
+type DocLoadStatus = "idle" | "loading" | "soft_fail" | "hard_fail" | "ready";
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -630,8 +637,8 @@ function PaperTradingTab() {
 function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
   const [activeDoc, setActiveDoc] = useState<SelectedDoc | null>(selectedDoc);
   const [docContent, setDocContent] = useState<{ title: string; content: string } | null>(null);
-  const [docLoading, setDocLoading] = useState(false);
-  const [docError, setDocError] = useState<string | null>(null);
+  const [docStatus, setDocStatus] = useState<DocLoadStatus>("idle");
+  const [loadGeneration, setLoadGeneration] = useState(0);
 
   useEffect(() => {
     if (selectedDoc) setActiveDoc(selectedDoc);
@@ -640,27 +647,46 @@ function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
   useEffect(() => {
     if (!activeDoc) {
       setDocContent(null);
-      setDocError(null);
-      setDocLoading(false);
+      setDocStatus("idle");
       return;
     }
 
     const controller = new AbortController();
-    setDocLoading(true);
-    setDocError(null);
-    fetchDocsDocument(activeDoc.path, controller.signal)
-      .then((document) => setDocContent(document))
-      .catch((error) => {
+    let cancelled = false;
+    let attempt = 0;
+
+    const load = async () => {
+      attempt += 1;
+      if (attempt === 1) {
+        setDocStatus("loading");
+        setDocContent(null);
+      }
+      try {
+        const document = await fetchDocsDocument(activeDoc.path, controller.signal);
+        if (cancelled) return;
+        setDocContent(document);
+        setDocStatus("ready");
+      } catch (error) {
+        if (cancelled) return;
         if (error instanceof DOMException && error.name === "AbortError") return;
         setDocContent(null);
-        setDocError("Could not load this document from the local backend.");
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setDocLoading(false);
-      });
+        if (attempt === 1) {
+          setDocStatus("soft_fail");
+          void load();
+          return;
+        }
+        setDocStatus("hard_fail");
+      }
+    };
 
-    return () => controller.abort();
-  }, [activeDoc]);
+    void load();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [activeDoc, loadGeneration]);
+
+  const retryDoc = () => setLoadGeneration((generation) => generation + 1);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
@@ -678,9 +704,28 @@ function ResourceHubTab({ selectedDoc }: { selectedDoc: SelectedDoc | null }) {
               </p>
             </div>
           </div>
-          {docLoading && <p className="text-xs text-text-muted">Loading document...</p>}
-          {docError && <p role="alert" className="text-xs text-loss">{docError}</p>}
-          {docContent && (
+          {docStatus === "loading" && (
+            <p className="text-xs text-text-muted">{RESOURCE_HUB_DOC_LOADING}</p>
+          )}
+          {docStatus === "soft_fail" && (
+            <div className="flex flex-col items-start gap-2">
+              <p className="text-xs text-text-muted">{RESOURCE_HUB_DOC_SOFT_FAIL}</p>
+              <Button size="sm" onClick={retryDoc}>
+                Retry
+              </Button>
+            </div>
+          )}
+          {docStatus === "hard_fail" && (
+            <div className="flex flex-col items-start gap-2">
+              <p role="alert" className="text-xs text-loss">
+                {RESOURCE_HUB_DOC_HARD_FAIL}
+              </p>
+              <Button size="sm" onClick={retryDoc}>
+                Retry
+              </Button>
+            </div>
+          )}
+          {docStatus === "ready" && docContent && (
             <article className="max-h-[38rem] overflow-y-auto rounded-md border border-border-default bg-surface-base/70 p-4">
               <DocMarkdown content={docContent.content} />
             </article>
