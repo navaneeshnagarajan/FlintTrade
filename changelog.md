@@ -34,6 +34,12 @@ changelog rebuilds itself from the first release cut after this baseline.
   Explore retarget is allowed and keeps Sample labels.
   An empty watchlist never silently retargets.
 
+- **Option Chain OI profile + PCR strip (FT-TRADE-012).**
+  The Option Chain strip shows OI profile + PCR for
+  the selected expiry/symbol. Explore keeps a Sample
+  badge and never invents live OI. An empty expiry
+  is an honest empty, not zeros-as-data.
+
 ### Changed
 
 - **Desk chrome: one TopBar + one ticker + flex shell (FT-UX-002).**
