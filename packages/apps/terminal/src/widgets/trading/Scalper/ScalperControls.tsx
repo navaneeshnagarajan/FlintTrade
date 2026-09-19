@@ -112,7 +112,7 @@ export function ScalperControls({
       {/* Row 1: Index, Expiry, CE Strike, PE Strike, Status */}
       <div className="flex items-end gap-3 px-3 py-2 flex-wrap">
         {/* Index selector */}
-        <div className="flex flex-col gap-0.5">
+        <div className="flex flex-col gap-0.5" data-testid="scalper-index" data-symbol={symbol}>
           <span className="text-xxs text-text-muted uppercase tracking-wider font-sans">Index</span>
           <Select value={symbol} onValueChange={onSymbolChange}>
             <SelectTrigger size="sm" className="font-mono font-bold min-w-[9rem]">

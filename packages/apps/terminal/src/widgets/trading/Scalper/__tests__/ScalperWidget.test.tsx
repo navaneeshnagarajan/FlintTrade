@@ -9,12 +9,14 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { createStore, Provider } from "jotai";
 import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { EXPLORE_SCALPER_ORDER_HELPER } from "../exploreGate";
+import WatchlistWidget from "@/widgets/utility/Watchlist/WatchlistWidget";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -35,6 +37,8 @@ const mockTicks = vi.hoisted(() => ({
   current: {} as Record<string, { ltp?: number; close?: number }>,
 }));
 
+const mockGetMultiQuotes = vi.hoisted(() => vi.fn());
+
 vi.mock("@/services/api", () => ({
   placeOrder: mockPlaceOrder,
   cancelAllOrders: mockCancelAllOrders,
@@ -42,6 +46,9 @@ vi.mock("@/services/api", () => ({
   getExpiry: mockGetExpiry,
   getQuotes: mockGetQuotes,
   getSymbol: mockGetSymbol,
+  getMultiQuotes: mockGetMultiQuotes,
+  searchSymbol: vi.fn().mockResolvedValue([]),
+  normaliseMultiQuotes: () => [],
 }));
 
 vi.mock("@/services/ftApi", () => ({
@@ -140,6 +147,7 @@ describe("ScalperWidget", () => {
       lot_size: 75,
       is_sample_data: true,
     });
+    mockGetMultiQuotes.mockResolvedValue([]);
   });
 
   it("renders without crashing", () => {
@@ -672,13 +680,8 @@ describe("ScalperWidget", () => {
 // FT-TRADE-011: shared symbol bus (FDC3 red channel / selectedSymbolAtom)
 // ---------------------------------------------------------------------------
 
-const SCALPER_INDEXES = new Set(["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"]);
-
 function scalperIndexValue(): string | null {
-  const match = screen.getAllByTestId("scalper-select").find((el) =>
-    SCALPER_INDEXES.has(el.getAttribute("data-value") ?? ""),
-  );
-  return match?.getAttribute("data-value") ?? null;
+  return screen.getByTestId("scalper-index").getAttribute("data-symbol");
 }
 
 function renderScalperOnBus(
@@ -716,6 +719,62 @@ describe("ScalperWidget — FT-TRADE-011 shared symbol bus", () => {
       lot_size: 75,
       is_sample_data: true,
     });
+    mockGetMultiQuotes.mockResolvedValue([]);
+    localStorage.removeItem("flinttrade:watchlists");
+    localStorage.removeItem("flinttrade:watchlist");
+    localStorage.removeItem("flinttrade:watchlist:view");
+  });
+
+  it("follows a watchlist selection written to selectedSymbolAtom", async () => {
+    const { store } = renderScalperOnBus();
+    expect(scalperIndexValue()).toBe("NIFTY");
+
+    act(() => {
+      store.set(selectedSymbolAtom, { symbol: "BANKNIFTY", exchange: "NSE_INDEX" });
+    });
+
+    await waitFor(() => expect(scalperIndexValue()).toBe("BANKNIFTY"));
+    expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "BANKNIFTY", exchange: "NSE_INDEX" });
+  });
+
+  it("follows a Watchlist row click onto the real Scalper widget", async () => {
+    const store = createStore();
+    localStorage.setItem(
+      "flinttrade:watchlists",
+      JSON.stringify([
+        {
+          id: "t1",
+          name: "Watchlist 1",
+          symbols: [
+            { symbol: "NIFTY", exchange: "NSE_INDEX" },
+            { symbol: "BANKNIFTY", exchange: "NSE_INDEX" },
+          ],
+        },
+      ]),
+    );
+
+    render(
+      <Provider store={store}>
+        <WatchlistWidget
+          {...makeWidgetPanelProps({
+            api: { id: "watchlist-panel", updateParameters: () => undefined },
+          })}
+        />
+        <ScalperWidget
+          {...makeWidgetPanelProps({
+            api: { id: "scalper-panel", updateParameters: () => undefined },
+          })}
+        />
+      </Provider>,
+    );
+
+    expect(scalperIndexValue()).toBe("NIFTY");
+    expect(store.get(selectedSymbolAtom)).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "BANKNIFTY" }));
+
+    await waitFor(() => expect(scalperIndexValue()).toBe("BANKNIFTY"));
+    expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "BANKNIFTY", exchange: "NSE_INDEX" });
   });
 
   it("follows a Watchlist selection on the shared red channel", async () => {
