@@ -104,6 +104,12 @@ changelog rebuilds itself from the first release cut after this baseline.
   armed control (empty-account disarm is
   FT-DITTO-001).
 
+- **Log refs no longer create a missing workspace.**
+  A cold `log_ref` salt cache no longer calls
+  `workspace_dir()` in a way that mkdir's the default
+  workspace. Isolated callers (explicit-path TOTP
+  stores) stay off the default pair.
+
 - **Explore Schedules Pause gated for sample jobs (FT-AUTO-004).**
   Explore `/automate` → Schedules seeded jobs rely on
   the global Explore sample banner for disclosure —
