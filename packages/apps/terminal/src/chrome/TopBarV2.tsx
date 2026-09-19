@@ -2,8 +2,12 @@
  * TopBarV2 — redesigned glass chrome bar (38px, single row).
  *
  * Layout (left → right):
- *   [FlintLogo] | [TickerMarquee (flex:1)] [GearIcon] | [SearchBtn Ctrl+K]
- *   [BellIcon] [FullscreenIcon] [ModeIndicator] [MarketSessionStatus] [ClockIST] [Avatar]
+ *   [FlintLogo] | [SearchBtn Ctrl+K] [Tools overflow] [Bell] [Account]
+ *   [Workspace] [ModeIndicator] [Fullscreen] [MarketSessionStatus] [ClockIST] [Avatar]
+ *
+ * FT-UX-002: TopBar is not a quote rail. The dedicated scrolling ticker
+ * lives under this bar (TickerBar / TickerStrip). Settings lives inside
+ * the Tools overflow — at most one Settings chrome entry.
  *
  * Design:
  *   - Background: rgba(12, 12, 20, 0.85) + backdrop-filter: blur(16px)
@@ -23,10 +27,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router";
-import { AnimatePresence } from "framer-motion";
-import { Search, Maximize2, Minimize2, MoreHorizontal, Settings, Wrench } from "lucide-react";
+import { Search, Maximize2, Minimize2, MoreHorizontal, Wrench } from "lucide-react";
 import { LogoIcon } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -48,13 +50,12 @@ import type { ToolId } from "@/types/widgets";
 import NotificationBell from "@/components/NotificationCentre/NotificationCentre";
 import AccountSwitcher from "./AccountSwitcher";
 import ModeIndicator from "./ModeIndicator";
-import QuickAccessPanel from "./QuickAccessPanel";
-import TickerMarquee from "./TickerMarquee";
 import type { TickerMode } from "./TickerMarquee";
 import ToolsDropdown from "./ToolsDropdown";
 import TopBarMoreSheet, { MoreRow } from "./TopBarMoreSheet";
 import { useChromeCollapse } from "./useChromeCollapse";
 import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
+import { useDeskChromeStore } from "@/stores/deskChromeStore";
 
 // ---------------------------------------------------------------------------
 // ISTClock
@@ -319,22 +320,16 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   const setTickerMode = useSettingsStore((s) => s.setTickerMode);
   const tickerMode: TickerMode = tickerModeProp ?? storedTickerMode;
   const { availableTools } = useSkillContent();
-  const { hideTickerByDefault, collapseOverflow } = useChromeCollapse();
+  const { collapseOverflow } = useChromeCollapse();
   const {
-    showTicker: showDeskTicker,
     showToolRibbon,
     setToolsExpanded,
   } = useDeskDensityChrome();
-  const [quickSettingsOpen, setQuickSettingsOpen] = useState(false);
+  const tickerForcedOnNarrow = useDeskChromeStore((s) => s.tickerForcedOnNarrow);
+  const setTickerForcedOnNarrow = useDeskChromeStore((s) => s.setTickerForcedOnNarrow);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [tickerForcedOnNarrow, setTickerForcedOnNarrow] = useState(false);
-  const gearRef = useRef<HTMLButtonElement>(null);
   const toolsRef = useRef<HTMLButtonElement>(null);
-  const showTicker =
-    tickerMode !== "off"
-    && (!hideTickerByDefault || tickerForcedOnNarrow)
-    && showDeskTicker;
   const hideDeskRibbon = !showToolRibbon && !collapseOverflow;
 
   // Maintain broker connection status from either OpenAlgo bridge ping or a
@@ -365,21 +360,6 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
     const id = setInterval(check, 10_000);
     return () => clearInterval(id);
   }, [mode, directBrokerConnected, setStatus]);
-
-  // Close QuickAccessPanel on outside click
-  useEffect(() => {
-    if (!quickSettingsOpen) return;
-    const handler = (e: MouseEvent) => {
-      const panel = document.querySelector(
-        "[role='dialog'][aria-label='Quick settings']",
-      );
-      if (!panel || panel.contains(e.target as Node)) return;
-      if (gearRef.current?.contains(e.target as Node)) return;
-      setQuickSettingsOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [quickSettingsOpen]);
 
   const barStyle: React.CSSProperties = {
     background: "var(--glass-chrome-bg, rgba(12,12,20,0.85))",
@@ -417,31 +397,8 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
 
       <Divider />
 
-      {/* ── GROUP 2: Ticker (flex:1) + Gear ───────────────────────────────── */}
-      <div className="flex items-center gap-1 flex-1 min-w-0 mx-2">
-        {showTicker && (
-          <TickerMarquee
-            mode={tickerMode}
-            className="flex-1 min-w-0 h-9.5"
-          />
-        )}
-
-        {!collapseOverflow && (
-          <Button
-            ref={gearRef}
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0 text-text-muted hover:text-text-primary shrink-0"
-            onClick={() => setQuickSettingsOpen(!quickSettingsOpen)}
-            aria-label="Quick settings"
-            aria-expanded={quickSettingsOpen}
-            aria-haspopup="dialog"
-            data-testid="gear-btn"
-          >
-            <Settings className="h-3.5 w-3.5" aria-hidden="true" />
-          </Button>
-        )}
-      </div>
+      {/* ── GROUP 2: Spacer — ticker lives under TopBar (FT-UX-002) ───────── */}
+      <div className="flex-1 min-w-0 mx-2" aria-hidden="true" />
 
       <Divider />
 
@@ -458,7 +415,6 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
               onClick={() => {
                 setMoreOpen((open) => !open);
                 setToolsOpen(false);
-                setQuickSettingsOpen(false);
               }}
               aria-label="More"
               aria-expanded={moreOpen}
@@ -479,7 +435,6 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
                 className="h-7 px-2 gap-1.5 text-text-muted hover:text-text-primary shrink-0"
                 onClick={() => {
                   setToolsOpen((open) => !open);
-                  setQuickSettingsOpen(false);
                 }}
                 aria-label="Tools"
                 aria-expanded={toolsOpen}
@@ -543,7 +498,6 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
             className="min-h-11 px-2 gap-1.5 text-text-muted hover:text-text-primary"
             onClick={() => {
               setToolsOpen((open) => !open);
-              setQuickSettingsOpen(false);
             }}
             aria-label="Tools"
             aria-expanded={toolsOpen}
@@ -560,25 +514,6 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
         </MoreRow>
         <MoreRow>
           <ISTClock />
-        </MoreRow>
-        <MoreRow>
-          <Button
-            ref={gearRef}
-            variant="ghost"
-            size="sm"
-            className="min-h-11 px-2 gap-1.5 text-text-muted hover:text-text-primary"
-            onClick={() => {
-              setQuickSettingsOpen((open) => !open);
-              setMoreOpen(false);
-            }}
-            aria-label="Quick settings"
-            aria-expanded={quickSettingsOpen}
-            aria-haspopup="dialog"
-            data-testid="gear-btn"
-          >
-            <Settings className="h-3.5 w-3.5" aria-hidden="true" />
-            <span className="text-xs">Settings</span>
-          </Button>
         </MoreRow>
         <MoreRow>
           <NotificationBell />
@@ -604,21 +539,6 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
           </Button>
         </MoreRow>
       </TopBarMoreSheet>
-
-      {/* QuickAccessPanel portal — renders outside TopBar stacking context */}
-      {createPortal(
-        <AnimatePresence>
-          {quickSettingsOpen && (
-            <QuickAccessPanel
-              key="quick-settings"
-              onClose={() => setQuickSettingsOpen(false)}
-              triggerRef={gearRef}
-              anchorRect={gearRef.current?.getBoundingClientRect()}
-            />
-          )}
-        </AnimatePresence>,
-        document.body,
-      )}
 
       <ToolsDropdown
         isOpen={toolsOpen}

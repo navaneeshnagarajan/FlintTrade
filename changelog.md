@@ -46,8 +46,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   Trade ships first; the same shell then rolls to Invest,
   Automate, Learn, and Ditto. Not a silent widen of
   FT-UX-001 Compact-only-on-Trade, and not a big-bang
-  rewrite. Developer ships TopBar/ticker consolidation
-  first, then route-body flex.
+  rewrite.
 
 - **Mode vocabulary and Trade desk density (FT-UX-001).**
   Explore / Practice / Live chips mean execution mode only.

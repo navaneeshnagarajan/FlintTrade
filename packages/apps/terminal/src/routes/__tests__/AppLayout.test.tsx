@@ -38,7 +38,7 @@ vi.mock("@/chrome/DockSidebar", () => ({
 }));
 
 vi.mock("@/chrome/TickerBar", () => ({
-  default: () => <div data-testid="tickerbar">TickerBar</div>,
+  default: () => <div data-testid="ticker-strip">TickerStrip</div>,
 }));
 
 vi.mock("@/components/motion/PageTransition", () => ({
@@ -211,19 +211,21 @@ describe("AppLayout", () => {
     Object.defineProperty(window, "innerWidth", { value: 1920, writable: true });
     useSettingsStore.setState({
       density: "comfortable",
+      tickerMode: "marquee",
       riskLimits: { ...useSettingsStore.getState().riskLimits, mtmStoploss: 0 },
     });
-    useDeskChromeStore.setState({ toolsExpanded: false });
+    useDeskChromeStore.setState({ toolsExpanded: false, tickerForcedOnNarrow: false });
     mockBrokerConnected.value = true;
     useTradingStore.setState({ totalPnl: 0 });
     mockLocation.pathname = "/trade";
   });
 
-  it("renders header with TopBar and TickerBar, and a main landmark", () => {
+  it("renders header with TopBar and one ticker strip, and a main landmark", () => {
     renderApp();
 
     expect(screen.getByTestId("topbar")).toBeInTheDocument();
-    expect(screen.getByTestId("tickerbar")).toBeInTheDocument();
+    expect(screen.getAllByTestId("ticker-strip")).toHaveLength(1);
+    expect(screen.queryByTestId("tickerbar")).not.toBeInTheDocument();
     // <main> landmark with aria-label from route title
     expect(screen.getByRole("main", { name: /trading workspace/i })).toBeInTheDocument();
   });
@@ -293,12 +295,12 @@ describe("AppLayout", () => {
     useSettingsStore.setState({ density: "compact" });
     renderApp();
 
-    expect(screen.queryByTestId("tickerbar")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ticker-strip")).not.toBeInTheDocument();
 
     act(() => {
       useDeskChromeStore.getState().setToolsExpanded(true);
     });
-    expect(screen.getByTestId("tickerbar")).toBeInTheDocument();
+    expect(screen.getByTestId("ticker-strip")).toBeInTheDocument();
   });
 
   it("keeps the ticker on Compact Home — disclosure is Trade-only", () => {
@@ -306,7 +308,7 @@ describe("AppLayout", () => {
     useSettingsStore.setState({ density: "compact" });
     renderApp();
 
-    expect(screen.getByTestId("tickerbar")).toBeInTheDocument();
+    expect(screen.getByTestId("ticker-strip")).toBeInTheDocument();
   });
 
   it("does not show the daily welcome card in explore mode", () => {
@@ -477,5 +479,35 @@ describe("AppLayout", () => {
     });
 
     expect(mockNavigate).toHaveBeenCalledWith(detail.path);
+  });
+
+  it("Trade route body is a flex-fill shell under TopBar and ticker strip", () => {
+    renderApp();
+
+    const header = document.querySelector("header");
+    expect(header?.className).toMatch(/flex/);
+    expect(header?.className).toMatch(/flex-col/);
+    expect(screen.getByTestId("topbar").compareDocumentPosition(screen.getByTestId("ticker-strip"))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const body = screen.getByTestId("route-body");
+    expect(body.className).toMatch(/flex-1/);
+    expect(body.className).toMatch(/min-h-0/);
+    expect(screen.getByRole("main").className).toMatch(/flex-col/);
+    expect(screen.getByRole("main").className).toMatch(/min-h-0/);
+  });
+
+  it("hides the dedicated ticker strip when ticker mode is off", () => {
+    useSettingsStore.setState({ tickerMode: "off" });
+    renderApp();
+
+    expect(screen.queryByTestId("ticker-strip")).not.toBeInTheDocument();
+  });
+
+  it("source-guard: TopBar is not a second quote rail", () => {
+    const src = appLayoutSource();
+    expect(src).toMatch(/showTickerStrip/);
+    expect(src).toMatch(/data-testid="route-body"/);
+    expect(src).not.toMatch(/TickerMarquee/);
   });
 });

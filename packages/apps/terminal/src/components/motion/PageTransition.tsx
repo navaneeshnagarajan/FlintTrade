@@ -30,7 +30,14 @@ export default function PageTransition({
   const reduced = motionConfig.prefersReducedMotion();
 
   if (isTradeRoute || reduced) {
-    return <>{children}</>;
+    return (
+      <div
+        className="flex h-full min-h-0 flex-1 flex-col overflow-hidden"
+        data-testid="route-body-fill"
+      >
+        {children}
+      </div>
+    );
   }
 
   return (
