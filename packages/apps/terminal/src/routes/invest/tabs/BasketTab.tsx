@@ -9,6 +9,7 @@
  *
  * Design:
  * - Sample baskets (NIFTY IT, Banking) pre-loaded for exploration
+ * - Explore seeded cards: Edit/Delete disabled (banner owns Sample disclosure)
  * - Create custom baskets with symbol + weight pairs
  * - Rebalance view shows drift from target weights
  * - Performance summary with total value and P&L
@@ -59,7 +60,10 @@ import { safeParse } from "@/lib/safeParse";
 import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
 import { DemoBanner } from "@/components/ui/DemoBanner";
+import { useModeStore } from "@/stores/modeStore";
 import { formatINR, formatPercent } from "../formatters";
+
+const SAMPLE_BASKET_EDIT_UNAVAILABLE = "Sample basket — editing unavailable in Explore";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -129,6 +133,12 @@ const SAMPLE_BASKETS: StockBasket[] = [
     createdAt: "2026-01-01T00:00:00.000Z",
   },
 ];
+
+const SEEDED_SAMPLE_BASKET_IDS = new Set(SAMPLE_BASKETS.map((basket) => basket.id));
+
+function isSeededSampleBasket(id: string): boolean {
+  return SEEDED_SAMPLE_BASKET_IDS.has(id);
+}
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
 
@@ -222,6 +232,7 @@ function totalWeight(constituents: BasketConstituent[]): number {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function BasketTab() {
+  const isExplore = useModeStore((s) => s.mode === "explore");
   const [baskets, setBaskets] = useState<StockBasket[]>(loadBaskets);
   const [selectedBasketId, setSelectedBasketId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -261,6 +272,9 @@ export function BasketTab() {
   }, []);
 
   const openEditDialog = useCallback((basket: StockBasket) => {
+    if (useModeStore.getState().mode === "explore" && isSeededSampleBasket(basket.id)) {
+      return;
+    }
     setEditId(basket.id);
     setFormName(basket.name);
     setFormDescription(basket.description);
@@ -317,6 +331,9 @@ export function BasketTab() {
 
   const deleteBasket = useCallback(
     (id: string) => {
+      if (useModeStore.getState().mode === "explore" && isSeededSampleBasket(id)) {
+        return;
+      }
       const updated = baskets.filter((b) => b.id !== id);
       setBaskets(updated);
       saveBaskets(updated);
@@ -364,6 +381,8 @@ export function BasketTab() {
         {basketsWithQuotes.map((basket) => {
           const isSelected = basket.id === selectedBasketId;
           const isProfit = basket.pnl >= 0;
+          const sampleActionsLocked = isExplore && isSeededSampleBasket(basket.id);
+          const sampleActionTitle = sampleActionsLocked ? SAMPLE_BASKET_EDIT_UNAVAILABLE : undefined;
           return (
             <GlassCard
               key={basket.id}
@@ -385,15 +404,27 @@ export function BasketTab() {
                 </div>
                 <div className="flex items-center gap-1">
                   <button
+                    type="button"
+                    disabled={sampleActionsLocked}
+                    title={sampleActionTitle}
                     onClick={(e) => { e.stopPropagation(); openEditDialog(basket); }}
-                    className="p-1 rounded hover:bg-surface-card text-text-muted hover:text-text-primary"
+                    className={cn(
+                      "p-1 rounded hover:bg-surface-card text-text-muted hover:text-text-primary",
+                      sampleActionsLocked && "cursor-not-allowed opacity-50",
+                    )}
                     aria-label={`Edit ${basket.name}`}
                   >
                     <Pencil className="size-3" />
                   </button>
                   <button
+                    type="button"
+                    disabled={sampleActionsLocked}
+                    title={sampleActionTitle}
                     onClick={(e) => { e.stopPropagation(); deleteBasket(basket.id); }}
-                    className="p-1 rounded hover:bg-surface-card text-text-muted hover:text-loss"
+                    className={cn(
+                      "p-1 rounded hover:bg-surface-card text-text-muted hover:text-loss",
+                      sampleActionsLocked && "cursor-not-allowed opacity-50",
+                    )}
                     aria-label={`Delete ${basket.name}`}
                   >
                     <Trash2 className="size-3" />

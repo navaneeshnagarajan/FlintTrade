@@ -92,6 +92,19 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Explore Stock Baskets disable demo Edit/Delete (FT-INVEST-002).**
+  Explore `/invest#basket` seeded cards (NIFTY IT,
+  Banking, and any other sample set) rely on the
+  global Explore sample banner for disclosure — no
+  card-level Sample chip. Bare ₹ / P&L under that
+  banner is acceptable once actions cannot look live.
+  Edit and Delete on seeded Explore baskets are
+  disabled, with title helper `Sample basket —
+  editing unavailable in Explore`. User-created
+  Practice/Live baskets keep full Edit/Delete.
+  Empty Explore is an honest empty or a clearly
+  labelled sample set.
+
 - **Feed-freshness honesty (FT-CORE-002).**
   Explore: the global
   `EXPLORE MODE — All data shown is sample only`

@@ -520,7 +520,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
-| `/invest` | Portfolio-record workspace — holdings, net worth, SIPs, and mutual-fund tracker. Deep-link hashes such as `#holdings`, `#sip`, `#networth`, `#mutual-funds`, and `#mf-optimizer` open the matching tab on load; an unknown hash falls back to Dashboard. |
+| `/invest` | Portfolio-record workspace — holdings, net worth, SIPs, mutual-fund tracker, and stock baskets. Deep-link hashes such as `#holdings`, `#sip`, `#networth`, `#mutual-funds`, `#mf-optimizer`, and `#basket` open the matching tab on load; an unknown hash falls back to Dashboard. |
 | `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. Practice Trading links to Settings → Broker Gateway (`/settings#api`) for OpenAlgo Practice setup, not native Brokers. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise, Options Builder. |
 | `/automate` | Automation Hub — flows, cron, monitors, logs. Kill-switch activate/reset lives under Automate → Settings. |
@@ -548,6 +548,15 @@ under a failed load. A connected broker with no positions shows
 `0 holdings` and an honest empty state (`No holdings`) — no sample
 table under a zero badge. Connected positions use the live count only,
 with no Sample chip (FT-TRADE-010).
+
+On Explore `/invest#basket` (Stock Baskets), the global Explore sample
+banner (`EXPLORE MODE — All data shown is sample only`) owns disclosure —
+seeded cards do **not** carry a card-level Sample chip. Bare ₹ / P&L
+under that banner is acceptable once **Edit** and **Delete** cannot look
+live. Seeded Explore baskets disable **Edit** and **Delete**, with title
+helper `Sample basket — editing unavailable in Explore`. User-created
+Practice or Live baskets keep full Edit/Delete. Empty Explore is an
+honest empty state or a clearly labelled sample set (FT-INVEST-002).
 
 ### The widgets (71)
 
