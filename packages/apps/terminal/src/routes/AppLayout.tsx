@@ -31,6 +31,9 @@ import { appendAISymbolContext } from "@/lib/aiSymbolContext";
 import { primaryBannerCopy } from "@/lib/primaryBanner";
 import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
 import { usePrimaryBannerKind } from "@/hooks/usePrimaryBannerKind";
+import { useChromeCollapse } from "@/chrome/useChromeCollapse";
+import { useDeskChromeStore } from "@/stores/deskChromeStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
@@ -143,12 +146,19 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
 
 /**
  * AppLayout -- shared chrome for all app routes (/terminal, /invest, /learn).
- * Renders TopBar (with route tabs) + TickerBar + DockSidebar + nested route content.
+ * Renders TopBar → dedicated TickerStrip → flex route body + DockSidebar.
  * Flow routes (/welcome, /explore, /setup) render outside this layout.
  */
 export default function AppLayout() {
   const mode = useModeStore((s) => s.mode);
-  const { showTicker: showTickerBar } = useDeskDensityChrome();
+  const { showTicker: showDeskTicker } = useDeskDensityChrome();
+  const tickerMode = useSettingsStore((s) => s.tickerMode);
+  const { hideTickerByDefault } = useChromeCollapse();
+  const tickerForcedOnNarrow = useDeskChromeStore((s) => s.tickerForcedOnNarrow);
+  const showTickerStrip =
+    tickerMode !== "off"
+    && showDeskTicker
+    && (!hideTickerByDefault || tickerForcedOnNarrow);
   const authStatus = useAuthStore((s) => s.status);
   const openAlgoApiKey = useConnectionStore((s) => s.apiKey);
   const authenticated = authStatus === "logged-in";
@@ -508,26 +518,31 @@ export default function AppLayout() {
       >
         Skip to main content
       </a>
-      <header className="relative z-20">
+      <header className="relative z-20 flex flex-col shrink-0">
         <TopBarV2 />
-        {showTickerBar && <TickerBar />}
+        {showTickerStrip && <TickerBar mode={tickerMode} />}
       </header>
       {/* Content area: DockSidebar + main panel side by side */}
       {/* Issue #47: visually-hidden H1 for screen readers reflecting the current route */}
       {/* Issue #54: aria-label on main landmark mirrors the route title */}
-      <div className="relative z-10 flex flex-1 overflow-hidden">
+      <div className="relative z-10 flex min-h-0 flex-1 overflow-hidden">
         <DockSidebar />
         <main
           id="main-content"
           ref={mainRef}
           tabIndex={-1}
           aria-label={routeTitle}
-          className="flex-1 overflow-hidden outline-none"
+          className="flex min-h-0 flex-1 flex-col overflow-hidden outline-none"
         >
           <h1 className="sr-only">{routeTitle}</h1>
-          <PageTransition locationKey={location.pathname}>
-            <Outlet />
-          </PageTransition>
+          <div
+            data-testid="route-body"
+            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          >
+            <PageTransition locationKey={location.pathname}>
+              <Outlet />
+            </PageTransition>
+          </div>
         </main>
       </div>
       {showWelcome && mode !== "explore" && (

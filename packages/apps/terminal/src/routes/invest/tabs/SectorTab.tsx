@@ -34,22 +34,6 @@ import { DemoBanner } from "@/components/ui/DemoBanner";
 import { cn } from "@/lib/utils";
 import { useInvest } from "../InvestContext";
 import { formatINRCompact } from "../formatters";
-import type { Holding } from "@/types/api";
-
-// ─── Demo data ────────────────────────────────────────────────────────────────
-
-const DEMO_HOLDINGS: Holding[] = [
-  { symbol: "RELIANCE", exchange: "NSE", quantity: 50, averagePrice: 2450, ltp: 2520, pnl: 3500, pnlPercent: 2.86 },
-  { symbol: "TCS", exchange: "NSE", quantity: 25, averagePrice: 3800, ltp: 3920, pnl: 3000, pnlPercent: 3.16 },
-  { symbol: "HDFCBANK", exchange: "NSE", quantity: 40, averagePrice: 1650, ltp: 1710, pnl: 2400, pnlPercent: 3.64 },
-  { symbol: "INFY", exchange: "NSE", quantity: 30, averagePrice: 1500, ltp: 1475, pnl: -750, pnlPercent: -1.67 },
-  { symbol: "ICICIBANK", exchange: "NSE", quantity: 60, averagePrice: 1100, ltp: 1145, pnl: 2700, pnlPercent: 4.09 },
-  { symbol: "WIPRO", exchange: "NSE", quantity: 100, averagePrice: 450, ltp: 462, pnl: 1200, pnlPercent: 2.67 },
-  { symbol: "ITC", exchange: "NSE", quantity: 200, averagePrice: 480, ltp: 495, pnl: 3000, pnlPercent: 3.13 },
-  { symbol: "BHARTIARTL", exchange: "NSE", quantity: 30, averagePrice: 1700, ltp: 1745, pnl: 1350, pnlPercent: 2.65 },
-  { symbol: "SBIN", exchange: "NSE", quantity: 80, averagePrice: 780, ltp: 798, pnl: 1440, pnlPercent: 2.31 },
-  { symbol: "LT", exchange: "NSE", quantity: 20, averagePrice: 3200, ltp: 3150, pnl: -1000, pnlPercent: -1.56 },
-];
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 // 10 distinct Tailwind colours mapped by sector index (cyclically)
@@ -131,13 +115,8 @@ function SortHeader({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function SectorTab() {
-  const { holdings: liveHoldings, isLoading, isError, isSampleData } = useInvest();
-
-  // Explore already exposes the labelled sample book via InvestContext.
-  // Live/Practice still fall back to local demo rows when the book is empty.
-  const isEmptyFallback = !isSampleData && (isError || (!isLoading && liveHoldings.length === 0));
-  const isDemo = Boolean(isSampleData) || isEmptyFallback;
-  const holdings = isEmptyFallback ? DEMO_HOLDINGS : liveHoldings;
+  const { holdings, isLoading, isSampleData } = useInvest();
+  const isDemo = Boolean(isSampleData);
 
   const [sortField, setSortField] = useState<SortField>("value");
   const [sortDir, setSortDir] = useState<SortDir>("desc");

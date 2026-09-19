@@ -5,6 +5,9 @@
  *   - Searchable symbol combobox (cmdk) — type to find any F&O stock
  *   - Exchange selector, first-5 expiry buttons, view tabs
  *   - Spot LTP, change, change% (green/red arrow), PCR badge (bullish/bearish/neutral)
+ *   - OI profile + PCR strip for the selected expiry/symbol (FT-TRADE-012);
+ *     Explore keeps a Sample badge and never invents live OI; empty expiry
+ *     is an honest empty, not zeros-as-data
  *   - Three view tabs: LTP | OI | GREEKS (Delta/Gamma/Theta/Vega/IV)
  *   - OI interpretation badges: Long Build Up / Short Covering / Long Unwinding / Short Build Up
  *   - Scrollable chain table: 10 strikes above ATM, ATM row highlighted (gold tint), 10 below
@@ -55,6 +58,8 @@ import {
 } from "@/hooks/useDataScope";
 import { checkOrderEntryMode, resolveLotQuantity } from "@/lib/orderGuards";
 import { useOptionChainData } from "./useOptionChainData";
+import OiPcrStrip from "./OiPcrStrip";
+import { strikeHasPositiveOi } from "./oiPcrStrip";
 import SymbolSearch from "./SymbolSearch";
 import BasketPanel from "./BasketPanel";
 import LegBuilder, { type LegBuilderHandle } from "./LegBuilder";
@@ -690,7 +695,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
             </div>
           )}
 
-          {pcr != null && (
+          {pcr != null && strikes.some(strikeHasPositiveOi) && (
             <div className={`flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-semibold font-mono ${
               Number(pcr) >= 1.2
                 ? "bg-bullish-bg border-bullish-border text-bullish-text"
@@ -736,6 +741,16 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
           </div>
         )}
       </div>
+
+      <OiPcrStrip
+        symbol={symDef.label}
+        expiry={selectedExpiry}
+        expiries={expiries}
+        strikes={strikes}
+        pcr={pcr}
+        isExplore={isExplore}
+        loading={loading}
+      />
 
       {/* Error banner */}
       {error && (

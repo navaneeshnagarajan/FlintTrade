@@ -1,5 +1,5 @@
 /**
- * TickerMarquee — seamless auto-scrolling ticker for the TopBarV2 chrome.
+ * TickerMarquee — seamless auto-scrolling ticker for the dedicated strip.
  *
  * Modes:
  *   "off"     — hidden
@@ -42,6 +42,13 @@ export interface TickerMarqueeProps {
   /** Pixels per second for marquee scroll. Default: 48. */
   speed?: number;
   className?: string;
+  /**
+   * When false, skip the region landmark — TickerBar already owns
+   * "Market indices". Default: true.
+   */
+  labelled?: boolean;
+  /** When false, skip the polite live-region summary. Default: true. */
+  announce?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +180,8 @@ export default function TickerMarquee({
   symbols: propSymbols,
   speed = 48,
   className = "",
+  labelled = true,
+  announce = true,
 }: TickerMarqueeProps) {
   // Fall back to Jotai atom when no symbols prop provided
   const atomSymbols = useAtomValue(indicesSummaryAtom);
@@ -181,20 +190,23 @@ export default function TickerMarquee({
   // Counter bumped every 30 s to force aria-live re-announcement of current prices
   const [announceKey, setAnnounceKey] = useState(0);
   useEffect(() => {
-    if (mode === "off") return;
+    if (mode === "off" || !announce) return;
     const timer = setInterval(() => setAnnounceKey((k) => k + 1), 30_000);
     return () => clearInterval(timer);
-  }, [mode]);
+  }, [mode, announce]);
 
   if (mode === "off" || symbols.length === 0) return null;
+
+  const landmarkProps = labelled
+    ? { role: "region" as const, "aria-label": "Ticker prices" }
+    : {};
 
   // ── Pinned mode: static row, no scroll ──────────────────────────────────
   if (mode === "pinned") {
     return (
       <div
         className={`flex items-center overflow-hidden ${className}`}
-        role="region"
-        aria-label="Ticker prices"
+        {...landmarkProps}
       >
         {symbols.map((sym) => (
           <TickerChip key={sym.name} name={sym.name} data={sym.data} />
@@ -214,8 +226,7 @@ export default function TickerMarquee({
           WebkitMaskImage:
             "linear-gradient(90deg, transparent 0%, black 4%, black 96%, transparent 100%)",
         }}
-        role="region"
-        aria-label="Ticker prices"
+        {...landmarkProps}
       >
         {symbols.map((sym) => (
           <TickerChip key={sym.name} name={sym.name} data={sym.data} />
@@ -242,8 +253,7 @@ export default function TickerMarquee({
         WebkitMaskImage:
           "linear-gradient(90deg, transparent 0%, black 4%, black 96%, transparent 100%)",
       }}
-      role="region"
-      aria-label="Ticker prices"
+      {...landmarkProps}
       data-testid="ticker-marquee"
     >
       {/*
@@ -275,14 +285,15 @@ export default function TickerMarquee({
         <TickerStrip symbols={symbols} />
       </div>
 
-      {/* Screen-reader accessible summary — key change every 30 s triggers re-announcement */}
-      <span key={announceKey} className="sr-only" aria-live="polite" aria-atomic="true">
-        {"Market prices: "}
-        {symbols
-          .filter((s) => s.data?.ltp != null && (s.data.ltp ?? 0) > 0)
-          .map((s) => `${s.name} ${s.data!.ltp}`)
-          .join(", ")}
-      </span>
+      {announce ? (
+        <span key={announceKey} className="sr-only" aria-live="polite" aria-atomic="true">
+          {"Market prices: "}
+          {symbols
+            .filter((s) => s.data?.ltp != null && (s.data.ltp ?? 0) > 0)
+            .map((s) => `${s.name} ${s.data!.ltp}`)
+            .join(", ")}
+        </span>
+      ) : null}
     </div>
   );
 }
