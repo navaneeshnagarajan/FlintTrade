@@ -113,6 +113,7 @@ describe("LogsSection", () => {
     expect(await screen.findByText(EXPLORE_EMPTY)).toBeInTheDocument();
     expect(screen.queryByText(LOAD_ERROR)).not.toBeInTheDocument();
     expect(screen.queryByText(DATE_EMPTY)).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Time" })).not.toBeInTheDocument();
     expect(mockGetAuditLogs).not.toHaveBeenCalled();
   });
 

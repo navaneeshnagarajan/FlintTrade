@@ -143,7 +143,7 @@ export default function LogsSection() {
           </p>
         )}
 
-        {allLogs.length > 0 && (
+        {!isExplore && allLogs.length > 0 && (
           <>
             <div className="text-xs text-text-muted mb-2">
               Showing {allLogs.length} of {total} entries
