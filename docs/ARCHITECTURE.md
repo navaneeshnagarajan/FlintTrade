@@ -603,13 +603,15 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
 
 ### Server-side mode enforcement
 
-Every HTTP order-path endpoint asks `mode_guard` whether the JWT permits a
-live action. Trying to place a live order on a Practice JWT is rejected 403
-immediately with code `practice_unsupported`. Explore JWTs yield
-`mode_blocked` on those same server routes — the request never reaches
-OpenAlgo or a broker. That does not cover Order Pad Sample Buy on
-`/trade` in Explore, which records a local client-side sample fill
-without calling an HTTP order route, SafetySystem, or a broker.
+The core `/api/v1/orders/*` proxy fans out by JWT mode: Explore is
+HTTP 403 `mode_blocked`, Practice routes to the native sandbox, and
+Live requires `live_mode_unlocked` plus the gated `BrokerRouter`.
+Executor-direct engine routes (basket, split, bracket, options-strategy)
+use `mode_guard.require_live_unlocked`: Explore is `mode_blocked`,
+Practice is `practice_unsupported` (no sandbox parity yet), and Live
+without PIN unlock is `live_locked`. Order Pad Sample Buy on `/trade`
+in Explore is a local client-side sample fill — no HTTP order route,
+SafetySystem, or broker.
 
 ### OpenAlgo X-API-Key
 

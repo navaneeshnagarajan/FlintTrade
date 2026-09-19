@@ -721,13 +721,15 @@ $params = @{
 Invoke-RestMethod @params
 ```
 
-Sandbox response shape:
+Sandbox response shape — the handler returns the sandbox dict as-is
+(`COMPLETE` / `PENDING`). A `REJECTED` sandbox result is HTTP 400 with
+`status: "error"`. There is no `status: "success"` envelope on this path.
 
 ```json
 {
-  "status": "success",
   "order_id": "sandbox-...",
-  "message": "Practice order filled by sandbox"
+  "status": "COMPLETE",
+  "message": "Paper order executed: BUY 50 NIFTY @ 0.00"
 }
 ```
 
