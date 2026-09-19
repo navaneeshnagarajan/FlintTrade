@@ -83,11 +83,37 @@ Object.defineProperty(globalThis, "localStorage", { value: localStorageMock });
 // Import after mocks
 // ---------------------------------------------------------------------------
 
+import { useModeStore } from "@/stores/modeStore";
 import { BasketTab } from "../BasketTab";
+
+const SAMPLE_BASKET_EDIT_UNAVAILABLE = "Sample basket — editing unavailable in Explore";
+
+const USER_BASKET = {
+  id: "custom-1",
+  name: "My Picks",
+  description: "Custom basket",
+  constituents: [
+    { symbol: "RELIANCE", exchange: "NSE", weight: 50 },
+    { symbol: "TCS", exchange: "NSE", weight: 50 },
+  ],
+  investedAmount: 200000,
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
+function seedUserBasket(): void {
+  localStorageMock.setItem("flinttrade:stock-baskets", JSON.stringify([USER_BASKET]));
+}
+
+function expectNoCardSampleChip(): void {
+  expect(screen.queryByTestId("provenance-badge")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("provenance-badge-inline")).not.toBeInTheDocument();
+  expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+}
 
 describe("BasketTab", () => {
   beforeEach(() => {
     localStorageMock.clear();
+    useModeStore.setState({ mode: "explore" });
   });
 
   it("renders sample baskets when no saved data", () => {
@@ -125,20 +151,7 @@ describe("BasketTab", () => {
   });
 
   it("renders saved baskets from localStorage", () => {
-    const baskets = [
-      {
-        id: "custom-1",
-        name: "My Picks",
-        description: "Custom basket",
-        constituents: [
-          { symbol: "RELIANCE", exchange: "NSE", weight: 50 },
-          { symbol: "TCS", exchange: "NSE", weight: 50 },
-        ],
-        investedAmount: 200000,
-        createdAt: "2026-01-01T00:00:00.000Z",
-      },
-    ];
-    localStorageMock.setItem("flinttrade:stock-baskets", JSON.stringify(baskets));
+    seedUserBasket();
 
     render(<BasketTab />);
     expect(screen.getByText("My Picks")).toBeInTheDocument();
@@ -186,5 +199,70 @@ describe("BasketTab", () => {
 
     expect(screen.getByText("Create Stock Basket")).toBeInTheDocument();
     expect(screen.getByText("Basket Name")).toBeInTheDocument();
+  });
+
+  it("disables Edit and Delete on seeded Explore baskets with the sample helper", () => {
+    render(<BasketTab />);
+
+    for (const name of ["NIFTY IT", "Banking"]) {
+      const edit = screen.getByRole("button", { name: `Edit ${name}` });
+      const remove = screen.getByRole("button", { name: `Delete ${name}` });
+      expect(edit).toBeDisabled();
+      expect(remove).toBeDisabled();
+      expect(edit).toHaveAttribute("title", SAMPLE_BASKET_EDIT_UNAVAILABLE);
+      expect(remove).toHaveAttribute("title", SAMPLE_BASKET_EDIT_UNAVAILABLE);
+    }
+
+    expectNoCardSampleChip();
+    fireEvent.click(screen.getByRole("button", { name: "Edit NIFTY IT" }));
+    expect(screen.queryByText("Edit Basket")).not.toBeInTheDocument();
+  });
+
+  it("keeps Edit and Delete armed on user-created Explore baskets", () => {
+    seedUserBasket();
+    render(<BasketTab />);
+
+    const edit = screen.getByRole("button", { name: "Edit My Picks" });
+    const remove = screen.getByRole("button", { name: "Delete My Picks" });
+    expect(edit).toBeEnabled();
+    expect(remove).toBeEnabled();
+    expectNoCardSampleChip();
+
+    fireEvent.click(edit);
+    expect(screen.getByText("Edit Basket")).toBeInTheDocument();
+  });
+
+  it("keeps Edit and Delete armed on Practice user-created baskets", () => {
+    useModeStore.setState({ mode: "practice" });
+    seedUserBasket();
+    render(<BasketTab />);
+
+    const edit = screen.getByRole("button", { name: "Edit My Picks" });
+    const remove = screen.getByRole("button", { name: "Delete My Picks" });
+    expect(edit).toBeEnabled();
+    expect(remove).toBeEnabled();
+    expect(edit).not.toHaveAttribute("title", SAMPLE_BASKET_EDIT_UNAVAILABLE);
+    expect(remove).not.toHaveAttribute("title", SAMPLE_BASKET_EDIT_UNAVAILABLE);
+    expectNoCardSampleChip();
+
+    fireEvent.click(edit);
+    expect(screen.getByText("Edit Basket")).toBeInTheDocument();
+  });
+
+  it("keeps Edit and Delete armed on Live user-created baskets", () => {
+    useModeStore.setState({ mode: "live" });
+    seedUserBasket();
+    render(<BasketTab />);
+
+    const edit = screen.getByRole("button", { name: "Edit My Picks" });
+    const remove = screen.getByRole("button", { name: "Delete My Picks" });
+    expect(edit).toBeEnabled();
+    expect(remove).toBeEnabled();
+    expect(edit).not.toHaveAttribute("title", SAMPLE_BASKET_EDIT_UNAVAILABLE);
+    expect(remove).not.toHaveAttribute("title", SAMPLE_BASKET_EDIT_UNAVAILABLE);
+    expectNoCardSampleChip();
+
+    fireEvent.click(edit);
+    expect(screen.getByText("Edit Basket")).toBeInTheDocument();
   });
 });
