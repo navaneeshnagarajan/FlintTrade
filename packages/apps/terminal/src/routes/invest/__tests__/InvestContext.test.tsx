@@ -1,11 +1,10 @@
 /**
- * InvestContext — explore-mode sample holdings must be the count source
- * for the Investor Dashboard header (FT-DEMO-001).
+ * InvestContext — sample holdings must be the count source for the
+ * Investor Dashboard header (FT-DEMO-001 / FT-TRADE-010).
  *
- * The Holdings tab already lists sample stocks when the live book is empty.
- * The route header previously read the raw (empty) broker query and showed
- * “0 holdings”. Explore must use the same demo book as the rest of the app
- * (`getDemoHoldings`), not a hardcoded 10.
+ * Practice and Explore with no broker expose `getDemoHoldings` so the
+ * header badge matches the listed sample rows. A connected broker with
+ * an empty book stays at 0 — never a sample table under a zero badge.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -15,13 +14,15 @@ import { getDemoHoldings } from "@/hooks/useModeData";
 import { useModeStore } from "@/stores/modeStore";
 import type { Holding } from "@/types/api";
 
+const holdingsQuery = vi.hoisted(() => ({
+  data: undefined as Holding[] | undefined,
+  isLoading: false,
+  isError: false,
+  refetch: vi.fn(),
+}));
+
 vi.mock("@/hooks/useHoldings", () => ({
-  useHoldings: () => ({
-    data: undefined,
-    isLoading: false,
-    isError: false,
-    refetch: vi.fn(),
-  }),
+  useHoldings: () => holdingsQuery,
 }));
 
 vi.mock("@/hooks/useFunds", () => ({
@@ -32,15 +33,22 @@ vi.mock("@/hooks/useAccountReadsEnabled", () => ({
   useAccountReadsEnabled: () => false,
 }));
 
+const brokerConnected = vi.hoisted(() => ({ current: false }));
+
+vi.mock("@/hooks/useBrokerConnected", () => ({
+  useBrokerConnected: () => brokerConnected.current,
+}));
+
 import { InvestProvider, useInvest } from "../InvestContext";
 
 function HoldingsCountProbe() {
-  const { holdings, summary, isSampleData } = useInvest();
+  const { holdings, summary, isSampleData, isLoading } = useInvest();
   return (
     <div>
       <span data-testid="holding-count">{holdings.length} holdings</span>
       <span data-testid="summary-count">{summary.holdingCount}</span>
       <span data-testid="sample-flag">{String(isSampleData)}</span>
+      <span data-testid="loading-flag">{String(isLoading)}</span>
     </div>
   );
 }
@@ -59,6 +67,10 @@ function renderProbe() {
 }
 
 afterEach(() => {
+  brokerConnected.current = false;
+  holdingsQuery.data = undefined;
+  holdingsQuery.isLoading = false;
+  holdingsQuery.isError = false;
   useModeStore.setState({ mode: "explore" });
 });
 
@@ -81,12 +93,69 @@ describe("InvestContext sample holdings count (FT-DEMO-001)", () => {
 
   it("keeps an empty live book empty so a funded account with no holdings stays at 0", () => {
     useModeStore.setState({ mode: "live" });
+    brokerConnected.current = true;
 
     renderProbe();
 
     expect(screen.getByTestId("holding-count")).toHaveTextContent("0 holdings");
     expect(screen.getByTestId("summary-count")).toHaveTextContent("0");
     expect(screen.getByTestId("sample-flag")).toHaveTextContent("false");
+  });
+
+  it("exposes the demo holdings book in practice mode when no broker is connected", () => {
+    useModeStore.setState({ mode: "practice" });
+    brokerConnected.current = false;
+    const expected = getDemoHoldings();
+
+    renderProbe();
+
+    expect(screen.getByTestId("holding-count")).toHaveTextContent(
+      `${expected.length} holdings`,
+    );
+    expect(screen.getByTestId("summary-count")).toHaveTextContent(
+      String(expected.length),
+    );
+    expect(screen.getByTestId("sample-flag")).toHaveTextContent("true");
+    expect(expected.length).toBeGreaterThan(0);
+  });
+
+  it("keeps an empty connected practice book at 0 with no sample flag", () => {
+    useModeStore.setState({ mode: "practice" });
+    brokerConnected.current = true;
+
+    renderProbe();
+
+    expect(screen.getByTestId("holding-count")).toHaveTextContent("0 holdings");
+    expect(screen.getByTestId("summary-count")).toHaveTextContent("0");
+    expect(screen.getByTestId("sample-flag")).toHaveTextContent("false");
+  });
+
+  it("does not classify Practice as sample while the holdings query is still pending", () => {
+    useModeStore.setState({ mode: "practice" });
+    brokerConnected.current = false;
+    holdingsQuery.isLoading = true;
+    holdingsQuery.data = undefined;
+
+    renderProbe();
+
+    expect(screen.getByTestId("holding-count")).toHaveTextContent("0 holdings");
+    expect(screen.getByTestId("summary-count")).toHaveTextContent("0");
+    expect(screen.getByTestId("sample-flag")).toHaveTextContent("false");
+    expect(screen.getByTestId("loading-flag")).toHaveTextContent("true");
+  });
+
+  it("does not classify Practice as sample when the holdings query errored empty", () => {
+    useModeStore.setState({ mode: "practice" });
+    brokerConnected.current = false;
+    holdingsQuery.isError = true;
+    holdingsQuery.data = undefined;
+
+    renderProbe();
+
+    expect(screen.getByTestId("holding-count")).toHaveTextContent("0 holdings");
+    expect(screen.getByTestId("summary-count")).toHaveTextContent("0");
+    expect(screen.getByTestId("sample-flag")).toHaveTextContent("false");
+    expect(screen.getByTestId("loading-flag")).toHaveTextContent("false");
   });
 });
 
@@ -113,6 +182,10 @@ describe("resolveInvestHoldings", () => {
       holdings: [],
       isSampleData: false,
     });
+    expect(resolveInvestHoldings("practice", [], true)).toEqual({
+      holdings: [],
+      isSampleData: false,
+    });
   });
 
   it("substitutes getDemoHoldings in explore even when the live query is empty", async () => {
@@ -124,5 +197,25 @@ describe("resolveInvestHoldings", () => {
     expect(resolved.isSampleData).toBe(true);
     expect(resolved.holdings).toHaveLength(demo.length);
     expect(resolved.holdings.map((h) => h.symbol)).toEqual(demo.map((h) => h.symbol));
+  });
+
+  it("substitutes getDemoHoldings in practice when no broker is connected and the live book is empty", async () => {
+    const { resolveInvestHoldings } = await import("../InvestContext");
+    const demo = getDemoHoldings();
+
+    const resolved = resolveInvestHoldings("practice", [], false);
+
+    expect(resolved.isSampleData).toBe(true);
+    expect(resolved.holdings).toHaveLength(demo.length);
+    expect(resolved.holdings.map((h) => h.symbol)).toEqual(demo.map((h) => h.symbol));
+  });
+
+  it("does not substitute sample in practice until the holdings query has settled empty", async () => {
+    const { resolveInvestHoldings } = await import("../InvestContext");
+
+    expect(resolveInvestHoldings("practice", [], false, false)).toEqual({
+      holdings: [],
+      isSampleData: false,
+    });
   });
 });

@@ -299,12 +299,33 @@ continuous to 15:30. There is no flat "Market open until 15:30" or "VWAP
 last 30 min" closing-price copy. The September 2026 consultation stays out
 of the UI.
 
+**Feed freshness (FT-CORE-002).** Explore already discloses sample data
+with the global banner `EXPLORE MODE — All data shown is sample only`,
+plus per-widget **Sample** chips and age when known. That is enough —
+per-symbol ticker Sample chips are optional, and the Market Clock
+freshness chip appears only when that widget is mounted. Practice and
+Live have no Explore banner to lean on: TopBar or the ticker strip must
+show **Live**, **Delayed**, or **Sample** (and muted **Stale** /
+**Unknown** plus age when known). Silent-stale is a fail. This is
+provenance, not execution mode — Live mode does not imply a Live feed
+(Mode honesty).
+
 **Compact / Comfortable.** New installs default to Comfortable (full labels).
 Compact on a desk Trade viewport (~1280 and wider) keeps chart, order pad,
 and positions primary; the ticker strip, full tool ribbon, and watchlist /
 indices / advanced tools start collapsed behind **Watchlist & tools** /
 **Desk tools**. Selecting Compact again re-collapses that disclosure.
 Phone layouts are unchanged.
+
+**Desk chrome (FT-UX-002).** The desk uses one TopBar and one scrolling
+ticker strip under it. TopBar keeps Mode, session/status, and overflow —
+it is not a second quote rail, so dual index slots in TopBar are gone.
+Settings and Tools collapse to one Tools overflow menu plus at most one
+primary Settings entry (no triple chrome). Trade uses the flex shell
+TopBar → TickerStrip → route body first; the same shell then rolls to
+Invest, Automate, Learn, and Ditto. This is not a silent widen of
+Compact-only-on-Trade (FT-UX-001). Mode and status stay reachable
+(desk-first; skinny-browser defensive collapse is fine).
 
 ### Walkthrough
 
@@ -369,6 +390,12 @@ quotes as the ticker tape (Sample data badge). A missing quote
 shows `—` after a brief `…`, never a silent blank. Unchecking a
 column hides it (FT-TRADE-008).
 
+Selecting a symbol in `/trade` Watchlist retargets Chart,
+Option Chain, and Scalper to that symbol — no retype.
+Explore retarget is allowed and keeps Sample labels.
+An empty watchlist never silently retargets
+(FT-TRADE-011).
+
 On Explore `/trade` → Scalper, **Buy CE**, **Sell**, and **1-CLICK**
 stay disarmed — the same honesty class as Automate Telegram
 **Send Test**. They never open Confirm Order and never place.
@@ -398,6 +425,19 @@ Jan 2026 NSE-cycle index lots (`NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 ·
 MIDCPNIFTY 120 (as of Jan 2026 NSE cycle)`) plus a **Verify on NSE**
 link to circular NSE/FAOP/70616. Learn market facts that exchanges
 revise must ship dated, not as forever hardcodes.
+
+### Learn → Resource Hub (local documents)
+
+Explore `/learn` → **Resource Hub** opens project docs from the local
+FlintTrade backend (`USER_GUIDE.md`, `ORDER_SAFETY.md`, and the other
+listed cards). First open shows `Loading document…` while that local
+load settles — it never flashes a red backend error on a cold-start
+race. A timeout or race is a muted soft fail: `Document isn’t ready
+yet.` plus a primary **Retry** (one automatic retry is allowed). The
+red `Couldn’t load this document from the local backend.` line plus
+**Retry** is reserved for a hard fail after retry is exhausted. Order
+Safety Notes already loading in the same session does not treat User
+Guide as permanently broken (FT-LEARN-003).
 
 ---
 
@@ -495,6 +535,20 @@ fixture date and does not auto-update. Practice and Live keep the live
 AMFI sentence ("Updated daily after market close") when the live feed is
 in use.
 
+On Practice or Explore `/invest` → Holdings with no broker, the header
+badge matches the visible table (`N holdings`) and a muted Sample chip
+discloses sample data. The badge is never `0 holdings` over a populated
+sample table. Dashboard and "N stocks" use that same N. Practice waits
+until the holdings query has settled empty before the sample fallback,
+so a cold load does not flash the sample N over a pending book.
+Dashboard `Net Worth (Equity + Cash)` uses that same shared demo book
+as Holdings. A broker read failure shows muted `Failed to load holdings`
+plus `Refresh` — never `0 holdings`, `No holdings`, or a sample table
+under a failed load. A connected broker with no positions shows
+`0 holdings` and an honest empty state (`No holdings`) — no sample
+table under a zero badge. Connected positions use the live count only,
+with no Sample chip (FT-TRADE-010).
+
 ### The widgets (71)
 
 Widgets are organised into three categories — Trading / Analysis / Utility —
@@ -527,16 +581,34 @@ Market Clock uses the same CAS-aware cash timeline as the TopBar
 still runs after cash continuous ends, the TopBar may show `F&O open · till
 15:40`. Non-CAS cash still continuous to 15:30.
 
+Feed freshness (FT-CORE-002) is mode-split. In Explore, the global
+`EXPLORE MODE — All data shown is sample only` banner plus per-widget
+**Sample** chips and age when known is enough; per-symbol ticker Sample
+chips are optional, and the Market Clock freshness chip appears only
+when that widget is mounted. In Practice and Live, TopBar or the ticker
+must show **Live**, **Delayed**, or **Sample** (and muted **Stale** /
+**Unknown** plus age when known) — there is no Explore banner to lean
+on, so silent-stale is a fail. Feed provenance is independent of
+Explore / Practice / Live execution mode.
+
 On Explore `/trade` Watchlist, checked LTP and % change columns
 use the same sample quotes as the ticker tape (Sample data badge).
 A missing quote shows `—` after a brief `…`, never a silent blank
-(FT-TRADE-008).
+(FT-TRADE-008). Selecting a watchlist symbol retargets Chart,
+Option Chain, and Scalper to that symbol; Explore keeps Sample
+labels. An empty watchlist never silently retargets
+(FT-TRADE-011).
 
 On Explore `/trade` Scalper (including the Scalper Zone preset),
 **Buy CE**, **Sell**, and **1-CLICK** stay disarmed. Helper:
 "Orders blocked in Explore (sample-only). Switch to Practice or
 Live with a broker connected to trade." There is no Confirm Order
 path from Explore (FT-TRADE-009).
+
+On Explore `/trade` Option Chain, the strip shows OI profile
++ PCR for the selected expiry/symbol. Explore keeps a Sample
+badge and never invents live OI. An empty expiry is an honest
+empty, not zeros-as-data (FT-TRADE-012).
 
 News Feed loads headlines only through the FlintTrade backend (`GET /api/v1/news`).
 There is no browser-side RSS or CORS-proxy fallback. If the backend cannot
@@ -578,6 +650,11 @@ Streaming option-chain widget rendered with
 [Glide Data Grid](https://github.com/glideapps/glide-data-grid) for
 60+ FPS updates even on a 50-strike chain. The header also shows a
 Max Pain badge derived from the same chain.
+
+The Option Chain strip shows **OI profile + PCR** for the
+selected expiry and symbol (FT-TRADE-012). Explore keeps a
+**Sample** badge and never invents live OI. An empty expiry
+is an honest empty — not zeros painted as data.
 
 1. Drag the **Option Chain** widget into the workspace.
 2. Pick a symbol (e.g. `NIFTY`, `BANKNIFTY`, `RELIANCE`).

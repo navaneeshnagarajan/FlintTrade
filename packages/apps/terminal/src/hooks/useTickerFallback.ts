@@ -50,6 +50,7 @@ import { channelInstrumentAtoms, USER_CHANNELS } from "@/services/fdc3/channels"
 import { useConnectionStore } from "@/stores/connectionStore";
 import { getWsService } from "@/services/websocket";
 import { getTicker } from "@/services/api";
+import { FEED_STALE_AFTER_MS } from "@/lib/feedFreshness";
 import type { WsTick, WsInstrument } from "@/types/api";
 
 /** Maximum instruments to poll simultaneously to stay within the 50/s rate limit. */
@@ -60,9 +61,9 @@ const POLL_INTERVAL_MS = 5_000;
 
 /**
  * Fallback data older than this is reported stale (two missed poll cycles).
- * Exported so consumers rendering staleness affordances agree on the window.
+ * Same window as the TopBar / ticker / Market Clock source chip.
  */
-export const STALE_AFTER_MS = POLL_INTERVAL_MS * 2;
+export const STALE_AFTER_MS = FEED_STALE_AFTER_MS;
 
 /** Health report for the REST tick fallback — no silent lies. */
 export interface TickerFallbackStatus {

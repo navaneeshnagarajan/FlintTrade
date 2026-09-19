@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
@@ -55,7 +55,44 @@ function renderLearnRoute(initialEntries: Parameters<typeof MemoryRouter>[0]["in
   );
 }
 
+// Locked FT-LEARN-003 copy (USER_GUIDE Learn → Resource Hub).
+const DOC_LOADING = "Loading document…";
+const DOC_SOFT_FAIL = "Document isn’t ready yet.";
+const DOC_HARD_FAIL = "Couldn’t load this document from the local backend.";
+const DOC_LEGACY_HARD_FAIL = "Could not load this document from the local backend.";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((settle, fail) => {
+    resolve = settle;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+function docsResponse(title: string, content: string): Response {
+  return new Response(JSON.stringify({ title, content }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function openUserGuideCard() {
+  fireEvent.click(screen.getByRole("tab", { name: "Resource Hub" }));
+  fireEvent.click(screen.getByRole("button", { name: /User Guide/ }));
+}
+
+function expectNoHardFail() {
+  expect(screen.queryByText(DOC_HARD_FAIL)).not.toBeInTheDocument();
+  expect(screen.queryByText(DOC_LEGACY_HARD_FAIL)).not.toBeInTheDocument();
+}
+
 describe("LearnRoute", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("renders the Learning Center heading", () => {
     renderLearnRoute();
     expect(screen.getByText("Learning Center")).toBeInTheDocument();
@@ -213,5 +250,117 @@ describe("LearnRoute", () => {
     expect(src).toMatch(/as of Jan 2026 NSE cycle/);
     expect(src).toMatch(/Verify on NSE/);
     expect(src).toMatch(/nsearchives\.nseindia\.com\/content\/circulars\/FAOP70616\.pdf/);
+  });
+
+  it("shows Loading document… on first-open User Guide and never a red backend error while pending", async () => {
+    const pending = deferred<Response>();
+    vi.spyOn(globalThis, "fetch").mockReturnValue(pending.promise);
+
+    renderLearnRoute();
+    openUserGuideCard();
+
+    expect(await screen.findByText(DOC_LOADING)).toBeInTheDocument();
+    expectNoHardFail();
+    expect(screen.queryByText(DOC_SOFT_FAIL)).not.toBeInTheDocument();
+
+    pending.resolve(docsResponse("User Guide", "Configure your workspace"));
+    expect(await screen.findByText("Configure your workspace")).toBeInTheDocument();
+    expect(screen.queryByText(DOC_LOADING)).not.toBeInTheDocument();
+    expectNoHardFail();
+  });
+
+  it("treats a first-open timeout/race as a muted soft fail with Retry, not a hard backend death", async () => {
+    const autoRetry = deferred<Response>();
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("Failed to fetch"))
+      .mockReturnValueOnce(autoRetry.promise);
+
+    renderLearnRoute();
+    openUserGuideCard();
+
+    expect(await screen.findByText(DOC_SOFT_FAIL)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expectNoHardFail();
+    expect(screen.queryByText(DOC_LOADING)).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalled();
+
+    autoRetry.resolve(docsResponse("User Guide", "Configure your workspace"));
+    expect(await screen.findByText("Configure your workspace")).toBeInTheDocument();
+    expect(screen.queryByText(DOC_SOFT_FAIL)).not.toBeInTheDocument();
+    expectNoHardFail();
+  });
+
+  it("auto-retries once and recovers a cold-start User Guide without a hard fail", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("Failed to fetch"))
+      .mockResolvedValueOnce(docsResponse("User Guide", "Configure your workspace"));
+
+    renderLearnRoute();
+    openUserGuideCard();
+
+    expect(await screen.findByText("Configure your workspace")).toBeInTheDocument();
+    expectNoHardFail();
+    expect(screen.queryByText(DOC_SOFT_FAIL)).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows hard-fail copy plus Retry only after retry is exhausted", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("Failed to fetch"))
+      .mockRejectedValueOnce(new Error("Failed to fetch"));
+
+    renderLearnRoute();
+    openUserGuideCard();
+
+    expect(await screen.findByText(DOC_HARD_FAIL)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByText(DOC_SOFT_FAIL)).not.toBeInTheDocument();
+    expect(screen.queryByText(DOC_LEGACY_HARD_FAIL)).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers from hard fail when Retry succeeds", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("Failed to fetch"))
+      .mockRejectedValueOnce(new Error("Failed to fetch"))
+      .mockResolvedValueOnce(docsResponse("User Guide", "Configure your workspace"));
+
+    renderLearnRoute();
+    openUserGuideCard();
+
+    expect(await screen.findByText(DOC_HARD_FAIL)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("Configure your workspace")).toBeInTheDocument();
+    expect(screen.queryByText(DOC_HARD_FAIL)).not.toBeInTheDocument();
+  });
+
+  it("does not mark User Guide permanently broken after Order Safety Notes loads in the same session", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("ORDER_SAFETY")) {
+        return Promise.resolve(docsResponse("Order Safety Notes", "Gate every live order."));
+      }
+      const guideAttempts = fetchMock.mock.calls.filter((call) =>
+        String(call[0]).includes("USER_GUIDE"),
+      ).length;
+      if (guideAttempts <= 2) {
+        return Promise.reject(new Error("Failed to fetch"));
+      }
+      return Promise.resolve(docsResponse("User Guide", "Configure your workspace"));
+    });
+
+    renderLearnRoute();
+    fireEvent.click(screen.getByRole("tab", { name: "Resource Hub" }));
+    fireEvent.click(screen.getByRole("button", { name: /User Guide/ }));
+    expect(await screen.findByText(DOC_HARD_FAIL)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Order Safety Notes/ }));
+    expect(await screen.findByText("Gate every live order.")).toBeInTheDocument();
+    expect(screen.queryByText(DOC_HARD_FAIL)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /User Guide/ }));
+    expect(await screen.findByText("Configure your workspace")).toBeInTheDocument();
+    expectNoHardFail();
   });
 });

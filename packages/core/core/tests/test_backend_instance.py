@@ -396,8 +396,10 @@ def test_proofless_flask_factory_serves_without_broker_authorities(monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("proofless factory constructed broker authority")
 
-    # docs/API.md keeps /healthz API-key-gated when a key is configured.
-    # Isolate leaked worker keys so this probe uses the loopback-no-key path.
+    # Sibling modules assign OPENALGO_API_KEY / FLINTTRADE_API_KEY on
+    # os.environ directly. docs/API.md keeps /healthz API-key-gated when a
+    # key is configured; isolate the leak so this probe uses the
+    # loopback-no-key path instead of 401-ing.
     monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
     monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
     monkeypatch.setattr(module, "CredentialStore", forbidden)

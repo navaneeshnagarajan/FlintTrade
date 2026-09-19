@@ -65,6 +65,8 @@ export interface ScalperControlsProps {
   onOneClickToggle: () => void;
   /** Explore: 1-CLICK stays OFF / disabled with the locked title + helper. */
   ordersArmed: boolean;
+  /** Explore: keep the Sample data badge after a Watchlist retarget. */
+  isExplore: boolean;
 }
 
 export function ScalperControls({
@@ -103,13 +105,14 @@ export function ScalperControls({
   oneClick,
   onOneClickToggle,
   ordersArmed,
+  isExplore,
 }: ScalperControlsProps) {
   return (
     <div className="shrink-0 bg-surface-card border-b border-border-default">
       {/* Row 1: Index, Expiry, CE Strike, PE Strike, Status */}
       <div className="flex items-end gap-3 px-3 py-2 flex-wrap">
         {/* Index selector */}
-        <div className="flex flex-col gap-0.5">
+        <div className="flex flex-col gap-0.5" data-testid="scalper-index" data-symbol={symbol}>
           <span className="text-xxs text-text-muted uppercase tracking-wider font-sans">Index</span>
           <Select value={symbol} onValueChange={onSymbolChange}>
             <SelectTrigger size="sm" className="font-mono font-bold min-w-[9rem]">
@@ -171,6 +174,16 @@ export function ScalperControls({
           onDec={onPeOffsetDec}
           onInc={onPeOffsetInc}
         />
+
+        {isExplore && (
+          <span
+            role="status"
+            className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+            title="Explore uses sample quotes and expiries"
+          >
+            Sample data
+          </span>
+        )}
 
         <div className="flex-1" />
 

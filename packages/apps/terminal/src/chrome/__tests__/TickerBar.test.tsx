@@ -36,6 +36,7 @@ vi.mock("@/lib/market", () => ({
   isMarketHours: (...args: unknown[]) => mockIsMarketHours(...args),
 }));
 
+import { useModeStore } from "@/stores/modeStore";
 import TickerBar from "../TickerBar";
 
 function renderTickerBar() {
@@ -59,6 +60,7 @@ describe("TickerBar", () => {
     vi.restoreAllMocks();
     mockIndicesData.length = 0;
     mockIsMarketHours.mockReturnValue(false);
+    useModeStore.setState({ mode: "explore" });
   });
 
   it("renders without crashing", () => {
@@ -84,8 +86,8 @@ describe("TickerBar", () => {
     ]);
     renderTickerBar();
 
-    expect(screen.getByText("NIFTY 50")).toBeInTheDocument();
-    expect(screen.getByText("SENSEX")).toBeInTheDocument();
+    expect(screen.getAllByText("NIFTY 50").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("SENSEX").length).toBeGreaterThan(0);
   });
 
   it("displays LTP values for indices with data", () => {
@@ -95,7 +97,17 @@ describe("TickerBar", () => {
     renderTickerBar();
 
     // LTP formatted as en-IN with 2 decimal places
-    expect(screen.getByText("23,500.50")).toBeInTheDocument();
+    expect(screen.getAllByText("23,500.50").length).toBeGreaterThan(0);
+  });
+
+  it("shows a Sample feed-source chip in Explore (FT-CORE-002)", () => {
+    setIndices([]);
+    renderTickerBar();
+
+    const chip = screen.getByTestId("feed-freshness-chip");
+    expect(chip).toHaveTextContent("Sample");
+    expect(chip).toHaveAttribute("data-state", "sample");
+    expect(chip).not.toHaveTextContent("Live");
   });
 
   it("has the market indices region landmark", () => {
@@ -103,6 +115,7 @@ describe("TickerBar", () => {
     renderTickerBar();
 
     expect(screen.getByRole("region", { name: "Market indices" })).toBeInTheDocument();
+    expect(screen.getByTestId("ticker-strip")).toBeInTheDocument();
   });
 
   it("does not show connect prompt when live data exists", () => {
@@ -152,10 +165,10 @@ describe("TickerBar", () => {
       ]);
       renderTickerBar();
 
-      expect(screen.getByText("GOLD")).toBeInTheDocument();
-      expect(screen.getByText("SILVER")).toBeInTheDocument();
-      expect(screen.getByText("CRUDEOIL")).toBeInTheDocument();
-      expect(screen.getByText("NATGAS")).toBeInTheDocument();
+      expect(screen.getAllByText("GOLD").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("SILVER").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("CRUDEOIL").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("NATGAS").length).toBeGreaterThan(0);
     });
 
     it("shows MCX badge as 'MCX open' when MCX session is active", () => {
@@ -190,7 +203,7 @@ describe("TickerBar", () => {
       ]);
       renderTickerBar();
 
-      expect(screen.getByText("72,500.00")).toBeInTheDocument();
+      expect(screen.getAllByText("72,500.00").length).toBeGreaterThan(0);
     });
 
     it("MCX instruments are visible even when NSE is closed", () => {
@@ -203,8 +216,8 @@ describe("TickerBar", () => {
       ]);
       renderTickerBar();
 
-      expect(screen.getByText("GOLD")).toBeInTheDocument();
-      expect(screen.getByText("72,500.00")).toBeInTheDocument();
+      expect(screen.getAllByText("GOLD").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("72,500.00").length).toBeGreaterThan(0);
     });
 
     it("MCX section has accessible label", () => {
@@ -217,5 +230,17 @@ describe("TickerBar", () => {
         screen.getByLabelText("MCX commodities section"),
       ).toBeInTheDocument();
     });
+  });
+
+  it("uses one scrolling marquee for the dedicated strip", () => {
+    setIndices([
+      { name: "NIFTY 50", data: { ltp: 23500.50, prevClose: 23400 } as WsTick },
+    ]);
+    renderTickerBar();
+
+    expect(screen.getByTestId("ticker-strip")).toBeInTheDocument();
+    expect(screen.getByTestId("ticker-marquee")).toBeInTheDocument();
+    expect(screen.getAllByRole("region", { name: "Market indices" })).toHaveLength(1);
+    expect(screen.queryByRole("region", { name: "Ticker prices" })).not.toBeInTheDocument();
   });
 });
