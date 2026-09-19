@@ -1,6 +1,9 @@
 /**
  * LogsSection — Local audit log viewer.
  * Paginated by date, with load-more for large days.
+ *
+ * Explore is sample-only: never fetch, never treat the empty trail as an
+ * outage. Practice/Live distinguish pending, success-empty, and real errors.
  */
 
 import { useState, useEffect } from "react";
@@ -13,9 +16,21 @@ import {
 } from "@/components/ui/table";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { getAuditLogs, type AuditLog } from "@/services/ftApi";
+import { useModeStore } from "@/stores/modeStore";
 import { VerdictBadge, verdictClass } from "./shared";
 
 const PAGE_SIZE = 50;
+
+export const EXPLORE_EXECUTION_LOGS_EMPTY =
+  "No execution logs in Explore (sample-only). Switch to Practice or Live to see real run history.";
+
+export const PRACTICE_LIVE_EXECUTION_LOGS_EMPTY =
+  "No execution logs for this date.";
+
+export const EXECUTION_LOGS_LOAD_ERROR =
+  "Failed to load logs. Backend may be offline.";
+
+export const EXECUTION_LOGS_LOADING = "Loading logs…";
 
 function formatTs(ts: string): string {
   try {
@@ -32,6 +47,8 @@ function formatTs(ts: string): string {
 }
 
 export default function LogsSection() {
+  const mode = useModeStore((state) => state.mode);
+  const isExplore = mode === "explore";
   const today = new Date().toISOString().slice(0, 10);
   const [date, setDate]       = useState(today);
   const [offset, setOffset]   = useState(0);
@@ -41,6 +58,7 @@ export default function LogsSection() {
   const { data, isFetching, isError, refetch } = useQuery({
     queryKey: ["auditLogs", date, offset],
     queryFn: () => getAuditLogs(date, PAGE_SIZE, offset),
+    enabled: !isExplore,
   });
 
   useEffect(() => {
@@ -61,6 +79,11 @@ export default function LogsSection() {
   };
 
   const hasMore = allLogs.length < total;
+  const requestSettled = !isExplore && !isFetching;
+  const showExploreEmpty = isExplore;
+  const showLoading = !isExplore && isFetching && allLogs.length === 0;
+  const showError = requestSettled && isError;
+  const showDateEmpty = requestSettled && !isError && allLogs.length === 0;
 
   return (
     <div className="space-y-4">
@@ -83,7 +106,8 @@ export default function LogsSection() {
               size="sm"
               variant="ghost"
               onClick={() => void refetch()}
-              disabled={isFetching}
+              disabled={isExplore || isFetching}
+              aria-label="Refresh logs"
               className="h-7 w-7 p-0 text-text-muted hover:text-text-primary"
             >
               <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
@@ -91,15 +115,31 @@ export default function LogsSection() {
           </div>
         </div>
 
-        {isError && (
-          <p className="text-xs text-loss text-center py-6">
-            Failed to load logs. Backend may be offline.
+        {showExploreEmpty && (
+          <p className="text-xs text-text-muted text-center py-8">
+            {EXPLORE_EXECUTION_LOGS_EMPTY}
           </p>
         )}
 
-        {!isError && allLogs.length === 0 && !isFetching && (
+        {showError && (
+          <div className="flex flex-col items-center gap-3 py-6">
+            <p className="text-xs text-loss text-center">
+              {EXECUTION_LOGS_LOAD_ERROR}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void refetch()}
+              className="h-7 px-3 text-xs border-border-default text-text-secondary hover:text-text-primary"
+            >
+              Retry
+            </Button>
+          </div>
+        )}
+
+        {showDateEmpty && (
           <p className="text-xs text-text-muted text-center py-8">
-            No logs for {date}. Logs appear once automations execute.
+            {PRACTICE_LIVE_EXECUTION_LOGS_EMPTY}
           </p>
         )}
 
@@ -179,9 +219,14 @@ export default function LogsSection() {
           </>
         )}
 
-        {isFetching && allLogs.length === 0 && (
-          <div className="flex items-center justify-center py-10">
+        {showLoading && (
+          <div
+            className="flex items-center justify-center gap-2 py-10 text-xs text-text-muted"
+            role="status"
+            aria-live="polite"
+          >
             <Loader2 size={18} className="animate-spin text-text-muted" />
+            {EXECUTION_LOGS_LOADING}
           </div>
         )}
       </GlassCard>
