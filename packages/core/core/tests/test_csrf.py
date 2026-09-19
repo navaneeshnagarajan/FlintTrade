@@ -151,6 +151,30 @@ class TestPublicEndpointBypass:
         # Should succeed (201) or conflict (409) — never 401 from API key
         assert resp.status_code in (201, 409, 503)
 
+    def test_api_v1_ping_no_key_required(self, client: Any) -> None:
+        """Documented public liveness probe stays reachable without an API key."""
+        resp = client.get("/api/v1/ping")
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "ok"
+
+    def test_api_v1_health_no_key_required(self, client: Any) -> None:
+        """Documented public aggregated health surface stays reachable without a key."""
+        resp = client.get("/api/v1/health")
+        assert resp.status_code in (200, 503)
+        assert resp.get_json()["status"] in ("ok", "degraded", "error")
+
+    def test_process_health_paths_require_api_key_when_configured(self, client: Any) -> None:
+        """``/healthz`` and ``/health/detail`` stay key-gated when a key is set.
+
+        ``docs/API.md`` tells operators to probe ``/api/v1/ping`` and
+        ``/api/v1/health`` instead. Opening the whole health blueprint would
+        also publish workspace paths from ``/health/detail``.
+        """
+        healthz = client.get("/healthz")
+        assert healthz.status_code == 401
+        detail = client.get("/health/detail")
+        assert detail.status_code == 401
+
 
 # ---------------------------------------------------------------------------
 # OPTIONS preflight bypass

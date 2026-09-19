@@ -27,7 +27,32 @@ changelog rebuilds itself from the first release cut after this baseline.
   contract (quotes, depth, history, balances, books, and related methods) —
   not a restored terminal Brokers screen or a new public HTTP read family.
 
+- **Shared symbol bus from Watchlist (FT-TRADE-011).**
+  Selecting a symbol in `/trade` Watchlist retargets
+  Chart, Option Chain, and Scalper to that symbol —
+  no retype. Keyboard retarget is optional later.
+  Explore retarget is allowed and keeps Sample labels.
+  An empty watchlist never silently retargets.
+
+- **Option Chain OI profile + PCR strip (FT-TRADE-012).**
+  The Option Chain strip shows OI profile + PCR for
+  the selected expiry/symbol. Explore keeps a Sample
+  badge and never invents live OI. An empty expiry
+  is an honest empty, not zeros-as-data.
+
 ### Changed
+
+- **Desk chrome: one TopBar + one ticker + flex shell (FT-UX-002).**
+  Dual TopBar index slots are replaced by one dedicated
+  scrolling TickerStrip under TopBar. TopBar keeps Mode,
+  status, and overflow — not a second quote rail. Three
+  Settings/Tools entries collapse into one Tools overflow
+  menu plus at most one primary Settings entry. App chrome
+  is a flex column: TopBar → TickerStrip → route body.
+  Trade ships first; the same shell then rolls to Invest,
+  Automate, Learn, and Ditto. Not a silent widen of
+  FT-UX-001 Compact-only-on-Trade, and not a big-bang
+  rewrite.
 
 - **Mode vocabulary and Trade desk density (FT-UX-001).**
   Explore / Practice / Live chips mean execution mode only.
@@ -66,6 +91,49 @@ changelog rebuilds itself from the first release cut after this baseline.
   `gate_broker_write` → `BrokerRouter`) stay unchanged.
 
 ### Fixed
+
+- **Feed-freshness honesty (FT-CORE-002).**
+  Explore: the global
+  `EXPLORE MODE — All data shown is sample only`
+  banner plus per-widget Sample chips and age
+  when known is enough. Per-symbol ticker Sample
+  chips are optional. The Market Clock freshness
+  chip appears only when that widget is mounted.
+  Practice / Live: TopBar or the ticker must show
+  Live · Delayed · Sample (and muted Stale /
+  Unknown plus age when known). There is no
+  Explore banner to lean on — silent-stale is a
+  fail. Feed provenance stays separate from
+  Explore / Practice / Live mode (Mode honesty).
+
+- **Resource Hub User Guide first-open honesty (FT-LEARN-003).**
+  Explore `/learn` → Resource Hub → User Guide shows
+  `Loading document…` while the local backend/doc
+  settles — never a red backend error on a cold race.
+  A timeout or race is a muted soft fail:
+  `Document isn’t ready yet.` plus a primary **Retry**
+  (one automatic retry is allowed). Hard fail copy
+  `Couldn’t load this document from the local backend.`
+  plus **Retry** appears only after retry is exhausted.
+  Order Safety Notes already loading in the same
+  session does not mark User Guide permanently broken.
+
+- **Holdings badge matches the visible table (FT-TRADE-010).**
+  Practice/Explore `/invest` → Holdings with no broker
+  shows `N holdings` for the rows currently in the table
+  plus a muted Sample chip — never `0 holdings` over a
+  10-row sample table. Dashboard and "N stocks" use the
+  same N. Practice waits until the holdings query has
+  settled empty before the sample fallback, so a cold
+  load does not flash the wrong N. Dashboard
+  `Net Worth (Equity + Cash)` uses the same shared demo
+  book as Holdings. A broker read failure shows muted
+  `Failed to load holdings` plus `Refresh` — never
+  `0 holdings`, `No holdings`, or a sample table under
+  a failed load. A connected broker with no positions
+  shows `0 holdings` and an honest empty state (no
+  sample table under a zero badge). Connected positions
+  use the live count only, with no Sample chip.
 
 - **Explore Execution Logs mode honesty (FT-AUTO-003).**
   Explore `/automate` → Execution Logs shows the muted

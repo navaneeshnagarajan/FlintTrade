@@ -45,6 +45,7 @@ import {
   EyeOff,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { ProvenanceBadge } from "@/components/data/ProvenanceBadge";
 import { useValueVisibilityStore } from "@/stores/valueVisibilityStore";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import TabTransition from "@/components/motion/TabTransition";
@@ -201,7 +202,7 @@ function InvestShell() {
 
   const [activeTab, setActiveTab] = useState<TabId>(tabFromHash);
   const level = useSkillLevel("invest");
-  const { holdings, isLoading } = useInvest();
+  const { holdings, isLoading, isSampleData } = useInvest();
   const tablistRef = useRef<HTMLDivElement>(null);
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);
   const toggleValues = useValueVisibilityStore((s) => s.toggle);
@@ -273,12 +274,15 @@ function InvestShell() {
             <div className="flex items-center gap-2" data-tour-target="networth">
               {isLoading && <RefreshCw className="size-3 text-text-muted animate-spin" />}
               {!isLoading && (
-                <Badge
-                  variant="outline"
-                  className="text-xxs h-5 border-border-default text-text-muted"
-                >
-                  {holdings.length} holdings
-                </Badge>
+                <>
+                  <Badge
+                    variant="outline"
+                    className="text-xxs h-5 border-border-default text-text-muted"
+                  >
+                    {holdings.length} holdings
+                  </Badge>
+                  {isSampleData && <ProvenanceBadge label="Sample" placement="inline" />}
+                </>
               )}
               <button
                 type="button"
