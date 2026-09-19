@@ -22,6 +22,7 @@
 
 import { useState, useEffect, useMemo, memo } from "react";
 import { Clock } from "lucide-react";
+import FeedFreshnessChip from "@/components/FeedFreshnessChip";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { fmtDuration, fmtIstClock, istMinutes, istParts } from "@/lib/ist";
 import {
@@ -380,6 +381,7 @@ function MarketClockWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Clock size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Market Clock</span>
+        <FeedFreshnessChip />
         <div className="flex-1" />
         <span className="text-xxs text-text-muted tabular-nums">
           {fmtIstClock(now)} IST

@@ -1,6 +1,7 @@
 import { useAtomValue } from "jotai";
 import { useNavigate } from "react-router";
 import { indicesSummaryAtom } from "@/atoms/marketAtoms";
+import FeedFreshnessChip from "@/components/FeedFreshnessChip";
 import { isMarketHours } from "@/lib/market";
 import type { WsTick } from "@/types/api";
 import TickerMarquee, { type TickerMode } from "./TickerMarquee";
@@ -45,6 +46,10 @@ export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
       aria-label="Market indices"
       data-testid="ticker-strip"
     >
+      <div className="flex items-center px-1.5 shrink-0 border-r border-border-default h-full">
+        <FeedFreshnessChip />
+      </div>
+
       {mcxIndices.length > 0 && (
         <div
           className="flex items-center gap-1.5 px-2 shrink-0 border-r border-border-default h-full"

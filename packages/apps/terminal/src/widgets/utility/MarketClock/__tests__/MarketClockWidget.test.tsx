@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 // ---------------------------------------------------------------------------
@@ -9,6 +9,7 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
+import { useModeStore } from "@/stores/modeStore";
 import MarketClockWidget, {
   MARKET_DEFS,
   computeMarketState,
@@ -30,9 +31,21 @@ beforeAll(() => {
 // ---------------------------------------------------------------------------
 
 describe("MarketClockWidget", () => {
+  beforeEach(() => {
+    useModeStore.setState({ mode: "explore" });
+  });
+
   it("renders widget title", () => {
     render(<MarketClockWidget />);
     expect(screen.getByText("Market Clock")).toBeTruthy();
+  });
+
+  it("shows a Sample feed-source chip in Explore (FT-CORE-002)", () => {
+    render(<MarketClockWidget />);
+    const chip = screen.getByTestId("feed-freshness-chip");
+    expect(chip.textContent).toBe("Sample");
+    expect(chip.getAttribute("data-state")).toBe("sample");
+    expect(chip.textContent).not.toMatch(/Live/);
   });
 
   it("renders IST clock in header", () => {

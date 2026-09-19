@@ -360,6 +360,17 @@ describe("TopBarV2", () => {
     expect(screen.queryByRole("region", { name: "Market indices" })).not.toBeInTheDocument();
   });
 
+  it("shows a Sample feed-source chip in Explore (FT-CORE-002)", () => {
+    useModeStore.setState({ mode: "explore" });
+    renderTopBarV2();
+
+    const chip = screen.getByTestId("feed-freshness-chip");
+    expect(chip).toHaveTextContent("Sample");
+    expect(chip).toHaveAttribute("data-state", "sample");
+    expect(chip).not.toHaveTextContent("Live");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Sample");
+  });
+
   it("renders the notification bell", () => {
     renderTopBarV2();
     expect(screen.getByTestId("notification-bell")).toBeInTheDocument();
