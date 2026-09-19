@@ -7,20 +7,39 @@ description: NSE/BSE/MCX/CDS trading hours, pre-market, post-market, holidays, a
 
 ## Equity (NSE / BSE)
 
+SEBI Closing Auction Session (CAS) has been live from 3 Aug 2026 for
+F&O underlyings. Hours below are as of Aug 2026. Cash is never green
+"open" (continuous) after 15:15 on CAS names; CAS is not closed.
+Non-CAS cash still trades continuous to 15:30. The September 2026
+consultation is not product UI. Closing price is the CAS auction, not
+a VWAP of the last 30 minutes.
+
 | Session | Time (IST) | Notes |
 |---|---|---|
 | Pre-open call auction | 09:00–09:08 | Order entry only, no matching |
 | Pre-open matching | 09:08–09:15 | Price discovery, block matching |
-| Normal market | 09:15–15:30 | Continuous order matching |
-| Closing price session | 15:30–15:40 | VWAP of last 30 min used |
-| Post-market session | 15:40–16:00 | Only at closing price |
+| Continuous | ~09:15–15:15 | Continuous matching on CAS names |
+| CAS | 15:15–15:35 | Closing Auction Session (F&O underlyings) |
+| Matching | ~15:35–15:50 | Auction match; not continuous, not closed |
+| Post-close | 15:50–16:00 | Post-close session |
+| Closed | after 16:00 | Day session over |
+| Non-CAS cash continuous | 09:15–15:30 | Names not in CAS still CTS to 15:30 |
+
+TopBar shows one active chip — Continuous · CAS · Matching · Post-close ·
+Closed — with tooltip/title as the window (for example
+`CAS · 15:15–15:35 (as of Aug 2026)`). Market Clock follows the same
+timeline. Never emit flat "Market open until 15:30" or "VWAP last 30 min"
+closing-price copy.
 
 ## F&O (NSE Futures & Options — NFO segment)
 
 | Session | Time (IST) |
 |---|---|
-| Normal trading | 09:15–15:30 |
+| Continuous | 09:15–15:40 |
 | Expiry auto-square-off | 15:20–15:25 on expiry Thursday |
+
+Equity F&O remains open until 15:40 while cash CAS runs. UI may show a
+secondary `F&O open · till 15:40` chip after cash continuous ends.
 
 **Weekly expiry:** Thursday (Nifty 50, BankNifty, FinNifty)
 **Monthly expiry:** Last Thursday of the month

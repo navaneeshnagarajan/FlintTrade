@@ -2,7 +2,9 @@
  * MarketClockWidget — Live status of major trading sessions in IST.
  *
  * Markets tracked:
- *   - NSE (Equities)        09:15–15:30 IST
+ *   - NSE (Equities, CAS-aware as of Aug 2026)
+ *       Continuous (~09:15–15:15) → CAS 15:15–15:35 → Match → Post-close 15:50–16:00
+ *       Non-CAS cash still CTS to 15:30. Never green "open" after 15:15.
  *   - MCX (Commodities)     09:00–23:55 IST
  *   - GIFT Nifty            06:30–23:30 IST
  *   - US (NYSE/NASDAQ)      19:00–01:30 IST (next day)
@@ -10,6 +12,7 @@
  *
  * Features:
  *   - Status: Open (green) / Pre-market (amber) / Closed (grey)
+ *     NSE uses Continuous · CAS · Matching · Post-close · Closed
  *   - Progress bar: how far through the session
  *   - Time remaining or time until open
  *   - Ticks every second; all clock maths goes through ``@/lib/ist`` so the
@@ -20,14 +23,23 @@
 import { useState, useEffect, useMemo, memo } from "react";
 import { Clock } from "lucide-react";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { fmtDuration, fmtIstClock, istMinutes } from "@/lib/ist";
+import { fmtDuration, fmtIstClock, istMinutes, istParts } from "@/lib/ist";
+import {
+  NSE_CASH_PHASE_LABEL,
+  NSE_CASH_TIMELINE_NOTE,
+  NSE_CAS_START_MIN,
+  NSE_POST_CLOSE_END_MIN,
+  nseCashPhaseAtMinutes,
+  resolveNseCashSession,
+  type NseCashSessionPhase,
+} from "@/lib/nseSession";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type MarketStatus = "open" | "pre" | "closed";
+type MarketStatus = "open" | "pre" | "closed" | "cas" | "matching" | "post-close";
 
 export interface MarketDef {
   name: string;
@@ -45,6 +57,8 @@ export interface MarketState {
   status: MarketStatus;
   progress: number;       // 0–1, fraction through session
   remainingMs: number;    // ms until close (open) or until open (closed/pre)
+  phaseLabel?: string;
+  timelineNote?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,9 +72,9 @@ function hm(h: number, m: number): number {
 export const MARKET_DEFS: MarketDef[] = [
   {
     name: "NSE",
-    description: "India — Equities",
+    description: "India — Equities · CAS-aware",
     openMin: hm(9, 15),
-    closeMin: hm(15, 30),
+    closeMin: NSE_POST_CLOSE_END_MIN,
     preMin: 15,
   },
   {
@@ -153,6 +167,59 @@ export function computeMarketState(def: MarketDef, nowMin: number, nowMs: number
   return { def, status, progress: Math.min(1, Math.max(0, progress)), remainingMs };
 }
 
+const PHASE_TO_STATUS: Record<NseCashSessionPhase, MarketStatus> = {
+  continuous: "open",
+  cas: "cas",
+  matching: "matching",
+  "post-close": "post-close",
+  closed: "closed",
+};
+
+/**
+ * NSE cash row — same CAS clock as the TopBar (FT-CORE-001).
+ * Continuous is the only green "open". CAS / Matching / Post-close are live
+ * phases, not Closed.
+ */
+export function computeNseMarketState(def: MarketDef, now: Date): MarketState {
+  const session = resolveNseCashSession(now);
+  const nowMin = istMinutes(now);
+  const nowMs = now.getTime();
+  const weekend = istParts(now).weekday === 0 || istParts(now).weekday === 6;
+
+  if (weekend) {
+    const minsUntilMonday = def.openMin - nowMin + (nowMin >= def.openMin ? 2 * 1440 : 1440);
+    return {
+      def,
+      status: "closed",
+      progress: 0,
+      remainingMs: Math.max(0, minsUntilMonday) * 60_000,
+      phaseLabel: session.label,
+      timelineNote: NSE_CASH_TIMELINE_NOTE,
+    };
+  }
+
+  if (session.phase === "continuous") {
+    const continuousDef = { ...def, closeMin: NSE_CAS_START_MIN };
+    const base = computeMarketState(continuousDef, nowMin, nowMs);
+    return { ...base, def, phaseLabel: session.label, timelineNote: NSE_CASH_TIMELINE_NOTE };
+  }
+
+  if (session.phase === "closed") {
+    const base = computeMarketState(def, nowMin, nowMs);
+    return { ...base, status: "closed", phaseLabel: session.label, timelineNote: NSE_CASH_TIMELINE_NOTE };
+  }
+
+  const phase = nseCashPhaseAtMinutes(Math.floor(nowMin));
+  return {
+    def,
+    status: PHASE_TO_STATUS[phase],
+    progress: Math.min(1, Math.max(0, (nowMin - def.openMin) / (def.closeMin - def.openMin))),
+    remainingMs: Math.max(0, (def.closeMin - nowMin) * 60_000 - (nowMs % 1000)),
+    phaseLabel: NSE_CASH_PHASE_LABEL[phase],
+    timelineNote: NSE_CASH_TIMELINE_NOTE,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Formatting helpers
 // ---------------------------------------------------------------------------
@@ -171,18 +238,27 @@ const STATUS_LABEL: Record<MarketStatus, string> = {
   open: "Open",
   pre: "Pre-market",
   closed: "Closed",
+  cas: "CAS",
+  matching: "Matching",
+  "post-close": "Post-close",
 };
 
 const STATUS_CLASS: Record<MarketStatus, string> = {
   open: "text-profit bg-profit/10 border-profit/30",
   pre: "text-warning bg-warning/10 border-warning/30",
   closed: "text-text-muted bg-surface-hover border-border-default",
+  cas: "text-warning bg-warning/10 border-warning/30",
+  matching: "text-warning bg-warning/10 border-warning/30",
+  "post-close": "text-warning bg-warning/10 border-warning/30",
 };
 
 const BAR_CLASS: Record<MarketStatus, string> = {
   open: "bg-profit",
   pre: "bg-warning",
   closed: "bg-surface-hover",
+  cas: "bg-warning",
+  matching: "bg-warning",
+  "post-close": "bg-warning",
 };
 
 // ---------------------------------------------------------------------------
@@ -194,15 +270,16 @@ interface MarketRowProps {
 }
 
 function MarketRow({ state }: MarketRowProps) {
-  const { def, status, progress, remainingMs } = state;
+  const { def, status, progress, remainingMs, phaseLabel, timelineNote } = state;
   const isOpen = status === "open";
   const isPre = status === "pre";
+  const badge = phaseLabel ?? STATUS_LABEL[status];
 
   return (
     <div
       className="px-3 py-2.5 border-b border-border-default last:border-0"
       role="listitem"
-      aria-label={`${def.name} market status: ${STATUS_LABEL[status]}`}
+      aria-label={`${def.name} market status: ${badge}`}
     >
       <div className="flex items-center gap-2 mb-1.5">
         {/* Name + description */}
@@ -218,7 +295,7 @@ function MarketRow({ state }: MarketRowProps) {
             STATUS_CLASS[status],
           )}
         >
-          {STATUS_LABEL[status]}
+          {badge}
         </span>
 
         {/* Time remaining / opens in */}
@@ -234,7 +311,7 @@ function MarketRow({ state }: MarketRowProps) {
             {fmtDuration(remainingMs)}
           </div>
           <div className="text-xxs text-text-muted">
-            {isOpen ? "closes" : isPre ? "opens" : "opens"}
+            {isOpen ? "closes" : isPre || status === "closed" ? "opens" : "to close"}
           </div>
         </div>
       </div>
@@ -259,6 +336,11 @@ function MarketRow({ state }: MarketRowProps) {
         <span>{fmtTime(def.openMin)} IST</span>
         <span>{fmtTime(def.closeMin)} IST</span>
       </div>
+      {timelineNote ? (
+        <p className="mt-1 text-xxs text-text-muted leading-snug" data-testid="nse-cas-timeline">
+          {timelineNote}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -280,7 +362,11 @@ function MarketClockWidget() {
   const states = useMemo<MarketState[]>(() => {
     const curMin = istMinutes(now);
     const nowMs = now.getTime();
-    return MARKET_DEFS.map((def) => computeMarketState(def, curMin, nowMs));
+    return MARKET_DEFS.map((def) => (
+      def.name === "NSE"
+        ? computeNseMarketState(def, now)
+        : computeMarketState(def, curMin, nowMs)
+    ));
   }, [now]);
 
   const openCount = states.filter((s) => s.status === "open").length;

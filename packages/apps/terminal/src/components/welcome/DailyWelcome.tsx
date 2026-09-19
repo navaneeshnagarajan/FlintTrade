@@ -6,6 +6,7 @@ import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
 import { useTradingStore } from "@/stores/tradingStore";
 import { useHolidays } from "@/hooks/useMarketStatus";
 import { holidayClosesExchange } from "@/lib/market";
+import { resolveNseCashSession } from "@/lib/nseSession";
 import type { Holiday } from "@/types/api";
 import type { ToolId } from "@/types/widgets";
 
@@ -49,13 +50,13 @@ function getTimeContext(): TimeContext | null {
     };
   }
 
-  if (mins <= 930) {
-    // 9:15 AM - 3:30 PM IST (market hours) -- don't show
+  const cash = resolveNseCashSession(now);
+  if (cash.phase !== "closed") {
+    // Continuous / CAS / Matching / Post-close — do not call the cash book closed.
     return null;
   }
 
   if (hour < 20) {
-    // Post-market (3:30 PM - 8:00 PM)
     return {
       greeting: "Markets closed",
       message: "Review today's trades",

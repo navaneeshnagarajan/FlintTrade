@@ -93,10 +93,16 @@ function ISTClock() {
 // MarketStatus — explicit NSE session state, separate from Live execution mode
 // ---------------------------------------------------------------------------
 
-function compactSessionLabel(status: MarketSessionInfo["status"]): string {
-  if (status === "open") return "Open";
-  if (status === "unavailable") return "N/A";
-  return "Closed";
+function compactSessionLabel(info: MarketSessionInfo): string {
+  if (info.status === "unavailable") return "N/A";
+  return info.label;
+}
+
+function sessionChipTone(info: MarketSessionInfo): "green" | "amber" | "muted" {
+  if (info.isGreenOpen) return "green";
+  if (info.status === "unavailable") return "amber";
+  if (info.status === "closed") return "muted";
+  return "amber";
 }
 
 function MarketSessionStatus({ compact = false }: { compact?: boolean }) {
@@ -120,39 +126,62 @@ function MarketSessionStatus({ compact = false }: { compact?: boolean }) {
     return () => clearInterval(id);
   }, [currentStatus]);
 
-  const isOpen = statusInfo.status === "open";
+  const tone = sessionChipTone(statusInfo);
 
   return (
-    <div
-      className="flex items-center gap-1 px-1.5 py-0.5 rounded shrink-0"
-      style={{
-        background: isOpen ? "var(--color-bullish-bg)" : "var(--glass-l2-bg)",
-        border: isOpen ? "1px solid var(--color-bullish-border)" : "1px solid var(--glass-l2-border)",
-      }}
-      aria-label={`Market status: ${statusInfo.label}`}
-      data-testid="market-session-status"
-    >
+    <div className="flex items-center gap-1 shrink-0">
       <div
-        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-          isOpen
-            ? "bg-profit animate-[pulse-glow_2s_ease-in-out_infinite]"
-            : statusInfo.status === "unavailable"
-              ? "bg-amber-400"
-              : "bg-text-muted/50"
-        }`}
-        aria-hidden="true"
-      />
-      <span
-        className={`text-xs font-medium tabular-nums whitespace-nowrap ${
-          isOpen
-            ? "text-profit"
-            : statusInfo.status === "unavailable"
-              ? "text-amber-400"
-              : "text-text-muted"
-        }`}
+        className="flex items-center gap-1 px-1.5 py-0.5 rounded"
+        style={{
+          background: tone === "green" ? "var(--color-bullish-bg)" : "var(--glass-l2-bg)",
+          border: tone === "green"
+            ? "1px solid var(--color-bullish-border)"
+            : "1px solid var(--glass-l2-border)",
+        }}
+        aria-label={`Market status: ${statusInfo.label}`}
+        title={statusInfo.title}
+        data-testid="market-session-status"
       >
-        {compact ? compactSessionLabel(statusInfo.status) : statusInfo.label}
-      </span>
+        <div
+          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+            tone === "green"
+              ? "bg-profit animate-[pulse-glow_2s_ease-in-out_infinite]"
+              : tone === "amber"
+                ? "bg-amber-400"
+                : "bg-text-muted/50"
+          }`}
+          aria-hidden="true"
+        />
+        <span
+          className={`text-xs font-medium tabular-nums whitespace-nowrap ${
+            tone === "green"
+              ? "text-profit"
+              : tone === "amber" && statusInfo.status === "unavailable"
+                ? "text-amber-400"
+                : tone === "amber"
+                  ? "text-warning"
+                  : "text-text-muted"
+          }`}
+        >
+          {compact ? compactSessionLabel(statusInfo) : statusInfo.label}
+        </span>
+      </div>
+      {statusInfo.foSecondary ? (
+        <div
+          className="flex items-center px-1.5 py-0.5 rounded"
+          style={{
+            background: "var(--glass-l2-bg)",
+            border: "1px solid var(--glass-l2-border)",
+          }}
+          aria-label={statusInfo.foSecondary}
+          title={statusInfo.foSecondary}
+          data-testid="fo-session-status"
+        >
+          <span className="text-xs font-medium tabular-nums whitespace-nowrap text-text-secondary">
+            {compact ? "F&O 15:40" : statusInfo.foSecondary}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

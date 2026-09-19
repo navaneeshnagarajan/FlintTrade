@@ -281,11 +281,23 @@ The current mode is shown in the top bar and is server-enforced via the JWT
 claim — switching to Live requires a deliberate confirmation step.
 
 **Mode vs session vs sample (FT-UX-001).** The Explore / Practice / Live chips
-mean execution mode only. Market open/closed is session status, never Live
-mode. Explore Order Pad uses **Sample Buy** / **Sample Sell** (a local sample
-fill after review). Practice keeps **Practice Buy** / **Practice Sell**. Live
-uses **Place BUY Order**. Connected / green is never shown for an
-unconfigured subsystem.
+mean execution mode only. TopBar session chips (Continuous · CAS · Matching ·
+Post-close · Closed) are session status, never Live mode. Explore Order Pad
+uses **Sample Buy** / **Sample Sell** (a local sample fill after review).
+Practice keeps **Practice Buy** / **Practice Sell**. Live uses **Place BUY
+Order**. Connected / green is never shown for an unconfigured subsystem.
+
+**Market session (FT-CORE-001, as of Aug 2026).** The TopBar shows one active
+session chip: **Continuous**, **CAS**, **Matching**, **Post-close**, or
+**Closed**. The chip tooltip/title is the window, for example
+`CAS · 15:15–15:35 (as of Aug 2026)`. Cash is never shown as green "open"
+after 15:15 IST; CAS is not Closed. When equity F&O still runs after cash
+continuous ends, a secondary `F&O open · till 15:40` chip appears. The Market Clock
+widget follows the same cash timeline: Continuous (~09:15–15:15) → CAS
+15:15–15:35 → Matching → Post-close 15:50–16:00. Non-CAS cash still trades
+continuous to 15:30. There is no flat "Market open until 15:30" or "VWAP
+last 30 min" closing-price copy. The September 2026 consultation stays out
+of the UI.
 
 **Compact / Comfortable.** New installs default to Comfortable (full labels).
 Compact on a desk Trade viewport (~1280 and wider) keeps chart, order pad,
@@ -508,6 +520,12 @@ from the widget registry
   Strategy Templates, Audit Trail, Economic Calendar, Expiry Countdown,
   Market Clock, Trade Ideas, Tick Speed, and Journal Entries
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
+
+Market Clock uses the same CAS-aware cash timeline as the TopBar
+(Continuous → CAS → Matching → Post-close → Closed), not a flat
+09:15–15:30 "open" window (FT-CORE-001, as of Aug 2026). When F&O
+still runs after cash continuous ends, the TopBar may show `F&O open · till
+15:40`. Non-CAS cash still continuous to 15:30.
 
 On Explore `/trade` Watchlist, checked LTP and % change columns
 use the same sample quotes as the ticker tape (Sample data badge).

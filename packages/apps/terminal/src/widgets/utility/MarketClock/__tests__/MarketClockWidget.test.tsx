@@ -9,7 +9,12 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
-import MarketClockWidget, { MARKET_DEFS, computeMarketState } from "../MarketClockWidget";
+import MarketClockWidget, {
+  MARKET_DEFS,
+  computeMarketState,
+  computeNseMarketState,
+} from "../MarketClockWidget";
+import { NSE_CASH_TIMELINE_NOTE } from "@/lib/nseSession";
 import { istMinutes } from "@/lib/ist";
 
 beforeAll(() => {
@@ -117,9 +122,11 @@ describe("MARKET_DEFS", () => {
     expect(nse!.openMin).toBe(9 * 60 + 15);
   });
 
-  it("NSE close is 15:30 IST (930 minutes)", () => {
+  it("NSE session ends at post-close 16:00 IST, not a flat 15:30 close", () => {
     const nse = MARKET_DEFS.find((d) => d.name === "NSE");
-    expect(nse!.closeMin).toBe(15 * 60 + 30);
+    expect(nse).toBeDefined();
+    expect(nse!.closeMin).toBe(16 * 60);
+    expect(nse!.description).toMatch(/CAS-aware/);
   });
 
   it("all markets have non-empty name and description", () => {
@@ -194,9 +201,54 @@ describe("computeMarketState — sessions crossing IST midnight", () => {
   });
 });
 
+describe("computeNseMarketState — CAS honesty (FT-CORE-001)", () => {
+  const nse = MARKET_DEFS.find((d) => d.name === "NSE")!;
+
+  function istWeekday(hour: number, minute: number): Date {
+    const utcMs = Date.UTC(2026, 7, 18, hour, minute, 0, 0) - (5 * 60 + 30) * 60 * 1000;
+    return new Date(utcMs);
+  }
+
+  it("is Continuous (green open) at 10:00 IST", () => {
+    const state = computeNseMarketState(nse, istWeekday(10, 0));
+    expect(state.status).toBe("open");
+    expect(state.phaseLabel).toBe("Continuous");
+    expect(state.timelineNote).toBe(NSE_CASH_TIMELINE_NOTE);
+  });
+
+  it("is CAS at 15:20 — not Closed and not green Open", () => {
+    const state = computeNseMarketState(nse, istWeekday(15, 20));
+    expect(state.status).toBe("cas");
+    expect(state.phaseLabel).toBe("CAS");
+    expect(state.status).not.toBe("open");
+    expect(state.status).not.toBe("closed");
+  });
+
+  it("is Matching at 15:40 and Post-close at 15:55", () => {
+    expect(computeNseMarketState(nse, istWeekday(15, 40)).phaseLabel).toBe("Matching");
+    expect(computeNseMarketState(nse, istWeekday(15, 55)).phaseLabel).toBe("Post-close");
+  });
+
+  it("is Closed at 16:00, not still Open until 15:30-only", () => {
+    const state = computeNseMarketState(nse, istWeekday(16, 0));
+    expect(state.status).toBe("closed");
+    expect(state.phaseLabel).toBe("Closed");
+  });
+});
+
 describe("MarketClockWidget — after IST midnight", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("renders the NSE CAS timeline and never VWAP-last-30-min copy", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T04:30:00Z")); // 10:00 IST Tuesday
+    render(<MarketClockWidget />);
+    expect(screen.getByTestId("nse-cas-timeline")).toHaveTextContent(NSE_CASH_TIMELINE_NOTE);
+    expect(screen.getByLabelText("NSE market status: Continuous")).toBeTruthy();
+    expect(screen.queryByText(/VWAP last 30 min/i)).toBeNull();
+    expect(screen.queryByText(/Market open until 15:30/i)).toBeNull();
   });
 
   it("REGRESSION: renders US Markets as Open at 01:00 IST", () => {

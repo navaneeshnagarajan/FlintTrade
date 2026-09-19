@@ -491,6 +491,12 @@ describe("EXCHANGE_HOURS data", () => {
     expect(EXCHANGE_HOURS.NSE.close).toBe(15 * 60 + 30); // 930
   });
 
+  it("has NFO hours through the 15:40 equity F&O close", () => {
+    expect(EXCHANGE_HOURS.NFO.open).toBe(9 * 60 + 15);
+    expect(EXCHANGE_HOURS.NFO.close).toBe(15 * 60 + 40);
+    expect(EXCHANGE_HOURS.BFO.close).toBe(15 * 60 + 40);
+  });
+
   it("has CDS hours 9:00–17:00", () => {
     expect(EXCHANGE_HOURS.CDS.open).toBe(9 * 60);
     expect(EXCHANGE_HOURS.CDS.close).toBe(17 * 60);
@@ -514,43 +520,56 @@ const EXPLORE_NSE_TIMINGS = [
 ];
 
 describe("getNseCashSessionStatus IST session window", () => {
-  it("is open at Thursday mid-session with Explore HHMM timings (FT-TRADE-004)", () => {
+  it("is Continuous at Thursday mid-session with Explore HHMM timings (FT-TRADE-004)", () => {
     vi.setSystemTime(istToUtc(2026, 9, 10, 12, 8));
-    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS)).toEqual({
-      status: "open",
-      label: "Market open",
-    });
+    const session = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(session.status).toBe("continuous");
+    expect(session.label).toBe("Continuous");
+    expect(session.isGreenOpen).toBe(true);
+    expect(session.title).toBe("Continuous · 09:15–15:15 (as of Aug 2026)");
   });
 
-  it("is closed after 15:30 IST on a weekday with Explore HHMM timings", () => {
+  it("is Matching at 15:45 IST — not Closed, not green open", () => {
     vi.setSystemTime(istToUtc(2026, 9, 10, 15, 45));
-    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS)).toEqual({
-      status: "closed",
-      label: "Market closed",
-    });
+    const session = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(session.status).toBe("matching");
+    expect(session.label).toBe("Matching");
+    expect(session.isGreenOpen).toBe(false);
+    expect(session.foSecondary).toBeNull();
+  });
+
+  it("is CAS at 15:20 IST and never green open after 15:15", () => {
+    vi.setSystemTime(istToUtc(2026, 9, 10, 15, 20));
+    const session = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(session.status).toBe("cas");
+    expect(session.label).toBe("CAS");
+    expect(session.title).toBe("CAS · 15:15–15:35 (as of Aug 2026)");
+    expect(session.isGreenOpen).toBe(false);
+    expect(session.foSecondary).toBe("F&O open · till 15:40");
   });
 
   it("is closed before 09:15 IST on a weekday with Explore HHMM timings", () => {
     vi.setSystemTime(istToUtc(2026, 9, 10, 9, 0));
-    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS)).toEqual({
-      status: "closed",
-      label: "Market closed",
-    });
+    const session = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(session.status).toBe("closed");
+    expect(session.label).toBe("Closed");
+    expect(session.isGreenOpen).toBe(false);
   });
 
-  it("is open at the 09:15 and 15:30 IST inclusive bounds", () => {
+  it("is Continuous at 09:15 and CAS at 15:30 — not a flat 15:30 open", () => {
     vi.setSystemTime(istToUtc(2026, 9, 10, 9, 15));
-    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS).status).toBe("open");
+    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS).status).toBe("continuous");
     vi.setSystemTime(istToUtc(2026, 9, 10, 15, 30));
-    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS).status).toBe("open");
+    const cas = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(cas.status).toBe("cas");
+    expect(cas.isGreenOpen).toBe(false);
   });
 
   it("is closed on an IST Saturday even during weekday session hours", () => {
     vi.setSystemTime(istToUtc(2026, 9, 12, 12, 8));
-    expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS)).toEqual({
-      status: "closed",
-      label: "Market closed",
-    });
+    const session = getNseCashSessionStatus(EXPLORE_NSE_TIMINGS);
+    expect(session.status).toBe("closed");
+    expect(session.label).toBe("Closed");
   });
 
   it("is closed on an IST Sunday", () => {
@@ -558,13 +577,16 @@ describe("getNseCashSessionStatus IST session window", () => {
     expect(getNseCashSessionStatus(EXPLORE_NSE_TIMINGS).status).toBe("closed");
   });
 
-  it("uses epoch-millisecond timings when the broker supplies them", () => {
+  it("uses the CAS clock over a broker 15:30 epoch end", () => {
     const start = istToUtc(2026, 9, 10, 9, 15).getTime();
     const end = istToUtc(2026, 9, 10, 15, 30).getTime();
     const timings = [{ exchange: "NSE", start_time: start, end_time: end }];
 
     vi.setSystemTime(istToUtc(2026, 9, 10, 12, 8));
-    expect(getNseCashSessionStatus(timings).status).toBe("open");
+    expect(getNseCashSessionStatus(timings).status).toBe("continuous");
+
+    vi.setSystemTime(istToUtc(2026, 9, 10, 15, 45));
+    expect(getNseCashSessionStatus(timings).status).toBe("matching");
 
     vi.setSystemTime(istToUtc(2026, 9, 10, 16, 0));
     expect(getNseCashSessionStatus(timings).status).toBe("closed");
@@ -574,6 +596,9 @@ describe("getNseCashSessionStatus IST session window", () => {
     expect(getNseCashSessionStatus(undefined)).toEqual({
       status: "unavailable",
       label: "Market unavailable",
+      title: "Market unavailable",
+      foSecondary: null,
+      isGreenOpen: false,
     });
   });
 });

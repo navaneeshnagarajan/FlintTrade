@@ -2008,8 +2008,8 @@ class SafetyResult:
 MARKET_HOURS: dict[str, tuple[dt_time, dt_time]] = {
     "NSE": (dt_time(9, 15), dt_time(15, 30)),
     "BSE": (dt_time(9, 15), dt_time(15, 30)),
-    "NFO": (dt_time(9, 15), dt_time(15, 30)),
-    "BFO": (dt_time(9, 15), dt_time(15, 30)),
+    "NFO": (dt_time(9, 15), dt_time(15, 40)),
+    "BFO": (dt_time(9, 15), dt_time(15, 40)),
     "CDS": (dt_time(9, 0), dt_time(17, 0)),
     "BCD": (dt_time(9, 0), dt_time(17, 0)),
     "MCX": (dt_time(9, 0), dt_time(23, 30)),
