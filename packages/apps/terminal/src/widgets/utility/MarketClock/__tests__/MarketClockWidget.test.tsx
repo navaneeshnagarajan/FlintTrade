@@ -50,10 +50,7 @@ describe("MarketClockWidget", () => {
 
   it("renders IST clock in header", () => {
     render(<MarketClockWidget />);
-    // time string in header has tabular-nums class
-    const clockEl = document.querySelector(".tabular-nums");
-    expect(clockEl).toBeTruthy();
-    expect(clockEl?.textContent).toMatch(/IST/);
+    expect(screen.getByTestId("market-clock-ist").textContent).toMatch(/IST/);
   });
 
   it("renders a row for each market definition", () => {

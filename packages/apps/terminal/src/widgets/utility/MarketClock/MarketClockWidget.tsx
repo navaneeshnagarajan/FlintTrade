@@ -383,7 +383,7 @@ function MarketClockWidget() {
         <span className="text-xs font-semibold text-text-primary">Market Clock</span>
         <FeedFreshnessChip />
         <div className="flex-1" />
-        <span className="text-xxs text-text-muted tabular-nums">
+        <span className="text-xxs text-text-muted tabular-nums" data-testid="market-clock-ist">
           {fmtIstClock(now)} IST
         </span>
         {openCount > 0 && (
