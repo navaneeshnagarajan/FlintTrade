@@ -1,10 +1,14 @@
 /**
  * HoldingsTab.test.tsx — Render tests for the holdings table tab.
+ *
+ * FT-TRADE-010: the table must render the same rows the header badge
+ * counts. A connected empty book stays empty — no sample fallback.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import type { Holding } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -46,26 +50,30 @@ vi.mock("@/lib/exportUtils", () => ({
   printCurrentView: vi.fn(),
 }));
 
-// Mock InvestContext with holdings data
+const SAMPLE_ROWS: Holding[] = [
+  { symbol: "RELIANCE", exchange: "NSE", quantity: 50, averagePrice: 2450, ltp: 2520, pnl: 3500, pnlPercent: 2.86 },
+  { symbol: "TCS", exchange: "NSE", quantity: 25, averagePrice: 3800, ltp: 3920, pnl: 3000, pnlPercent: 3.16 },
+];
+
+const investState = vi.hoisted(() => ({
+  holdings: [] as Holding[],
+  summary: {
+    currentValue: 224000,
+    totalInvested: 217500,
+    totalPnl: 6500,
+    totalPnlPercent: 2.99,
+    availableCash: 50000,
+    sectorCount: 2,
+    holdingCount: 2,
+  },
+  isLoading: false,
+  isError: false,
+  isSampleData: false,
+  refetchHoldings: vi.fn(),
+}));
+
 vi.mock("../../InvestContext", () => ({
-  useInvest: () => ({
-    holdings: [
-      { symbol: "RELIANCE", exchange: "NSE", quantity: 50, averagePrice: 2450, ltp: 2520, pnl: 3500, pnlPercent: 2.86 },
-      { symbol: "TCS", exchange: "NSE", quantity: 25, averagePrice: 3800, ltp: 3920, pnl: 3000, pnlPercent: 3.16 },
-    ],
-    summary: {
-      currentValue: 224000,
-      totalInvested: 217500,
-      totalPnl: 6500,
-      totalPnlPercent: 2.99,
-      availableCash: 50000,
-      sectorCount: 2,
-      holdingCount: 2,
-    },
-    isLoading: false,
-    isError: false,
-    refetchHoldings: vi.fn(),
-  }),
+  useInvest: () => investState,
 }));
 
 // ---------------------------------------------------------------------------
@@ -79,6 +87,15 @@ import { HoldingsTab } from "../HoldingsTab";
 // ---------------------------------------------------------------------------
 
 describe("HoldingsTab", () => {
+  beforeEach(() => {
+    investState.holdings = SAMPLE_ROWS;
+    investState.isLoading = false;
+    investState.isError = false;
+    investState.isSampleData = false;
+    investState.summary.holdingCount = SAMPLE_ROWS.length;
+    investState.refetchHoldings.mockClear();
+  });
+
   it("renders the holdings table with symbols", () => {
     render(<HoldingsTab />);
     expect(screen.getByText("RELIANCE")).toBeInTheDocument();
@@ -124,5 +141,49 @@ describe("HoldingsTab", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Holdings totals")).toHaveTextContent("₹6,500");
     vi.unstubAllGlobals();
+  });
+
+  it("shows N stocks matching the sample rows currently in the table", () => {
+    investState.holdings = SAMPLE_ROWS;
+    investState.isSampleData = true;
+
+    render(<HoldingsTab />);
+
+    expect(screen.getByText(`${SAMPLE_ROWS.length} stocks`)).toBeInTheDocument();
+    expect(screen.getByText("RELIANCE")).toBeInTheDocument();
+    expect(screen.getByText("TCS")).toBeInTheDocument();
+    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+  });
+
+  it("shows an honest empty state with no sample rows when the connected book is empty", () => {
+    investState.holdings = [];
+    investState.isSampleData = false;
+
+    render(<HoldingsTab />);
+
+    expect(screen.getByText("No holdings")).toBeInTheDocument();
+    expect(screen.queryByText("RELIANCE")).not.toBeInTheDocument();
+    expect(screen.queryByText("TCS")).not.toBeInTheDocument();
+    expect(screen.queryByText(/stocks$/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("shows failure and Refresh when the broker holdings query errored with an empty book", () => {
+    investState.holdings = [];
+    investState.isError = true;
+    investState.isSampleData = false;
+
+    render(<HoldingsTab />);
+
+    expect(screen.getByText("Failed to load holdings")).toBeInTheDocument();
+    expect(screen.getByText("Refresh")).toBeInTheDocument();
+    expect(screen.queryByText("No holdings")).not.toBeInTheDocument();
+    expect(screen.queryByText("RELIANCE")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Refresh"));
+    expect(investState.refetchHoldings).toHaveBeenCalledTimes(1);
   });
 });

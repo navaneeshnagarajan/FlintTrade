@@ -19,7 +19,7 @@ import {
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";
-import { Download, Printer, RefreshCw } from "lucide-react";
+import { AlertCircle, Download, Printer, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -35,21 +35,6 @@ import { cn } from "@/lib/utils";
 import { useInvest } from "../InvestContext";
 import { formatINR, formatPercent } from "../formatters";
 import { exportToCSV, printCurrentView } from "@/lib/exportUtils";
-
-// ─── Demo data ────────────────────────────────────────────────────────────────
-
-const DEMO_HOLDINGS: Holding[] = [
-  { symbol: "RELIANCE", exchange: "NSE", quantity: 50, averagePrice: 2450, ltp: 2520, pnl: 3500, pnlPercent: 2.86 },
-  { symbol: "TCS", exchange: "NSE", quantity: 25, averagePrice: 3800, ltp: 3920, pnl: 3000, pnlPercent: 3.16 },
-  { symbol: "HDFCBANK", exchange: "NSE", quantity: 40, averagePrice: 1650, ltp: 1710, pnl: 2400, pnlPercent: 3.64 },
-  { symbol: "INFY", exchange: "NSE", quantity: 30, averagePrice: 1500, ltp: 1475, pnl: -750, pnlPercent: -1.67 },
-  { symbol: "ICICIBANK", exchange: "NSE", quantity: 60, averagePrice: 1100, ltp: 1145, pnl: 2700, pnlPercent: 4.09 },
-  { symbol: "WIPRO", exchange: "NSE", quantity: 100, averagePrice: 450, ltp: 462, pnl: 1200, pnlPercent: 2.67 },
-  { symbol: "ITC", exchange: "NSE", quantity: 200, averagePrice: 480, ltp: 495, pnl: 3000, pnlPercent: 3.13 },
-  { symbol: "BHARTIARTL", exchange: "NSE", quantity: 30, averagePrice: 1700, ltp: 1745, pnl: 1350, pnlPercent: 2.65 },
-  { symbol: "SBIN", exchange: "NSE", quantity: 80, averagePrice: 780, ltp: 798, pnl: 1440, pnlPercent: 2.31 },
-  { symbol: "LT", exchange: "NSE", quantity: 20, averagePrice: 3200, ltp: 3150, pnl: -1000, pnlPercent: -1.56 },
-];
 
 // ─── Sub-component ─────────────────────────────────────────────────────────────
 
@@ -129,16 +114,11 @@ function buildColumns(): ColumnDef<Holding>[] {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function HoldingsTab() {
-  const { holdings: liveHoldings, isLoading, isError, isSampleData, refetchHoldings } = useInvest();
+  const { holdings, isLoading, isError, isSampleData, refetchHoldings } = useInvest();
   const { isNarrow, containerRef } = useNarrowLayout<HTMLDivElement>();
   const [sorting, setSorting] = useState<SortingState>([]);
   const columns = useMemo(() => buildColumns(), []);
-
-  // Explore already exposes the labelled sample book via InvestContext.
-  // Live/Practice still fall back to local demo rows when the book is empty.
-  const isEmptyFallback = !isSampleData && (isError || (!isLoading && liveHoldings.length === 0));
-  const isDemo = Boolean(isSampleData) || isEmptyFallback;
-  const holdings = isEmptyFallback ? DEMO_HOLDINGS : liveHoldings;
+  const isDemo = Boolean(isSampleData);
 
   const table = useReactTable({
     data: holdings,
@@ -180,6 +160,24 @@ export function HoldingsTab() {
         <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
           <RefreshCw className="size-5 animate-spin" />
           <span className="text-sm">Fetching holdings from your active broker...</span>
+        </div>
+      ) : isError && holdings.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
+          <AlertCircle className="size-6" aria-hidden="true" />
+          <span className="text-sm">Failed to load holdings</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={refetchHoldings}
+            className="text-xs text-text-muted h-6 px-2 gap-1"
+          >
+            <RefreshCw className="size-3" />
+            Refresh
+          </Button>
+        </div>
+      ) : holdings.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-64 gap-2 text-text-muted">
+          <span className="text-sm">No holdings</span>
         </div>
       ) : (
         <>
