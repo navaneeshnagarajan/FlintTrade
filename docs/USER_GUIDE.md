@@ -729,6 +729,20 @@ to send a real test." There is no confirm-and-send path from Explore.
 Practice and Live arm Send Test only when Telegram is configured; otherwise
 the helper is "Configure Telegram first".
 
+### Execution Logs
+
+**Execution Logs** is the date-paginated history of automated actions.
+On Explore `/automate` → Execution Logs, a healthy sample session shows
+the muted empty state `No execution logs in Explore (sample-only). Switch
+to Practice or Live to see real run history.` It never shows `Failed to
+load logs. Backend may be offline.` while the app is live and the Explore
+sample banner is present (FT-AUTO-003). In Practice or Live, a successful
+load with no rows for the selected date shows `No execution logs for this
+date.` — not an outage. The red `Failed to load logs. Backend may be
+offline.` line (or Retry) is reserved for a real request failure. While
+logs are loading, the view shows a spinner / `Loading logs…` and never
+flashes the outage copy.
+
 ![Automate](screenshots/07-automate.png)
 
 ---
