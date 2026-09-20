@@ -1608,11 +1608,9 @@ def test_native_activates_only_when_attested_and_credentialled(*, backend_lease_
 def test_only_connectable_natives_activate_from_registered_selectors(*, backend_lease_factory) -> None:
     """Boot activation follows the activation-cleared native set, not stale rows.
 
-    Kotak Neo, INDmoney, and Groww are built/catalogued but still
-    ``connectable=false`` while declared blockers remain, so even
-    attested+credentialled stale rows must remain dormant after restart.
-    Capability metadata remains available via the recommendation/capability
-    routes; this only guards runtime activation.
+    INDmoney and Groww stay dormant while blockers remain. Kotak Neo is
+    connectable for Connected (read) / API smoke and must activate when
+    attested and credentialled.
     """
     router = build_broker_router(
         BrokerRegistry(),
@@ -1620,9 +1618,8 @@ def test_only_connectable_natives_activate_from_registered_selectors(*, backend_
         native_attest_ok=lambda _b: True,
         native_has_credentials=lambda _b: True, backend_lease_proof=backend_lease_factory()
     )
-    assert set(router._adapters) == {"dhan", "upstox"}
+    assert set(router._adapters) == {"dhan", "upstox", "kotakneo"}
     assert "indmoney" not in router._adapters
-    assert "kotakneo" not in router._adapters
     assert "groww" not in router._adapters
 
 

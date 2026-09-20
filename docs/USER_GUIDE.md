@@ -210,9 +210,10 @@ reads as a working operator path.
 ### Steps
 
 1. **Use the OpenAlgo path.** The community-tested bridge is the working
-   operator path. The native gateway is catalogued (Dhan and Upstox are
-   evidence-gated as connectable; brokers shown as "coming soon" stay
-   disabled) but its HTTP connect and read surfaces are frozen.
+   operator path. The native gateway is catalogued (Dhan, Upstox, and
+   Kotak Neo are evidence-gated as connectable; Kotak Neo is Connected
+   (read) / API smoke only; Groww and INDmoney stay disabled / coming
+   soon) but its HTTP connect and read surfaces are frozen.
 2. **Configure your broker in OpenAlgo.** Open `http://localhost:5000`,
    choose your broker from the dropdown, paste your API key and secret, and
    complete the broker's login flow (TOTP / OAuth / OTP — depends on the
@@ -239,16 +240,20 @@ with zero provider calls until the Task 7C.2 / 8B cutover onto the in-process
 port, not a working terminal Brokers screen. Service connections are an inert
 control plane only.
 
-When native connect returns, only Dhan and Upstox are evidence-gated as
-enabled. Upstox Developer Apps analytics tokens would connect as read-only
-sessions. INDmoney uses a dashboard-generated token that resets at the
-daily 06:00 IST dashboard cycle, but remains disabled until its smart-parent,
-atomic reduce-only, and live order-safety blockers clear. Kotak Neo and Groww
-retain their displayed activation blockers; Kotak Neo still needs live
-login/read and order-safety proof, and Groww may also require approving the
-API-key session in Groww Cloud before FlintTrade can mint a token.
-Localhost postback URLs are for diagnostics unless you expose FlintTrade through
-a broker-reachable tunnel or public URL.
+When native connect returns, Dhan, Upstox, and Kotak Neo are evidence-gated
+as enabled in the catalogue. Kotak Neo is Connected (read) / API smoke only
+after persisted REST smoke evidence (FT-MONDAY-002) — never placeable Live;
+Neo has no sandbox (`Live read only until funded unlock.`). Monday Neo is
+REST-only; live SFeed is not wired. Upstox Developer Apps analytics tokens
+would connect as read-only sessions. INDmoney uses a dashboard-generated token that resets
+at the daily 06:00 IST dashboard cycle, but remains disabled until its
+smart-parent, atomic reduce-only, and live order-safety blockers clear. Groww
+retains its displayed activation blockers and may also require approving the
+API-key session in Groww Cloud before FlintTrade can mint a token. Native HTTP
+remains frozen until Task 9D / Task 7C.2 — Setup → Brokers still fails on the
+frozen routes; Monday MSI smoke uses the in-process native read path, not a
+restored Brokers HTTP session. Localhost postback URLs are for diagnostics
+unless you expose FlintTrade through a broker-reachable tunnel or public URL.
 
 The Brokers screen also shows **Broker MCP assistants** for OpenAlgo, Dhan,
 Upstox, and Groww when catalogue metadata is available. These cards copy the
@@ -263,6 +268,23 @@ The two-layer design lets existing OpenAlgo users keep their broker setup while
 FlintTrade keeps its own backend, native sandbox, analytics, automation, and a
 first-party broker gateway whose HTTP connect and read surfaces are frozen
 until Task 9D and Task 7C.2.
+
+**Monday dual-broker smoke (FT-MONDAY-002).** The Monday path is
+native Dhan + Kotak Neo on the MSI static-IP host, non-funded live REST
+API smoke (quotes / depth / hist / chain where the SDK allows). Monday
+Neo is REST-only; live SFeed / `create_websocket` is not wired.
+Prefer native; OpenAlgo is Settings / fallback only — not the Monday
+primary connect CTA. Native HTTP remains frozen on this unreleased
+line until Task 9D and Task 7C.2 — Setup → Brokers HTTP still fails;
+Monday MSI is the in-process read path. Dhan and Neo chrome is
+**Connected (read)** or **API smoke** only after persisted REST smoke
+evidence (`read_smoke_ok`) — never placeable Live orders, and a failed
+login/read never fakes Connected. Native Setup Continue ignores
+gateway/OpenAlgo Dhan/Neo rows; it requires a native source plus
+successful `read_smoke_ok`. Neo has no sandbox: never offer “Neo
+Practice”; copy is `Live read only until funded unlock.` `dhanhq` stays
+on latest stable 2.2.0; Neo is PyPI `kotakneoapi` 3.0.7. Live place stays
+fail-closed. See [FT-MONDAY-002](acceptance/FT-MONDAY-002.md).
 
 ---
 
@@ -289,9 +311,8 @@ fail-closed until MSI native smoke is trusted and funded unlock.
 OpenAlgo is a Settings fallback only — not the primary Monday
 connect CTA. Setup's primary connect action is **Continue without
 a broker**. Dhan Sandbox is optional OpenAlgo paper. Learn →
-Practice Trading still shows **Kotak Neo Sandbox** as **Planned**
-/ **when available**; that row is not a usable sandbox today and
-is not a Monday Practice path.
+Practice Trading never offers Neo Practice — Kotak Neo has no
+sandbox. Operator copy is `Live read only until funded unlock.`
 
 **Mode vs session vs sample (FT-UX-001).** The Explore / Practice / Live chips
 mean execution mode only. TopBar session chips (Continuous · CAS · Matching ·
@@ -425,19 +446,17 @@ backend rejects Explore orders if the UI slips (FT-TRADE-009).
 This is a fallback path, not the primary Monday fills path. The
 primary paper path is Practice mode on `/trade` through the native
 `SandboxEngine` (FT-MONDAY-001). Explore `/learn` → **Practice
-Trading** still walks through OpenAlgo broker Practice / sandbox
-setup when you need that fallback. **Supported Sandboxes** lists
-**Dhan Sandbox** as **Active** (optional OpenAlgo paper) and
-**Kotak Neo Sandbox** as **Planned** / **when available**. Neo has
-no usable sandbox today — treat that Planned row as a future
-placeholder, not an available Practice path and not Monday
-Practice. The tab shows "How to start Practice Trading", helper text
-"Configure OpenAlgo in Settings → Broker Gateway.", and an
+Trading** still walks through optional OpenAlgo broker Practice /
+sandbox setup when you need that fallback. **Dhan Sandbox** remains
+optional OpenAlgo paper. Kotak Neo has **no sandbox** — never offer
+“Neo Practice”. Operator copy is `Live read only until funded unlock.`
+(FT-MONDAY-002). The tab shows "How to start Practice Trading", helper
+text "Configure OpenAlgo in Settings → Broker Gateway.", and an
 **Open Settings → Broker Gateway** button that navigates to
 `/settings#api`. The CTA does not send operators to Settings →
 Brokers (`/settings#brokers`). Point the Broker Gateway at that
-OpenAlgo Practice instance only as fallback, then return to native
-Practice `SandboxEngine` fills for Monday desk and AI work.
+OpenAlgo Practice instance only as fallback paper, then return to
+native Practice `SandboxEngine` fills for Monday desk and AI work.
 
 On Explore `/learn` → Glossary → Lot Size, the glossary teaches dated
 Jan 2026 NSE-cycle index lots (`NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 ·

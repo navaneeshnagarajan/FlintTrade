@@ -99,12 +99,15 @@ async def test_upstox_write_accepted_through_real_router(*, backend_lease_factor
 
 
 @pytest.mark.asyncio
-async def test_kotakneo_write_accepted_through_real_router(*, backend_lease_factory):
+async def test_kotakneo_write_fail_closed_through_real_router(*, backend_lease_factory):
+    """Monday Neo login is read-only until funded unlock — writes fail closed."""
+    from flinttrade_engine.safety import SafetyBypassError
+
     client = _MockNeoClient()
     adapter = KotakNeoAdapter(client_factory=lambda _s: client, symbol_resolver=lambda s, e: "RELIANCE-EQ")
-    oid = await _dispatch_through_router(adapter, "kotakneo", backend_lease_factory=backend_lease_factory)
-    assert oid == "NEO-ROUTER"
-    assert len(client.placed) == 1
+    with pytest.raises(SafetyBypassError, match="read-only"):
+        await _dispatch_through_router(adapter, "kotakneo", backend_lease_factory=backend_lease_factory)
+    assert client.placed == []
 
 
 @pytest.mark.asyncio

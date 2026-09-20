@@ -12,7 +12,7 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 BROKERS_LOCK = REPO / "brokers.lock"
 REQUIREMENTS_LOCK = REPO / "requirements.lock"
 UV_LOCK = REPO / "uv.lock"
-ACTIVATED_WAVES = {"dhanhq", "growwapi", "neo-api-client", "upstox-python-sdk"}
+ACTIVATED_WAVES = {"dhanhq", "growwapi", "kotakneoapi", "upstox-python-sdk"}
 YANKED_VERSIONS = {"dhanhq": {"2.1.0"}}
 
 PIN_RE = re.compile(r"^([a-zA-Z0-9_.-]+)==([^\s;]+)")

@@ -8,17 +8,19 @@ between buckets.
 
 `v0.0.1` is not production ready. The native adapter code for the five
 founder brokers (Dhan / Upstox / Kotak Neo / INDmoney / Groww) is present and
-mock-tested. Dhan and Upstox are the current connectable native set; INDmoney
-is read-verified with a locally verified fail-closed planner, but remains disabled
-until restart-time regular/smart-parent cancellation can be resolved authoritatively
-and a broker-atomic reduce-only close primitive plus funded/live-market order-safety
-proof exist. Kotak Neo and Groww are built and catalogued but stay
-`connectable=false`; Kotak Neo's fail-closed planner is locally verified but its
-live login/read and order-safety proofs remain, while Groww retains its remaining live blockers. Groww's
-official `growwapi` SDK is pinned for attestation/reference parity while the
-adapter keeps using FlintTrade's tested REST transport; the latest key-secret
-probe proves login/account reads but still lacks broker-side market-data/API
-permission, static IP, and order-safety evidence.
+mock-tested. Dhan, Upstox, and Kotak Neo are the current connectable native set
+(Kotak Neo for Connected (read) / API smoke on FT-MONDAY-002 — Live place stays
+fail-closed; Neo has no sandbox). INDmoney is read-verified with a locally
+verified fail-closed planner, but remains disabled until restart-time
+regular/smart-parent cancellation can be resolved authoritatively and a
+broker-atomic reduce-only close primitive plus funded/live-market order-safety
+proof exist. Groww stays `connectable=false` and retains its remaining live
+blockers. Groww's official `growwapi` SDK is pinned for attestation/reference
+parity while the adapter keeps using FlintTrade's tested REST transport; the
+latest key-secret probe proves login/account reads but still lacks broker-side
+market-data/API permission, static IP, and order-safety evidence. Native HTTP
+UX remains frozen (Task 9D / Task 7C.2); Monday MSI smoke is the in-process
+read path, not a restored Setup → Brokers HTTP session.
 INDmoney is the only REST-only native with no SDK pin; its dashboard token resets
 at the daily 06:00 IST cycle. INDstocks' own FAQ advertises `indstocks-sdk`, but
 PyPI and npm currently have no matching package, so the adapter stays REST-native
@@ -55,7 +57,7 @@ Closed-market/no-funds verification does not prove funded live order execution.
 | — Dhan: rolling-options history + documented L20 depth feed | 🟡 | Rolling-options history is encoded in routing capabilities; Dhan's L20 depth remains feed-only until FlintTrade wires a runtime depth snapshot bridge (`market_depth_runtime_ready=false`). |
 | — Upstox: historical-data edge | ✅ | `historical_max_lookback/candles` capabilities |
 | — Kotak Neo: low-cost execution metadata | ✅ | `brokerage_free` + `low_cost_execution` use-case |
-| Native adapters (Dhan/Upstox/Kotak Neo/INDmoney/Groww): identity, capabilities, order + **data** surfaces | 🟡 | Adapter and mapping code is present and mock-tested. Dhan and Upstox are connectable after live verification and emergency-planner coverage. INDmoney's fail-closed planner is locally verified but it remains coming soon pending an authoritative restart-time regular/smart-parent discriminator, a broker-atomic reduce-only close primitive, and a funded/live-market order-safety proof. Kotak Neo's pinned-SDK-grounded planner is locally verified; live login/read and order-safety proof remain. Groww retains its documented live blockers. |
+| Native adapters (Dhan/Upstox/Kotak Neo/INDmoney/Groww): identity, capabilities, order + **data** surfaces | 🟡 | Adapter and mapping code is present and mock-tested. Dhan and Upstox are connectable after live verification and emergency-planner coverage. INDmoney's fail-closed planner is locally verified but it remains coming soon pending an authoritative restart-time regular/smart-parent discriminator, a broker-atomic reduce-only close primitive, and a funded/live-market order-safety proof. Kotak Neo is connectable for Connected (read) / API smoke on `kotakneoapi` 3.0.7; live order-safety proof remains and Live place stays fail-closed. Neo has no sandbox (never offer Neo Practice). FT-MONDAY-002 ships Monday MSI native Dhan + Neo REST read/API smoke (quotes / depth / hist / chain; live SFeed is not wired). Groww retains its documented live blockers. |
 | Native adapters: **order execution** end-to-end (R13/R14) | 🟡 | The gated path they plug into (`SafetySystem → gate_order → BrokerRouter`) is built + tested. Generic terminal place/modify/cancel now route to the active native account when no OpenAlgo key is configured, but funded live native order placement remains unproven because verification used no-funds/closed-market accounts. |
 | Multiple brokers per account, per-broker rate limits | ✅ | `BrokerRateLimiter` + live-apply UI (Account Manager) |
 
@@ -132,8 +134,8 @@ Closed-market/no-funds verification does not prove funded live order execution.
 | Historical option-chain (`getHistoricalChain`/`getHistoricalExpiries`) | ✅ | "Historical Chain" widget — archived expiries → grouped CE/PE chain; honest empty state |
 | Position sizing (Fixed % / Kelly / ATR) | ✅ | `PositionSizingWidget` computes all three methods correctly client-side (no backend round-trip — pure calculator, keeps latency low). The `calculatePositionSize` API client is for external callers, not a gap |
 | Stock / fundamentals screener | ✅ | `StocksTab` (Invest route) → `useStockScan` → `/v1/stocks/scan`; curated large-cap fundamentals (disclosed as a fixed point-in-time snapshot). The separate `/screener/fundamental/*` clients are a dead duplicate (no consumers) |
-| Credential rotation (`rotation/status|schedule|rotate-now`) | ✅ | **Mounted (Phase 1 G5)** behind the G9 operator-session write guard. `CredentialsRotator` runs over `flinttrade_core.native_rotation.NativeSessionRefresher` — a real per-selector `refresh_token` hook (Dhan renew-in-place via `RenewToken`, vault-credential replay for the rest, raises on failure so `rotate-now` reports honestly). Active registered native adapters get the daily 08:05 IST refresh job (armed on the serve path); stale coming-soon selectors such as Kotak Neo do not schedule false refresh work. |
-| Native-SDK **order execution** (R13/R14) | 🟡 | Dhan and Upstox SDK-backed native paths plus INDmoney, Kotak Neo, and Groww REST/native writes are mapped and gated; INDmoney, Kotak Neo, and Groww remain not connectable. INDmoney's fail-closed emergency planner is locally verified, but restart-time regular/smart-parent discrimination, a broker-atomic reduce-only close primitive, and funded/live-market order-safety proof remain. Kotak Neo's fail-closed planner is locally verified, but live login/read and order-safety proof remain. Groww now has approved-key login/account-read proof but still needs market-data/API permission, static-IP, and order-safety proof before promotion. Funded live order placement remains unproven until market/funds conditions allow a live broker write probe. |
+| Credential rotation (`rotation/status|schedule|rotate-now`) | ✅ | **Mounted (Phase 1 G5)** behind the G9 operator-session write guard. `CredentialsRotator` runs over `flinttrade_core.native_rotation.NativeSessionRefresher` — a real per-selector `refresh_token` hook (Dhan renew-in-place via `RenewToken`, vault-credential replay for the rest, raises on failure so `rotate-now` reports honestly). Active registered native adapters get the daily 08:05 IST refresh job (armed on the serve path); coming-soon selectors (Groww / INDmoney) and any selector without a published connected session do not schedule false refresh work. |
+| Native-SDK **order execution** (R13/R14) | 🟡 | Dhan and Upstox SDK-backed native paths plus INDmoney, Kotak Neo, and Groww REST/native writes are mapped and gated. Kotak Neo is catalogue-connectable for Connected (read) / API smoke only (`kotakneoapi` 3.0.7); funded Live place stays fail-closed. INDmoney and Groww remain not connectable. INDmoney's fail-closed emergency planner is locally verified, but restart-time regular/smart-parent discrimination, a broker-atomic reduce-only close primitive, and funded/live-market order-safety proof remain. Groww now has approved-key login/account-read proof but still needs market-data/API permission, static-IP, and order-safety proof before promotion. Funded live order placement remains unproven until market/funds conditions allow a live broker write probe. |
 | Overscoped / dead frontend clients | — | Admin user-CRUD (single-principal app → out of scope), QuestDB browser-REST, OTP pair — removal candidates |
 
 ---

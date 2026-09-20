@@ -43,9 +43,9 @@ wraps the websocket callbacks into an async queue) while ``subscribe`` /
 Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8).
 ``build_broker_router``'s native-activation factory registers this adapter
 automatically once its pinned SDK is attested AND vault credentials exist;
-until then it stays dormant. Kotak Neo remains ``connectable=False`` in the
-catalogue until the live account, static-IP, and order-path requirements are
-verified end to end.
+until then it stays dormant. Kotak Neo is ``connectable=True`` for
+Connected (read) / API smoke. Live place stays fail-closed. Neo has no
+Practice sandbox.
 """
 
 from __future__ import annotations
@@ -184,7 +184,7 @@ KOTAKNEO_CAPABILITIES = Capabilities(
     # Trade-token TTL is not stated in the local docs; 24h is the daily-cycle
     # ceiling used for refresh timing (the only JWT shown is a view-scope token).
     session_lifetime_hours=24.0,
-    sandbox=True,
+    sandbox=False,
     # "Currently the system supports up to 10 orders per second."
     rate_limit_orders_per_sec=10,
     # 'tag' is an optional order field, not a mandated algo tag.
@@ -199,9 +199,8 @@ KOTAKNEO_CAPABILITIES = Capabilities(
         "apply. Exception: a bracket order's square-off leg attracts standard "
         "brokerage."
     ),
-    # No historical/OHLC-candle API in the Neo trade API — only live quotes.
-    # No option-chain endpoint (search_scrip only).
-    option_chain_supported=False,
+    # kotakneoapi 3.x adds historical candles and option chain. HS feed retired.
+    option_chain_supported=True,
     streaming_supported=True,
     # Captured Kotak Neo v2 WebSocket docs: 16 channels and 200 scrips at a
     # time. Runtime remains disabled until the SDK callback bridge is live-proven.
@@ -216,7 +215,7 @@ KOTAKNEO_CAPABILITIES = Capabilities(
 
 
 class KotakNeoClient:
-    """Dict-based facade over the neo-api-client v2 SDK (lazy import).
+    """Dict-based facade over the kotakneoapi 3.x SDK (lazy import).
 
     Owns the ``NeoAPI`` handle and runs the two-step TOTP+MPIN 2FA at
     construction so the adapter stays SDK-free. Built by ``KotakNeoAdapter.login``
@@ -459,10 +458,46 @@ class KotakNeoClient:
             ignore_50multiple=ignore_50multiple,
         )
 
+    def expiries(self, exchange: str, underlying: str, instrument_type: str | None = None) -> Any:
+        return self._neo.expiries(exchange=exchange, underlying=underlying, instrument_type=instrument_type)
+
+    def option_chain(
+        self,
+        exchange: str,
+        underlying: str,
+        expiry: str | None = None,
+        instrument_type: str | None = None,
+        count: int | None = None,
+    ) -> Any:
+        return self._neo.option_chain(
+            exchange=exchange,
+            underlying=underlying,
+            expiry=expiry,
+            instrument_type=instrument_type,
+            count=count,
+        )
+
+    def historical_data(self, neosymbol: str, interval: str, from_date: str, to_date: str) -> Any:
+        return self._neo.historical_data(
+            neosymbol=neosymbol, interval=interval, from_date=from_date, to_date=to_date
+        )
+
     # -- streaming + session ------------------------------------------------
+    # Monday Neo smoke is REST-only (quotes / depth / historical / option
+    # chain). kotakneoapi 3.x retired the HS callback feed. Live SFeed
+    # (``create_websocket``) is not wired in this tip — do not half-call it.
+
+    SFEED_NOT_WIRED = (
+        "Kotak Neo Monday path is REST-only (quotes, depth, historical, "
+        "option chain). Live SFeed create_websocket is not wired."
+    )
 
     def subscribe(self, instrument_tokens: list[dict[str, str]], is_index: bool, is_depth: bool) -> None:
-        self._neo.subscribe(instrument_tokens=instrument_tokens, isIndex=is_index, isDepth=is_depth)
+        subscribe = getattr(self._neo, "subscribe", None)
+        if callable(subscribe):
+            self._neo.subscribe(instrument_tokens=instrument_tokens, isIndex=is_index, isDepth=is_depth)
+            return
+        raise BrokerError(self.SFEED_NOT_WIRED)
 
     def un_subscribe(self, instrument_tokens: list[dict[str, str]], is_index: bool, is_depth: bool) -> None:
         self._neo.un_subscribe(instrument_tokens=instrument_tokens, isIndex=is_index, isDepth=is_depth)
@@ -500,7 +535,7 @@ class KotakNeoAdapter(BrokerAdapter):
             the journal-backed provider.
     """
 
-    _BROKER_READ_UNSUPPORTED = frozenset({"historical", "option_chain"})
+    _BROKER_READ_UNSUPPORTED: frozenset[str] = frozenset()
 
     def __init__(
         self,
@@ -913,12 +948,15 @@ class KotakNeoAdapter(BrokerAdapter):
             if not credentials.get(required):
                 raise BrokerError(f"Kotak Neo login requires {required!r}")
         client = None if self._client_factory is not None else await self._call(KotakNeoClient, dict(credentials))
+        expires_at = datetime.now(tz=UTC).timestamp() + 24 * 3600
         return Session(
             access_token=str(credentials.get("ucc", "")),
-            expires_at=datetime.now(tz=UTC).timestamp() + 24 * 3600,
+            expires_at=expires_at,
             account_id=str(credentials.get("ucc", "")),
             adapter_id="kotakneo",
             extra={"client": client},
+            # Monday fail-closed: Neo stays read-only until funded unlock.
+            read_only_until_at=expires_at,
         )
 
     def replay_credentials(self, credentials: dict, session: Session) -> dict:
@@ -1766,12 +1804,81 @@ class KotakNeoAdapter(BrokerAdapter):
         return M.from_kotak_scrip_master(resp)
 
     async def historical(self, session: Session, req: dict) -> Candles:
-        # NEO trade API has no historical-candle endpoint (capability is False).
-        raise NotImplementedError("Kotak Neo exposes no historical-candle API")
+        """kotakneoapi 3.x historical candles (``historical_data``)."""
+        from flinttrade_core.models import OHLCV, Candles  # noqa: PLC0415
+
+        symbol = str(req.get("symbol") or "")
+        exchange = str(req.get("exchange") or "NSE")
+        interval = str(req.get("interval") or "D")
+        from_date = str(req.get("from_date") or req.get("from") or "")
+        to_date = str(req.get("to_date") or req.get("to") or "")
+        token = await self._resolve_token(session, symbol, exchange)
+        seg = M.EXCHANGE_TO_KOTAK.get(exchange.upper(), exchange.lower())
+        neosymbol = str(req.get("neosymbol") or f"{seg}|{token}")
+        resp = await self._call(
+            self._client(session).historical_data, neosymbol, interval, from_date, to_date
+        )
+        rows = resp.get("data", resp) if isinstance(resp, dict) else resp
+        if not isinstance(rows, list):
+            raise BrokerReadResponseInvalid from None
+        bars: list[OHLCV] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                raise BrokerReadResponseInvalid from None
+            bars.append(
+                OHLCV(
+                    timestamp=str(row.get("timestamp") or row.get("datetime") or row.get("date") or ""),
+                    open=float(row.get("open") or 0),
+                    high=float(row.get("high") or 0),
+                    low=float(row.get("low") or 0),
+                    close=float(row.get("close") or 0),
+                    volume=int(row.get("volume") or 0),
+                )
+            )
+        return Candles(symbol=symbol, exchange=exchange, interval=interval, bars=bars)
 
     async def option_chain(self, session: Session, req: dict) -> OptionChain:
-        # NEO has no option-chain endpoint (capability is False).
-        raise NotImplementedError("Kotak Neo exposes no option-chain API")
+        """kotakneoapi 3.x option chain (REST). Neo has no Practice sandbox."""
+        from flinttrade_core.models import OptionChain, OptionChainStrike  # noqa: PLC0415
+
+        underlying = str(req.get("underlying") or req.get("symbol") or "")
+        exchange = str(req.get("exchange") or "NFO")
+        expiry = req.get("expiry")
+        seg = M.EXCHANGE_TO_KOTAK.get(str(exchange).upper(), str(exchange).lower())
+        resp = await self._call(
+            self._client(session).option_chain,
+            seg,
+            underlying,
+            expiry,
+            req.get("instrument_type"),
+            req.get("count"),
+        )
+        payload = resp.get("data", resp) if isinstance(resp, dict) else resp
+        rows = payload if isinstance(payload, list) else (
+            payload.get("strikes", []) if isinstance(payload, dict) else []
+        )
+        strikes: list[OptionChainStrike] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                raise BrokerReadResponseInvalid from None
+            ce = row.get("ce") if isinstance(row.get("ce"), dict) else {}
+            pe = row.get("pe") if isinstance(row.get("pe"), dict) else {}
+            strikes.append(
+                OptionChainStrike(
+                    strike_price=float(row.get("strike_price") or row.get("strike") or 0),
+                    ce_ltp=float(ce.get("ltp") or 0),
+                    pe_ltp=float(pe.get("ltp") or 0),
+                )
+            )
+        expiry_s = str(expiry or (payload.get("expiry") if isinstance(payload, dict) else "") or "")
+        return OptionChain(
+            underlying=underlying,
+            underlying_key=underlying,
+            exchange=exchange,
+            expiry=expiry_s,
+            expiry_date=expiry_s,
+            strikes=strikes,
+        )
 
     # ---------- market data: streaming ----------
 

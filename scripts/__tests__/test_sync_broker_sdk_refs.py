@@ -12,12 +12,12 @@ def test_active_sdk_entries_ignores_placeholders_and_unknowns() -> None:
         {"name": "dhanhq", "version": "2.2.0"},
         {"name": "future-sdk", "version": "PLACEHOLDER"},
         {"name": "unknown-sdk", "version": "1.0.0"},
-        {"name": "neo-api-client", "version": "2.0.0", "source_commit": "abc"},
+        {"name": "kotakneoapi", "version": "3.0.7"},
     ]
 
     assert syncer.active_sdk_entries(entries) == [
         {"name": "dhanhq", "version": "2.2.0", "source_commit": ""},
-        {"name": "neo-api-client", "version": "2.0.0", "source_commit": "abc"},
+        {"name": "kotakneoapi", "version": "3.0.7", "source_commit": ""},
     ]
 
 

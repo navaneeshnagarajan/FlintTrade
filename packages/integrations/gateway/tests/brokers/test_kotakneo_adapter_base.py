@@ -85,6 +85,14 @@ class MockNeo:
              "pTrdSymbol": f"{symbol}-EQ", "pISIN": "INE528G01035", "lLotSize": 1, "dTickSize": 1},
         ]
 
+    def historical_data(self, neosymbol, interval, from_date, to_date):
+        self.calls.append(("historical_data", (neosymbol, interval, from_date, to_date)))
+        return {"data": [{"timestamp": "2026-09-20", "open": 1, "high": 2, "low": 1, "close": 2, "volume": 10}]}
+
+    def option_chain(self, exchange, underlying, expiry=None, instrument_type=None, count=None):
+        self.calls.append(("option_chain", (exchange, underlying, expiry)))
+        return {"data": [{"strike_price": 25000, "ce": {"ltp": 1.5}, "pe": {"ltp": 2.5}}]}
+
 
 class _NoScripNeo(MockNeo):
     def search_scrip(self, exchange_segment, symbol):
@@ -106,6 +114,8 @@ async def _session(adapter):
 async def test_login_returns_session():
     session = await _session(_adapter(MockNeo()))
     assert session.adapter_id == "kotakneo" and session.account_id == "U1"
+    assert session.is_read_only is True
+    assert session.read_only_until_at == session.expires_at
 
 
 @pytest.mark.asyncio
@@ -356,10 +366,34 @@ async def test_search_scrip_resolves_symbol():
 
 
 @pytest.mark.asyncio
-async def test_no_historical_or_option_chain():
-    adapter = _adapter(MockNeo())
+async def test_v3_historical_and_option_chain():
+    mock = MockNeo()
+    adapter = _adapter(mock)
     session = await _session(adapter)
-    with pytest.raises(NotImplementedError, match="historical"):
-        await adapter.historical(session, {})
-    with pytest.raises(NotImplementedError, match="option-chain"):
-        await adapter.option_chain(session, {})
+    candles = await adapter.historical(
+        session,
+        {"symbol": "YESBANK", "exchange": "NSE", "interval": "D", "from_date": "2026-09-01", "to_date": "2026-09-20"},
+    )
+    assert candles.symbol == "YESBANK"
+    assert len(candles.bars) == 1
+    chain = await adapter.option_chain(
+        session,
+        {"underlying": "NIFTY", "exchange": "NFO", "expiry": "2026-09-24"},
+    )
+    assert chain.underlying == "NIFTY"
+    assert chain.strikes[0].strike_price == 25000.0
+    assert ("historical_data", ("nse_cm|11915", "D", "2026-09-01", "2026-09-20")) in mock.calls
+    assert ("option_chain", ("nse_fo", "NIFTY", "2026-09-24")) in mock.calls
+
+
+def test_sfeed_only_facade_rejects_subscribe_as_rest_only():
+    from flinttrade_gateway.brokers.kotakneo import KotakNeoClient
+
+    class _SFeedOnly:
+        def create_websocket(self):
+            raise AssertionError("create_websocket must not be called")
+
+    facade = KotakNeoClient.__new__(KotakNeoClient)
+    facade._neo = _SFeedOnly()
+    with pytest.raises(BrokerError, match="REST-only"):
+        facade.subscribe([], False, False)

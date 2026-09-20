@@ -170,10 +170,11 @@ describe("ConnectionStep", () => {
     fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
 
     expect(screen.getByText("Native brokers section")).toBeInTheDocument();
-    expect(screen.getByText(/availability and login fields come from the broker catalogue/i)).toBeInTheDocument();
-    expect(screen.getByText(/use at your own risk/i)).toBeInTheDocument();
+    expect(screen.getByText(/Monday primary broker connect/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Connected \(read\)/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Live read only until funded unlock/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Dhan, Upstox, INDmoney/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /connect a write-capable broker/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /connect dhan or neo for connected \(read\)/i })).toBeDisabled();
     // No connected accounts at all — the read-only demotion reason must not show.
     expect(screen.queryByRole("note")).not.toBeInTheDocument();
     expect(setupMocks.useBrokerAccounts).not.toHaveBeenCalled();
@@ -229,7 +230,7 @@ describe("ConnectionStep", () => {
 
     render(<ConnectionStep onComplete={onComplete} />);
     fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
-    const continueButton = screen.getByRole("button", { name: /connect a write-capable broker/i });
+    const continueButton = screen.getByRole("button", { name: /connect dhan or neo for connected \(read\)/i });
 
     expect(continueButton).toBeDisabled();
     fireEvent.click(continueButton);
@@ -290,6 +291,64 @@ describe("ConnectionStep", () => {
     render(<ConnectionStep onComplete={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
 
-    expect(screen.getByRole("button", { name: /connect a write-capable broker/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /connect dhan or neo for connected \(read\)/i })).toBeDisabled();
+  });
+
+  it("ignores gateway Dhan or Neo rows on the native tab", () => {
+    act(() => {
+      useBrokerStore.setState({
+        activeAccountId: null,
+        accounts: [
+          {
+            account_id: "N1",
+            broker: "kotakneo",
+            label: "Neo via OpenAlgo",
+            status: "connected",
+            connected_at: null,
+            error_message: null,
+            is_primary: false,
+            source: "gateway",
+            read_only: true,
+            read_smoke_ok: true,
+          },
+        ],
+      });
+    });
+
+    render(<ConnectionStep onComplete={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
+    expect(screen.getByRole("button", { name: /connect dhan or neo for connected \(read\)/i })).toBeDisabled();
+  });
+
+  it("allows continuing when Dhan or Neo is Connected (read)", () => {
+    const onComplete = vi.fn();
+    act(() => {
+      useBrokerStore.setState({
+        activeAccountId: null,
+        accounts: [
+          {
+            account_id: "N1",
+            broker: "kotakneo",
+            label: "Neo",
+            status: "connected",
+            connected_at: null,
+            error_message: null,
+            is_primary: false,
+            source: "native",
+            read_only: true,
+            read_smoke_ok: true,
+          },
+        ],
+      });
+    });
+
+    render(<ConnectionStep onComplete={onComplete} />);
+    fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
+    const continueButton = screen.getByRole("button", { name: /^continue$/i });
+    expect(continueButton).toBeEnabled();
+    expect(screen.getByRole("note")).toHaveTextContent(/Connected \(read\)/i);
+    expect(screen.getByRole("note")).toHaveTextContent(/Live read only until funded unlock/i);
+    fireEvent.click(continueButton);
+    expect(onComplete).toHaveBeenCalled();
   });
 });

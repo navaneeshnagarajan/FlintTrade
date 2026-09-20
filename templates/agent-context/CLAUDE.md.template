@@ -204,7 +204,7 @@ Two-tier config. No exceptions.
 
 | Package | Description |
 |---|---|
-| `integrations/gateway` | Native broker gateway: `BrokerAdapter` Protocol (`adapter.py`), per-broker adapters in `brokers/` (35 in `BROKER_CATALOG`), `registry.py`, `BrokerRouter` (`router.py`); five founder-broker native adapters exist (Dhan, Upstox, Kotak Neo, INDmoney, Groww), but only Dhan and Upstox are connectable while the other three retain declared activation blockers; required SDKs are pinned in `brokers.lock` and attested before activation; OpenAlgo is the optional primary bridge adapter; `shims/` holds OpenAlgo infra shims only |
+| `integrations/gateway` | Native broker gateway: `BrokerAdapter` Protocol (`adapter.py`), per-broker adapters in `brokers/` (35 in `BROKER_CATALOG`), `registry.py`, `BrokerRouter` (`router.py`); five founder-broker native adapters exist (Dhan, Upstox, Kotak Neo, INDmoney, Groww); Dhan, Upstox, and Kotak Neo are connectable (Kotak Neo Connected (read) / API smoke only on FT-MONDAY-002 — Live place fail-closed; Neo has no sandbox); INDmoney and Groww retain declared activation blockers; required SDKs are pinned in `brokers.lock` and attested before activation; OpenAlgo is the optional primary bridge adapter; `shims/` holds OpenAlgo infra shims only |
 | `integrations/webhooks` | Generic HMAC-signed custom webhooks, flow builder, alerter |
 
 #### `packages/apps/` — front-ends (2)

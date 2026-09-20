@@ -66,6 +66,8 @@ def test_rest_only_native_declares_no_sdk_pin():
     assert SDK_PIN_BY_BROKER["indmoney"] is None
     assert BROKER_CATALOG["dhan"].sdk_pin == "dhanhq"
     assert SDK_PIN_BY_BROKER["dhan"] == "dhanhq"
+    assert BROKER_CATALOG["kotakneo"].sdk_pin == "kotakneoapi"
+    assert SDK_PIN_BY_BROKER["kotakneo"] == "kotakneoapi"
     assert BROKER_CATALOG["groww"].sdk_pin == "growwapi"
     assert SDK_PIN_BY_BROKER["groww"] == "growwapi"
 
@@ -130,7 +132,7 @@ def test_skip_reasons_reported():
 def test_coming_soon_natives_never_activate_from_factory():
     skips: list[tuple[str, str]] = []
     out = build_native_adapters(
-        ["kotakneo", "indmoney", "groww"],
+        ["indmoney", "groww"],
         attest_ok=lambda _b: True,
         has_credentials=lambda _b: True,
         on_skip=lambda b, why: skips.append((b, why)),
@@ -138,10 +140,24 @@ def test_coming_soon_natives_never_activate_from_factory():
 
     assert out == {}
     assert skips == [
-        ("kotakneo", "coming-soon-activation-blocked"),
         ("indmoney", "coming-soon-activation-blocked"),
         ("groww", "coming-soon-activation-blocked"),
     ]
+
+
+def test_kotakneo_is_connectable_and_never_coming_soon_blocked():
+    skips: list[tuple[str, str]] = []
+    out = build_native_adapters(
+        ["kotakneo"],
+        attest_ok=lambda _b: True,
+        has_credentials=lambda _b: True,
+        on_skip=lambda b, why: skips.append((b, why)),
+    )
+
+    assert set(out) == {"kotakneo"}
+    assert isinstance(out["kotakneo"], KotakNeoAdapter)
+    assert "coming-soon-activation-blocked" not in {why for _broker, why in skips}
+    assert BROKER_CATALOG["kotakneo"].connectable is True
 
 
 def test_connectable_native_without_emergency_planner_never_activates(monkeypatch):

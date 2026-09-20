@@ -60,11 +60,13 @@ def test_kotak_neo_wins_low_cost_execution() -> None:
     assert "zero execution brokerage" in top.rationale
 
 
-def test_kotak_neo_scores_zero_for_options_and_historical() -> None:
-    # Kotak Neo has no option-chain API and no historical candle API.
-    for use_case in (BrokerUseCase.OPTIONS_ANALYTICS, BrokerUseCase.HISTORICAL_DATA):
-        by_broker = {r.broker_id: r for r in recommend(use_case)}
-        assert by_broker["kotakneo"].raw_score == 0.0
+def test_kotak_neo_v3_has_option_chain_but_no_lookback_history() -> None:
+    # kotakneoapi 3.x adds option chain. Historical candles exist but we do not
+    # advertise a lookback/interval menu yet, so HISTORICAL_DATA stays 0.
+    options = {r.broker_id: r for r in recommend(BrokerUseCase.OPTIONS_ANALYTICS)}
+    history = {r.broker_id: r for r in recommend(BrokerUseCase.HISTORICAL_DATA)}
+    assert options["kotakneo"].raw_score > 0.0
+    assert history["kotakneo"].raw_score == 0.0
 
 
 def test_dhan_wins_options_history() -> None:
@@ -213,7 +215,7 @@ def test_options_analytics_excludes_brokers_without_a_chain() -> None:
     recs = {r.broker_id: r for r in recommend(BrokerUseCase.OPTIONS_ANALYTICS)}
     assert recs["dhan"].raw_score > 0
     assert recs["upstox"].raw_score > 0
-    assert recs["kotakneo"].raw_score == 0.0
+    assert recs["kotakneo"].raw_score > 0
 
 
 def test_recommend_all_covers_every_use_case() -> None:

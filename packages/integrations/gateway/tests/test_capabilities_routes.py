@@ -186,12 +186,9 @@ class TestCapabilitiesRoute:
         response = client.get("/api/v1/broker/capabilities?broker=kotakneo")
         assert response.status_code == 200
         caps = response.get_json()["capabilities"]
-        assert caps["connectable"] is False
+        assert caps["connectable"] is True
         assert caps["requires_static_ip"] is True
-        assert caps["native_connect_blockers"] == [
-            "Maintainer live login/read verification with current TOTP and MPIN",
-            "Live order-safety proof",
-        ]
+        assert caps["native_connect_blockers"] == []
         assert caps["auth_model"] == "mpin_totp_daily"
         assert caps["rate_limit_orders_per_sec"] == 10
         assert caps["algo_tag_required"] is False
@@ -380,8 +377,7 @@ class TestRecommendationsRoute:
         data = response.get_json()
         assert data["use_case"] == "low_cost_execution"
         ids = {r["broker_id"] for r in data["recommendations"]}
-        assert "kotakneo" not in ids
-        assert ids == {"dhan", "upstox"}
+        assert ids == {"dhan", "upstox", "kotakneo"}
         assert all(r["connectable"] is True for r in data["recommendations"])
 
     def test_include_coming_soon_keeps_disabled_native_capability_metadata(self, client) -> None:  # type: ignore[no-untyped-def]
@@ -392,12 +388,9 @@ class TestRecommendationsRoute:
         data = response.get_json()
         by_id = {r["broker_id"]: r for r in data["recommendations"]}
         assert {"kotakneo", "indmoney", "groww"} <= set(by_id)
-        assert by_id["kotakneo"]["connectable"] is False
+        assert by_id["kotakneo"]["connectable"] is True
         assert by_id["kotakneo"]["requires_static_ip"] is True
-        assert by_id["kotakneo"]["native_connect_blockers"] == [
-            "Maintainer live login/read verification with current TOTP and MPIN",
-            "Live order-safety proof",
-        ]
+        assert by_id["kotakneo"]["native_connect_blockers"] == []
         assert by_id["indmoney"]["connectable"] is False
         assert by_id["indmoney"]["native_connect_blockers"] == [
             "Authoritative smart-parent cancellation discriminator",

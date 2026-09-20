@@ -92,7 +92,7 @@ maintainer permission.
 2. **Phase 4 learning loop** — AI1 and AI2 shipped; AI3 is deferred to a maintainer sandbox-design call. The remaining execution gate is the full-day Practice run on a market day.
 3. **Phase 5 publication/signing** — publish only after native CI evidence and the complete release set; add Apple signing/notarisation secrets when the maintainer is ready, and never describe an ad-hoc seal as distribution signing.
 4. **Bracket follow-ups** — OCO monitoring (one leg fills → cancel sibling) is refused at placement today, not silently accepted; a proper engine-side monitor is the next step. `BrokerRouter`/`_resolve_target` private-config coupling in `bracket_routes.py` mirrors core order routes — refactor both together or neither.
-5. **Human-gated (do not attempt autonomously):** Groww session approval, Kotak Neo live probe, funded order smoke, W6 spec, B3 order-capable MCP decision.
+5. **Human-gated (do not attempt autonomously):** Groww session approval, Kotak Neo funded Live unlock / order-safety proof, funded order smoke, W6 spec, B3 order-capable MCP decision.
 
 **Non-negotiables (verify before claiming done):**
 - Every reachable live order mints a `SafetyContext` via `gate_order`/`gate_broker_write` → `BrokerRouter`; `gateway/tests/test_no_legacy_order_path.py` is the guard — run it after touching anything order-adjacent.

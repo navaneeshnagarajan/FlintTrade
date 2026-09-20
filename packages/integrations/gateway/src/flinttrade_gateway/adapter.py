@@ -1050,19 +1050,17 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         name="kotakneo",
         display_name="Kotak Neo",
         # Native FlintTrade adapter (brokers/kotakneo.py). Distinct from the
-        # bridge "kotak" (Kotak Securities) above. Built + mock-tested, not yet
-        # login/read verified → native but "coming soon" (connectable=False).
+        # bridge "kotak" (Kotak Securities) above. FT-MONDAY-002: connectable
+        # for non-funded Connected (read) / API smoke. Live place stays
+        # fail-closed. Neo has no sandbox.
         auth_flow=AuthFlowType.totp_form,
         exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NSE_INDEX", "BSE_INDEX"],
         native=True,
-        connectable=False,
+        connectable=True,
         requires_static_ip=True,
-        native_connect_blockers=[
-            "Maintainer live login/read verification with current TOTP and MPIN",
-            "Live order-safety proof",
-        ],
+        native_connect_blockers=[],
         auth_methods=_NATIVE_AUTH["kotakneo"],
-        sdk_pin="neo-api-client",
+        sdk_pin="kotakneoapi",
     ),
     "motilal": BrokerInfo(
         name="motilal",

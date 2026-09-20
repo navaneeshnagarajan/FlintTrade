@@ -67,9 +67,8 @@ export interface BrokerSdkAttestation {
 export interface NativeBroker {
   adapter_id: string;
   display_name: string;
-  /** Tried-and-tested against a live account and the emergency-write contract (Dhan and Upstox today). When false
-   * the broker is catalogued but "coming soon" — the connect UI must not offer
-   * it, and the backend rejects a connect for it. */
+  /** Native connect is offered when true. Dhan + Kotak Neo stay selectable for
+   * Connected (read) / API smoke even if a stale catalogue still says false. */
   connectable: boolean;
   requires_static_ip: boolean;
   native_connect_blockers: string[];
@@ -125,6 +124,8 @@ export interface NativeAccount {
   has_session?: boolean;
   expires_at?: number | null;
   read_only?: boolean;
+  /** True only after a successful Monday REST read-smoke (quotes/depth). */
+  read_smoke_ok?: boolean;
   /** Set when the last credential replay failed — the stored material is
    * stale/single-use and the operator must re-authenticate (G7). */
   needs_relogin?: boolean;

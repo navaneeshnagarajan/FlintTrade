@@ -1909,7 +1909,9 @@ def _native_account_statuses() -> list[dict[str, Any]]:
                 expires_at = state.expires_at if has_session else None
             except Exception:  # noqa: BLE001 - no registered live session
                 has_session = False
-        connectable = bool(info.connectable)
+        from flinttrade_gateway.monday_read_smoke import monday_read_connectable  # noqa: PLC0415
+
+        connectable = monday_read_connectable(adapter_id, bool(info.connectable))
         selector = f"{adapter_id}:{account_id}"
         last_login = str(login_status.get(selector) or "")
         login_retryable = bool(connectable and not has_session and last_login == BROKER_LOGIN_RETRY_MESSAGE)

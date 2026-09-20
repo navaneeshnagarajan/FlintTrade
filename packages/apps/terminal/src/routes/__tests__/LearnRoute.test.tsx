@@ -165,8 +165,10 @@ describe("LearnRoute", () => {
     const dhanRow = screen.getByText("Dhan Sandbox").closest("[data-testid='practice-sandbox-row']");
     expect(dhanRow).toHaveClass("flex-wrap", "min-w-0");
 
-    const kotakRow = screen.getByText("Kotak Neo Sandbox").closest("[data-testid='practice-sandbox-row']");
-    expect(kotakRow).toHaveClass("flex-wrap", "min-w-0");
+    expect(screen.getByTestId("neo-no-practice")).toHaveTextContent(/no sandbox/i);
+    expect(screen.getByTestId("neo-no-practice")).toHaveTextContent(/never offer Neo Practice/i);
+    expect(screen.getByTestId("neo-no-practice")).toHaveTextContent(/Live read only until funded unlock/i);
+    expect(screen.queryByText("Kotak Neo Sandbox")).not.toBeInTheDocument();
   });
 
   it("stacks the Learn shell and wraps Practice Trading so a ~390px column cannot clip", () => {

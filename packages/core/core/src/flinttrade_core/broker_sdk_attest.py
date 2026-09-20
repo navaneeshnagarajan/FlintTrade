@@ -41,7 +41,7 @@ _DIST_NAMES: dict[str, str] = {
     "dhanhq": "dhanhq",
     "growwapi": "growwapi",
     "upstox-python-sdk": "upstox-python-sdk",
-    "neo-api-client": "neo-api-client",
+    "kotakneoapi": "kotakneoapi",
 }
 
 

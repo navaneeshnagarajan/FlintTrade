@@ -203,6 +203,11 @@ async def verify_native_session(adapter: Any, session: Any) -> str | None:
     except Exception as exc:
         if not should_keep_session_after_probe_error(exc):
             return SESSION_INVALID_RELOGIN_MESSAGE
+    from flinttrade_gateway.monday_read_smoke import MONDAY_READ_BROKERS, probe_monday_session_reads
+
+    broker_id = str(getattr(adapter, "broker_id", "") or "")
+    if broker_id in MONDAY_READ_BROKERS:
+        await probe_monday_session_reads(adapter, session)
     return None
 
 

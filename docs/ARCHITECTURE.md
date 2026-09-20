@@ -103,19 +103,23 @@ WebSocket on 8765 are optional external integration origins, proxied through
 Vite only when that bridge is enabled. The native
 gateway contract and routing are present, and the five founder-broker adapters
 (Dhan, Upstox, Kotak Neo, INDmoney, Groww) remain dormant unless their activation
-gates pass. The current connectable native set is Dhan and Upstox
-after live login/read verification and emergency-planner coverage. INDmoney is
+gates pass. The current connectable native set is Dhan, Upstox, and Kotak Neo.
+Dhan and Upstox are connectable after live login/read verification and
+emergency-planner coverage. Kotak Neo is catalogue-connectable for Connected
+(read) / API smoke (FT-MONDAY-002) only; funded Live place and market-hours
+order-safety proof remain pending. Neo has no sandbox (never offer Neo
+Practice); operator copy is `Live read only until funded unlock.` INDmoney is
 read-verified and its fail-closed planner is locally verified, but it remains
 `connectable=false`: active regular `EQ-`/`DRV-` MARKET/LIMIT rows cannot yet be
 distinguished authoritatively from smart parents after restart, and the broker
 does not expose an atomic reduce-only close primitive. A funded/live-market
-order-safety proof is still required. Kotak Neo and Groww are built and
-catalogued but also kept `connectable=false` until their broker-specific blockers clear:
-Kotak Neo's fail-closed planner is locally verified, but it still needs a successful
-live adapter login/read probe and order-safety proof, while Groww
-has approved-key login/account-read proof but still needs market-data/API
+order-safety proof is still required. Groww stays `connectable=false`: it has
+approved-key login/account-read proof but still needs market-data/API
 permission, static-IP resolution, and order-safety proof.
-Portal/static-IP evidence is not enough by itself to promote them.
+Portal/static-IP evidence is not enough by itself to promote Groww.
+Native HTTP remains frozen (Task 9D / Task 7C.2); Setup → Brokers still fails.
+Monday MSI smoke is the in-process native read path, not a restored Brokers
+HTTP session.
 
 The Electron shell has machine authority but no trading authority. It owns
 tool acquisition, the managed checkout, source promotion, the source guardian,

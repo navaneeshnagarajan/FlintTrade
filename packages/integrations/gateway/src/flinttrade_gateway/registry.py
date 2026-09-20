@@ -117,6 +117,7 @@ class ExactRegistryState:
     status: str
     expires_at: float | None
     read_only: bool | None
+    read_smoke_ok: bool = False
 
 
 @dataclass(frozen=True)
@@ -543,6 +544,7 @@ class BrokerRegistry:
             canonical = (
                 record is not None and isinstance(record.session, Session) and self._valid_expiry(record.session)
             )
+            extra = record.session.extra if canonical else None
             return ExactRegistryState(
                 selector,
                 version,
@@ -551,6 +553,7 @@ class BrokerRegistry:
                 self._status(record) if record else "tombstoned",
                 float(record.session.expires_at) if canonical else None,
                 record.session.is_read_only if canonical else None,
+                extra.get("read_smoke_ok") is True if isinstance(extra, dict) else False,
             )
 
     def list_exact_states(self) -> tuple[ExactRegistryState, ...]:
