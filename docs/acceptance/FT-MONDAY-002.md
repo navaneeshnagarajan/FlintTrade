@@ -21,8 +21,9 @@ fix during the Monday session.
   not the Monday primary connect CTA.
 - `dhanhq` stays on latest stable **2.2.0** (not RC).
 - Neo v3 is PyPI `kotakneoapi` **3.0.7**. The v2 `neo-api-client` git
-  pin is gone. HS feed is retired; SFeed plus option-chain/hist are in
-  scope.
+  pin is gone. HS feed is retired. Monday Neo smoke is REST-only
+  (quotes / depth / historical / option chain where the SDK allows);
+  live SFeed `create_websocket` is not wired in this tip.
 
 ## Modes (UX lock)
 
@@ -37,9 +38,10 @@ Monday primary fill path.
 
 ## MSI broker chrome
 
-When non-funded live reads work, Dhan and Neo show **Connected (read)**
-or **API smoke**. That chrome must never imply placeable Live orders.
-A failed read fails honestly — never a fake Connected.
+**Connected (read)** / **API smoke** paints only after successful
+persisted REST smoke evidence (`read_smoke_ok`). A failed login or
+read never fakes Connected. That chrome must never imply placeable
+Live orders.
 
 Monday smoke does **not** require funded Live unlock.
 
@@ -57,8 +59,12 @@ illustrative. Never paint green Connected without a real LLM
 ## Acceptance
 
 - Both brokers connect without a fake Connected state.
-- Live reads work or fail honestly (ticks / depth / hist / chain where
-  the SDK allows).
+  **Connected (read)** / **API smoke** paints only after successful
+  persisted REST smoke evidence; a failed login or read never fakes
+  Connected.
+- Live reads work or fail honestly (quotes / depth / historical /
+  option chain where the SDK allows). Monday Neo smoke is REST-only;
+  live SFeed `create_websocket` is not wired.
 - No funded Live unlock required for Monday smoke.
 - Neo never offered as Practice; copy stays
   `Live read only until funded unlock.`

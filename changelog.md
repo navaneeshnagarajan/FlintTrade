@@ -63,7 +63,10 @@ changelog rebuilds itself from the first release cut after this baseline.
   fail-closed. Prefer native; OpenAlgo is Settings /
   fallback only. `dhanhq` stays on latest stable
   2.2.0 (not RC). Neo migrates to PyPI
-  `kotakneoapi` 3.0.7 (HS feed retired). Native HTTP
+  `kotakneoapi` 3.0.7 (HS feed retired; Monday Neo
+  is REST-only and live SFeed is not wired).
+  **Connected (read)** / **API smoke** paints only
+  after persisted REST smoke evidence. Native HTTP
   freeze (Task 9D / Task 7C.2) is not lifted. Refs
   #253.
 

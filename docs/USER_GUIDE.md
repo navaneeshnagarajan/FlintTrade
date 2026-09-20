@@ -242,9 +242,10 @@ control plane only.
 
 When native connect returns, Dhan, Upstox, and Kotak Neo are evidence-gated
 as enabled in the catalogue. Kotak Neo is Connected (read) / API smoke only
-(FT-MONDAY-002) — never placeable Live; Neo has no sandbox (`Live read only
-until funded unlock.`). Upstox Developer Apps analytics tokens would connect
-as read-only sessions. INDmoney uses a dashboard-generated token that resets
+after persisted REST smoke evidence (FT-MONDAY-002) — never placeable Live;
+Neo has no sandbox (`Live read only until funded unlock.`). Monday Neo is
+REST-only; live SFeed is not wired. Upstox Developer Apps analytics tokens
+would connect as read-only sessions. INDmoney uses a dashboard-generated token that resets
 at the daily 06:00 IST dashboard cycle, but remains disabled until its
 smart-parent, atomic reduce-only, and live order-safety blockers clear. Groww
 retains its displayed activation blockers and may also require approving the
@@ -270,11 +271,17 @@ until Task 9D and Task 7C.2.
 
 **Monday dual-broker smoke (FT-MONDAY-002).** The Monday path is
 native Dhan + Kotak Neo on the MSI static-IP host, non-funded live API
-smoke (ticks / depth / hist / chain where the SDK allows). Prefer native;
-OpenAlgo is Settings / fallback only — not the Monday primary connect CTA.
-Native HTTP remains frozen on this unreleased line until Task 9D and
-Task 7C.2. Dhan and Neo chrome is **Connected (read)** or **API smoke** —
-never placeable Live orders. Neo has no sandbox: never offer “Neo
+smoke (ticks / depth / hist / chain where the SDK allows). Monday Neo
+is REST-only; live SFeed websocket (`create_websocket`) is not wired.
+Prefer native; OpenAlgo is Settings / fallback only — not the Monday
+primary connect CTA. Native HTTP remains frozen on this unreleased
+line until Task 9D and Task 7C.2 — Setup → Brokers HTTP still fails;
+Monday MSI is the in-process read path. Dhan and Neo chrome is
+**Connected (read)** or **API smoke** only after persisted REST smoke
+evidence (`read_smoke_ok`) — never placeable Live orders, and a failed
+login/read never fakes Connected. Native Setup Continue ignores
+gateway/OpenAlgo Dhan/Neo rows; it requires a native source plus
+successful `read_smoke_ok`. Neo has no sandbox: never offer “Neo
 Practice”; copy is `Live read only until funded unlock.` `dhanhq` stays
 on latest stable 2.2.0; Neo is PyPI `kotakneoapi` 3.0.7. Live place stays
 fail-closed. See [FT-MONDAY-002](acceptance/FT-MONDAY-002.md).
