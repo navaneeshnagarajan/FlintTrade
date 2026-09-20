@@ -2165,43 +2165,26 @@ def test_all_thirteen_missing_capabilities_return_unsupported_without_alternate_
 
 
 @pytest.mark.parametrize(
-    ("adapter_type", "invoke", "attribute"),
+    ("invoke", "attribute"),
     [
         (
-            "indmoney",
             lambda port: port.option_chain(
                 OptionChainRequest(InstrumentRef("NIFTY", "NSE"), "2026-09-24")
             ),
             "option_chain",
         ),
-        ("indmoney", lambda port: port.trades(), "trade_book"),
-        (
-            "kotakneo",
-            lambda port: port.historical(
-                HistoricalRequest(InstrumentRef("NIFTY", "NSE"), "D", "2026-09-01", "2026-09-05")
-            ),
-            "historical",
-        ),
-        (
-            "kotakneo",
-            lambda port: port.option_chain(
-                OptionChainRequest(InstrumentRef("NIFTY", "NSE"), "2026-09-24")
-            ),
-            "option_chain",
-        ),
+        (lambda port: port.trades(), "trade_book"),
     ],
 )
 def test_exact_class_static_unsupported_markers_skip_limiter_and_callable(
     harness,
     monkeypatch,
-    adapter_type,
     invoke,
     attribute,
 ) -> None:
     from flinttrade_gateway.brokers.indmoney import IndMoneyAdapter
-    from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
 
-    adapter = IndMoneyAdapter() if adapter_type == "indmoney" else KotakNeoAdapter()
+    adapter = IndMoneyAdapter()
     endpoint_calls: list[str] = []
     verifier_calls: list[str] = []
 
@@ -2225,6 +2208,51 @@ def test_exact_class_static_unsupported_markers_skip_limiter_and_callable(
     assert verifier_calls == ["verify"]
     assert harness.limiter.calls == []
     assert endpoint_calls == []
+    assert owner._active == 0
+
+
+@pytest.mark.parametrize(
+    ("invoke", "attribute"),
+    [
+        (
+            lambda port: port.historical(
+                HistoricalRequest(InstrumentRef("NIFTY", "NSE"), "D", "2026-09-01", "2026-09-05")
+            ),
+            "historical",
+        ),
+        (
+            lambda port: port.option_chain(
+                OptionChainRequest(InstrumentRef("NIFTY", "NSE"), "2026-09-24")
+            ),
+            "option_chain",
+        ),
+    ],
+)
+def test_kotakneo_rest_hist_and_chain_are_admitted_not_static_unsupported(
+    harness,
+    monkeypatch,
+    invoke,
+    attribute,
+) -> None:
+    """Monday Neo REST hist/chain are present — not a static UNSUPPORTED marker."""
+    from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
+
+    adapter = KotakNeoAdapter()
+    endpoint_calls: list[str] = []
+
+    async def forbidden(*_args):
+        endpoint_calls.append(attribute)
+        raise AssertionError("REST surface was admitted")
+
+    monkeypatch.setattr(adapter, attribute, forbidden)
+    owner = _owner(harness, adapters={"dhan": adapter})
+    port = owner.bind(target=ExactReadTarget(harness.selector), verify_current_authority=lambda: harness.context)
+    assert not isinstance(port, BrokerReadFailure)
+    harness.limiter.calls.clear()
+
+    assert asyncio.run(invoke(port)) == BrokerReadFailure(BrokerReadErrorCode.PROVIDER_FAILURE)
+    assert harness.limiter.calls == [("dhan", "data")]
+    assert endpoint_calls == [attribute]
     assert owner._active == 0
 
 
