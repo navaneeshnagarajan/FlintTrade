@@ -80,6 +80,8 @@ Done: Layer 3 admission from native option Greeks with fail-closed instrument re
 
 AI3 (read-only Python-RPC tool scripting) is deferred to a maintainer sandbox-design call before any code or spec implementation.
 
+**Forge** (`FT-FORGE-001`) is a planned FlintTrade-native always-on, session-aware index F&O desk harness (NIFTY + SENSEX first). It is backlog only and is not shipped. Product spikes stay parked until the Pass 9 honesty pack is on `main`. The behaviour bar is Hermes-*class* (overnight self-improve, local typed gates) only — Forge does not build or vendor Nous Hermes Agent. It is distinct from the existing Settings → AI **Hermes (Nous)** LLM provider profile and from the optional **Hermes Agent (ACP)** backend.
+
 **Exit:** the loop survives a real full trading day in Practice with zero safety violations — rate limiting proven under load, a mid-run kill-switch drill, Live blocked server-side — and a complete journal/learning trail; audit + re-audit clean.
 
 ## Phase 5 — Distribution + public surfaces *(in progress)*
