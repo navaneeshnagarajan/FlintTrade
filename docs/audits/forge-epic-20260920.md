@@ -1,28 +1,29 @@
-# Desk harness epic backlog — 2026-09-20
+# Forge epic backlog — 2026-09-20
 
-**Epic ID:** `FT-DESK-HARNESS-001`
+**Epic ID:** `FT-FORGE-001`
+**Product surface:** **Forge** (FlintTrade-native desk harness)
 **Status:** Backlog lock only. No product or implementation code in this
 document's landing PR. Product spikes stay parked until the Pass 9
 honesty pack clears; each spike then opens as its own PR.
 
-This is the public umbrella for a **FlintTrade-native** always-on,
+This is the public umbrella for **Forge**, a FlintTrade-native always-on,
 session-aware research and execution harness for Indian index F&O. It
 is a tracking lock, not a shipped product and not a capability claim.
 
-The harness aims at Hermes-*class* behaviour only: overnight
-self-improve, local typed gates, NIFTY + SENSEX first. That is a
-behaviour bar, not a product name and not a dependency.
+Forge aims at Hermes-*class* behaviour only: overnight self-improve,
+local typed gates, NIFTY + SENSEX first. That is a behaviour bar, not
+a product name and not a dependency.
 
 ## What this is not
 
 Do **not** build, vendor, or depend on Nous **Hermes Agent** (or any
-Hermes Agent package, binary, or closed core). This epic does not
-ship Hermes, does not wrap Hermes, and does not treat Settings → AI
+Hermes Agent package, binary, or closed core). Forge does not ship
+Hermes, does not wrap Hermes, and does not treat Settings → AI
 **Hermes** (the existing LLM / ACP catalogue entry) as this harness.
 
 | Name | What it is | Relation to this epic |
 |---|---|---|
-| **Desk harness (this epic)** | FlintTrade-native always-on index F&O performance harness (`FT-DESK-HARNESS-001`) | Tracking only; not shipped |
+| **Forge (this epic)** | FlintTrade-native always-on index F&O desk harness (`FT-FORGE-001`) | Tracking only; not shipped |
 | **Settings → AI Hermes** | Existing LLM / ACP catalogue entry and `agent_backends` Hermes ACP session | Unrelated; do not extend or rename |
 | **Nous Hermes Agent** | Third-party agent product | Forbidden dependency; do not vendor |
 
@@ -104,12 +105,12 @@ separate PR after Pass 9.
 - "Never mistakes / never forgets" product chrome.
 - Implementing any spike in this umbrella PR.
 - Building, vendoring, or depending on Nous Hermes Agent.
-- Treating Settings → AI Hermes (LLM / ACP) as this harness.
+- Treating Settings → AI Hermes (LLM / ACP) as Forge.
 
 ## How later PRs should attach
 
 - Title prefix `feat(ai):` / `test(ai):` / `docs(ai):` with
-  `FT-DESK-HARNESS-001` and the spike number (for example `spike 2`).
+  `FT-FORGE-001` and the spike number (for example `spike 2`).
 - Keep Live fail-closed until P2 evidence exists.
 - Do not open product spikes until Pass 9 is on `main`.
 - Maintainer squash-merges this docs lock when review is done.
@@ -123,7 +124,7 @@ separate PR after Pass 9.
 - [Architecture — market session clock (FT-CORE-001)](../ARCHITECTURE.md#market-session-clock-ft-core-001)
 - [Static IP setup](../setup/static-ip-setup.md)
 - [Order safety](../ORDER_SAFETY.md)
-- [PLAN.md](../../PLAN.md) — public phase tracker (this harness is not
-  a PLAN.md phase close; it parks under AI / Practice work)
+- [PLAN.md](../../PLAN.md) — public phase tracker (Forge is not a
+  PLAN.md phase close; it parks under AI / Practice work)
 
 No order-path bypass. No release. No lockfile churn.

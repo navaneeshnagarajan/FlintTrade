@@ -19,14 +19,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Added
 
-- **Desk harness epic backlog (FT-DESK-HARNESS-001).** Docs-only lock
-  for a FlintTrade-native always-on, session-aware Indian index F&O
+- **Forge epic backlog (FT-FORGE-001).** Docs-only lock for **Forge**,
+  a FlintTrade-native always-on, session-aware Indian index F&O desk
   harness (NIFTY + SENSEX first). Hermes-class behaviour only
   (overnight self-improve, local typed gates) — not Nous Hermes Agent,
   and not a vendored Hermes dependency. Always-on process is not 24×7
   fills. No product code. Product spikes stay parked until the Pass 9
   honesty pack clears. See
-  [docs/audits/desk-harness-epic-20260920.md](docs/audits/desk-harness-epic-20260920.md).
+  [docs/audits/forge-epic-20260920.md](docs/audits/forge-epic-20260920.md).
 
 - **Service connections and in-process `BrokerReadPort`.** The backend now
   ships a rights-aware service-provider catalogue, static LLM/data profiles,
