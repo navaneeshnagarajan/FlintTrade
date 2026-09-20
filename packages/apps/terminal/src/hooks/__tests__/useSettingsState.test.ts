@@ -1284,6 +1284,19 @@ describe("useSettingsState", () => {
     await expect(probeSettingsLlmHydration()).resolves.toBe("ready");
   });
 
+  it.each(["explore", "practice", "live"] as const)(
+    "treats a successful Settings read with no stored provider as empty in %s — global config truth, not Mode",
+    async (mode) => {
+      useModeStore.setState({ mode });
+      useAuthStore.setState({ token: mode === "explore" ? "demo-user" : `${mode}-jwt` });
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+        status: "success",
+        data: { provider: "", model: "", api_key_configured: false },
+      }))));
+      await expect(probeSettingsLlmHydration()).resolves.toBe("empty");
+    },
+  );
+
   it("keeps a Live LLM load failure as a protected error, not an empty Explore fallback", async () => {
     useModeStore.setState({ mode: "live" });
     useAuthStore.setState({ token: "session-jwt" });

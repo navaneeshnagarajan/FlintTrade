@@ -115,18 +115,21 @@ describe("useAdvisorLlmStatus", () => {
     expect(MANAGED_OLLAMA_INSTALL_QUERY_KEY).toEqual(["managed-ollama-install"]);
   });
 
-  it("never treats Managed Ollama Not installed as Connected even when advisor/status is configured", async () => {
-    useModeStore.setState({ mode: "live" });
-    useAuthStore.setState({ token: "session-jwt" });
-    mockAdvisorAndSettings({ advisor: "configured", settings: "ready", provider: "ollama" });
-    vi.mocked(getLocalAiStatus).mockResolvedValue({ installed: false } as Awaited<ReturnType<typeof getLocalAiStatus>>);
+  it.each(["practice", "live"] as const)(
+    "never treats Managed Ollama Not installed as Connected in %s even when advisor/status is configured",
+    async (mode) => {
+      useModeStore.setState({ mode });
+      useAuthStore.setState({ token: mode === "practice" ? "practice-jwt" : "session-jwt" });
+      mockAdvisorAndSettings({ advisor: "configured", settings: "ready", provider: "ollama" });
+      vi.mocked(getLocalAiStatus).mockResolvedValue({ installed: false } as Awaited<ReturnType<typeof getLocalAiStatus>>);
 
-    const { result } = renderHook(() => useAdvisorLlmStatus(), { wrapper: wrapper() });
+      const { result } = renderHook(() => useAdvisorLlmStatus(), { wrapper: wrapper() });
 
-    await waitFor(() => expect(result.current.chrome).toBe("not_installed"));
-    expect(result.current.configured).toBe(false);
-    expect(getLocalAiStatus).toHaveBeenCalled();
-  });
+      await waitFor(() => expect(result.current.chrome).toBe("not_installed"));
+      expect(result.current.configured).toBe(false);
+      expect(getLocalAiStatus).toHaveBeenCalled();
+    },
+  );
 
   it("keeps Connected when Managed Ollama is installed and advisor/status is configured", async () => {
     useModeStore.setState({ mode: "live" });
@@ -151,6 +154,21 @@ describe("useAdvisorLlmStatus", () => {
     expect(result.current.configured).toBe(false);
   });
 
+  it.each(["explore", "practice"] as const)(
+    "never treats an empty stored Settings provider as Connected in %s when advisor/status is env-default configured",
+    async (mode) => {
+      useModeStore.setState({ mode });
+      useAuthStore.setState({ token: mode === "explore" ? "demo-user" : "practice-jwt" });
+      mockAdvisorAndSettings({ advisor: "configured", settings: "ready", provider: "" });
+
+      const { result } = renderHook(() => useAdvisorLlmStatus(), { wrapper: wrapper() });
+
+      await waitFor(() => expect(result.current.chrome).toBe("unconfigured"));
+      expect(result.current.configured).toBe(false);
+      expect(useModeStore.getState().mode).toBe(mode);
+    },
+  );
+
   it("treats a configured probe as ready Chat chrome only when Settings #llm can load", async () => {
     useModeStore.setState({ mode: "live" });
     useAuthStore.setState({ token: "session-jwt" });
@@ -165,7 +183,7 @@ describe("useAdvisorLlmStatus", () => {
   it("maps an unreachable probe to Disconnected when Settings #llm is ready", async () => {
     useModeStore.setState({ mode: "live" });
     useAuthStore.setState({ token: "session-jwt" });
-    mockAdvisorAndSettings({ advisor: "unreachable", settings: "ready" });
+    mockAdvisorAndSettings({ advisor: "unreachable", settings: "ready", provider: "openai" });
 
     const { result } = renderHook(() => useAdvisorLlmStatus(), { wrapper: wrapper() });
 
@@ -176,7 +194,7 @@ describe("useAdvisorLlmStatus", () => {
   it("maps a broken configured-looking probe to Error when Settings #llm is ready", async () => {
     useModeStore.setState({ mode: "live" });
     useAuthStore.setState({ token: "session-jwt" });
-    mockAdvisorAndSettings({ advisor: "unknown", settings: "ready" });
+    mockAdvisorAndSettings({ advisor: "unknown", settings: "ready", provider: "openai" });
 
     const { result } = renderHook(() => useAdvisorLlmStatus(), { wrapper: wrapper() });
 

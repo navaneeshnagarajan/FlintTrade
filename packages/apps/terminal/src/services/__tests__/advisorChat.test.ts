@@ -144,6 +144,20 @@ describe("advisorChat", () => {
     expect(isAdvisorChatReady(alignAdvisorChromeWithSettingsHydration("ready", "empty"))).toBe(false);
   });
 
+  it("treats a ready Settings #llm with an empty stored provider as Not configured — never Connected", () => {
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "ready", "")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "ready", "   ")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("loading", "ready", "")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("disconnected", "ready", "")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "ready", "openai")).toBe("ready");
+    expect(isAdvisorChatReady(alignAdvisorChromeWithSettingsHydration("ready", "ready", ""))).toBe(false);
+    expect(advisorLlmChromeLabel(alignAdvisorChromeWithSettingsHydration("ready", "ready", ""))).toBe(
+      "Not configured",
+    );
+    expect(advisorLlmChromeLabel("not_installed")).not.toBe("Connected");
+    expect(advisorLlmChromeLabel("unconfigured")).not.toBe("Connected");
+  });
+
   it("maps an offline-paused probe to Disconnected instead of a stuck Checking or Connected", () => {
     expect(resolveAdvisorLlmChrome({
       availability: undefined,

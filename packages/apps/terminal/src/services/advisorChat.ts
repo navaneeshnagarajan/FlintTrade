@@ -103,18 +103,22 @@ export function isAdvisorChatReady(chrome: AdvisorLlmChrome): boolean {
 export type SettingsLlmHydration = "loading" | "ready" | "error" | "empty";
 
 /**
- * Align Chat chrome with Settings `#llm`.
+ * Align Chat chrome with stored Settings `#llm` — global, not Mode-derived.
  *
- * Explore's Settings empty/Retry path is an unconfigured appearance even when
- * ``advisor/status`` reports configured because ``LLMConfig.from_env()``
- * defaults an empty stored provider to ollama. Never show Connected in that
- * case.
+ * ``LLMConfig.from_env()`` defaults an empty stored provider to ollama, so
+ * ``advisor/status`` can look configured in Practice while Explore already
+ * fail-closes. A blank stored provider is unconfigured in every mode.
+ * Never show Connected from that sandbox/default path.
  */
 export function alignAdvisorChromeWithSettingsHydration(
   advisorChrome: AdvisorLlmChrome,
   settingsHydration: SettingsLlmHydration,
+  settingsProvider?: string,
 ): AdvisorLlmChrome {
-  if (settingsHydration === "empty") return "unconfigured";
+  const storedProvider = settingsProvider?.trim();
+  if (settingsHydration === "empty" || (settingsHydration === "ready" && storedProvider === "")) {
+    return "unconfigured";
+  }
   if (settingsHydration === "error") {
     return advisorChrome === "ready" || advisorChrome === "loading" ? "error" : advisorChrome;
   }

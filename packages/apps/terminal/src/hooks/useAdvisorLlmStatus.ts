@@ -1,9 +1,10 @@
 /**
- * Chat LLM readiness from advisor/status, aligned with Settings `#llm`.
+ * Chat LLM readiness from stored Settings `#llm` + advisor/status + install.
  *
- * Explore / demo-user still probe advisor/status, but a Settings empty
- * appearance (FT-SET-001) wins over an env-default ``configured: true``.
- * Managed Ollama ``Not installed`` never paints Connected (FT-AI-004).
+ * Readiness is global config truth, not Mode-derived. Explore and Practice
+ * share this hook — Mode must not invent a green Connected from a sandbox
+ * or env-default ``advisor/status``. A blank stored provider or Managed
+ * Ollama ``Not installed`` never paints Connected (FT-AI-004).
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -87,7 +88,7 @@ export function useAdvisorLlmStatus(): AdvisorLlmStatus {
       : (installQuery.data ?? "loading"))
     : "not_applicable";
   const chrome = alignAdvisorChromeWithManagedOllama(
-    alignAdvisorChromeWithSettingsHydration(advisorChrome, settingsHydration),
+    alignAdvisorChromeWithSettingsHydration(advisorChrome, settingsHydration, settingsProvider),
     install,
   );
 

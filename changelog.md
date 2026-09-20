@@ -92,6 +92,18 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Restore Connected honesty on `/ai` (FT-AI-004 regression).**
+  LLM readiness is global stored-config truth, not
+  Mode-derived. Explore and Practice Chat share one
+  readiness source: a blank stored provider or Managed
+  Ollama **Not installed** is **Not configured** /
+  **Not installed** — never a green **Connected** from
+  env-default `advisor/status` (empty provider → ollama).
+  Practice does not inherit a sandbox “configured”
+  path that Explore already fail-closes. Composer input
+  and Send stay disabled until a provider is actually
+  configured.
+
 - **Connected badge matches LLM install state (FT-AI-004).**
   `/ai` Chat (AI Hub) follows the real LLM status from
   Settings → AI / `#llm`, including Managed Ollama

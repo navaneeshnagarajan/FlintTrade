@@ -286,9 +286,35 @@ describe("AIAdvisorWidget", () => {
     expect(screen.queryByText("Ask me anything about trading, markets, or strategies.")).not.toBeInTheDocument();
   });
 
-  it("shows Not installed — never Connected — when Settings Managed Ollama is not installed", async () => {
-    useModeStore.setState({ mode: "live" });
-    useAuthStore.setState({ token: "session-jwt" });
+  it.each([
+    { mode: "explore" as const, token: "demo-user" },
+    { mode: "practice" as const, token: "practice-jwt" },
+  ])(
+    "shows Not configured — never Connected — in $mode when Settings stored provider is empty and advisor/status is env-default configured",
+    async ({ mode, token }) => {
+      mockLlmProvider.mockReturnValue("");
+      useModeStore.setState({ mode });
+      useAuthStore.setState({ token });
+      mockChatLlmProbes({ advisor: "configured", settings: "ready", provider: "" });
+      render(<AIAdvisorWidget />, { wrapper: Providers });
+
+      const badge = await screen.findByText("Not configured");
+      expect(badge.className).toMatch(/warning/);
+      expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+      expect(screen.getByText("LLM not configured")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Open Settings → AI/i })).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
+      expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
+      expect(screen.queryByPlaceholderText("Ask the AI advisor...")).not.toBeInTheDocument();
+      expect(useModeStore.getState().mode).toBe(mode);
+    },
+  );
+
+  it.each(["practice", "live"] as const)(
+    "shows Not installed — never Connected — in %s when Settings Managed Ollama is not installed",
+    async (mode) => {
+    useModeStore.setState({ mode });
+    useAuthStore.setState({ token: mode === "practice" ? "practice-jwt" : "session-jwt" });
     mockChatLlmProbes({ advisor: "configured", settings: "ready", provider: "ollama" });
     mockGetLocalAiStatus.mockResolvedValue({ installed: false });
     render(<AIAdvisorWidget />, { wrapper: Providers });
@@ -303,7 +329,8 @@ describe("AIAdvisorWidget", () => {
     expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
     expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
     expect(screen.queryByPlaceholderText("Ask the AI advisor...")).not.toBeInTheDocument();
-  });
+    },
+  );
 
   it("shows a green Connected badge only after advisor/status is configured and Settings #llm can load", async () => {
     useModeStore.setState({ mode: "live" });
