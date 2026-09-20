@@ -12,6 +12,26 @@ from flinttrade_gateway.session import BrokerSession
 from flinttrade_gateway.ticker import BrokerTicker
 
 
+def test_log_ref_does_not_create_a_missing_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A cold salt cache must not mkdir the default workspace (FT-AUTO-004 CI)."""
+    import flinttrade_core.workspace as ws
+    import flinttrade_gateway.log_safety as log_safety
+
+    monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+    monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+    workspace = tmp_path / "workspace"
+    monkeypatch.setattr(ws, "_default_home", lambda: workspace)
+    log_safety._salt = None
+
+    ref = log_safety.log_ref("explicit-user", kind="user")
+
+    assert ref.startswith("user#")
+    assert not workspace.exists()
+
+
 def test_account_log_refs_are_stable_and_non_reversible() -> None:
     raw = "UPX-PRIVATE-ACCOUNT-12345"
 

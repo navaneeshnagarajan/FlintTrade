@@ -113,6 +113,23 @@ changelog rebuilds itself from the first release cut after this baseline.
   armed control (empty-account disarm is
   FT-DITTO-001).
 
+- **Log refs no longer create a missing workspace.**
+  A cold `log_ref` salt cache no longer calls
+  `workspace_dir()` in a way that mkdir's the default
+  workspace. Isolated callers (explicit-path TOTP
+  stores) stay off the default pair.
+
+- **Explore Schedules Pause gated for sample jobs (FT-AUTO-004).**
+  Explore `/automate` → Schedules seeded jobs rely on
+  the global Explore sample banner for disclosure —
+  no extra Sample chip once Pause is gated. Seeded
+  Explore jobs show status Sample/Demo (or muted),
+  not a production-looking Active badge. Pause on
+  those jobs is disabled, with title helper `Sample
+  schedule — control unavailable in Explore`.
+  Practice/Live jobs keep Pause/Resume. The backend
+  rejects Explore pause/resume with `mode_blocked`.
+
 - **Explore Stock Baskets disable demo Edit/Delete (FT-INVEST-002).**
   Explore `/invest#basket` seeded cards (NIFTY IT,
   Banking, and any other sample set) rely on the

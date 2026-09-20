@@ -392,6 +392,19 @@ The operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
 | `safety/kill-switch` (**POST**) | Latch Layer 5. Body `{ "reason": "…" }`. Cancels open orders and requests supported flatten. |
 | `safety/kill-switch` (**DELETE**) | Reset Layer 5 after emergency actions complete. Incomplete flatten keeps the latch. |
 
+### Cron / Schedules (`/api/v1/cron/*`)
+
+Source: `packages/core/core/src/flinttrade_core/operations_routes.py`.
+The operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
+`/ft-api/api/v1/cron/…` and a direct backend call is
+`http://<host>:5100/api/v1/cron/…`. These are not under `/v1/`.
+
+| Endpoint | Purpose |
+|---|---|
+| `cron/jobs` (**GET**) | List registered cron jobs with status (`name`, `description`, `trigger_type`, `status`, `last_run`, `run_count`, `error_count`). |
+| `cron/jobs/<name>/pause` (**POST**) | Pause a job by name. Explore-mode writes (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Sample schedule — control unavailable in Explore`. Practice and Live are not blocked by this gate. CronManager missing → 503 (`CronManager not available`). Unknown name → 404 (`Job '<name>' not found`). |
+| `cron/jobs/<name>/resume` (**POST**) | Resume a paused job by name. Same Explore `mode_blocked` gate, 503, and 404 as pause. |
+
 ### Telegram (`/api/v1/telegram`)
 
 Source: `packages/core/core/src/flinttrade_core/telegram_routes.py`.
@@ -873,13 +886,14 @@ proxy is still message-only: HTTP 403 with "Live mode not unlocked —
 verify PIN first". A `code` field is also emitted on
 `mode_guard`-decorated engine routes (brackets and other
 executor-direct paths), on `POST /api/v1/telegram` Explore refusals,
-and on `POST /api/v1/ditto/mirror/start` and
-`POST /api/v1/ditto/kill-all` Explore refusals.
+on `POST /api/v1/ditto/mirror/start` and
+`POST /api/v1/ditto/kill-all` Explore refusals, and on
+`POST /api/v1/cron/jobs/<name>/pause` and `…/resume` Explore refusals.
 Not every endpoint emits `code`:
 
 | Code or status | Meaning |
 |---|---|
-| `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, and `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` Explore refusals (same header/claim gate). |
+| `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` Explore refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` Explore refusals (same header/claim gate). |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
 | `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true` (PIN unlock). |
 | HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |

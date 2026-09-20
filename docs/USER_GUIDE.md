@@ -791,13 +791,22 @@ as sending a notification or running a local script.
 
 ### Cron
 
-Time-based automations. Examples:
+Time-based automations on the **Schedules** tab. Examples:
 
 - Run pre-market screener at 9:00 AM IST every weekday.
 - Snapshot positions to a CSV at 3:30 PM IST.
 - Write a daily P&L summary to local storage at end-of-day.
 
 Cron jobs run inside the FlintTrade backend (`packages/services/automation`).
+
+On Explore `/automate` → Schedules, the global Explore sample
+banner (`EXPLORE MODE — All data shown is sample only`) owns
+disclosure — seeded jobs do **not** carry an extra Sample chip
+once Pause is gated. Seeded Explore jobs show status Sample/Demo
+(or muted), not a production-looking Active badge. **Pause** on
+those jobs is disabled, with title helper `Sample schedule —
+control unavailable in Explore`. Practice and Live keep
+Pause/Resume for real jobs (FT-AUTO-004).
 
 ### Monitors
 
