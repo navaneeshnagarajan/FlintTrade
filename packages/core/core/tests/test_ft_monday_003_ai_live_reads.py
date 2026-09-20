@@ -113,6 +113,47 @@ def test_format_skips_failed_rows() -> None:
 
 
 @pytest.mark.unit
+def test_format_includes_collected_depth() -> None:
+    """Advisor prompt must carry depth, not quotes only."""
+    formatted = format_monday_ai_read_context(
+        [
+            {
+                "broker_id": "dhan",
+                "account_id": "Main",
+                "chrome": CHROME_CONNECTED_READ,
+                "ok": True,
+                "quotes": [{"symbol": "NSE:RELIANCE", "ltp": 1400.0}],
+                "depth": {"bids": [{"price": 1399.0, "quantity": 10}], "asks": []},
+                "operator_copy": None,
+            }
+        ]
+    )
+    assert "quotes: " in formatted
+    assert "depth: " in formatted
+    assert "1399.0" in formatted
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_monday_ai_snapshot_keeps_peer_when_one_quote_fails() -> None:
+    """A failed quote is ok=False — callers can keep other sessions."""
+    class _Flaky:
+        async def quotes(self, *_a: object, **_k: object) -> list[dict]:
+            raise TimeoutError("transient")
+
+        async def place_order(self, *_a: object, **_k: object) -> None:
+            raise AssertionError("Monday AI reads must not place")
+
+    row = await collect_monday_ai_read_snapshot("dhan", "Main", _Flaky(), _session())
+    assert row["ok"] is False
+    assert row["quotes"] is None
+    healthy = await collect_monday_ai_read_snapshot("dhan", "Main", _ReadAdapter(), _session())
+    formatted = format_monday_ai_read_context([row, healthy])
+    assert "1400.0" in formatted
+    assert "depth:" in formatted
+
+
+@pytest.mark.unit
 def test_list_handles_filters_to_stamped_dhan_neo() -> None:
     dhan = _session()
     neo = Session("synthetic-neo", 1e12, "Neo", "kotakneo")

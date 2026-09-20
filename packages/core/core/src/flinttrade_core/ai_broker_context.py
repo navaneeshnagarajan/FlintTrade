@@ -342,3 +342,144 @@ def collect_configured_broker_context(symbol: str, exchange: str) -> BrokerAnaly
     finally:
         for port in ports:
             owner.revoke(port)
+
+
+def collect_authorised_monday_read_feeds(symbol: str, exchange: str) -> list[dict[str, Any]]:
+    """Collect Dhan/Neo Connected (read) quotes and depth for authorised accounts.
+
+    Requires ``admin.accounts.read`` and each selected account's ACL via
+    ``BrokerReadOwner`` / ``AuthenticatingSessionProvider``. Candidates come
+    from ``list_exact_states`` metadata (selector, status, ``read_smoke_ok``)
+    — never raw registry sessions. One failed broker does not discard the
+    others. Never writes. Explore / missing scope / ACL miss return ``[]``.
+    """
+    from flinttrade_engine.request_context import RequestContext
+    from flinttrade_gateway.broker_read_service import BrokerReadOwner
+    from flinttrade_gateway.monday_read_smoke import (
+        CHROME_CONNECTED_READ,
+        MONDAY_READ_BROKERS,
+        NEO_OPERATOR_COPY,
+    )
+
+    from .app import _BrokerRuntimeDependencies
+    from .broker_identity import serialise_broker_selector
+    from .openalgo_client import OpenAlgoClient
+
+    ports: list[Any] = []
+    owner: Any = None
+    try:
+        if (
+            type(symbol) is not str or not _INPUT_PATTERN.fullmatch(symbol)
+            or type(exchange) is not str or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,15}", exchange)
+        ):
+            return []
+        auth = request.headers.get("Authorization", "")
+        token = (
+            auth[7:].strip()
+            if auth.startswith("Bearer ")
+            else request.headers.get("X-FlintTrade-Token", "").strip()
+        )
+        if not token or len(token) > 16_384:
+            return []
+        try:
+            identity = _session_identity(token)
+        except BrokerContextError:
+            return []
+        if identity[2] not in {"practice", "live"}:
+            return []
+        app = current_app._get_current_object()
+        dependencies = app.extensions.get("flinttrade_broker_dependencies")
+        if type(dependencies) is not _BrokerRuntimeDependencies:
+            return []
+        owner = dependencies.read_owner
+        client = dependencies.openalgo_client
+        if type(owner) is not BrokerReadOwner or not isinstance(client, OpenAlgoClient):
+            return []
+        try:
+            states = dependencies.registry.list_exact_states()
+        except Exception:
+            return []
+        candidates = [
+            state
+            for state in states
+            if getattr(state.selector, "adapter_id", "") in MONDAY_READ_BROKERS
+            and state.status == "connected"
+            and state.read_smoke_ok is True
+        ]
+        if not candidates:
+            return []
+
+        def authority(selector):
+            with app.app_context():
+                if _session_identity(token) != identity:
+                    raise BrokerContextError("broker_context_authentication_required")
+            return RequestContext(
+                identity[1],
+                "human",
+                identity[0],
+                identity[2],
+                selector=serialise_broker_selector(selector),
+            )
+
+        instrument = InstrumentRef(symbol, exchange)
+        quote_request = QuoteRequest(instrument)
+        bound: list[tuple[Any, Any]] = []
+        for state in candidates:
+            selector = state.selector
+            port = owner.bind(
+                target=ExactReadTarget(selector),
+                verify_current_authority=lambda selected=selector: authority(selected),
+            )
+            if type(port) is BrokerReadFailure:
+                continue
+            ports.append(port)
+            bound.append((state, port))
+        if not bound:
+            return []
+
+        async def collect() -> list[dict[str, Any]]:
+            rows: list[dict[str, Any]] = []
+            for state, port in bound:
+                try:
+                    quote_outcome = await port.quote(quote_request)
+                    if (
+                        type(quote_outcome) is not BrokerReadSuccess
+                        or type(quote_outcome.value) is not QuoteSnapshot
+                    ):
+                        continue
+                    value = quote_outcome.value
+                    if not value.available or value.ltp is None or value.ltp <= 0:
+                        continue
+                    depth_value = None
+                    try:
+                        depth_outcome = await port.depth(quote_request)
+                        if (
+                            type(depth_outcome) is BrokerReadSuccess
+                            and type(depth_outcome.value) is DepthSnapshot
+                        ):
+                            depth_value = asdict(depth_outcome.value)
+                    except Exception:  # noqa: BLE001 — keep quotes if depth fails
+                        depth_value = None
+                    rows.append({
+                        "broker_id": state.selector.adapter_id,
+                        "account_id": state.selector.account_id,
+                        "chrome": CHROME_CONNECTED_READ,
+                        "ok": True,
+                        "quotes": asdict(value),
+                        "depth": depth_value,
+                        "operator_copy": (
+                            NEO_OPERATOR_COPY if state.selector.adapter_id == "kotakneo" else None
+                        ),
+                        "error": None,
+                    })
+                except Exception:  # noqa: BLE001 — one broker must not wipe the rest
+                    continue
+            return rows
+
+        return client.run_sync(collect(), timeout=8.0)
+    except Exception:  # noqa: BLE001 — advisor must never 500 on a read feed
+        return []
+    finally:
+        if owner is not None:
+            for port in ports:
+                owner.revoke(port)

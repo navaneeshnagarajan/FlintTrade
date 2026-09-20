@@ -5,7 +5,6 @@ Provides AI advisor chat (single-turn and streaming SSE) and advisor status.
 
 from __future__ import annotations
 
-import asyncio
 import json as _json
 import logging
 import os
@@ -159,19 +158,18 @@ def _native_live_read_symbols(raw: Any) -> list[str]:
 
 
 def _native_live_read_context(raw: Any = None) -> str:
-    """Inject Dhan/Neo Connected (read) quotes when the JWT may analyse.
+    """Inject authorised Dhan/Neo Connected (read) quotes when the JWT may analyse.
 
-    Practice and Live JWTs may consume stamped ``read_smoke_ok`` feeds.
-    Explore stays dark. Never places, and never invents Neo Practice.
+    Practice and Live JWTs may consume stamped ``read_smoke_ok`` feeds after
+    ``admin.accounts.read`` and each account ACL via the authorised
+    broker-context / read-port boundary. Explore stays dark. Never enumerates
+    raw registry sessions, never places, and never invents Neo Practice.
     """
     if _jwt_mode() not in {"practice", "live"}:
         return ""
     try:
-        from flinttrade_gateway.monday_read_smoke import (
-            collect_monday_ai_read_snapshot,
-            format_monday_ai_read_context,
-            list_monday_ai_read_handles,
-        )
+        from flinttrade_core.ai_broker_context import collect_authorised_monday_read_feeds
+        from flinttrade_gateway.monday_read_smoke import format_monday_ai_read_context
 
         hook = current_app.config.get("MONDAY_AI_READ_FEED_COLLECTOR")
         if callable(hook):
@@ -180,38 +178,10 @@ def _native_live_read_context(raw: Any = None) -> str:
                 return ""
             return format_monday_ai_read_context(rows)
 
-        registry = current_app.config.get("REGISTRY")
-        adapters = current_app.config.get("ACTIVE_BROKER_ADAPTERS") or {}
-        if not isinstance(adapters, dict) or not adapters:
-            return ""
-        handles = list_monday_ai_read_handles(registry)
-        if not handles:
-            return ""
-        symbols = _native_live_read_symbols(raw)
-        client = current_app.config.get("OPENALGO_CLIENT") or current_app.config.get("CLIENT")
-
-        async def _collect() -> list[dict[str, Any]]:
-            rows: list[dict[str, Any]] = []
-            for broker_id, account_id, session in handles:
-                adapter = adapters.get(broker_id)
-                if adapter is None:
-                    continue
-                rows.append(
-                    await collect_monday_ai_read_snapshot(
-                        broker_id,
-                        account_id,
-                        adapter,
-                        session,
-                        symbols=symbols,
-                    )
-                )
-            return rows
-
-        if client is not None and hasattr(client, "run_sync"):
-            collected = client.run_sync(_collect(), timeout=8.0)
-        else:
-            collected = asyncio.run(_collect())
-        return format_monday_ai_read_context(collected)
+        pair = _native_live_read_symbols(raw)[0]
+        exchange, _, symbol = pair.partition(":")
+        rows = collect_authorised_monday_read_feeds(symbol, exchange)
+        return format_monday_ai_read_context(rows)
     except Exception:  # noqa: BLE001 - advisor must never 500 on a read feed
         logger.debug("Native live-read AI context failed", exc_info=True)
         return ""

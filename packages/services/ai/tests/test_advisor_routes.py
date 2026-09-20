@@ -491,6 +491,51 @@ class TestAdvisorNativeLiveReadContext:
             for message in conversation
         )
 
+    def test_production_path_uses_authorised_collector_not_raw_registry(self, app) -> None:
+        """P1: Chat reads go through the authorised read-port, not raw sessions."""
+        rows = [
+            {
+                "broker_id": "dhan",
+                "account_id": "Main",
+                "chrome": "Connected (read)",
+                "ok": True,
+                "quotes": [{"symbol": "NSE:RELIANCE", "ltp": 1400.0}],
+                "depth": {"bids": [{"price": 1399.0, "quantity": 2}], "asks": []},
+                "operator_copy": None,
+                "error": None,
+            }
+        ]
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = _make_llm_response()
+        client = app.test_client()
+        with (
+            patch("flinttrade_ai.advisor_routes._is_llm_configured", return_value=True),
+            patch("flinttrade_ai.advisor_routes.LLMClient", return_value=mock_llm),
+            patch(
+                "flinttrade_core.ai_broker_context.collect_authorised_monday_read_feeds",
+                return_value=rows,
+            ) as authorised,
+            patch(
+                "flinttrade_gateway.monday_read_smoke.list_monday_ai_read_handles",
+            ) as raw_handles,
+        ):
+            resp = client.post(
+                "/api/v1/advisor",
+                json={"messages": [{"role": "user", "content": "What is the book?"}]},
+                headers=self._headers("practice"),
+            )
+        assert resp.status_code == 200
+        authorised.assert_called_once()
+        raw_handles.assert_not_called()
+        conversation = mock_llm.chat.call_args[0][0]
+        feed = next(
+            message.content
+            for message in conversation
+            if "Native Connected (read) feeds" in getattr(message, "content", "")
+        )
+        assert "depth:" in feed
+        assert "1399.0" in feed
+
     def test_llm_unconfigured_never_collects_native_reads(self, app) -> None:
         """Honesty gate: no LLM means 503 before any broker read."""
         collected = {"called": False}

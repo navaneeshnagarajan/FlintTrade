@@ -105,13 +105,16 @@ def runtime(tmp_path, monkeypatch):
     config = RoutingConfig.from_workspace(workspace.as_dict()["brokers"])
     registry, publication_owner = create_owned_registry()
     credentials = {}
+    sessions = {}
     for raw in _SELECTORS:
         selector = BrokerSelector(*raw.split(":"))
         credentials[selector] = CredentialVersion(selector, uuid4(), 1)
         authority = ManagedSessionAuthority(credentials[selector], workspace.version, broker_workspace_version(workspace))
+        session = Session("synthetic-test-session", time.time() + 3600, selector.account_id, selector.adapter_id)
+        sessions[selector] = session
         receipt = publication_owner.prepare_session_candidate(
             selector,
-            Session("synthetic-test-session", time.time() + 3600, selector.account_id, selector.adapter_id),
+            session,
             expected_registry=registry.snapshot_selector(selector), authority=authority,
             broker=selector.adapter_id, label=selector.account_id, client=object(),
         )
@@ -146,7 +149,7 @@ def runtime(tmp_path, monkeypatch):
 
     yield SimpleNamespace(app=app, adapter=adapter, dependencies=dependencies, owner=owner, client=client,
                           audit=audit, audit_path=audit_path, token=token, revoked=revoked, credentials=credentials,
-                          workspace_path=workspace_path)
+                          workspace_path=workspace_path, sessions=sessions)
     owner.close(timeout=2.0)
     asyncio.run(client.shutdown())
     audit.close()
@@ -513,3 +516,82 @@ def test_concrete_dhan_context_records_unsupported_depth_and_exact_account_input
         "input_digest": hashlib.sha256(canonical.encode()).hexdigest(),
     }
     assert runtime.audit.verify_chain()["ok"]
+
+
+def _stamp_monday_dhan(runtime) -> None:
+    from flinttrade_gateway.monday_read_smoke import stamp_monday_read_smoke
+
+    stamp_monday_read_smoke(runtime.sessions[BrokerSelector("dhan", "Quotes")], True)
+    stamp_monday_read_smoke(runtime.sessions[BrokerSelector("dhan", "Execution")], True)
+
+
+def test_monday_feeds_require_admin_accounts_read(runtime):
+    """P1: JWT mode alone is not enough — missing account-read scope never binds."""
+    from flinttrade_core.ai_broker_context import collect_authorised_monday_read_feeds
+
+    _stamp_monday_dhan(runtime)
+    headers = {"Authorization": "Bearer " + runtime.token(scopes=[])}
+    with runtime.app.test_request_context(headers=headers):
+        assert collect_authorised_monday_read_feeds("RELIANCE", "NSE") == []
+    assert runtime.adapter.calls == []
+
+
+def test_monday_feeds_respect_account_acl(runtime):
+    """P1: another operator cannot borrow the quote-account ACL."""
+    from flinttrade_core.ai_broker_context import collect_authorised_monday_read_feeds
+
+    _stamp_monday_dhan(runtime)
+    headers = {"Authorization": "Bearer " + runtime.token(sub="another-operator")}
+    with runtime.app.test_request_context(headers=headers):
+        assert collect_authorised_monday_read_feeds("RELIANCE", "NSE") == []
+    assert runtime.adapter.calls == []
+
+
+def test_monday_feeds_use_authorised_read_port_and_include_depth(runtime, monkeypatch):
+    """Authorised Connected (read) quotes + depth reach the advisor rows."""
+    from flinttrade_core.ai_broker_context import collect_authorised_monday_read_feeds
+
+    _stamp_monday_dhan(runtime)
+
+    async def depth(session, request):
+        await runtime.adapter._read(session, "depth")
+        return {
+            "symbol": request.instrument.symbol,
+            "exchange": request.instrument.exchange,
+            "bids": [{"price": 99.0, "quantity": 2}],
+            "asks": [{"price": 101.0, "quantity": 1}],
+        }
+
+    monkeypatch.setattr(runtime.adapter, "depth", depth, raising=False)
+    headers = {"Authorization": "Bearer " + runtime.token()}
+    with runtime.app.test_request_context(headers=headers):
+        rows = collect_authorised_monday_read_feeds("RELIANCE", "NSE")
+    assert rows
+    assert all(row["ok"] for row in rows)
+    assert {row["account_id"] for row in rows} <= {"Quotes", "Execution"}
+    assert any(row["quotes"]["ltp"] == 100.0 for row in rows)
+    assert any(row["depth"] and row["depth"]["bids"] for row in rows)
+    assert all(op != "place_order" for op, _, _ in runtime.adapter.calls)
+
+
+def test_monday_feeds_preserve_healthy_when_one_broker_fails(runtime, monkeypatch):
+    """P2: one adapter timeout must not wipe the other authorised feed."""
+    from flinttrade_core.ai_broker_context import collect_authorised_monday_read_feeds
+
+    _stamp_monday_dhan(runtime)
+    original = runtime.adapter.quotes
+
+    async def flaky(session, symbols):
+        selector = getattr(session, "selector", None)
+        account_id = getattr(selector, "account_id", getattr(session, "account_id", ""))
+        if account_id == "Execution":
+            raise TimeoutError("transient Execution quote")
+        return await original(session, symbols)
+
+    monkeypatch.setattr(runtime.adapter, "quotes", flaky)
+    headers = {"Authorization": "Bearer " + runtime.token()}
+    with runtime.app.test_request_context(headers=headers):
+        rows = collect_authorised_monday_read_feeds("RELIANCE", "NSE")
+    assert len(rows) == 1
+    assert rows[0]["account_id"] == "Quotes"
+    assert rows[0]["quotes"]["ltp"] == 100.0

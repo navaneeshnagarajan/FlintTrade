@@ -198,7 +198,19 @@ async def collect_monday_ai_read_snapshot(
             "error": "not Connected (read)",
         }
     symbols = list(symbols or ["NSE:RELIANCE"])
-    quotes = await adapter.quotes(session, symbols)
+    try:
+        quotes = await adapter.quotes(session, symbols)
+    except Exception:  # noqa: BLE001 — one failed read is not a fabricated book
+        return {
+            "broker_id": broker_id,
+            "account_id": account_id,
+            "chrome": "",
+            "ok": False,
+            "quotes": None,
+            "depth": None,
+            "operator_copy": _neo_copy(broker_id),
+            "error": "read failed",
+        }
     depth: Any = None
     market_depth = getattr(adapter, "market_depth", None)
     if callable(market_depth):
@@ -231,7 +243,8 @@ def format_monday_ai_read_context(rows: list[dict[str, Any]] | tuple[dict[str, A
         suffix = f" — {copy}" if copy else ""
         lines.append(
             f"{row.get('broker_id')}:{row.get('account_id')} {row.get('chrome')}{suffix}\n"
-            f"quotes: {row.get('quotes')}"
+            f"quotes: {row.get('quotes')}\n"
+            f"depth: {row.get('depth')}"
         )
     return "\n".join(lines)
 
