@@ -55,8 +55,7 @@ Settings / fallback only. Not the Monday primary connect CTA.
 
 Chat may use live reads when an LLM is configured. Suggest stays
 illustrative. Never paint green Connected without a real LLM
-(FT-AI-004). This tip does **not** implement AI-on-live-reads
-(FT-MONDAY-003 / #256).
+(FT-AI-004). AI-on-live-reads is the FT-MONDAY-003 / #256 product tip.
 
 ## Acceptance
 
@@ -79,5 +78,5 @@ illustrative. Never paint green Connected without a real LLM
 
 - Native HTTP cutover (Task 9D / Task 7C.2) — freeze stays.
 - Funded Live order placement.
-- AI Suggest on live reads (FT-MONDAY-003 / #256).
+- AI Chat on live reads (FT-MONDAY-003 / #256) — shipped on that tip.
 - Live SFeed / `create_websocket` — not wired; deferred.

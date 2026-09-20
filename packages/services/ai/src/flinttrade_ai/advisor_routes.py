@@ -25,7 +25,10 @@ _SYSTEM_PROMPT = (
     "options strategies, technical indicators, and portfolio management. "
     "Be concise, accurate, and always remind users that your responses are "
     "informational — not financial advice. Never recommend specific trades "
-    "without proper risk disclaimers."
+    "without proper risk disclaimers. Practice SandboxEngine fills and native "
+    "Connected (read) feeds are analysis context only — not a live order path "
+    "and not a guarantee of profitable alphas. Never place or claim to place "
+    "a Live order. Kotak Neo has no Practice sandbox."
 )
 
 
@@ -117,8 +120,9 @@ def _jwt_mode() -> str | None:
 def _practice_sandbox_book_context() -> str:
     """Return the Practice SandboxEngine book when the JWT is Practice.
 
-    Desk/AI read the same paper fills that ``orders/place`` recorded. Live
-    and Explore stay dark here — live-read AI is FT-MONDAY-003.
+    Desk/AI read the same paper fills that ``orders/place`` recorded. Explore
+    stays sample-only. Live never receives this paper book — native
+    Connected (read) feeds are a separate path (FT-MONDAY-003).
     """
     if _jwt_mode() != "practice":
         return ""
@@ -140,15 +144,65 @@ def _practice_sandbox_book_context() -> str:
     )
 
 
+def _native_live_read_symbols(raw: Any) -> list[str]:
+    """Prefer the request symbol; otherwise the Monday smoke default."""
+    symbol, exchange = "RELIANCE", "NSE"
+    if isinstance(raw, dict):
+        requested = str(raw.get("symbol") or "").strip()
+        venue = str(raw.get("exchange") or "").strip().upper()
+        if requested:
+            symbol = requested
+        if venue:
+            exchange = venue
+    return [f"{exchange}:{symbol}"]
+
+
+def _native_live_read_context(raw: Any = None) -> str:
+    """Inject authorised Dhan/Neo Connected (read) quotes when the JWT may analyse.
+
+    Practice and Live JWTs may consume stamped ``read_smoke_ok`` feeds after
+    ``admin.accounts.read`` and each account ACL via the authorised
+    broker-context / read-port boundary. Explore stays dark. Never enumerates
+    raw registry sessions, never places, and never invents Neo Practice.
+    """
+    if _jwt_mode() not in {"practice", "live"}:
+        return ""
+    try:
+        from flinttrade_core.ai_broker_context import collect_authorised_monday_read_feeds
+        from flinttrade_gateway.monday_read_smoke import format_monday_ai_read_context
+
+        hook = current_app.config.get("MONDAY_AI_READ_FEED_COLLECTOR")
+        if callable(hook):
+            rows = hook()
+            if not isinstance(rows, list):
+                return ""
+            return format_monday_ai_read_context(rows)
+
+        pair = _native_live_read_symbols(raw)[0]
+        exchange, _, symbol = pair.partition(":")
+        rows = collect_authorised_monday_read_feeds(symbol, exchange)
+        return format_monday_ai_read_context(rows)
+    except Exception:  # noqa: BLE001 - advisor must never 500 on a read feed
+        logger.debug("Native live-read AI context failed", exc_info=True)
+        return ""
+
+
 def _merge_request_context(raw: Any) -> str:
-    """Flatten the request context and append the Practice book when allowed."""
+    """Flatten request context plus Practice book and Connected (read) feeds."""
     context = _coerce_context(raw)
+    extras: list[str] = []
     practice_book = _practice_sandbox_book_context()
-    if not practice_book:
+    if practice_book:
+        extras.append(practice_book)
+    native_reads = _native_live_read_context(raw)
+    if native_reads:
+        extras.append(native_reads)
+    if not extras:
         return context
+    glued = "\n".join(extras)
     if not context:
-        return practice_book
-    return f"{context}\n{practice_book}"
+        return glued
+    return f"{context}\n{glued}"
 
 
 def _coerce_context(raw: Any) -> str:

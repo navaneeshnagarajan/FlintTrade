@@ -69,6 +69,15 @@ changelog rebuilds itself from the first release cut after this baseline.
   retired; SFeed deferred). Native HTTP freeze
   (Task 9D / Task 7C.2) is not lifted. Refs #253.
 
+- **AI Chat Practice + native live-read context (FT-MONDAY-003).**
+  When an LLM is configured, AI Chat may use Practice
+  SandboxEngine fills and native live-read feeds for analysis.
+  Suggest stays labelled illustrative.
+  Chat never shows green **Connected** without a real LLM.
+  AI does not place Live orders — Live place stays fail-closed.
+  Measure later: profitable alphas are not a Monday ship criterion.
+  This does not lift the native broker HTTP freeze. Refs #254.
+
 - **Desk chrome: one TopBar + one ticker + flex shell (FT-UX-002).**
   Dual TopBar index slots are replaced by one dedicated
   scrolling TickerStrip under TopBar. TopBar keeps Mode,

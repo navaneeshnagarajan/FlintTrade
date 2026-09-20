@@ -131,6 +131,27 @@ def test_user_guide_documents_indstocks_dashboard_reset_cycle() -> None:
     assert stale_indstocks_phrase not in guide
 
 
+def test_monday_003_ai_live_read_acceptance_lock() -> None:
+    """FT-MONDAY-003 / #254: Chat live-read acceptance is locked in public docs."""
+    guide = _read(ROOT / "docs/USER_GUIDE.md")
+    changelog = _read(ROOT / "changelog.md")
+    plan = _read(ROOT / "PLAN.md")
+
+    for text in (guide, changelog, plan):
+        assert "FT-MONDAY-003" in text
+        assert "native live-read feeds" in text
+        assert "Suggest stays labelled illustrative" in text
+        assert "profitable alphas are not a Monday ship criterion" in text
+
+    assert "never shows green **Connected** without a real LLM" in guide
+    assert "never shows green **Connected** without a real LLM" in changelog
+    assert "never shows green Connected without a real LLM" in plan
+    assert "Live place stays fail-closed" in changelog
+    assert "Live place stays fail-closed" in plan
+    assert "Tracking / docs lock only — no product in this change" not in changelog
+    assert "tracking lock only — no product in this change" not in plan
+
+
 def test_operator_docs_state_native_broker_http_freeze() -> None:
     """Operator docs must state the 503/409 freeze, not a working native path."""
     guide = _read(ROOT / "docs/USER_GUIDE.md")

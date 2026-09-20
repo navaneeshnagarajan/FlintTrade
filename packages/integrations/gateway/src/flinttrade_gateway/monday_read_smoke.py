@@ -148,6 +148,107 @@ async def _timed(name: str, call: Callable[[], Awaitable[Any]]) -> ReadSmokeStep
     return ReadSmokeStep(name, True, latency_ms)
 
 
+def list_monday_ai_read_handles(registry: Any) -> list[tuple[str, str, Any]]:
+    """Connected Dhan/Neo sessions stamped ``read_smoke_ok`` for AI analysis.
+
+    Never grants write authority. Neo is Live-read only — not Practice.
+    """
+    if registry is None or not hasattr(registry, "list_read_smoke_sessions"):
+        return []
+    handles: list[tuple[str, str, Any]] = []
+    try:
+        sessions = registry.list_read_smoke_sessions()
+    except Exception:  # noqa: BLE001 — advisor must never 500 on a listing
+        return []
+    for selector, session in sessions:
+        broker_id = getattr(selector, "adapter_id", "")
+        account_id = getattr(selector, "account_id", "")
+        if broker_id not in MONDAY_READ_BROKERS:
+            continue
+        if not monday_read_smoke_ok(session):
+            continue
+        handles.append((str(broker_id), str(account_id), session))
+    return handles
+
+
+async def collect_monday_ai_read_snapshot(
+    broker_id: str,
+    account_id: str,
+    adapter: Any,
+    session: Any,
+    *,
+    symbols: list[str] | None = None,
+) -> dict[str, Any]:
+    """Quotes (+ depth when supported) for AI context. Never a write.
+
+    Requires stamped Connected (read) evidence. A failed or unstamped
+    session returns ``ok=False`` and no fabricated quotes.
+    """
+    if broker_id not in MONDAY_READ_BROKERS:
+        raise ValueError(f"Monday AI reads are Dhan + Neo only, not {broker_id}")
+    if not monday_read_smoke_ok(session):
+        return {
+            "broker_id": broker_id,
+            "account_id": account_id,
+            "chrome": "",
+            "ok": False,
+            "quotes": None,
+            "depth": None,
+            "operator_copy": _neo_copy(broker_id),
+            "error": "not Connected (read)",
+        }
+    symbols = list(symbols or ["NSE:RELIANCE"])
+    try:
+        quotes = await adapter.quotes(session, symbols)
+    except Exception:  # noqa: BLE001 — one failed read is not a fabricated book
+        return {
+            "broker_id": broker_id,
+            "account_id": account_id,
+            "chrome": "",
+            "ok": False,
+            "quotes": None,
+            "depth": None,
+            "operator_copy": _neo_copy(broker_id),
+            "error": "read failed",
+        }
+    depth: Any = None
+    market_depth = getattr(adapter, "market_depth", None)
+    if callable(market_depth):
+        try:
+            depth = await market_depth(session, symbols)
+        except Exception:  # noqa: BLE001 — missing depth is not a fake book
+            depth = None
+    return {
+        "broker_id": broker_id,
+        "account_id": account_id,
+        "chrome": CHROME_CONNECTED_READ,
+        "ok": True,
+        "quotes": quotes,
+        "depth": depth,
+        "operator_copy": _neo_copy(broker_id),
+        "error": None,
+    }
+
+
+def format_monday_ai_read_context(rows: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> str:
+    """Flatten successful Connected (read) snapshots for the advisor prompt."""
+    usable = [row for row in rows if row.get("ok")]
+    if not usable:
+        return ""
+    lines = [
+        "Native Connected (read) feeds (analysis only; not a live order path; not Neo Practice):",
+    ]
+    for row in usable:
+        copy = row.get("operator_copy")
+        suffix = f" — {copy}" if copy else ""
+        lines.append(
+            f"{row.get('broker_id')}:{row.get('account_id')} {row.get('chrome')}{suffix}\n"
+            f"quotes: {row.get('quotes')}\n"
+            f"depth: {row.get('depth')}"
+        )
+    return "\n".join(lines)
+
+
 async def run_monday_read_smoke(
     broker_id: str,
     adapter: Any,

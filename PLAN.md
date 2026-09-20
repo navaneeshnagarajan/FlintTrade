@@ -80,6 +80,8 @@ Done: Layer 3 admission from native option Greeks with fail-closed instrument re
 
 AI3 (read-only Python-RPC tool scripting) is deferred to a maintainer sandbox-design call before any code or spec implementation.
 
+**FT-MONDAY-003** (`#254`) ships AI Chat live-read context: when an LLM is configured, Chat may use Practice fills and native live-read feeds for analysis. Suggest stays labelled illustrative. Chat never shows green Connected without a real LLM. Measure later: profitable alphas are not a Monday ship criterion. Live place stays fail-closed. This does not lift the native broker HTTP freeze.
+
 **Exit:** the loop survives a real full trading day in Practice with zero safety violations — rate limiting proven under load, a mid-run kill-switch drill, Live blocked server-side — and a complete journal/learning trail; audit + re-audit clean.
 
 ## Phase 5 — Distribution + public surfaces *(in progress)*

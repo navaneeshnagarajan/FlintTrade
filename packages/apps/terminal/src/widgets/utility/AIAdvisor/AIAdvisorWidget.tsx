@@ -242,9 +242,20 @@ export async function executeApprovedToolCall(toolCall: ToolCall): Promise<Appro
   // Read imperatively: this runs from an approval handler, not a render. The
   // manual tickets all gate on mode, and an approval card is not a substitute
   // — approving an order in Explore approved something that cannot be placed.
-  const modeBlock = checkOrderEntryMode(useModeStore.getState().mode);
+  // FT-MONDAY-003: AI may read Practice + Connected (read) feeds; Live place
+  // stays fail-closed on this path.
+  const mode = useModeStore.getState().mode;
+  const modeBlock = checkOrderEntryMode(mode);
   if (modeBlock) {
     return { executed: false, message: `Action not executed: ${modeBlock}.` };
+  }
+  if (mode === "live") {
+    return {
+      executed: false,
+      message:
+        "Action not executed: Live order placement stays fail-closed. " +
+        "AI Chat may read Practice and Connected (read) feeds — it cannot place a Live order.",
+    };
   }
 
   const params = toPlaceOrderParams(toolCall.payload);
@@ -258,10 +269,7 @@ export async function executeApprovedToolCall(toolCall: ToolCall): Promise<Appro
   }
 
   try {
-    const mode = useModeStore.getState().mode;
-    const result = mode === "practice"
-      ? await placeOrder(params, { mode: "practice" })
-      : await placeOrder(params);
+    const result = await placeOrder(params, { mode: "practice" });
     return {
       executed: true,
       message:
@@ -308,8 +316,11 @@ function ToolCard({ toolCall, status, onApprove, onReject }: ToolCardProps) {
   // not the model's free-text description, which a prompt-injected model
   // could arbitrage against the payload ("Buy 1 RELIANCE" describing a
   // SELL 1800). Non-approvable or malformed calls get no Approve button.
+  // Live place stays fail-closed on the AI path (FT-MONDAY-003).
+  const mode = useModeStore((s) => s.mode);
+  const liveBlocked = mode === "live";
   const approvable = APPROVABLE_ORDER_ENDPOINTS.has(normaliseToolEndpoint(toolCall.endpoint));
-  const params = approvable ? toPlaceOrderParams(toolCall.payload) : null;
+  const params = approvable && !liveBlocked ? toPlaceOrderParams(toolCall.payload) : null;
 
   return (
     <div className="bg-surface-card border border-border-default rounded-lg p-3">
@@ -325,9 +336,11 @@ function ToolCard({ toolCall, status, onApprove, onReject }: ToolCardProps) {
         </div>
       ) : (
         <div className="text-xs text-loss">
-          {approvable
-            ? "Malformed order proposal — a required field is missing or invalid. It cannot be approved."
-            : `Not an approvable action (${toolCall.method} ${toolCall.endpoint}). Only gated order placement can be approved here.`}
+          {liveBlocked
+            ? "Live order placement stays fail-closed. AI Chat may read Practice and Connected (read) feeds — it cannot place a Live order."
+            : approvable
+              ? "Malformed order proposal — a required field is missing or invalid. It cannot be approved."
+              : `Not an approvable action (${toolCall.method} ${toolCall.endpoint}). Only gated order placement can be approved here.`}
         </div>
       )}
       {toolCall.description && (

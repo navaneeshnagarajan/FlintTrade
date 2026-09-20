@@ -889,8 +889,9 @@ flashes the outage copy.
 ## 9. AI Centre walkthrough
 
 Open `/ai`. Chat, Signals, Sentiment, and RAG are backed by
-`packages/services/ai`. Suggest is a local filter UI over an illustrative
-strategy list — not a live AI fetch.
+`packages/services/ai`. Suggest is a local filter UI over an
+illustrative strategy list — not a live AI fetch. Suggest stays
+labelled illustrative (FT-MONDAY-003).
 
 ### Chat
 
@@ -944,6 +945,15 @@ Connected sample advisor. Any later demo replies must be labelled
 **Sample replies**. Signals **Live** / **Polling** stay separate from Chat
 LLM readiness.
 
+Monday product (FT-MONDAY-003): when an LLM is configured, Chat may
+use Practice SandboxEngine fills and native live-read feeds for
+analysis. That is analysis context, not a guarantee of profitable
+alphas, and profitable alphas are not a Monday ship criterion. Chat
+does not place Live orders — Live place stays fail-closed. This does
+not lift the native broker HTTP freeze and does not claim every Chat
+turn already has live ticks. Chat never shows green **Connected** without a real LLM.
+Suggest stays labelled illustrative and is not this live-read path.
+
 On Explore `/settings#llm`, a demo or unconfigured session shows the empty
 state "No LLM provider configured" with **Retry** — not a broken load.
 That Settings empty-state wording stays distinct from Chat's **LLM not
@@ -957,7 +967,9 @@ Practice on this machine; see
 **AI Strategy Suggestions** filters a local illustrative recommendation
 list by Market Mood chips (**Volatile**, **Trending**, **Sideways**) and
 your risk profile from persona and experience. Mood is a filter, not a
-draft and not a live AI fetch.
+draft and not a live AI fetch. Cards stay labelled illustrative
+(FT-MONDAY-003). Suggest is not the Chat live-read path and is not a
+profitable-alphas product.
 
 Changing mood — a chip or **Next mood** — immediately replaces the
 recommendation cards and clears any previously focused strategy card, so
@@ -1185,7 +1197,11 @@ AI Hub does not show a green **Connected** badge. The badge is
 **Not configured** / **Not installed**, the Settings CTA stays
 visible, and the composer stays gated until the runtime is installed
 and configured. A provider string of ollama is not Connected while
-the managed runtime is absent.
+the managed runtime is absent. Chat never shows green **Connected**
+without a real LLM. When that LLM is configured, Chat may use
+Practice fills and native live-read feeds for analysis
+(FT-MONDAY-003); Suggest stays labelled illustrative, and profitable
+alphas are not a Monday ship criterion.
 A configured but broken probe shows **Error** or **Disconnected** with
 **Retry**. Returning to Chat after saving Settings → AI re-checks
 readiness (advisor and Settings hydration), so the gate should not stay
