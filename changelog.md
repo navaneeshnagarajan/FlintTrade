@@ -75,8 +75,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   fills and native live-read feeds for analysis.
   Suggest stays labelled illustrative.
   Chat never shows green **Connected** without a real LLM.
-  Profitable alphas are not a Monday ship criterion. This does not
-  lift the native broker HTTP freeze. Refs #254.
+  Measure later: profitable alphas are not a Monday ship criterion.
+  This does not lift the native broker HTTP freeze. Refs #254.
 
 - **Desk chrome: one TopBar + one ticker + flex shell (FT-UX-002).**
   Dual TopBar index slots are replaced by one dedicated
