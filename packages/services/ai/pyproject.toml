@@ -24,7 +24,7 @@ ml = [
     "scipy>=1.18.1",
     # Hyper-parameter optimisation for the ensemble/strategy tuners
     # (hyperopt_strategy.py, ensemble_selector.py).
-    "optuna>=3.6",
+    "optuna>=5.0.0",
 ]
 # PDF support for the canonical RAG pipeline.
 rag = [
