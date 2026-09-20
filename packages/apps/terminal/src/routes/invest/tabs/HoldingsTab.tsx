@@ -12,13 +12,12 @@ import { useState, useMemo } from "react";
 import { useNarrowLayout } from "@/hooks/useNarrowLayout";
 import { NarrowBookCards } from "@/components/books/NarrowBookCards";
 import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
+  useTable,
   type ColumnDef,
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";
+import { sortedTableFeatures } from "@/lib/tableFeatures";
 import { AlertCircle, Download, Printer, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,7 +49,7 @@ function PnLCell({ value, percent }: { value: number; percent: number }) {
 
 // ─── Column definitions ────────────────────────────────────────────────────────
 
-function buildColumns(): ColumnDef<Holding>[] {
+function buildColumns(): ColumnDef<typeof sortedTableFeatures, Holding>[] {
   return [
     {
       accessorKey: "symbol",
@@ -120,13 +119,12 @@ export function HoldingsTab() {
   const columns = useMemo(() => buildColumns(), []);
   const isDemo = Boolean(isSampleData);
 
-  const table = useReactTable({
+  const table = useTable({
+    features: sortedTableFeatures,
     data: holdings,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
   });
 
   const totalInvested = useMemo(

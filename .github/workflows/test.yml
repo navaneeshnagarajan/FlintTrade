@@ -158,7 +158,8 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       # SC-07: hash-verified install only. uv sync --frozen installs the locked
       # workspace + dev group from uv.lock — never an unhashed requirements.txt.
-      - run: uv sync --frozen
+      # Exercise the optional Optuna optimiser compatibility tests in this lane.
+      - run: uv sync --frozen --extra ml
       - name: Verify pre-restructure baseline artefacts
         run: |
           uv run python - <<'PY'

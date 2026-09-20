@@ -10,11 +10,10 @@ import { Input } from "@/components/ui/input";
 import {
   type ColumnDef,
   flexRender,
-  getCoreRowModel,
-  getSortedRowModel,
   type SortingState,
-  useReactTable,
+  useTable,
 } from "@tanstack/react-table";
+import { sortedTableFeatures } from "@/lib/tableFeatures";
 import {
   Table,
   TableBody,
@@ -592,7 +591,7 @@ function OrdersWidget(_props: WidgetProps) {
     [modifyIntent, refreshOrders],
   );
 
-  const columns = useMemo<ColumnDef<OrderRow>[]>(
+  const columns = useMemo<ColumnDef<typeof sortedTableFeatures, OrderRow>[]>(
     () => [
       {
         accessorKey: "symbol",
@@ -615,14 +614,16 @@ function OrdersWidget(_props: WidgetProps) {
         ),
       },
       {
-        accessorKey: "quantity",
+        id: "quantity",
+        accessorFn: (row) => row.quantityNum,
         header: "Qty",
         cell: ({ row }) => (
           <span className="font-mono tabular-nums">{row.original.quantity}</span>
         ),
       },
       {
-        accessorKey: "price",
+        id: "price",
+        accessorFn: (row) => row.priceNum,
         header: "Price",
         cell: ({ row }) => (
           <span className="font-mono tabular-nums">{row.original.price}</span>
@@ -706,13 +707,12 @@ function OrdersWidget(_props: WidgetProps) {
     [canManageOrders, isExplore, actionPending, currentIdentity],
   );
 
-  const table = useReactTable({
+  const table = useTable({
+    features: sortedTableFeatures,
     data: rows,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
   });
 
   return (

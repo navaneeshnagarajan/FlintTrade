@@ -81,7 +81,7 @@ const guarantees = [
 function primaryDownloadsFor(manifest: DesktopReleaseManifest) {
   return [
     {
-      title: 'macOS (Universal)',
+      title: 'macOS 13+ (Universal)',
       asset: assetForPlatform(manifest, 'macos', 'universal'),
     },
     {

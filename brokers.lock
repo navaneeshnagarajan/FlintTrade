@@ -11,14 +11,16 @@ notes = "wave 1 baseline. Repo-managed through flinttrade-gateway's dhanhq==2.2.
 
 [[broker]]
 name = "upstox-python-sdk"
-version = "2.29.0"
-sha256 = "14e614d9ebc8ecf27a310f31625d80ca2c6516069690418001505c6429b3185c"
+version = "2.30.0"
+sha256 = "e9cd7aeec3c3dc006a4cb9e4e222bb7caa18ab40363e8ed9f1cd843c37bb7e7b"
 licence = "MIT"
 licence_source = "upstream LICENSE.txt (MIT, Copyright 2023 Upstox); sha256 is the requirements.lock sdist hash"
 homepage = "https://github.com/upstox/upstox-python"
+# Historical adapter activation evidence; no new sandbox/live run is claimed
+# for SDK 2.30.0. Its compatibility is checked locally with mocked adapters.
 sandbox_tested = "2026-07-03"
 approved_by = "navaneeshnagarajan"
-notes = "wave 2 activated. Repo-managed through flinttrade-gateway's upstox-python-sdk==2.29.0 dependency and requirements.lock. Runtime attestation gates on the installed distribution version."
+notes = "wave 2 activated. Repo-managed through flinttrade-gateway's upstox-python-sdk==2.30.0 dependency and requirements.lock. Runtime attestation gates on the installed distribution version. sandbox_tested and approved_by record the historical adapter baseline, not a fresh 2.30.0 broker-session or funded-order verification."
 
 [[broker]]
 name = "kotakneoapi"

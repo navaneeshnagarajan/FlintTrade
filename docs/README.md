@@ -42,6 +42,7 @@ to fully-original implementations is ongoing. FlintTrade is licensed under
 | [USER_GUIDE.md](USER_GUIDE.md) | User / Operator | Install, configure local integrations, and walk through every workspace. |
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Contributor | Repo layout, dev environment, tests, build, how to add a widget / strategy / broker. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Contributor | Component diagrams, data flow, mode system, package dependency graph. |
+| [TECH_STACK.md](TECH_STACK.md) | Everyone / Contributor | Dependency purposes, version sources, and the in-app build information. |
 | [API.md](API.md) | Integrator | FlintTrade `/ft-api/v1/*` reference, broker/OpenAlgo-compatible bridge endpoints, WebSocket protocol, auth model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | Operator / Contributor | Supported brokers, exchanges, operating systems, and Python / Node versions. |
 | [ORDER_SAFETY.md](ORDER_SAFETY.md) | Operator / Contributor | Audit logging, rate limits, retention, and kill-switch design notes. |
@@ -70,6 +71,7 @@ to fully-original implementations is ongoing. FlintTrade is licensed under
 
 - **[Developer Guide](DEVELOPER_GUIDE.md)** — repo layout, dev environment setup, running tests, building, adding widgets / strategies / broker adapters, code style.
 - **[Architecture](ARCHITECTURE.md)** — Mermaid diagrams, component map, data-flow model, mode-system state machine, WSGI prefix-strip explanation.
+- **[Technology stack](TECH_STACK.md)** — what each major dependency does, where its version is recorded, and how dependency updates are reviewed.
 - **[CI and quality contract](CI.md)** — how the per-push pipeline is shaped, how to interpret failure logs, how the nightly cross-platform matrix works.
 - **[Setup guides](setup/)** — pick the file that matches your operating system, follow it end-to-end, you should have a green test run inside an hour.
 - **[Static IP](setup/static-ip-setup.md)**, **[Email](setup/email.md)**, **[Backup](setup/backup.md)**, and **[Multi-user](setup/multi-user.md)** — operator notes for broker access, recovery email, ordinary bhavcopy archives, and trust boundaries.

@@ -111,7 +111,7 @@ overrides:
   # unbounded query-cache growth and normalizeStats prototype writes, patched in 4.28.7.
   # Pin the current 4.28.8 line so Babel's helper-compilation-targets cannot keep 4.28.2.
   browserslist: 4.28.8
-  esbuild: 0.28.1
+  esbuild: 0.28.2
   # GHSA-5jgf-p345-68v8 / GHSA-f65p-4m7j-42xc / GHSA-fph4-wmhf-6fwf /
   # GHSA-jqff-g426-hqxp: host-confusion and SSRF fixes, patched in 4.1.3.
   # Pin the current 4.1.4 line so ajv cannot keep 4.1.2.
@@ -122,9 +122,9 @@ overrides:
   # patched in 4.3.2 (and 3.15.2). The tree is already on the 4.x line.
   js-yaml: 4.3.2
   # GHSA-jrc7-96c5-q579 / CVE-2026-85061: XSS sanitizer bypass, patched in
-  # 6.4.1. plotly.js 3.7.0 (and 4.1.0) still request 4.x/5.x, both inside
-  # the advisory range. The terminal renders through plotly.js-dist-min, so
-  # this override is lockfile hygiene for the unused source tree.
+  # 6.4.1. Keep the source dependency on the patched 6.8.0 line. The terminal
+  # renders through the matching plotly.js-dist-min bundle, whose embedded
+  # dependencies must be checked separately when upgrading Plotly.
   maplibre-gl: 6.8.0
   postcss: 8.5.23
   # GHSA-rgj7-g3m4-5g8c: inherited libheif RCEs, patched in 0.35.4.

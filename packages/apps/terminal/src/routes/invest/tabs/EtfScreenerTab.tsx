@@ -29,14 +29,12 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  getFilteredRowModel,
+  useTable,
   type ColumnDef,
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";
+import { filteredSortedTableFeatures } from "@/lib/tableFeatures";
 import {
   AlertCircle,
   Grid2X2,
@@ -251,11 +249,11 @@ function formatAum(cr: number): string {
 
 // ─── Column definitions ───────────────────────────────────────────────────────
 
-function buildColumns(): ColumnDef<EtfScreenerRow>[] {
+function buildColumns(): ColumnDef<typeof filteredSortedTableFeatures, EtfScreenerRow>[] {
   const returnCol = (
     key: keyof EtfScreenerRow,
     label: string,
-  ): ColumnDef<EtfScreenerRow> => ({
+  ): ColumnDef<typeof filteredSortedTableFeatures, EtfScreenerRow> => ({
     accessorKey: key as string,
     header: () => <span className="block text-right">{label}</span>,
     cell: ({ getValue }) => <ReturnCell value={getValue() as number} />,
@@ -500,14 +498,12 @@ export function EtfScreenerTab() {
     return rows;
   }, [rawRows, category, searchText]);
 
-  const table = useReactTable({
+  const table = useTable({
+    features: filteredSortedTableFeatures,
     data: filteredRows,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
   });
 
   const gainers = useMemo(() => rawRows.filter((r) => r.change_1d > 0).length, [rawRows]);

@@ -59,7 +59,7 @@ import {
 import { checkOrderEntryMode, resolveLotQuantity } from "@/lib/orderGuards";
 import { useOptionChainData } from "./useOptionChainData";
 import OiPcrStrip from "./OiPcrStrip";
-import { strikeHasPositiveOi } from "./oiPcrStrip";
+import { strikeHasPositiveOi } from "./oiPcrStripData";
 import SymbolSearch from "./SymbolSearch";
 import BasketPanel from "./BasketPanel";
 import LegBuilder, { type LegBuilderHandle } from "./LegBuilder";

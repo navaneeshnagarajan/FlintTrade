@@ -2,7 +2,7 @@
 
 FlintTrade is a self-hosted web app first. The backend serves the terminal and
 API from one origin, and a normal browser remains the primary supported way to
-run it. The desktop package is a small Electron 43 shell around that same local
+run it. The desktop package is a small Electron 44 shell around that same local
 application.
 
 > **Installer availability:** the current source baseline is `v0.0.1`. Previous
@@ -21,11 +21,14 @@ file:
 
 | Platform | Canonical asset |
 |---|---|
-| macOS, Apple Silicon and Intel | `FlintTrade-<version>-mac-universal.dmg` |
+| macOS 13+, Apple Silicon and Intel | `FlintTrade-<version>-mac-universal.dmg` |
 | Windows x64 | `FlintTrade-<version>-win-x64.exe` |
 | Linux x64 | `FlintTrade-<version>-linux-x64.AppImage` |
 | Linux ARM64 | `FlintTrade-<version>-linux-arm64.AppImage` |
 | All platforms | `SHA256SUMS.txt` |
+
+Electron 44 requires macOS 13 (Ventura) or later; macOS 12 (Monterey) is no
+longer supported by the desktop shell. See the [Electron 44 release notes](https://www.electronjs.org/blog/electron-44-0).
 
 The macOS, Windows, Linux and tray assets are generated from the same canonical
 FlintTrade angular `F` and green flint-spark mark used by the terminal and

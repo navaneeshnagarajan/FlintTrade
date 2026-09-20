@@ -328,11 +328,32 @@ def test_nonpython_inventory_detects_core_rust_workspace_writer(tmp_path, monkey
         test_nonpython_authority_copy_inventory_has_no_new_unguarded_owner()
 
 
+def test_nonpython_inventory_ignores_generated_site_bundle_only(tmp_path, monkeypatch):
+    import sys
+
+    bundle = tmp_path / "packages/apps/site/.next/server/chunks/docs.js"
+    bundle.parent.mkdir(parents=True)
+    bundle.write_text('const documentation = "restic authority backup is unavailable";')
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
+    test_nonpython_authority_copy_inventory_has_no_new_unguarded_owner()
+
+    source = tmp_path / "packages/apps/site/scripts/state.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text('fs.writeFileSync("workspace.json", payload);')
+    with pytest.raises(AssertionError, match="packages/apps/site/scripts/state.ts"):
+        test_nonpython_authority_copy_inventory_has_no_new_unguarded_owner()
+
+
 def test_nonpython_authority_copy_inventory_has_no_new_unguarded_owner():
     guarded = {"infra/backup/backup.sh", "infra/backup/restore.sh", "scripts/reset-flinttrade-state.sh"}
+    generated_site = ROOT / "packages/apps/site/.next"
     failures = []
     for root in (ROOT / "infra", ROOT / "scripts", ROOT / "packages"):
         for path in root.rglob("*"):
+            # Next bundles documentation as JS strings, including examples of
+            # authority commands; inspect its source, not the ignored output.
+            if path.is_relative_to(generated_site):
+                continue
             if path.suffix not in {".sh", ".ps1", ".ts", ".js", ".rs"} or any(
                 part in {"node_modules", "dist", "target", "tests", "e2e"} for part in path.parts
             ):

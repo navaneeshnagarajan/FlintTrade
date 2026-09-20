@@ -9,7 +9,7 @@ dependencies = [
     "flinttrade-engine",
     "flinttrade-historical",
     "flinttrade-indicators",
-    "numpy>=2.5.2",
+    "numpy>=2.5.3",
     "pandas>=2.0.0",
     "pydantic>=2.13.5",
     "flask>=3.0",

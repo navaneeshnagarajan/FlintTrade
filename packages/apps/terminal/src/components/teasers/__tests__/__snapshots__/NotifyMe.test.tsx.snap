@@ -13,7 +13,7 @@ exports[`NotifyMe > matches snapshot for subscribed state 1`] = `
     >
       <svg
         aria-hidden="true"
-        class="lucide lucide-circle-check"
+        class="lucide lucide-circle-check lucide-check-circle-2"
         fill="none"
         height="12"
         stroke="currentColor"
@@ -30,7 +30,7 @@ exports[`NotifyMe > matches snapshot for subscribed state 1`] = `
           r="10"
         />
         <path
-          d="m9 12 2 2 4-4"
+          d="m16 9-5.5 5.5L8 12"
         />
       </svg>
       <span>

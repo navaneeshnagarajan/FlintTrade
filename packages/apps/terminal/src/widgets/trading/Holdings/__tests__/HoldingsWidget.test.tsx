@@ -144,6 +144,26 @@ describe("HoldingsWidget", () => {
     expect(screen.queryByText("TCS")).not.toBeInTheDocument();
   });
 
+  it("sorts quantities numerically and retains sorting when a search is cleared", () => {
+    mockUseHoldings.mockReturnValue(queryResult({ data: SAMPLE_HOLDINGS }));
+    render(<HoldingsWidget {...makeWidgetPanelProps()} />);
+
+    const symbols = () => Array.from(screen.getByRole("table").querySelectorAll("tbody tr"))
+      .map((row) => row.querySelector("td")?.textContent);
+    const quantityHeader = screen.getByRole("columnheader", { name: /qty/i });
+
+    fireEvent.click(quantityHeader);
+    expect(symbols()).toEqual(["RELIANCE", "TCS"]);
+    fireEvent.click(quantityHeader);
+    expect(symbols()).toEqual(["TCS", "RELIANCE"]);
+
+    const search = screen.getByPlaceholderText(/filter symbol/i);
+    fireEvent.change(search, { target: { value: "rel" } });
+    expect(symbols()).toEqual(["RELIANCE"]);
+    fireEvent.change(search, { target: { value: "" } });
+    expect(symbols()).toEqual(["TCS", "RELIANCE"]);
+  });
+
   // ── Portfolio report export ────────────────────────────────────────────
 
   it("exports a portfolio report (positions + holdings) and notifies on success", async () => {

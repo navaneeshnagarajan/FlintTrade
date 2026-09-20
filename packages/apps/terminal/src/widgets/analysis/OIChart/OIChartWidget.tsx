@@ -881,6 +881,8 @@ function OIChartWidget(props: WidgetProps) {
       yaxis2: {
         title: { text: "PCR", font: { size: 10 } },
         overlaying: "y",
+        // Preserve independent PCR ticks; Plotly 4 synchronises overlay ticks by default.
+        tickmode: "auto",
         side: "right",
         tickfont: { size: 9 },
         range: [0, Math.max(3, ...pcrPerStrike.filter((v): v is number => v !== null)) * 1.2],

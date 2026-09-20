@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Layout, Model } from "flexlayout-react";
 import { emptyWorkspaceJson } from "@/layout/flexLayoutAdapter";
 
-describe("FlexLayout 0.10 + React 19", () => {
+describe("FlexLayout + React 19", () => {
   it("Layout component is importable", () => {
     expect(Layout).toBeDefined();
     expect(typeof Layout).toMatch(/^(function|object)$/);

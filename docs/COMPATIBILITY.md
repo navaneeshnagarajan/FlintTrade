@@ -48,6 +48,15 @@ disagrees. Per-push CI runs the **floor**; nightly
 | Node | `>=22.22.2` | 22.x on per-push lanes; 24 on the nightly target leg | Floor is jsdom 30's engine requirement. Required for the terminal, site, desktop, and Playwright. |
 | Operating system | Any platform that can provide Python `>=3.12` (Ubuntu 24.04 LTS is the Linux system-interpreter floor) | Per-push: Ubuntu (`ubuntu-latest` plus Electron on `ubuntu-24.04`). Nightly: macOS, Windows, and a fail-soft `ubuntu-26.04` preview. Desktop-release Linux build legs still use `ubuntu-22.04` images with a managed toolchain. | Ubuntu 22.04's *system* Python is 3.10 and cannot meet the source-install floor. The one-line installer sidesteps this by provisioning `~/.flinttrade/tools`. |
 
+The Electron 44 desktop shell additionally requires **macOS 13 (Ventura) or
+later** on Apple Silicon and Intel. Electron 44 dropped macOS 12 support; this
+desktop requirement is separate from the Python/Node requirements for the
+source-built web app. See [Desktop App](DESKTOP.md) and the
+[Electron 44 release notes](https://www.electronjs.org/blog/electron-44-0).
+
+For library purposes and exact resolved versions, see
+[Technology Stack and Dependencies](TECH_STACK.md).
+
 ## Brokers
 
 FlintTrade supports two broker paths: the recommended OpenAlgo-compatible

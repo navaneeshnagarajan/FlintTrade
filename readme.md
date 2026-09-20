@@ -183,7 +183,7 @@ never satisfy that gate:
 
 | OS | Electron installer | Architectures |
 |---|---|---|
-| macOS | universal `.dmg` | Apple Silicon (arm64) + Intel (x64) |
+| macOS 13+ | universal `.dmg` | Apple Silicon (arm64) + Intel (x64) |
 | Windows | `.exe` (NSIS, per-user) | x64; Windows 11 on ARM uses emulation |
 | Linux | `.AppImage` | x64 + arm64 |
 
@@ -354,7 +354,7 @@ and 1 Rust/PyO3 tick engine.
 |---|---|---|
 | `packages/apps/site` | Next.js + TS | Public documentation site and read-only docs MCP |
 | `packages/apps/terminal` | React + TS | Single-page workspace, home widgets, routes, tools, and FlexLayout terminal |
-| `packages/apps/desktop` | Electron 43 + TypeScript | Sandboxed desktop shell; verifies tools, builds managed local source, supervises the source guardian, and loads only its selected loopback origin |
+| `packages/apps/desktop` | Electron 44 + TypeScript | Sandboxed desktop shell; verifies tools, builds managed local source, supervises the source guardian, and loads only its selected loopback origin |
 | `packages/core/core` | Python | Flask backend, auth, workspace, OpenAlgo-compatible client, route registration |
 | `packages/core/data` | Python | Tick capture, audit log, trade logging, SQLite sandbox state, DuckDB analytics storage |
 | `packages/core/design-system` | TypeScript | Shared FlintTrade tokens, brand primitives, layers, and React components |
@@ -372,6 +372,9 @@ and 1 Rust/PyO3 tick engine.
 | `packages/services/screener` | Python | Option chain, OI analysis, PCR, max-pain, portfolio Greeks, IV smile |
 
 ### Tech stack
+
+See the [Technology Stack and Dependencies guide](docs/TECH_STACK.md) for what
+each dependency does, exact-version sources, and the terminal's About screen.
 
 | Layer | Tools |
 |---|---|
@@ -395,6 +398,7 @@ and 1 Rust/PyO3 tick engine.
 | [User Guide](docs/USER_GUIDE.md) | Install, first connection, paper trade, workspace tour |
 | [Developer Guide](docs/DEVELOPER_GUIDE.md) | Repo layout, dev setup, adding widgets and strategies |
 | [Architecture](docs/ARCHITECTURE.md) | Diagrams, data flow, mode system, auth, WSGI |
+| [Technology stack](docs/TECH_STACK.md) | Dependency purposes, version sources, and app build information |
 | [API Reference](docs/API.md) | FlintTrade `/ft-api/v1/` endpoints plus broker/OpenAlgo-compatible bridge routes |
 | [Disclaimer](disclaimer.md) | Beta-stage, no-advice, trading-risk, and user-responsibility notice |
 | [Changelog](changelog.md) | Release notes by version |

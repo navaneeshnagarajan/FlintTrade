@@ -11,13 +11,12 @@
 
 import { useState, useMemo } from "react";
 import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
+  useTable,
   type ColumnDef,
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";
+import { sizedSortedTableFeatures } from "@/lib/tableFeatures";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getBase, buildHeaders } from "@/services/ftApi.helpers";
 import {
@@ -186,7 +185,7 @@ function CategoryBadge({ category }: { category: string }) {
 
 // ── Profile-ranking columns ──────────────────────────────────────────────────
 
-function buildLeaderboardColumns(): ColumnDef<TraderRow>[] {
+function buildLeaderboardColumns(): ColumnDef<typeof sizedSortedTableFeatures, TraderRow>[] {
   return [
     {
       accessorKey: "rank",
@@ -294,13 +293,12 @@ function LeaderboardSection() {
   const isDemo = isError || (!isLoading && liveTraders.length === 0);
   const traders = isDemo ? DEMO_TRADERS : liveTraders;
 
-  const table = useReactTable({
+  const table = useTable({
+    features: sizedSortedTableFeatures,
     data: traders,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
   });
 
   return (

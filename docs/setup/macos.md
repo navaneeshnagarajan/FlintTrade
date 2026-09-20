@@ -78,6 +78,9 @@ bash scripts/install/flinttrade-uninstall.sh
 
 ## Electron installer status
 
+The Electron 44 desktop shell requires macOS 13 (Ventura) or later on Apple
+Silicon and Intel. See [desktop compatibility](../COMPATIBILITY.md#runtime-stack).
+
 The public [download surface](https://flinttrade.vercel.app/download)
 distinguishes the source-built web-app install above from Electron-shell
 installers. It withholds Electron commands and downloads unless one release

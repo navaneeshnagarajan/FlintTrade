@@ -10,7 +10,7 @@ dependencies = [
     "httpx>=0.27.0",
     "pydantic>=2.13.5",
     "flask>=3.0",
-    "numpy>=2.5.2",
+    "numpy>=2.5.3",
     "pandas>=2.0.0",
     "lightgbm>=4.7.0",
     "catboost>=1.2",
@@ -22,9 +22,8 @@ dependencies = [
 ml = [
     "scikit-learn>=1.4",
     "scipy>=1.18.1",
-    # Hyper-parameter optimisation for the ensemble/strategy tuners
-    # (hyperopt_strategy.py, ensemble_selector.py).
-    "optuna>=3.6",
+    # Hyper-parameter optimisation for the strategy tuner (hyperopt_strategy.py).
+    "optuna>=5.0.0",
 ]
 # PDF support for the canonical RAG pipeline.
 rag = [
