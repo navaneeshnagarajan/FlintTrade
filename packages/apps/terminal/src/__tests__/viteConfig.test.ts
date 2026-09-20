@@ -56,6 +56,13 @@ function loadEnvDirInChild(publicDemoBuild: boolean): unknown {
 }
 
 describe("Vite configuration", () => {
+  it("imports the Reticle connect gate with an explicit .ts extension", () => {
+    const source = fs.readFileSync(path.join(terminalRoot, "vite.config.ts"), "utf8");
+    const gatePath = path.join(terminalRoot, "vite.reticleConnectGate.ts");
+    expect(source).toContain('from "./vite.reticleConnectGate.ts"');
+    expect(fs.existsSync(gatePath)).toBe(true);
+  });
+
   it("loads through Vite's native config loader", async () => {
     const loaded = await loadTerminalViteConfig();
 
