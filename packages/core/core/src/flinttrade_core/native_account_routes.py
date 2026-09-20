@@ -760,8 +760,13 @@ def _session_status(registry: Any, adapter_id: str, account_id: str) -> dict[str
     """Detached exact status never grants access to a session payload."""
     state = registry.snapshot_exact_state(BrokerSelector(adapter_id, account_id))
     if state is None or state.status != "connected":
-        return {"has_session": False, "expires_at": None, "read_only": False}
-    return {"has_session": True, "expires_at": state.expires_at, "read_only": state.read_only is True}
+        return {"has_session": False, "expires_at": None, "read_only": False, "read_smoke_ok": False}
+    return {
+        "has_session": True,
+        "expires_at": state.expires_at,
+        "read_only": state.read_only is True,
+        "read_smoke_ok": bool(getattr(state, "read_smoke_ok", False)),
+    }
 
 
 def _stored_native_account(store: Any, adapter_id: str, account_id: str) -> dict[str, Any] | None:
@@ -1346,11 +1351,13 @@ def _activate_candidate_credentials(candidate_store: Any, adapter_id: str, accou
 def _candidate_session_status(session: Any | None) -> dict[str, Any]:
     """Return the public status snapshot for an isolated candidate session."""
     if session is None:
-        return {"has_session": False, "expires_at": None, "read_only": False}
+        return {"has_session": False, "expires_at": None, "read_only": False, "read_smoke_ok": False}
+    extra = getattr(session, "extra", None) or {}
     return {
         "has_session": True,
         "expires_at": getattr(session, "expires_at", None),
         "read_only": bool(getattr(session, "is_read_only", False)),
+        "read_smoke_ok": extra.get("read_smoke_ok") is True,
     }
 
 

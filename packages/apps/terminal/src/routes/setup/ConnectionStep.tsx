@@ -66,7 +66,12 @@ function isWriteCapableBrokerAccount(account: BrokerAccount): boolean {
 }
 
 function isMondayReadConnectedAccount(account: BrokerAccount): boolean {
-  return account.status === "connected" && isMondayReadBroker(account.broker);
+  return (
+    account.source === "native"
+    && account.status === "connected"
+    && isMondayReadBroker(account.broker)
+    && account.read_smoke_ok === true
+  );
 }
 
 function isReadOnlyConnectedBrokerAccount(account: BrokerAccount): boolean {

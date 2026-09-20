@@ -502,6 +502,7 @@ function makeNativeAccount(overrides: Partial<BrokerAccount> = {}): BrokerAccoun
     error_message: null,
     is_primary: false,
     source: "native",
+    read_smoke_ok: true,
     ...overrides,
   };
 }

@@ -21,9 +21,12 @@ export function mondayReadConnectable(brokerId: string, catalogConnectable = fal
   return isMondayReadBroker(brokerId) || catalogConnectable;
 }
 
-export function mondayReadChrome(account: Pick<BrokerAccount, "broker" | "status">): string | null {
+export function mondayReadChrome(
+  account: Pick<BrokerAccount, "broker" | "status" | "read_smoke_ok">,
+): string | null {
   if (!isMondayReadBroker(account.broker)) return null;
   if (account.status !== "connected") return null;
+  if (account.read_smoke_ok !== true) return null;
   return CONNECTED_READ_LABEL;
 }
 

@@ -50,6 +50,8 @@ export interface BrokerAccount {
   source?: "gateway" | "native";
   expires_at?: number | null;
   read_only?: boolean;
+  /** True only after a successful Monday read-smoke (quotes/depth). */
+  read_smoke_ok?: boolean;
   needs_relogin?: boolean;
   login_retryable?: boolean;
 }

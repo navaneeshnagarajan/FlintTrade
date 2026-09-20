@@ -483,17 +483,21 @@ class KotakNeoClient:
         )
 
     # -- streaming + session ------------------------------------------------
-    # kotakneoapi 3.x retired the HS callback feed. Live stream uses SFeed
-    # (``create_websocket``). Tests inject a facade; Monday smoke uses REST.
+    # Monday Neo smoke is REST-only (quotes / depth / historical / option
+    # chain). kotakneoapi 3.x retired the HS callback feed. Live SFeed
+    # (``create_websocket``) is not wired in this tip — do not half-call it.
+
+    SFEED_NOT_WIRED = (
+        "Kotak Neo Monday path is REST-only (quotes, depth, historical, "
+        "option chain). Live SFeed create_websocket is not wired."
+    )
 
     def subscribe(self, instrument_tokens: list[dict[str, str]], is_index: bool, is_depth: bool) -> None:
-        create_ws = getattr(self._neo, "create_websocket", None)
         subscribe = getattr(self._neo, "subscribe", None)
-        if callable(create_ws) and not callable(subscribe):
-            raise BrokerError("Kotak Neo HS feed is retired — use SFeed create_websocket")
-        if not callable(subscribe):
-            raise BrokerError("Kotak Neo HS feed is retired — use SFeed create_websocket")
-        self._neo.subscribe(instrument_tokens=instrument_tokens, isIndex=is_index, isDepth=is_depth)
+        if callable(subscribe):
+            self._neo.subscribe(instrument_tokens=instrument_tokens, isIndex=is_index, isDepth=is_depth)
+            return
+        raise BrokerError(self.SFEED_NOT_WIRED)
 
     def un_subscribe(self, instrument_tokens: list[dict[str, str]], is_index: bool, is_depth: bool) -> None:
         self._neo.un_subscribe(instrument_tokens=instrument_tokens, isIndex=is_index, isDepth=is_depth)
@@ -944,12 +948,15 @@ class KotakNeoAdapter(BrokerAdapter):
             if not credentials.get(required):
                 raise BrokerError(f"Kotak Neo login requires {required!r}")
         client = None if self._client_factory is not None else await self._call(KotakNeoClient, dict(credentials))
+        expires_at = datetime.now(tz=UTC).timestamp() + 24 * 3600
         return Session(
             access_token=str(credentials.get("ucc", "")),
-            expires_at=datetime.now(tz=UTC).timestamp() + 24 * 3600,
+            expires_at=expires_at,
             account_id=str(credentials.get("ucc", "")),
             adapter_id="kotakneo",
             extra={"client": client},
+            # Monday fail-closed: Neo stays read-only until funded unlock.
+            read_only_until_at=expires_at,
         )
 
     def replay_credentials(self, credentials: dict, session: Session) -> dict:

@@ -15,10 +15,11 @@ describe("mondayReadChrome", () => {
     expect(isMondayReadBroker("dhan")).toBe(true);
     expect(isMondayReadBroker("kotakneo")).toBe(true);
     expect(isMondayReadBroker("upstox")).toBe(false);
-    expect(mondayReadChrome({ broker: "dhan", status: "connected" })).toBe(CONNECTED_READ_LABEL);
-    expect(mondayReadChrome({ broker: "kotakneo", status: "connected" })).toBe(CONNECTED_READ_LABEL);
-    expect(mondayReadChrome({ broker: "dhan", status: "disconnected" })).toBeNull();
-    expect(mondayReadChrome({ broker: "upstox", status: "connected" })).toBeNull();
+    expect(mondayReadChrome({ broker: "dhan", status: "connected", read_smoke_ok: true })).toBe(CONNECTED_READ_LABEL);
+    expect(mondayReadChrome({ broker: "kotakneo", status: "connected", read_smoke_ok: true })).toBe(CONNECTED_READ_LABEL);
+    expect(mondayReadChrome({ broker: "dhan", status: "connected" })).toBeNull();
+    expect(mondayReadChrome({ broker: "dhan", status: "disconnected", read_smoke_ok: true })).toBeNull();
+    expect(mondayReadChrome({ broker: "upstox", status: "connected", read_smoke_ok: true })).toBeNull();
     expect(mondayReadConnectable("kotakneo", false)).toBe(true);
     expect(mondayReadConnectable("dhan", false)).toBe(true);
     expect(mondayReadConnectable("groww", false)).toBe(false);
@@ -36,6 +37,7 @@ describe("mondayReadChrome", () => {
       is_primary: false,
       source: "native",
       read_only: true,
+      read_smoke_ok: true,
     });
     expect(neo).toContain(CONNECTED_READ_LABEL);
     expect(neo).toContain(API_SMOKE_LABEL);

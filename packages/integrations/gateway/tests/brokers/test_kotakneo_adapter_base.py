@@ -114,6 +114,8 @@ async def _session(adapter):
 async def test_login_returns_session():
     session = await _session(_adapter(MockNeo()))
     assert session.adapter_id == "kotakneo" and session.account_id == "U1"
+    assert session.is_read_only is True
+    assert session.read_only_until_at == session.expires_at
 
 
 @pytest.mark.asyncio
@@ -382,3 +384,16 @@ async def test_v3_historical_and_option_chain():
     assert chain.strikes[0].strike_price == 25000.0
     assert ("historical_data", ("nse_cm|11915", "D", "2026-09-01", "2026-09-20")) in mock.calls
     assert ("option_chain", ("nse_fo", "NIFTY", "2026-09-24")) in mock.calls
+
+
+def test_sfeed_only_facade_rejects_subscribe_as_rest_only():
+    from flinttrade_gateway.brokers.kotakneo import KotakNeoClient
+
+    class _SFeedOnly:
+        def create_websocket(self):
+            raise AssertionError("create_websocket must not be called")
+
+    facade = KotakNeoClient.__new__(KotakNeoClient)
+    facade._neo = _SFeedOnly()
+    with pytest.raises(BrokerError, match="REST-only"):
+        facade.subscribe([], False, False)

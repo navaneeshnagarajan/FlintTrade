@@ -17,6 +17,7 @@ CHROME_CONNECTED_READ = "Connected (read)"
 CHROME_API_SMOKE = "API smoke"
 NEO_OPERATOR_COPY = "Live read only until funded unlock."
 MONDAY_READ_BROKERS = frozenset({"dhan", "kotakneo"})
+READ_SMOKE_EXTRA_KEY = "read_smoke_ok"
 WRITE_VERBS = frozenset({
     "place_order",
     "modify_order",
@@ -75,6 +76,43 @@ def monday_read_connectable(broker_id: str, catalog_connectable: bool = False) -
     if broker_id in MONDAY_READ_BROKERS:
         return True
     return bool(catalog_connectable)
+
+
+def stamp_monday_read_smoke(session: Any, ok: bool) -> None:
+    """Persist smoke evidence on the session. Chrome must read this flag."""
+    extra = getattr(session, "extra", None)
+    if extra is None:
+        try:
+            session.extra = {}
+        except Exception:  # noqa: BLE001 — read-only handle; skip stamp
+            return
+        extra = session.extra
+    extra[READ_SMOKE_EXTRA_KEY] = bool(ok)
+
+
+def monday_read_smoke_ok(session: Any) -> bool:
+    extra = getattr(session, "extra", None) or {}
+    return extra.get(READ_SMOKE_EXTRA_KEY) is True
+
+
+async def probe_monday_session_reads(
+    adapter: Any,
+    session: Any,
+    *,
+    symbols: list[str] | None = None,
+) -> bool:
+    """REST quotes + depth against an already-logged-in session. Never a write."""
+    symbols = list(symbols or ["NSE:RELIANCE"])
+    try:
+        await adapter.quotes(session, symbols)
+        depth = getattr(adapter, "market_depth", None)
+        if callable(depth):
+            await depth(session, symbols)
+    except Exception:  # noqa: BLE001 — failed smoke never paints Connected
+        stamp_monday_read_smoke(session, False)
+        return False
+    stamp_monday_read_smoke(session, True)
+    return True
 
 
 def monday_read_chrome(broker_id: str, *, connected: bool, reads_ok: bool) -> str | None:
@@ -163,4 +201,6 @@ async def run_monday_read_smoke(
     chrome = monday_read_chrome(broker_id, connected=login_step.ok, reads_ok=ok) or ""
     if ok:
         chrome = CHROME_CONNECTED_READ
+    if session is not None:
+        stamp_monday_read_smoke(session, ok)
     return ReadSmokeResult(broker_id, ok, chrome, steps, operator_copy=_neo_copy(broker_id))

@@ -294,6 +294,32 @@ describe("ConnectionStep", () => {
     expect(screen.getByRole("button", { name: /connect dhan or neo for connected \(read\)/i })).toBeDisabled();
   });
 
+  it("ignores gateway Dhan or Neo rows on the native tab", () => {
+    act(() => {
+      useBrokerStore.setState({
+        activeAccountId: null,
+        accounts: [
+          {
+            account_id: "N1",
+            broker: "kotakneo",
+            label: "Neo via OpenAlgo",
+            status: "connected",
+            connected_at: null,
+            error_message: null,
+            is_primary: false,
+            source: "gateway",
+            read_only: true,
+            read_smoke_ok: true,
+          },
+        ],
+      });
+    });
+
+    render(<ConnectionStep onComplete={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
+    expect(screen.getByRole("button", { name: /connect dhan or neo for connected \(read\)/i })).toBeDisabled();
+  });
+
   it("allows continuing when Dhan or Neo is Connected (read)", () => {
     const onComplete = vi.fn();
     act(() => {
@@ -310,6 +336,7 @@ describe("ConnectionStep", () => {
             is_primary: false,
             source: "native",
             read_only: true,
+            read_smoke_ok: true,
           },
         ],
       });

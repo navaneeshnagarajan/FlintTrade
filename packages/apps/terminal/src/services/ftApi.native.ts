@@ -124,6 +124,8 @@ export interface NativeAccount {
   has_session?: boolean;
   expires_at?: number | null;
   read_only?: boolean;
+  /** True only after a successful Monday REST read-smoke (quotes/depth). */
+  read_smoke_ok?: boolean;
   /** Set when the last credential replay failed — the stored material is
    * stale/single-use and the operator must re-authenticate (G7). */
   needs_relogin?: boolean;

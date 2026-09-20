@@ -26,7 +26,10 @@ from flinttrade_gateway.monday_read_smoke import (
     WRITE_VERBS,
     monday_read_chrome,
     monday_read_connectable,
+    monday_read_smoke_ok,
+    probe_monday_session_reads,
     run_monday_read_smoke,
+    stamp_monday_read_smoke,
 )
 
 
@@ -164,3 +167,21 @@ def test_neo_has_no_practice_sandbox_copy() -> None:
     assert monday_read_connectable("kotakneo", False) is True
     assert monday_read_connectable("dhan", False) is True
     assert monday_read_connectable("groww", False) is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_chrome_requires_stamped_read_smoke() -> None:
+    class _Session:
+        def __init__(self) -> None:
+            self.extra: dict = {}
+
+    adapter = _SmokeAdapter()
+    session = _Session()
+    assert monday_read_smoke_ok(session) is False
+    assert monday_read_chrome("kotakneo", connected=True, reads_ok=False) is None
+    ok = await probe_monday_session_reads(adapter, session)
+    assert ok is True
+    assert monday_read_smoke_ok(session) is True
+    stamp_monday_read_smoke(session, False)
+    assert monday_read_smoke_ok(session) is False
