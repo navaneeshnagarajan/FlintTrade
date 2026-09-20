@@ -92,6 +92,15 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Leverage tab content or honest empty (FT-SET-004).**
+  `/settings#leverage` shows real leverage content when
+  the broker snapshot is available. When leverage cannot
+  be shown — unsupported broker, missing snapshot, or
+  load failure — the pane shows the honest empty
+  `Leverage settings unavailable.` plus **Retry**.
+  Selecting the Leverage tab never leaves a highlighted
+  tab over a blank content pane.
+
 - **Kill All fail-closed when risk runtime unavailable (FT-DITTO-003).**
   Whenever the Ditto risk runtime is unavailable —
   including Explore `/ditto` Risk — **Kill All

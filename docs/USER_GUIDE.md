@@ -1033,6 +1033,14 @@ Live and Practice still disable editing on a real load failure ("AI
 settings could not be loaded") to protect a saved configuration, and
 offer **Retry**.
 
+`/settings#leverage` always shows real leverage content or an honest
+empty. When the broker snapshot is available, the tiles show the
+current margin or leverage figures (read-only — change leverage on the
+broker platform). When leverage cannot be shown — unsupported broker,
+missing snapshot, or load failure — the pane shows
+`Leverage settings unavailable.` plus **Retry**. Selecting the Leverage
+tab never leaves a highlighted tab over a blank content pane.
+
 Settings → **Report Bug** prepares a GitHub issue without background telemetry.
 The form keeps runtime/error diagnostics out of the public draft by default;
 enable the diagnostic-summary switch only after reviewing the displayed
@@ -1160,6 +1168,13 @@ inside `vite.config.ts` and inherits that alias — there is no separate
 `workspace.json` may be read-only or in a folder the process cannot write
 to. Check the path printed in the FlintTrade backend startup log and
 ensure the running user has write access.
+
+### "Leverage settings unavailable." or a blank Leverage pane
+
+A highlighted Leverage tab on `/settings#leverage` must never sit over a
+blank pane. The pane shows real leverage content, or the honest empty
+`Leverage settings unavailable.` plus **Retry**. Leverage is a read-only
+broker snapshot — change it on the broker platform, not in FlintTrade.
 
 ### Where to get help
 
