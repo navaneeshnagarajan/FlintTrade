@@ -210,9 +210,10 @@ reads as a working operator path.
 ### Steps
 
 1. **Use the OpenAlgo path.** The community-tested bridge is the working
-   operator path. The native gateway is catalogued (Dhan and Upstox are
-   evidence-gated as connectable; brokers shown as "coming soon" stay
-   disabled) but its HTTP connect and read surfaces are frozen.
+   operator path. The native gateway is catalogued (Dhan, Upstox, and
+   Kotak Neo are evidence-gated as connectable; Kotak Neo is Connected
+   (read) / API smoke only; Groww and INDmoney stay disabled / coming
+   soon) but its HTTP connect and read surfaces are frozen.
 2. **Configure your broker in OpenAlgo.** Open `http://localhost:5000`,
    choose your broker from the dropdown, paste your API key and secret, and
    complete the broker's login flow (TOTP / OAuth / OTP — depends on the
