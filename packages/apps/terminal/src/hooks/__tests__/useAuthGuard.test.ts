@@ -127,6 +127,7 @@ vi.mock("@/stores/authStore", async () => {
 // Import after mocks
 // ---------------------------------------------------------------------------
 
+import { AUTH_SESSION_STORAGE_KEY, writePersistedAuthSession } from "@/lib/homeEntry";
 import { useAuthGuard } from "../useAuthGuard";
 
 // ---------------------------------------------------------------------------
@@ -147,6 +148,41 @@ describe("useAuthGuard", () => {
     renderHook(() => useAuthGuard());
 
     expect(mockNavigate).toHaveBeenCalledWith("/welcome", { replace: true });
+  });
+
+  it("restores a tab-scoped signed-in session on /home and skips the Welcome Back gate", async () => {
+    authState.status = "unknown";
+    writePersistedAuthSession({
+      token: "jwt-alice",
+      username: "alice",
+      expiresAt: "2099-01-01T02:30:00Z",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const { result } = renderHook(() => useAuthGuard());
+
+    await waitFor(() => {
+      expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+        "jwt-alice",
+        "alice",
+        "2099-01-01T02:30:00Z",
+        { status: "unknown", principal: null, generation: 0 },
+      );
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.current.isLoading).toBe(false);
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(mockSetLoggedOut).not.toHaveBeenCalled();
+  });
+
+  it("still sends a visitor with no tab session to the Welcome Back gate", () => {
+    authState.status = "logged-out";
+    sessionStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+    renderHook(() => useAuthGuard());
+
+    expect(mockNavigate).toHaveBeenCalledWith("/welcome", { replace: true });
+    expect(mockSetLoggedInIfCurrent).not.toHaveBeenCalled();
   });
 
   it("redirects to /welcome when status is setup-required", () => {

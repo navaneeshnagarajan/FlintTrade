@@ -160,6 +160,8 @@ vi.mock("@/routes/LoginRoute", () => ({
 import { waitFor } from "@testing-library/react";
 import { BRAND_REVEAL_TIMELINE, BRAND_SLOGAN_WORDS } from "@flinttrade/design-system/brand";
 
+import { writePersistedAuthSession } from "@/lib/homeEntry";
+
 import WelcomeRoute, { CINEMATIC_STEP_SCHEDULE, SLOGAN } from "../WelcomeRoute";
 
 // ---------------------------------------------------------------------------
@@ -207,6 +209,29 @@ describe("WelcomeRoute", () => {
 
     expect(mockNavigate).not.toHaveBeenCalledWith("/setup", { replace: true });
     localStorage.removeItem("flinttrade:setup-progress");
+  });
+
+  it("restores a tab-scoped signed-in session before the public auth probe", async () => {
+    authState.status = "unknown";
+    writePersistedAuthSession({
+      token: "jwt-alice",
+      username: "alice",
+      expiresAt: "2099-01-01T02:30:00Z",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    render(<WelcomeRoute />);
+
+    await waitFor(() =>
+      expect(mockSetLoggedIn).toHaveBeenCalledWith(
+        "jwt-alice",
+        "alice",
+        "2099-01-01T02:30:00Z",
+      ),
+    );
+    expect(mockSetLoggedOut).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   it("restores sample-data Explore on Welcome remount when the hatch session is active", async () => {

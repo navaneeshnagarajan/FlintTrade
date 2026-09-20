@@ -517,7 +517,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP, or PIN). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Explore stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
 | `/setup` | First-time 7-step linear wizard (Account → optional authenticator → Persona → Broker → Trading → Risk → Choose Mode). After account create, **Set up later** continues Explore/Practice without enrolling 2FA. Daily login stays password-only until enrolment; Live still requires the authenticator and PIN. `/setup-account` is a compatibility alias. |
-| `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. |
+| `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
 | `/invest` | Portfolio-record workspace — holdings, net worth, SIPs, mutual-fund tracker, and stock baskets. Deep-link hashes such as `#holdings`, `#sip`, `#networth`, `#mutual-funds`, `#mf-optimizer`, and `#basket` open the matching tab on load; an unknown hash falls back to Dashboard. |
@@ -527,6 +527,12 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/ai` | AI Centre — chat, Suggest, signals, sentiment, RAG. |
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
+
+`/home` is the canonical Home / Welcome dashboard. A signed-in
+operator who opens it (address bar, refresh, or same-tab bookmark)
+sees the same Home as sidebar Home, Alt+H, or the TopBar logo —
+never the password Welcome Back gate. That gate stays on `/welcome`
+for unauthenticated visitors only (FT-HOME-003).
 
 On Explore `/invest#mutual-funds`, Mutual Fund Explorer labels the static
 fixture `Sample NAVs · as of 10-Sep-2026` (from `EXPLORE_SAMPLE_NAV_DATE`)
