@@ -22,13 +22,12 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
+  useTable,
   type ColumnDef,
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";
+import { sortedTableFeatures } from "@/lib/tableFeatures";
 import { RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/button";
@@ -178,7 +177,7 @@ function EtfCard({ row }: { row: EtfRow }) {
 
 // ─── Column definitions ───────────────────────────────────────────────────────
 
-function buildColumns(): ColumnDef<EtfRow>[] {
+function buildColumns(): ColumnDef<typeof sortedTableFeatures, EtfRow>[] {
   return [
     {
       accessorKey: "symbol",
@@ -278,13 +277,12 @@ export function EtfTab() {
     });
   }, [quotes]);
 
-  const table = useReactTable({
+  const table = useTable({
+    features: sortedTableFeatures,
     data: rows,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
   });
 
   // ─── Loading state ──────────────────────────────────────────────────────

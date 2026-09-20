@@ -14,7 +14,7 @@ import {
   pcrLean,
   type OiPcrStripInput,
   type OiProfileBar,
-} from "./oiPcrStrip";
+} from "./oiPcrStripData";
 
 function pcrVariant(pcr: number): "bullish" | "bearish" | "atm" {
   const lean = pcrLean(pcr);

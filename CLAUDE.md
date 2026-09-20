@@ -89,7 +89,7 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `gateway` | integrations | Py | Native broker gateway — `BrokerAdapter` protocol, `BrokerRouter`, `BROKER_CATALOG` (37 brokers), encrypted credential vault, WS bridge, OpenAlgo bridge adapter |
 | `webhooks` | integrations | Py | Generic HMAC-signed custom webhooks + flow builder (the TradingView/ChartInk/GoCharting parsers and the n8n/WhatsApp bridges were removed on 2026-07-26; a retired provider source now 404s) |
 | `terminal` | apps | TS/React | SPA: FlexLayout workspace, 71 widgets, FDC3 channel bus, routes — single source of truth for UI |
-| `desktop` | apps | TS/Electron | Sandboxed Electron 43 shell — verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin |
+| `desktop` | apps | TS/Electron | Sandboxed Electron 44 shell — verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin |
 | `site` | apps | TS/Next | Next.js + fumadocs public site, generated docs, docs MCP |
 
 (`chrome-extension` was dropped in the v0.6.0 restructure. The Tauri shell was
@@ -109,6 +109,7 @@ These cause real failures, not just style nits:
 - **British English** in docstrings, comments, and **user-visible strings** (behaviour, organise, colour, centred…). Code identifiers keep upstream spelling. Indian market terms always win: "expiry" (never "expiration"), "lakh", "crore", "scrip".
 - **Conventional Commits** are mandatory (`feat|fix|docs|test|chore|refactor|perf|ci(scope): …`). Scope is the package name or focus area.
 - **Never** `git add -A` / `git add .` — stage explicitly. Never commit `.env`, API keys, broker account names, fund amounts, order IDs, or personal hostnames/IPs. Never push without explicit permission, and never with `--no-verify` or `dangerouslySkipPermissions`.
+- Before opening or merging any PR, fetch `origin`, verify `origin/main` against the live remote, and bring local `main` and the PR branch up to date with affected verification repeated. A stale fetched base is not sufficient, and this check grants no push or merge permission.
 - Every new widget is a workspace (FlexLayout) panel registered in [packages/apps/terminal/src/layout/widgetFactory.tsx](packages/apps/terminal/src/layout/widgetFactory.tsx) with a co-located `<Name>.test.tsx`.
 - **Don't touch OpenAlgo's SQLite directly** — concurrent access corrupts it. Go through the REST API; `flinttrade_core.openalgo_client` is the only path in.
 - **Port 5100 is FlintTrade's backend, not OpenAlgo.** OpenAlgo uses 5000-5009. Don't propose consolidating.

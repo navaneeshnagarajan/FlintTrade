@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "Technical analysis indicators — pure-NumPy batch (110 exports), streaming classes, Pine Script conversion"
 requires-python = ">=3.12"
 dependencies = [
-    "numpy>=2.5.2",
+    "numpy>=2.5.3",
     "pydantic>=2.13.5",
     "numba>=0.66.0; extra == 'numba'",
 ]

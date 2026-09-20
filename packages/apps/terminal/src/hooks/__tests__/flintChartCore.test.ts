@@ -274,6 +274,7 @@ describe("core Flint Lightweight Charts factory", () => {
     expect(FLINT_PLOTLY_DEFAULT_CONFIG).toMatchObject({
       displayModeBar: true,
       displaylogo: false,
+      showSendToCloud: false,
       responsive: true,
     });
 

@@ -303,7 +303,9 @@ class StrategyOptimiser:
 
         study = optuna.create_study(
             direction="minimize",
-            sampler=optuna.samplers.TPESampler(seed=42),
+            # Keep independent, sequential TPE when upgrading to Optuna 5,
+            # whose defaults enable multivariate TPE and the constant liar.
+            sampler=optuna.samplers.TPESampler(seed=42, multivariate=False, constant_liar=False),
         )
 
         def objective(trial: optuna.Trial) -> float:

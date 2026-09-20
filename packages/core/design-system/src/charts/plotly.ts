@@ -42,6 +42,8 @@ export type FlintPlotlyLayout = Record<string, unknown> & {
 export const FLINT_PLOTLY_DEFAULT_CONFIG = {
   displayModeBar: true,
   displaylogo: false,
+  // Financial chart data stays local; Plotly 4 enables cloud sharing by default.
+  showSendToCloud: false,
   responsive: true,
   modeBarButtonsToRemove: ["toImage", "sendDataToCloud", "lasso2d", "select2d"],
 } as const

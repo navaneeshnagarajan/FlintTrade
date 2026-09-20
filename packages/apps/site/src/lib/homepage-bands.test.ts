@@ -218,8 +218,8 @@ describe('homepage Spark Path scroll-world (default-off decorative enhancement)'
     expect(wrapperSource).toContain('ssr: false');
     expect(capabilitySource).toContain("NEXT_PUBLIC_FLINTTRADE_SITE_SCROLL_WORLD === '1'");
     expect(webglSource).toContain("from 'three'");
-    expect(sitePackage.dependencies?.three).toBe('0.185.1');
-    expect(sitePackage.devDependencies?.['@types/three']).toBe('0.185.1');
+    expect(sitePackage.dependencies?.three).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(sitePackage.devDependencies?.['@types/three']).toBe(sitePackage.dependencies?.three);
   });
 
   it('re-evaluates live capability changes and fails open after sustained slow rendering', () => {

@@ -7,12 +7,10 @@ import { Clock, Search, RefreshCw, Briefcase, FileSpreadsheet } from "lucide-rea
 import {
   type ColumnDef,
   flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getSortedRowModel,
   type SortingState,
-  useReactTable,
+  useTable,
 } from "@tanstack/react-table";
+import { filteredSortedTableFeatures } from "@/lib/tableFeatures";
 import {
   Table,
   TableBody,
@@ -133,7 +131,7 @@ function HoldingsWidget(_props: WidgetProps) {
     }
   }, [positionsData, rows]);
 
-  const columns = useMemo<ColumnDef<HoldingRow>[]>(
+  const columns = useMemo<ColumnDef<typeof filteredSortedTableFeatures, HoldingRow>[]>(
     () => [
       {
         accessorKey: "symbol",
@@ -201,15 +199,13 @@ function HoldingsWidget(_props: WidgetProps) {
     [],
   );
 
-  const table = useReactTable({
+  const table = useTable({
+    features: filteredSortedTableFeatures,
     data: rows,
     columns,
     state: { sorting, globalFilter },
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
   });
 
   return (

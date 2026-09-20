@@ -9,7 +9,7 @@ Read `packages/apps/terminal/CLAUDE.md` first. This is the React frontend.
 - Components: shadcn/ui + Radix (accessible, copy-paste ownership)
 - State: Zustand 5 (UI) + Jotai (market data atoms) + TanStack Query 5 (REST cache)
 - Charting: Lightweight Charts v5
-- Data grids: Glide Data Grid (streaming) + TanStack Table v8 (static)
+- Data grids: Glide Data Grid (streaming) + TanStack Table v9 (static)
 - Branch: main (pre-release, all commits to main)
 
 ## Widgets (69 TSX)

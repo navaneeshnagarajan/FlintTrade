@@ -5,6 +5,7 @@
 import { Settings, GitBranch, ExternalLink } from "lucide-react";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
 import { widgetCatalog } from "@/layout/widgetFactory";
+import { dependencies } from "../../../package.json";
 import { SectionTitle } from "./shared";
 
 export function AboutSection() {
@@ -43,6 +44,16 @@ export function AboutSection() {
           >
             <GitBranch size={12} className="flex-none text-text-muted" />
             <span>GitHub — navaneeshnagarajan/FlintTrade</span>
+            <ExternalLink size={10} className="ml-auto text-text-muted flex-none" />
+          </a>
+          <a
+            href="https://flinttrade.vercel.app/docs/tech-stack"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-3 py-2 rounded border border-border-default bg-surface-card hover:bg-surface-hover text-xs text-text-secondary hover:text-text-primary transition-colors"
+          >
+            <ExternalLink size={12} className="flex-none text-text-muted" />
+            <span>Technology stack — versions and dependency purposes</span>
             <ExternalLink size={10} className="ml-auto text-text-muted flex-none" />
           </a>
           <a
@@ -87,13 +98,38 @@ export function AboutSection() {
             <tbody>
               {[
                 ["Version",  APP_VERSION_TAG],
-                ["React",    "19"          ],
-                ["FlexLayout", "0.10"      ],
                 ["License",  "AGPL-3.0"   ],
               ].map(([key, val]) => (
                 <tr key={key} className="border-b border-border-default last:border-0">
                   <td className="px-3 py-1.5 text-text-muted w-32">{key}</td>
                   <td className="px-3 py-1.5 text-text-primary font-mono">{val}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">Terminal dependencies</p>
+        <p className="text-xs text-text-secondary">
+          Declared version ranges from this build. The lockfile records exact resolved versions.
+        </p>
+        <div className="rounded border border-border-default overflow-hidden">
+          <table className="w-full text-xs">
+            <tbody>
+              {[
+                ["React", dependencies.react, "Interface"],
+                ["FlexLayout", dependencies["flexlayout-react"], "Workspace panels"],
+                ["TanStack Query", dependencies["@tanstack/react-query"], "API data cache"],
+                ["TanStack Table", dependencies["@tanstack/react-table"], "Financial tables"],
+                ["Lightweight Charts", dependencies["lightweight-charts"], "Price charts"],
+                ["Plotly", dependencies["plotly.js-dist-min"], "Analytical charts"],
+              ].map(([name, version, purpose]) => (
+                <tr key={name} className="border-b border-border-default last:border-0">
+                  <th scope="row" className="px-3 py-1.5 text-left font-normal text-text-muted">{name}</th>
+                  <td className="px-3 py-1.5 text-text-primary font-mono">{version}</td>
+                  <td className="px-3 py-1.5 text-text-secondary">{purpose}</td>
                 </tr>
               ))}
             </tbody>

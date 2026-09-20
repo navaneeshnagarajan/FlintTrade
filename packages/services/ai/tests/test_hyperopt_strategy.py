@@ -147,6 +147,49 @@ def _lightgbm_available() -> bool:
 class TestStrategyOptimiser:
     """Tests for the StrategyOptimiser class."""
 
+    def test_seeded_tpe_preserves_independent_search_after_startup(self, monkeypatch) -> None:
+        """The Optuna 5 upgrade retains the established sequential search."""
+        pytest.importorskip("optuna")
+        optimiser = StrategyOptimiser(bars=_make_bars(200), lookahead=3)
+        monkeypatch.setattr(
+            optimiser,
+            "_evaluate",
+            lambda params, loss_fn: (params["num_leaves"] - 40) ** 2 + (params["learning_rate"] - 0.1) ** 2,
+        )
+        monkeypatch.setattr(optimiser, "_train_final", lambda params: None)
+
+        # Trials 0-9 use random startup sampling. These next two trials were
+        # recorded with Optuna 4.9.0, seed 42 and the same synthetic objective;
+        # checking only the first ten would miss the changed Optuna 5 defaults.
+        expected = [
+            {
+                "num_leaves": 122,
+                "learning_rate": 0.010206070557577017,
+                "n_estimators": 216,
+                "min_child_samples": 5,
+                "subsample": 0.5105579858093708,
+                "colsample_bytree": 0.7627332534279544,
+                "reg_alpha": 4.3444691085504035,
+                "reg_lambda": 0.01620963590242718,
+            },
+            {
+                "num_leaves": 43,
+                "learning_rate": 0.0552655524426594,
+                "n_estimators": 227,
+                "min_child_samples": 16,
+                "subsample": 0.7628614131457857,
+                "colsample_bytree": 0.9902698740804924,
+                "reg_alpha": 9.393382777352836e-05,
+                "reg_lambda": 7.3210985188372955e-06,
+            },
+        ]
+        result = optimiser.optimise(n_trials=12, loss_fn="accuracy")
+
+        assert result.n_trials == len(result.all_trials) == 12
+        for (actual, _), prior in zip(result.all_trials[10:], expected, strict=True):
+            assert actual == pytest.approx(prior)
+        assert result.best_score == min(score for _, score in result.all_trials)
+
     def test_init_insufficient_bars(self) -> None:
         bars = _make_bars(10)
         optimiser = StrategyOptimiser(bars=bars)

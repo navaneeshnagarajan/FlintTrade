@@ -222,6 +222,36 @@ describe("OrdersWidget", () => {
     expect(screen.getByText("complete")).toBeInTheDocument();
   });
 
+  it("sorts decimal order prices and quantities numerically while preserving broker display values", () => {
+    mockUseOrders.mockReturnValue(queryResult({
+      data: [
+        { ...COMPLETE_ORDER, symbol: "HALF", price: "100.5", quantity: "2" },
+        { ...COMPLETE_ORDER, symbol: "QUARTER", price: "100.25", quantity: "10" },
+        { ...COMPLETE_ORDER, symbol: "MARKET", price: 0, quantity: "5" },
+      ],
+    }));
+    renderWidget();
+    const symbols = () => Array.from(screen.getByRole("table").querySelectorAll("tbody tr"))
+      .map((row) => row.querySelector("td")?.textContent);
+
+    const priceHeader = screen.getByRole("columnheader", { name: /price/i });
+    fireEvent.click(priceHeader);
+    expect(symbols()).toEqual(["HALF", "QUARTER", "MARKET"]);
+    fireEvent.click(priceHeader);
+    expect(symbols()).toEqual(["MARKET", "QUARTER", "HALF"]);
+    expect(screen.getByText("100.5")).toBeInTheDocument();
+    expect(screen.getByText("100.25")).toBeInTheDocument();
+    expect(screen.getByText("MKT")).toBeInTheDocument();
+
+    const quantityHeader = screen.getByRole("columnheader", { name: /qty/i });
+    fireEvent.click(quantityHeader);
+    expect(symbols()).toEqual(["QUARTER", "MARKET", "HALF"]);
+    fireEvent.click(quantityHeader);
+    expect(symbols()).toEqual(["HALF", "MARKET", "QUARTER"]);
+    expect(mockModifyOrder).not.toHaveBeenCalled();
+    expect(mockCancelOrder).not.toHaveBeenCalled();
+  });
+
   it("shows the header with order count", () => {
     mockUseOrders.mockReturnValue(
       queryResult({

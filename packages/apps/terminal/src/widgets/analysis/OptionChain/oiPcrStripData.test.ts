@@ -12,7 +12,7 @@ import {
   optionOpenInterest,
   pcrLean,
   strikeHasPositiveOi,
-} from "./oiPcrStrip";
+} from "./oiPcrStripData";
 import type { StrikeRow } from "./types";
 
 const NIFTY_EXPIRY = "2026-04-10";

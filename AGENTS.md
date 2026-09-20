@@ -31,6 +31,8 @@ Run focused tests before broad suites, for example `uv run pytest packages/integ
 
 Follow Conventional Commits, as used in history: `feat(terminal): add sector rotation widget`, `fix(tests,docs): align project-structure test`, or `chore(repo): untrack ignored folders`. Scope should be a package or focus area. Stage explicit files only; do not use `git add -A` or `git add .`. PRs should describe intent, link issues, list tests run, include screenshots for UI changes, and update docs when behaviour changes.
 
+Before opening or merging any PR, fetch `origin`, verify `origin/main` against the live remote, and check whether local `main` and the PR branch include it. Bring the work up to date and repeat affected verification before proceeding; never rely on a previously fetched base. Updating the base does not grant push or merge permission.
+
 ## Agentic Workflow
 
 - **Pipeline:** build agents (Codex or claude) → claude ultracode multi-agent review panels → maintainer. After any build/commit wave, run a full multi-agent audit before declaring done — fix everything found, then re-audit.
