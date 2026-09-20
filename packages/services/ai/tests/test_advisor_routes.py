@@ -356,7 +356,7 @@ class TestAdvisorPracticeSandboxBook:
         assert "NIFTY" in book_msgs[0].content
 
     def test_live_jwt_does_not_inject_practice_sandbox_book(self, practice_app) -> None:
-        """Live AI-on-broker reads are FT-MONDAY-003 — not injected here."""
+        """Live JWTs do not receive the paper SandboxEngine book."""
         mock_llm = MagicMock()
         mock_llm.chat.return_value = _make_llm_response()
         client = practice_app.test_client()
@@ -375,3 +375,138 @@ class TestAdvisorPracticeSandboxBook:
             "Practice SandboxEngine book" not in getattr(message, "content", "")
             for message in conversation
         )
+
+
+# ---------------------------------------------------------------------------
+# FT-MONDAY-003 — native Connected (read) feeds for AI
+# ---------------------------------------------------------------------------
+
+
+class TestAdvisorNativeLiveReadContext:
+    """Chat may analyse Dhan/Neo Connected (read) feeds; never place Live."""
+
+    @staticmethod
+    def _headers(mode: str) -> dict[str, str]:
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("ft-monday-003-ai", mode=mode, live_mode_unlocked=False)
+        return {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+    @staticmethod
+    def _feed_rows() -> list[dict]:
+        return [
+            {
+                "broker_id": "dhan",
+                "account_id": "Main",
+                "chrome": "Connected (read)",
+                "ok": True,
+                "quotes": [{"symbol": "NSE:RELIANCE", "ltp": 1400.0}],
+                "depth": None,
+                "operator_copy": None,
+                "error": None,
+            },
+            {
+                "broker_id": "kotakneo",
+                "account_id": "Neo",
+                "chrome": "Connected (read)",
+                "ok": True,
+                "quotes": [{"symbol": "NSE:RELIANCE", "ltp": 1401.0}],
+                "depth": None,
+                "operator_copy": "Live read only until funded unlock.",
+                "error": None,
+            },
+        ]
+
+    def test_practice_jwt_injects_native_read_feeds(self, app) -> None:
+        """A Practice JWT plus stamped Connected (read) feeds reach the LLM."""
+        app.config["MONDAY_AI_READ_FEED_COLLECTOR"] = self._feed_rows
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = _make_llm_response(content="Reliance is 1400")
+        client = app.test_client()
+        with (
+            patch("flinttrade_ai.advisor_routes._is_llm_configured", return_value=True),
+            patch("flinttrade_ai.advisor_routes.LLMClient", return_value=mock_llm),
+        ):
+            resp = client.post(
+                "/api/v1/advisor",
+                json={"messages": [{"role": "user", "content": "What is RELIANCE?"}]},
+                headers=self._headers("practice"),
+            )
+        assert resp.status_code == 200
+        conversation = mock_llm.chat.call_args[0][0]
+        feed_msgs = [
+            message
+            for message in conversation
+            if "Native Connected (read) feeds" in getattr(message, "content", "")
+        ]
+        assert feed_msgs, "Connected (read) quotes must be visible to the advisor"
+        assert "dhan:Main" in feed_msgs[0].content
+        assert "1400.0" in feed_msgs[0].content
+        assert "not Neo Practice" in feed_msgs[0].content
+        assert "Live read only until funded unlock." in feed_msgs[0].content
+
+    def test_live_jwt_injects_native_reads_without_practice_book(self, app) -> None:
+        """Live JWT may read Connected (read) feeds; paper book stays dark."""
+        app.config["MONDAY_AI_READ_FEED_COLLECTOR"] = self._feed_rows
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = _make_llm_response()
+        client = app.test_client()
+        with (
+            patch("flinttrade_ai.advisor_routes._is_llm_configured", return_value=True),
+            patch("flinttrade_ai.advisor_routes.LLMClient", return_value=mock_llm),
+        ):
+            resp = client.post(
+                "/api/v1/advisor",
+                json={"messages": [{"role": "user", "content": "Read the book"}]},
+                headers=self._headers("live"),
+            )
+        assert resp.status_code == 200
+        conversation = mock_llm.chat.call_args[0][0]
+        contents = [getattr(message, "content", "") for message in conversation]
+        assert any("Native Connected (read) feeds" in text for text in contents)
+        assert all("Practice SandboxEngine book" not in text for text in contents)
+
+    def test_explore_jwt_does_not_inject_native_reads(self, app) -> None:
+        """Explore stays sample-only — no Connected (read) analysis context."""
+        app.config["MONDAY_AI_READ_FEED_COLLECTOR"] = self._feed_rows
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = _make_llm_response()
+        client = app.test_client()
+        with (
+            patch("flinttrade_ai.advisor_routes._is_llm_configured", return_value=True),
+            patch("flinttrade_ai.advisor_routes.LLMClient", return_value=mock_llm),
+        ):
+            resp = client.post(
+                "/api/v1/advisor",
+                json={"messages": [{"role": "user", "content": "Any quotes?"}]},
+                headers=self._headers("explore"),
+            )
+        assert resp.status_code == 200
+        conversation = mock_llm.chat.call_args[0][0]
+        assert all(
+            "Native Connected (read) feeds" not in getattr(message, "content", "")
+            for message in conversation
+        )
+
+    def test_llm_unconfigured_never_collects_native_reads(self, app) -> None:
+        """Honesty gate: no LLM means 503 before any broker read."""
+        collected = {"called": False}
+
+        def _boom() -> list[dict]:
+            collected["called"] = True
+            raise AssertionError("unconfigured chat must not read broker feeds")
+
+        app.config["MONDAY_AI_READ_FEED_COLLECTOR"] = _boom
+        client = app.test_client()
+        with patch("flinttrade_ai.advisor_routes._is_llm_configured", return_value=False):
+            resp = client.post(
+                "/api/v1/advisor",
+                json={"messages": [{"role": "user", "content": "Any quotes?"}]},
+                headers=self._headers("practice"),
+            )
+        assert resp.status_code == 503
+        assert collected["called"] is False
+        assert "LLM not configured" in resp.get_json()["message"]

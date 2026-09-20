@@ -5,6 +5,7 @@ Provides AI advisor chat (single-turn and streaming SSE) and advisor status.
 
 from __future__ import annotations
 
+import asyncio
 import json as _json
 import logging
 import os
@@ -25,7 +26,10 @@ _SYSTEM_PROMPT = (
     "options strategies, technical indicators, and portfolio management. "
     "Be concise, accurate, and always remind users that your responses are "
     "informational — not financial advice. Never recommend specific trades "
-    "without proper risk disclaimers."
+    "without proper risk disclaimers. Practice SandboxEngine fills and native "
+    "Connected (read) feeds are analysis context only — not a live order path "
+    "and not a guarantee of profitable alphas. Never place or claim to place "
+    "a Live order. Kotak Neo has no Practice sandbox."
 )
 
 
@@ -117,8 +121,9 @@ def _jwt_mode() -> str | None:
 def _practice_sandbox_book_context() -> str:
     """Return the Practice SandboxEngine book when the JWT is Practice.
 
-    Desk/AI read the same paper fills that ``orders/place`` recorded. Live
-    and Explore stay dark here — live-read AI is FT-MONDAY-003.
+    Desk/AI read the same paper fills that ``orders/place`` recorded. Explore
+    stays sample-only. Live never receives this paper book — native
+    Connected (read) feeds are a separate path (FT-MONDAY-003).
     """
     if _jwt_mode() != "practice":
         return ""
@@ -140,15 +145,94 @@ def _practice_sandbox_book_context() -> str:
     )
 
 
+def _native_live_read_symbols(raw: Any) -> list[str]:
+    """Prefer the request symbol; otherwise the Monday smoke default."""
+    symbol, exchange = "RELIANCE", "NSE"
+    if isinstance(raw, dict):
+        requested = str(raw.get("symbol") or "").strip()
+        venue = str(raw.get("exchange") or "").strip().upper()
+        if requested:
+            symbol = requested
+        if venue:
+            exchange = venue
+    return [f"{exchange}:{symbol}"]
+
+
+def _native_live_read_context(raw: Any = None) -> str:
+    """Inject Dhan/Neo Connected (read) quotes when the JWT may analyse.
+
+    Practice and Live JWTs may consume stamped ``read_smoke_ok`` feeds.
+    Explore stays dark. Never places, and never invents Neo Practice.
+    """
+    if _jwt_mode() not in {"practice", "live"}:
+        return ""
+    try:
+        from flinttrade_gateway.monday_read_smoke import (
+            collect_monday_ai_read_snapshot,
+            format_monday_ai_read_context,
+            list_monday_ai_read_handles,
+        )
+
+        hook = current_app.config.get("MONDAY_AI_READ_FEED_COLLECTOR")
+        if callable(hook):
+            rows = hook()
+            if not isinstance(rows, list):
+                return ""
+            return format_monday_ai_read_context(rows)
+
+        registry = current_app.config.get("REGISTRY")
+        adapters = current_app.config.get("ACTIVE_BROKER_ADAPTERS") or {}
+        if not isinstance(adapters, dict) or not adapters:
+            return ""
+        handles = list_monday_ai_read_handles(registry)
+        if not handles:
+            return ""
+        symbols = _native_live_read_symbols(raw)
+        client = current_app.config.get("OPENALGO_CLIENT") or current_app.config.get("CLIENT")
+
+        async def _collect() -> list[dict[str, Any]]:
+            rows: list[dict[str, Any]] = []
+            for broker_id, account_id, session in handles:
+                adapter = adapters.get(broker_id)
+                if adapter is None:
+                    continue
+                rows.append(
+                    await collect_monday_ai_read_snapshot(
+                        broker_id,
+                        account_id,
+                        adapter,
+                        session,
+                        symbols=symbols,
+                    )
+                )
+            return rows
+
+        if client is not None and hasattr(client, "run_sync"):
+            collected = client.run_sync(_collect(), timeout=8.0)
+        else:
+            collected = asyncio.run(_collect())
+        return format_monday_ai_read_context(collected)
+    except Exception:  # noqa: BLE001 - advisor must never 500 on a read feed
+        logger.debug("Native live-read AI context failed", exc_info=True)
+        return ""
+
+
 def _merge_request_context(raw: Any) -> str:
-    """Flatten the request context and append the Practice book when allowed."""
+    """Flatten request context plus Practice book and Connected (read) feeds."""
     context = _coerce_context(raw)
+    extras: list[str] = []
     practice_book = _practice_sandbox_book_context()
-    if not practice_book:
+    if practice_book:
+        extras.append(practice_book)
+    native_reads = _native_live_read_context(raw)
+    if native_reads:
+        extras.append(native_reads)
+    if not extras:
         return context
+    glued = "\n".join(extras)
     if not context:
-        return practice_book
-    return f"{context}\n{practice_book}"
+        return glued
+    return f"{context}\n{glued}"
 
 
 def _coerce_context(raw: Any) -> str:

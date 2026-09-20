@@ -72,6 +72,17 @@ describe("AISuggestionsPanel", () => {
     expect(screen.getByText("AI Strategy Suggestions")).toBeInTheDocument();
   });
 
+  it("stays labelled illustrative — never sold as live alpha (FT-MONDAY-003)", () => {
+    render(<AISuggestionsPanel />);
+    const labels = screen.getAllByText("Illustrative");
+    expect(labels.length).toBeGreaterThan(1);
+    expect(
+      screen.getByText(/illustrative local filter/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/live alpha/i)).toBeInTheDocument();
+    expect(screen.getByText(/not actual backtest results/i)).toBeInTheDocument();
+  });
+
   it("renders market mood selector with three options", () => {
     render(<AISuggestionsPanel />);
     expect(screen.getByText("Volatile")).toBeInTheDocument();

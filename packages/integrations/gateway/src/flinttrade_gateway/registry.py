@@ -646,6 +646,27 @@ class BrokerRegistry:
     def list_connected_adapter_sessions(self) -> list[tuple[str, str, Any]]:
         raise RegistrySessionUnavailable
 
+    def list_read_smoke_sessions(self) -> tuple[tuple[BrokerSelector, Session], ...]:
+        """Connected sessions stamped ``read_smoke_ok`` for analysis reads.
+
+        Does not grant write authority. Callers must only invoke read verbs.
+        Expired or unstamped sessions are omitted.
+        """
+        found: list[tuple[BrokerSelector, Session]] = []
+        now = time.time()
+        with self._lock:
+            for selector, record in self._records.items():
+                session = record.session
+                if not isinstance(session, Session):
+                    continue
+                if not self._valid_expiry(session) or session.expires_at <= now:
+                    continue
+                extra = session.extra if isinstance(session.extra, dict) else {}
+                if extra.get("read_smoke_ok") is not True:
+                    continue
+                found.append((selector, session))
+        return tuple(found)
+
     def list_accounts(self) -> list[BrokerAccountInfo]:
         return [
             BrokerAccountInfo(

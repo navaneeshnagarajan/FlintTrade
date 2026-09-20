@@ -312,6 +312,12 @@ function StrategyCard({ suggestion, index, selected, onSelect, onDeploy }: Strat
             <div className="flex items-center gap-1.5 mt-1">
               <Badge
                 variant="outline"
+                className="text-xxs font-mono px-1.5 py-0 border-amber-500/40 text-amber-400"
+              >
+                Illustrative
+              </Badge>
+              <Badge
+                variant="outline"
                 className="text-xxs font-mono px-1.5 py-0 border-border-default text-text-muted"
               >
                 {suggestion.category}
@@ -415,9 +421,17 @@ export default function AISuggestionsPanel() {
       {/* Intro card */}
       <Card className="bg-surface-card border border-border-default rounded-lg p-5">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="font-heading font-semibold text-base text-text-primary">
-            AI Strategy Suggestions
-          </h3>
+          <div className="flex items-center gap-2 min-w-0">
+            <h3 className="font-heading font-semibold text-base text-text-primary">
+              AI Strategy Suggestions
+            </h3>
+            <Badge
+              variant="outline"
+              className="text-xxs font-mono px-1.5 py-0 border-amber-500/40 text-amber-400"
+            >
+              Illustrative
+            </Badge>
+          </div>
           <Button
             variant="ghost"
             size="sm"
@@ -431,8 +445,9 @@ export default function AISuggestionsPanel() {
           </Button>
         </div>
         <p className="text-xs text-text-secondary leading-relaxed">
-          Strategy recommendations based on current market conditions and your risk profile
-          ({userRisk} risk). Powered by {SUGGESTION_POOL.length} backtest strategies.
+          Illustrative local filter over a curated strategy list — not a live AI fetch
+          and not live alpha. Filtered by market mood and your risk profile
+          ({userRisk} risk).
         </p>
       </Card>
 

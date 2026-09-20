@@ -945,12 +945,13 @@ Connected sample advisor. Any later demo replies must be labelled
 **Sample replies**. Signals **Live** / **Polling** stay separate from Chat
 LLM readiness.
 
-Monday acceptance (FT-MONDAY-003): when an LLM is configured, Chat may
+Monday product (FT-MONDAY-003): when an LLM is configured, Chat may
 use Practice SandboxEngine fills and native live-read feeds for
 analysis. That is analysis context, not a guarantee of profitable
-alphas, and profitable alphas are not a Monday ship criterion. This
-lock does not lift the native broker HTTP freeze and does not claim
-every Chat turn already has live ticks. Chat never shows green **Connected** without a real LLM.
+alphas, and profitable alphas are not a Monday ship criterion. Chat
+does not place Live orders — Live place stays fail-closed. This does
+not lift the native broker HTTP freeze and does not claim every Chat
+turn already has live ticks. Chat never shows green **Connected** without a real LLM.
 Suggest stays labelled illustrative and is not this live-read path.
 
 On Explore `/settings#llm`, a demo or unconfigured session shows the empty

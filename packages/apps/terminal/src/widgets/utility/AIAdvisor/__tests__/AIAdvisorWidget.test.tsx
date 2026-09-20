@@ -761,15 +761,26 @@ describe("executeApprovedToolCall", () => {
     },
   };
 
-  it("dispatches an approvable order through the shared gated client", async () => {
+  it("dispatches an approvable Practice order through the shared gated client", async () => {
+    useModeStore.setState({ mode: "practice" });
     mockPlaceOrder.mockResolvedValueOnce({ orderId: "FT-123" });
     const outcome = await executeApprovedToolCall(orderCall);
     expect(mockPlaceOrder).toHaveBeenCalledOnce();
     expect(mockPlaceOrder).toHaveBeenCalledWith(
       expect.objectContaining({ symbol: "NIFTY24JUL25000CE", strategy: "AIAdvisor" }),
+      { mode: "practice" },
     );
     expect(outcome.executed).toBe(true);
     expect(outcome.message).toContain("FT-123");
+  });
+
+  it("refuses Live place from the AI path — fail-closed (FT-MONDAY-003)", async () => {
+    useModeStore.setState({ mode: "live" });
+    const outcome = await executeApprovedToolCall(orderCall);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(outcome.executed).toBe(false);
+    expect(outcome.message).toContain("Live order placement stays fail-closed");
+    expect(outcome.message).toContain("cannot place a Live order");
   });
 
   it("pins Practice authority so an approved AI order cannot retarget Live", async () => {
@@ -815,7 +826,8 @@ describe("executeApprovedToolCall", () => {
     expect(outcome.executed).toBe(false);
   });
 
-  it("still dispatches a well-formed LIMIT order", async () => {
+  it("still dispatches a well-formed Practice LIMIT order", async () => {
+    useModeStore.setState({ mode: "practice" });
     mockPlaceOrder.mockResolvedValueOnce({ orderId: "FT-9" });
     const outcome = await executeApprovedToolCall({
       ...orderCall,
@@ -847,11 +859,12 @@ describe("executeApprovedToolCall", () => {
     expect(outcome.message).toContain("Nothing was sent to the broker");
   });
 
-  it("reports a failed placement honestly — never 'executed successfully'", async () => {
-    mockPlaceOrder.mockRejectedValueOnce(new Error("Live order blocked: mode_blocked"));
+  it("reports a failed Practice placement honestly — never 'executed successfully'", async () => {
+    useModeStore.setState({ mode: "practice" });
+    mockPlaceOrder.mockRejectedValueOnce(new Error("Practice book refused"));
     const outcome = await executeApprovedToolCall(orderCall);
     expect(outcome.executed).toBe(false);
-    expect(outcome.message).toContain("Order failed: Live order blocked: mode_blocked");
+    expect(outcome.message).toContain("Order failed: Practice book refused");
     expect(outcome.message).not.toContain("submitted");
   });
 });

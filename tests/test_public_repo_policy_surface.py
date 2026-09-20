@@ -146,8 +146,10 @@ def test_monday_003_ai_live_read_acceptance_lock() -> None:
     assert "never shows green **Connected** without a real LLM" in guide
     assert "never shows green **Connected** without a real LLM" in changelog
     assert "never shows green Connected without a real LLM" in plan
-    assert "Tracking / docs lock only — no product in this change" in changelog
-    assert "tracking lock only — no product in this change" in plan
+    assert "Live place stays fail-closed" in changelog
+    assert "Live place stays fail-closed" in plan
+    assert "Tracking / docs lock only — no product in this change" not in changelog
+    assert "tracking lock only — no product in this change" not in plan
 
 
 def test_operator_docs_state_native_broker_http_freeze() -> None:
