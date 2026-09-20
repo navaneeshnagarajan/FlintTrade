@@ -16,6 +16,11 @@ export function isMondayReadBroker(broker: string): boolean {
   return broker === "dhan" || broker === "kotakneo";
 }
 
+/** Dhan + Neo stay selectable for Connected (read) even if a stale catalogue says Coming soon. */
+export function mondayReadConnectable(brokerId: string, catalogConnectable = false): boolean {
+  return isMondayReadBroker(brokerId) || catalogConnectable;
+}
+
 export function mondayReadChrome(account: Pick<BrokerAccount, "broker" | "status">): string | null {
   if (!isMondayReadBroker(account.broker)) return null;
   if (account.status !== "connected") return null;

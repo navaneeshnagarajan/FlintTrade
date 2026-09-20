@@ -28,6 +28,7 @@ from .adapter import BROKER_CATALOG
 from .exceptions import AuthFlowError, BrokerNotFoundError, CredentialError
 from .log_safety import account_ref
 from .models import AuthFlowType
+from .monday_read_smoke import monday_read_connectable
 
 logger = logging.getLogger("flinttrade.gateway.auth")
 
@@ -212,7 +213,7 @@ def _reject_legacy_native_connect(broker: str) -> Any | None:
     info = BROKER_CATALOG.get(broker)
     if info is None or not info.native:
         return None
-    if not info.connectable:
+    if not monday_read_connectable(broker, info.connectable):
         message = f"'{broker}' is not yet available for native connect (coming soon)."
     else:
         message = f"'{broker}' uses FlintTrade native connect; use /api/v1/native/accounts."

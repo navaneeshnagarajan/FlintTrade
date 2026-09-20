@@ -7,6 +7,7 @@ import {
   isMondayReadBroker,
   mondayAccountStatusLine,
   mondayReadChrome,
+  mondayReadConnectable,
 } from "./mondayReadChrome";
 
 describe("mondayReadChrome", () => {
@@ -18,6 +19,10 @@ describe("mondayReadChrome", () => {
     expect(mondayReadChrome({ broker: "kotakneo", status: "connected" })).toBe(CONNECTED_READ_LABEL);
     expect(mondayReadChrome({ broker: "dhan", status: "disconnected" })).toBeNull();
     expect(mondayReadChrome({ broker: "upstox", status: "connected" })).toBeNull();
+    expect(mondayReadConnectable("kotakneo", false)).toBe(true);
+    expect(mondayReadConnectable("dhan", false)).toBe(true);
+    expect(mondayReadConnectable("groww", false)).toBe(false);
+    expect(mondayReadConnectable("upstox", true)).toBe(true);
   });
 
   it("never implies live order capability and never offers Neo Practice", () => {

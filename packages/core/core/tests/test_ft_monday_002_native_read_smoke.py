@@ -25,6 +25,7 @@ from flinttrade_gateway.monday_read_smoke import (
     NEO_OPERATOR_COPY,
     WRITE_VERBS,
     monday_read_chrome,
+    monday_read_connectable,
     run_monday_read_smoke,
 )
 
@@ -160,3 +161,6 @@ def test_neo_has_no_practice_sandbox_copy() -> None:
     assert "Practice" not in NEO_OPERATOR_COPY
     assert monday_read_chrome("kotakneo", connected=True, reads_ok=True) == CHROME_CONNECTED_READ
     assert monday_read_chrome("upstox", connected=True, reads_ok=True) is None
+    assert monday_read_connectable("kotakneo", False) is True
+    assert monday_read_connectable("dhan", False) is True
+    assert monday_read_connectable("groww", False) is False

@@ -26,6 +26,7 @@ from flask import Blueprint, jsonify, request
 from .adapter import BROKER_CATALOG, OPENALGO_PLATFORM_MCP
 from .capabilities import REGISTRY, BrokerCapabilities
 from .models import BrokerMCPInfo
+from .monday_read_smoke import monday_read_connectable
 from .recommendations import (
     NATIVE_BROKER_CAPABILITIES,
     BrokerUseCase,
@@ -97,7 +98,11 @@ def _native_capability_fields(broker_name: str) -> dict[str, Any]:
     intervals = [_minute_interval_label(minutes) for minutes in intraday]
     intervals.extend(native.historical_calendar_intervals)
     data = {
-        "connectable": info.connectable if info else False,
+        "connectable": (
+            monday_read_connectable(broker_name, info.connectable)
+            if info is not None
+            else monday_read_connectable(broker_name, False)
+        ),
         "requires_static_ip": info.requires_static_ip if info else False,
         "native_connect_blockers": list(info.native_connect_blockers) if info else [],
         "historical_intervals": intervals,
@@ -230,7 +235,7 @@ def _rec_to_dict(rec: Any) -> dict[str, Any]:
     data = dataclasses.asdict(rec)
     info = BROKER_CATALOG.get(rec.broker_id)
     if info is not None:
-        data["connectable"] = info.connectable
+        data["connectable"] = monday_read_connectable(rec.broker_id, info.connectable)
         data["display_name"] = info.display_name
         data["requires_static_ip"] = info.requires_static_ip
         data["native_connect_blockers"] = list(info.native_connect_blockers)
@@ -243,7 +248,7 @@ def _mcp_entry(info: Any) -> dict[str, Any]:
         "adapter_id": info.name,
         "display_name": info.display_name,
         "native": info.native,
-        "connectable": info.connectable,
+        "connectable": monday_read_connectable(info.name, info.connectable),
         "requires_static_ip": info.requires_static_ip,
         "native_connect_blockers": list(info.native_connect_blockers),
         "mcp": info.mcp.model_dump(),
@@ -337,7 +342,8 @@ def _default_recommendation_capabilities(include_coming_soon: bool) -> dict[str,
     return {
         broker_id: caps
         for broker_id, caps in NATIVE_BROKER_CAPABILITIES.items()
-        if BROKER_CATALOG.get(broker_id) is not None and BROKER_CATALOG[broker_id].connectable
+        if BROKER_CATALOG.get(broker_id) is not None
+        and monday_read_connectable(broker_id, BROKER_CATALOG[broker_id].connectable)
     }
 
 

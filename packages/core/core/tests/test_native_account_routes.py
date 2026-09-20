@@ -3,9 +3,9 @@
 Upstox (its direct access-token method) is the exercise broker: ``login()`` builds
 a session from any non-empty access token WITHOUT calling the broker (validation is
 lazy, on the first API call), so the full connect -> register -> rebuild -> login ->
-session path runs offline. Dhan and Upstox are connectable natives; INDmoney,
-Kotak Neo and Groww are catalogued 'coming soon' and rejected on connect until
-their remaining live blockers clear.
+session path runs offline. Dhan, Upstox, and Kotak Neo are connectable natives
+(Neo for Connected (read) / API smoke). INDmoney and Groww are catalogued
+'coming soon' and rejected on connect until their remaining live blockers clear.
 
 G9: every WRITE on these routes requires a valid operator session JWT — the
 fixture mints one and ``_h()`` attaches it; the dedicated G9 tests pin the
@@ -4426,6 +4426,30 @@ def test_connect_rejects_coming_soon_native(client, adapter_id):
     payload = resp.get_json()
     assert "coming soon" in payload["message"].lower()
     assert payload["data"]["native_connect_blockers"]
+
+
+def test_neo_connect_is_not_rejected_as_coming_soon(client):
+    """Setup must allow native Neo connect for Connected (read) / API smoke."""
+    c, _app, _tmp = client
+    resp = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "kotakneo",
+            "account_id": "NEOREAD1",
+            "credentials": {
+                "access_token": "x",
+                "mobile_number": "1",
+                "ucc": "U",
+                "totp": "123456",
+                "mpin": "1234",
+            },
+        },
+    )
+    payload = resp.get_json() or {}
+    message = str(payload.get("message") or payload.get("error") or "").lower()
+    assert "coming soon" not in message
+    assert resp.status_code != 400 or "coming soon" not in message
 
 
 @pytest.mark.parametrize("adapter_id", ["groww", "indmoney"])

@@ -2317,6 +2317,8 @@ def _prepare_broker_dependencies(
     # Native-adapter activation (dormant -> live bridge). Only runs when the
     # caller supplies both prerequisite checks; otherwise natives stay dormant.
     if native_attest_ok is not None and native_has_credentials is not None:
+        from flinttrade_gateway.monday_read_smoke import monday_read_connectable  # noqa: PLC0415
+
         native_ids: list[str] = []
         for selector in config.registered:
             try:
@@ -2324,7 +2326,8 @@ def _prepare_broker_dependencies(
             except ValueError:
                 continue
             info = BROKER_CATALOG.get(adapter_id)
-            if info is not None and info.native and not info.connectable:
+            catalog_connectable = bool(info.connectable) if info is not None else False
+            if info is not None and info.native and not monday_read_connectable(adapter_id, catalog_connectable):
                 logger.info("Native adapter %s dormant: coming-soon-activation-blocked", adapter_id)
                 continue
             native_ids.append(adapter_id)

@@ -66,6 +66,17 @@ class ReadSmokeResult:
         }
 
 
+def monday_read_connectable(broker_id: str, catalog_connectable: bool = False) -> bool:
+    """Dhan + Neo stay selectable for Connected (read) / API smoke.
+
+    A stale catalogue ``connectable=False`` or coming-soon activation block
+    must not hide Neo from Setup. Live place stays fail-closed elsewhere.
+    """
+    if broker_id in MONDAY_READ_BROKERS:
+        return True
+    return bool(catalog_connectable)
+
+
 def monday_read_chrome(broker_id: str, *, connected: bool, reads_ok: bool) -> str | None:
     """Honest chrome for the Monday Dhan + Neo path.
 

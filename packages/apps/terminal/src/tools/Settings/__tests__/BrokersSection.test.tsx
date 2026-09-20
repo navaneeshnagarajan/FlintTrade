@@ -1570,6 +1570,24 @@ describe("BrokersSection", () => {
     expect(screen.queryByRole("option", { name: /Kotak Neo.*Coming soon/i })).not.toBeInTheDocument();
   });
 
+  it("keeps Kotak Neo selectable for Connected (read) even if the catalogue still says coming soon", async () => {
+    (listNativeBrokers as ReturnType<typeof vi.fn>).mockResolvedValue(
+      BROKERS.map((broker) =>
+        broker.adapter_id === "kotakneo" ? { ...broker, connectable: false } : broker,
+      ),
+    );
+    renderSection();
+    await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
+    const kotak = await screen.findByRole("option", { name: "Kotak Neo" });
+    expect(kotak).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("option", { name: /Kotak Neo.*Coming soon/i })).not.toBeInTheDocument();
+    fireEvent.click(kotak);
+    expect(screen.getByRole("combobox", { name: /broker/i })).toHaveTextContent("Kotak Neo");
+    expect(screen.queryByText(/native connect is coming soon/i)).not.toBeInTheDocument();
+  });
+
   it("keeps INDmoney disabled with its activation blockers visible", async () => {
     renderSection();
     await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());

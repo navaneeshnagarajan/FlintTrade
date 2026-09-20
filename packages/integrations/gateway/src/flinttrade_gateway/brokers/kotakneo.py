@@ -43,9 +43,9 @@ wraps the websocket callbacks into an async queue) while ``subscribe`` /
 Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8).
 ``build_broker_router``'s native-activation factory registers this adapter
 automatically once its pinned SDK is attested AND vault credentials exist;
-until then it stays dormant. Kotak Neo remains ``connectable=False`` in the
-catalogue until the live account, static-IP, and order-path requirements are
-verified end to end.
+until then it stays dormant. Kotak Neo is ``connectable=True`` for
+Connected (read) / API smoke. Live place stays fail-closed. Neo has no
+Practice sandbox.
 """
 
 from __future__ import annotations

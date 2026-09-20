@@ -145,6 +145,21 @@ def test_coming_soon_natives_never_activate_from_factory():
     ]
 
 
+def test_kotakneo_is_connectable_and_never_coming_soon_blocked():
+    skips: list[tuple[str, str]] = []
+    out = build_native_adapters(
+        ["kotakneo"],
+        attest_ok=lambda _b: True,
+        has_credentials=lambda _b: True,
+        on_skip=lambda b, why: skips.append((b, why)),
+    )
+
+    assert set(out) == {"kotakneo"}
+    assert isinstance(out["kotakneo"], KotakNeoAdapter)
+    assert "coming-soon-activation-blocked" not in {why for _broker, why in skips}
+    assert BROKER_CATALOG["kotakneo"].connectable is True
+
+
 def test_connectable_native_without_emergency_planner_never_activates(monkeypatch):
     class NoEmergencyPlanner:
         pass

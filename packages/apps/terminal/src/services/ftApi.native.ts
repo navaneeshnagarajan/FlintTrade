@@ -67,9 +67,8 @@ export interface BrokerSdkAttestation {
 export interface NativeBroker {
   adapter_id: string;
   display_name: string;
-  /** Tried-and-tested against a live account and the emergency-write contract (Dhan and Upstox today). When false
-   * the broker is catalogued but "coming soon" — the connect UI must not offer
-   * it, and the backend rejects a connect for it. */
+  /** Native connect is offered when true. Dhan + Kotak Neo stay selectable for
+   * Connected (read) / API smoke even if a stale catalogue still says false. */
   connectable: boolean;
   requires_static_ip: boolean;
   native_connect_blockers: string[];
