@@ -71,6 +71,8 @@
     "@babel/core": "8.0.5",
     "@babel/eslint-parser": "8.0.5",
     "@playwright/test": "^1.63.0",
+    "@reticlehq/react": "3.1.0",
+    "@reticlehq/vite-plugin": "3.1.0",
     "@sentry/react": "^10.74.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query-devtools": "^5.102.8",

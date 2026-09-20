@@ -8,6 +8,9 @@ import { visualizer } from "rollup-plugin-visualizer";
 import fs from "fs";
 import path from "path";
 
+import { reticle } from "@reticlehq/vite-plugin";
+import { shouldInjectReticleConnect } from "./vite.reticleConnectGate.ts";
+
 function readFlintTradeVersion(): string {
   const repoRoot = path.resolve(import.meta.dirname, "../../..");
   const versionPath = path.join(repoRoot, "VERSION");
@@ -31,6 +34,10 @@ export default defineConfig({
     "import.meta.env.VITE_FLINTTRADE_VERSION": JSON.stringify(flintTradeVersion),
   },
   plugins: [
+    // Official plugin. inject is off unless a Reticle daemon is already on
+    // :4400 (or RETICLE_CONNECT=0 forces off). Playwright CI has no daemon;
+    // connecting would log WebSocket errors and fail the fail-closed registry.
+    reticle({ sourceMapping: false, inject: shouldInjectReticleConnect() }),
     react(),
     tailwindcss(),
     ...(process.env.ANALYZE
