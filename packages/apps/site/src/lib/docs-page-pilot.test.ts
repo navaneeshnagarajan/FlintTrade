@@ -143,10 +143,12 @@ describe('docs.page pilot publication guards', () => {
     expect(allContent).toContain('Sample');
     expect(allContent).toContain('Home');
     expect(allContent).toContain('Trade');
-    // Retired first-class labels should not appear as current modes
-    expect(allContent).not.toMatch(/\bDemo\b/i);
-    expect(allContent).not.toMatch(/\bSandbox\b/i);
-    expect(allContent).not.toMatch(/\bPaper\b/i);
+    // Practice fills use the engine name SandboxEngine — that is honest, not a
+    // retired mode. Ban Demo/Sandbox/Paper only as a current mode label.
+    expect(allContent).toContain('SandboxEngine');
+    expect(allContent).not.toMatch(/\*\*(?:Demo|Sandbox|Paper)\*\*/);
+    expect(allContent).not.toMatch(/\b(?:Demo|Sandbox|Paper)\s+mode\b/i);
+    expect(allContent).not.toMatch(/^#{1,6}\s+(?:Demo|Sandbox|Paper)\b/im);
   });
 
   it('every sidebar route resolves to the exact MDX file', () => {
