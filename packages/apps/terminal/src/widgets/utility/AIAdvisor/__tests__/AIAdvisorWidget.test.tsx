@@ -741,7 +741,7 @@ describe("executeApprovedToolCall", () => {
   // mode gate stayed invisible.
   beforeEach(() => {
     mockPlaceOrder.mockReset();
-    useModeStore.setState({ mode: "live" });
+    useModeStore.setState({ mode: "practice" });
   });
   afterEach(() => {
     useModeStore.setState({ mode: "explore" });
