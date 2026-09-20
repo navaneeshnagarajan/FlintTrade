@@ -92,6 +92,18 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Kill All fail-closed when risk runtime unavailable (FT-DITTO-003).**
+  Whenever the Ditto risk runtime is unavailable —
+  including Explore `/ditto` Risk — **Kill All
+  Positions** stays muted and disabled. Helper:
+  `Risk runtime unavailable — Kill All disabled.`
+  The control is never the armed red emergency CTA
+  in that state. The backend rejects a Kill All if
+  the UI slips. Live and Practice with a live
+  runtime and managed accounts still keep the
+  armed control (empty-account disarm is
+  FT-DITTO-001).
+
 - **Explore Stock Baskets disable demo Edit/Delete (FT-INVEST-002).**
   Explore `/invest#basket` seeded cards (NIFTY IT,
   Banking, and any other sample set) rely on the

@@ -415,6 +415,7 @@ The operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
 | Endpoint | Purpose |
 |---|---|
 | `ditto/mirror/start` (**POST**) | Start position mirroring (Live-only, PIN-unlocked). Incomplete body (missing `source_account` / `target_accounts`) → 400. Explore-mode starts (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Mirroring is blocked in Explore (sample-only).`. Practice (and any other non-Live session) is refused HTTP 403 after that gate: `Protected safety actions require an authenticated Live session` (no `mode_blocked`). A Live JWT without PIN unlock is 403 (`Live mode must be PIN-unlocked before changing protected safety state`). |
+| `ditto/kill-all` (**POST**) | Flatten/cancel all managed accounts (emergency Kill All). Optional body `reason` (string, truncated server-side). Explore-mode requests (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Risk runtime unavailable — Kill All disabled.` before Live-session auth. Practice (and any other non-Live session) is refused HTTP 403 after that gate: `Protected safety actions require an authenticated Live session` (no `mode_blocked`). A Live JWT is enough; PIN unlock is not required. Missing `DITTO_RUNTIME` → HTTP 503 (`Ditto runtime unavailable`). Complete flatten → 200 with `status: success`; incomplete → 207 with `status: partial`. |
 | `ditto/mirror/status` (**GET**) | Position-mirroring status across accounts. |
 | `ditto/mirror/stop` (**POST**) | Stop position mirroring. |
 
@@ -872,12 +873,13 @@ proxy is still message-only: HTTP 403 with "Live mode not unlocked —
 verify PIN first". A `code` field is also emitted on
 `mode_guard`-decorated engine routes (brackets and other
 executor-direct paths), on `POST /api/v1/telegram` Explore refusals,
-and on `POST /api/v1/ditto/mirror/start` Explore refusals.
+and on `POST /api/v1/ditto/mirror/start` and
+`POST /api/v1/ditto/kill-all` Explore refusals.
 Not every endpoint emits `code`:
 
 | Code or status | Meaning |
 |---|---|
-| `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, and `POST /api/v1/ditto/mirror/start` Explore refusals (same header/claim gate). |
+| `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, and `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` Explore refusals (same header/claim gate). |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
 | `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true` (PIN unlock). |
 | HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |

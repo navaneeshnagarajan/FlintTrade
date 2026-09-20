@@ -2822,6 +2822,58 @@ class TestDittoRuntimeActions:
         finally:
             flask_app.config["DITTO_RUNTIME"] = original
 
+    def test_kill_all_explore_session_is_mode_blocked(self, flask_app, client):
+        runtime = _FakeDittoRuntime()
+        original = flask_app.config.get("DITTO_RUNTIME")
+        flask_app.config["DITTO_RUNTIME"] = runtime
+        try:
+            resp = client.post(
+                "/api/v1/ditto/kill-all",
+                json={"reason": "operator requested flatten"},
+                headers=_session_headers("explore"),
+            )
+            assert resp.status_code == 403
+            body = resp.get_json()
+            assert body["status"] == "error"
+            assert body["code"] == "mode_blocked"
+            assert body["message"] == "Risk runtime unavailable — Kill All disabled."
+            assert runtime.kill_calls == []
+        finally:
+            flask_app.config["DITTO_RUNTIME"] = original
+
+    def test_kill_all_explore_mode_header_is_mode_blocked(self, flask_app, client):
+        runtime = _FakeDittoRuntime()
+        original = flask_app.config.get("DITTO_RUNTIME")
+        flask_app.config["DITTO_RUNTIME"] = runtime
+        try:
+            resp = client.post(
+                "/api/v1/ditto/kill-all",
+                json={"reason": "operator requested flatten"},
+                headers={**_auth_headers(), "X-FlintTrade-Mode": "explore"},
+            )
+            assert resp.status_code == 403
+            assert resp.get_json()["code"] == "mode_blocked"
+            assert resp.get_json()["message"] == "Risk runtime unavailable — Kill All disabled."
+            assert runtime.kill_calls == []
+        finally:
+            flask_app.config["DITTO_RUNTIME"] = original
+
+    def test_kill_all_rejects_when_runtime_unavailable(self, flask_app, client):
+        original = flask_app.config.get("DITTO_RUNTIME")
+        flask_app.config["DITTO_RUNTIME"] = None
+        try:
+            resp = client.post(
+                "/api/v1/ditto/kill-all",
+                json={"reason": "operator requested flatten"},
+                headers=_live_headers(unlocked=False),
+            )
+            assert resp.status_code == 503
+            body = resp.get_json()
+            assert body["status"] == "error"
+            assert body["message"] == "Ditto runtime unavailable"
+        finally:
+            flask_app.config["DITTO_RUNTIME"] = original
+
 
 class TestDittoWriteAuthG9:
     """G9 pin: every Ditto broker-management write requires a session JWT.
