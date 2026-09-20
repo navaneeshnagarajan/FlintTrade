@@ -25,17 +25,22 @@ def _load_salt() -> bytes:
     try:
         from flinttrade_core.workspace import workspace_dir  # noqa: PLC0415
 
-        path = Path(workspace_dir()) / _SALT_FILENAME
+        # Never mkdir the workspace as a logging side-effect. An explicit-path
+        # TOTP store (and similar isolated callers) must not look like they
+        # probed or published the default workspace pair.
+        path = Path(workspace_dir(ensure_exists=False)) / _SALT_FILENAME
         if path.exists():
             _salt = path.read_bytes()
-        else:
+        elif path.parent.is_dir():
             _salt = secrets.token_bytes(32)
-            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(_salt)
             try:
                 path.chmod(0o600)
             except OSError:  # pragma: no cover - platform-specific
                 pass
+        else:
+            _logger.debug("log_ref salt not persistable; using process-local salt")
+            _salt = secrets.token_bytes(32)
     except Exception:  # pragma: no cover - unwritable workspace
         # Ephemeral per-process salt: refs stay non-reversible, only their
         # cross-restart stability is lost.

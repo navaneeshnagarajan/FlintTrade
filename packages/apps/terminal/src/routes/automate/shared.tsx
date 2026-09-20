@@ -109,6 +109,8 @@ export function StatusBadge({ status }: { status: string }) {
   if (lower === "active") return <Badge className="text-xs bg-profit/10 text-profit border-0">Active</Badge>;
   if (lower === "paused") return <Badge className="text-xs bg-atm-bg text-warning border-0">Paused</Badge>;
   if (lower === "error")  return <Badge className="text-xs bg-loss/10 text-loss border-0">Error</Badge>;
+  if (lower === "sample") return <Badge className="text-xs bg-text-muted/10 text-text-muted border-0">Sample</Badge>;
+  if (lower === "demo") return <Badge className="text-xs bg-text-muted/10 text-text-muted border-0">Demo</Badge>;
   return <Badge className="text-xs bg-text-muted/10 text-text-muted border-0">{status}</Badge>;
 }
 
