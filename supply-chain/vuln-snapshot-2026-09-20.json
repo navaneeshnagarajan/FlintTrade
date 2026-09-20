@@ -101,6 +101,11 @@
       "vulns": []
     },
     {
+      "name": "cloudpickle",
+      "version": "3.1.2",
+      "vulns": []
+    },
+    {
       "name": "colorama",
       "version": "0.4.6",
       "vulns": []
@@ -112,7 +117,7 @@
     },
     {
       "name": "cryptography",
-      "version": "50.0.0",
+      "version": "50.0.1",
       "vulns": []
     },
     {
@@ -142,7 +147,7 @@
     },
     {
       "name": "filelock",
-      "version": "3.32.3",
+      "version": "3.32.5",
       "vulns": []
     },
     {
@@ -217,12 +222,12 @@
     },
     {
       "name": "joblib",
-      "version": "1.5.3",
+      "version": "1.6.0",
       "vulns": []
     },
     {
       "name": "jugaad-data",
-      "version": "0.35.2",
+      "version": "0.35.5",
       "vulns": []
     },
     {
@@ -357,12 +362,12 @@
     },
     {
       "name": "pydantic",
-      "version": "2.13.4",
+      "version": "2.13.5",
       "vulns": []
     },
     {
       "name": "pydantic-core",
-      "version": "2.46.4",
+      "version": "2.46.5",
       "vulns": []
     },
     {
@@ -437,7 +442,7 @@
     },
     {
       "name": "scipy",
-      "version": "1.18.0",
+      "version": "1.18.1",
       "vulns": []
     },
     {
@@ -447,7 +452,7 @@
     },
     {
       "name": "sentry-sdk",
-      "version": "2.68.0",
+      "version": "2.68.1",
       "vulns": []
     },
     {
@@ -522,7 +527,7 @@
     },
     {
       "name": "websockets",
-      "version": "17.0.1",
+      "version": "17.1",
       "vulns": []
     },
     {
@@ -542,7 +547,7 @@
     },
     {
       "name": "yfinance",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "vulns": []
     },
     {
@@ -555,9 +560,9 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-08-30T09:44:38.331661Z",
-    "audited_at": "2026-08-30T09:44:38.331661Z",
-    "requirements_lock_sha256": "f2cf7dd9880663dcb2adbeb4a17c704f08d93d4b9c8f4be2f02dbcafe882eac8",
+    "generated_at": "2026-09-20T05:05:17.478628Z",
+    "audited_at": "2026-09-20T05:05:17.478628Z",
+    "requirements_lock_sha256": "4edcc24c4fe54738943255319f9b02ab068f79544947200122d6972ce2e79a30",
     "pip_audit_exit_code": 0
   }
 }

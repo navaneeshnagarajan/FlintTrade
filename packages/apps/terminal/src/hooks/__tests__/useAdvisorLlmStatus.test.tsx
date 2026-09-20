@@ -13,11 +13,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ADVISOR_LLM_STATUS_QUERY_KEY,
+  MANAGED_OLLAMA_INSTALL_QUERY_KEY,
   SETTINGS_LLM_HYDRATION_QUERY_KEY,
   useAdvisorLlmStatus,
 } from "../useAdvisorLlmStatus";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
+import { getLocalAiStatus } from "@/services/ftApi.localAi";
+
+vi.mock("@/services/ftApi.localAi", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/ftApi.localAi")>();
+  return {
+    ...actual,
+    getLocalAiStatus: vi.fn(),
+  };
+});
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -34,7 +44,9 @@ function isLlmConfigGet(input: unknown, init?: RequestInit): boolean {
 function mockAdvisorAndSettings(options: {
   advisor: "configured" | "unconfigured" | "unreachable" | "unknown";
   settings: "ready" | "unauthorized";
+  provider?: string;
 }): void {
+  const provider = options.provider ?? (options.advisor === "configured" ? "openai" : "");
   vi.mocked(fetch).mockImplementation(async (input, init) => {
     if (isLlmConfigGet(input, init)) {
       if (options.settings === "unauthorized") {
@@ -45,7 +57,7 @@ function mockAdvisorAndSettings(options: {
       }
       return jsonResponse({
         status: "success",
-        data: { provider: "openai", model: "test", api_key_configured: true },
+        data: { provider, model: "test", api_key_configured: true },
       });
     }
     if (options.advisor === "unreachable") {
@@ -58,7 +70,7 @@ function mockAdvisorAndSettings(options: {
       status: "success",
       data: {
         configured: options.advisor === "configured",
-        provider: options.advisor === "configured" ? "openai" : "",
+        provider: options.advisor === "configured" ? provider : provider || "",
         model: options.advisor === "configured" ? "test" : "",
       },
     });
@@ -77,6 +89,7 @@ describe("useAdvisorLlmStatus", () => {
     vi.stubGlobal("fetch", vi.fn());
     useModeStore.setState({ mode: "explore" });
     useAuthStore.setState({ token: null });
+    vi.mocked(getLocalAiStatus).mockReset();
   });
 
   afterEach(() => {
@@ -99,6 +112,32 @@ describe("useAdvisorLlmStatus", () => {
     expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes("/config/llm"))).toBe(true);
     expect(ADVISOR_LLM_STATUS_QUERY_KEY).toEqual(["advisor-llm-readiness"]);
     expect(SETTINGS_LLM_HYDRATION_QUERY_KEY).toEqual(["settings-llm-hydration"]);
+    expect(MANAGED_OLLAMA_INSTALL_QUERY_KEY).toEqual(["managed-ollama-install"]);
+  });
+
+  it("never treats Managed Ollama Not installed as Connected even when advisor/status is configured", async () => {
+    useModeStore.setState({ mode: "live" });
+    useAuthStore.setState({ token: "session-jwt" });
+    mockAdvisorAndSettings({ advisor: "configured", settings: "ready", provider: "ollama" });
+    vi.mocked(getLocalAiStatus).mockResolvedValue({ installed: false } as Awaited<ReturnType<typeof getLocalAiStatus>>);
+
+    const { result } = renderHook(() => useAdvisorLlmStatus(), { wrapper: wrapper() });
+
+    await waitFor(() => expect(result.current.chrome).toBe("not_installed"));
+    expect(result.current.configured).toBe(false);
+    expect(getLocalAiStatus).toHaveBeenCalled();
+  });
+
+  it("keeps Connected when Managed Ollama is installed and advisor/status is configured", async () => {
+    useModeStore.setState({ mode: "live" });
+    useAuthStore.setState({ token: "session-jwt" });
+    mockAdvisorAndSettings({ advisor: "configured", settings: "ready", provider: "ollama" });
+    vi.mocked(getLocalAiStatus).mockResolvedValue({ installed: true } as Awaited<ReturnType<typeof getLocalAiStatus>>);
+
+    const { result } = renderHook(() => useAdvisorLlmStatus(), { wrapper: wrapper() });
+
+    await waitFor(() => expect(result.current.chrome).toBe("ready"));
+    expect(result.current.configured).toBe(true);
   });
 
   it("treats Explore Settings #llm empty as unconfigured even when advisor/status is configured", async () => {
@@ -148,7 +187,7 @@ describe("useAdvisorLlmStatus", () => {
   it("does not keep Connected while a remount refetch of cached configured is in flight", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryData(ADVISOR_LLM_STATUS_QUERY_KEY, "configured");
-    client.setQueryData(SETTINGS_LLM_HYDRATION_QUERY_KEY, "ready");
+    client.setQueryData(SETTINGS_LLM_HYDRATION_QUERY_KEY, { hydration: "ready", provider: "openai" });
     let release!: () => void;
     const pending = new Promise<void>((resolve) => {
       release = resolve;

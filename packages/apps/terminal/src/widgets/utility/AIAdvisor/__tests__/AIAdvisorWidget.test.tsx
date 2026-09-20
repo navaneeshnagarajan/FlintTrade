@@ -102,6 +102,16 @@ vi.mock("@/services/ftApi.ai", () => ({
   getAiSession: (id: string) => mockGetSession(id) as Promise<unknown>,
 }));
 
+const mockGetLocalAiStatus = vi.hoisted(() => vi.fn());
+
+vi.mock("@/services/ftApi.localAi", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/ftApi.localAi")>();
+  return {
+    ...actual,
+    getLocalAiStatus: mockGetLocalAiStatus,
+  };
+});
+
 // Mock fetch to prevent real network calls (fetchAdvisorStatus on mount)
 vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No backend"));
 
@@ -137,7 +147,10 @@ function advisorStatusResponse(configured: boolean): Response {
   }), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
-function settingsLlmResponse(kind: "ready" | "unauthorized"): Response {
+function settingsLlmResponse(
+  kind: "ready" | "unauthorized",
+  provider = "openai",
+): Response {
   if (kind === "unauthorized") {
     return new Response(JSON.stringify({
       status: "error",
@@ -146,7 +159,7 @@ function settingsLlmResponse(kind: "ready" | "unauthorized"): Response {
   }
   return new Response(JSON.stringify({
     status: "success",
-    data: { provider: "openai", host: "", model: "test", api_key_configured: true },
+    data: { provider, host: "", model: "test", api_key_configured: true },
   }), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
@@ -158,10 +171,12 @@ function isLlmConfigGet(input: unknown, init?: RequestInit): boolean {
 function mockChatLlmProbes(options: {
   advisor: "configured" | "unconfigured" | "unreachable" | "unknown";
   settings: "ready" | "unauthorized";
+  provider?: string;
 }): ReturnType<typeof vi.spyOn> {
+  const provider = options.provider ?? "openai";
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (isLlmConfigGet(input, init)) {
-      return settingsLlmResponse(options.settings);
+      return settingsLlmResponse(options.settings, provider);
     }
     if (options.advisor === "unreachable") {
       throw new TypeError("Failed to fetch");
@@ -190,6 +205,8 @@ describe("AIAdvisorWidget", () => {
     mockLlmProvider.mockReturnValue("");
     useModeStore.setState({ mode: "explore" });
     useAuthStore.setState({ token: null });
+    mockGetLocalAiStatus.mockReset();
+    mockGetLocalAiStatus.mockResolvedValue({ installed: false });
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No backend"));
   });
 
@@ -269,6 +286,25 @@ describe("AIAdvisorWidget", () => {
     expect(screen.queryByText("Ask me anything about trading, markets, or strategies.")).not.toBeInTheDocument();
   });
 
+  it("shows Not installed — never Connected — when Settings Managed Ollama is not installed", async () => {
+    useModeStore.setState({ mode: "live" });
+    useAuthStore.setState({ token: "session-jwt" });
+    mockChatLlmProbes({ advisor: "configured", settings: "ready", provider: "ollama" });
+    mockGetLocalAiStatus.mockResolvedValue({ installed: false });
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    const labels = await screen.findAllByText("Not installed");
+    const badge = labels.find((node) => node.tagName === "SPAN");
+    expect(badge?.className).toMatch(/warning/);
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.getByText("Not installed", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open Settings → AI/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
+    expect(screen.queryByPlaceholderText("Ask the AI advisor...")).not.toBeInTheDocument();
+  });
+
   it("shows a green Connected badge only after advisor/status is configured and Settings #llm can load", async () => {
     useModeStore.setState({ mode: "live" });
     useAuthStore.setState({ token: "session-jwt" });
@@ -279,6 +315,30 @@ describe("AIAdvisorWidget", () => {
     expect(badge.className).toMatch(/profit/);
     expect(screen.queryByText("Not configured")).not.toBeInTheDocument();
     expect(await screen.findByPlaceholderText("Ask the AI advisor...")).not.toBeDisabled();
+  });
+
+  it("keeps Retry and Settings available when leftover transcript hides a Not installed empty state", async () => {
+    useModeStore.setState({ mode: "live" });
+    useAuthStore.setState({ token: "session-jwt" });
+    mockChatLlmProbes({ advisor: "configured", settings: "ready", provider: "ollama" });
+    mockGetLocalAiStatus.mockResolvedValue({ installed: false });
+    conversationStoreMock.useStore.setState({
+      messages: [{
+        id: "m1",
+        role: "user",
+        content: "What is NIFTY?",
+        timestamp: 1,
+        route: "/ai",
+      }],
+    });
+    render(<AIAdvisorWidget />, { wrapper: Providers });
+
+    expect(await screen.findAllByText("Not installed")).not.toHaveLength(0);
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry advisor status/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open Settings → AI/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
   });
 
   it("keeps Retry and Settings available when a leftover transcript hides the empty state", async () => {
