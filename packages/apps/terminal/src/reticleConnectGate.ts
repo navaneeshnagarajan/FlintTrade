@@ -4,15 +4,21 @@
  * Playwright CI has no Reticle daemon. The plugin's default inject opens
  * ws://127.0.0.1:4400/reticle; connection-refused console errors then fail the
  * fail-closed fixture registry. No-op unless a daemon is already listening.
+ *
+ * Lives under `src/` so `tsc --noEmit` (app tsconfig) can typecheck tests that
+ * import it. Vite config imports the same module; it is not part of the SPA
+ * entry graph.
  */
 import { spawnSync } from "node:child_process";
 
 export const RETICLE_BRIDGE_HOST = "127.0.0.1";
 export const RETICLE_BRIDGE_PORT_DEFAULT = 4400;
 
+export type ReticleDaemonProbe = (host: string, port: number) => boolean;
+
 export type ReticleConnectDecisionInput = {
   env?: NodeJS.ProcessEnv;
-  isDaemonListening?: (host: string, port: number) => boolean;
+  isDaemonListening?: ReticleDaemonProbe;
 };
 
 function parseConnectOff(raw: string | undefined): boolean {
@@ -65,6 +71,6 @@ export function shouldInjectReticleConnect(input: ReticleConnectDecisionInput = 
   if (parseConnectOff(env.RETICLE_CONNECT)) {
     return false;
   }
-  const probe = input.isDaemonListening ?? isReticleDaemonListening;
+  const probe: ReticleDaemonProbe = input.isDaemonListening ?? isReticleDaemonListening;
   return probe(RETICLE_BRIDGE_HOST, reticleBridgePort(env));
 }

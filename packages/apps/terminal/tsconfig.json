@@ -23,6 +23,8 @@
       "@flinttrade/design-system": ["../../core/design-system/src/index.ts"]
     }
   },
-  "include": ["src", "vite-env.d.ts"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  // No project reference to tsconfig.node.json: src/reticleConnectGate.ts is
+  // imported by both the app tests and vite.config.ts. A composite reference
+  // would demand a built *.d.ts (TS6305) instead of the source types.
+  "include": ["src", "vite-env.d.ts"]
 }

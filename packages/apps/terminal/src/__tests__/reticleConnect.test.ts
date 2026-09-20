@@ -17,7 +17,7 @@ import {
   isReticleDaemonListening,
   reticleBridgePort,
   shouldInjectReticleConnect,
-} from "../../vite.reticle";
+} from "../reticleConnectGate";
 
 describe("shouldInjectReticleConnect", () => {
   it("no-ops when the daemon port is closed", () => {
@@ -60,7 +60,7 @@ describe("shouldInjectReticleConnect", () => {
     const ports: number[] = [];
     shouldInjectReticleConnect({
       env: { RETICLE_PORT: "4411" },
-      isDaemonListening: (_host, port) => {
+      isDaemonListening: (_host: string, port: number) => {
         ports.push(port);
         return false;
       },

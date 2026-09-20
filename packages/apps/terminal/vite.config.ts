@@ -9,7 +9,7 @@ import fs from "fs";
 import path from "path";
 
 import { reticle } from "@reticlehq/vite-plugin";
-import { shouldInjectReticleConnect } from "./vite.reticle";
+import { shouldInjectReticleConnect } from "./src/reticleConnectGate";
 
 function readFlintTradeVersion(): string {
   const repoRoot = path.resolve(import.meta.dirname, "../../..");
