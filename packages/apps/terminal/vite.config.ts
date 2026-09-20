@@ -1,6 +1,5 @@
-// defineConfig comes from vitest/config (not vite) so the `test` block
-// typechecks: the vitest module augmentation lands on vitest's own vite 7
-// module identity, not the vite 6 copy this package resolves.
+// Import Vitest's defineConfig so its `test` configuration is typed alongside
+// Vite options, including when the tools resolve separate Vite module identities.
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";

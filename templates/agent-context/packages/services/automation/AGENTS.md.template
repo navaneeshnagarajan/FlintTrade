@@ -1,9 +1,9 @@
 # FlintTrade — automation
 
-> Cron scheduler, Telegram bot, OpenClaw agent bridge, post-market analysis
+> Cron scheduler, Telegram bot, post-market analysis
 
-## Absorbs
-- OpenClaw (external service; local-dev clone at `.local/external/openclaw/` via `scripts/setup-test-deps.sh`) → AI agent gateway, Telegram/WhatsApp/Discord, heartbeats, skills
+## AI integration
+- Agent runtimes and LLM providers are managed by `packages/services/ai`; follow its current registry and integration contracts.
 
 ## Depends on: core, engine, ai, data
 
@@ -13,7 +13,7 @@
 - Never reference specific brokers
 - Tests are in the `tests/` directory. Add new test files as needed.
 - Update root CHANGELOG.md
-- Branch: main (pre-release, all commits to main)
+- Branch: follow root AGENTS.md; verify live main before opening or merging a PR.
 
 ## Broker authentication
 - Broker login (OAuth, PIN, and session management) is handled by OpenAlgo, NOT FlintTrade

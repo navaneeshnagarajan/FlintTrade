@@ -39,7 +39,7 @@ const nextConfig = {
     return [
       {
         // Scoped CSP for the full-page terminal demo: same-origin only, but
-        // runtime-injected styles allowed (Dockview/Plotly/inline keyframes)
+        // runtime-injected styles allowed (FlexLayout/Plotly/inline keyframes)
         // and not frameable now that the site opens it as its own page.
         source: '/demo-app/:path*',
         headers: [

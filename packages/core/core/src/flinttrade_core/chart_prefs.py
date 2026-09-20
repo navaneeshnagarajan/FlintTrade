@@ -4,7 +4,7 @@ Stored in DuckDB for multi-user readiness.  Three logical stores:
 
 1. **Themes** — chart colour/style themes per user
 2. **Indicator sets** — named collections of indicator configs (e.g. "My Scalping Setup")
-3. **Layouts** — serialised Dockview/chart panel layouts per user
+3. **Layouts** — serialised FlexLayout/chart panel layouts per user
 
 All three are held in a single DuckDB file (``flint.duckdb`` by default) using
 three separate tables, each keyed by ``user_id``.
@@ -280,7 +280,7 @@ class ChartPreferences:
         Args:
             user_id: User identifier.
             layout_name: Layout identifier, e.g. ``"intraday"``.
-            layout: Serialised layout dict (Dockview / panel state).
+            layout: Serialised layout dict (FlexLayout / panel state).
         """
         now = datetime.now(tz=UTC).replace(tzinfo=None)
         self.connection.execute(

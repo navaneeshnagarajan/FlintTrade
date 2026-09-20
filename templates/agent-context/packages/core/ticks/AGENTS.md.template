@@ -18,4 +18,4 @@
 - Tests live in `packages/core/ticks/tests/`. Add Rust unit tests inline with `#[cfg(test)]` and Python integration tests as `test_*.py`.
 - Cross-platform: code must compile cleanly on Windows, macOS, and Linux (CI matrix). If a feature needs a platform-specific dependency, gate it with `cfg(target_os = …)`.
 - Update root CHANGELOG.md for any API surface change (added/removed exports, signature changes).
-- Branch: main (pre-release, all commits to main).
+- Branch: follow root AGENTS.md; verify live main before opening or merging a PR.

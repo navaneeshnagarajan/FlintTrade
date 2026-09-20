@@ -27,7 +27,7 @@
 - Never reference specific brokers
 - Tests are in the `tests/` directory. Add new test files as needed.
 - Update root CHANGELOG.md
-- Branch: main (pre-release, all commits to main)
+- Branch: follow root AGENTS.md; verify live main before opening or merging a PR.
 
 ## Multi-exchange safety
 - Auto square-off times differ: equity 3:15 PM, currency 4:45 PM, MCX 11:30 PM

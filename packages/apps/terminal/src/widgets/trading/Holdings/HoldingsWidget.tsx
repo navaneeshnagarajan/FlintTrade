@@ -1,7 +1,7 @@
 // Migrated to TSX — Phase 4 Batch 1
 // Replaces direct getHoldings() / getMultiQuotes() calls with useHoldings() hook.
 // PRESERVED: retry:false in useHoldings to suppress errors for brokers without holdings API.
-// Uses TanStack Table v8 + shadcn Table; search + sort are client-side derived state.
+// Uses TanStack Table + shadcn Table; search + sort are client-side derived state.
 import { useMemo, useState, useCallback, memo } from "react";
 import { Clock, Search, RefreshCw, Briefcase, FileSpreadsheet } from "lucide-react";
 import {

@@ -136,7 +136,6 @@ FORMER_IGNORED = [
     ".gitignore",
     ".gitattributes",
     ".editorconfig",
-    ".github/workflows/claude-foo.yml",
     ".github/workflows/status-report.yml",
     ".github/ISSUE_TEMPLATE/bar.md",
 ]
@@ -219,7 +218,6 @@ def test_changed_surfaces_classifier_mutation_sensitive():
         ".gitignore": ("^\\.gitignore$", ".gitignore"),
         ".gitattributes": ("^\\.gitattributes$", ".gitattributes"),
         ".editorconfig": ("^\\.editorconfig$", ".editorconfig"),
-        ".github/workflows/claude*.yml": ("^\\.github/workflows/claude.*\\.yml$", ".github/workflows/claude-foo.yml"),
         ".github/workflows/status-report.yml": ("^\\.github/workflows/status-report\\.yml$", ".github/workflows/status-report.yml"),
         ".github/ISSUE_TEMPLATE/**": ("^\\.github/ISSUE_TEMPLATE/", ".github/ISSUE_TEMPLATE/config.json"),
     }

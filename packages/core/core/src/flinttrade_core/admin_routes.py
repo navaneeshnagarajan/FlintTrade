@@ -120,7 +120,7 @@ _WIDGET_REGISTRY: list[dict[str, str]] = [
 # ---------------------------------------------------------------------------
 
 _FEATURE_FLAGS: list[dict[str, str]] = [
-    {"name": "Dockview Workspace", "status": "live", "route": "/trade"},
+    {"name": "FlexLayout Workspace", "status": "live", "route": "/trade"},
     {"name": "Multi-broker Gateway", "status": "live", "route": "/settings"},
     {"name": "Option Chain (real-time)", "status": "live", "route": "/trade"},
     {"name": "GEX Dashboard", "status": "live", "route": "/trade"},
