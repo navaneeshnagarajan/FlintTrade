@@ -89,7 +89,7 @@ vi.mock("@/services/advisorApi", () => ({
 // never through a raw fetch of a model-chosen endpoint.
 const mockPlaceOrder = vi.fn();
 vi.mock("@/services/api", () => ({
-  placeOrder: (params: unknown) => mockPlaceOrder(params) as Promise<{ orderId: string }>,
+  placeOrder: (...args: unknown[]) => mockPlaceOrder(...args) as Promise<{ orderId: string }>,
 }));
 
 // AI2 history clients — mocked so the panel is hermetic.
@@ -770,6 +770,17 @@ describe("executeApprovedToolCall", () => {
     );
     expect(outcome.executed).toBe(true);
     expect(outcome.message).toContain("FT-123");
+  });
+
+  it("pins Practice authority so an approved AI order cannot retarget Live", async () => {
+    useModeStore.setState({ mode: "practice" });
+    mockPlaceOrder.mockResolvedValueOnce({ orderId: "SB-55" });
+    const outcome = await executeApprovedToolCall(orderCall);
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "NIFTY24JUL25000CE", strategy: "AIAdvisor" }),
+      { mode: "practice" },
+    );
+    expect(outcome.executed).toBe(true);
   });
 
   it("refuses to dispatch in Explore mode", async () => {

@@ -11,6 +11,8 @@ vi.mock("../advisorApi", () => ({
   getAdvisorBase: () => "",
 }));
 
+import { useAuthStore } from "@/stores/authStore";
+
 import {
   ADVISOR_STREAM_TIMEOUT_MS,
   ADVISOR_TIMEOUT_MESSAGE,
@@ -25,6 +27,7 @@ import {
   isAdvisorChatReady,
   isExplicitAdvisorConfiguration,
   resolveAdvisorLlmChrome,
+  postAdvisorChat,
   probeAdvisorAvailability,
   readAdvisorHttpError,
   requestAdvisorReply,
@@ -42,9 +45,11 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe("advisorChat", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
+    useAuthStore.setState({ token: null });
   });
 
   afterEach(() => {
+    useAuthStore.setState({ token: null });
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -335,6 +340,25 @@ describe("advisorChat", () => {
     ).rejects.toThrow(LLM_NOT_CONFIGURED_MESSAGE);
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toMatch(/\/advisor\/status$/);
+  });
+
+  it("sends the Practice JWT so the advisor can read SandboxEngine fills", async () => {
+    useAuthStore.setState({ token: "practice-jwt" });
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ status: "success", data: { response: "You filled NIFTY" } }),
+    );
+
+    await expect(
+      postAdvisorChat({
+        messages: [{ role: "user", content: "What did I fill?" }],
+        context: "",
+      }),
+    ).resolves.toBe("You filled NIFTY");
+
+    const init = vi.mocked(fetch).mock.calls[0]?.[1] as RequestInit;
+    expect(init.headers).toEqual(expect.objectContaining({
+      Authorization: "Bearer practice-jwt",
+    }));
   });
 
   it("fails closed when the advisor backend is unreachable", async () => {

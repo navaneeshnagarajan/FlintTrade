@@ -37,24 +37,25 @@ describe("ConnectionStep", () => {
     vi.unstubAllGlobals();
   });
 
-  it("defaults to the OpenAlgo (primary) connect tab", () => {
-    // Principle 2: OpenAlgo is the recommended, community-tested path, so it is
-    // the default tab; native is the secondary option behind the second tab.
-    render(<ConnectionStep onComplete={vi.fn()} />);
+  it("does not present OpenAlgo as the primary Monday connect CTA", () => {
+    const onComplete = vi.fn();
+    render(<ConnectionStep onComplete={onComplete} />);
 
-    expect(screen.getByRole("button", { name: /openalgo bridge/i })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(screen.getByRole("button", { name: /flinttrade native/i })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
-    expect(screen.getByText(/Recommended/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/openalgo-compatible url/i)).toHaveValue(DEFAULT_OPENALGO_HOST);
-    expect(screen.getByLabelText(/REST port/i)).toHaveValue("5000");
-    // The native section is behind the secondary tab, not shown by default.
+    const skip = screen.getByRole("button", { name: /continue without a broker/i });
+    expect(skip).toBeEnabled();
+    expect(screen.getByText(/SandboxEngine/i)).toBeInTheDocument();
+    expect(screen.getByText(/Settings fallback/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Recommended/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/openalgo-compatible url/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Native brokers section")).not.toBeInTheDocument();
+
+    fireEvent.click(skip);
+    expect(onComplete).toHaveBeenCalledWith({
+      host: "",
+      port: "5000",
+      apiKey: "",
+      wsPort: "8765",
+    });
   });
 
   it("does not commit untested values to the connection store when Test Connection runs", async () => {
@@ -71,6 +72,7 @@ describe("ConnectionStep", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<ConnectionStep onComplete={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /openalgo bridge/i }));
 
     fireEvent.change(screen.getByLabelText(/openalgo-compatible url/i), {
       target: { value: "http://unverified-host:5000" },
@@ -98,6 +100,7 @@ describe("ConnectionStep", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<ConnectionStep onComplete={onComplete} />);
+    fireEvent.click(screen.getByRole("button", { name: /openalgo bridge/i }));
     fireEvent.change(screen.getByLabelText(/openalgo-compatible api key/i), {
       target: { value: "candidate-api-key" },
     });
@@ -132,6 +135,7 @@ describe("ConnectionStep", () => {
     )));
 
     render(<ConnectionStep onComplete={onComplete} />);
+    fireEvent.click(screen.getByRole("button", { name: /openalgo bridge/i }));
     fireEvent.change(screen.getByLabelText(/openalgo-compatible api key/i), {
       target: { value: "candidate-api-key" },
     });
@@ -150,6 +154,7 @@ describe("ConnectionStep", () => {
     )));
 
     render(<ConnectionStep onComplete={onComplete} />);
+    fireEvent.click(screen.getByRole("button", { name: /openalgo bridge/i }));
     fireEvent.change(screen.getByLabelText(/openalgo-compatible api key/i), {
       target: { value: "candidate-api-key" },
     });

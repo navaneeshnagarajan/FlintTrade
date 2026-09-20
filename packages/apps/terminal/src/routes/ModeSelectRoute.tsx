@@ -44,7 +44,7 @@ const MODE_CARDS: ModeCardConfig[] = [
   {
     id: "explore",
     label: "Explore",
-    description: "Browse with sample data",
+    description: "Browse with sample data only",
     brokerNote: "No broker needed",
     icon: <Monitor size={22} aria-hidden="true" />,
     pillClass: "bg-text-muted/20 text-text-secondary",
@@ -58,10 +58,10 @@ const MODE_CARDS: ModeCardConfig[] = [
     // "with live data" overpromised: without a broker or OpenAlgo connection
     // there is no market feed, so a fresh install sees honest dashes and the
     // sandbox refuses market fills (no LTP). Say what actually happens.
-    description: "Practice trading with virtual capital",
+    description: "Practice fills on FlintTrade's SandboxEngine",
     // Practice orders run against the native SandboxEngine, never a broker —
     // claiming "Broker required" here scared off broker-less users (item 2).
-    brokerNote: "No broker needed · Live prices once one is connected",
+    brokerNote: "No broker needed · primary Monday Practice path",
     icon: <FlaskConical size={22} aria-hidden="true" />,
     pillClass: "bg-amber-500/20 text-amber-400",
     borderClass: "border-border-default/70 hover:border-amber-500/50",
@@ -71,7 +71,7 @@ const MODE_CARDS: ModeCardConfig[] = [
   {
     id: "live",
     label: "Live",
-    description: "Real trading",
+    description: "Live orders stay fail-closed until funded unlock",
     brokerNote: "Broker required · PIN and authenticator required",
     icon: <Zap size={22} aria-hidden="true" />,
     pillClass: "bg-profit/20 text-profit",

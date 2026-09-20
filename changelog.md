@@ -19,6 +19,17 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Added
 
+- **Practice `SandboxEngine` primary Monday fills (FT-MONDAY-001).**
+  Practice places and records native `SandboxEngine`
+  fills end-to-end as the primary paper path. Desk
+  and AI read that same Practice book. Explore stays
+  sample-only. Live stays fail-closed until MSI
+  native smoke is trusted and funded unlock. Practice
+  never leaks a live broker order. OpenAlgo is
+  Settings fallback only — not the Monday primary
+  connect CTA. Learn still lists **Kotak Neo Sandbox**
+  as Planned / when available — that row is not a
+  usable Monday Practice path.
 - **Service connections and in-process `BrokerReadPort`.** The backend now
   ships a rights-aware service-provider catalogue, static LLM/data profiles,
   and an inert persisted service-connection control plane. Listing or saving a

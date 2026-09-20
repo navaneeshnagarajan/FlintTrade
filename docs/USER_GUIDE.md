@@ -274,11 +274,24 @@ Before enabling any order-capable integration, exercise the order path in
 | Mode | Order behaviour | Best for |
 |---|---|---|
 | **Explore** | Demo/sample data; no Live broker order authority. On `/trade`, Order Pad **Sample Buy** opens a sample review and records a local sample fill (no broker) | First-time visitors, screenshots, docs |
-| **Practice** | Orders simulated by FlintTrade's native sandbox | Strategy tests and integration checks |
+| **Practice** | Orders simulated by FlintTrade's native `SandboxEngine` (primary paper path) | Strategy tests, Monday fills, AI/desk work |
 | **Live** | Real orders sent through the configured broker path | Gated broker integration, only after user review |
 
 The current mode is shown in the top bar and is server-enforced via the JWT
 claim — switching to Live requires a deliberate confirmation step.
+
+**Monday fills path (FT-MONDAY-001).** Locked 2026-09-20 and now the
+shipped Practice path. Explore is sample-only. Practice is the
+primary paper path: orders place and record fills on FlintTrade's
+native `SandboxEngine`. AI and desk surfaces read that Practice
+book. Practice never leaks a live broker order. Live stays
+fail-closed until MSI native smoke is trusted and funded unlock.
+OpenAlgo is a Settings fallback only — not the primary Monday
+connect CTA. Setup's primary connect action is **Continue without
+a broker**. Dhan Sandbox is optional OpenAlgo paper. Learn →
+Practice Trading still shows **Kotak Neo Sandbox** as **Planned**
+/ **when available**; that row is not a usable sandbox today and
+is not a Monday Practice path.
 
 **Mode vs session vs sample (FT-UX-001).** The Explore / Practice / Live chips
 mean execution mode only. TopBar session chips (Continuous · CAS · Matching ·
@@ -407,18 +420,24 @@ BUY / Confirm SELL chrome. Practice and Live open Confirm only
 when the mode allows it and a gateway is configured. The
 backend rejects Explore orders if the UI slips (FT-TRADE-009).
 
-### Learn → Practice Trading (OpenAlgo)
+### Learn → Practice Trading (OpenAlgo fallback)
 
-This is a different path from the native Practice-mode sandbox on
-`/trade` above. Explore `/learn` → **Practice Trading** walks through
-OpenAlgo broker Practice / sandbox setup (Dhan Sandbox Active, ₹10L
-virtual funds; Kotak Neo Sandbox Planned). The tab shows "How to start
-Practice Trading", helper text "Configure OpenAlgo in Settings → Broker
-Gateway.", and an **Open Settings → Broker Gateway** button that
-navigates to `/settings#api`. The CTA does not send operators to
-Settings → Brokers (`/settings#brokers`). Point the Broker Gateway at
-that OpenAlgo Practice instance, trade against virtual funds, review
-P&L, then point OpenAlgo at live credentials when ready.
+This is a fallback path, not the primary Monday fills path. The
+primary paper path is Practice mode on `/trade` through the native
+`SandboxEngine` (FT-MONDAY-001). Explore `/learn` → **Practice
+Trading** still walks through OpenAlgo broker Practice / sandbox
+setup when you need that fallback. **Supported Sandboxes** lists
+**Dhan Sandbox** as **Active** (optional OpenAlgo paper) and
+**Kotak Neo Sandbox** as **Planned** / **when available**. Neo has
+no usable sandbox today — treat that Planned row as a future
+placeholder, not an available Practice path and not Monday
+Practice. The tab shows "How to start Practice Trading", helper text
+"Configure OpenAlgo in Settings → Broker Gateway.", and an
+**Open Settings → Broker Gateway** button that navigates to
+`/settings#api`. The CTA does not send operators to Settings →
+Brokers (`/settings#brokers`). Point the Broker Gateway at that
+OpenAlgo Practice instance only as fallback, then return to native
+Practice `SandboxEngine` fills for Monday desk and AI work.
 
 On Explore `/learn` → Glossary → Lot Size, the glossary teaches dated
 Jan 2026 NSE-cycle index lots (`NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 ·
