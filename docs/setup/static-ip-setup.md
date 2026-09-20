@@ -28,11 +28,12 @@ it directly in your broker's developer console.
 
 The locked Monday path is **native** Dhan + Kotak Neo on the MSI host
 whose public IP is allow-listed at both brokers. Smoke uses **non-funded**
-accounts and live API reads (ticks / depth / hist / chain where the SDK
-allows). That is API smoke, not funded Live unlock.
+accounts and live REST API reads (quotes / depth / hist / chain where the
+SDK allows). Live SFeed / `create_websocket` is not wired for Neo in this
+tip. That is REST API smoke, not funded Live unlock.
 
-When those reads work, chrome is **Connected (read)** / **API smoke** —
-never imply placeable Live orders. Neo copy is
+When those reads succeed (not login-only), chrome is **Connected (read)**
+/ **API smoke** — never imply placeable Live orders. Neo copy is
 `Live read only until funded unlock.` Prefer native; OpenAlgo is
 Settings / fallback only. Keep personal IPs out of this repository.
 

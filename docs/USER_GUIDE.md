@@ -270,9 +270,9 @@ first-party broker gateway whose HTTP connect and read surfaces are frozen
 until Task 9D and Task 7C.2.
 
 **Monday dual-broker smoke (FT-MONDAY-002).** The Monday path is
-native Dhan + Kotak Neo on the MSI static-IP host, non-funded live API
-smoke (ticks / depth / hist / chain where the SDK allows). Monday Neo
-is REST-only; live SFeed websocket (`create_websocket`) is not wired.
+native Dhan + Kotak Neo on the MSI static-IP host, non-funded live REST
+API smoke (quotes / depth / hist / chain where the SDK allows). Monday
+Neo is REST-only; live SFeed / `create_websocket` is not wired.
 Prefer native; OpenAlgo is Settings / fallback only — not the Monday
 primary connect CTA. Native HTTP remains frozen on this unreleased
 line until Task 9D and Task 7C.2 — Setup → Brokers HTTP still fails;

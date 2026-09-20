@@ -90,7 +90,9 @@ promoted Live order proof yet. Neo has **no sandbox** —
 never offer Neo Practice; Monday chrome copy is `Live read only until
 funded unlock.` FT-MONDAY-002 ships native Dhan + Neo on the MSI
 static-IP host as the preferred Monday connect path (OpenAlgo is
-Settings / fallback only). `dhanhq` stays on latest stable 2.2.0;
+Settings / fallback only). Monday Neo smoke is REST-only (quotes /
+depth / hist / chain where the SDK allows); live SFeed /
+`create_websocket` is not wired. `dhanhq` stays on latest stable 2.2.0;
 Neo is PyPI `kotakneoapi` 3.0.7 (the `neo-api-client` 2.0.0 git pin
 is gone). `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift` refreshes local SDK
 source mirrors and PyPI artifacts under the gitignored `.local/sdk-audit/` cache
