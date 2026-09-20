@@ -772,6 +772,17 @@ describe("executeApprovedToolCall", () => {
     expect(outcome.message).toContain("FT-123");
   });
 
+  it("pins Practice authority so an approved AI order cannot retarget Live", async () => {
+    useModeStore.setState({ mode: "practice" });
+    mockPlaceOrder.mockResolvedValueOnce({ orderId: "SB-55" });
+    const outcome = await executeApprovedToolCall(orderCall);
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "NIFTY24JUL25000CE", strategy: "AIAdvisor" }),
+      { mode: "practice" },
+    );
+    expect(outcome.executed).toBe(true);
+  });
+
   it("refuses to dispatch in Explore mode", async () => {
     useModeStore.setState({ mode: "explore" });
     const outcome = await executeApprovedToolCall(orderCall);

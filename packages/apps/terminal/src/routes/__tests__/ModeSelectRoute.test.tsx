@@ -29,11 +29,17 @@ describe("ModeSelectRoute", () => {
     const practiceButton = screen.getByText("Practice").closest("button") as HTMLButtonElement;
     expect(practiceButton).not.toBeNull();
     expect(practiceButton).toHaveTextContent(/no broker needed/i);
+    expect(practiceButton).toHaveTextContent(/SandboxEngine/i);
     expect(practiceButton).not.toHaveTextContent(/broker required/i);
 
-    // Live genuinely requires a broker + PIN — that copy must stay.
+    const exploreButton = screen.getByText("Explore").closest("button") as HTMLButtonElement;
+    expect(exploreButton).toHaveTextContent(/sample/i);
+
+    // Live stays fail-closed until funded unlock — never a Monday place CTA.
     const liveButton = screen.getByText("Live").closest("button") as HTMLButtonElement;
     expect(liveButton).toHaveTextContent(/broker required/i);
+    expect(liveButton).toHaveTextContent(/fail-closed/i);
+    expect(liveButton).toHaveTextContent(/funded unlock/i);
   });
 
   it("enrols a deferred authenticator before unlocking Live", async () => {

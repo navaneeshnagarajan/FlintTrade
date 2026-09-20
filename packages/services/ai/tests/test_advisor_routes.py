@@ -288,3 +288,90 @@ class TestAdvisorStatus:
         monkeypatch.setenv("LLM_PROVIDER", "openai")
         assert _llm_readiness_source() == "env"
         assert _is_llm_configured() is True
+
+
+# ---------------------------------------------------------------------------
+# FT-MONDAY-001 — Practice SandboxEngine book for AI
+# ---------------------------------------------------------------------------
+
+
+class TestAdvisorPracticeSandboxBook:
+    """AI chat can read Practice fills; Live/Explore do not get that book."""
+
+    @pytest.fixture()
+    def practice_app(self, tmp_path):
+        """Advisor app with a real SandboxEngine that already has one fill."""
+        from flinttrade_ai.advisor_routes import advisor_bp
+        from flinttrade_data.sandbox_engine import SandboxEngine
+
+        flask_app = Flask(__name__)
+        flask_app.config["TESTING"] = True
+        engine = SandboxEngine(db_path=str(tmp_path / "advisor-sandbox.sqlite3"))
+        result = engine.place_order(
+            symbol="NIFTY",
+            exchange="NSE",
+            action="BUY",
+            quantity=1,
+            price=100.0,
+            product="MIS",
+            order_type="MARKET",
+        )
+        assert result["status"] == "COMPLETE"
+        flask_app.config["DATA_SANDBOX_ENGINE"] = engine
+        flask_app.register_blueprint(advisor_bp)
+        return flask_app
+
+    @staticmethod
+    def _headers(mode: str) -> dict[str, str]:
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("ft-monday-001-ai", mode=mode, live_mode_unlocked=False)
+        return {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+    def test_practice_jwt_injects_sandbox_fills_into_llm_context(self, practice_app) -> None:
+        """A Practice JWT lets the advisor read the SandboxEngine book."""
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = _make_llm_response(content="Practice book received")
+        client = practice_app.test_client()
+        with (
+            patch("flinttrade_ai.advisor_routes._is_llm_configured", return_value=True),
+            patch("flinttrade_ai.advisor_routes.LLMClient", return_value=mock_llm),
+        ):
+            resp = client.post(
+                "/api/v1/advisor",
+                json={"messages": [{"role": "user", "content": "What did I fill?"}]},
+                headers=self._headers("practice"),
+            )
+        assert resp.status_code == 200
+        conversation = mock_llm.chat.call_args[0][0]
+        book_msgs = [
+            message
+            for message in conversation
+            if "Practice SandboxEngine book" in getattr(message, "content", "")
+        ]
+        assert book_msgs, "Practice fills must be visible to the advisor"
+        assert "NIFTY" in book_msgs[0].content
+
+    def test_live_jwt_does_not_inject_practice_sandbox_book(self, practice_app) -> None:
+        """Live AI-on-broker reads are FT-MONDAY-003 — not injected here."""
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = _make_llm_response()
+        client = practice_app.test_client()
+        with (
+            patch("flinttrade_ai.advisor_routes._is_llm_configured", return_value=True),
+            patch("flinttrade_ai.advisor_routes.LLMClient", return_value=mock_llm),
+        ):
+            resp = client.post(
+                "/api/v1/advisor",
+                json={"messages": [{"role": "user", "content": "What did I fill?"}]},
+                headers=self._headers("live"),
+            )
+        assert resp.status_code == 200
+        conversation = mock_llm.chat.call_args[0][0]
+        assert all(
+            "Practice SandboxEngine book" not in getattr(message, "content", "")
+            for message in conversation
+        )

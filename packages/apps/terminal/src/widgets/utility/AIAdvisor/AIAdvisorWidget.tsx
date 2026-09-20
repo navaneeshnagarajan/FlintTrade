@@ -258,7 +258,9 @@ export async function executeApprovedToolCall(toolCall: ToolCall): Promise<Appro
   }
 
   try {
-    const result = await placeOrder(params);
+    const mode = useModeStore.getState().mode;
+    const authority = mode === "practice" ? { mode: "practice" as const } : undefined;
+    const result = await placeOrder(params, authority);
     return {
       executed: true,
       message:

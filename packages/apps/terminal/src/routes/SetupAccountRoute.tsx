@@ -4,7 +4,7 @@
  * Step 0: Account Security  — username, email, password, optional PIN (POSTs /v1/auth/setup)
  * Step 1: Two-Factor Auth   — optional enrol; “Set up later” continues the wizard
  * Step 2: Persona           — Trader / Investor / Beginner
- * Step 3: Broker Connection — OpenAlgo host + API key (or Direct Connect)
+ * Step 3: Broker Connection — optional; Monday primary CTA is skip (Practice SandboxEngine)
  * Step 4: Trading Defaults  — exchange, product, quantity
  * Step 5: Risk Limits       — MTM caps, position size, order rate
  * Step 6: Choose Mode       — Explore / Practice / Live (selecting a mode FINISHES setup)

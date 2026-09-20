@@ -10,6 +10,7 @@ import logging
 import os
 from typing import Any
 
+import jwt
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from .llm_client import LLMClient, LLMConfig, LLMMessage
@@ -93,6 +94,63 @@ def _is_llm_configured() -> bool:
         return False
 
 
+def _jwt_mode() -> str | None:
+    """Return the signed JWT ``mode`` claim, or ``None`` when absent/invalid."""
+    from flinttrade_core.auth_routes import decode_token  # lazy: avoid import cycle
+
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip()
+    if not token:
+        token = request.headers.get("X-FlintTrade-Token", "").strip()
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    mode = payload.get("mode")
+    return mode if isinstance(mode, str) else None
+
+
+def _practice_sandbox_book_context() -> str:
+    """Return the Practice SandboxEngine book when the JWT is Practice.
+
+    Desk/AI read the same paper fills that ``orders/place`` recorded. Live
+    and Explore stay dark here — live-read AI is FT-MONDAY-003.
+    """
+    if _jwt_mode() != "practice":
+        return ""
+    engine = current_app.config.get("DATA_SANDBOX_ENGINE")
+    if engine is None:
+        return ""
+    try:
+        positions = engine.get_positions()
+        orders = engine.get_orders()
+        trades = engine.get_trades()
+    except Exception:  # noqa: BLE001 - advisor must never 500 on a book read
+        logger.debug("Practice sandbox book read failed", exc_info=True)
+        return ""
+    return (
+        "Practice SandboxEngine book (paper fills only; not a live broker):\n"
+        f"positions: {positions}\n"
+        f"orders: {orders}\n"
+        f"trades: {trades}"
+    )
+
+
+def _merge_request_context(raw: Any) -> str:
+    """Flatten the request context and append the Practice book when allowed."""
+    context = _coerce_context(raw)
+    practice_book = _practice_sandbox_book_context()
+    if not practice_book:
+        return context
+    if not context:
+        return practice_book
+    return f"{context}\n{practice_book}"
+
+
 def _coerce_context(raw: Any) -> str:
     """Normalise the request's ``context`` field to a single string.
 
@@ -135,7 +193,7 @@ def advisor_chat() -> tuple[Any, int]:
         }), 503
 
     body = request.get_json(silent=True) or {}
-    context: str = _coerce_context(body.get("context"))
+    context: str = _merge_request_context(body.get("context"))
 
     # Accept messages[] array (new) or message string (legacy)
     raw_messages = body.get("messages")
@@ -212,7 +270,7 @@ def advisor_stream() -> Response | tuple[Any, int]:
         }), 503
 
     body = request.get_json(silent=True) or {}
-    context: str = _coerce_context(body.get("context"))
+    context: str = _merge_request_context(body.get("context"))
 
     # Build conversation (same logic as /advisor)
     raw_messages = body.get("messages")

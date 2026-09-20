@@ -10,6 +10,7 @@
 import { safeParse, sseTokenSchema } from "@/lib/safeParse";
 import { AdvisorResponseSchema, AdvisorStatusResponseSchema } from "@/lib/schemas/ftApi";
 import { getAdvisorBase } from "./advisorApi";
+import { buildHeaders } from "./ftApi.helpers";
 
 /** Matches the backend 503 body when no LLM provider is configured. */
 export const LLM_NOT_CONFIGURED_MESSAGE =
@@ -387,7 +388,7 @@ export async function streamAdvisorChat(request: AdvisorChatRequest): Promise<st
   try {
     const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: buildHeaders(true),
       body: JSON.stringify({
         messages: request.messages,
         context: request.context,
@@ -423,7 +424,7 @@ export async function postAdvisorChat(request: AdvisorChatRequest): Promise<stri
   try {
     const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: buildHeaders(true),
       body: JSON.stringify({
         messages: request.messages,
         message: request.messages[request.messages.length - 1]?.content ?? "",

@@ -1,9 +1,9 @@
 /**
- * ConnectionStep — connection configuration step in the setup wizard.
+ * ConnectionStep — optional broker step in the setup wizard.
  *
- * Two modes toggled via tabs:
- *   - "OpenAlgo Bridge"    — connect to an external OpenAlgo-compatible server (primary)
- *   - "FlintTrade Native"  — use the catalogue-driven native broker surface
+ * Monday primary path (FT-MONDAY-001): continue without a broker. Practice
+ * fills use FlintTrade's native SandboxEngine. OpenAlgo and native brokers
+ * stay Settings/fallback only — never the primary connect CTA.
  *
  * Exports: ConnectionStep (schema/helpers live in connectionForm.ts for Fast Refresh)
  */
@@ -114,55 +114,65 @@ interface ConnectionStepProps {
 }
 
 export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
-  // OpenAlgo is the primary, community-tested connect path, so it remains the
-  // default tab; native FlintTrade adapters are the secondary option.
-  const [mode, setMode] = useState<ConnectionMode>("openalgo");
+  const [mode, setMode] = useState<ConnectionMode | null>(null);
 
   return (
     <div className="space-y-5">
-      <div
-        className="flex gap-1 p-1 rounded-lg bg-surface-base border border-border-default"
-        role="tablist"
-        aria-label="Connection mode"
-      >
-        <TabButton active={mode === "openalgo"} onClick={() => setMode("openalgo")}>
-          OpenAlgo Bridge
-        </TabButton>
-        <TabButton active={mode === "direct"} onClick={() => setMode("direct")}>
-          FlintTrade Native
-        </TabButton>
+      <div className="space-y-3">
+        <p className="text-sm text-text-primary">
+          Practice uses FlintTrade&apos;s SandboxEngine for paper fills. You do not
+          need a broker for Monday Practice.
+        </p>
+        <Button
+          type="button"
+          className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+          onClick={() => onComplete({ host: "", port: "5000", apiKey: "", wsPort: "8765" })}
+        >
+          Continue without a broker
+          <ArrowRight className="size-4 ml-2" />
+        </Button>
+        <p className="text-xs text-text-muted text-center">
+          OpenAlgo and native brokers stay in Settings as a fallback — not the
+          primary Monday path.
+        </p>
       </div>
 
-      {mode === "openalgo" ? (
+      <div className="pt-2 border-t border-border-default space-y-3">
         <p className="text-xs text-text-muted">
-          <strong className="text-text-secondary">Recommended.</strong> Connect through OpenAlgo — 30+
-          community-tested brokers, the battle-tested path.
+          Optional broker connection (Settings fallback)
         </p>
-      ) : (
-        <p className="text-xs text-text-muted">
-          Connect a FlintTrade native adapter directly. Availability and login fields come from the
-          broker catalogue. Secondary path — native order placement is not fully live-tested; use at
-          your own risk.
-        </p>
-      )}
-
-      {mode === "openalgo" ? (
-        <OpenAlgoConnectionForm defaultValues={defaultValues} onSaved={onComplete} />
-      ) : (
-        <DirectConnectPanel onComplete={onComplete} />
-      )}
-
-      <div className="pt-2 border-t border-border-default space-y-2">
-        <button
-          type="button"
-          onClick={() => onComplete({ host: "", port: "5000", apiKey: "", wsPort: "8765" })}
-          className="w-full text-xs text-text-muted hover:text-text-primary transition-colors py-1.5 rounded focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
+        <div
+          className="flex gap-1 p-1 rounded-lg bg-surface-base border border-border-default"
+          role="tablist"
+          aria-label="Connection mode"
         >
-          I&apos;ll connect later →
-        </button>
-        <p className="text-xs text-text-muted text-center">
-          You can connect your broker anytime from Settings &rarr; Broker Gateway.
-        </p>
+          <TabButton active={mode === "openalgo"} onClick={() => setMode("openalgo")}>
+            OpenAlgo Bridge
+          </TabButton>
+          <TabButton active={mode === "direct"} onClick={() => setMode("direct")}>
+            FlintTrade Native
+          </TabButton>
+        </div>
+
+        {mode === "openalgo" && (
+          <p className="text-xs text-text-muted">
+            Settings fallback only — not the Monday primary connect path. Practice
+            fills still use the native SandboxEngine.
+          </p>
+        )}
+        {mode === "direct" && (
+          <p className="text-xs text-text-muted">
+            Connect a FlintTrade native adapter directly. Availability and login fields come from the
+            broker catalogue. Secondary path — native order placement is not fully live-tested; use at
+            your own risk.
+          </p>
+        )}
+
+        {mode === "openalgo" ? (
+          <OpenAlgoConnectionForm defaultValues={defaultValues} onSaved={onComplete} />
+        ) : mode === "direct" ? (
+          <DirectConnectPanel onComplete={onComplete} />
+        ) : null}
       </div>
     </div>
   );
