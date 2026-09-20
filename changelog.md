@@ -19,18 +19,6 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Added
 
-- **Practice `SandboxEngine` primary Monday fills (FT-MONDAY-001).**
-  Docs and tracking only in this tip — product
-  SandboxEngine E2E does not ship here. Locked bar
-  (2026-09-20): Explore is sample-only; Practice
-  places and records native `SandboxEngine` fills as
-  the primary paper path (AI/desk may use that data);
-  Live stays fail-closed until MSI native smoke is
-  trusted and funded unlock; Practice never leaks a
-  live order; OpenAlgo is Settings fallback only, not
-  the primary CTA. Developer tips product onto the
-  same PR.
-
 - **Service connections and in-process `BrokerReadPort`.** The backend now
   ships a rights-aware service-provider catalogue, static LLM/data profiles,
   and an inert persisted service-connection control plane. Listing or saving a
