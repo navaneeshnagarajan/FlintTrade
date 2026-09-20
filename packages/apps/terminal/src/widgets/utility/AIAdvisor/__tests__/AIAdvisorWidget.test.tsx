@@ -136,13 +136,18 @@ function Providers({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
-function advisorStatusResponse(configured: boolean): Response {
+function advisorStatusResponse(
+  configured: boolean,
+  provider = configured ? "openai" : "",
+  source?: string,
+): Response {
   return new Response(JSON.stringify({
     status: "success",
     data: {
       configured,
-      provider: configured ? "openai" : "",
+      provider: configured ? provider : "",
       model: configured ? "test" : "",
+      ...(source ? { source } : {}),
     },
   }), { status: 200, headers: { "Content-Type": "application/json" } });
 }
@@ -172,8 +177,11 @@ function mockChatLlmProbes(options: {
   advisor: "configured" | "unconfigured" | "unreachable" | "unknown";
   settings: "ready" | "unauthorized";
   provider?: string;
+  advisorProvider?: string;
+  advisorSource?: string;
 }): ReturnType<typeof vi.spyOn> {
   const provider = options.provider ?? "openai";
+  const advisorProvider = options.advisorProvider ?? provider;
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (isLlmConfigGet(input, init)) {
       return settingsLlmResponse(options.settings, provider);
@@ -187,7 +195,11 @@ function mockChatLlmProbes(options: {
         headers: { "Content-Type": "application/json" },
       });
     }
-    return advisorStatusResponse(options.advisor === "configured");
+    return advisorStatusResponse(
+      options.advisor === "configured",
+      advisorProvider,
+      options.advisorSource,
+    );
   });
 }
 
@@ -271,7 +283,12 @@ describe("AIAdvisorWidget", () => {
     mockLlmProvider.mockReturnValue("ollama");
     useModeStore.setState({ mode: "explore" });
     useAuthStore.setState({ token: "demo-user" });
-    mockChatLlmProbes({ advisor: "configured", settings: "unauthorized" });
+    mockChatLlmProbes({
+      advisor: "configured",
+      settings: "unauthorized",
+      advisorProvider: "ollama",
+      advisorSource: "default",
+    });
     render(<AIAdvisorWidget />, { wrapper: Providers });
 
     const badge = await screen.findByText("Not configured");
@@ -295,7 +312,13 @@ describe("AIAdvisorWidget", () => {
       mockLlmProvider.mockReturnValue("");
       useModeStore.setState({ mode });
       useAuthStore.setState({ token });
-      mockChatLlmProbes({ advisor: "configured", settings: "ready", provider: "" });
+      mockChatLlmProbes({
+        advisor: "configured",
+        settings: "ready",
+        provider: "",
+        advisorProvider: "ollama",
+        advisorSource: "default",
+      });
       render(<AIAdvisorWidget />, { wrapper: Providers });
 
       const badge = await screen.findByText("Not configured");
@@ -306,6 +329,32 @@ describe("AIAdvisorWidget", () => {
       expect(screen.getByPlaceholderText("Configure LLM in Settings first...")).toBeDisabled();
       expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
       expect(screen.queryByPlaceholderText("Ask the AI advisor...")).not.toBeInTheDocument();
+      expect(useModeStore.getState().mode).toBe(mode);
+    },
+  );
+
+  it.each([
+    { mode: "explore" as const, token: "demo-user" },
+    { mode: "practice" as const, token: "practice-jwt" },
+  ])(
+    "shows Connected in $mode when stored Settings provider is blank but advisor/status is env-backed",
+    async ({ mode, token }) => {
+      mockLlmProvider.mockReturnValue("");
+      useModeStore.setState({ mode });
+      useAuthStore.setState({ token });
+      mockChatLlmProbes({
+        advisor: "configured",
+        settings: "ready",
+        provider: "",
+        advisorProvider: "openai",
+        advisorSource: "env",
+      });
+      render(<AIAdvisorWidget />, { wrapper: Providers });
+
+      const badge = await screen.findByText("Connected");
+      expect(badge.className).toMatch(/profit/);
+      expect(screen.queryByText("Not configured")).not.toBeInTheDocument();
+      expect(await screen.findByPlaceholderText("Ask the AI advisor...")).not.toBeDisabled();
       expect(useModeStore.getState().mode).toBe(mode);
     },
   );
@@ -372,7 +421,12 @@ describe("AIAdvisorWidget", () => {
     mockLlmProvider.mockReturnValue("openai");
     useModeStore.setState({ mode: "explore" });
     useAuthStore.setState({ token: "demo-user" });
-    mockChatLlmProbes({ advisor: "configured", settings: "unauthorized" });
+    mockChatLlmProbes({
+      advisor: "configured",
+      settings: "unauthorized",
+      advisorProvider: "ollama",
+      advisorSource: "default",
+    });
     conversationStoreMock.useStore.setState({
       messages: [{
         id: "m1",

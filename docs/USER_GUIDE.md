@@ -873,10 +873,12 @@ align with Settings → AI / `#llm` hydration as well as advisor status
 (including Explore / `demo-user` and Practice), not a leftover local setting.
 When Settings `#llm` is empty ("No LLM provider configured") or the stored
 provider is blank, Chat on Explore and Practice shows **Not configured** /
-**LLM not configured** — **Connected** must not appear from an env-default
-advisor `configured`. Returning to Chat after you save Settings → AI
-re-checks readiness (advisor and Settings hydration), so the
-**Not configured** gate should not stay stuck on an outdated result.
+**LLM not configured** unless `advisor/status` reports an explicit
+env-backed provider (`LLM_PROVIDER`). **Connected** must not appear from
+an env-default advisor `configured` (empty provider → ollama). Returning
+to Chat after you save Settings → AI re-checks readiness (advisor and
+Settings hydration), so the **Not configured** gate should not stay stuck
+on an outdated result.
 
 When Settings → AI shows Managed Ollama **Not installed**, AI Hub `/ai`
 Chat does not show a green **Connected** badge (FT-AI-004). The badge

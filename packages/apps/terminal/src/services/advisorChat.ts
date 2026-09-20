@@ -34,6 +34,21 @@ export const ADVISOR_STREAM_TIMEOUT_MS = 45_000;
 
 export type AdvisorAvailability = "configured" | "unconfigured" | "unknown" | "unreachable";
 
+/** How ``advisor/status`` resolved the effective provider. */
+export type AdvisorConfigSource = "env" | "stored" | "default";
+
+export interface AdvisorStatusProbe {
+  availability: AdvisorAvailability;
+  provider: string;
+  source: string;
+}
+
+export interface AdvisorStatusHint {
+  availability?: AdvisorAvailability;
+  provider?: string;
+  source?: string;
+}
+
 /**
  * Honest Chat chrome derived from ``advisor/status``.
  *
@@ -99,24 +114,45 @@ export function isAdvisorChatReady(chrome: AdvisorLlmChrome): boolean {
   return chrome === "ready";
 }
 
+/**
+ * True when ``advisor/status`` reports an explicit env or stored provider.
+ *
+ * The empty→ollama default (``source: default``, or a legacy configured
+ * ollama with no source) is not a real LLM. A non-ollama configured
+ * provider without source is treated as env-backed so older backends
+ * still honour ``LLM_PROVIDER``.
+ */
+export function isExplicitAdvisorConfiguration(input: AdvisorStatusHint): boolean {
+  if (input.availability !== "configured") return false;
+  const source = (input.source ?? "").trim().toLowerCase();
+  if (source === "env" || source === "stored") return true;
+  if (source === "default") return false;
+  const provider = (input.provider ?? "").trim().toLowerCase();
+  return provider !== "" && !selectsManagedOllama(provider);
+}
+
 /** Same states Settings `#llm` uses (FT-SET-001). */
 export type SettingsLlmHydration = "loading" | "ready" | "error" | "empty";
 
 /**
  * Align Chat chrome with stored Settings `#llm` — global, not Mode-derived.
  *
- * ``LLMConfig.from_env()`` defaults an empty stored provider to ollama, so
- * ``advisor/status`` can look configured in Practice while Explore already
- * fail-closes. A blank stored provider is unconfigured in every mode.
- * Never show Connected from that sandbox/default path.
+ * A blank stored provider is unconfigured unless ``advisor/status`` reports
+ * an explicit env-backed or stored provider. The empty→ollama default must
+ * not paint Connected. ``LLM_PROVIDER`` / ``LLM_MODEL`` env-only setups
+ * stay ready.
  */
 export function alignAdvisorChromeWithSettingsHydration(
   advisorChrome: AdvisorLlmChrome,
   settingsHydration: SettingsLlmHydration,
   settingsProvider?: string,
+  advisorStatus?: AdvisorStatusHint,
 ): AdvisorLlmChrome {
   const storedProvider = settingsProvider?.trim();
   if (settingsHydration === "empty" || (settingsHydration === "ready" && storedProvider === "")) {
+    if (advisorStatus && isExplicitAdvisorConfiguration(advisorStatus)) {
+      return advisorChrome;
+    }
     return "unconfigured";
   }
   if (settingsHydration === "error") {
@@ -250,32 +286,43 @@ export async function readAdvisorHttpError(resp: Response): Promise<string> {
  * Anything else (malformed body, unexpected status) is ``unknown`` so the
  * caller can still attempt the real stream/fallback path.
  */
-export async function probeAdvisorAvailability(
+export async function probeAdvisorStatus(
   signal?: AbortSignal,
-): Promise<AdvisorAvailability> {
+): Promise<AdvisorStatusProbe> {
   const gated = combineAbortSignals(signal, ADVISOR_STATUS_TIMEOUT_MS);
   try {
     const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/status`, {
       signal: gated.signal,
     });
-    if (!resp.ok) return "unknown";
+    if (!resp.ok) return { availability: "unknown", provider: "", source: "" };
     let raw: unknown;
     try {
       raw = await resp.json();
     } catch {
-      return "unknown";
+      return { availability: "unknown", provider: "", source: "" };
     }
     const parsed = AdvisorStatusResponseSchema.safeParse(raw);
     if (!parsed.success || parsed.data.status !== "success" || !parsed.data.data) {
-      return "unknown";
+      return { availability: "unknown", provider: "", source: "" };
     }
-    return parsed.data.data.configured ? "configured" : "unconfigured";
+    const data = parsed.data.data;
+    return {
+      availability: data.configured ? "configured" : "unconfigured",
+      provider: data.provider,
+      source: data.source ?? "",
+    };
   } catch (err) {
     if (signal?.aborted && !gated.timedOut()) throw err;
-    return "unreachable";
+    return { availability: "unreachable", provider: "", source: "" };
   } finally {
     gated.cleanup();
   }
+}
+
+export async function probeAdvisorAvailability(
+  signal?: AbortSignal,
+): Promise<AdvisorAvailability> {
+  return (await probeAdvisorStatus(signal)).availability;
 }
 
 /**

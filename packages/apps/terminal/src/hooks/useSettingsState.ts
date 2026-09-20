@@ -98,12 +98,12 @@ export interface SettingsLlmReadiness {
 }
 
 /**
- * Probe Settings `#llm` stored config — global readiness truth, not Mode.
+ * Probe Settings `#llm` stored config — not Mode-derived.
  *
- * A successful read with a blank stored provider is unconfigured in every
- * mode. Practice must not inherit env-default ``advisor/status`` Connected
- * just because Settings hydrated the form ("No pending LLM changes").
- * Mode only classifies a failed GET (Explore empty vs Live/Practice error).
+ * A successful read with a blank stored provider is the Settings empty
+ * appearance. Chat still consults ``advisor/status`` so an explicit
+ * ``LLM_PROVIDER`` env-only setup can stay ready. Mode only classifies a
+ * failed GET (Explore empty vs Live/Practice error).
  */
 export async function probeSettingsLlmReadiness(): Promise<SettingsLlmReadiness> {
   try {
