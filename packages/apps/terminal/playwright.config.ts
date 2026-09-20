@@ -43,5 +43,11 @@ export default defineConfig({
     port: 5173,
     reuseExistingServer: !process.env['CI'],
     timeout: 60_000,
+    // Fail-closed e2e has no Reticle daemon. Force the official Vite inject
+    // off so Playwright does not log ws://127.0.0.1:4400 connection refused.
+    env: {
+      ...process.env,
+      RETICLE_CONNECT: '0',
+    },
   },
 });
