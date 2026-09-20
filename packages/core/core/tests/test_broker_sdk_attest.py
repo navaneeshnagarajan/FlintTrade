@@ -34,7 +34,7 @@ _LOCK = textwrap.dedent(
     version = "PLACEHOLDER"
 
     [[broker]]
-    name = "neo-api-client"
+    name = "kotakneoapi"
     version = "1.0.0"
     """
 )
@@ -50,11 +50,11 @@ def lock_file(tmp_path):
 def test_ok_when_installed_matches_pin(lock_file):
     res = attest_all(
         lock_file,
-        version_resolver=lambda d: {"dhanhq": "2.2.0", "neo-api-client": "1.0.0"}.get(d),
+        version_resolver=lambda d: {"dhanhq": "2.2.0", "kotakneoapi": "1.0.0"}.get(d),
     )
     by = {r.broker: r for r in res}
     assert by["dhanhq"].status == STATUS_OK
-    assert by["neo-api-client"].status == STATUS_OK
+    assert by["kotakneoapi"].status == STATUS_OK
     # Placeholder pin → not yet live → skipped (not a failure).
     assert by["upstox-python-sdk"].status == STATUS_SKIPPED
     assert attest_all_ok(res) is True
@@ -64,8 +64,8 @@ def test_mismatch_and_missing_are_failures(lock_file):
     res = attest_all(lock_file, version_resolver=lambda d: {"dhanhq": "2.1.0"}.get(d))
     by = {r.broker: r for r in res}
     assert by["dhanhq"].status == STATUS_MISMATCH
-    assert by["neo-api-client"].status == STATUS_MISSING
-    assert {f.broker for f in required_failures(res)} == {"dhanhq", "neo-api-client"}
+    assert by["kotakneoapi"].status == STATUS_MISSING
+    assert {f.broker for f in required_failures(res)} == {"dhanhq", "kotakneoapi"}
     assert attest_all_ok(res) is False
 
 

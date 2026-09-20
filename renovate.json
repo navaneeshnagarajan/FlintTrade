@@ -60,7 +60,7 @@
   "packageRules": [
     {
       "description": "Broker SDKs move real money. Never automerged, always founder-reviewed, and a bump also needs brokers.lock regenerated (the sha256 and licence evidence are pinned per version).",
-      "matchPackageNames": ["dhanhq", "upstox-python-sdk", "neo-api-client", "growwapi"],
+      "matchPackageNames": ["dhanhq", "upstox-python-sdk", "kotakneoapi", "growwapi"],
       "groupName": "python brokers (manual review only)",
       "automerge": false,
       "labels": ["needs-founder-review", "needs-sandbox-smoke-test"],

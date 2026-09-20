@@ -53,11 +53,12 @@ SDK_SOURCES: dict[str, BrokerSdkSource] = {
         git_url="https://github.com/upstox/upstox-python.git",
         pypi_name="upstox-python-sdk",
     ),
-    "neo-api-client": BrokerSdkSource(
-        package="neo-api-client",
-        repo_name="kotak-neo-api-v2",
-        git_url="https://github.com/Kotak-Neo/Kotak-neo-api-v2.git",
-        notes="Kotak Neo publishes this SDK from GitHub; package metadata remains version 2.0.0.",
+    "kotakneoapi": BrokerSdkSource(
+        package="kotakneoapi",
+        repo_name="kotak-neo-python",
+        git_url="https://github.com/Kotak-Neo/kotak-neo-python.git",
+        pypi_name="kotakneoapi",
+        notes="Kotak Neo v3 PyPI SDK (import still neo_api_client). HS feed is retired.",
     ),
     "growwapi": BrokerSdkSource(
         package="growwapi",

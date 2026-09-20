@@ -139,12 +139,16 @@ const BROKERS = [
   {
     adapter_id: "kotakneo",
     display_name: "Kotak Neo",
-    connectable: false,
+    connectable: true,
     requires_static_ip: true,
-    native_connect_blockers: [
-      "Maintainer live login/read verification with current TOTP and MPIN",
-      "Live order-safety proof",
-    ],
+    native_connect_blockers: [],
+    sdk_pin: "kotakneoapi",
+    sdk_attestation: {
+      pin: "kotakneoapi",
+      pinned_version: "3.0.7",
+      installed_version: "3.0.7",
+      status: "ok" as const,
+    },
     auth_methods: [
       {
         id: "totp_mpin",
@@ -556,16 +560,30 @@ describe("BrokersSection", () => {
     await waitFor(() => expect(listBrokerAccounts).toHaveBeenCalledTimes(1));
   });
 
+  it("shows Connected (read) for Dhan and Neo — never a live-order claim", async () => {
+    useBrokerStore.setState({
+      accounts: [
+        makeNativeAccount({ account_id: "D1", broker: "dhan", label: "Dhan" }),
+        makeNativeAccount({ account_id: "N1", broker: "kotakneo", label: "Neo" }),
+      ],
+    });
+    renderSection(false);
+    expect(await screen.findAllByText(/Connected \(read\)/)).not.toHaveLength(0);
+    expect(screen.getAllByText(/Live read only until funded unlock/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/ · connected$/)).not.toBeInTheDocument();
+  });
+
   it("shows the section heading and empty connected-accounts state", async () => {
     renderSection();
     expect(screen.getByRole("heading", { name: "Brokers" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/No broker accounts connected/i)).toBeInTheDocument());
-    expect(screen.getByText(/not fully tested — use at your own risk/i)).toBeInTheDocument();
+    expect(screen.getByText(/never placeable Live orders/i)).toBeInTheDocument();
+    expect(screen.getByText(/Live read only until funded unlock/i)).toBeInTheDocument();
     await waitFor(() => {
-      const nativeWarning = screen.getByText(/Native connection is currently enabled for/i);
-      expect(nativeWarning).toHaveTextContent("Dhan and Upstox");
-      expect(nativeWarning).toHaveTextContent("Kotak Neo, INDmoney, and Groww stay visible");
-      expect(nativeWarning).toHaveTextContent("not been live-verified for any broker");
+      const nativeWarning = screen.getByText(/never placeable Live orders/i);
+      expect(nativeWarning).toHaveTextContent("Dhan, Upstox, and Kotak Neo");
+      expect(nativeWarning).toHaveTextContent("INDmoney and Groww stay visible");
+      expect(nativeWarning).toHaveTextContent("Native order placement stays fail-closed");
     });
   });
 
@@ -734,9 +752,7 @@ describe("BrokersSection", () => {
     await waitFor(() => expect(listBrokerMcpCatalogue).toHaveBeenCalled());
 
     expect(await screen.findByText("Broker MCP assistants")).toBeInTheDocument();
-    expect(screen.getByTestId("native-connect-blockers")).toHaveTextContent(
-      "Kotak Neo: Maintainer live login/read verification with current TOTP and MPIN and Live order-safety proof",
-    );
+    expect(screen.getByTestId("native-connect-blockers")).not.toHaveTextContent("Kotak Neo:");
     expect(screen.getByTestId("native-connect-blockers")).toHaveTextContent(
       "Groww: Broker-side market-data/API permission and Live order-safety proof",
     );
@@ -1549,9 +1565,9 @@ describe("BrokersSection", () => {
     await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
-    const kotak = await screen.findByRole("option", { name: /Kotak Neo.*Coming soon/i });
-    expect(kotak).toHaveAttribute("aria-disabled", "true");
-    expect(screen.queryByLabelText(/consumer key/i)).not.toBeInTheDocument();
+    const kotak = await screen.findByRole("option", { name: "Kotak Neo" });
+    expect(kotak).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("option", { name: /Kotak Neo.*Coming soon/i })).not.toBeInTheDocument();
   });
 
   it("keeps INDmoney disabled with its activation blockers visible", async () => {

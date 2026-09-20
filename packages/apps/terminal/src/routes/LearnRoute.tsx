@@ -620,14 +620,9 @@ function PaperTradingTab() {
               — ₹10L virtual funds, 24/7, all instruments
             </span>
           </div>
-          <div
-            data-testid="practice-sandbox-row"
-            className="flex min-w-0 flex-wrap items-center gap-2"
-          >
-            <Badge variant="outline" className="shrink-0 text-xs">Planned</Badge>
-            <span className="text-sm text-text-primary">Kotak Neo Sandbox</span>
-            <span className="min-w-0 break-words text-xs text-text-muted">— when available</span>
-          </div>
+          <p className="min-w-0 break-words text-xs text-text-muted" data-testid="neo-no-practice">
+            Kotak Neo has no sandbox — never offer Neo Practice. Live read only until funded unlock.
+          </p>
         </div>
       </GlassCard>
     </div>

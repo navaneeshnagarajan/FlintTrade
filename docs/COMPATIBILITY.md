@@ -85,13 +85,13 @@ token path. INDstocks' FAQ advertises an
 `indstocks-sdk`, but no matching PyPI or npm
 package exists yet, so there is deliberately no SDK pin for it. Kotak Neo has
 adapter/mapping coverage plus a pinned-SDK-grounded emergency planner, but no
-promoted native connect or live order proof yet. Neo has **no sandbox** —
+promoted Live order proof yet. Neo has **no sandbox** —
 never offer Neo Practice; Monday chrome copy is `Live read only until
-funded unlock.` FT-MONDAY-002 locks native Dhan + Neo on the MSI
+funded unlock.` FT-MONDAY-002 ships native Dhan + Neo on the MSI
 static-IP host as the preferred Monday connect path (OpenAlgo is
-Settings / fallback only). Keep `dhanhq` on the current pin; the Neo v3
-bump (`kotakneoapi` 3.x, replacing the `neo-api-client` 2.0.0 git pin)
-is in scope for the product PR, not this tracking lock. `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift` refreshes local SDK
+Settings / fallback only). `dhanhq` stays on latest stable 2.2.0;
+Neo is PyPI `kotakneoapi` 3.0.7 (the `neo-api-client` 2.0.0 git pin
+is gone). `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift` refreshes local SDK
 source mirrors and PyPI artifacts under the gitignored `.local/sdk-audit/` cache
 and fails if a locked SDK is behind upstream metadata; `uv.lock` and
 `brokers.lock` remain the only tracked install/attestation sources.

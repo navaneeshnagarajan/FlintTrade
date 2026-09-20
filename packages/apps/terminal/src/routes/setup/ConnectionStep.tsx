@@ -17,6 +17,11 @@ import { Button } from "@/components/ui/button";
 import { useBrokerStore } from "@/stores/brokerStore";
 import type { BrokerAccount } from "@/types/broker";
 import type { ConnectionFormValues } from "./connectionForm";
+import {
+  CONNECTED_READ_LABEL,
+  NEO_OPERATOR_COPY,
+  isMondayReadBroker,
+} from "@/lib/mondayReadChrome";
 
 type ConnectionMode = "openalgo" | "direct";
 
@@ -60,6 +65,10 @@ function isWriteCapableBrokerAccount(account: BrokerAccount): boolean {
   return account.status === "connected" && account.read_only !== true;
 }
 
+function isMondayReadConnectedAccount(account: BrokerAccount): boolean {
+  return account.status === "connected" && isMondayReadBroker(account.broker);
+}
+
 function isReadOnlyConnectedBrokerAccount(account: BrokerAccount): boolean {
   return account.status === "connected" && account.read_only === true;
 }
@@ -72,15 +81,32 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
   const hasWriteCapableBroker = useBrokerStore((state) =>
     state.accounts.some(isWriteCapableBrokerAccount),
   );
+  const hasMondayReadBroker = useBrokerStore((state) =>
+    state.accounts.some(isMondayReadConnectedAccount),
+  );
   const hasReadOnlyConnectedBroker = useBrokerStore((state) =>
     state.accounts.some(isReadOnlyConnectedBrokerAccount),
   );
+  const canContinue = hasMondayReadBroker || hasWriteCapableBroker;
 
   return (
     <div className="space-y-4">
       <BrokerConnect />
 
-      {!hasWriteCapableBroker && hasReadOnlyConnectedBroker && (
+      {hasMondayReadBroker && (
+        <div
+          role="note"
+          className="flex items-start gap-2 px-3 py-2 rounded border border-amber-500/30 bg-amber-500/10 text-xs text-amber-400"
+        >
+          <Info className="size-3.5 mt-0.5 shrink-0" aria-hidden="true" />
+          <span>
+            {CONNECTED_READ_LABEL} / API smoke only — never placeable Live orders.
+            Neo has no sandbox. {NEO_OPERATOR_COPY}
+          </span>
+        </div>
+      )}
+
+      {!hasWriteCapableBroker && !hasMondayReadBroker && hasReadOnlyConnectedBroker && (
         <div
           role="note"
           className="flex items-start gap-2 px-3 py-2 rounded border border-amber-500/30 bg-amber-500/10 text-xs text-amber-400"
@@ -97,12 +123,12 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
       <Button
         type="button"
         className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-        disabled={!hasWriteCapableBroker}
+        disabled={!canContinue}
         onClick={() => onComplete(DIRECT_CONNECT_PLACEHOLDER)}
       >
         <CheckCheck className="size-4 mr-2" />
-        {hasWriteCapableBroker ? "Continue" : "Connect a write-capable broker"}
-        {hasWriteCapableBroker && <ArrowRight className="size-4 ml-2" />}
+        {canContinue ? "Continue" : "Connect Dhan or Neo for Connected (read)"}
+        {canContinue && <ArrowRight className="size-4 ml-2" />}
       </Button>
     </div>
   );
@@ -146,11 +172,11 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
           role="tablist"
           aria-label="Connection mode"
         >
-          <TabButton active={mode === "openalgo"} onClick={() => setMode("openalgo")}>
-            OpenAlgo Bridge
-          </TabButton>
           <TabButton active={mode === "direct"} onClick={() => setMode("direct")}>
             FlintTrade Native
+          </TabButton>
+          <TabButton active={mode === "openalgo"} onClick={() => setMode("openalgo")}>
+            OpenAlgo Bridge
           </TabButton>
         </div>
 
@@ -162,9 +188,9 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
         )}
         {mode === "direct" && (
           <p className="text-xs text-text-muted">
-            Connect a FlintTrade native adapter directly. Availability and login fields come from the
-            broker catalogue. Secondary path — native order placement is not fully live-tested; use at
-            your own risk.
+            Monday primary broker connect: native Dhan + Kotak Neo. Successful
+            non-funded reads show {CONNECTED_READ_LABEL} / API smoke — never
+            placeable Live orders. Neo has no Practice sandbox. {NEO_OPERATOR_COPY}
           </p>
         )}
 

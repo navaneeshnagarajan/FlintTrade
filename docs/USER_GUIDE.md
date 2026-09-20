@@ -264,17 +264,16 @@ FlintTrade keeps its own backend, native sandbox, analytics, automation, and a
 first-party broker gateway whose HTTP connect and read surfaces are frozen
 until Task 9D and Task 7C.2.
 
-**Monday dual-broker smoke (FT-MONDAY-002).** The locked Monday path is
+**Monday dual-broker smoke (FT-MONDAY-002).** The Monday path is
 native Dhan + Kotak Neo on the MSI static-IP host, non-funded live API
 smoke (ticks / depth / hist / chain where the SDK allows). Prefer native;
 OpenAlgo is Settings / fallback only — not the Monday primary connect CTA.
 Native HTTP remains frozen on this unreleased line until Task 9D and
-Task 7C.2; this paragraph is the acceptance lock, not a working Brokers
-screen. When that smoke lands, Dhan and Neo chrome is **Connected (read)**
-or **API smoke** — never placeable Live orders. Neo has no sandbox: never
-offer “Neo Practice”; copy is `Live read only until funded unlock.` Keep
-`dhanhq` stable; Neo v3 (`kotakneoapi` 3.x) is in scope for the product
-PR. See [FT-MONDAY-002](acceptance/FT-MONDAY-002.md).
+Task 7C.2. Dhan and Neo chrome is **Connected (read)** or **API smoke** —
+never placeable Live orders. Neo has no sandbox: never offer “Neo
+Practice”; copy is `Live read only until funded unlock.` `dhanhq` stays
+on latest stable 2.2.0; Neo is PyPI `kotakneoapi` 3.0.7. Live place stays
+fail-closed. See [FT-MONDAY-002](acceptance/FT-MONDAY-002.md).
 
 ---
 
@@ -301,9 +300,8 @@ fail-closed until MSI native smoke is trusted and funded unlock.
 OpenAlgo is a Settings fallback only — not the primary Monday
 connect CTA. Setup's primary connect action is **Continue without
 a broker**. Dhan Sandbox is optional OpenAlgo paper. Learn →
-Practice Trading still shows **Kotak Neo Sandbox** as **Planned**
-/ **when available**; that row is not a usable sandbox today and
-is not a Monday Practice path.
+Practice Trading never offers Neo Practice — Kotak Neo has no
+sandbox. Operator copy is `Live read only until funded unlock.`
 
 **Mode vs session vs sample (FT-UX-001).** The Explore / Practice / Live chips
 mean execution mode only. TopBar session chips (Continuous · CAS · Matching ·

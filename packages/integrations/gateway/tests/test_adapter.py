@@ -228,14 +228,12 @@ class TestBrokerCatalog:
         assert "passed with an approved key" in secret.description
         assert "session approval is required" in next(f for f in secret.fields if f.name == "api_secret").help
 
-    def test_kotakneo_native_metadata_names_live_verification_blocker(self):
+    def test_kotakneo_native_metadata_is_read_connectable(self):
         entry = BROKER_CATALOG["kotakneo"]
         assert entry.native is True
-        assert entry.connectable is False
-        assert entry.native_connect_blockers == [
-            "Maintainer live login/read verification with current TOTP and MPIN",
-            "Live order-safety proof",
-        ]
+        assert entry.connectable is True
+        assert entry.native_connect_blockers == []
+        assert entry.sdk_pin == "kotakneoapi"
 
     def test_upstox_analytics_access_token_is_catalogued_as_read_only(self):
         entry = BROKER_CATALOG["upstox"]
@@ -244,13 +242,13 @@ class TestBrokerCatalog:
         assert analytics.credential_defaults == {"read_only": "true", "token_scope": "analytics"}
         assert "read-only" in analytics.description
 
-    def test_kotakneo_catalogue_matches_native_segment_map_but_stays_disabled(self):
+    def test_kotakneo_catalogue_matches_native_segment_map(self):
         """Kotak Neo metadata must expose every segment the native mapper supports."""
         from flinttrade_gateway.brokers.kotakneo_mapping import EXCHANGE_TO_KOTAK
 
         entry = BROKER_CATALOG["kotakneo"]
         assert entry.native is True
-        assert entry.connectable is False
+        assert entry.connectable is True
         assert set(EXCHANGE_TO_KOTAK) <= set(entry.exchanges)
 
     def test_native_sdk_pins_live_on_broker_catalogue(self):
@@ -263,7 +261,7 @@ class TestBrokerCatalog:
         assert pins == {
             "dhan": "dhanhq",
             "upstox": "upstox-python-sdk",
-            "kotakneo": "neo-api-client",
+            "kotakneo": "kotakneoapi",
             "indmoney": None,
             "groww": "growwapi",
         }

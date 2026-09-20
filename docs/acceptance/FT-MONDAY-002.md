@@ -1,8 +1,9 @@
 # FT-MONDAY-002 — Native Dhan + Kotak Neo dual-broker smoke
 
-Maintainer tracking lock (docs/acceptance only). This page is the Monday
-PASS bar for GitHub issue [#253](https://github.com/navaneeshnagarajan/FlintTrade/issues/253).
-It does **not** ship product connect, broker chrome, or the Neo v3 SDK bump.
+Product tip for GitHub issue [#253](https://github.com/navaneeshnagarajan/FlintTrade/issues/253)
+on tracking PR #257. Native Dhan + Kotak Neo Connected (read) / API smoke
+on the MSI static-IP host. Live place stays fail-closed. Native HTTP
+cutover (Task 9D / Task 7C.2) is not lifted.
 
 ## Finding
 
@@ -18,8 +19,10 @@ fix during the Monday session.
   `Live read only until funded unlock.`
 - Prefer **native** Dhan + Neo. OpenAlgo is Settings / fallback only —
   not the Monday primary connect CTA.
-- Keep `dhanhq` stable. Neo v3 bump (`kotakneoapi` 3.x) is in scope for
-  the product PR, not this tracking change.
+- `dhanhq` stays on latest stable **2.2.0** (not RC).
+- Neo v3 is PyPI `kotakneoapi` **3.0.7**. The v2 `neo-api-client` git
+  pin is gone. HS feed is retired; SFeed plus option-chain/hist are in
+  scope.
 
 ## Modes (UX lock)
 
@@ -48,7 +51,8 @@ Settings / fallback only. Not the Monday primary connect CTA.
 
 Chat may use live reads when an LLM is configured. Suggest stays
 illustrative. Never paint green Connected without a real LLM
-(FT-AI-004).
+(FT-AI-004). This tip does **not** implement AI-on-live-reads
+(FT-MONDAY-003 / #256).
 
 ## Acceptance
 
@@ -59,14 +63,11 @@ illustrative. Never paint green Connected without a real LLM
 - Neo never offered as Practice; copy stays
   `Live read only until funded unlock.`
 - Prefer native; OpenAlgo remains fallback only.
-- `dhanhq` stays on the current pin; `kotakneoapi` 3.x is the in-scope
-  Neo v3 bump for the product PR.
+- `dhanhq==2.2.0` (latest stable). `kotakneoapi==3.0.7` from PyPI.
+- Live place stays fail-closed.
 
-## Out of scope for this tracking PR
+## Out of scope
 
-- Native HTTP cutover (Task 9D / Task 7C.2), adapter activation, or
-  Brokers UX implementation.
-- `kotakneoapi` 3.x / `uv.lock` / `brokers.lock` edits.
+- Native HTTP cutover (Task 9D / Task 7C.2) — freeze stays.
 - Funded Live order placement.
-- Changing Learn → Practice Trading product chrome (follow-on product
-  PR must drop any “Kotak Neo Sandbox” / “Neo Practice” offer).
+- AI Suggest on live reads (FT-MONDAY-003 / #256).

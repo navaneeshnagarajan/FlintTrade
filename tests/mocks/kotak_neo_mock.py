@@ -47,6 +47,31 @@ class NeoAPI:
     def cancel_order(self, *_: Any, **__: Any) -> dict[str, Any]:
         raise _MockRefused("kotak_neo_mock.cancel_order refused (default-mock SDK)")
 
+    def totp_login(self, *_: Any, **__: Any) -> dict[str, Any]:
+        self._authenticated = True
+        return {"status": "success", "mock": True}
+
+    def totp_validate(self, *_: Any, **__: Any) -> dict[str, Any]:
+        return {"status": "success", "mock": True}
+
+    def quotes(self, *_: Any, **__: Any) -> dict[str, Any]:
+        return {"status": "success", "data": [], "mock": True}
+
+    def historical_data(self, *_: Any, **__: Any) -> dict[str, Any]:
+        return {"status": "success", "data": [], "mock": True}
+
+    def option_chain(self, *_: Any, **__: Any) -> dict[str, Any]:
+        return {"status": "success", "data": [], "mock": True}
+
+    def expiries(self, *_: Any, **__: Any) -> dict[str, Any]:
+        return {"status": "success", "data": [], "mock": True}
+
+    def limits(self, *_: Any, **__: Any) -> dict[str, Any]:
+        return {"status": "success", "data": {}, "mock": True}
+
+    def create_websocket(self, *_: Any, **__: Any) -> None:
+        raise _MockRefused("kotak_neo_mock.create_websocket refused (default-mock SDK)")
+
 
 class OrderReportAPI:
     """Mirror of ``neo_api_client.OrderReportAPI`` (read-only report surface).

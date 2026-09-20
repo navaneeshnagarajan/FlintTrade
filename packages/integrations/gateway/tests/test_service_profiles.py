@@ -26,7 +26,7 @@ def test_broker_projection_preserves_static_catalogue_facts() -> None:
     assert kotakneo.exchanges == tuple(sorted(BROKER_CATALOG["kotakneo"].exchanges))
     assert kotakneo.auth_models == ("method:totp_mpin", "totp_form")
     assert kotakneo.connection_requirements == ("static_ip",)
-    assert kotakneo.resource_requirements == ("sdk:neo-api-client",)
+    assert kotakneo.resource_requirements == ("sdk:kotakneoapi",)
     assert kotakneo.activation_blockers == tuple(sorted(BROKER_CATALOG["kotakneo"].native_connect_blockers))
     assert kotakneo.service_kinds == frozenset({ServiceKind.BROKER_EXECUTION, ServiceKind.MARKET_DATA_LIVE})
     assert kotakneo.implemented is True
@@ -37,9 +37,8 @@ def test_broker_projection_classifies_native_connectability_without_health_claim
     by_id = {item.provider_id: item for item in broker_service_descriptors()}
 
     assert {"native", "native_connectable"} <= set(by_id["broker:dhan"].capabilities)
-    assert "native" in by_id["broker:kotakneo"].capabilities
-    assert "native_connectable" not in by_id["broker:kotakneo"].capabilities
-    assert by_id["broker:kotakneo"].activation_blockers
+    assert {"native", "native_connectable"} <= set(by_id["broker:kotakneo"].capabilities)
+    assert not by_id["broker:kotakneo"].activation_blockers
     assert all("verified" not in item.capabilities for item in by_id.values())
 
 

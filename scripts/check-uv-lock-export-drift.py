@@ -15,8 +15,6 @@ _EXPORT_ARGS = (
     "--frozen",
     "--no-emit-workspace",
     "--no-dev",
-    "--no-emit-package",
-    "neo-api-client",
     "--format",
     "requirements-txt",
 )

@@ -11,7 +11,7 @@ dependencies = [
     "cryptography>=50.0.0",
     "dhanhq==2.2.0",
     "upstox-python-sdk==2.29.0",
-    "neo-api-client==2.0.0",
+    "kotakneoapi==3.0.7",
     "growwapi==1.5.0",
 ]
 

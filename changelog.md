@@ -27,9 +27,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   native smoke is trusted and funded unlock. Practice
   never leaks a live broker order. OpenAlgo is
   Settings fallback only — not the Monday primary
-  connect CTA. Learn still lists **Kotak Neo Sandbox**
-  as Planned / when available — that row is not a
-  usable Monday Practice path.
+  connect CTA. Kotak Neo has no sandbox — never offer
+  Neo Practice.
 - **Service connections and in-process `BrokerReadPort`.** The backend now
   ships a rights-aware service-provider catalogue, static LLM/data profiles,
   and an inert persisted service-connection control plane. Listing or saving a
@@ -53,19 +52,20 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
-- **Native Dhan + Kotak Neo Monday smoke acceptance (FT-MONDAY-002).**
-  Tracking/docs lock only — this change does not
-  implement native connect, broker chrome, or the
-  `kotakneoapi` 3.x bump. Monday path is native Dhan
-  + Neo on the MSI static-IP host with non-funded
-  live API smoke (ticks / depth / hist / chain where
-  the SDK allows). Neo has no sandbox: never offer
-  Neo Practice; chrome copy is `Live read only until
-  funded unlock.` Connected (read) / API smoke never
-  implies placeable Live orders. Prefer native;
-  OpenAlgo is Settings / fallback only. Keep dhanhq
-  stable; Neo v3 (`kotakneoapi` 3.x) stays in scope
-  for the product PR. Refs #253.
+- **Native Dhan + Kotak Neo Connected (read) smoke (FT-MONDAY-002).**
+  Monday path is native Dhan + Neo on the MSI
+  static-IP host with non-funded live API smoke
+  (ticks / depth / hist / chain where the SDK
+  allows). Chrome is **Connected (read)** / **API
+  smoke** — never placeable Live orders. Neo has no
+  sandbox: never offer Neo Practice; copy is `Live
+  read only until funded unlock.` Live place stays
+  fail-closed. Prefer native; OpenAlgo is Settings /
+  fallback only. `dhanhq` stays on latest stable
+  2.2.0 (not RC). Neo migrates to PyPI
+  `kotakneoapi` 3.0.7 (HS feed retired). Native HTTP
+  freeze (Task 9D / Task 7C.2) is not lifted. Refs
+  #253.
 
 - **Desk chrome: one TopBar + one ticker + flex shell (FT-UX-002).**
   Dual TopBar index slots are replaced by one dedicated

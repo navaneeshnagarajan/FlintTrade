@@ -61,6 +61,13 @@ import {
 } from "@/services/ftApi.native";
 import { isDesktopShell, openExternalUrl } from "@/lib/desktopShell";
 import { cancelAccountAction, runAccountAction } from "@/services/accountMutationActions";
+import {
+  API_SMOKE_LABEL,
+  CONNECTED_READ_LABEL,
+  NEO_OPERATOR_COPY,
+  isMondayReadBroker,
+  mondayReadChrome,
+} from "@/lib/mondayReadChrome";
 
 const BROKERS_KEY = ["native", "brokers"] as const;
 const MCP_KEY = ["broker", "mcp"] as const;
@@ -752,12 +759,12 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
         <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
         <div className="space-y-2">
           <p>
-            <strong className="text-text-primary">Native adapters are not fully tested — use at your own risk.</strong>{" "}
+            <strong className="text-text-primary">Monday path is native Dhan + Kotak Neo Connected (read).</strong>{" "}
             Native connection is currently enabled for{" "}
-            {connectableNativeLabel || "the currently selectable native brokers"}, but native order
-            placement (place / modify / cancel) has{" "}
-            <strong className="text-text-primary">not been live-verified for any broker</strong> yet —
-            OpenAlgo is the recommended, community-tested path.{" "}
+            {connectableNativeLabel || "the currently selectable native brokers"}. Non-funded live
+            reads are {CONNECTED_READ_LABEL} / {API_SMOKE_LABEL} — never placeable Live orders. Neo
+            has no sandbox: {NEO_OPERATOR_COPY} OpenAlgo is Settings / fallback only, not the Monday
+            primary connect CTA. Native order placement stays fail-closed.{" "}
             {unavailableNativeLabel
               ? `${unavailableNativeLabel} ${unavailableNativeVerb} visible as catalogued adapters and remain disabled until their activation blockers clear.`
               : "Unavailable adapters stay disabled until their activation blockers clear."}
@@ -976,9 +983,17 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
                     <div className="text-xs text-text-muted">
                       {a.broker}
                       {a.is_primary ? " · primary" : ""}
-                      {a.read_only ? " · read-only" : ""}
-                      {connected
-                        ? ` · connected${a.expires_at ? ` · ${expiryLabel(a.expires_at)}` : ""}`
+                      {isMondayReadBroker(a.broker)
+                        ? ""
+                        : a.read_only
+                          ? " · read-only"
+                          : ""}
+                      {connected && mondayReadChrome(a)
+                        ? ` · ${CONNECTED_READ_LABEL} · ${API_SMOKE_LABEL}${
+                            a.broker === "kotakneo" ? ` · ${NEO_OPERATOR_COPY}` : ""
+                          }${a.expires_at ? ` · ${expiryLabel(a.expires_at)}` : ""}`
+                        : connected
+                          ? ` · connected${a.expires_at ? ` · ${expiryLabel(a.expires_at)}` : ""}`
                         : needsFreshLogin
                           ? " · needs fresh login"
                           : retryLater

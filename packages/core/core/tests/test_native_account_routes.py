@@ -820,10 +820,10 @@ def test_list_native_brokers_catalogue(client, monkeypatch):
                 "installed_version": "2.2.0",
                 "status": "ok",
             },
-            "neo-api-client": {
-                "pin": "neo-api-client",
-                "pinned_version": "2.0.0",
-                "installed_version": "2.0.0",
+            "kotakneoapi": {
+                "pin": "kotakneoapi",
+                "pinned_version": "3.0.7",
+                "installed_version": "3.0.7",
                 "status": "ok",
             },
         },
@@ -863,12 +863,9 @@ def test_list_native_brokers_catalogue(client, monkeypatch):
     ]
     assert brokers["indmoney"]["sdk_pin"] is None
     assert brokers["indmoney"]["sdk_attestation"]["status"] == "not_required"
-    assert brokers["kotakneo"]["connectable"] is False
-    assert brokers["kotakneo"]["native_connect_blockers"] == [
-        "Maintainer live login/read verification with current TOTP and MPIN",
-        "Live order-safety proof",
-    ]
-    assert brokers["kotakneo"]["sdk_pin"] == "neo-api-client"
+    assert brokers["kotakneo"]["connectable"] is True
+    assert brokers["kotakneo"]["native_connect_blockers"] == []
+    assert brokers["kotakneo"]["sdk_pin"] == "kotakneoapi"
     assert brokers["kotakneo"]["sdk_attestation"]["status"] == "ok"
     assert {"BCD", "MCX"} <= set(brokers["kotakneo"]["exchanges"])
     assert brokers["groww"]["connectable"] is False
@@ -4416,7 +4413,7 @@ def test_failed_reconnect_restores_label_and_is_primary(client, monkeypatch):
     assert bool(row["is_primary"]) is True
 
 
-@pytest.mark.parametrize("adapter_id", ["kotakneo", "groww", "indmoney"])
+@pytest.mark.parametrize("adapter_id", ["groww", "indmoney"])
 def test_connect_rejects_coming_soon_native(client, adapter_id):
     """A catalogued native with unresolved activation blockers is rejected."""
     c, _app, _tmp = client
@@ -4431,7 +4428,7 @@ def test_connect_rejects_coming_soon_native(client, adapter_id):
     assert payload["data"]["native_connect_blockers"]
 
 
-@pytest.mark.parametrize("adapter_id", ["kotakneo", "groww", "indmoney"])
+@pytest.mark.parametrize("adapter_id", ["groww", "indmoney"])
 def test_relogin_rejects_coming_soon_native_even_if_vault_row_exists(client, adapter_id):
     """A stale vault row must not bypass a native broker's activation blockers."""
     c, app, _tmp = client
