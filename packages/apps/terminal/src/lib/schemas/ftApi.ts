@@ -280,6 +280,7 @@ export const AdvisorStatusDataSchema = z.object({
   configured: z.boolean(),
   provider: z.string(),
   model: z.string(),
+  source: z.string().optional(),
 });
 
 export const AdvisorStatusResponseSchema = z.object({

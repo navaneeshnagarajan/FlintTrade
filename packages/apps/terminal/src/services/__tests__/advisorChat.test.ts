@@ -23,6 +23,7 @@ import {
   alignAdvisorChromeWithSettingsHydration,
   consumeAdvisorSse,
   isAdvisorChatReady,
+  isExplicitAdvisorConfiguration,
   resolveAdvisorLlmChrome,
   probeAdvisorAvailability,
   readAdvisorHttpError,
@@ -142,6 +143,49 @@ describe("advisorChat", () => {
     expect(alignAdvisorChromeWithSettingsHydration("ready", "ready")).toBe("ready");
     expect(alignAdvisorChromeWithSettingsHydration("unconfigured", "ready")).toBe("unconfigured");
     expect(isAdvisorChatReady(alignAdvisorChromeWithSettingsHydration("ready", "empty"))).toBe(false);
+  });
+
+  it("treats a ready Settings #llm with an empty stored provider as Not configured — never Connected", () => {
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "ready", "")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "ready", "   ")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("loading", "ready", "")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("disconnected", "ready", "")).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "ready", "openai")).toBe("ready");
+    expect(isAdvisorChatReady(alignAdvisorChromeWithSettingsHydration("ready", "ready", ""))).toBe(false);
+    expect(advisorLlmChromeLabel(alignAdvisorChromeWithSettingsHydration("ready", "ready", ""))).toBe(
+      "Not configured",
+    );
+    expect(advisorLlmChromeLabel("not_installed")).not.toBe("Connected");
+    expect(advisorLlmChromeLabel("unconfigured")).not.toBe("Connected");
+  });
+
+  it("keeps env-backed advisor/status ready when stored Settings provider is blank", () => {
+    const envOpenAi = {
+      availability: "configured" as const,
+      provider: "openai",
+      source: "env",
+    };
+    expect(isExplicitAdvisorConfiguration(envOpenAi)).toBe(true);
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "empty", "", envOpenAi)).toBe("ready");
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "ready", "", envOpenAi)).toBe("ready");
+    expect(isAdvisorChatReady(alignAdvisorChromeWithSettingsHydration("ready", "empty", "", envOpenAi))).toBe(true);
+
+    const defaultOllama = {
+      availability: "configured" as const,
+      provider: "ollama",
+      source: "default",
+    };
+    expect(isExplicitAdvisorConfiguration(defaultOllama)).toBe(false);
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "empty", "", defaultOllama)).toBe("unconfigured");
+    expect(alignAdvisorChromeWithSettingsHydration("ready", "ready", "", defaultOllama)).toBe("unconfigured");
+    expect(isExplicitAdvisorConfiguration({
+      availability: "configured",
+      provider: "ollama",
+    })).toBe(false);
+    expect(isExplicitAdvisorConfiguration({
+      availability: "configured",
+      provider: "openai",
+    })).toBe(true);
   });
 
   it("maps an offline-paused probe to Disconnected instead of a stuck Checking or Connected", () => {

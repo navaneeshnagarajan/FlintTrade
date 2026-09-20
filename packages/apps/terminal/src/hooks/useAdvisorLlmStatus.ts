@@ -1,8 +1,10 @@
 /**
- * Chat LLM readiness from advisor/status, aligned with Settings `#llm`.
+ * Chat LLM readiness from stored Settings `#llm` + advisor/status + install.
  *
- * Explore / demo-user still probe advisor/status, but a Settings empty
- * appearance (FT-SET-001) wins over an env-default ``configured: true``.
+ * Readiness is global config truth, not Mode-derived. Explore and Practice
+ * share this hook. A blank stored provider is Not configured unless
+ * ``advisor/status`` reports an explicit env-backed or stored provider
+ * (``LLM_PROVIDER``). The empty→ollama default never paints Connected.
  * Managed Ollama ``Not installed`` never paints Connected (FT-AI-004).
  */
 
@@ -11,7 +13,8 @@ import {
   alignAdvisorChromeWithManagedOllama,
   alignAdvisorChromeWithSettingsHydration,
   isAdvisorChatReady,
-  probeAdvisorAvailability,
+  isExplicitAdvisorConfiguration,
+  probeAdvisorStatus,
   selectsManagedOllama,
   type AdvisorLlmChrome,
   type ManagedOllamaInstall,
@@ -43,7 +46,7 @@ export async function probeManagedOllamaInstall(): Promise<ManagedOllamaInstall>
 export function useAdvisorLlmStatus(): AdvisorLlmStatus {
   const advisorQuery = useQuery({
     queryKey: ADVISOR_LLM_STATUS_QUERY_KEY,
-    queryFn: ({ signal }) => probeAdvisorAvailability(signal),
+    queryFn: ({ signal }) => probeAdvisorStatus(signal),
     staleTime: 0,
     refetchOnMount: "always",
     networkMode: "always",
@@ -62,8 +65,16 @@ export function useAdvisorLlmStatus(): AdvisorLlmStatus {
       ? "loading"
       : (settingsQuery.data?.hydration ?? "loading");
   const settingsProvider = settingsQuery.data?.provider ?? "";
+  const advisorHint = {
+    availability: advisorQuery.data?.availability,
+    provider: advisorQuery.data?.provider ?? "",
+    source: advisorQuery.data?.source ?? "",
+  };
+  const envOrStoredOllama = isExplicitAdvisorConfiguration(advisorHint)
+    && selectsManagedOllama(advisorHint.provider);
   const needsInstallProbe =
-    settingsHydration === "ready" && selectsManagedOllama(settingsProvider);
+    (settingsHydration === "ready" && selectsManagedOllama(settingsProvider))
+    || envOrStoredOllama;
 
   const installQuery = useQuery({
     queryKey: MANAGED_OLLAMA_INSTALL_QUERY_KEY,
@@ -76,7 +87,7 @@ export function useAdvisorLlmStatus(): AdvisorLlmStatus {
   });
 
   const advisorChrome = resolveAdvisorLlmChrome({
-    availability: advisorQuery.data,
+    availability: advisorQuery.data?.availability,
     isPending: advisorQuery.isPending,
     isFetching: advisorQuery.isFetching,
     fetchStatus: advisorQuery.fetchStatus,
@@ -87,7 +98,12 @@ export function useAdvisorLlmStatus(): AdvisorLlmStatus {
       : (installQuery.data ?? "loading"))
     : "not_applicable";
   const chrome = alignAdvisorChromeWithManagedOllama(
-    alignAdvisorChromeWithSettingsHydration(advisorChrome, settingsHydration),
+    alignAdvisorChromeWithSettingsHydration(
+      advisorChrome,
+      settingsHydration,
+      settingsProvider,
+      advisorHint,
+    ),
     install,
   );
 

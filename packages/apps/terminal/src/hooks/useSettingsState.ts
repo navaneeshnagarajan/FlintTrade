@@ -98,8 +98,12 @@ export interface SettingsLlmReadiness {
 }
 
 /**
- * Probe Settings `#llm` the same way the Settings page hydrates, including
- * the selected provider so Chat can follow Managed Ollama install state.
+ * Probe Settings `#llm` stored config — not Mode-derived.
+ *
+ * A successful read with a blank stored provider is the Settings empty
+ * appearance. Chat still consults ``advisor/status`` so an explicit
+ * ``LLM_PROVIDER`` env-only setup can stay ready. Mode only classifies a
+ * failed GET (Explore empty vs Live/Practice error).
  */
 export async function probeSettingsLlmReadiness(): Promise<SettingsLlmReadiness> {
   try {
@@ -107,9 +111,10 @@ export async function probeSettingsLlmReadiness(): Promise<SettingsLlmReadiness>
     if (!isAcceptedLlmConfigStatus(payload.status)) {
       return { hydration: llmHydrationFailureState(), provider: "" };
     }
+    const provider = String(payload.data?.provider ?? "").trim();
     return {
-      hydration: "ready",
-      provider: String(payload.data?.provider ?? "").trim(),
+      hydration: provider ? "ready" : "empty",
+      provider,
     };
   } catch {
     return { hydration: llmHydrationFailureState(), provider: "" };

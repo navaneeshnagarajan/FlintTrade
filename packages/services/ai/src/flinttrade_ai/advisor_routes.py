@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json as _json
 import logging
+import os
 from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
@@ -65,11 +66,29 @@ def _capture_session(
         logger.debug("AI session capture failed", exc_info=True)
 
 
-def _is_llm_configured() -> bool:
-    """Check whether the LLM provider is configured."""
+def _llm_readiness_source() -> str:
+    """Classify LLM readiness: env override, stored workspace, or empty default.
+
+    ``LLMConfig.from_env()`` defaults a blank stored provider to ollama.
+    That implicit default is not a configured LLM. ``LLM_PROVIDER`` counts
+    as an explicit env-only setup.
+    """
+    if os.getenv("LLM_PROVIDER", "").strip():
+        return "env"
     try:
-        cfg = LLMConfig.from_env()
-        return bool(cfg.provider)
+        from flinttrade_core.llm_config import read_llm_config
+
+        if str(read_llm_config().get("provider") or "").strip():
+            return "stored"
+    except Exception:
+        pass
+    return "default"
+
+
+def _is_llm_configured() -> bool:
+    """Check whether an explicit LLM provider is configured."""
+    try:
+        return _llm_readiness_source() != "default"
     except Exception:
         return False
 
@@ -257,6 +276,7 @@ def advisor_stream() -> Response | tuple[Any, int]:
 @advisor_bp.route("/advisor/status", methods=["GET"])
 def advisor_status() -> tuple[Any, int]:
     """Check whether the AI advisor LLM backend is configured."""
+    source = _llm_readiness_source()
     configured = _is_llm_configured()
     cfg = LLMConfig.from_env() if configured else None
     return jsonify({
@@ -265,5 +285,6 @@ def advisor_status() -> tuple[Any, int]:
             "configured": configured,
             "provider": cfg.provider if cfg else "",
             "model": cfg.model if cfg else "",
+            "source": source,
         },
     }), 200

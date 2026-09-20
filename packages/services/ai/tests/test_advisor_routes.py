@@ -263,3 +263,28 @@ class TestAdvisorStatus:
         data = resp.get_json()
         assert data["data"]["configured"] is False
         assert data["data"]["provider"] == ""
+
+    def test_empty_ollama_default_is_not_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Blank stored provider plus no LLM_PROVIDER is not configured."""
+        from flinttrade_ai.advisor_routes import _is_llm_configured, _llm_readiness_source
+
+        monkeypatch.delenv("LLM_PROVIDER", raising=False)
+        monkeypatch.setattr(
+            "flinttrade_ai.advisor_routes.read_llm_config",
+            lambda: {"provider": ""},
+            raising=False,
+        )
+        with patch(
+            "flinttrade_core.llm_config.read_llm_config",
+            return_value={"provider": ""},
+        ):
+            assert _llm_readiness_source() == "default"
+            assert _is_llm_configured() is False
+
+    def test_env_only_llm_provider_is_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """LLM_PROVIDER env-only setup is an explicit configured source."""
+        from flinttrade_ai.advisor_routes import _is_llm_configured, _llm_readiness_source
+
+        monkeypatch.setenv("LLM_PROVIDER", "openai")
+        assert _llm_readiness_source() == "env"
+        assert _is_llm_configured() is True
