@@ -126,13 +126,14 @@ mutations return `503` `broker_account_cutover_unavailable`) and Task
 7C.2 / 8B (native HTTP account and market-data reads return `409` with
 zero provider calls until cutover onto the in-process `BrokerReadPort`;
 catalogue and vault-backed account-list GETs stay metadata only). The Brokers screen will
-fail rather than connect. Dhan and Upstox remain evidence-gated as
-connectable in the catalogue; that is not a working native HTTP or UX
-path. INDmoney is read-verified and its fail-closed emergency planner is
-locally verified, but it stays "coming soon" until restart-time regular/smart-parent
-cancellation can be resolved authoritatively, a broker-atomic reduce-only close
-primitive exists, and a funded/live-market order-safety proof lands;
-other catalogued brokers stay disabled until their live checks pass. For the
+fail rather than connect. Dhan, Upstox, and Kotak Neo remain evidence-gated as
+connectable in the catalogue; Kotak Neo is Connected (read) / API smoke only
+on FT-MONDAY-002 — Live place fail-closed; Neo has no sandbox. That is not a
+working native HTTP or UX path. INDmoney is read-verified and its fail-closed
+emergency planner is locally verified, but it stays "coming soon" until
+restart-time regular/smart-parent cancellation can be resolved authoritatively,
+a broker-atomic reduce-only close primitive exists, and a funded/live-market
+order-safety proof lands; Groww stays disabled until its live checks pass. For the
 local-dev OpenAlgo clone, broker credentials stay in
 `.local/external/openalgo/.env` (copy from `.sample.env` if needed):
 - Set broker name (e.g., your broker or its sandbox variant for testing)
