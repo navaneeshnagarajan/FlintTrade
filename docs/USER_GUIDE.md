@@ -829,9 +829,9 @@ offline.` line (or Retry) is reserved for a real request failure. While
 logs are loading, the view shows a spinner / `Loading logs…` and never
 flashes the outage copy.
 
-A planned always-on index F&O harness (**Hermes**, `FT-HERMES-001`) is
-backlog-only — it is not a shipped Automate tool. See
-[Hermes (planned)](#hermes-planned--not-shipped).
+A planned always-on index F&O **desk harness** (`FT-DESK-HARNESS-001`)
+is backlog-only — it is not a shipped Automate tool. See
+[Desk harness (planned)](#desk-harness-planned--not-shipped).
 
 ![Automate](screenshots/07-automate.png)
 
@@ -933,17 +933,20 @@ do not download models, embed documents, or carry optional AI dependencies. Set
 `FLINTTRADE_RAG_AUTO_INDEX=true` when you intentionally want `docs/` indexed at
 startup.
 
-### Hermes (planned — not shipped)
+### Desk harness (planned — not shipped)
 
-**Hermes** here is a planned always-on, session-aware research and
-execution harness for Indian index F&O (NIFTY and SENSEX first). It is
-**not** the existing Hermes LLM / ACP catalogue entry in Settings → AI
-and it is **not** a shipped Automate or AI Centre tool.
+The **desk harness** is a planned FlintTrade-native always-on,
+session-aware research and execution harness for Indian index F&O
+(NIFTY and SENSEX first). It aims at Hermes-class behaviour
+(overnight self-improve, local typed gates) only. It does **not**
+build, vendor, or depend on Nous Hermes Agent, and it is **not** the
+existing Hermes LLM / ACP catalogue entry in Settings → AI. It is
+**not** a shipped Automate or AI Centre tool.
 
 Always-on means a session-aware process, not 24×7 fills. OpenAlgo
 Analyzer and Practice come first; Live stays fail-closed. This guide
 does not claim a product. The backlog lock is
-[Hermes epic FT-HERMES-001](audits/hermes-epic-20260920.md).
+[desk harness epic FT-DESK-HARNESS-001](audits/desk-harness-epic-20260920.md).
 
 ![AI](screenshots/08-ai.png)
 

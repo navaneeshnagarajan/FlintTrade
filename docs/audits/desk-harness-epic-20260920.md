@@ -1,26 +1,30 @@
-# Hermes epic backlog — 2026-09-20
+# Desk harness epic backlog — 2026-09-20
 
-**Epic ID:** `FT-HERMES-001`
+**Epic ID:** `FT-DESK-HARNESS-001`
 **Status:** Backlog lock only. No product or implementation code in this
 document's landing PR. Product spikes stay parked until the Pass 9
 honesty pack clears; each spike then opens as its own PR.
 
-This is the public umbrella for **Hermes**, an always-on, session-aware
-research and execution harness for Indian index F&O. It is a tracking
-lock, not a shipped product and not a capability claim.
+This is the public umbrella for a **FlintTrade-native** always-on,
+session-aware research and execution harness for Indian index F&O. It
+is a tracking lock, not a shipped product and not a capability claim.
 
-## Naming (do not collapse)
+The harness aims at Hermes-*class* behaviour only: overnight
+self-improve, local typed gates, NIFTY + SENSEX first. That is a
+behaviour bar, not a product name and not a dependency.
 
-Two different things already share the word Hermes in this repo:
+## What this is not
 
-| Name | What it is | Status |
+Do **not** build, vendor, or depend on Nous **Hermes Agent** (or any
+Hermes Agent package, binary, or closed core). This epic does not
+ship Hermes, does not wrap Hermes, and does not treat Settings → AI
+**Hermes** (the existing LLM / ACP catalogue entry) as this harness.
+
+| Name | What it is | Relation to this epic |
 |---|---|---|
-| **Hermes (LLM / ACP)** | Catalogue entry in Settings → AI and the `agent_backends` Hermes ACP session | Existing, unrelated |
-| **Hermes (this epic)** | Always-on Indian index F&O harness (`FT-HERMES-001`) | Not shipped |
-
-Settings → AI **Hermes** is a model / agent-backend profile. This epic
-does not extend that catalogue entry, does not claim that profile can
-trade, and does not rename it.
+| **Desk harness (this epic)** | FlintTrade-native always-on index F&O performance harness (`FT-DESK-HARNESS-001`) | Tracking only; not shipped |
+| **Settings → AI Hermes** | Existing LLM / ACP catalogue entry and `agent_backends` Hermes ACP session | Unrelated; do not extend or rename |
+| **Nous Hermes Agent** | Third-party agent product | Forbidden dependency; do not vendor |
 
 ## Honest framing
 
@@ -99,12 +103,13 @@ separate PR after Pass 9.
 - Closed TypeSafe core, or any dependency that pulls one in.
 - "Never mistakes / never forgets" product chrome.
 - Implementing any spike in this umbrella PR.
+- Building, vendoring, or depending on Nous Hermes Agent.
 - Treating Settings → AI Hermes (LLM / ACP) as this harness.
 
 ## How later PRs should attach
 
 - Title prefix `feat(ai):` / `test(ai):` / `docs(ai):` with
-  `FT-HERMES-001` and the spike number (for example `spike 2`).
+  `FT-DESK-HARNESS-001` and the spike number (for example `spike 2`).
 - Keep Live fail-closed until P2 evidence exists.
 - Do not open product spikes until Pass 9 is on `main`.
 - Maintainer squash-merges this docs lock when review is done.
@@ -118,7 +123,7 @@ separate PR after Pass 9.
 - [Architecture — market session clock (FT-CORE-001)](../ARCHITECTURE.md#market-session-clock-ft-core-001)
 - [Static IP setup](../setup/static-ip-setup.md)
 - [Order safety](../ORDER_SAFETY.md)
-- [PLAN.md](../../PLAN.md) — public phase tracker (Hermes is not a
-  PLAN.md phase close; it parks under AI / Practice work)
+- [PLAN.md](../../PLAN.md) — public phase tracker (this harness is not
+  a PLAN.md phase close; it parks under AI / Practice work)
 
 No order-path bypass. No release. No lockfile churn.
