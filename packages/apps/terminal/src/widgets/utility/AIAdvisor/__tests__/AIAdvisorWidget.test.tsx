@@ -89,7 +89,7 @@ vi.mock("@/services/advisorApi", () => ({
 // never through a raw fetch of a model-chosen endpoint.
 const mockPlaceOrder = vi.fn();
 vi.mock("@/services/api", () => ({
-  placeOrder: (params: unknown) => mockPlaceOrder(params) as Promise<{ orderId: string }>,
+  placeOrder: (...args: unknown[]) => mockPlaceOrder(...args) as Promise<{ orderId: string }>,
 }));
 
 // AI2 history clients — mocked so the panel is hermetic.
