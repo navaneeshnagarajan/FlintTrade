@@ -196,6 +196,16 @@
       "vulns": []
     },
     {
+      "name": "h2",
+      "version": "4.4.1",
+      "vulns": []
+    },
+    {
+      "name": "hpack",
+      "version": "4.2.0",
+      "vulns": []
+    },
+    {
       "name": "httpcore",
       "version": "1.0.9",
       "vulns": []
@@ -203,6 +213,11 @@
     {
       "name": "httpx",
       "version": "0.28.1",
+      "vulns": []
+    },
+    {
+      "name": "hyperframe",
+      "version": "6.1.0",
       "vulns": []
     },
     {
@@ -233,6 +248,11 @@
     {
       "name": "kiwisolver",
       "version": "1.5.0",
+      "vulns": []
+    },
+    {
+      "name": "kotakneoapi",
+      "version": "3.0.7",
       "vulns": []
     },
     {
@@ -406,6 +426,11 @@
       "vulns": []
     },
     {
+      "name": "python-decouple",
+      "version": "3.8",
+      "vulns": []
+    },
+    {
       "name": "python-dotenv",
       "version": "1.2.2",
       "vulns": []
@@ -473,6 +498,11 @@
     {
       "name": "tabulate",
       "version": "0.10.0",
+      "vulns": []
+    },
+    {
+      "name": "tenacity",
+      "version": "9.1.4",
       "vulns": []
     },
     {
@@ -560,9 +590,9 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-09-20T05:05:17.478628Z",
-    "audited_at": "2026-09-20T05:05:17.478628Z",
-    "requirements_lock_sha256": "4edcc24c4fe54738943255319f9b02ab068f79544947200122d6972ce2e79a30",
+    "generated_at": "2026-09-20T09:04:58.063363Z",
+    "audited_at": "2026-09-20T09:04:58.063363Z",
+    "requirements_lock_sha256": "c26840a11fc060a1430fee754e8a4ba1c1dfd205c7c8a614910c9dec40bb7e05",
     "pip_audit_exit_code": 0
   }
 }
