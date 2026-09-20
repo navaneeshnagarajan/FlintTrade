@@ -70,9 +70,10 @@ verified, but it remains disabled because INDstocks does not expose an authorita
 restart-time discriminator for active regular MARKET/LIMIT rows versus smart parents;
 it also lacks a broker-atomic reduce-only close primitive, and a funded/live-market
 order-safety proof is pending. Kotak Neo's fail-closed emergency planner is
-locally verified, but the broker remains disabled pending its live TOTP/MPIN
-login/read probe and funded/market-hours order-safety proof;
-Groww remains disabled until its broker-specific blockers clear. Dhan and
+locally verified and the catalogue marks Neo `connectable=True` for
+Connected (read) / API smoke (FT-MONDAY-002); funded Live place and
+market-hours order-safety proof remain pending. Groww remains disabled
+until its broker-specific blockers clear. Dhan and
 Upstox use native SDK/API clients, Groww has the official
 `growwapi` SDK pinned for attestation/reference parity while production calls use
 FlintTrade's tested REST transport, and its approved-key probe now proves native

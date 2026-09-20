@@ -239,16 +239,19 @@ with zero provider calls until the Task 7C.2 / 8B cutover onto the in-process
 port, not a working terminal Brokers screen. Service connections are an inert
 control plane only.
 
-When native connect returns, only Dhan and Upstox are evidence-gated as
-enabled. Upstox Developer Apps analytics tokens would connect as read-only
-sessions. INDmoney uses a dashboard-generated token that resets at the
-daily 06:00 IST dashboard cycle, but remains disabled until its smart-parent,
-atomic reduce-only, and live order-safety blockers clear. Kotak Neo and Groww
-retain their displayed activation blockers; Kotak Neo still needs live
-login/read and order-safety proof, and Groww may also require approving the
-API-key session in Groww Cloud before FlintTrade can mint a token.
-Localhost postback URLs are for diagnostics unless you expose FlintTrade through
-a broker-reachable tunnel or public URL.
+When native connect returns, Dhan, Upstox, and Kotak Neo are evidence-gated
+as enabled in the catalogue. Kotak Neo is Connected (read) / API smoke only
+(FT-MONDAY-002) — never placeable Live; Neo has no sandbox (`Live read only
+until funded unlock.`). Upstox Developer Apps analytics tokens would connect
+as read-only sessions. INDmoney uses a dashboard-generated token that resets
+at the daily 06:00 IST dashboard cycle, but remains disabled until its
+smart-parent, atomic reduce-only, and live order-safety blockers clear. Groww
+retains its displayed activation blockers and may also require approving the
+API-key session in Groww Cloud before FlintTrade can mint a token. Native HTTP
+remains frozen until Task 9D / Task 7C.2 — Setup → Brokers still fails on the
+frozen routes; Monday MSI smoke uses the in-process native read path, not a
+restored Brokers HTTP session. Localhost postback URLs are for diagnostics
+unless you expose FlintTrade through a broker-reachable tunnel or public URL.
 
 The Brokers screen also shows **Broker MCP assistants** for OpenAlgo, Dhan,
 Upstox, and Groww when catalogue metadata is available. These cards copy the
