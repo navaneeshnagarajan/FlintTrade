@@ -8,6 +8,7 @@ import { visualizer } from "rollup-plugin-visualizer";
 import fs from "fs";
 import path from "path";
 
+import { reticle } from '@reticlehq/vite-plugin';
 function readFlintTradeVersion(): string {
   const repoRoot = path.resolve(import.meta.dirname, "../../..");
   const versionPath = path.join(repoRoot, "VERSION");
@@ -30,7 +31,7 @@ export default defineConfig({
   define: {
     "import.meta.env.VITE_FLINTTRADE_VERSION": JSON.stringify(flintTradeVersion),
   },
-  plugins: [
+  plugins: [reticle({ sourceMapping: false }),
     react(),
     tailwindcss(),
     ...(process.env.ANALYZE
