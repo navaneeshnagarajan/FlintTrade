@@ -935,18 +935,27 @@ startup.
 
 ### Forge (planned — not shipped)
 
-**Forge** is a planned FlintTrade-native always-on, session-aware
-research and execution desk harness for Indian index F&O (NIFTY and
-SENSEX first). It aims at Hermes-class behaviour (overnight
-self-improve, local typed gates) only. It does **not** build, vendor,
-or depend on Nous Hermes Agent, and it is **not** the existing Hermes
-LLM / ACP catalogue entry in Settings → AI. It is **not** a shipped
-Automate or AI Centre tool.
+**Forge** (`FT-FORGE-001`) is a planned FlintTrade-native always-on,
+session-aware research and execution desk harness for Indian index F&O
+(NIFTY and SENSEX first). It is backlog only and is **not** a shipped
+Automate or AI Centre tool. Curated status lives in
+[PLAN.md](../PLAN.md).
 
-Always-on means a session-aware process, not 24×7 fills. OpenAlgo
-Analyzer and Practice come first; Live stays fail-closed. This guide
-does not claim a product. The backlog lock is
-[Forge epic FT-FORGE-001](audits/forge-epic-20260920.md).
+Do not collapse these names:
+
+- **Forge** — the planned native desk harness above. Not shipped.
+- **Settings → AI → Hermes (Nous)** — the existing host-based LLM
+  provider profile from `llm_provider_profiles.py` (display name
+  "Hermes (Nous)").
+- **Hermes Agent (ACP)** — a separate optional agent backend in
+  `agent_backends` (`hermes_session.py`). It is not the LLM profile.
+- **Nous Hermes Agent** — a third-party product. Forge does not build
+  or vendor it, and FlintTrade does not ship it as the Forge product.
+
+Forge aims at Hermes-class behaviour (overnight self-improve, local
+typed gates) only. Always-on means a session-aware process, not 24×7
+fills. OpenAlgo Analyzer and Practice come first; Live stays
+fail-closed. This guide does not claim a product.
 
 ![AI](screenshots/08-ai.png)
 
@@ -1016,7 +1025,7 @@ Settings panels:
 |---|---|---|
 | **Appearance** | `ui.theme` plus the theme / density stores | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Data Paths** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
-| **LLM Config** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes, and custom endpoints. |
+| **LLM Config** | `llm.provider`, `llm.host`, `llm.model` | Catalogue-driven LLM profiles generated into the terminal from `llm_provider_profiles.py`: managed Ollama, cloud providers including NVIDIA NIM (intentionally blank unpinned default model), Hermes (Nous), and custom endpoints. |
 | **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives on Automate → Settings → Telegram Alerts (**Send Test**); Explore keeps that control disarmed. |
 | **Risk Limits** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
 
