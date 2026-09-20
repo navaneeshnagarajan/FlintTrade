@@ -264,6 +264,18 @@ FlintTrade keeps its own backend, native sandbox, analytics, automation, and a
 first-party broker gateway whose HTTP connect and read surfaces are frozen
 until Task 9D and Task 7C.2.
 
+**Monday dual-broker smoke (FT-MONDAY-002).** The locked Monday path is
+native Dhan + Kotak Neo on the MSI static-IP host, non-funded live API
+smoke (ticks / depth / hist / chain where the SDK allows). Prefer native;
+OpenAlgo is Settings / fallback only — not the Monday primary connect CTA.
+Native HTTP remains frozen on this unreleased line until Task 9D and
+Task 7C.2; this paragraph is the acceptance lock, not a working Brokers
+screen. When that smoke lands, Dhan and Neo chrome is **Connected (read)**
+or **API smoke** — never placeable Live orders. Neo has no sandbox: never
+offer “Neo Practice”; copy is `Live read only until funded unlock.` Keep
+`dhanhq` stable; Neo v3 (`kotakneoapi` 3.x) is in scope for the product
+PR. See [FT-MONDAY-002](acceptance/FT-MONDAY-002.md).
+
 ---
 
 ## 3. First sandbox order (Practice mode)
@@ -425,19 +437,17 @@ backend rejects Explore orders if the UI slips (FT-TRADE-009).
 This is a fallback path, not the primary Monday fills path. The
 primary paper path is Practice mode on `/trade` through the native
 `SandboxEngine` (FT-MONDAY-001). Explore `/learn` → **Practice
-Trading** still walks through OpenAlgo broker Practice / sandbox
-setup when you need that fallback. **Supported Sandboxes** lists
-**Dhan Sandbox** as **Active** (optional OpenAlgo paper) and
-**Kotak Neo Sandbox** as **Planned** / **when available**. Neo has
-no usable sandbox today — treat that Planned row as a future
-placeholder, not an available Practice path and not Monday
-Practice. The tab shows "How to start Practice Trading", helper text
-"Configure OpenAlgo in Settings → Broker Gateway.", and an
+Trading** still walks through optional OpenAlgo broker Practice /
+sandbox setup when you need that fallback. **Dhan Sandbox** remains
+optional OpenAlgo paper. Kotak Neo has **no sandbox** — never offer
+“Neo Practice”. Operator copy is `Live read only until funded unlock.`
+(FT-MONDAY-002). The tab shows "How to start Practice Trading", helper
+text "Configure OpenAlgo in Settings → Broker Gateway.", and an
 **Open Settings → Broker Gateway** button that navigates to
 `/settings#api`. The CTA does not send operators to Settings →
 Brokers (`/settings#brokers`). Point the Broker Gateway at that
-OpenAlgo Practice instance only as fallback, then return to native
-Practice `SandboxEngine` fills for Monday desk and AI work.
+OpenAlgo Practice instance only as fallback paper, then return to
+native Practice `SandboxEngine` fills for Monday desk and AI work.
 
 On Explore `/learn` → Glossary → Lot Size, the glossary teaches dated
 Jan 2026 NSE-cycle index lots (`NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 ·

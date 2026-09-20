@@ -21,8 +21,22 @@ it directly in your broker's developer console.
 | Dhan | DhanHQ / profile API settings | Dhan API access is typically tied to an API token and IP allow-list. Re-check the broker UI after token rotation. |
 | Zerodha | Kite Connect developer console | Keep app callback URLs and IP entries aligned with the deployed backend. |
 | Upstox | Upstox developer console | Verify whether the app is in sandbox or production before enabling Live mode. |
-| Kotak Neo | Kotak developer console / Neo API onboarding | Follow the broker's current onboarding email or console instructions. |
+| Kotak Neo | Kotak developer console / Neo API onboarding | Follow the broker's current onboarding email or console instructions. Neo has no sandbox — live read / API smoke only until funded unlock. |
 | IndMoney | Broker/API onboarding channel | Confirm production access and IP rules directly with the broker. |
+
+## Monday dual-broker smoke (FT-MONDAY-002)
+
+The locked Monday path is **native** Dhan + Kotak Neo on the MSI host
+whose public IP is allow-listed at both brokers. Smoke uses **non-funded**
+accounts and live API reads (ticks / depth / hist / chain where the SDK
+allows). That is API smoke, not funded Live unlock.
+
+When those reads work, chrome is **Connected (read)** / **API smoke** —
+never imply placeable Live orders. Neo copy is
+`Live read only until funded unlock.` Prefer native; OpenAlgo is
+Settings / fallback only. Keep personal IPs out of this repository.
+
+See [FT-MONDAY-002](../acceptance/FT-MONDAY-002.md).
 
 ## FlintTrade Boundary
 

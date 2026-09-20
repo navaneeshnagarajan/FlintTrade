@@ -53,6 +53,20 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
+- **Native Dhan + Kotak Neo Monday smoke acceptance (FT-MONDAY-002).**
+  Tracking/docs lock only — this change does not
+  implement native connect, broker chrome, or the
+  `kotakneoapi` 3.x bump. Monday path is native Dhan
+  + Neo on the MSI static-IP host with non-funded
+  live API smoke (ticks / depth / hist / chain where
+  the SDK allows). Neo has no sandbox: never offer
+  Neo Practice; chrome copy is `Live read only until
+  funded unlock.` Connected (read) / API smoke never
+  implies placeable Live orders. Prefer native;
+  OpenAlgo is Settings / fallback only. Keep dhanhq
+  stable; Neo v3 (`kotakneoapi` 3.x) stays in scope
+  for the product PR. Refs #253.
+
 - **Desk chrome: one TopBar + one ticker + flex shell (FT-UX-002).**
   Dual TopBar index slots are replaced by one dedicated
   scrolling TickerStrip under TopBar. TopBar keeps Mode,
