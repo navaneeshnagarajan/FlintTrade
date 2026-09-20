@@ -283,6 +283,7 @@ describe("useBrokerAccounts — successful response", () => {
         needs_relogin: false,
         login_retryable: false,
         read_only: false,
+        read_smoke_ok: false,
       },
       {
         account_id: "DHAN-1",
@@ -297,6 +298,7 @@ describe("useBrokerAccounts — successful response", () => {
         needs_relogin: true,
         login_retryable: false,
         read_only: false,
+        read_smoke_ok: false,
       },
       {
         account_id: "IND-1",
@@ -311,6 +313,7 @@ describe("useBrokerAccounts — successful response", () => {
         needs_relogin: false,
         login_retryable: true,
         read_only: false,
+        read_smoke_ok: false,
       },
     ]);
   });
@@ -341,6 +344,7 @@ describe("useBrokerAccounts — successful response", () => {
         needs_relogin: false,
         login_retryable: false,
         read_only: false,
+        read_smoke_ok: false,
       },
     ]);
   });
