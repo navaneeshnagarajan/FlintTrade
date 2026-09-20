@@ -11,7 +11,7 @@
 
 ## Current State (fill from live tests/PLAN.md)
 - **Version:** {{VERSION}} (e.g. v0.0.1)
-- **Widgets:** {{WIDGET_COUNT}} (authoritative: expect(widgetCatalog).toHaveLength(71))
+- **Widgets:** {{WIDGET_COUNT}} (verify the widgetCatalog length assertion in widgetFactory.test.ts)
 - **Brokers:** {{BROKER_COUNT}} (verify via BROKER_CATALOG / test_adapter.py)
 - **Packages:** {{PACKAGE_COUNT}} (verify via test_project_structure.py)
 - **Tests:** {{TEST_COUNTS}} (Python / terminal / etc.)

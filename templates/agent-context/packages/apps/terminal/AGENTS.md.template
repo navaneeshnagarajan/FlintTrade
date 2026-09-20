@@ -1,28 +1,23 @@
 # terminal — Agent Instructions
 
-Read `packages/apps/terminal/CLAUDE.md` first. This is the React frontend.
+Read root `AGENTS.md` and `packages/apps/terminal/CLAUDE.md` first. This is the React frontend.
 
 ## Key Facts
-- Port: 5173 (Vite dev server)
-- Framework: React 19 + TypeScript 5.x strict
-- Layout: Dockview v5.1 (widget-composable, NOT fixed modules)
-- Components: shadcn/ui + Radix (accessible, copy-paste ownership)
-- State: Zustand 5 (UI) + Jotai (market data atoms) + TanStack Query 5 (REST cache)
-- Charting: Lightweight Charts v5
-- Data grids: Glide Data Grid (streaming) + TanStack Table v9 (static)
-- Branch: main (pre-release, all commits to main)
+- Port: 5173 (Vite dev server).
+- React with strict TypeScript; FlexLayout provides the widget-composable workspace.
+- Components: shadcn/ui and Radix primitives.
+- State: Zustand for UI state, Jotai for market-data atoms, TanStack Query for REST cache.
+- Charting: Lightweight Charts; grids: Glide Data Grid for streaming data and TanStack Table for static data.
+- Current dependency requirements: `packages/apps/terminal/package.json`; exact resolutions: root `pnpm-lock.yaml`.
+- Dependency purposes and version families: `docs/TECH_STACK.md`.
+- Branch, review and publication rules: root `AGENTS.md`.
 
-## Widgets (69 TSX)
-Trading (15): under `src/widgets/trading/` — ActionCenter, Fills, Holdings, OrderLadder, OrderPad, Orders, PnLMonitor, PortfolioAllocation, Positions, QuickTrade, RiskDashboard, Scalper, SmartOrder, StrategyMonitor, TradeCopier.
-Analysis (29): under `src/widgets/analysis/` — ArbitrageScanner, Chart, ConditionScanner, CorrelationMatrix, CorrelationPairs, DOMHeatmap, DeliveryData, GammaDensity, GapAnalysis, Greeks, GreeksHeatmap, HistoricalChain, IVSmile, InstrumentCompare, MarketOverview, MultiTimeframe, OIChart, OptionChain, OrderFlow, PCRTrend, PatternDetection, PivotPoints, PortfolioOptimiser, Straddle, StraddlePnL, TimeSales, VWAPBands, VolSurface, VolatilityCone.
-Utility (21): under `src/widgets/utility/` — AIAdvisor, AIBackends, AITeam, Alerts, AuditTrail, Calculator, CurrencyConverter, EarningsCalendar, EconomicCalendar, ExpiryCountdown, FundingRate, IndexStrip, MarketClock, News, Obsidian, StrategyTemplates, TickSpeed, Ticker, TradeIdea, TradeJournal, Watchlist.
-Also `src/widgets/orders/` and `src/widgets/account/`: 4 broker-order and reconciliation widgets.
-
-## Tools (5)
-Under `src/tools/`: BacktestLab, FlowBuilder, Settings, StrategyBuilder, TradeJournal.
-
-## Routes (12 public + DEV `/admin` + 404)
-/welcome, /explore, /setup, /setup-account, /settings, /home, /trade (with `/terminal` alias), /invest, /learn, /lab, /automate, /ai, /ditto. Plus DEV-only `/admin` and `*` 404 catch-all.
+## Catalogues
+- `src/layout/widgetFactory.tsx` and its tests define the supported widgets and count pin.
+- `src/layout/workspacePresets.ts` defines the built-in FlexLayout presets.
+- `src/tools/` contains app tools; `src/main.tsx` defines routes and aliases.
+- Do not copy widget lists, route counts or historical test totals into current guidance.
 
 ## Tests
-Vitest — ~2,973 tests across 264 files. Run: `npx vitest run`. Verified 2026-05-19.
+From the repository root, run `pnpm --filter @flinttrade/terminal exec vitest run`.
+Follow root `AGENTS.md` and `docs/CI.md` for the full verification gate.

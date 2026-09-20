@@ -14,7 +14,7 @@
 - Never reference specific brokers
 - Tests are in the `tests/` directory. Add new test files as needed.
 - Update root CHANGELOG.md
-- Branch: main (pre-release, all commits to main)
+- Branch: follow root AGENTS.md; verify live main before opening or merging a PR.
 
 ## Multi-exchange data
 - Support historical data for ALL exchanges: NSE, BSE, NFO, BFO, CDS, BCD, MCX, NCDEX

@@ -61,10 +61,10 @@ test.describe('Explore mode', () => {
     await expect(prompt).toBeVisible({ timeout: 10_000 });
   });
 
-  test('/trade renders the Dockview workspace shell', async ({ page }) => {
+  test('/trade renders the FlexLayout workspace shell', async ({ page }) => {
     await seedExploreDemoSession(page);
     await page.goto('/trade');
-    // The TerminalRoute wraps Dockview inside a <main aria-label="Trading Workspace">
+    // The TerminalRoute wraps FlexLayout inside a <main aria-label="Trading Workspace">
     // Wait for the main landmark — it is always present once AppLayout mounts
     const main = page.getByRole('main', { name: /Trading Workspace/i });
     await expect(main).toBeVisible({ timeout: 10_000 });

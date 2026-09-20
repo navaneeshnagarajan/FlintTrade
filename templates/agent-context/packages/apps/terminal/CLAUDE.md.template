@@ -1,26 +1,29 @@
 # FlintTrade — terminal
 
-> Trading UI — widget-composable workspace with Dockview v5
-> Port: 5173 | Branch: main (pre-release, no PRs)
+> Trading UI — widget-composable workspace with FlexLayout
+> Port: 5173 | Follow root `AGENTS.md` for branch, review and publication rules.
+> Current versions and dependency purposes: `package.json`, root `pnpm-lock.yaml` and `docs/TECH_STACK.md`.
 
 ## Quick Commands
 
+Run from the repository root:
+
 ```bash
-npm install                                    # install deps
-npm run dev                                    # dev server at localhost:5173
-npm run build                                  # tsc --noEmit + vite build
-npm run typecheck                              # tsc --noEmit only
-npx vitest run                                 # all tests
-npx vitest run src/path/to/file.test.ts        # single test file
-npx vitest run -t "test name"                  # single test by name
+pnpm install --frozen-lockfile
+pnpm --filter @flinttrade/terminal dev
+pnpm --filter @flinttrade/terminal build
+pnpm --filter @flinttrade/terminal typecheck
+pnpm --filter @flinttrade/terminal exec vitest run
+pnpm --filter @flinttrade/terminal exec vitest run src/path/to/file.test.ts
+pnpm --filter @flinttrade/terminal exec vitest run -t "test name"
 ```
 
 ## Architecture
-- Single React app serving 3 personas via 17 route files (12 public addressable paths + DEV-only `/admin` + 404): /welcome, /explore, /setup, /settings, /trade, /invest, /learn, /lab, /automate, /ai, /ditto, /home
-- Dockview v5 for widget-composable workspace on /trade (drag, resize, tabs, serialize)
-- 82 widgets (all TSX, under `src/widgets/{analysis,trading,utility}/`) + 7 tools: canvas overlays (P&L Dashboard, Market Intelligence, Trade Journal) + full-page tools (Backtest Lab, Flow Builder, Strategy Builder)
-- 13 workspace presets (Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Investor View, + 7 others — see `src/layout/workspacePresets.ts`)
-- UI libraries: shadcn/ui + Tremor (dashboards) + Magic UI (animations) + Aceternity UI (effects)
+- Single React app with routes and aliases defined in `src/main.tsx`.
+- FlexLayout provides the workspace on `/trade` (drag, resize, tabs and serialised models).
+- Widget catalogue and count pin: `src/layout/widgetFactory.tsx` and its tests; app tools live in `src/tools/`.
+- Built-in workspace presets: `src/layout/workspacePresets.ts`.
+- UI components: shared design-system primitives and shadcn/ui with Radix accessibility.
 - 3 canonical themes (Graphite, Midnight, Ember) with dark/light/system variants
 - Path alias: `@` → `src/`
 
@@ -41,7 +44,7 @@ Boundary rule: data enters through ONE path only, never duplicated across stores
 - `api.ts` uses empty base in dev (relative paths hit proxy), full host in production
 
 ## Key Files
-- `src/layout/widgetFactory.tsx` — widget registry (all 82 widgets + 7 tools)
+- `src/layout/widgetFactory.tsx` — authoritative widget registry
 - `src/services/api.ts` — OpenAlgo REST client with rate limiting
 - `src/services/websocket.ts` — WebSocket client (authenticate → subscribe → parse nested data)
 - `src/stores/connectionStore.ts` — host/apiKey/wsUrl (reads env vars on init)
@@ -58,13 +61,13 @@ Boundary rule: data enters through ONE path only, never duplicated across stores
 - Glass (backdrop-blur) only on Level 3 floating elements; everything else solid
 - Fonts: Geist (headings), Inter (body), JetBrains Mono (data)
 - 60+ design tokens (surfaces, borders, text, trading semantics)
-- Dockview themed via CSS custom properties
+- FlexLayout themed via CSS custom properties
 - Density modes: comfortable (default) / compact (auto on small screens)
 
 ## Rules
 - TypeScript strict — no `any` types
 - shadcn/ui components — no raw HTML controls
-- Every widget is a Dockview panel registered in widgetFactory.tsx
+- Every widget is a FlexLayout panel registered in widgetFactory.tsx
 - Absorb from repos before writing new code
 - No mock/placeholder/fake data
 - Test with Playwright after UI changes

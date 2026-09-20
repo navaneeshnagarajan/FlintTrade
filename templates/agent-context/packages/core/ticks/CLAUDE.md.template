@@ -29,4 +29,4 @@ python -m pytest packages/core/ticks/tests/ -v --import-mode=importlib
 - Read root CLAUDE.md for project-wide rules
 - Tests are in the `tests/` directory. Add new test files as needed.
 - Update root CHANGELOG.md
-- Branch: main (pre-release, all commits to main)
+- Branch: follow root AGENTS.md; verify live main before opening or merging a PR.

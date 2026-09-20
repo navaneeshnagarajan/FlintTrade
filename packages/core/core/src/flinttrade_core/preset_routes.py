@@ -1,6 +1,6 @@
 """Workspace preset management API — /ft-api/api/v1/presets/*.
 
-Persists custom Dockview workspace presets to ~/.flinttrade/presets.json so
+Persists custom FlexLayout workspace presets to ~/.flinttrade/presets.json so
 they are shared across machines when the file is synced (or served from the
 same backend).
 
@@ -36,14 +36,14 @@ preset_bp = Blueprint("presets", __name__, url_prefix="/api/v1/presets")
 
 
 class WorkspacePreset(BaseModel):
-    """A named Dockview workspace layout, built-in or custom.
+    """A named FlexLayout workspace layout, built-in or custom.
 
     Attributes:
         id: Unique identifier (UUID4 for custom, slug for built-ins).
         name: Human-readable display name.
         description: Short description shown in the preset picker.
         widgets: Ordered list of widget IDs included in this preset.
-        layout: Serialised Dockview layout object (arbitrary nested dict).
+        layout: Serialised FlexLayout layout object (arbitrary nested dict).
         is_builtin: True for built-in presets shipped with FlintTrade.
         created_at: ISO 8601 UTC timestamp of creation.
         updated_at: ISO 8601 UTC timestamp of last update.
@@ -66,7 +66,7 @@ class PresetCreateRequest(BaseModel):
         name: Unique name for the new preset.
         description: Short description.
         widgets: List of widget IDs.
-        layout: Serialised Dockview layout.
+        layout: Serialised FlexLayout layout.
     """
 
     name: str
@@ -420,7 +420,7 @@ def create_preset() -> tuple[Response, int]:
         name (str): Unique display name.
         description (str, optional): Short description.
         widgets (list[str], optional): Ordered list of widget IDs.
-        layout (dict, optional): Serialised Dockview layout.
+        layout (dict, optional): Serialised FlexLayout layout.
 
     Returns:
         JSON ``{ status, data: preset }`` with HTTP 201 on success.

@@ -1,6 +1,6 @@
 // Migrated to TSX — Phase 4 Batch 1
 // Replaces direct getOrderbook() call with useOrders() TanStack Query hook.
-// Uses TanStack Table v8 + shadcn Table + shadcn Badge for status.
+// Uses TanStack Table + shadcn Table + shadcn Badge for status.
 // Open orders carry per-order Cancel and Modify actions wired to the REAL
 // broker order id through the existing gated cancel/modify routes.
 import { useMemo, useState, useEffect, useCallback, useRef, memo } from "react";

@@ -2,41 +2,29 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> Single source of truth. Every Claude Code session on every machine starts here.
-> After reading this, read PLAN.md to know what to build next.
+> Compatibility scaffold for Claude Code; the tracked root `AGENTS.md` governs repository workflow.
+> Verify current architecture, versions, counts and work queues against the linked sources before using this template.
 
 ## Quick Commands
 
+Run from the repository root:
+
 ```bash
-# Terminal (React) — run from packages/apps/terminal/
-npm install                                    # install deps
-npm run dev                                    # dev server at localhost:5173
-npm run build                                  # tsc --noEmit + vite build
-npm run typecheck                              # tsc --noEmit only
-npx vitest run                                 # all tests (~2,973)
-npx vitest run src/path/to/file.test.ts        # single test file
-npx vitest run -t "test name"                  # single test by name
-
-# Python — run from repo root
-make test                                      # all pytest tests (~9,089)
-make test-fast                                 # stop on first failure
-python -m pytest packages/core/core/tests/test_foo.py -v              # single file
-python -m pytest packages/core/core/tests/test_foo.py::test_name -v   # single test
-make lint                                      # ruff check
-
-# Services
-make start                                     # start FlintTrade backend (OpenAlgo optional)
-make stop                                      # stop FlintTrade backend
-make dev                                       # terminal dev + FlintTrade backend
-make status                                    # check services
-make health                                    # health check
-
-# CI per-push (test.yml — 7 Ubuntu jobs after 2026-05-19 cost-control: python-tests, node-core-tests, node-widget-tests-1, node-widget-tests-2a, node-widget-tests-2b, node-widget-tests-3, secrets-check). Cross-platform matrix (macOS + Windows) moved to nightly-cross-platform.yml (weekly Sun 03:00 UTC).
-gh run list --limit 1                          # check latest CI
-gh run view <id> --log-failed                  # diagnose failure
+pnpm install --frozen-lockfile
+pnpm --filter @flinttrade/terminal dev
+pnpm --filter @flinttrade/terminal build
+pnpm --filter @flinttrade/terminal typecheck
+pnpm --filter @flinttrade/terminal exec vitest run
+pnpm --filter @flinttrade/terminal exec vitest run src/path/to/file.test.ts
+uv run python scripts/ft.py test
+uv run python scripts/ft.py test-fast
+uv run python scripts/ft.py lint
+python scripts/ft.py dev
 ```
 
-See `docs/CI.md` for the per-commit checklist, hosted-runner cost model, defence-in-depth layers, and runbook if the monthly minute bill spikes.
+See `AGENTS.md` for the required verification gate and `docs/CI.md` for current
+workflow names, required checks and the cross-platform contract. Test totals
+are evidence from a particular run, not fixed acceptance counts.
 
 ## What This Is
 
@@ -55,9 +43,9 @@ One app. One port. Route-based separation. Widget-composable workspace.
 
 FlintTrade runs its own backend first. OpenAlgo is optional and external.
 
-- **OpenAlgo:** Broker connections (32 brokers), REST API port 5000, WebSocket port 8765
-- **FlintTrade:** Single React app (Dockview workspace) + Python backend (strategy engine, backtesting, AI, data pipelines, screener, multi-account orchestration)
-- **External test-deps (not bundled, not submodules):** OpenAlgo and OpenClaw are optional external services FlintTrade can talk to over HTTP/WS. Contributors can run `scripts/setup-test-deps.sh` to clone local-dev copies into `.local/external/{openalgo,openclaw}/` (gitignored, not shipped). AlgoMirror is intentionally absent — its mirroring patterns are absorbed into `packages/services/ditto/` and run in-process; the upstream repo is no longer tracked.
+- **OpenAlgo:** Optional broker connections, REST API port 5000, WebSocket port 8765
+- **FlintTrade:** Single React app (FlexLayout workspace) + Python backend (strategy engine, backtesting, AI, data pipelines, screener, multi-account orchestration)
+- **External test-deps (not bundled, not submodules):** OpenAlgo is an optional external service FlintTrade can talk to over HTTP/WS. Contributors can run `scripts/setup-test-deps.sh` to clone a local-dev copy into `.local/external/openalgo/` (gitignored, not shipped). AlgoMirror is intentionally absent — its mirroring patterns are absorbed into `packages/services/ditto/` and run in-process; the upstream repo is no longer tracked.
 - OpenAlgo is needed only for the optional OpenAlgo-compatible integration path. Native backend, site, terminal, docs, design-system, and most unit tests run without it.
 
 ```
@@ -74,7 +62,7 @@ localhost:5173/
 ├── /explore        → Demo mode with sample data (no broker needed)
 ├── /setup          → First-time wizard (Quick / Guided / Advanced)
 ├── /settings       → Standalone settings page
-├── /trade          → Trader workspace (Dockview canvas, ≈90 widgets — run the registry for the exact count)
+├── /trade          → Trader workspace (FlexLayout canvas; catalogue in widgetFactory.tsx)
 ├── /invest         → Investor dashboard (holdings, net worth, SIPs)
 ├── /learn          → Beginner center (courses, glossary, strategies)
 ├── /lab            → Strategy Lab (backtest, forward test, optimize)
@@ -90,49 +78,24 @@ Each route lazy-loads its own module. No cross-route code in the initial bundle.
 
 ## Tech Stack
 
-### Frontend (locked)
+The maintained inventory is `docs/TECH_STACK.md`. It explains each dependency's
+purpose and links the manifests, `pnpm-lock.yaml`, `uv.lock` and Cargo lockfile.
+The terminal and site may use different build-tool versions; do not infer one
+app's compiler version from another app.
 
-| Category | Choice | Version |
-|----------|--------|---------|
-| Language | TypeScript | 5.x (strict mode) |
-| Framework | React | 19 |
-| Build | Vite | 6.4+ |
-| CSS | Tailwind CSS | v4 (`@tailwindcss/vite` plugin) |
-| Components | shadcn/ui | latest (Radix accessibility, copy-paste ownership) |
-| Layout/Docking | Dockview | v5.1 (floating, popout, tabs, serialize) |
-| Charting | Lightweight Charts | v5 (35KB, multi-pane, plugins) |
-| Data Grid (streaming) | Glide Data Grid | latest (canvas-rendered, 100K+ updates/sec) |
-| Data Grid (static) | TanStack Table | v8 (headless, sortable, filterable) |
-| State (global/UI) | Zustand | v5 (selectors, middleware, devtools) |
-| State (market data) | Jotai | latest (per-instrument atoms, derived atoms) |
-| State (REST cache) | TanStack Query | v5 (auto-cache, refetch, loading/error) |
-| Forms | react-hook-form + zod | latest |
-| Icons | lucide-react | latest (tree-shakable) |
-| Dates | date-fns | latest (IST formatting) |
-| Router | react-router-dom | latest |
+| Surface | Main technologies | Authoritative declaration |
+|---|---|---|
+| Terminal | React, TypeScript, Vite, Tailwind, FlexLayout, TanStack Table, React Router (`react-router`) | `packages/apps/terminal/package.json` |
+| Shared UI | React components, tokens and chart primitives | `packages/core/design-system/package.json` |
+| Backend | Python, Flask, DuckDB, NumPy, broker SDKs and optional ML packages | Package `pyproject.toml` files and `uv.lock` |
+| Desktop | Electron 44 source-bootstrap shell (exact pin in manifest) | `packages/apps/desktop/package.json` |
+| Public site | Next.js, React and Fumadocs | `packages/apps/site/package.json` |
+| Tick engine | Rust and PyO3 | `packages/core/ticks/Cargo.toml` |
 
-### Backend (Python)
-
-| Category | Choice |
-|----------|--------|
-| Runtime | Python 3.12 |
-| HTTP Client | httpx (async) |
-| Models | pydantic |
-| Storage | DuckDB (analytics), QuestDB (ticks, future) |
-| AI/ML | Managed Ollama + local sqlite3/NumPy vector store + LightGBM |
-| Indicators | TA-Lib (batch) + Numba (streaming) — `indicators` package |
-| Backtesting | VectorBT (exploration) + Rust/PyO3 (tick-level, future) |
-| Linting | ruff |
-| Testing | pytest (importlib mode) |
-
-### Infrastructure
-
-| Category | Choice |
-|----------|--------|
-| Broker Gateway | OpenAlgo (external service; local dev clone at `.local/external/openalgo` via `scripts/setup-test-deps.sh`) |
-| Real-time | WebSocket port 8765 (LTP/Quote/Depth modes) |
-| Config | `.env` (4 vars) + in-app Settings (`workspace.json`) |
-| Deployment | systemd (Ubuntu), local dev (Windows / macOS) |
+Supported runtime minimums and development targets are in `flint.toml` and
+`docs/COMPATIBILITY.md`. Root `package.json` pins pnpm; `pnpm-lock.yaml` records
+JavaScript resolutions. Settings → About displays selected frontend declared
+requirements and links to the technology-stack guide.
 
 ## State Architecture
 
@@ -158,24 +121,16 @@ Rate limiting built into the query layer: Orders 10/s, Smart orders 2/s, General
 
 ## Configuration
 
-Two-tier config. No exceptions.
-
-| Layer | File | What goes here |
-|---|---|---|
-| Infrastructure | `.env` | `OPENALGO_HOST`, `OPENALGO_PORT`, `OPENALGO_API_KEY`, `OPENALGO_WS_PORT` |
-| User preferences | `~/.flinttrade/workspace.json` | Storage paths, enabled modules, LLM config, Telegram, theme, order-safety settings |
-
-- `.env.example` has ALL values blank (open-source rule)
-- Broker credentials are in OpenAlgo's own `.env` (managed by your OpenAlgo install — for the local-dev clone that's `.local/external/openalgo/.env`), never in FlintTrade
-- TOTP auto-login NOT implemented. OpenAlgo handles broker auth.
-- API keys as env vars or workspace.json `_ref` fields, never hardcoded
-- Cross-platform workspace: `~/.flinttrade/` (Linux), `~/Library/Application Support/flinttrade/` (macOS), `%APPDATA%/flinttrade/` (Windows)
-- `~/.flinttrade/jwt_secret` is auto-generated on first startup (used for JWT auth tokens)
-- All other config (LLM, Telegram, risk, data paths) is in workspace.json, configured in-app via Settings
+Follow the Security & Configuration section of root `AGENTS.md`, `.env.example`
+and `docs/setup/QUICKSTART.md`. Native broker credentials use the encrypted
+gateway vault; the optional OpenAlgo bridge manages broker authentication in
+OpenAlgo. Platform workspace paths, file-backed secrets and in-app preferences
+are distinct. Do not copy historical environment-variable or credential-storage
+instructions into a new installation.
 
 ## Monorepo Structure
 
-18 package surfaces in a four-way nest under `packages/`: **13 Python + 1 Rust + 1 TS design-system + 3 apps** (terminal, desktop, site). Python source for each package lives under `src/flinttrade_<pkg>/` (never a bare `src/<file>.py`). The `chrome-extension` package was dropped in the v0.6.0 restructure. The active desktop package is Electron 44 with verified local-source bootstrap. The source-built web app remains distinct from Electron-shell installers; a release is accepted only as all four canonical installers plus `SHA256SUMS.txt`, and retired Tauri and PyInstaller assets never satisfy that gate.
+18 package surfaces in a four-way nest under `packages/`: **13 Python + 1 Rust + 1 TS design-system + 3 apps** (terminal, desktop, site). Python source for each package lives under `src/flinttrade_<pkg>/` (never a bare `src/<file>.py`). The `chrome-extension` package was dropped in the v0.6.0 restructure. The active desktop package uses Electron with verified local-source bootstrap; its manifest records the current version. The source-built web app remains distinct from Electron-shell installers; a release is accepted only as all four canonical installers plus `SHA256SUMS.txt`, and retired Tauri and PyInstaller assets never satisfy that gate.
 
 #### `packages/core/` — runtime foundation (4 Python + 1 Rust + 1 TS)
 
@@ -196,7 +151,7 @@ Two-tier config. No exceptions.
 | `services/screener` | Option chain, OI analysis, PCR, max pain, futures quadrant, portfolio Greeks, IV |
 | `services/backtest` | Simulator, metrics (Sharpe/Sortino/DD), walk-forward, Monte Carlo, 94 strategy templates |
 | `services/ai` | LLM client (multi-provider), RAG (local sqlite3/NumPy vector store), signals, sentiment, MCP bridge, advisor |
-| `services/automation` | Cron manager, Telegram bot with kill switch, OpenClaw bridge, post-market analysis |
+| `services/automation` | Cron manager, Telegram bot with kill switch, post-market analysis |
 | `services/ditto` | Multi-account manager, position mirror, margin calculator, trailing SL, risk manager |
 | `services/journal` | Trade journal, execution-quality analytics, and realised P&L tracking |
 
@@ -204,63 +159,38 @@ Two-tier config. No exceptions.
 
 | Package | Description |
 |---|---|
-| `integrations/gateway` | Native broker gateway: `BrokerAdapter` Protocol (`adapter.py`), per-broker adapters in `brokers/` (35 in `BROKER_CATALOG`), `registry.py`, `BrokerRouter` (`router.py`); five founder-broker native adapters exist (Dhan, Upstox, Kotak Neo, INDmoney, Groww); Dhan, Upstox, and Kotak Neo are connectable (Kotak Neo Connected (read) / API smoke only on FT-MONDAY-002 — Live place fail-closed; Neo has no sandbox); INDmoney and Groww retain declared activation blockers; required SDKs are pinned in `brokers.lock` and attested before activation; OpenAlgo is the optional primary bridge adapter; `shims/` holds OpenAlgo infra shims only |
+| `integrations/gateway` | Native broker gateway: `BrokerAdapter` Protocol (`adapter.py`), per-broker adapters in `brokers/` (catalogued in `BROKER_CATALOG`; verify counts with `test_adapter.py`), `registry.py`, `BrokerRouter` (`router.py`); five founder-broker native adapters exist (Dhan, Upstox, Kotak Neo, INDmoney, Groww); Dhan, Upstox, and Kotak Neo are connectable (Kotak Neo Connected (read) / API smoke only on FT-MONDAY-002 — Live place fail-closed; Neo has no sandbox); INDmoney and Groww retain declared activation blockers; required SDKs are pinned in `brokers.lock` and attested before activation; OpenAlgo is the optional primary bridge adapter; `shims/` holds OpenAlgo infra shims only |
 | `integrations/webhooks` | Generic HMAC-signed custom webhooks, flow builder, alerter |
 
-#### `packages/apps/` — front-ends (2)
+#### `packages/apps/` — applications
 
 | Package | Port | Description |
 |---|---|---|
-| `apps/terminal` | 5173 | Single React app. Dockview workspace, route-based personas, widget-composable layout. |
+| `apps/terminal` | 5173 | Single React app. FlexLayout workspace, route-based personas, widget-composable layout. |
 | `apps/site` | 3000 | Public Next.js/Fumadocs site, generated docs, and read-only docs MCP |
+| `apps/desktop` | — | Electron shell and managed local-source lifecycle |
 
 ## Terminal — Widgets & Tools
 
-≈90 widgets (all TSX) + 7 tools + 13 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx` (run the registry for the exact count).
-
-- **Widgets:** `src/widgets/` — Trading / Analysis / Utility. See `packages/apps/terminal/src/widgets/{trading,analysis,utility}/` for the full set.
-- **Tools:** `src/tools/` — BacktestLab, FlowBuilder, Settings, StrategyBuilder, TradeJournal (displayed as "Trade Review").
-- **Full-page routes:** /lab (Backtest + Forward Test), /automate (Flows + Cron + Monitors), /ai (Chat + Signals + Sentiment + RAG).
-- **Workspace presets:** 17 presets in `packages/apps/terminal/src/layout/workspacePresets.ts` (Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Trading Desk, Three Panel, Investor View, plus 9 more). Serialised via Dockview API.
+- **Widgets:** `packages/apps/terminal/src/layout/widgetFactory.tsx` is the catalogue; its tests pin the supported widget count. Widget implementations live under `src/widgets/`.
+- **Tools:** `packages/apps/terminal/src/tools/` contains the app tools.
+- **Routes:** `packages/apps/terminal/src/main.tsx` defines the current routes and aliases.
+- **Workspace presets:** `packages/apps/terminal/src/layout/workspacePresets.ts` builds FlexLayout models. Use that source for the available presets.
 
 ## Current State
 
-- **Version:** 0.0.1 (tag `v0.0.1`, 2026-07-02) — beta restructure snapshot. Not production ready; see `disclaimer.md`, `changelog.md`, and `docs/releases/v0.0.1.md`.
-- **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total. Counts measured 2026-05-19 via `pytest --collect-only` + grep of `it/test/describe` declarations.
-- **CI:** 7 per-push Ubuntu jobs in `test.yml` (python-tests, node-core-tests, node-widget-tests-{1,2a,2b,3}, secrets-check) + weekly nightly-cross-platform.yml for macOS/Windows. Per-push has `paths-ignore` (doc-only commits skip the `test.yml` matrix, while `docs/**` still runs `site.yml`), `cancel-in-progress` concurrency, and a draft-PR guard. See `docs/CI.md` for the contract.
-- **Terminal:** ≈90 widgets (TSX, run the registry for the exact count) + 7 tools + 12 public routes (+ DEV-only /admin + 404) + 13 workspace presets in Dockview v5.1 shell
-- **AI Skills:** markdown files under `packages/services/ai/skills/` covering trading, market data, analysis, execution, safety, options, and psychology domains
-- **Strategies:** 94 backtest templates in `packages/services/backtest/src/strategies/` + 2 live-engine strategies in `packages/services/engine/src/strategies/` (`ema_crossover`, `wheel_live`)
-- **AI:** RAG pipeline, ML advisor, auto-retraining, memory manager, trade reflection, news scheduler, skill system (10 skills), swarm executor, Crawl4AI client
-- **Analytics:** Options payoff engine, regime detector, correlation matrix, portfolio optimiser, order analytics, strategy comparator, multi-phase simulation
-- **Mode system:** 3 modes (Explore/Practice/Live) with server-side order enforcement
-- **Auth:** argon2id passwords, Fernet TOTP, JWT with daily 8AM IST expiry
-- **TypeScript migration:** Complete. Zero JSX/JS files. Strict mode, no `any` types, no @ts-ignore.
-- **UI Foundation:** Geist font, SVG logo, 60+ design tokens, 3 cinematic themes (Graphite/Midnight/Ember) with dark/light/system variants, density modes, zero arbitrary values
-- **UI Libraries:** Tremor (dashboards), Magic UI (animations), Aceternity UI (visual effects)
-- **Design System:** Glass Adaptive — 16 CSS vars, 13 Tailwind v4 utilities, rgba surfaces with backdrop-filter blur
-- **Shell Chrome:** TopBarV2 (glass, integrated ticker, Ctrl+K search), DockSidebar (macOS dock, drag reorder, auto-hide), BentoGrid (CSS Grid, 12 cards, persona-adaptive), StatusBar
-- **Command Palette:** 4-tab Unified Search (Symbols with live prices, Commands, Widgets, Ask AI), prefix routing
-- **Ticker System:** Configurable marquee (4 modes), symbol editor, settings integration
-- **Onboarding:** Cinematic /welcome, /explore demo mode, setup wizard with persona × interest matrix
-- **Routes:** 12 public (`/welcome`, `/explore`, `/setup`, `/setup-account`, `/settings`, `/home`, `/trade`, `/invest`, `/learn`, `/lab`, `/automate`, `/ai`, `/ditto`) + DEV-only `/admin` + 404 — all with Glass Adaptive styling. `/terminal` is an alias for `/trade`. Routes are lazy-loaded in `packages/apps/terminal/src/main.tsx`.
-- **Full-stack wiring:** 100% OpenAlgo API coverage (45+ endpoints), many FlintTrade backend endpoint families (reconciliation, smart-route, agent, forever/super/conditional orders, recommendations, and more — grown well past the original 20)
-- **Accessibility:** WCAG AA landmarks, skip-nav, ARIA tabs, prefers-reduced-motion, OrderPad form a11y, route focus management
-- **Package structure:** 13 Python packages with pyproject.toml + hatchling, uv workspace, wheel source mappings
-- **OpenAlgo:** Tested with broker sandbox, first trade placed
-- **State:** 7 Zustand stores, Jotai market atoms, 15 TanStack Query hooks, WebSocket + REST fallback
-- **Infrastructure:** Makefile, Docker Compose, systemd templates, GitHub Actions CI
-- **Security:** SSRF protection, API key obfuscation, SQL allowlists, structured logging via structlog
-- **Workspace:** `~/.flinttrade/workspace.json`, cross-platform
+The current source version is v0.0.1 (tracked in `VERSION`).
+Use `VERSION`, `PLAN.md` and the handoff in root `AGENTS.md` for release and work
+status. Package, broker and widget catalogue tests own their count pins. Current
+test totals come from completed test runs, and CI behaviour is documented in
+`docs/CI.md`. Historical snapshots belong in their dated evidence, not in a
+new agent's current-state instructions.
 
 ## Decisions Made — DO NOT REVISIT
 
-- No TOTP auto-login (OpenAlgo handles broker auth)
 - Storage paths configurable via workspace.json, not hardcoded
-- `.env` has only 4 vars
 - Port: Terminal 5173 (single app, no other React ports)
 - Port: FlintTrade backend 5100 (locked — avoids OpenAlgo multi-instance range 5000-5009). Do not propose consolidating with OpenAlgo's port.
-- `.env.example` values ALL BLANK
 - No personal hostnames, IPs, or provider names in committed code
 - FlintTrade (capital T) in display text, `flinttrade` lowercase in paths/packages
 - Tailwind CSS v4 with `@tailwindcss/vite` plugin
@@ -268,13 +198,13 @@ Two-tier config. No exceptions.
 - Font: Geist (headings) + Inter (body) + JetBrains Mono (numbers/data) — 3-tier system
 - Route tabs: Learn / Invest / Trade order in TopBar (global navigation)
 - Cinematic welcome at /welcome for first-time users (smart redirect)
-- Pre-release (v0.x): all commits to main, no PRs required
-- Dockview v5 for layout (NOT FlexLayout)
+- Follow root `AGENTS.md` for isolated branches, fresh-main checks, review and explicit push/merge authorisation
+- FlexLayout for workspace layout; keep the adapter in `src/layout/flexLayoutAdapter.tsx` authoritative
 - Single React app with routes (NOT 3 separate apps)
 - Widget-composable workspace (NOT F1-F8 fixed modules)
 - shadcn/ui for all UI components (no raw HTML buttons/inputs/dialogs)
 - TypeScript strict mode — no `any` types
-- package-lock.json committed to git (reproducible installs across machines)
+- Use the root-pinned pnpm version and committed `pnpm-lock.yaml` for reproducible JavaScript installs
 
 ## OpenAlgo API Reference
 
@@ -320,30 +250,13 @@ Orders: 10/sec | Smart orders: 2/sec | General API: 50/sec
 
 ## Available Tools and Skills
 
-Claude Code on every machine has these installed globally:
+Inspect the tools and skills actually available in the current session. Do not
+assume a machine has a particular agent, plugin or MCP server installed. Follow
+root `AGENTS.md` for independent multi-agent review and use applicable library
+documentation and browser verification tools.
 
-**Skills:** superpowers (brainstorm/write-plan/execute-plan/TDD/debugging/code-review/git-worktrees/parallel-agents), frontend-design, vercel-react-best-practices, web-design-guidelines, planning-with-files, find-skills, gstack, firecrawl, deploy-to-vercel, vercel-composition-patterns, vercel-react-native-skills
-
-**Plugins:** superpowers, frontend-design, VoltAgent subagents (meta, lang), claude-md-management, skill-creator
-
-**Agents:** 172 agency-agents (engineering, design, testing, product, strategy, marketing, sales, etc.) installed in `~/.claude/agents/`
-
-**MCP Servers:** context7 (live library docs), playwright (browser testing), sequential-thinking, github, firecrawl
-
-For the complete list of upstream projects and libraries, see `docs/REFERENCES.md`. For the ~215 cloned reference repositories absorbed into FlintTrade (broker gateway, strategy templates, UI patterns, AI agents), see `.local/reference/REPO_FEATURE_MAP.md`.
-
-### USE THESE ACTIVELY
-- `/brainstorm` before starting any major feature
-- `/write-plan` to create structured implementation plans
-- `/execute-plan` to build from plans
-- `frontend-design` skill when building any UI component
-- `vercel-react-best-practices` for React code
-- `context7` MCP to look up latest library APIs instead of guessing
-- `playwright` MCP to test UI changes in a real browser
-- `/simplify` after completing a feature
-- `/code-review` before marking any task done
-- Check `.local/reference/REPO_FEATURE_MAP.md` before writing new code — absorb from existing repos first
-- Use specialized agents (e.g., engineering, testing) over general-purpose ones
+See `docs/REFERENCES.md` for upstream libraries and, when available locally,
+`.local/reference/REPO_FEATURE_MAP.md` for prior integration research.
 
 ## Code Standards
 
@@ -353,55 +266,32 @@ For the complete list of upstream projects and libraries, see `docs/REFERENCES.m
 - **Tests:** pytest (Python, `--import-mode=importlib` required for flat package layout) + Vitest (terminal). Every new function needs a test.
 - **Vite proxy (dev):** `/api` → OpenAlgo:5000, `/ft-api` → FlintTrade backend:5100, `/ws` → ws://127.0.0.1:8765. Port 5100 avoids conflict with OpenAlgo multi-instance (5000-5009). In dev mode `api.ts` uses relative paths (empty base); production uses full host from connectionStore. Don't bypass the proxy in dev.
 - **Git:** Conventional commits (`feat(pkg):`, `fix(pkg):`, `docs:`, `test:`, `chore:`)
-- **Branch:** main only (pre-alpha)
-- **Widgets:** Every widget is a Dockview panel registered in `widgetFactory.tsx`
+- **Branch:** Follow root `AGENTS.md`; fetch and verify live `main` before opening or merging a PR
+- **Widgets:** Every widget is a FlexLayout panel registered in `widgetFactory.tsx`
 - **Forms:** react-hook-form + zod for validation
 - **Data grids:** Glide Data Grid for streaming data (option chain), TanStack Table for static data (positions, orders)
 
 ## Development Workflow
 
-1. Read CLAUDE.md and PLAN.md
-2. Pick the next unchecked task from PLAN.md
-3. Check `docs/REFERENCES.md` — absorb before building
-4. Use `/brainstorm` and `/write-plan` for non-trivial tasks
-5. Implement — full permissions: create, edit, delete, refactor as needed
-6. Run: `make test` (must pass ~9,089 Python) and `npx vitest run` in terminal (must pass ~2,973)
-7. For React: `npm run build` in `packages/apps/terminal` (must build clean)
-8. Mark task done in PLAN.md
-9. Update CHANGELOG.md [Unreleased] section for notable changes
-10. Commit with detailed conventional message (see CONTRIBUTING.md)
-
-Workflow: `READ → PLAN → APPROVE → BUILD → VERIFY → TEST → UPDATE → COMMIT`
+1. Read root `AGENTS.md`, `CLAUDE.md` and the current work queue in `PLAN.md`.
+2. Use `.local/specs/<area>/DESIGN_LOG.md` for design and local evidence.
+3. Implement within the authorised scope and run the required verification.
+4. Run independent multi-agent review, resolve findings and re-audit.
+5. Follow the fresh-main and maintainer-authorisation requirements before publication.
+6. Record shipped changes in `changelog.md`; keep in-flight planning in the local spec.
 
 ## Machine Setup
 
-Every machine (Windows, macOS, Ubuntu, or new contributor) can:
-- Run OpenAlgo locally for development and testing
-- Write, create, delete, refactor ANY code
-- Run all tests and build all packages
-- Commit and push
-- Use all skills, plugins, MCP servers, and agents
-
-To set up a new machine:
-1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
-2. `make setup`
-3. `cp .env.example .env` and set `OPENALGO_API_KEY`
-4. Install OpenAlgo separately (see its docs), OR run `scripts/setup-test-deps.sh` to clone a local-dev copy into `.local/external/openalgo/` and configure its `.env` with broker credentials
-5. `make start` (starts OpenAlgo from the local-dev copy if present)
-6. `make test` (verify ~9,089 pass)
-7. `cd packages/apps/terminal && npm install && npm run build` (verify clean build, ~2,973 vitest pass)
-8. Read PLAN.md, pick a task, start building
-
-See `docs/setup/QUICKSTART.md` for detailed instructions.
+Follow `docs/setup/QUICKSTART.md` and `docs/DEVELOPER_GUIDE.md`. The cross-platform
+entry point is `python scripts/ft.py setup`; the optional OpenAlgo integration
+has a separate setup path. Setup instructions do not grant push permission.
 
 ## Do NOT
 
-- Modify files inside `.local/external/openalgo/` or `.local/external/openclaw/` (external test-deps; not part of FlintTrade)
+- Modify files inside `.local/external/openalgo/` (external test-deps; not part of FlintTrade)
 - Hardcode API keys, hostnames, IPs, provider names, or personal values
 - Use mock/placeholder/fake data in terminal or any UI
 - Commit `.env` files (only `.env.example` with blank values)
-- Use port 3000/3001/3002 for anything
-- Add TOTP auto-login
 - Duplicate functionality that OpenAlgo already provides
 - Bypass hooks with `--no-verify` or `dangerouslySkipPermissions`
 - Write new code without checking `.local/reference/REPO_FEATURE_MAP.md` first — absorb, don't reinvent
@@ -409,5 +299,5 @@ See `docs/setup/QUICKSTART.md` for detailed instructions.
 - Skip spec review or code review for non-trivial changes
 - Use raw HTML buttons/inputs/dialogs — use shadcn/ui
 - Use `any` type in TypeScript
-- Create fixed layouts — every widget must be a Dockview panel
+- Create fixed layouts — every widget must be a FlexLayout panel
 - Include private data in commit messages (fund amounts, order IDs, broker names)

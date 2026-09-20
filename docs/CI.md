@@ -25,8 +25,6 @@ workflow YAML should read this once.
 | `status-report.yml` | weekly cron (Mon 07:00 UTC); manual dispatch | 1 Linux job (~5 minutes) | Emits a repo-health snapshot artefact. |
 | `key-freshness.yml` | daily cron; manual dispatch; push touching `packages/apps/desktop/resources/bootstrap/checksums/**` | 1 Linux job (~1 minute) | Fails while the pinned Node release key is expired, revoked, or expiring inside 30 days. Node releases are signed by whichever release manager cut them, using their own key with their own expiry, so this is upstream state we consume — it can be refreshed, never regenerated. `gpg` exits 0 on an expired key and reports `EXPKEYSIG` out of band, so a check that only reads the exit status passes indefinitely against a dead key. Revocation is upstream-only state — the packet lands on the keyserver, never in the mirrored `.asc` — so this job fetches the keyserver copy and merges it into the same keyring before reporting; that is why the per-PR `--offline` step in `test.yml` cannot replace it. Availability is handled separately from trust: an unreachable or unparseable keyserver prints `Upstream: NOT CHECKED` and leaves the exit code alone. |
 | `toolchain-freshness.yml` | daily cron; manual dispatch | 1 Linux job (~1 minute) | Fails when a pinned or floor version is EOL or has fallen outside the N-1 band declared in `flint.toml` `[requirements]`, reading nodejs.org/dist, the Node LTS schedule, the npm registry, uv's GitHub releases and the CPython EOL calendar. `pnpm audit` audits the dependency tree and pnpm is not a node in the lockfile, so nothing else can see toolchain binaries. Network-tolerant: an unreachable source skips with a note rather than failing an unrelated PR. |
-| `claude.yml` | issue / PR comment containing `@claude` | 1 Linux job per invocation | Zero per-push cost. Runs only when explicitly tagged. |
-| `claude-code-review.yml` | PR opened / ready-for-review / reopened (paths-ignore + draft guard) | 1 Linux job per qualifying transition | Skips `synchronize` events to avoid running on every PR commit. |
 
 ### The ten per-push Ubuntu jobs
 
@@ -85,8 +83,7 @@ regressions and reverted on review.
 
 Three mechanisms keep CI inexpensive and signal-rich:
 
-- **`concurrency: cancel-in-progress: true`** on `test.yml` and
-  `claude-code-review.yml`. Back-to-back pushes only run the latest
+- **`concurrency: cancel-in-progress: true`** on `test.yml`. Back-to-back pushes only run the latest
   commit's matrix — the previous one is cancelled automatically.
 - **Draft-PR guard.** Every job is gated on
   `github.event.pull_request.draft != true`. Open PRs as drafts while
@@ -96,7 +93,7 @@ Three mechanisms keep CI inexpensive and signal-rich:
   Test check context for PRs outside that filter. Push may still use
   `paths-ignore`. Cost control for genuinely inert files (`.local/**`, `notice`,
   `LICENSE`, `.gitignore`, `.gitattributes`, `.editorconfig`,
-  `.github/ISSUE_TEMPLATE/**`, `claude*.yml`, `status-report.yml`) and for
+  `.github/ISSUE_TEMPLATE/**`, `status-report.yml`) and for
   documentation/site-only edits lives in the `changed-surfaces` classifier, not
   in the PR trigger.
 - **Documentation and the site are deliberately NOT path-ignored on the PR
@@ -165,11 +162,11 @@ these may be chained with it.
 |---|---|---|
 | 1 | Local pre-commit (`tsc --noEmit` + `vitest run` + `pytest --tb=short` + `ruff check`) | Most syntactic and unit-test regressions. |
 | 2 | Contract tests (e.g. `packages/core/core/tests/test_orders_contract.py` parses `api.ts` for `postOrder("leaf", ...)` calls and asserts the matching Flask route exists) | Frontend ↔ backend route drift. |
-| 3 | `cancel-in-progress: true` on `test.yml` and `claude-code-review.yml` | Back-to-back-push runner amplification. |
+| 3 | `cancel-in-progress: true` on `test.yml` | Back-to-back-push runner amplification. |
 | 4 | Draft-PR guard on every test job | Wasted CI on work-in-progress PRs. |
 | 5 | No PR-level `paths`/`paths-ignore` on `test.yml`, plus the `changed-surfaces` classifier gating expensive lanes on doc/site/inert-only edits | Routine doc or inert-file updates burning runner minutes — without omitting required check contexts or blinding the guards that police documentation. |
 | 6 | `continue-on-error: true` confined to the nightly workflow — never `test.yml` | Cosmetic matrix entries inflating perceived failure rate. |
-| 7 | Local stop-time review gate (`/codex:setup --enable-review-gate`) — **legacy/optional local contributor option**, not a required hosted CI job. Its optional status does not retire Codex build agents or replace the canonical build agents (Codex or Claude) → Claude ultracode multi-agent review panels → maintainer pipeline. | High-level design / contract / safety issues unit tests cannot see. |
+| 7 | Local stop-time review gate (`/codex:setup --enable-review-gate`) — **legacy/optional local contributor option**, not a required hosted CI job. Its optional status does not retire Codex build agents or replace the canonical build agents (Codex or other supported agents) → independent multi-agent review panels → maintainer pipeline. | High-level design / contract / safety issues unit tests cannot see. |
 | 8 | Nightly cross-platform matrix (Sunday cron) | Slow-burn Python and Electron-package regressions on macOS, Windows and Linux before they pile up. |
 
 ---
@@ -358,9 +355,7 @@ If you add a new GitHub Actions workflow:
 2. Check `nightly-cross-platform.yml` — confirm it is on the weekly
    schedule, not a daily one (a daily macOS cron is significantly more
    expensive than weekly).
-3. Check `claude.yml` invocations — a runaway `@claude` thread can fire
-   a job per comment.
-4. Check artefact retention — `actions/upload-artifact@v4` defaults to
+3. Check artefact retention — `actions/upload-artifact@v4` defaults to
    90 days. For large bundles (coverage HTML, screenshots), set
    `retention-days: 7`.
 

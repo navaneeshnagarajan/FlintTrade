@@ -18,4 +18,4 @@
 - Credentials are persisted via `CredentialStore` (Fernet-encrypted SQLite). Never log a credential payload, even at DEBUG.
 - Tests are in `tests/`. Tests that need a real broker session must `pytest.skip` when `.local/external/openalgo/` is absent.
 - Update root CHANGELOG.md for adapter-surface changes (new broker, auth-flow change, contract-normalisation change).
-- Branch: main (pre-release, all commits to main).
+- Branch: follow root AGENTS.md; verify live main before opening or merging a PR.

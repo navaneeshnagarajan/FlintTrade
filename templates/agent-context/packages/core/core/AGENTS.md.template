@@ -15,7 +15,7 @@
 - Never reference specific brokers
 - Tests are in the `tests/` directory. Add new test files as needed.
 - Update root CHANGELOG.md
-- Branch: main (pre-release, all commits to main)
+- Branch: follow root AGENTS.md; verify live main before opening or merging a PR.
 
 ## Sandbox/Analyzer mode
 - OpenAlgo has built-in Analyzer mode (sandbox): /api/v1/analyzer/toggle and /api/v1/analyzer/status

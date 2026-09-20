@@ -3,7 +3,7 @@
 Read `packages/core/design-system/CLAUDE.md` first. This package owns shared FlintTrade UI primitives, tokens, motion utilities, and brand assets consumed by terminal and site.
 
 ## Rules
-- Keep exports explicit in `package.json`; do not leak terminal-only widgets or Dockview code.
+- Keep exports explicit in `package.json`; do not leak terminal-only widgets or FlexLayout code.
 - Preserve Tailwind v4 `@source` compatibility for both consuming apps.
 - Prefer shadcn/ui-compatible primitives and `lucide-react` icons.
 - Keep chart wrappers app-private; share only token/theme primitives here.
