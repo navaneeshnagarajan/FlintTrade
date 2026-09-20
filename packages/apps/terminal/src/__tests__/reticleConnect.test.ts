@@ -17,7 +17,7 @@ import {
   isReticleDaemonListening,
   reticleBridgePort,
   shouldInjectReticleConnect,
-} from "../reticleConnectGate";
+} from "../../vite.reticleConnectGate.ts";
 
 describe("shouldInjectReticleConnect", () => {
   it("no-ops when the daemon port is closed", () => {
@@ -73,6 +73,7 @@ describe("shouldInjectReticleConnect", () => {
 describe("Vite Reticle wiring", () => {
   it("uses the official inject option gated by shouldInjectReticleConnect", () => {
     const source = fs.readFileSync(path.resolve(import.meta.dirname, "../../vite.config.ts"), "utf8");
+    expect(source).toContain('from "./vite.reticleConnectGate.ts"');
     expect(source).toContain("inject: shouldInjectReticleConnect()");
   });
 

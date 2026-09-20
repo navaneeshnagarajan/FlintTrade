@@ -5,9 +5,8 @@
  * ws://127.0.0.1:4400/reticle; connection-refused console errors then fail the
  * fail-closed fixture registry. No-op unless a daemon is already listening.
  *
- * Lives under `src/` so `tsc --noEmit` (app tsconfig) can typecheck tests that
- * import it. Vite config imports the same module; it is not part of the SPA
- * entry graph.
+ * Colocated next to vite.config.ts and imported with an explicit `.ts`
+ * extension so Vite's native Node ESM config loader can resolve it.
  */
 import { spawnSync } from "node:child_process";
 

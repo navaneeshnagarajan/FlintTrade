@@ -16,6 +16,7 @@
     "allowJs": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "types": ["node", "vite/client"],
     "paths": {
       "@/*": ["./src/*"],
@@ -23,8 +24,8 @@
       "@flinttrade/design-system": ["../../core/design-system/src/index.ts"]
     }
   },
-  // No project reference to tsconfig.node.json: src/reticleConnectGate.ts is
+  // No project reference to tsconfig.node.json: vite.reticleConnectGate.ts is
   // imported by both the app tests and vite.config.ts. A composite reference
   // would demand a built *.d.ts (TS6305) instead of the source types.
-  "include": ["src", "vite-env.d.ts"]
+  "include": ["src", "vite-env.d.ts", "vite.reticleConnectGate.ts"]
 }

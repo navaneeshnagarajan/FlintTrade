@@ -4,11 +4,12 @@
     "lib": ["ES2022"],
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "composite": true,
     "strict": true,
     "isolatedModules": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
-  "include": ["vite.config.ts", "src/reticleConnectGate.ts"]
+  "include": ["vite.config.ts", "vite.reticleConnectGate.ts"]
 }
