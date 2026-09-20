@@ -29,7 +29,7 @@ licence_source = "kotakneoapi-3.0.7.dist-info/LICENSE"
 homepage = "https://github.com/Kotak-Neo/kotak-neo-python"
 sandbox_tested = "2026-09-20"
 approved_by = "navaneeshnagarajan"
-notes = "wave 3 Neo v3. PyPI kotakneoapi==3.0.7 (import still neo_api_client). Replaces the neo-api-client 2.0.0 git pin. HS feed is retired; SFeed plus option-chain/hist are in scope. Runtime attestation gates on the installed distribution version. Neo has no sandbox."
+notes = "wave 3 Neo v3. PyPI kotakneoapi==3.0.7 (import still neo_api_client). Replaces the neo-api-client 2.0.0 git pin. HS feed is retired; Monday path is REST-only (option-chain/hist via REST). Live SFeed / create_websocket is deferred and not wired. Runtime attestation gates on the installed distribution version. Neo has no sandbox."
 
 [[broker]]
 name = "growwapi"
