@@ -239,3 +239,22 @@ def test_agent_templates_match_the_pinned_electron_runtime_major() -> None:
     }
 
     assert violations == {}
+
+
+def test_ft_ai_004_practice_connected_hotfix_lock() -> None:
+    """Practice /ai must never claim Connected without a real LLM (FT-AI-004)."""
+    changelog = _read(ROOT / "changelog.md")
+    guide = _read(ROOT / "docs/USER_GUIDE.md")
+
+    assert "Practice `/ai` must not show Connected without LLM (FT-AI-004)" in changelog
+    assert "BOTH Explore and Practice" in changelog
+    assert "Configure LLM in Settings" in changelog
+    assert "Ask the AI advisor" in changelog
+    assert "No LLM provider configured" in changelog
+    assert "Pass 9 #250" in changelog
+
+    assert "BOTH Explore and Practice `/ai`" in guide
+    assert "Configure LLM in Settings first" in guide
+    assert "Ask the AI advisor" in guide
+    assert "Practice is not green **Connected** without a real LLM" in guide
+    assert "Practice `/settings#llm` with no provider installed" in guide

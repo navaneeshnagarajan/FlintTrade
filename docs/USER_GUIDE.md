@@ -871,12 +871,18 @@ the action or label it successful.
 Chat itself needs a configured LLM via Settings → AI. The badge and composer
 align with Settings → AI / `#llm` hydration as well as advisor status
 (including Explore / `demo-user`), not a leftover local setting. When Explore
-Settings `#llm` looks empty ("No LLM provider configured"), Chat shows
-**Not configured** / **LLM not configured** — **Connected** must not appear
-from an env-default advisor `configured` while Settings looks empty.
+or Practice Settings `#llm` looks empty ("No LLM provider configured"), Chat
+shows **Not configured** / **LLM not configured** — **Connected** must not
+appear from an env-default advisor `configured` while Settings looks empty.
 Returning to Chat after you save Settings → AI re-checks readiness (advisor
 and Settings hydration), so the **Not configured** gate should not stay stuck
 on an outdated result.
+
+BOTH Explore and Practice `/ai` use the same honesty bar (FT-AI-004 hotfix
+after Pass 9 #250). Practice is not green **Connected** without a real LLM.
+Unconfigured composer stays gated (`Configure LLM in Settings first…`) and
+never shows **Ask the AI advisor**. Settings `#llm` shows **No LLM provider
+configured** when none is installed — including Practice, not only Explore.
 
 When Settings → AI shows Managed Ollama **Not installed**, AI Hub `/ai`
 Chat does not show a green **Connected** badge (FT-AI-004). The badge
@@ -899,13 +905,14 @@ offers **Retry** (re-check advisor status and Settings hydration) and
 **Open Settings → AI**.
 
 A configured but broken probe shows **Error** or **Disconnected** with
-**Retry** — never a green **Connected**. Explore does not show a fake
-Connected sample advisor. Any later demo replies must be labelled
+**Retry** — never a green **Connected**. Explore and Practice do not show
+a fake Connected sample advisor. Any later demo replies must be labelled
 **Sample replies**. Signals **Live** / **Polling** stay separate from Chat
 LLM readiness.
 
-On Explore `/settings#llm`, a demo or unconfigured session shows the empty
-state "No LLM provider configured" with **Retry** — not a broken load.
+On Explore or Practice `/settings#llm`, a demo or unconfigured session
+shows the empty state "No LLM provider configured" with **Retry** — not a
+broken load.
 That Settings empty-state wording stays distinct from Chat's **LLM not
 configured**; the two are aligned for readiness, so Chat also looks
 unconfigured when Settings looks empty. Configure a provider in Live or
@@ -1045,12 +1052,14 @@ On Explore `/settings` → **LLM Config**, a demo or unconfigured session
 shows the empty state "No LLM provider configured", with **Retry** and
 guidance that Explore cannot load or persist LLM secrets. This is not a
 broken session; configure a provider in Live or Practice on this machine.
-Live and Practice still disable editing on a real load failure ("AI
-settings could not be loaded") to protect a saved configuration, and
-offer **Retry**. Selecting Managed Ollama while the runtime is absent
-shows **Not installed** — that is not a Connected advisor. AI Hub
-`/ai` Chat follows that install state (FT-AI-004) and does not paint
-green **Connected** until the runtime is installed and configured.
+Practice `/settings#llm` with no provider installed also shows **No LLM
+provider configured** — not a working advisor. Live and Practice still
+disable editing on a real load failure ("AI settings could not be loaded")
+to protect a saved configuration, and offer **Retry**. Selecting Managed
+Ollama while the runtime is absent shows **Not installed** — that is not
+a Connected advisor. AI Hub `/ai` Chat follows that install state in
+BOTH Explore and Practice (FT-AI-004) and does not paint green
+**Connected** until the runtime is installed and configured.
 
 `/settings#leverage` always shows real leverage content or an honest
 empty. When the broker snapshot is available, the tiles show the
@@ -1124,7 +1133,8 @@ Stop-Process -Id <pid>
 On Explore `/settings` → LLM Config, the empty state "No LLM provider
 configured" is expected for a demo or unconfigured session. Explore
 cannot load or persist LLM secrets. Use **Retry**, or configure a
-provider in Live or Practice on this machine.
+provider in Live or Practice on this machine. Practice Settings `#llm`
+with none installed also shows **No LLM provider configured**.
 
 On Live or Practice, "AI settings could not be loaded" disables editing
 to protect a saved configuration. Use **Retry**.
@@ -1132,13 +1142,15 @@ to protect a saved configuration. Use **Retry**.
 On `/ai` Chat (AI Hub), an unconfigured LLM shows **LLM not configured**
 (badge **Not configured**) with **Open Settings → AI** and an outline
 **Retry** that re-probes advisor status and Settings `#llm` hydration.
-Composer input and Send stay disabled. Chat also looks unconfigured when
-Explore Settings `#llm` looks empty ("No LLM provider configured") —
-**Connected** must not appear from an env-default advisor `configured`
-while Settings looks empty. If leftover transcript messages hide that
-empty state, the header still offers **Retry** and **Open Settings → AI**.
-The Settings empty-state wording stays distinct from Chat's **LLM not
-configured**; they are aligned for readiness.
+Composer input and Send stay disabled (`Configure LLM in Settings
+first…`) — never **Ask the AI advisor**. Chat also looks unconfigured
+when Explore or Practice Settings `#llm` looks empty ("No LLM provider
+configured") — **Connected** must not appear from an env-default
+advisor `configured` while Settings looks empty. Practice `/ai` is not
+exempt (FT-AI-004 hotfix after Pass 9 #250). If leftover transcript
+messages hide that empty state, the header still offers **Retry** and
+**Open Settings → AI**. The Settings empty-state wording stays distinct
+from Chat's **LLM not configured**; they are aligned for readiness.
 
 When Settings → AI shows Managed Ollama **Not installed** (FT-AI-004),
 AI Hub does not show a green **Connected** badge. The badge is

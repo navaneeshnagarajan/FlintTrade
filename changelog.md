@@ -92,6 +92,19 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Practice `/ai` must not show Connected without LLM (FT-AI-004).**
+  BOTH Explore and Practice `/ai` Chat never paint
+  green **Connected** without a real LLM. Unconfigured
+  composer stays gated (`Configure LLM in Settings
+  first…`) — never **Ask the AI advisor**. Settings
+  `#llm` shows **No LLM provider configured** when
+  none is installed — Practice is not exempt.
+  Pass 9 #250 (`cb0136a2`) closed Explore; Tester
+  confirmed Practice still failed on 2026-09-20
+  (green Connected + enabled composer). Same honesty
+  bar as FT-AI-002. Docs tracking on this PR until
+  product lands here.
+
 - **Connected badge matches LLM install state (FT-AI-004).**
   `/ai` Chat (AI Hub) follows the real LLM status from
   Settings → AI / `#llm`, including Managed Ollama
@@ -107,7 +120,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   runtime is absent. A configured-but-broken probe still
   shows **Error** / **Disconnected** with Retry.
   Signals **Live** / **Polling** stay separate from
-  Chat LLM readiness.
+  Chat LLM readiness. Pass 9 #250 closed Explore;
+  Practice is the hotfix row above.
 
 - **Authed `/home` skips password Welcome Back (FT-HOME-003).**
   `/home` is the canonical Home / Welcome dashboard.
