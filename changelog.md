@@ -128,6 +128,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Docs: correct GTT proxy, Practice walkthrough, and Live safety path.**
+  `USER_GUIDE` Practice walkthrough no longer treats Explore
+  Sample Buy as a sandbox Positions/Orders fill.
+  `API.md` no longer claims `/orders/gtt-*` is gated like
+  regular Live place — those verbs 501 after unlock; gated
+  GTT is `/orders/forever`. `API.md` documents
+  `GET /api/v1/advisor/status` `source` (`env` / `stored` /
+  `default`). `ARCHITECTURE.md` mode-guards Practice to
+  `SandboxEngine` and runs L1–L5 only on Live.
+
 - **Restore Connected honesty on `/ai` (FT-AI-004 regression).**
   LLM readiness is global config truth (stored Settings
   `#llm` plus explicit `advisor/status`), not Mode-derived.

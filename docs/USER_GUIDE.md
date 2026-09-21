@@ -378,15 +378,18 @@ Compact-only-on-Trade (FT-UX-001). Mode and status stay reachable
    auto-fills Quantity from that instrument's current lot size — do
    not hardcode 50. Learn Glossary teaches dated Jan 2026 NSE-cycle
    figures separately. Choose **MARKET**. Side = **BUY**.
-6. Click **Sample Buy** (Explore) or **Practice Buy** (Practice) and confirm the review. The order
+6. Click **Practice Buy** and confirm the review. The sandbox order
    appears in the **Positions** widget immediately; the **Orders**
-   widget shows it as filled (simulated).
+   widget shows it as filled (simulated). **Sample Buy** on Explore is
+   only the local sample fill from step 2 — it does not appear as a new
+   Positions or Orders row, and it never calls the order API.
 7. Close the position from the Positions widget. Confirm your simulated
    P&L is recorded in the **P&L Monitor** widget.
 
-You have just exercised the full FlintTrade order path — front-end → JWT
+You have just exercised the Practice order path — front-end → JWT
 guard → mode guard → FlintTrade sandbox → simulated fill → REST
-refresh of Positions and Orders. No real money moved.
+refresh of Positions and Orders. No real money moved. Explore Sample
+Buy never enters that path.
 
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*

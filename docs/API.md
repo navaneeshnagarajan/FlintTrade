@@ -43,8 +43,9 @@ POST unless explicitly marked **GET**.
 GTT triggers sit on the broker until the LTP crosses the trigger price,
 at which point the broker emits a real order. The schema rejects MIS
 (intraday) product because triggers can sit for days. Live broker support
-upstream: Dhan + Zerodha. Other brokers respond with a clean 501 that
-FlintTrade propagates unchanged.
+upstream: Dhan + Zerodha. Other brokers respond with a clean 501 on the
+OpenAlgo service itself. FlintTrade does not propagate that 501 through
+`/orders/gtt-*` on Live.
 
 | Endpoint | Purpose |
 |---|---|
@@ -53,10 +54,20 @@ FlintTrade propagates unchanged.
 | `cancelgttorder` | Cancel an active trigger by `trigger_id`. |
 | `gttorderbook` | List all live (non-terminal) GTT triggers for the user. |
 
-FlintTrade surfaces these through the safety proxy at
-`/api/v1/orders/gtt-{place,modify,cancel}` so the mode gate
-(explore / practice / live) and the live-mode JWT unlock are enforced
-identically to regular orders.
+FlintTrade still registers `/api/v1/orders/gtt-{place,modify,cancel}` so
+the mode gate runs, but those verbs are **not** gated like regular
+`/orders/place`. Explore returns 403 `mode_blocked`. Practice returns a
+rejected GTT — the sandbox does not simulate price triggers. Live requires
+the unlocked JWT, then `gtt-*` returns HTTP 501 (they do not call
+`gate_order` → `BrokerRouter`, and they do not forward an upstream
+OpenAlgo 501). Gated forever/GTT is:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/v1/orders/forever` | Place a forever (GTT) order. Live only. SafetySystem L1–L5 → `gate_order` → `BrokerRouter.place_order` with `variety="gtt"`. |
+| `PUT /api/v1/orders/forever/<order_id>` | Modify a resting forever order (`changes` object). Gated `modify_forever`. |
+| `DELETE /api/v1/orders/forever/<order_id>` | Cancel a resting forever order. Gated `cancel_forever`. |
+| `GET /api/v1/orders/forever` | List resting forever orders (`?broker=` / `?account_id=`). |
 
 ### Accounts
 
@@ -286,14 +297,18 @@ operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
 |---|---|
 | `news` (**GET**) | Server-side fetch of the static RSS publisher profiles (MoneyControl, ET Markets, LiveMint). There is no browser-side RSS or CORS-proxy fallback. |
 
-### AI (`/api/v1/ai/*`, `/api/v1/signals/*`; Vite proxy `/ft-api/api/v1/…`)
+### AI (`/api/v1/advisor*`, `/api/v1/ai/*`, `/api/v1/signals/*`; Vite proxy `/ft-api/api/v1/…`)
 
 Source: `packages/services/ai/`. Blueprints mount at `/api/v1`. GET unless
-noted. Managed local inference (`/v1/ai/local-runtime`) is the exception —
-that blueprint stays under `/v1`.
+noted. Advisor Chat uses `/api/v1/advisor` (not `/ai/advisor`). Managed local
+inference (`/v1/ai/local-runtime`) is the exception — that blueprint stays
+under `/v1`.
 
 | Endpoint | Purpose |
 |---|---|
+| `advisor/status` (**GET**) | LLM readiness for Chat Connected honesty. `data.source` is `env` (explicit `LLM_PROVIDER`), `stored` (Settings → AI), or `default` (empty→ollama implicit default — not Connected). `configured` is true only for `env` or `stored`. |
+| `advisor` (**POST**) | Chat completion. Analysis only — does not place Live or Practice orders. Returns 503 when no explicit LLM is configured. |
+| `advisor/stream` (**POST**) | SSE variant of `advisor`. Same body; tokens then `done: true`. |
 | `signals/recent` (**GET**) | Recent ML/indicator signals (the live signal source). |
 | `ai/sentiment/summary` (**GET**) | Market-wide sentiment summary; neutral when no feed is connected. |
 | `ai/sentiment/tickers` (**GET**) | Per-ticker sentiment from news feeds. |
@@ -669,7 +684,7 @@ the guard returns one of three verdicts:
 |---|---|
 | `explore` | Reject order placement with HTTP 403 and `code: "mode_blocked"`. Explore is for reading, learning, and demo data only. |
 | `practice` | Route supported single-leg order flows to FlintTrade's native `SandboxEngine`; never touch OpenAlgo or a broker. Advanced executor-direct routes that do not yet have sandbox parity fail closed with `practice_unsupported`. |
-| `live` | Require a JWT with `live_mode_unlocked=true`. The core `/orders/place`, modify, cancel, and `cancel-all` paths go through the gated `BrokerRouter`. Other legacy write verbs (`open-position`, `close-position`, and similar) return HTTP 501 until they have a gated `BrokerRouter` verb — they do not forward ungated to OpenAlgo. |
+| `live` | Require a JWT with `live_mode_unlocked=true`. The core `/orders/place`, modify, cancel, `cancel-all`, and `/orders/forever` paths go through the gated `BrokerRouter`. Other legacy write verbs (`gtt-*`, `open-position`, `close-position`, and similar) return HTTP 501 until they have a gated `BrokerRouter` verb — they do not forward ungated to OpenAlgo. |
 
 `POST /v1/auth/mode` issues a fresh JWT and revokes the previous `jti`,
 but it accepts **only** downgrades to `practice` or `explore`. Upgrading
