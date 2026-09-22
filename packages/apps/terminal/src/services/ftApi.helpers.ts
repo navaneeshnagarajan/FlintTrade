@@ -1,5 +1,6 @@
 ﻿import { useAuthStore } from "@/stores/authStore";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { noteObservedFailure } from "@/stores/operatorSignalStore";
 import type { AppMode } from "@/stores/modeStore";
 
 export class FtApiError<T = unknown> extends Error {
@@ -95,7 +96,12 @@ async function throwHttpError(resp: Response, endpoint: string): Promise<never> 
   } catch {
     // Not a JSON body — fall through to the generic message.
   }
-  throw new FtApiError(message ?? `FT API ${endpoint}: HTTP ${resp.status}`, resp.status, data);
+  const resolved = message ?? `FT API ${endpoint}: HTTP ${resp.status}`;
+  // General helpers have no broker or order provenance. Host and backend
+  // faults may still latch; broker classes must not, or Chat and backtests
+  // would mute Live.
+  noteObservedFailure({ message: resolved, httpStatus: resp.status, provenance: "general" });
+  throw new FtApiError(resolved, resp.status, data);
 }
 
 export async function parseResponse<T>(res: Response, endpoint: string): Promise<T> {

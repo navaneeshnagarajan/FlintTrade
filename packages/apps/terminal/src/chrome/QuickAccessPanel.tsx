@@ -33,6 +33,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ShimmerButton } from "@/components/magicui/shimmer-button";
+import { useOperatorIncident } from "@/hooks/useOperatorIncident";
+import { honestBrokerStatus } from "@/lib/operatorIncident";
 import { useConnectionStore } from "@/stores/connectionStore";
 import type { WsFailure } from "@/services/websocket";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -141,15 +143,25 @@ function ConnectionCard({ connected, practiceMode, exploreMode, wsFailure }: Con
   // An auth rejection is more actionable than a bare "Disconnected" — name it,
   // and show the server's reason so the operator knows which key to fix.
   // Explore has no broker subsystem — never green / Connected (FT-UX-001).
+  // A money-path incident replaces Connected with Unavailable / Degraded.
+  const operatorIncident = useOperatorIncident();
   const authFailed = !exploreMode && !connected && wsFailure?.kind === "auth";
+  const honest = connected
+    ? honestBrokerStatus({
+      connected: true,
+      connectedRead: false,
+      nativeMonday: false,
+      incident: operatorIncident,
+    })
+    : null;
   const label = exploreMode
     ? "No broker session"
-    : connected
-      ? "Connected"
+    : honest
+      ? honest
       : authFailed
         ? "Authentication failed"
         : "Disconnected";
-  const showConnected = connected && !exploreMode;
+  const showConnected = connected && !exploreMode && label === "Connected";
   return (
     <div
       className="p-2.5 rounded-lg border border-border-default"

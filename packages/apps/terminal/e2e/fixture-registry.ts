@@ -7,6 +7,11 @@ import {
   type Route,
 } from "@playwright/test";
 
+import {
+  EDGE_PROBE_URLS,
+  PUBLIC_INTERNET_PROBE_URL,
+} from "../src/lib/operatorProbeUrls";
+
 export { expect };
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS";
@@ -584,6 +589,105 @@ export function registerExploreAdvisorStatusProbe(
       };
     },
   });
+}
+
+const OPERATOR_PROBE_CALLS = { minimum: 1, maximum: 6 } as const;
+
+function probeHost(url: string): string {
+  return new URL(url).host;
+}
+
+function assertReadOnlyProbe(request: Request): void {
+  expect(request.method()).toBe("GET");
+  expect(request.postData()).toBeNull();
+}
+
+/**
+ * Register the operator-status probes mounted with the desk.
+ *
+ * These are reads: desk ping, desk health, Chat config, and the public
+ * site/install plus neutral internet checks. They are not Live order paths.
+ * The Practice place handler stays the JWT authority check.
+ */
+export function registerOperatorStatusProbes(
+  registry: SyntheticFixtureRegistry,
+  options: {
+    expectedCalls?: SyntheticHandlerRegistration["expectedCalls"];
+    includeLlmConfig?: boolean;
+  } = {},
+): void {
+  const expectedCalls = options.expectedCalls ?? OPERATOR_PROBE_CALLS;
+  const allowedHosts = new Set([
+    ...EDGE_PROBE_URLS.map((url) => probeHost(url)),
+    probeHost(PUBLIC_INTERNET_PROBE_URL),
+  ]);
+
+  registry.register({
+    name: "operator desk ping",
+    method: "GET",
+    path: "/ft-api/api/v1/ping",
+    expectedCalls,
+    handler: (request) => {
+      assertReadOnlyProbe(request);
+      expect(request.headers()["authorization"]).toBeUndefined();
+      return { json: { status: "ok" } };
+    },
+  });
+  registry.register({
+    name: "operator desk health",
+    method: "GET",
+    path: "/ft-api/health",
+    expectedCalls,
+    handler: (request) => {
+      assertReadOnlyProbe(request);
+      expect(request.headers()["authorization"]).toBeUndefined();
+      return { json: { status: "healthy" } };
+    },
+  });
+  if (options.includeLlmConfig !== false) {
+    registry.register({
+      name: "operator chat config",
+      method: "GET",
+      path: "/ft-api/v1/config/llm",
+      expectedCalls,
+      handler: (request) => {
+        assertReadOnlyProbe(request);
+        return {
+          json: {
+            status: "success",
+            data: { provider: "", host: "", model: "", api_key_configured: false },
+          },
+        };
+      },
+    });
+  }
+  registry.register({
+    name: "operator public site or internet probe",
+    method: "GET",
+    path: "/",
+    expectedCalls,
+    handler: (request) => {
+      assertReadOnlyProbe(request);
+      const host = new URL(request.url()).host;
+      expect(allowedHosts.has(host)).toBe(true);
+      return { status: 204, body: "" };
+    },
+  });
+  for (const url of EDGE_PROBE_URLS) {
+    const path = new URL(url).pathname;
+    if (path === "/") continue;
+    registry.register({
+      name: `operator edge probe ${path}`,
+      method: "GET",
+      path,
+      expectedCalls,
+      handler: (request) => {
+        assertReadOnlyProbe(request);
+        expect(new URL(request.url()).host).toBe(probeHost(url));
+        return { status: 204, body: "" };
+      },
+    });
+  }
 }
 
 type JourneyFixtures = {

@@ -341,6 +341,40 @@ Widgets stay quiet: they do not repeat a Sample chip. Mode is not provenance. A 
 when one is showing, sits between the TopBar and this line and does not
 replace it.
 
+**Operator status strip.** One sticky strip sits between the TopBar and the Mode line. It is
+Info, Degraded, or Blocked. Explore and Practice sample copy is the Mode line, not this strip. Live risk, a broken desk, a broker fault, or a
+local-network fault uses Degraded or Blocked. There is not a second banner
+for the same fact. While the strip is Blocked or Degraded on the money path,
+broker chrome says **Unavailable** or **Degraded** plus the failure in plain
+words — never **Connected** or **Connected (read)**. Live place and Position
+Mirror start stay muted, with one rectify line. Kill All and the safety
+layers stay reachable. Chat being down does not close Live orders. A public
+site outage does not mean the local desk cancelled broker orders.
+
+FlintTrade does not hold client funds, reverse broker fills, or file a
+dispute. Rectify steps point at the broker, the exchange, or the host:
+
+| Strip | What it means | What to do |
+|---|---|---|
+| Exchange (`exchange`) | Unavailable or Degraded — exchange/session. A broker reject names a halt or circuit. The session clock and CAS chip never raise this. | Wait for the session. Check [NSE circuit breakers](https://www.nseindia.com/products-services/equity-market-circuit-breakers). Manage open risk in the broker app. |
+| edge/CDN | Public site/CDN unreachable. The install/update or public-site fetch failed and the local desk ping (`/api/v1/ping`) still succeeded. | Install from the repository. [Cloudflare status](https://www.cloudflarestatus.com/) and [Vercel status](https://www.vercel-status.com/). A site outage does not cancel broker orders. |
+| Broker sign-in (`broker_auth`) | The broker session or token failed. Connected (read) only after a read smoke succeeds. | Sign in again under Settings → Brokers. Retry once. No automatic re-smoke. |
+| Broker connection (`broker_rest`) | The broker API failed. | Check the broker status page, then retry once. |
+| Broker stream (`broker_stream`) | Dhan's market stream dropped. Kotak Neo has no stream class until SFeed. | Wait for the stream. Do not treat quotes as live. |
+| Broker rate limit (`broker_rate_limit`) | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
+| Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
+| Chat provider (`llm_provider`) | Chat is unavailable. Trading chrome stays as it was. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
+| Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
+| Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
+| Local network (`network_local`) | The desk process is up and cannot reach the public internet (gateway, DNS, or ping). A site/CDN miss with the desk ping still ok is edge/CDN. A single broker timeout is not this class. | Check the link or switch network, then retry. |
+
+Dispute and status links, if you need them, are the broker's or the
+regulator's — not a FlintTrade claims desk:
+
+- Dhan support: https://dhan.co/customer-service/ and grievances: https://dhan.co/grievance/
+- Kotak Neo trade API: https://www.kotakneo.com/support/trading/trade-api-and-terminals/ and the complaint procedure: https://www.kotakneo.com/support/procedure-for-filing-a-complaint-with-kotak-securities/
+- SEBI SCORES: https://scores.sebi.gov.in and SMART ODR: https://smartodr.in
+
 **Feed freshness (FT-CORE-002).** Explore disclosure is that Mode line.
 Per-widget Sample chips are retired. Per-symbol ticker Sample chips are
 optional, and the Market Clock freshness chip appears only when that

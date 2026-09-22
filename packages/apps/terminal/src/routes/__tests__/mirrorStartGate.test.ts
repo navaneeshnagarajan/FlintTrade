@@ -25,6 +25,26 @@ function gate(
 }
 
 describe("mirrorStartGate (FT-DITTO-002)", () => {
+  it("mutes Live mirror start with the incident rectify and leaves Explore on its own helper", () => {
+    const live = gate({
+      mode: "live",
+      sourceAccount: "acc_1",
+      targetCount: 1,
+      activeAccountCount: 2,
+      liveWriteBlock: "Wait for the exchange. FlintTrade cannot file a dispute.",
+    });
+    expect(mirrorStartArmed(live)).toBe(false);
+    expect(mirrorStartHelper(live)).toContain("exchange");
+    const explore = gate({
+      mode: "explore",
+      sourceAccount: "acc_1",
+      targetCount: 1,
+      activeAccountCount: 2,
+      liveWriteBlock: "Wait for the exchange.",
+    });
+    expect(mirrorStartHelper(explore)).toBe(EXPLORE_MIRROR_START_HELPER);
+  });
+
   it("always disarms Explore, even with source, targets, and accounts", () => {
     const input = gate({
       mode: "explore",

@@ -21,6 +21,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { assertNativeWriteTargetReadyOrThrow, pickNativeBrokerOrderTarget } from "@/services/brokerTargets";
+import { noteObservedFailure } from "@/stores/operatorSignalStore";
 import { queryKeys } from "@/services/queryKeys";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
@@ -203,9 +204,9 @@ async function request<T>(
       body: hasBody ? JSON.stringify(options.body) : undefined,
     });
   } catch {
-    throw new BrokerOrdersApiError(
-      "Cannot reach the FlintTrade backend — check that it is running.",
-    );
+    const message = "Cannot reach the FlintTrade backend — check that it is running.";
+    noteObservedFailure({ message, httpStatus: null, provenance: "order" });
+    throw new BrokerOrdersApiError(message);
   }
 
   const json: unknown = await resp.json().catch(() => null);
@@ -217,10 +218,9 @@ async function request<T>(
     (json as { status: unknown }).status === "error";
 
   if (!resp.ok || isErrorBody) {
-    throw new BrokerOrdersApiError(
-      message ?? `Broker orders API ${path}: HTTP ${resp.status}`,
-      resp.status,
-    );
+    const failureMessage = message ?? `Broker orders API ${path}: HTTP ${resp.status}`;
+    noteObservedFailure({ message: failureMessage, httpStatus: resp.status, provenance: "order" });
+    throw new BrokerOrdersApiError(failureMessage, resp.status);
   }
 
   const data =
