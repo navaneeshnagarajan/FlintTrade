@@ -469,9 +469,14 @@ gated-session model; never add plaintext credential storage.
 
 ### Safety layers
 
-The 5-layer safety system lives in `packages/services/engine/`. Every order
-placed through FlintTrade is checked by those layers. Runtime fail-fast
-order in `_check_order_locked` is **L5 → L4 → L1 → L2 → L3**:
+The 5-layer safety system lives in `packages/services/engine/`. Every
+**Live** order placed through FlintTrade is checked by those layers.
+Practice orders skip this chain: the mode guard sends them to
+`SandboxEngine` only. Explore placement is refused by the backend
+(`mode_blocked`); Order Pad Sample Buy is a local client fill (no HTTP
+order route, no SafetySystem). Runtime fail-fast order in
+`_check_order_locked` is **L5 → L4 → L1 → L2 → L3** (not L1–L5 numerical
+order):
 
 1. **L5 Kill switch** — explicit operator activation through Telegram, the UI,
    or the API cancels open orders and requests position flattening. Automatic

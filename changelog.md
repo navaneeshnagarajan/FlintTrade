@@ -137,6 +137,10 @@ changelog rebuilds itself from the first release cut after this baseline.
   `GET /api/v1/advisor/status` `source` (`env` / `stored` /
   `default`). `ARCHITECTURE.md` mode-guards Practice to
   `SandboxEngine` and runs L1–L5 only on Live.
+  `DEVELOPER_GUIDE.md` no longer says every order is checked
+  by L1–L5: those layers are Live-only. Practice goes to
+  `SandboxEngine`. Explore placement is `mode_blocked`;
+  Sample Buy is a local fill.
 
 - **Restore Connected honesty on `/ai` (FT-AI-004 regression).**
   LLM readiness is global config truth (stored Settings
