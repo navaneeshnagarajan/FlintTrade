@@ -336,8 +336,8 @@ of the UI.
 **Mode honesty.** One line under the TopBar, always, owned by Mode.
 Explore reads `Explore — sample data only. No broker session, no live orders.`
 Practice reads `Practice — SandboxEngine fills. Not your funded broker account.`
-Live reads `Live — real broker session. Orders and money move for real.`
-Widgets stay quiet: they do not repeat a Sample chip. An incident strip,
+Live reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.`
+Widgets stay quiet: they do not repeat a Sample chip. Mode is not provenance. A figure that stays fabricated in Practice and Live, such as benchmark returns, keeps its own sample banner. An incident strip,
 when one is showing, sits between the TopBar and this line and does not
 replace it.
 

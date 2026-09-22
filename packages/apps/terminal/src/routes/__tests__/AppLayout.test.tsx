@@ -280,7 +280,7 @@ describe("AppLayout", () => {
     expect(strip).toHaveTextContent(/feed disconnected/i);
     const bar = screen.getByTestId("mode-honesty-bar");
     expect(bar).toHaveTextContent(
-      "Live — real broker session. Orders and money move for real.",
+      "Live — real-money capable when a broker is Connected. Orders place only on a live session.",
     );
     const header = screen.getByRole("banner");
     const order = Array.from(header.querySelectorAll("[data-testid]")).map((node) =>
@@ -303,7 +303,7 @@ describe("AppLayout", () => {
     expect(strip).toHaveAttribute("data-banner-kind", "live_risk");
     expect(strip).toHaveTextContent(/Live risk/i);
     expect(screen.getByTestId("mode-honesty-bar")).toHaveTextContent(
-      "Live — real broker session. Orders and money move for real.",
+      "Live — real-money capable when a broker is Connected. Orders place only on a live session.",
     );
   });
 

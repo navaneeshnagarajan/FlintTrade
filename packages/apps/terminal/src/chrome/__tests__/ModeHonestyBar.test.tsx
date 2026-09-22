@@ -25,7 +25,7 @@ describe("ModeHonestyBar", () => {
   it("renders the Live line", () => {
     render(<ModeHonestyBar mode="live" />);
     expect(screen.getByTestId("mode-honesty-bar")).toHaveTextContent(
-      "Live — real broker session. Orders and money move for real.",
+      "Live — real-money capable when a broker is Connected. Orders place only on a live session.",
     );
   });
 });

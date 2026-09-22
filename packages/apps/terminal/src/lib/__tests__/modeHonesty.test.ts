@@ -14,9 +14,9 @@ describe("mode honesty copy", () => {
     );
   });
 
-  it("gives Live its funded-session line", () => {
+  it("gives Live an execution-mode line that does not claim a session is open", () => {
     expect(modeHonestyCopy("live")).toBe(
-      "Live — real broker session. Orders and money move for real.",
+      "Live — real-money capable when a broker is Connected. Orders place only on a live session.",
     );
   });
 

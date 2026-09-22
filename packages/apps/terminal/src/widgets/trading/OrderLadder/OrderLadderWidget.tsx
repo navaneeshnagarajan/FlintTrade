@@ -633,7 +633,14 @@ function OrderLadderWidget(props: Props) {
             ))}
           </SelectContent>
         </Select>
-        
+        {isExplore && (
+          <span
+            className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+            aria-label="Showing sample data"
+          >
+            Sample data
+          </span>
+        )}
         <div className="flex-1" />
         {pendingOrders.length > 0 && <span className="text-xxs text-warning font-mono">{pendingOrders.length} open</span>}
       </div>
