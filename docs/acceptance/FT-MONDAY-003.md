@@ -10,7 +10,7 @@ Suggest stays labelled illustrative. Live place stays fail-closed.
 Wire AI to Practice + native live-read feeds for analysis (not
 “guaranteed profitable alphas”).
 
-## Locked (2026-09-20)
+## Locked behaviour
 
 - **Chat live-reads** — when an LLM is configured, AI Chat may use
   Practice SandboxEngine fills and native live-read feeds for analysis
@@ -18,7 +18,7 @@ Wire AI to Practice + native live-read feeds for analysis (not
   Chat live-read path; never sold as live alpha
 - **Never green Connected without a real LLM** — same honesty bar as
   FT-AI-002 / FT-AI-004
-- **Not a “profitable alphas” ship criterion** — analysis context only;
+- **Not a “profitable alphas” release criterion** — analysis context only;
   measure later
 - AI may consume Dhan/Neo Connected (read) / Practice SandboxEngine
   data for context — not place Live orders

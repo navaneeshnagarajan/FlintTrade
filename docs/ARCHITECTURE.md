@@ -118,7 +118,7 @@ approved-key login/account-read proof but still needs market-data/API
 permission, static-IP resolution, and order-safety proof.
 Portal/static-IP evidence is not enough by itself to promote Groww.
 Native HTTP remains frozen (Task 9D / Task 7C.2); Setup → Brokers still fails.
-Monday MSI smoke is the in-process native read path, not a restored Brokers
+MSI static-IP host native read smoke is the in-process native read path, not a restored Brokers
 HTTP session.
 
 The Electron shell has machine authority but no trading authority. It owns

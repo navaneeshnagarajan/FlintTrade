@@ -141,7 +141,7 @@ def test_monday_003_ai_live_read_acceptance_lock() -> None:
         assert "FT-MONDAY-003" in text
         assert "native live-read feeds" in text
         assert "Suggest stays labelled illustrative" in text
-        assert "profitable alphas are not a Monday ship criterion" in text
+        assert "profitable alphas are not a release criterion" in text
 
     assert "never shows green **Connected** without a real LLM" in guide
     assert "never shows green **Connected** without a real LLM" in changelog
