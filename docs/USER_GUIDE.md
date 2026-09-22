@@ -712,9 +712,10 @@ Streaming option-chain widget rendered with
 Max Pain badge derived from the same chain.
 
 The Option Chain strip shows **OI profile + PCR** for the
-selected expiry and symbol (FT-TRADE-012). Explore keeps a
-**Sample** badge and never invents live OI. An empty expiry
-is an honest empty — not zeros painted as data.
+selected expiry and symbol (FT-TRADE-012). Explore does not
+invent live OI. The Mode honesty line is the disclosure —
+there is no Sample chip on the chain strip. An empty expiry
+is an honest empty — not zeros-as-data.
 
 1. Drag the **Option Chain** widget into the workspace.
 2. Pick a symbol (e.g. `NIFTY`, `BANKNIFTY`, `RELIANCE`).
@@ -734,7 +735,8 @@ OI Chart shares Option Chain expiries for the symbol/exchange. The
 expiry control appears when that list is non-empty; charts and
 statistics cover only the selected expiry (the chain’s selection
 when both widgets are open; otherwise the nearest listed). Explore
-sample expiries stay listed and are badged **Sample**. Empty states
+sample expiries stay listed. The Mode honesty line is the disclosure
+— expiries and the OI Chart are not badged Sample. Empty states
 are honest: `No expiries for this symbol` or `No OI for this expiry`,
 with no bars and no PCR/max-pain stats — never “No expiries” over
 fake or generic bars.
