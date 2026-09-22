@@ -42,10 +42,11 @@ import {
 import {
   type ColumnDef,
   flexRender,
+  getCoreRowModel,
+  getSortedRowModel,
   type SortingState,
-  useTable,
+  useReactTable,
 } from "@tanstack/react-table";
-import { sortedTableFeatures } from "@/lib/tableFeatures";
 import { istToday } from "@/lib/ist";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/formatters";
@@ -362,7 +363,7 @@ export function FillsTable({
   }, [tradebookEnabled, isLive, tradebookQuery, journalQuery]);
 
   // --- Columns ---
-  const columns = useMemo<ColumnDef<typeof sortedTableFeatures, FillRow>[]>(
+  const columns = useMemo<ColumnDef<FillRow>[]>(
     () => [
       {
         accessorKey: "timeSortMs",
@@ -518,12 +519,13 @@ export function FillsTable({
     [screenshotsByKey, legacyIdxByFilteredIndex, isExplore, attachMutation],
   );
 
-  const table = useTable({
-    features: sortedTableFeatures,
+  const table = useReactTable({
     data: filteredRows,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
   });
 
   // --- Derived UI state ---
