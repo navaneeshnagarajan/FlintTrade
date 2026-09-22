@@ -19,6 +19,7 @@ export interface OperatorSignalSnapshot {
   brokerRateLimited: boolean;
   brokerReject: BrokerRejectSignal | null;
   observedHostDown: boolean;
+  observedBackendUnreachable: boolean;
   llmChrome: string | null;
 }
 
@@ -31,6 +32,7 @@ const INITIAL: OperatorSignalSnapshot = {
   brokerRateLimited: false,
   brokerReject: null,
   observedHostDown: false,
+  observedBackendUnreachable: false,
   llmChrome: null,
 };
 
@@ -52,6 +54,7 @@ export const useOperatorSignalStore = create<OperatorSignalStore>((set, get) => 
     localPing: probe.localPing,
     transportReason: probe.transportReason,
     observedHostDown: probe.localPing === "ok" ? false : get().observedHostDown,
+    observedBackendUnreachable: probe.localPing === "ok" ? false : get().observedBackendUnreachable,
   }),
   setHealth: (health) => set({ health }),
   setPublicSite: (publicSite) => set({ publicSite }),
@@ -78,8 +81,12 @@ export const useOperatorSignalStore = create<OperatorSignalStore>((set, get) => 
       });
       return;
     }
-    if (observed.failureClass === "host") {
+    if (observed.failureClass === "host_unhealthy") {
       set({ observedHostDown: true });
+      return;
+    }
+    if (observed.failureClass === "backend_unreachable") {
+      set({ observedBackendUnreachable: true });
       return;
     }
     set({

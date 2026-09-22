@@ -67,7 +67,7 @@ describe("FT-UX-001 primary banner priority", () => {
 
   it("a money-path incident outranks a disconnected feed, and Live risk still wins", () => {
     const incident = classifyOperatorSignals(closedHost());
-    expect(incident?.failureClass).toBe("host");
+    expect(incident?.failureClass).toBe("host_unhealthy");
     expect(
       selectPrimaryBanner({
         mode: "live",
@@ -75,7 +75,7 @@ describe("FT-UX-001 primary banner priority", () => {
         feedDisconnected: true,
         incident,
       }),
-    ).toBe("host");
+    ).toBe("host_unhealthy");
     expect(
       selectPrimaryBanner({
         mode: "live",
@@ -96,6 +96,7 @@ describe("FT-UX-001 primary banner priority", () => {
 
   it("Chat and a public-site outage do not hide a disconnected feed", () => {
     const llm = classifyOperatorSignals({ ...closedHost(), health: "healthy", llmChrome: "error" });
+    expect(llm?.failureClass).toBe("llm_provider");
     expect(
       selectPrimaryBanner({
         mode: "live",
@@ -103,6 +104,44 @@ describe("FT-UX-001 primary banner priority", () => {
         incident: llm,
       }),
     ).toBe("feed_disconnected");
+    const edge = classifyOperatorSignals({
+      ...closedHost(),
+      health: "healthy",
+      publicSite: "unreachable",
+      localPing: "ok",
+    });
+    expect(edge?.failureClass).toBe("edge");
+    expect(
+      selectPrimaryBanner({
+        mode: "live",
+        feedDisconnected: true,
+        incident: edge,
+      }),
+    ).toBe("feed_disconnected");
+  });
+
+  it("a broker-trust incident outranks a disconnected feed and loses to Live risk", () => {
+    const incident = classifyOperatorSignals({
+      ...closedHost(),
+      health: "healthy",
+      brokerRateLimited: true,
+    });
+    expect(incident?.failureClass).toBe("broker_rate_limit");
+    expect(
+      selectPrimaryBanner({
+        mode: "live",
+        feedDisconnected: true,
+        incident,
+      }),
+    ).toBe("broker_rate_limit");
+    expect(
+      selectPrimaryBanner({
+        mode: "live",
+        liveRiskActive: true,
+        feedDisconnected: true,
+        incident,
+      }),
+    ).toBe("live_risk");
   });
 
   it("Live with no risk and a connected feed has no primary banner", () => {

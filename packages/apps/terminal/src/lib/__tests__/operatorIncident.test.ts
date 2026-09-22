@@ -88,7 +88,7 @@ const MONEY_PATH_FIXTURES: Array<{ name: string; signals: OperatorSignals }> = [
     }),
   },
   {
-    name: "host",
+    name: "host_unhealthy",
     signals: signals({ health: "unhealthy", localPing: "ok" }),
   },
   {
@@ -157,6 +157,9 @@ describe("operator incident classifier", () => {
     expect(incident?.moneyPath).toBe(false);
     expect(liveWritesMuted(incident)).toBe(false);
     expect(incident?.rectify.toLowerCase()).toContain("public site");
+    expect(incident?.headline.toLowerCase()).toContain("cdn");
+    expect(incident?.headline.toLowerCase()).not.toContain("cloudflare");
+    expect(incident?.rectify.toLowerCase()).not.toContain("cloudflare");
     expect(
       honestBrokerStatus({
         connected: true,
@@ -179,7 +182,7 @@ describe("operator incident classifier", () => {
     expect(incident?.failureClass).toBe("network_local");
   });
 
-  it("treats a same-origin failure with a reachable public site as host, not ISP", () => {
+  it("treats a same-origin failure with a reachable public site as backend unreachable", () => {
     const incident = classifyOperatorSignals(
       signals({
         localPing: "transport",
@@ -188,7 +191,7 @@ describe("operator incident classifier", () => {
         health: "unknown",
       }),
     );
-    expect(incident?.failureClass).toBe("host");
+    expect(incident?.failureClass).toBe("backend_unreachable");
     expect(incident?.moneyPath).toBe(true);
     expect(liveWritesMuted(incident)).toBe(true);
   });
@@ -202,13 +205,13 @@ describe("operator incident classifier", () => {
         health: "unknown",
       }),
     );
-    expect(incident?.failureClass).toBe("host");
+    expect(incident?.failureClass).toBe("backend_unreachable");
     expect(incident?.headline.toLowerCase()).not.toContain("isp");
   });
 
-  it("surfaces the native HTTP freeze as a host banner without muting the bridge path", () => {
+  it("surfaces the native HTTP freeze as a backend banner without muting the bridge path", () => {
     const incident = classifyOperatorSignals(signals({ nativeHttpFreeze: true }));
-    expect(incident?.failureClass).toBe("host");
+    expect(incident?.failureClass).toBe("backend_unreachable");
     expect(incident?.nativeHttpFreeze).toBe(true);
     expect(incident?.moneyPath).toBe(false);
     expect(liveWritesMuted(incident)).toBe(false);
@@ -220,7 +223,7 @@ describe("operator incident classifier", () => {
         nativeMonday: true,
         incident,
       }),
-    ).toBe("Unavailable — host");
+    ).toBe("Unavailable — backend unreachable");
     expect(
       honestBrokerStatus({
         connected: true,
@@ -233,7 +236,7 @@ describe("operator incident classifier", () => {
 
   it("keeps Chat failures off Live writes and off broker Connected", () => {
     const incident = classifyOperatorSignals(signals({ llmChrome: "error" }));
-    expect(incident?.failureClass).toBe("llm");
+    expect(incident?.failureClass).toBe("llm_provider");
     expect(incident?.moneyPath).toBe(false);
     expect(liveWritesMuted(incident)).toBe(false);
     expect(incident?.rectify.toLowerCase()).toContain("chat");
@@ -251,7 +254,7 @@ describe("operator incident classifier", () => {
     expect(classifyOperatorSignals(signals({ llmChrome: "unconfigured" }))).toBeNull();
   });
 
-  it("ranks a money-path broker fault above the freeze banner and above Chat", () => {
+  it("ranks the freeze banner above a broker rate limit and above Chat, and still closes Live", () => {
     const incident = classifyOperatorSignals(
       signals({
         nativeHttpFreeze: true,
@@ -259,7 +262,27 @@ describe("operator incident classifier", () => {
         brokerRateLimited: true,
       }),
     );
-    expect(incident?.failureClass).toBe("broker_rate_limit");
+    expect(incident?.failureClass).toBe("backend_unreachable");
+    expect(incident?.nativeHttpFreeze).toBe(true);
+    expect(incident?.muteBrokerSmoke).toBe(true);
+    expect(incident?.moneyPath).toBe(true);
+    expect(liveWritesMuted(incident)).toBe(true);
+    expect(
+      honestBrokerStatus({
+        connected: true,
+        connectedRead: true,
+        nativeMonday: false,
+        incident,
+      }),
+    ).not.toMatch(/Connected/);
+  });
+
+  it("ranks host unhealthy above a latched broker rate limit", () => {
+    const incident = classifyOperatorSignals(
+      signals({ health: "unhealthy", brokerRateLimited: true }),
+    );
+    expect(incident?.failureClass).toBe("host_unhealthy");
+    expect(incident?.muteBrokerSmoke).toBe(true);
     expect(liveWritesMuted(incident)).toBe(true);
   });
 
@@ -282,5 +305,31 @@ describe("operator incident classifier", () => {
         httpStatus: 400,
       }),
     ).toBeNull();
+    expect(
+      classifyObservedFailure({
+        message: "host unhealthy",
+        httpStatus: 503,
+      })?.kind,
+    ).toBe("reject");
+    expect(
+      classifyObservedFailure({
+        message: "Cannot reach the FlintTrade backend",
+        httpStatus: null,
+      }),
+    ).toMatchObject({ kind: "reject", failureClass: "backend_unreachable" });
+  });
+
+  it("keeps a real exchange reject when the session clock is also closed", () => {
+    const incident = classifyOperatorSignals(
+      signals({
+        sessionClockClosed: true,
+        brokerReject: {
+          message: "Trading halted by exchange circuit breaker",
+          httpStatus: 400,
+          broker: "dhan",
+        },
+      }),
+    );
+    expect(incident?.failureClass).toBe("exchange");
   });
 });

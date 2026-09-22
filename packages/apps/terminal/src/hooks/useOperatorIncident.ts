@@ -6,6 +6,7 @@
 
 import { useMemo } from "react";
 import { classifyOperatorSignals, type OperatorIncident } from "@/lib/operatorIncident";
+import { resolveNseCashSession } from "@/lib/nseSession";
 import { isBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
@@ -25,7 +26,9 @@ export function useOperatorIncident(): OperatorIncident | null {
   const brokerRateLimited = useOperatorSignalStore((s) => s.brokerRateLimited);
   const brokerReject = useOperatorSignalStore((s) => s.brokerReject);
   const observedHostDown = useOperatorSignalStore((s) => s.observedHostDown);
+  const observedBackendUnreachable = useOperatorSignalStore((s) => s.observedBackendUnreachable);
   const llmChrome = useOperatorSignalStore((s) => s.llmChrome);
+  const sessionClockClosed = cashSessionClockClosed();
 
   return useMemo(() => {
     const directConnected = accounts.some((account) => account.status === "connected");
@@ -44,8 +47,9 @@ export function useOperatorIncident(): OperatorIncident | null {
       brokerRateLimited,
       brokerReject,
       observedHostDown,
+      observedBackendUnreachable,
       llmChrome,
-      sessionClockClosed: false,
+      sessionClockClosed,
       wsFailure: wsFailure ? { kind: wsFailure.kind, reason: wsFailure.reason } : null,
       activeAccount: active
         ? {
@@ -68,9 +72,17 @@ export function useOperatorIncident(): OperatorIncident | null {
     localPing,
     mode,
     nativeHttpFreeze,
+    observedBackendUnreachable,
     observedHostDown,
     publicSite,
+    sessionClockClosed,
     transportReason,
     wsFailure,
   ]);
+}
+
+/** CAS / cash clock is read and ignored. Closed or CAS is not an exchange halt. */
+function cashSessionClockClosed(now: Date = new Date()): boolean {
+  const phase = resolveNseCashSession(now).phase;
+  return phase === "closed" || phase === "cas";
 }

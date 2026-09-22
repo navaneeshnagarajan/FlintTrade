@@ -39,7 +39,7 @@ export function OperatorStatusStrip({
   const level = stripLevel(kind, incident);
   const headline = showingIncident ? incident.headline : primaryBannerCopy(kind);
   const rectify = showingIncident ? incident.rectify : null;
-  const showRetry = showingIncident && incident.failureClass !== "llm";
+  const showRetry = showingIncident && incident.failureClass !== "llm_provider";
 
   async function retryOnce() {
     if (retrying) return;
