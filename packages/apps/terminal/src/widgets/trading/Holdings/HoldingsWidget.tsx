@@ -1,18 +1,19 @@
 // Migrated to TSX — Phase 4 Batch 1
 // Replaces direct getHoldings() / getMultiQuotes() calls with useHoldings() hook.
 // PRESERVED: retry:false in useHoldings to suppress errors for brokers without holdings API.
-// Uses TanStack Table v8 + shadcn Table; search + sort are client-side derived state.
+// Uses TanStack Table v9 + shadcn Table; search + sort are client-side derived state.
 import { useMemo, useState, useCallback, memo } from "react";
 import { Clock, Search, RefreshCw, Briefcase, FileSpreadsheet } from "lucide-react";
 import {
   type ColumnDef,
   flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getSortedRowModel,
   type SortingState,
-  useReactTable,
+  useTable,
 } from "@tanstack/react-table";
+import {
+  filteredSortedTableFeatures,
+  type FilteredSortedTableFeatures,
+} from "@/lib/tableFeatures";
 import {
   Table,
   TableBody,
@@ -133,7 +134,7 @@ function HoldingsWidget(_props: WidgetProps) {
     }
   }, [positionsData, rows]);
 
-  const columns = useMemo<ColumnDef<HoldingRow>[]>(
+  const columns = useMemo<ColumnDef<FilteredSortedTableFeatures, HoldingRow>[]>(
     () => [
       {
         accessorKey: "symbol",
@@ -201,15 +202,13 @@ function HoldingsWidget(_props: WidgetProps) {
     [],
   );
 
-  const table = useReactTable({
+  const table = useTable({
+    features: filteredSortedTableFeatures,
     data: rows,
     columns,
     state: { sorting, globalFilter },
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
   });
 
   return (
