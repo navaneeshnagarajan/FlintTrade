@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { BROKER_ACCOUNTS_QUERY_KEY, useBrokerAccounts } from "@/hooks/useBrokerAccounts";
+import { clearBrokerFault } from "@/stores/operatorSignalStore";
 import { canPromotePrimaryAccount } from "@/lib/brokerAccountRules";
 import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
 import {
@@ -61,6 +62,8 @@ import {
 } from "@/services/ftApi.native";
 import { isDesktopShell, openExternalUrl } from "@/lib/desktopShell";
 import { cancelAccountAction, runAccountAction } from "@/services/accountMutationActions";
+import { useOperatorIncident } from "@/hooks/useOperatorIncident";
+import { honestBrokerStatus } from "@/lib/operatorIncident";
 import {
   API_SMOKE_LABEL,
   CONNECTED_READ_LABEL,
@@ -225,6 +228,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
   const mcpQuery = useQuery({ queryKey: MCP_KEY, queryFn: listBrokerMcpCatalogue });
   useBrokerAccounts(pollAccounts);
   const brokerAccounts = useBrokerStore((s) => s.accounts);
+  const operatorIncident = useOperatorIncident();
 
   const brokers = brokersQuery.data ?? [];
   const mcpBrokers = mcpQuery.data ?? [];
@@ -599,6 +603,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
         setAccountLabel("");
       }
       setNotice(r.message);
+      if (!r.oauth) clearBrokerFault();
       // OAuth completes out-of-band. Settings has no passive Explore poll, so
       // keep a bounded, user-triggered handshake alive until this exact account
       // appears; setup relies on its existing continuous observer.
@@ -675,6 +680,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`${sel.adapter} account ${sel.account} re-authenticated.`);
+      clearBrokerFault();
       invalidateAccountQueries();
     },
     onError: (e: unknown, sel) => {
@@ -968,15 +974,25 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
               const needsFreshLogin = a.status === "token_expired" || !!a.needs_relogin;
               const retryLater = !!a.login_retryable;
               const canSetPrimary = canPromotePrimaryAccount(a);
+              const monday = isMondayReadBroker(a.broker);
+              const honest = honestBrokerStatus({
+                connected,
+                connectedRead: connected && mondayReadChrome(a) !== null,
+                nativeMonday: monday,
+                incident: operatorIncident,
+              });
+              const moneyPathChrome = honest !== null
+                && honest !== "Connected"
+                && honest !== "Connected (read)";
               return (
               <li
                 key={brokerAccountKey(a)}
                 className="flex items-center justify-between rounded-lg border border-border-default bg-surface-card p-3"
               >
                 <div className="flex items-center gap-3">
-                  {connected ? (
+                  {connected && !moneyPathChrome ? (
                     <CheckCircle2 className="size-4 text-profit" aria-hidden="true" />
-                  ) : needsFreshLogin || retryLater ? (
+                  ) : needsFreshLogin || retryLater || moneyPathChrome ? (
                     <AlertTriangle className="size-4 text-warning" aria-hidden="true" />
                   ) : (
                     <XCircle className="size-4 text-loss" aria-hidden="true" />
@@ -988,12 +1004,14 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
                     <div className="text-xs text-text-muted">
                       {a.broker}
                       {a.is_primary ? " · primary" : ""}
-                      {isMondayReadBroker(a.broker)
+                      {monday
                         ? ""
                         : a.read_only
                           ? " · read-only"
                           : ""}
-                      {connected && mondayReadChrome(a)
+                      {moneyPathChrome
+                        ? ` · ${honest}`
+                        : connected && mondayReadChrome(a)
                         ? ` · ${CONNECTED_READ_LABEL} · ${API_SMOKE_LABEL}${
                             a.broker === "kotakneo" ? ` · ${NEO_OPERATOR_COPY}` : ""
                           }${a.expires_at ? ` · ${expiryLabel(a.expires_at)}` : ""}`

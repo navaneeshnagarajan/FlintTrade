@@ -40,6 +40,8 @@ import type {
   LeverageSettings,
 } from "@/types/api";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { readOperatorIncident } from "@/hooks/useOperatorIncident";
+import { liveWritesMuted } from "@/lib/operatorIncident";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
@@ -2597,6 +2599,16 @@ function placeExploreSampleOrder(params: PlaceOrderParams): { orderId: string } 
   return { orderId: `SAMPLE-${symbol}-${stamp}` };
 }
 
+const LIVE_PLACE_ENDPOINTS = new Set([
+  "place",
+  "place-smart",
+  "open-position",
+  "basket",
+  "split",
+  "options",
+  "options-multi",
+]);
+
 async function postOrder<T>(
   ftEndpoint: string,
   body: object = {},
@@ -2637,6 +2649,12 @@ async function postOrder<T>(
   // Prefer the pinned authority mode so in-flight Practice confirms keep the
   // sandbox header/routing even if the store flips after the equality check.
   const mode = authority?.mode ?? currentMode;
+  if (mode === "live" && LIVE_PLACE_ENDPOINTS.has(ftEndpoint)) {
+    const incident = readOperatorIncident();
+    if (liveWritesMuted(incident)) {
+      throw new Error(incident?.rectify ?? "Live orders are closed.");
+    }
+  }
   const apiKey = useConnectionStore.getState().apiKey;
   const jwt = useAuthStore.getState().token;
 

@@ -36,6 +36,8 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useModeStore } from "@/stores/modeStore";
 import WorkspaceSwitcher from "@/chrome/WorkspaceSwitcher";
 import { useDirectBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useOperatorIncident } from "@/hooks/useOperatorIncident";
+import { liveWritesMuted } from "@/lib/operatorIncident";
 import { useSkillContent } from "@/hooks/useSkillContent";
 import {
   MARKET_TIMINGS_MAX_AGE_MS,
@@ -317,6 +319,8 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   const setStatus = useConnectionStore((s) => s.setStatus);
   const mode = useModeStore((s) => s.mode);
   const directBrokerConnected = useDirectBrokerConnected();
+  const operatorIncident = useOperatorIncident();
+  const moneyPathClosed = liveWritesMuted(operatorIncident);
   const storedTickerMode = useSettingsStore((s) => s.tickerMode);
   const setTickerMode = useSettingsStore((s) => s.setTickerMode);
   const tickerMode: TickerMode = tickerModeProp ?? storedTickerMode;
@@ -343,9 +347,10 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   // the status is purely whatever real broker is connected (none), never the
   // demo ping.
   useEffect(() => {
-    if (mode === "explore") {
+    if (mode === "explore" || moneyPathClosed) {
       // Explore is broker-free. A leftover native session must not paint
       // Connected/green — same honesty as FT-AI-002 / FT-AUTO-002.
+      // A money-path incident stays dark even when a broker session remains.
       setStatus("disconnected");
       return;
     }
@@ -360,7 +365,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
     check();
     const id = setInterval(check, 10_000);
     return () => clearInterval(id);
-  }, [mode, directBrokerConnected, setStatus]);
+  }, [mode, directBrokerConnected, moneyPathClosed, setStatus]);
 
   const barStyle: React.CSSProperties = {
     background: "var(--glass-chrome-bg, rgba(12,12,20,0.85))",

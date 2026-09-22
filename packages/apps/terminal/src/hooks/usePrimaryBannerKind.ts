@@ -7,7 +7,9 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { selectPrimaryBanner, type PrimaryBannerKind } from "@/lib/primaryBanner";
+import type { OperatorIncident } from "@/lib/operatorIncident";
 import { getSafetyConfig } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -36,9 +38,17 @@ export function useLiveRiskActive(): boolean {
   return killActive || dailyLossHalt || dailyLossAlert;
 }
 
-export function usePrimaryBannerKind(): PrimaryBannerKind {
+export function usePrimaryBanner(): { kind: PrimaryBannerKind; incident: OperatorIncident | null } {
   const mode = useModeStore((s) => s.mode);
   const liveRiskActive = useLiveRiskActive();
   const feedDisconnected = !useBrokerConnected();
-  return selectPrimaryBanner({ mode, liveRiskActive, feedDisconnected });
+  const incident = useOperatorIncident();
+  return {
+    kind: selectPrimaryBanner({ mode, liveRiskActive, feedDisconnected, incident }),
+    incident,
+  };
+}
+
+export function usePrimaryBannerKind(): PrimaryBannerKind {
+  return usePrimaryBanner().kind;
 }

@@ -1,4 +1,4 @@
-import { expect, test } from "./fixture-registry";
+import { expect, registerOperatorStatusProbes, test } from "./fixture-registry";
 import { seedExploreDemoSession } from "./helpers";
 
 test.use({ benignConsoleErrors: [{
@@ -16,7 +16,7 @@ test("broker connection retry retains its action identity after an ambiguous res
   })) {
     syntheticApi.register({
       name: `settings hydration ${name}`, method: "GET", path: `/ft-api/v1/config/${name}`,
-      expectedCalls: 2,
+      expectedCalls: { minimum: 2, maximum: 8 },
       handler: () => ({ json: { status: "success", data } }),
     });
   }
@@ -55,6 +55,7 @@ test("broker connection retry retains its action identity after an ambiguous res
       handler: () => ({ json: { status: "success", data: { accounts: [] } } }),
     });
   }
+  registerOperatorStatusProbes(syntheticApi, { includeLlmConfig: false });
   await page.goto("/settings#brokers");
   await expect(page).toHaveURL("http://localhost:5173/settings#brokers");
   await expect(page).toHaveTitle(/FlintTrade/i);

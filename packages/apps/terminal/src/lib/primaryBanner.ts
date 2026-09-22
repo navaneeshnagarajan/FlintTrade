@@ -1,14 +1,22 @@
 /**
- * Incident banner for the slot under TopBar.
+ * FT-UX-001 — at most one primary banner.
  *
- * Mode honesty is a separate always-on line and is not selected here.
- * Explore and Practice leave this slot empty. On Live, risk beats a
- * disconnected feed so the desk shows at most one incident.
+ * Kinds feed the incident strip between the TopBar and the Mode line.
+ * Mode honesty owns Explore and Practice, so this slot stays empty there.
+ * On Live: Live risk / Kill All, then host (network_local, host_unhealthy,
+ * backend_unreachable), then broker trust, then a disconnected feed, then
+ * edge, then Chat (llm_provider). Host beats broker inside the incident
+ * classifier. Toasts stay action feedback and must not duplicate this strip.
  */
 
+import type { FailureClass, OperatorIncident } from "@/lib/operatorIncident";
 import type { AppMode } from "@/stores/modeStore";
 
-export type PrimaryBannerKind = "live_risk" | "feed_disconnected" | null;
+export type PrimaryBannerKind =
+  | "live_risk"
+  | "feed_disconnected"
+  | FailureClass
+  | null;
 
 export const LIVE_RISK_BANNER = "Live risk — kill switch or daily-loss alert is active";
 export const FEED_DISCONNECTED_BANNER = "Live market feed disconnected";
@@ -17,11 +25,30 @@ export function selectPrimaryBanner(input: {
   mode: AppMode;
   liveRiskActive?: boolean;
   feedDisconnected?: boolean;
+  incident?: OperatorIncident | null;
 }): PrimaryBannerKind {
   if (input.mode !== "live") return null;
   if (input.liveRiskActive) return "live_risk";
+  const incident = input.incident ?? null;
+  const incidentOutranksFeed = incident !== null && incidentRank(incident.failureClass) >= 2;
+  if (incidentOutranksFeed) return incident.failureClass;
   if (input.feedDisconnected) return "feed_disconnected";
+  if (incident) return incident.failureClass;
   return null;
+}
+
+/** 3 host, 2 broker trust, 1 edge, 0 Chat. Feed sits between 2 and 1. */
+function incidentRank(failureClass: FailureClass): number {
+  if (
+    failureClass === "network_local"
+    || failureClass === "host_unhealthy"
+    || failureClass === "backend_unreachable"
+  ) {
+    return 3;
+  }
+  if (failureClass === "edge") return 1;
+  if (failureClass === "llm_provider") return 0;
+  return 2;
 }
 
 export function primaryBannerCopy(kind: PrimaryBannerKind): string | null {

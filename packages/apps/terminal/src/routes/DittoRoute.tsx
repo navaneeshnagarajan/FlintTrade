@@ -88,6 +88,8 @@ import {
   mirrorStartHelper,
   resolveAccountsLoadState,
 } from "./mirrorStartGate";
+import { useOperatorIncident } from "@/hooks/useOperatorIncident";
+import { liveWritesMuted } from "@/lib/operatorIncident";
 import { killAllArmed, killAllHelper, resolveRiskLoadState } from "./killAllGate";
 
 // ─── Tab registry ────────────────────────────────────────────────────────────
@@ -740,12 +742,14 @@ function MirrorTab() {
   });
   const accountList = accounts?.accounts ?? [];
   const activeAccounts = accountList.filter((account) => account.status === "active");
+  const operatorIncident = useOperatorIncident();
   const startInput = {
     mode,
     sourceAccount,
     targetCount: targetAccounts.size,
     activeAccountCount: activeAccounts.length,
     accountsLoadState,
+    liveWriteBlock: liveWritesMuted(operatorIncident) ? operatorIncident?.rectify ?? null : null,
   };
   const startHelper = mirrorStartHelper(startInput);
   const startArmed = mirrorStartArmed(startInput);

@@ -66,6 +66,9 @@ import {
   orderSuccessNotificationTitle,
   orderSuccessToast,
 } from "@/lib/modeVocabulary";
+import { useOperatorIncident } from "@/hooks/useOperatorIncident";
+import { liveWritesMuted } from "@/lib/operatorIncident";
+import { noteObservedFailure } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { PracticeOrderReviewStage } from "./PracticeOrderReviewStage";
 import {
@@ -674,7 +677,11 @@ function OrderPadWidget(props: WidgetProps) {
       return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Order failed";
-      const retryable = isRetryableError(msg);
+      const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
+        ? err.status
+        : null;
+      noteObservedFailure({ message: msg, httpStatus, provenance: "order" });
+      const retryable = isRetryableError(msg) && !/rate limit/i.test(msg);
       showToast("error", msg, 6000, retryable);
       emitNotification({
         category: "order",
@@ -691,6 +698,8 @@ function OrderPadWidget(props: WidgetProps) {
   }, [showToast]);
 
   const appMode = useModeStore((s) => s.mode);
+  const operatorIncident = useOperatorIncident();
+  const liveMuted = appMode === "live" && liveWritesMuted(operatorIncident);
   const isPracticeOrExplore = appMode === "practice" || appMode === "explore";
   const currentIntentIdentity = practiceOrderIntentIdentity({
     symbol,
@@ -727,6 +736,11 @@ function OrderPadWidget(props: WidgetProps) {
     // Live-intent surfaces still use checkOrderEntryMode to refuse Explore.
     // Order Pad's Practice Buy is the paper path: Explore records a sample
     // fill and Practice uses the sandbox. Do not demand a live broker here.
+    if (liveMuted) {
+      showToast("error", operatorIncident?.rectify ?? "Live orders are closed.", 6000);
+      return;
+    }
+
     if (!isPracticeOrExplore) {
       const modeRefusal = checkOrderEntryMode(appMode);
       if (modeRefusal) {
@@ -1348,12 +1362,15 @@ function OrderPadWidget(props: WidgetProps) {
         {/* Submit button */}
         <Button
           type="submit"
-          disabled={loading || !symbol || !qty}
+          disabled={loading || !symbol || !qty || liveMuted}
           className={`${btnBase} ${btnColor}`}
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}
           {loading ? "Placing…" : orderPadCtaLabel(appMode, action)}
         </Button>
+        {liveMuted && operatorIncident ? (
+          <p className="text-xs text-loss" data-testid="live-write-rectify">{operatorIncident.rectify}</p>
+        ) : null}
       </form>
 
       {/* Toast */}

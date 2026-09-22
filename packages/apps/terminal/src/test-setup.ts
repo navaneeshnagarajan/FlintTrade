@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
+import { resetOperatorSignals } from "@/stores/operatorSignalStore";
 
 // ---------------------------------------------------------------------------
 // 1. React test environment flag.
@@ -21,6 +22,7 @@ Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
 // previous file stay in the DOM and cause "Found multiple elements" failures.
 // ---------------------------------------------------------------------------
 afterEach(() => {
+  resetOperatorSignals();
   cleanup();
   if (typeof globalThis.localStorage?.clear === "function") {
     globalThis.localStorage.clear();
