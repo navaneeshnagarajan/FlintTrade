@@ -1,6 +1,6 @@
 // Migrated to TSX — Phase 4 Batch 1
 // Replaces direct getOrderbook() call with useOrders() TanStack Query hook.
-// Uses TanStack Table v8 + shadcn Table + shadcn Badge for status.
+// Uses TanStack Table v9 + shadcn Table + shadcn Badge for status.
 // Open orders carry per-order Cancel and Modify actions wired to the REAL
 // broker order id through the existing gated cancel/modify routes.
 import { useMemo, useState, useEffect, useCallback, useRef, memo } from "react";
@@ -10,11 +10,10 @@ import { Input } from "@/components/ui/input";
 import {
   type ColumnDef,
   flexRender,
-  getCoreRowModel,
-  getSortedRowModel,
   type SortingState,
-  useReactTable,
+  useTable,
 } from "@tanstack/react-table";
+import { sortedTableFeatures, type SortedTableFeatures } from "@/lib/tableFeatures";
 import {
   Table,
   TableBody,
@@ -592,7 +591,7 @@ function OrdersWidget(_props: WidgetProps) {
     [modifyIntent, refreshOrders],
   );
 
-  const columns = useMemo<ColumnDef<OrderRow>[]>(
+  const columns = useMemo<ColumnDef<SortedTableFeatures, OrderRow>[]>(
     () => [
       {
         accessorKey: "symbol",
@@ -708,13 +707,12 @@ function OrdersWidget(_props: WidgetProps) {
     [canManageOrders, isExplore, actionPending, currentIdentity],
   );
 
-  const table = useReactTable({
+  const table = useTable({
+    features: sortedTableFeatures,
     data: rows,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
   });
 
   return (

@@ -17,13 +17,12 @@
 
 import { useMemo, useState } from "react";
 import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
+  useTable,
   type ColumnDef,
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";
+import { sortedTableFeatures, type SortedTableFeatures } from "@/lib/tableFeatures";
 import { Info, TrendingUp, TrendingDown } from "lucide-react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Badge } from "@/components/ui/badge";
@@ -236,7 +235,7 @@ function formatDate(iso: string): string {
 
 // ─── Column definitions ──────────────────────────────────────────────────────
 
-function buildColumns(): ColumnDef<IpoEntry>[] {
+function buildColumns(): ColumnDef<SortedTableFeatures, IpoEntry>[] {
   return [
     {
       accessorKey: "name",
@@ -302,7 +301,7 @@ function buildColumns(): ColumnDef<IpoEntry>[] {
       accessorKey: "listingGain",
       header: () => <span className="block text-right">Listing Gain</span>,
       cell: ({ row }) => <ListingGainCell gain={row.original.listingGain} />,
-      sortingFn: (rowA, rowB) => {
+      sortFn: (rowA, rowB) => {
         const a = rowA.original.listingGain ?? -Infinity;
         const b = rowB.original.listingGain ?? -Infinity;
         return a - b;
@@ -355,13 +354,12 @@ export function IpoTab() {
 
   const columns = useMemo(() => buildColumns(), []);
 
-  const table = useReactTable({
+  const table = useTable({
+    features: sortedTableFeatures,
     data: RECENT_IPOS,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
   });
 
   return (
