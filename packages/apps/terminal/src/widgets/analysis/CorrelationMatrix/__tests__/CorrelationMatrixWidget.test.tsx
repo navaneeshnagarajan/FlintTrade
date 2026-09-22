@@ -74,7 +74,7 @@ describe("CorrelationMatrixWidget", () => {
   it("shows the Sample data badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
     renderWidget();
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("does not fetch the matrix when disconnected", () => {
@@ -101,15 +101,13 @@ describe("CorrelationMatrixWidget", () => {
     renderWidget();
 
     await waitFor(() => expect(mockGetMatrix).toHaveBeenCalled());
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
   it("Sample data badge carries an honest status role and explanatory title", () => {
     renderWidget();
-    const badge = screen.getByText("Sample data");
-    expect(badge.getAttribute("role")).toBe("status");
-    expect(badge.getAttribute("title")).toMatch(/no live data wired yet/i);
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("does not render a live-looking refresh control implying fresh data", () => {

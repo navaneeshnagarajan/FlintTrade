@@ -78,10 +78,7 @@ describe("SessionTab", () => {
 
   it("shows the disclosed Sample data badge while no round trip has closed", () => {
     render(<SessionTab />);
-    const badge = screen.getByText("Sample data");
-    expect(badge).toBeTruthy();
-    expect(badge.getAttribute("role")).toBe("status");
-    expect(badge.getAttribute("aria-label")).toMatch(/sample data/i);
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("renders session equity chart through the shared Flint primitive", () => {
@@ -156,7 +153,7 @@ describe("SessionTab", () => {
     render(<SessionTab />);
     expect(tradebookOptions.every((o) => o?.enabled === false)).toBe(true);
     expect(ordersOptions.every((o) => o?.enabled === false)).toBe(true);
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 });
 
@@ -281,7 +278,7 @@ describe("SessionTab live mode", () => {
       ],
     });
     render(<SessionTab />);
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("shows the operator's real round trips in the trade log, never the sample rows", () => {
@@ -323,8 +320,9 @@ describe("SessionTab live mode", () => {
 
     // The header stays Live — the trade metrics genuinely are.
     expect(screen.getByText("Live")).toBeTruthy();
-    // But the Orders section discloses that its counts are not.
-    expect(screen.getByLabelText(/sample order counts/i)).toBeTruthy();
+    // An empty order book is zeros, not the Explore sample counts.
+    expect(screen.queryByLabelText(/sample order counts/i)).toBeNull();
+    expect(screen.getByLabelText("Orders: 0 placed, 0 filled, 0 rejected, 0 pending")).toBeTruthy();
   });
 
   it("shows no Orders badge when the order book is real", () => {

@@ -372,11 +372,7 @@ export function ShareholdingTab() {
         <Badge variant="outline" className="text-xxs border-border-default text-text-muted h-5">
           As of {displayData.shareholding.as_of_quarter}
         </Badge>
-        {isDemo && (
-          <Badge variant="outline" className="text-xxs border-amber-400/40 text-amber-400 h-5">
-            Sample data
-          </Badge>
-        )}
+        
       </div>
 
       {/* Loading skeleton */}
@@ -435,7 +431,6 @@ export function ShareholdingTab() {
 
           <p className="text-xs text-text-muted">
             Source: Screener.in (financials + shareholding), BSE API (announcements).
-            {isDemo ? " Sample data shown — enter a symbol above to fetch live data." : ""}
           </p>
         </>
       )}

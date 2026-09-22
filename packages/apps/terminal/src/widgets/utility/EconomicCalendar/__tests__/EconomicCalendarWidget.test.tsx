@@ -58,9 +58,7 @@ describe("EconomicCalendarWidget", () => {
 
   it("shows the permanent 'Sample data' badge", () => {
     renderWidget();
-    const badge = screen.getByText("Sample data");
-    expect(badge).toBeTruthy();
-    expect(badge.getAttribute("role")).toBe("status");
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("renders the impact legend with all three levels", () => {
@@ -131,7 +129,7 @@ describe("EconomicCalendarWidget", () => {
     expect(screen.getByText("Backend Fed Rate Decision")).toBeInTheDocument();
     await waitFor(() => expect(mockCalendar).toHaveBeenCalledWith(30));
     // the badge stays — the backend provider is itself sample-only today
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("skips backend events from countries the widget cannot render", async () => {

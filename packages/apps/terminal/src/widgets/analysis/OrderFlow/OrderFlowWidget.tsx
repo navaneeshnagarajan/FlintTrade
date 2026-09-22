@@ -874,7 +874,7 @@ function OrderFlowWidget(props: WidgetProps) {
             ? "Delayed"
             : dataState === "stale"
               ? "Stale"
-              : "Sample data";
+              : "";
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1270,6 +1270,7 @@ function OrderFlowWidget(props: WidgetProps) {
               <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
                 Status
               </DropdownMenuLabel>
+              {(compactStatus !== "" || isError) && (
               <DropdownMenuItem
                 aria-label={isError ? `Status: Error. ${errorMessage}` : `Status: ${compactStatus}`}
                 className="items-start justify-between gap-2 px-2 py-1 text-xs focus:bg-surface-active"
@@ -1289,6 +1290,7 @@ function OrderFlowWidget(props: WidgetProps) {
                   <OrderFlowQualityBadge data={data} />
                 )}
               </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator className="bg-border-default" />
               <DropdownMenuLabel className="px-2 py-1 text-xs text-text-muted">
                 Legend

@@ -182,10 +182,10 @@ describe("WatchlistWidget", () => {
   it("keeps Explore Sample data after an explicit select writes the bus", async () => {
     useModeStore.setState({ mode: "explore" });
     const { store } = renderWidget();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "BANKNIFTY" }));
     expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "BANKNIFTY", exchange: "NSE_INDEX" });
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   function BusFollower({ name }: { name: string }) {
@@ -215,7 +215,7 @@ describe("WatchlistWidget", () => {
     expect(screen.getByTestId("bus-follower-chart")).toHaveTextContent("BANKNIFTY");
     expect(screen.getByTestId("bus-follower-option-chain")).toHaveTextContent("BANKNIFTY");
     expect(screen.getByTestId("bus-follower-scalper")).toHaveTextContent("BANKNIFTY");
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("empty watchlist never silently retargets Chart, Option Chain, or Scalper", async () => {
@@ -585,7 +585,7 @@ describe("WatchlistWidget", () => {
     expect(screen.getByLabelText("SBIN LTP")).toHaveTextContent("780.00");
     expect(screen.getByLabelText("RELIANCE LTP")).toHaveTextContent("2,850.00");
     expect(screen.getByLabelText("HDFCBANK LTP")).toHaveTextContent("1,680.00");
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("shows an honest em dash when LTP is checked but no quote is available", async () => {

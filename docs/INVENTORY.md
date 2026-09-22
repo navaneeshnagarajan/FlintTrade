@@ -87,8 +87,8 @@ Closed-market/no-funds verification does not prove funded live order execution.
 | Trade journal | ✅ | `TradeJournalTool` + write path on executed orders |
 | Multiple built-in strategies | ✅ | 132 runnable by name (`ALL_STRATEGIES` + `STRATEGY_REGISTRY` + `BUILTIN`); 41 selectable in the Lab picker |
 | Option-analysis tabs (GEX / IV-smile / max-pain / OI-profile) | ✅ | Live option chains use strict exchange, expiry, row, Greek and lot-size provenance through the configured broker path; incomplete or contradictory inputs fail closed to a labelled sample/unavailable state |
-| Analytics widgets (VWAP / multi-timeframe / correlation pairs / correlation matrix) | ✅ | Live via `/api/v1/history` + screener analysers (`/v1/analytics/*`, `/api/v1/analytics/correlation`); honest "Live"/"Sample data" badge |
-| IV-smile-derived widgets (IV skew / Greeks heatmap) | ✅ | Sourced from the live IV-smile feed (`getFtIVSmile`); greeks Black–Scholes-derived (shared with GreeksSurface); pure unit-tested transforms; honest "Live"/"Sample data" badge |
+| Analytics widgets (VWAP / multi-timeframe / correlation pairs / correlation matrix) | ✅ | Live via `/api/v1/history` + screener analysers (`/v1/analytics/*`, `/api/v1/analytics/correlation`); Live chip when the feed is live; Sample chips retired in favour of the Mode honesty line |
+| IV-smile-derived widgets (IV skew / Greeks heatmap) | ✅ | Sourced from the live IV-smile feed (`getFtIVSmile`); greeks Black–Scholes-derived (shared with GreeksSurface); pure unit-tested transforms; Live chip when the feed is live; Sample chips retired in favour of the Mode honesty line |
 | Vol-surface, straddle-PnL analysis | 🟡 | Honest sample only (need multi-expiry / candle source) |
 
 ## Data & Infra

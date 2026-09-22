@@ -117,7 +117,7 @@ describe("MutualFundTab Explore sample copy (FT-INVEST-001)", () => {
     const asOfLines = screen.getAllByText(`Sample NAVs · as of ${EXPLORE_SAMPLE_NAV_DATE}`);
     expect(asOfLines.length).toBeGreaterThan(0);
     expect(screen.queryByText(/Updated daily after market close/i)).not.toBeInTheDocument();
-    expect(screen.getByText("Sample Data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample Data")).not.toBeInTheDocument();
     // Fixture date must appear on the NAV rows as well as the as-of line.
     expect(screen.getAllByText(EXPLORE_SAMPLE_NAV_DATE).length).toBeGreaterThan(1);
   });

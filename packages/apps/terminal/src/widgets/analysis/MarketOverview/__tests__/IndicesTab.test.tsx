@@ -83,7 +83,7 @@ describe("IndicesTab — NSE index cards", () => {
     expect(screen.getByText("BANKNIFTY")).toBeInTheDocument();
     expect(screen.getAllByLabelText(/awaiting live price/i).length).toBeGreaterThan(0);
     const heading = screen.getByText("NSE Indices");
-    expect(heading.querySelector("span")?.textContent).toBe("Sample");
+    expect(heading.querySelector("span")).toBeNull();
   });
 
   it("renders a live index level once a tick arrives", () => {
@@ -105,9 +105,9 @@ describe("IndicesTab — NSE index cards", () => {
     renderTab();
 
     const nseHeading = screen.getByText("NSE Indices");
-    expect(nseHeading.querySelector("span")?.textContent).toBe("Sample");
+    expect(nseHeading.querySelector("span")).toBeNull();
     const vixHeading = screen.getByText("Volatility Regime");
-    expect(vixHeading.querySelector("span")?.textContent).toBe("Sample");
+    expect(vixHeading.querySelector("span")).toBeNull();
     // Levels may still render from the injected ticks — only the chip changes.
     expect(screen.getByText("22,150.4")).toBeInTheDocument();
   });
@@ -145,7 +145,7 @@ describe("IndicesTab — global indices (disconnected)", () => {
 
   it("shows sample data label when disconnected", () => {
     renderTab();
-    expect(screen.getByText("(sample data)")).toBeTruthy();
+    expect(screen.queryByText("(sample data)")).not.toBeInTheDocument();
     expect(screen.queryByText(/Updated:/)).toBeNull();
   });
 
@@ -229,8 +229,8 @@ describe("IndicesTab — global indices (connected)", () => {
 
     expect(await screen.findByText("NIFTY 50")).toBeTruthy();
     // Header badge + footer note both visible despite the connection.
-    expect(screen.getByText("Sample data")).toBeTruthy();
-    expect(screen.getByText("(sample data)")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(screen.queryByText("(sample data)")).not.toBeInTheDocument();
     // No fabricated "Updated: …" freshness claim when the payload has no
     // honest timestamp.
     expect(screen.queryByText(/Updated:/)).toBeNull();
@@ -246,8 +246,8 @@ describe("IndicesTab — global indices (connected)", () => {
     renderTab();
 
     expect(await screen.findByText("NIFTY 50")).toBeTruthy();
-    expect(screen.getByText("Sample data")).toBeTruthy();
-    expect(screen.getByText("(sample data)")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(screen.queryByText("(sample data)")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Refresh global indices")).toBeNull();
     expect(screen.queryByText(/Updated:/)).toBeNull();
   });
@@ -418,7 +418,7 @@ describe("IndicesTab — India VIX regime", () => {
   it("classifies nothing until a tick arrives — the tool hardcoded 14.28", () => {
     renderTab();
     const heading = screen.getByText("Volatility Regime");
-    expect(heading.querySelector("span")?.textContent).toBe("Sample");
+    expect(heading.querySelector("span")).toBeNull();
     expect(screen.getByText(/Awaiting India VIX tick/)).toBeInTheDocument();
     expect(screen.queryByText("14.28")).toBeNull();
   });

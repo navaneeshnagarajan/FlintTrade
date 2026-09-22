@@ -143,11 +143,7 @@ export function MutualFundTab() {
           <h3 className="font-heading font-semibold text-sm text-text-primary">
             Mutual Fund Explorer
           </h3>
-          {!isLive && (
-            <Badge variant="outline" className="text-xxs h-4 px-1.5 border-amber-500/30 text-amber-400">
-              Sample Data
-            </Badge>
-          )}
+          
         </div>
         <p className="text-xs text-text-muted mt-1">
           {isLive

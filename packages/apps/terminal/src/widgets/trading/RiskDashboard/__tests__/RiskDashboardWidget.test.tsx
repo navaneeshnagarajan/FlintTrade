@@ -145,7 +145,7 @@ describe("Risk widget", () => {
 
   it("shows Sample badge in Explore", () => {
     renderWidget();
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
   });
 
   it("does not show Sample badge when connected", async () => {

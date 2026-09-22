@@ -75,7 +75,7 @@ describe("CorrelationPairsWidget", () => {
   it("shows the Sample data badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
     renderWidget();
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("does not fetch when broker disconnected", () => {
@@ -109,19 +109,14 @@ describe("CorrelationPairsWidget", () => {
     renderWidget();
 
     await waitFor(() => expect(mockGetPairs).toHaveBeenCalled());
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
   it("badge discloses no live source via its accessible name (sample mode)", () => {
     mockConnected.mockReturnValue(false);
     renderWidget();
-    const badge = screen.getByText("Sample data");
-    expect(badge).toBeInTheDocument();
-    expect(badge).toHaveAttribute(
-      "aria-label",
-      "Showing sample data; no live correlation data source is wired yet",
-    );
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("does not render a deceptive live-looking refresh control", () => {

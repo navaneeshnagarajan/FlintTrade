@@ -16,7 +16,7 @@
  *   - both profits and losses across several sectors, so the heat map's
  *     diverging colour scale and its sector grouping are exercised.
  *
- * Every surface that renders it MUST carry the Sample badge and the watermark.
+ * Explore renders this book quietly. The Mode honesty bar is the disclaimer.
  */
 
 import type { Position } from "@/types/api";

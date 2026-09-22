@@ -43,11 +43,11 @@ describe("usePrimaryBannerKind", () => {
     useTradingStore.setState({ totalPnl: 0 });
   });
 
-  it("Explore sample wins over a disconnected feed", () => {
+  it("Explore leaves the incident slot empty even when the feed is down", () => {
     useModeStore.setState({ mode: "explore" });
     mockBrokerConnected.value = false;
     const { result } = renderHook(() => usePrimaryBannerKind(), { wrapper });
-    expect(result.current).toBe("explore_sample");
+    expect(result.current).toBeNull();
   });
 
   it("Live feed disconnect is the primary when there is no risk alert", () => {

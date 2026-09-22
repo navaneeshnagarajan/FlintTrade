@@ -106,17 +106,7 @@ function OiPcrStrip(props: OiPcrStripInput) {
       className="flex-none border-b border-border-default bg-surface-card px-2 py-1.5"
     >
       <div className="flex items-center gap-2">
-        {model.sample && (
-          <span
-            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-            role="status"
-            data-testid="oi-pcr-sample-badge"
-            aria-label="Sample — not live open interest"
-            title="Sample data — fabricated sample values, not live open interest."
-          >
-            Sample
-          </span>
-        )}
+        
         <span className="text-xs font-medium uppercase tracking-wide text-text-muted">
           OI profile
         </span>

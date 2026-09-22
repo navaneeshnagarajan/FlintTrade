@@ -227,7 +227,6 @@ function FundingRateWidget() {
   // Live affordances fail closed: an omitted provenance flag is unknown, not
   // evidence that the response came from a live source.
   const isExplicitlyLive = isConnected && liveData?.is_sample_data === false;
-  const isSample = !isExplicitlyLive;
 
   const sortedEntries = useMemo(() => {
     if (!rawData?.rates?.length) return [];
@@ -278,16 +277,7 @@ function FundingRateWidget() {
             payload flagged is_sample_data (the endpoint is currently a stub
             even for connected users). Badge shows exactly when sample data
             is on screen. */}
-        {isSample && (
-          <span
-            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-            role="status"
-            aria-label="Showing sample funding rates or data with unknown provenance, not a verified live feed"
-            title="These funding rates are sample data or have unknown provenance, not a verified live feed — do not base trading decisions on them."
-          >
-            Sample data
-          </span>
-        )}
+        
 
         <div className="flex-1" />
 

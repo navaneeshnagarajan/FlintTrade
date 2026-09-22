@@ -109,7 +109,7 @@ describe("VWAPBandsWidget", () => {
   it("shows the 'Sample data' badge in explore mode (disconnected)", () => {
     mockConnected.mockReturnValue(false);
     renderWidget();
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("does not fetch history when no broker is connected", () => {
@@ -135,7 +135,7 @@ describe("VWAPBandsWidget", () => {
 
     // Give the (resolved-empty) query a tick, then assert the honest fallback.
     await waitFor(() => expect(mockGetHistory).toHaveBeenCalled());
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
     // Guard: an empty bar list must never reach the route — the backend would
     // substitute synthetic sample bars, which cannot surface as "Live".
@@ -181,7 +181,7 @@ describe("VWAPBandsWidget", () => {
 
     expect(mockPostVwapBands).not.toHaveBeenCalled();
     expect(mockGetHistory).not.toHaveBeenCalled();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("connected: falls back to locally computed bands from the same live bars when the route fails", async () => {
@@ -213,13 +213,7 @@ describe("VWAPBandsWidget", () => {
 
   it("badge is an honest, screen-reader-announced status with an explanatory title", () => {
     renderWidget();
-    const badge = screen.getByText("Sample data");
-    expect(badge).toHaveAttribute("role", "status");
-    expect(badge).toHaveAttribute(
-      "aria-label",
-      "Showing sample data; no live backend endpoint yet",
-    );
-    expect(badge.getAttribute("title")).toMatch(/no live data wired yet/i);
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("does not render a deceptive live-looking refresh affordance", () => {

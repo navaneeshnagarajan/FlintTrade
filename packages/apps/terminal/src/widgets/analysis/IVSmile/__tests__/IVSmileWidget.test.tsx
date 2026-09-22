@@ -161,7 +161,7 @@ describe("IVSmileWidget — smile view", () => {
     renderWidget();
     expect(screen.getByTestId("feature-teaser")).toBeTruthy();
     expect(screen.getByTestId("plotly-chart")).toBeTruthy();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 });
 

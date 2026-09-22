@@ -211,7 +211,7 @@ describe("TradeJournalTool (Trade Review)", () => {
     render(<TradeJournalTool />);
 
     expect(tradeJournalMocks.queryOptions?.enabled).toBe(false);
-    expect(screen.getByText("Sample Data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample Data")).not.toBeInTheDocument();
   });
 
   it("filters explore sample trades through the strategy search", () => {
@@ -271,7 +271,7 @@ describe("TradeJournalTool (Trade Review)", () => {
 
     expect(screen.getByText("Today's Session")).toBeInTheDocument();
     // Stubbed empty tradebook → no closed round trips → disclosed sample.
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("REGRESSION: Review-range journal query uses the analytics page size, not a silent 200-row list cap", async () => {

@@ -246,7 +246,7 @@ describe("OI Analytics butterfly view", () => {
 
     renderButterfly();
 
-    expect(screen.getByRole("status", { name: /sample data/i })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
     expect(await screen.findByTestId("plotly-chart")).toBeInTheDocument();
     expect(screen.getByText(/PCR:/)).toBeInTheDocument();
   });

@@ -149,7 +149,8 @@ describe("VolSurfaceWidget provenance fails closed", () => {
 
     render(<VolSurfaceWidget />, { wrapper });
 
-    expect(screen.getByText(/sample|demo/i)).toBeTruthy();
+    expect(screen.queryByText(/sample|demo/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
   it("accepts an explicit live flag", () => {

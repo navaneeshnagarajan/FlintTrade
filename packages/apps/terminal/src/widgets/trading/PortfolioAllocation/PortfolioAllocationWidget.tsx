@@ -158,9 +158,9 @@ function PortfolioAllocationWidget() {
         <PieChart size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Portfolio Allocation</span>
         <div className="flex-1" />
-        {(isExplore || isPractice) && (
+        {isPractice && (
           <span className="text-xxs text-text-muted border border-border-subtle rounded px-1.5 py-0.5">
-            {isExplore ? "Sample" : "Practice"}
+            Practice
           </span>
         )}
       </div>

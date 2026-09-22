@@ -381,7 +381,6 @@ export function SectorRotationTab() {
 
       <p className="text-xs text-text-muted">
         Sector data sourced from NSE sectoral indices. Market cap is approximate.
-        {isDemo ? " Sample data shown — connect broker for live data." : ""}
       </p>
     </div>
   );

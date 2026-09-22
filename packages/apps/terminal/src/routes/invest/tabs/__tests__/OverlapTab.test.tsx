@@ -169,8 +169,8 @@ import { OverlapTab } from "../OverlapTab";
 describe("OverlapTab rendering", () => {
   it("renders with sample data when no live holdings", () => {
     render(<OverlapTab />);
-    // Should show sample data notice
-    expect(screen.getByText(/sample portfolio/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sample portfolio/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Stock Overlaps")).toBeInTheDocument();
   });
 
   it("shows overlap section with sample data", () => {

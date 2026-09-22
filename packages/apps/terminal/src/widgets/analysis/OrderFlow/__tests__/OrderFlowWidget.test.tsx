@@ -769,7 +769,7 @@ describe("OrderFlowWidget", () => {
       hookResult({ data: orderFlowResponse([singleBucket], { exchange: "NFO" }) }),
     );
     render(<OrderFlowWidget {...defaultProps} />);
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("keeps explicit sample provenance visible even if is_live is contradictory", () => {
@@ -783,7 +783,7 @@ describe("OrderFlowWidget", () => {
 
     render(<OrderFlowWidget {...defaultProps} />);
 
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 

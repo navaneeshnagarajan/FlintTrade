@@ -115,7 +115,7 @@ describe("QuickAccessPanel", () => {
   it("labels Explore as sample data, never Connected/green", () => {
     useModeStore.setState({ mode: "explore" });
     renderPanel();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.getByText("No broker session")).toBeInTheDocument();
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
   });
 

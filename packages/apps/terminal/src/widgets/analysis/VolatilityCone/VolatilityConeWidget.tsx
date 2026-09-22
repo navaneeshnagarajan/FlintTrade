@@ -187,7 +187,7 @@ function VolatilityConeWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
   const [liveCone, setLiveCone] = useState<ConePoint[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [, setLoadError] = useState<string | null>(null);
 
   // When connected, build a REAL cone: daily-return series from history →
   // /v1/analytics/volcone (rolling-HV percentiles). The overlay is current
@@ -287,20 +287,7 @@ function VolatilityConeWidget() {
           >
             Live
           </span>
-        ) : (
-          <span
-            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-            role="status"
-            aria-label="Showing sample data; connect a broker for a live HV cone"
-            title={
-              loadError
-                ? `Showing sample data — live cone unavailable: ${loadError}`
-                : "Sample IV cone so the widget is usable in explore mode — connect a broker for a live HV cone from real price history."
-            }
-          >
-            Sample data
-          </span>
-        )}
+        ) : null}
         {isLoading && <Loader2 size={12} className="animate-spin text-text-muted" aria-label="Loading" />}
         <div className="flex-1" />
         <SymbolDropdown value={symbol} onChange={handleSymbolChange} />

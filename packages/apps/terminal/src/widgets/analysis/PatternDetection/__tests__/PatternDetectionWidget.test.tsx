@@ -37,7 +37,7 @@ describe("PatternDetectionWidget", () => {
 
     render(<PatternDetectionWidget />, { wrapper });
 
-    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(screen.getByTestId("feature-teaser")).toHaveAttribute("data-feature", "Pattern Detection");
     expect(screen.getByText("Bullish Engulfing")).toBeInTheDocument();
     expect(screen.getByText("Three White Soldiers")).toBeInTheDocument();
@@ -62,7 +62,7 @@ describe("PatternDetectionWidget", () => {
 
     render(<PatternDetectionWidget />, { wrapper });
 
-    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(screen.getByText("Shooting Star")).toBeInTheDocument();
   });
 

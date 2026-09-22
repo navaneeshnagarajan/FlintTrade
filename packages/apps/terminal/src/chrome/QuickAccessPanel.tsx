@@ -143,7 +143,7 @@ function ConnectionCard({ connected, practiceMode, exploreMode, wsFailure }: Con
   // Explore has no broker subsystem — never green / Connected (FT-UX-001).
   const authFailed = !exploreMode && !connected && wsFailure?.kind === "auth";
   const label = exploreMode
-    ? "Sample data"
+    ? "No broker session"
     : connected
       ? "Connected"
       : authFailed

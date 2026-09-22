@@ -126,7 +126,7 @@ describe("EarningsCalendarWidget — honest data", () => {
   it("shows the Sample data badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
     render(<EarningsCalendarWidget />, { wrapper });
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("hides the Sample data badge when connected to a genuinely live source", () => {
@@ -160,7 +160,7 @@ describe("EarningsCalendarWidget — honest data", () => {
     // The backend (synthetic) rows render — not the local sample constant —
     // and the badge stays visible.
     expect(await screen.findByText("PAYTM")).toBeTruthy();
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByText("INFY")).toBeNull();
   });
 

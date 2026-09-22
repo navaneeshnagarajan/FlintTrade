@@ -333,16 +333,22 @@ continuous to 15:30. There is no flat "Market open until 15:30" or "VWAP
 last 30 min" closing-price copy. The September 2026 consultation stays out
 of the UI.
 
-**Feed freshness (FT-CORE-002).** Explore already discloses sample data
-with the global banner `EXPLORE MODE — All data shown is sample only`,
-plus per-widget **Sample** chips and age when known. That is enough —
-per-symbol ticker Sample chips are optional, and the Market Clock
-freshness chip appears only when that widget is mounted. Practice and
-Live have no Explore banner to lean on: TopBar or the ticker strip must
-show **Live**, **Delayed**, or **Sample** (and muted **Stale** /
-**Unknown** plus age when known). Silent-stale is a fail. This is
-provenance, not execution mode — Live mode does not imply a Live feed
-(Mode honesty).
+**Mode honesty.** One line under the TopBar, always, owned by Mode.
+Explore reads `Explore — sample data only. No broker session, no live orders.`
+Practice reads `Practice — SandboxEngine fills. Not your funded broker account.`
+Live reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.`
+Widgets stay quiet: they do not repeat a Sample chip. Mode is not provenance. A figure that stays fabricated in Practice and Live, such as benchmark returns, keeps its own sample banner. An incident strip,
+when one is showing, sits between the TopBar and this line and does not
+replace it.
+
+**Feed freshness (FT-CORE-002).** Explore disclosure is that Mode line.
+Per-widget Sample chips are retired. Per-symbol ticker Sample chips are
+optional, and the Market Clock freshness chip appears only when that
+widget is mounted. Practice and Live still need feed provenance on the
+TopBar or the ticker strip: **Live**, **Delayed**, or **Sample** (and
+muted **Stale** / **Unknown** plus age when known). Silent-stale is a
+fail. This is provenance, not execution mode — Live mode does not imply
+a Live feed.
 
 **Compact / Comfortable.** New installs default to Comfortable (full labels).
 Compact on a desk Trade viewport (~1280 and wider) keeps chart, order pad,
@@ -416,20 +422,21 @@ Chain expiry list for that symbol/exchange. When the list is
 non-empty, the expiry control is shown and charts/statistics cover
 only the selected expiry (the chain’s selected expiry when both
 widgets are open; otherwise the nearest listed). Explore sample
-expiries stay listed and are badged **Sample**. No expiries or no
+expiries stay listed. The Mode honesty line is the disclosure — there
+is no Sample chip on the chain. No expiries or no
 OI is an honest empty — `No expiries for this symbol` or
 `No OI for this expiry` — with no bars and no PCR/max-pain stats.
 The widget never pairs “No expiries” with generic or sample bars.
 
 On Explore `/trade` Watchlist, checked LTP and % change columns
 paint their headers and cells. Those values use the same sample
-quotes as the ticker tape (Sample data badge). A missing quote
+quotes as the ticker tape. A missing quote
 shows `—` after a brief `…`, never a silent blank. Unchecking a
 column hides it (FT-TRADE-008).
 
 Selecting a symbol in `/trade` Watchlist retargets Chart,
 Option Chain, and Scalper to that symbol — no retype.
-Explore retarget is allowed and keeps Sample labels.
+Explore retarget is allowed.
 An empty watchlist never silently retargets
 (FT-TRADE-011).
 
@@ -583,8 +590,8 @@ AMFI sentence ("Updated daily after market close") when the live feed is
 in use.
 
 On Practice or Explore `/invest` → Holdings with no broker, the header
-badge matches the visible table (`N holdings`) and a muted Sample chip
-discloses sample data. The badge is never `0 holdings` over a populated
+badge matches the visible table (`N holdings`). Sample disclosure is the
+Mode honesty line, not a chip on the table. The badge is never `0 holdings` over a populated
 sample table. Dashboard and "N stocks" use that same N. Practice waits
 until the holdings query has settled empty before the sample fallback,
 so a cold load does not flash the sample N over a pending book.
@@ -593,12 +600,11 @@ as Holdings. A broker read failure shows muted `Failed to load holdings`
 plus `Refresh` — never `0 holdings`, `No holdings`, or a sample table
 under a failed load. A connected broker with no positions shows
 `0 holdings` and an honest empty state (`No holdings`) — no sample
-table under a zero badge. Connected positions use the live count only,
-with no Sample chip (FT-TRADE-010).
+table under a zero badge. Connected positions use the live count only
+(FT-TRADE-010).
 
-On Explore `/invest#basket` (Stock Baskets), the global Explore sample
-banner (`EXPLORE MODE — All data shown is sample only`) owns disclosure —
-seeded cards do **not** carry a card-level Sample chip. Bare ₹ / P&L
+On Explore `/invest#basket` (Stock Baskets), the Mode honesty line owns
+disclosure — seeded cards do **not** carry a card-level Sample chip. Bare ₹ / P&L
 under that banner is acceptable once **Edit** and **Delete** cannot look
 live. Seeded Explore baskets disable **Edit** and **Delete**, with title
 helper `Sample basket — editing unavailable in Explore`. User-created
@@ -637,22 +643,20 @@ Market Clock uses the same CAS-aware cash timeline as the TopBar
 still runs after cash continuous ends, the TopBar may show `F&O open · till
 15:40`. Non-CAS cash still continuous to 15:30.
 
-Feed freshness (FT-CORE-002) is mode-split. In Explore, the global
-`EXPLORE MODE — All data shown is sample only` banner plus per-widget
-**Sample** chips and age when known is enough; per-symbol ticker Sample
-chips are optional, and the Market Clock freshness chip appears only
-when that widget is mounted. In Practice and Live, TopBar or the ticker
-must show **Live**, **Delayed**, or **Sample** (and muted **Stale** /
-**Unknown** plus age when known) — there is no Explore banner to lean
-on, so silent-stale is a fail. Feed provenance is independent of
-Explore / Practice / Live execution mode.
+Feed freshness (FT-CORE-002) is mode-split. In Explore, the Mode honesty
+line is the disclosure; widgets do not add a Sample chip. Per-symbol
+ticker Sample chips are optional, and the Market Clock freshness chip
+appears only when that widget is mounted. In Practice and Live, TopBar
+or the ticker must show **Live**, **Delayed**, or **Sample** (and muted
+**Stale** / **Unknown** plus age when known) — feed provenance is
+independent of Explore / Practice / Live execution mode, so silent-stale
+is a fail.
 
 On Explore `/trade` Watchlist, checked LTP and % change columns
-use the same sample quotes as the ticker tape (Sample data badge).
+use the same sample quotes as the ticker tape.
 A missing quote shows `—` after a brief `…`, never a silent blank
 (FT-TRADE-008). Selecting a watchlist symbol retargets Chart,
-Option Chain, and Scalper to that symbol; Explore keeps Sample
-labels. An empty watchlist never silently retargets
+Option Chain, and Scalper to that symbol. An empty watchlist never silently retargets
 (FT-TRADE-011).
 
 On Explore `/trade` Scalper (including the Scalper Zone preset),
@@ -662,8 +666,8 @@ Live with a broker connected to trade." There is no Confirm Order
 path from Explore (FT-TRADE-009).
 
 On Explore `/trade` Option Chain, the strip shows OI profile
-+ PCR for the selected expiry/symbol. Explore keeps a Sample
-badge and never invents live OI. An empty expiry is an honest
++ PCR for the selected expiry/symbol. Explore does not invent live OI.
+An empty expiry is an honest
 empty, not zeros-as-data (FT-TRADE-012).
 
 News Feed loads headlines only through the FlintTrade backend (`GET /api/v1/news`).
@@ -708,9 +712,10 @@ Streaming option-chain widget rendered with
 Max Pain badge derived from the same chain.
 
 The Option Chain strip shows **OI profile + PCR** for the
-selected expiry and symbol (FT-TRADE-012). Explore keeps a
-**Sample** badge and never invents live OI. An empty expiry
-is an honest empty — not zeros painted as data.
+selected expiry and symbol (FT-TRADE-012). Explore does not
+invent live OI. The Mode honesty line is the disclosure —
+there is no Sample chip on the chain strip. An empty expiry
+is an honest empty — not zeros-as-data.
 
 1. Drag the **Option Chain** widget into the workspace.
 2. Pick a symbol (e.g. `NIFTY`, `BANKNIFTY`, `RELIANCE`).
@@ -730,7 +735,8 @@ OI Chart shares Option Chain expiries for the symbol/exchange. The
 expiry control appears when that list is non-empty; charts and
 statistics cover only the selected expiry (the chain’s selection
 when both widgets are open; otherwise the nearest listed). Explore
-sample expiries stay listed and are badged **Sample**. Empty states
+sample expiries stay listed. The Mode honesty line is the disclosure
+— expiries and the OI Chart are not badged Sample. Empty states
 are honest: `No expiries for this symbol` or `No OI for this expiry`,
 with no bars and no PCR/max-pain stats — never “No expiries” over
 fake or generic bars.
@@ -846,8 +852,7 @@ Time-based automations on the **Schedules** tab. Examples:
 
 Cron jobs run inside the FlintTrade backend (`packages/services/automation`).
 
-On Explore `/automate` → Schedules, the global Explore sample
-banner (`EXPLORE MODE — All data shown is sample only`) owns
+On Explore `/automate` → Schedules, the Mode honesty line owns
 disclosure — seeded jobs do **not** carry an extra Sample chip
 once Pause is gated. Seeded Explore jobs show status Sample/Demo
 (or muted), not a production-looking Active badge. **Pause** on

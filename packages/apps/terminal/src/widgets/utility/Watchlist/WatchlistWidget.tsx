@@ -31,7 +31,6 @@ import { DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import { instrumentContext } from "@/services/fdc3/contexts";
 import { useBroadcastInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { raiseIntent } from "@/services/fdc3/intents";
-import { useModeStore } from "@/stores/modeStore";
 import type { WidgetProps } from "@/types/widgets";
 
 import {
@@ -107,7 +106,6 @@ function WatchlistWidget({ params, api }: WidgetProps) {
   const watchlist = activeTab?.symbols ?? [];
 
   const { quotes, sparkHistory, fetchError, isLoading } = useWatchlistPolling(watchlist);
-  const isExplore = useModeStore((s) => s.mode === "explore");
   const visible = new Set(viewSettings.visibleColumns);
 
   // ---------------------------------------------------------------------------
@@ -306,15 +304,7 @@ function WatchlistWidget({ params, api }: WidgetProps) {
           </span>
         )}
 
-        {isExplore && (
-          <span
-            role="status"
-            className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-            title="Explore uses the same sample quotes as the ticker tape"
-          >
-            Sample data
-          </span>
-        )}
+        
 
         {fetchError && (
           <span title={fetchError} className="w-1.5 h-1.5 rounded-full bg-loss shrink-0" />

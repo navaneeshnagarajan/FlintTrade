@@ -235,11 +235,7 @@ function PivotPointsWidget() {
           >
             Practice
           </span>
-        ) : (
-          <span className="text-xxs text-text-muted border border-border-subtle rounded px-1.5 py-0.5">
-            sample data
-          </span>
-        )}
+        ) : null}
         {isLoading && <Loader2 size={12} className="animate-spin text-text-muted" aria-label="Loading" />}
       </div>
 

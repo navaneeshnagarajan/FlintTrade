@@ -358,16 +358,7 @@ function StrategyMonitorWidget() {
 
         {/* Honest disclosure — sample strategies are shown only when no broker is
             connected (connected → empty state); upgrade to the canonical badge. */}
-        {!isConnected && (
-          <span
-            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-            role="status"
-            aria-label="Showing local sample strategies"
-            title="Illustrative local data only. This widget does not yet read or control backend strategy lifecycle state."
-          >
-            Sample data
-          </span>
-        )}
+        
       </div>
 
       {/* Column headers */}

@@ -130,7 +130,7 @@ describe("OI Analytics heat view — disconnected (sample data)", () => {
 
   it("badges the sample chain rather than presenting it as live", () => {
     renderHeat();
-    expect(screen.getByRole("status", { name: /sample data/i })).toBeTruthy();
+    expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
   });
 
   it("renders symbol selector with NIFTY as default option", () => {
@@ -182,7 +182,7 @@ describe("OI Analytics heat view — connected with live data", () => {
     apiMocks.getExpiry.mockResolvedValue({ expiry: ["24-APR-25"] });
     apiMocks.getOptionChain.mockResolvedValue(mockChain);
     renderHeat();
-    expect(screen.getByRole("status", { name: /sample data/i })).toBeTruthy();
+    expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
   });
 
   it("trims expiry payloads before enabling the live chain", async () => {

@@ -828,7 +828,7 @@ describe("ScalperWidget — FT-TRADE-011 shared symbol bus", () => {
       selector({ mode: "explore" }),
     );
     const { store } = renderScalperOnBus();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.getByText(EXPLORE_SCALPER_ORDER_HELPER)).toBeInTheDocument();
 
     act(() => {
@@ -836,7 +836,7 @@ describe("ScalperWidget — FT-TRADE-011 shared symbol bus", () => {
     });
 
     await waitFor(() => expect(scalperIndexValue()).toBe("SENSEX"));
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.getByText(EXPLORE_SCALPER_ORDER_HELPER)).toBeInTheDocument();
     expect(screen.getByText("Buy CE").closest("button")).toBeDisabled();
   });

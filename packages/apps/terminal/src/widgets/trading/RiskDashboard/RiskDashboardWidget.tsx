@@ -507,9 +507,9 @@ function RiskWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <ShieldAlert size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Risk</span>
-        {(isExplore || isPractice) && (
+        {isPractice && (
           <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            {isExplore ? "Sample" : "Practice"}
+            Practice
           </span>
         )}
         {!hasAccountSource && (

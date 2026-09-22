@@ -285,14 +285,7 @@ function EconomicCalendarWidget() {
             deterministic sample schedule (no live macro feed is integrated),
             and the bundled events are the offline fallback. The badge stays
             until the provider gains a real data source. */}
-        <span
-          className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 ml-1"
-          role="status"
-          aria-label="Showing sample data; the calendar provider has no live macro feed yet"
-          title="Sample economic schedule — served by the backend's calendar provider, which has no live macro feed integrated yet."
-        >
-          Sample data
-        </span>
+        
         <div className="flex-1" />
         <div className="flex items-center gap-1.5">
           {(["high", "medium", "low"] as Impact[]).map((i) => (

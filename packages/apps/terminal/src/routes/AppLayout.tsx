@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import TopBarV2 from "@/chrome/TopBarV2";
+import IncidentStripSlot from "@/chrome/IncidentStripSlot";
+import ModeHonestyBar from "@/chrome/ModeHonestyBar";
 import DockSidebar from "@/chrome/DockSidebar";
 import PageTransition from "@/components/motion/PageTransition";
 import TickerBar from "@/chrome/TickerBar";
@@ -28,7 +30,6 @@ import KeyboardShortcutsDialog from "@/components/KeyboardShortcuts/KeyboardShor
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import { appendAISymbolContext } from "@/lib/aiSymbolContext";
-import { primaryBannerCopy } from "@/lib/primaryBanner";
 import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
 import { usePrimaryBannerKind } from "@/hooks/usePrimaryBannerKind";
 import { useChromeCollapse } from "@/chrome/useChromeCollapse";
@@ -146,7 +147,7 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
 
 /**
  * AppLayout -- shared chrome for all app routes (/terminal, /invest, /learn).
- * Renders TopBar → dedicated TickerStrip → flex route body + DockSidebar.
+ * Renders TopBar → incident slot → Mode honesty → TickerStrip → route body.
  * Flow routes (/welcome, /explore, /setup) render outside this layout.
  */
 export default function AppLayout() {
@@ -444,8 +445,7 @@ export default function AppLayout() {
     setShowWelcome(false);
   }, []);
 
-  const primaryBannerKind = usePrimaryBannerKind();
-  const primaryBannerText = primaryBannerCopy(primaryBannerKind);
+  const incidentKind = usePrimaryBannerKind();
 
   return (
     <div className="relative h-screen flex flex-col bg-surface-base overflow-hidden">
@@ -483,33 +483,6 @@ export default function AppLayout() {
       {mode === "live" && (
         <div className="h-px bg-profit/60 shrink-0" aria-hidden="true" />
       )}
-      {primaryBannerText && (
-        <div
-          role="status"
-          aria-live="polite"
-          data-testid="primary-banner"
-          data-banner-kind={primaryBannerKind ?? undefined}
-          className={
-            primaryBannerKind === "explore_sample"
-              ? "bg-text-muted/10 border-b border-text-muted/20 px-4 py-1 text-center"
-              : primaryBannerKind === "live_risk" || primaryBannerKind === "feed_disconnected"
-                ? "bg-loss/10 border-b border-loss/20 px-4 py-1 text-center"
-                : "bg-amber-500/10 border-b border-amber-500/20 px-4 py-1 text-center"
-          }
-        >
-          <p
-            className={
-              primaryBannerKind === "explore_sample"
-                ? "text-xs text-text-muted"
-                : primaryBannerKind === "live_risk" || primaryBannerKind === "feed_disconnected"
-                  ? "text-xs text-loss"
-                  : "text-xs text-amber-400"
-            }
-          >
-            {primaryBannerText}
-          </p>
-        </div>
-      )}
       {/* Skip link — visible on focus with AA-compliant contrast (Issue #61).
           bg-accent is a high-saturation colour; text-white guarantees 4.5:1+. */}
       <a
@@ -520,6 +493,11 @@ export default function AppLayout() {
       </a>
       <header className="relative z-20 flex flex-col shrink-0">
         <TopBarV2 />
+        {/* #270 incident strip mounts in this slot when Info / Degraded / Blocked.
+            The existing Live-risk and feed-disconnected banner uses it until then
+            and never replaces the Mode line below. */}
+        <IncidentStripSlot kind={incidentKind} />
+        <ModeHonestyBar mode={mode} />
         {showTickerStrip && <TickerBar mode={tickerMode} />}
       </header>
       {/* Content area: DockSidebar + main panel side by side */}
@@ -548,7 +526,7 @@ export default function AppLayout() {
       {showWelcome && mode !== "explore" && (
         <DailyWelcome onDismiss={handleDismissWelcome} />
       )}
-      <NoConnectionOverlay suppress={primaryBannerKind === "live_risk"} />
+      <NoConnectionOverlay suppress={incidentKind === "live_risk"} />
       {authStatus === "pin-required" && <LockScreen />}
       <KeyboardShortcutsDialog
         isOpen={showShortcuts}

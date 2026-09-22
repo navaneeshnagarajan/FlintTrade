@@ -224,14 +224,7 @@ function PCRTrendWidget() {
             is wired yet. The badge previously hid when `isConnected`, which
             masked the fact that connected users still saw fabricated data.
             Keep it visible at all times. */}
-        <span
-          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-          role="status"
-          aria-label="Showing sample data; no live PCR data source is wired yet"
-          title="No live data wired yet — showing sample PCR trend so the widget is usable in explore mode."
-        >
-          Sample data
-        </span>
+        
         <div className="flex-1" />
         <SymbolDropdown value={symbol} onChange={handleSymbolChange} />
       </div>

@@ -162,9 +162,6 @@ function ArbitrageScannerWidget() {
   const response: ArbitrageScanResponse | undefined = isConnected
     ? live
     : { is_sample_data: true, scan: SAMPLE_ARBITRAGE_SCAN };
-  // Fail closed: a present payload must say `is_sample_data: false` to be
-  // labelled live. A missing flag reads as sample, not as real.
-  const isSample = response != null && response.is_sample_data !== false;
   const isRealEmptyScan =
     response !== undefined &&
     !response.is_sample_data &&
@@ -181,7 +178,7 @@ function ArbitrageScannerWidget() {
           <p className="text-[10px] text-text-muted">
             Cash-future basis &amp; cross-exchange
             {response !== undefined && ` · funding ${(response.scan.risk_free_rate * 100).toFixed(1)}%`}
-            {isSample && <span className="ml-1 text-amber-500">· Sample data</span>}
+            
           </p>
         </div>
         {isConnected && (

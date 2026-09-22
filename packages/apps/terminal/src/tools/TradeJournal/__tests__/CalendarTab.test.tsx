@@ -228,8 +228,6 @@ describe("CalendarTab — explore mode", () => {
     renderTab();
 
     expect(mockJournal).not.toHaveBeenCalled();
-    const badge = screen.getByText("Sample data");
-    expect(badge.getAttribute("role")).toBe("status");
-    expect(badge.getAttribute("aria-label")).toMatch(/sample journal data/i);
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 });

@@ -19,6 +19,9 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Added
 
+- **Mode honesty bar.** One line under the TopBar for Explore, Practice,
+  and Live. Widgets no longer repeat a Sample chip. An incident, when
+  one is showing, sits above that line and does not replace it.
 - **Practice `SandboxEngine` primary fills (FT-MONDAY-001).**
   Practice places and records native `SandboxEngine`
   fills end-to-end as the primary paper path. The terminal
@@ -46,9 +49,10 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 - **Option Chain OI profile + PCR strip (FT-TRADE-012).**
   The Option Chain strip shows OI profile + PCR for
-  the selected expiry/symbol. Explore keeps a Sample
-  badge and never invents live OI. An empty expiry
-  is an honest empty, not zeros-as-data.
+  the selected expiry/symbol. Explore does not invent
+  live OI. The Mode honesty line is the disclosure —
+  there is no Sample chip on the chain strip. An empty
+  expiry is an honest empty, not zeros-as-data.
 
 ### Changed
 
@@ -230,18 +234,16 @@ changelog rebuilds itself from the first release cut after this baseline.
   labelled sample set.
 
 - **Feed-freshness honesty (FT-CORE-002).**
-  Explore: the global
-  `EXPLORE MODE — All data shown is sample only`
-  banner plus per-widget Sample chips and age
-  when known is enough. Per-symbol ticker Sample
-  chips are optional. The Market Clock freshness
-  chip appears only when that widget is mounted.
-  Practice / Live: TopBar or the ticker must show
-  Live · Delayed · Sample (and muted Stale /
-  Unknown plus age when known). There is no
-  Explore banner to lean on — silent-stale is a
-  fail. Feed provenance stays separate from
-  Explore / Practice / Live mode (Mode honesty).
+  Explore disclosure is the Mode honesty line.
+  Per-widget Sample chips are retired. Per-symbol
+  ticker Sample chips are optional. The Market
+  Clock freshness chip appears only when that
+  widget is mounted. Practice / Live still need
+  TopBar or the ticker: Live · Delayed · Sample
+  (and muted Stale / Unknown plus age when
+  known). Silent-stale is a fail. Feed provenance
+  stays separate from Explore / Practice / Live
+  mode (Mode honesty).
 
 - **Resource Hub User Guide first-open honesty (FT-LEARN-003).**
   Explore `/learn` → Resource Hub → User Guide shows

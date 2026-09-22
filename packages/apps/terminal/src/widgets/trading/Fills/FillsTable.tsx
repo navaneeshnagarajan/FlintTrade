@@ -600,14 +600,7 @@ export function FillsTable({
             Fills
           </span>
           <span className="text-xxs text-text-secondary font-mono tabular-nums">({counts.all})</span>
-          {isExplore && (
-            <span
-              className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-              role="status"
-            >
-              Sample data
-            </span>
-          )}
+          
           {showBrokerRequired && (
             <span
               className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"

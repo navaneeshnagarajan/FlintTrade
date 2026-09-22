@@ -286,8 +286,8 @@ describe("OptionChainWidget", () => {
 
     render(<OptionChainWidget />, { wrapper: Wrapper });
 
-    expect(screen.getByTestId("oi-pcr-sample-badge")).toHaveTextContent("Sample");
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByTestId("oi-pcr-sample-badge")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByRole("status", { name: /^Live/ })).not.toBeInTheDocument();
     expect(screen.getByTestId("oi-pcr-strip")).toHaveTextContent("PCR 1.19");
   });
@@ -308,7 +308,7 @@ describe("OptionChainWidget", () => {
     expect(strip).toHaveTextContent("No OI for this expiry");
     expect(strip.querySelector("[data-oi-bar]")).toBeNull();
     expect(screen.queryByText(/PCR 0/)).not.toBeInTheDocument();
-    expect(screen.getByTestId("oi-pcr-sample-badge")).toBeInTheDocument();
+    expect(screen.queryByTestId("oi-pcr-sample-badge")).not.toBeInTheDocument();
   });
 
   it("renders the Build Strategy button", () => {
@@ -892,12 +892,12 @@ describe("OptionChainWidget — FDC3 channel following", () => {
     render(<OptionChainWidget {...makeWidgetPanelProps()} />, {
       wrapper: channelWrapper(store),
     });
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
 
     act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, BANKNIFTY));
 
     expect(screen.getByText(/strikes loaded for BANKNIFTY/)).toBeInTheDocument();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("does not silently retarget when the shared bus is empty", () => {

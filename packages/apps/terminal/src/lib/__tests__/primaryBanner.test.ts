@@ -1,28 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
-  EXPLORE_SAMPLE_BANNER,
   FEED_DISCONNECTED_BANNER,
   LIVE_RISK_BANNER,
   primaryBannerCopy,
   selectPrimaryBanner,
 } from "../primaryBanner";
 
-describe("FT-UX-001 primary banner priority", () => {
-  it("Explore always wins over live risk and feed disconnected", () => {
+describe("incident banner under the Mode line", () => {
+  it("Explore never takes the incident slot", () => {
     expect(
       selectPrimaryBanner({
         mode: "explore",
         liveRiskActive: true,
         feedDisconnected: true,
       }),
-    ).toBe("explore_sample");
-    expect(primaryBannerCopy("explore_sample")).toBe(EXPLORE_SAMPLE_BANNER);
+    ).toBeNull();
   });
 
-  it("Practice shows the simulated-results banner only", () => {
-    expect(selectPrimaryBanner({ mode: "practice", feedDisconnected: true })).toBe(
-      "practice_sample",
-    );
+  it("Practice never takes the incident slot", () => {
+    expect(selectPrimaryBanner({ mode: "practice", feedDisconnected: true })).toBeNull();
   });
 
   it("Live risk beats feed disconnected", () => {
@@ -36,7 +32,7 @@ describe("FT-UX-001 primary banner priority", () => {
     expect(primaryBannerCopy("live_risk")).toBe(LIVE_RISK_BANNER);
   });
 
-  it("Live feed disconnect is the fallback primary", () => {
+  it("Live feed disconnect is the fallback incident", () => {
     expect(
       selectPrimaryBanner({
         mode: "live",
@@ -47,7 +43,7 @@ describe("FT-UX-001 primary banner priority", () => {
     expect(primaryBannerCopy("feed_disconnected")).toBe(FEED_DISCONNECTED_BANNER);
   });
 
-  it("Live with no risk and a connected feed has no primary banner", () => {
+  it("Live with no risk and a connected feed has no incident banner", () => {
     expect(
       selectPrimaryBanner({
         mode: "live",

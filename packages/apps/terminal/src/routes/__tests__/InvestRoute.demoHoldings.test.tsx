@@ -97,7 +97,7 @@ describe("InvestRoute header holdings badge (FT-DEMO-001 / FT-TRADE-010)", () =>
 
     const expected = getDemoHoldings();
     expect(screen.getByText(`${expected.length} holdings`)).toBeInTheDocument();
-    expect(screen.getByText("Sample")).toBeInTheDocument();
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
   });
 
   it("matches header N, Sample chip, and Holdings table rows in practice with no broker", async () => {
@@ -108,7 +108,7 @@ describe("InvestRoute header holdings badge (FT-DEMO-001 / FT-TRADE-010)", () =>
 
     const expected = getDemoHoldings();
     expect(screen.getByText(`${expected.length} holdings`)).toBeInTheDocument();
-    expect(screen.getByText("Sample")).toBeInTheDocument();
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: /Holdings/i }));
 
