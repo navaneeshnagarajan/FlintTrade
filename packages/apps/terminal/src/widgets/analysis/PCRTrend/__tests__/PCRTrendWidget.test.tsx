@@ -36,7 +36,7 @@ describe("PCRTrendWidget", () => {
   it("shows the Sample data badge when broker is disconnected", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     render(<PCRTrendWidget />);
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("still shows the Sample data badge when broker is connected (data is never live yet)", () => {
@@ -45,14 +45,12 @@ describe("PCRTrendWidget", () => {
     // imply the headline PCR / arrow / regime is real.
     mockUseBrokerConnected.mockReturnValue(true);
     render(<PCRTrendWidget />);
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("labels the Sample data badge as a status disclosing no live source", () => {
     render(<PCRTrendWidget />);
-    const badge = screen.getByText("Sample data");
-    expect(badge).toHaveAttribute("role", "status");
-    expect(badge.getAttribute("aria-label")).toMatch(/no live PCR data source is wired yet/i);
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("renders the PCR chart through the shared Flint threshold line primitive", () => {

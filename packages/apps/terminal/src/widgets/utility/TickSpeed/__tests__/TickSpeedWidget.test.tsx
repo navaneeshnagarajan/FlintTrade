@@ -81,7 +81,7 @@ describe("TickSpeedWidget", () => {
 
   it("shows Sample badge when disconnected", () => {
     render(<TickSpeedWidget />);
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
   });
 
   it("renders Ticks / second metric label", () => {

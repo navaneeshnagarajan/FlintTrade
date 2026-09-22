@@ -119,7 +119,7 @@ export function BreadthCard() {
         </div>
 
         <p className="text-[10px] text-text-muted text-center mt-auto">
-          {isLive ? "NSE" : "Sample"} · {total.toLocaleString()} total
+          {isLive ? `NSE · ${total.toLocaleString()} total` : `${total.toLocaleString()} total`}
         </p>
       </div>
     </BentoCard>

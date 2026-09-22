@@ -349,7 +349,6 @@ function IndicesTab() {
 
   // Live affordances fail closed: an omitted flag means unknown provenance.
   const isExplicitlyLive = isConnected && liveData?.is_sample_data === false;
-  const isSample = !isExplicitlyLive;
 
   // A timestamp is a live freshness claim, so unknown/sample responses never
   // render one even if a malformed payload includes it.
@@ -407,16 +406,7 @@ function IndicesTab() {
                 fabricated: the local SAMPLE constant (disconnected) OR a
                 backend payload flagged is_sample_data (the endpoint is
                 currently a stub even for connected users). */}
-            {isSample && (
-              <span
-                className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 mb-1.5"
-                role="status"
-                aria-label="Showing sample global indices or data with unknown provenance, not verified live prices"
-                title="These index values are sample data or have unknown provenance, not verified live prices — do not base trading decisions on them."
-              >
-                Sample data
-              </span>
-            )}
+            
             <div className="flex-1" />
             {isExplicitlyLive && !isLoading && !isError && (
               <Button
@@ -513,11 +503,6 @@ function IndicesTab() {
                       hour12: false,
                     })} IST
                   </>
-                )}
-                {isSample && (
-                  <span className={updatedAt ? "ml-2 text-accent/70" : "text-accent/70"}>
-                    (sample data)
-                  </span>
                 )}
               </div>
             </div>

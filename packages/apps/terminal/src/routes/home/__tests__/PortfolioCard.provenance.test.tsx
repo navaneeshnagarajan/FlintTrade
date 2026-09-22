@@ -25,12 +25,6 @@ describe("PortfolioCard allocation provenance (Slice 3)", () => {
     render(<PortfolioCard />);
 
     expect(screen.getByText("Allocation")).toBeInTheDocument();
-    const badge = screen.getByTestId("provenance-badge-inline");
-    expect(badge).toBeInTheDocument();
-    expect(badge).toHaveTextContent("Sample");
-    expect(badge).toHaveAttribute("data-provenance", "Sample");
-    expect(badge.className).not.toMatch(/\babsolute\b/);
-    expect(badge).not.toHaveAttribute("role", "status");
-    expect(badge).not.toHaveAttribute("aria-live");
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
   });
 });

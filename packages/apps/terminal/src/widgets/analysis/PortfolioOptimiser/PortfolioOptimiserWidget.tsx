@@ -197,16 +197,7 @@ function PortfolioOptimiserWidget() {
           >
             Practice
           </span>
-        ) : (
-          <span
-            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-            role="status"
-            aria-label="Showing sample data; connect a broker for a live optimisation"
-            title="Sample optimisation so the widget is usable in explore mode — connect a broker to optimise the basket from real history."
-          >
-            Sample data
-          </span>
-        )}
+        ) : null}
         {(returnsQuery.isFetching || query.isFetching || frontierQuery.isFetching) && (
           <Loader2 size={12} className="animate-spin text-text-muted" aria-label="Optimising" />
         )}

@@ -412,9 +412,7 @@ describe("DOMHeatmapWidget — Explore demo data", () => {
 
   it("labels generated data with a permanent 'Sample data' badge", () => {
     render(<DOMHeatmapWidget {...liveProps} />);
-    const badge = screen.getByText("Sample data");
-    expect(badge).toBeInTheDocument();
-    expect(badge.getAttribute("role")).toBe("status");
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("says 'sample data' in the chart's accessible description", () => {

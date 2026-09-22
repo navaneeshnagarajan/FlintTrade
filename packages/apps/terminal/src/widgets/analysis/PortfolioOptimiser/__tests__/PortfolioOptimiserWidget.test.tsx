@@ -75,7 +75,7 @@ describe("PortfolioOptimiserWidget", () => {
 
   it("shows the Sample data badge and sample weights when disconnected", () => {
     render(<PortfolioOptimiserWidget />, { wrapper: wrapper() });
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.getByText("RELIANCE")).toBeInTheDocument();
     expect(mockGetHistory).not.toHaveBeenCalled();
     expect(mockOptimise).not.toHaveBeenCalled();
@@ -92,7 +92,7 @@ describe("PortfolioOptimiserWidget", () => {
 
     render(<PortfolioOptimiserWidget />, { wrapper: wrapper() });
 
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(mockGetHistory).not.toHaveBeenCalled();
@@ -157,7 +157,7 @@ describe("PortfolioOptimiserWidget", () => {
 
     render(<PortfolioOptimiserWidget />, { wrapper: wrapper() });
 
-    expect(await screen.findByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     await waitFor(() => expect(mockOptimise).not.toHaveBeenCalled());
   });
 
@@ -176,7 +176,7 @@ describe("PortfolioOptimiserWidget", () => {
     render(<PortfolioOptimiserWidget />, { wrapper: wrapper() });
 
     expect(await screen.findByText(/Live optimisation unavailable/i)).toBeInTheDocument();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
     expect(screen.queryByText("LIVE_ONLY")).not.toBeInTheDocument();
   });

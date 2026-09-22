@@ -65,7 +65,7 @@ export interface ScalperControlsProps {
   onOneClickToggle: () => void;
   /** Explore: 1-CLICK stays OFF / disabled with the locked title + helper. */
   ordersArmed: boolean;
-  /** Explore: keep the Sample data badge after a Watchlist retarget. */
+  /** Explore: orders stay disarmed. Sample disclosure is the Mode honesty bar. */
   isExplore: boolean;
 }
 
@@ -105,7 +105,6 @@ export function ScalperControls({
   oneClick,
   onOneClickToggle,
   ordersArmed,
-  isExplore,
 }: ScalperControlsProps) {
   return (
     <div className="shrink-0 bg-surface-card border-b border-border-default">
@@ -175,15 +174,7 @@ export function ScalperControls({
           onInc={onPeOffsetInc}
         />
 
-        {isExplore && (
-          <span
-            role="status"
-            className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-            title="Explore uses sample quotes and expiries"
-          >
-            Sample data
-          </span>
-        )}
+        
 
         <div className="flex-1" />
 

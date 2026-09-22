@@ -1460,11 +1460,6 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span className="text-sm font-heading font-semibold text-text-primary leading-none whitespace-nowrap">{displayedSymbol}</span>
             <span className="text-xs text-text-muted whitespace-nowrap">{displayedExchange}</span>
-            {dataScope === "explore:mock" && (
-              <span className="rounded border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-xxs text-warning" role="status">
-                Sample history
-              </span>
-            )}
             {awaitingOptionLeg && !currentOptionLegError && (
               <span className="text-xxs text-text-muted animate-pulse whitespace-nowrap" role="status">
                 Resolving {optionLegType} leg…

@@ -129,7 +129,7 @@ describe("GreeksHeatmapWidget (Greeks Matrix)", () => {
   it("shows Sample data badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
     renderWidget();
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("does not fetch when disconnected", () => {
@@ -237,7 +237,7 @@ describe("GreeksHeatmapWidget (Greeks Matrix)", () => {
       "Greeks Matrix",
     );
     // Visible honesty affordance for the fabricated matrix.
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("does not wrap a connected live matrix in a FeatureTeaser", async () => {

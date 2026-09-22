@@ -76,7 +76,7 @@ describe("FlowsTab — FII long/short", () => {
     render(<FlowsTab />, { wrapper });
 
     // Demo affordance is visible and the teaser wraps the content.
-    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(screen.getByTestId("feature-teaser")).toHaveAttribute("data-feature", "FII Long/Short");
     // All four segments render.
     for (const seg of SAMPLE_FII_LONG_SHORT.segments) {
@@ -114,7 +114,7 @@ describe("FlowsTab — FII long/short", () => {
 
     render(<FlowsTab />, { wrapper });
 
-    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 });
 
@@ -129,7 +129,7 @@ describe("FlowsTab — FII/DII cash flows", () => {
     expect(mockGetFiiDii).not.toHaveBeenCalled();
     expect(screen.getByText(/Capital Market Segment/)).toBeInTheDocument();
     const heading = screen.getByText(/Capital Market Segment/);
-    expect(heading.querySelector("span")?.textContent).toBe("Sample");
+    expect(heading.querySelector("span")).toBeNull();
     // No DII derivative table without a real snapshot — never fabricated.
     expect(screen.queryByText(/DII Derivative Positioning/)).not.toBeInTheDocument();
   });
@@ -167,6 +167,6 @@ describe("FlowsTab — FII/DII cash flows", () => {
 
     expect(await screen.findByText("2026-07-25")).toBeInTheDocument();
     const cashHeading = screen.getByText(/Capital Market Segment/);
-    expect(cashHeading.querySelector("span")?.textContent).toBe("Sample");
+    expect(cashHeading.querySelector("span")).toBeNull();
   });
 });

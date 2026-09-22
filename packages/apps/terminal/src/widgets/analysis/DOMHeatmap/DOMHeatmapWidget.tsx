@@ -1210,17 +1210,7 @@ function DOMHeatmapWidget(props: WidgetProps) {
           {/* Provenance. Explore-mode books come from the deterministic
               generator and are ALWAYS labelled — a heatmap of invented
               liquidity must never be mistakable for the real book. */}
-          {isExplore && (
-            <Badge
-              variant="outline"
-              className="text-xs border-amber-500/40 text-amber-400 bg-amber-500/10 h-5 px-1.5"
-              role="status"
-              aria-label="Showing generated demo depth — not a live order book"
-              title="Explore mode: the book is generated from a deterministic seed, not a broker feed."
-            >
-              Sample data
-            </Badge>
-          )}
+          
           {!isExplore && !error && snapshotCount > 0 && (
             <Badge
               variant="outline"

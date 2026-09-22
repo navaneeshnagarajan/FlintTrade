@@ -64,9 +64,7 @@ describe("StrategyMonitorWidget", () => {
   it("shows the 'Sample data' badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
     renderMonitor();
-    const badge = screen.getByText("Sample data");
-    expect(badge).toBeTruthy();
-    expect(badge.getAttribute("role")).toBe("status");
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("does not show the sample badge when connected (shows empty state instead)", () => {

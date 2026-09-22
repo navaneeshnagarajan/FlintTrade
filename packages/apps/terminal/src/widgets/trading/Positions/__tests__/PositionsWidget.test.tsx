@@ -680,8 +680,8 @@ describe("PositionsWidget", () => {
     expect(mockUsePositions).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
-    expect(screen.getByText("Sample")).toBeInTheDocument();
-    expect(screen.getByText(/Sample data — connect a broker/i)).toBeInTheDocument();
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sample data — connect a broker/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Live only")).toBeNull();
   });
 
@@ -1432,7 +1432,8 @@ describe("PositionsWidget", () => {
       mockUsePositions.mockReturnValue(queryResult({ data: [] }));
       withMeasuredContainer(() => {
         render(<PositionsWidget {...viewProps("heat")} />);
-        expect(screen.getByText(/Sample data — connect a broker/i)).toBeInTheDocument();
+        expect(screen.queryByText(/Sample data — connect a broker/i)).not.toBeInTheDocument();
+        expect(screen.queryByText("Sample")).not.toBeInTheDocument();
         expect(screen.queryByText("No open positions")).not.toBeInTheDocument();
       });
     });

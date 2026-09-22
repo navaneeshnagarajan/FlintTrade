@@ -714,15 +714,6 @@ function GreeksHeatmapWidget(props: WidgetProps) {
           >
             Live
           </span>
-        ) : isSample ? (
-          <span
-            className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-            role="status"
-            aria-label="Showing sample Greeks while disconnected"
-            title="Disconnected Explore state; values are deterministic sample data."
-          >
-            Sample data
-          </span>
         ) : isPending ? (
           <span
             className="px-1.5 py-0.5 text-xxs bg-surface-hover text-text-muted border border-border-default rounded"

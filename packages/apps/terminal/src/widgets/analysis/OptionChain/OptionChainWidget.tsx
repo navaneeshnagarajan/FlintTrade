@@ -641,16 +641,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
 
         {/* Row 2: Spot LTP + change% + PCR badge */}
         <div className="flex items-center gap-3 flex-wrap">
-          {isExplore && (
-            <span
-              className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-              role="status"
-              aria-label="Showing sample data, not a live option chain"
-              title="Sample data — fabricated sample values, not a live option chain."
-            >
-              Sample data
-            </span>
-          )}
+          
           {spotLtp != null ? (
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-text-muted uppercase tracking-wide">Spot</span>

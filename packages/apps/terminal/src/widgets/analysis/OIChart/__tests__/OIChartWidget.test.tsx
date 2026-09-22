@@ -840,14 +840,14 @@ describe("OI Analytics data provenance", () => {
   it("badges the sample chain when no broker is connected", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     renderWidget();
-    expect(screen.getByRole("status", { name: /sample data/i })).toBeTruthy();
+    expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
   });
 
   it("badges Explore mode even though a broker reads as connected", () => {
     mockUseBrokerConnected.mockReturnValue(true);
     mockMode.current = "explore";
     renderWidget();
-    expect(screen.getByRole("status", { name: /sample data/i })).toBeTruthy();
+    expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
   });
 
   it("drops the badge on a live connected read", () => {

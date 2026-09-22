@@ -19,6 +19,9 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Added
 
+- **Mode honesty bar.** One line under the TopBar for Explore, Practice,
+  and Live. Widgets no longer repeat a Sample chip. An incident, when
+  one is showing, sits above that line and does not replace it.
 - **Practice `SandboxEngine` primary fills (FT-MONDAY-001).**
   Practice places and records native `SandboxEngine`
   fills end-to-end as the primary paper path. The terminal

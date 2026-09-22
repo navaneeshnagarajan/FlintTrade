@@ -239,9 +239,6 @@ function SeasonalityWidget(props: WidgetProps) {
   // state) — the sample statistics render exclusively behind this guard,
   // beside the amber badge below.
   const data: SeasonalityData | null = isConnected ? live ?? null : SAMPLE_SEASONALITY;
-  // True only when fabricated rows are actually on screen (explore mode, or a
-  // backend that flagged its own payload) — drives the amber affordances.
-  const showingSample = !isConnected || (live !== undefined && live.is_sample_data);
 
   const entries = useMemo<FlintWeightedHeatmapEntry[]>(() => {
     if (!data) return [];
@@ -296,15 +293,6 @@ function SeasonalityWidget(props: WidgetProps) {
           >
             Live
           </span>
-        ) : showingSample ? (
-          <span
-            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-            role="status"
-            aria-label="Showing sample data; connect a broker for live seasonality statistics"
-            title="Sample calendar statistics so the widget is usable in explore mode — connect a broker for live seasonality from real price history."
-          >
-            Sample data
-          </span>
         ) : null}
         {isConnected && query.isLoading && (
           <Loader2 size={12} className="animate-spin text-text-muted" aria-label="Loading" />
@@ -347,7 +335,7 @@ function SeasonalityWidget(props: WidgetProps) {
         <p className="text-[10px] text-text-muted">
           {instrument.symbol} · average {view === "monthly" ? "monthly" : "daily"} return by{" "}
           {view === "monthly" ? "calendar month" : view === "weekday" ? "trading weekday" : "day of month"}
-          {showingSample && <span className="ml-1 text-amber-500">· Sample data</span>}
+          
         </p>
 
         {data === null ? (

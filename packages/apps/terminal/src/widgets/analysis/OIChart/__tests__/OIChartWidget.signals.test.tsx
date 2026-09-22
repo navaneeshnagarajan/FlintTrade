@@ -145,8 +145,8 @@ describe("OI Analytics signals view", () => {
 
   it("shows the Sample data badge and sample signals when disconnected", async () => {
     renderSignals();
-    expect(await screen.findByRole("status", { name: /sample data/i })).toBeInTheDocument();
-    expect(screen.getAllByText("24500").length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("24500")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
     // Live analytics stay gated off while disconnected.
     expect(ftApiMocks.getOIChangeAnalysis).not.toHaveBeenCalled();
     expect(ftApiMocks.getUnusualOI).not.toHaveBeenCalled();
@@ -309,7 +309,7 @@ describe("OI Analytics signals view", () => {
 
     expect(await screen.findByText("25000")).toBeInTheDocument();
     await waitFor(() => expect(ftApiMocks.getUnusualOI).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("status", { name: /sample data/i })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
@@ -322,7 +322,7 @@ describe("OI Analytics signals view", () => {
     renderSignals();
 
     await waitFor(() => expect(ftApiMocks.getOIChangeAnalysis).toHaveBeenCalled());
-    expect(screen.getByRole("status", { name: /sample data/i })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 

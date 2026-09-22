@@ -458,7 +458,7 @@ describe("FillsWidget (explore)", () => {
 
   it("shows clearly badged sample fills", () => {
     renderFills();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     // Both legs of the sample round trip render.
     expect(screen.getAllByText("NIFTY 22200 CE")).toHaveLength(2);
   });

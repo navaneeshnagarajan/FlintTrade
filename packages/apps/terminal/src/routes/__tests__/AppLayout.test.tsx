@@ -241,43 +241,57 @@ describe("AppLayout", () => {
     expect(screen.getByText("Page Content")).toBeInTheDocument();
   });
 
-  it("shows practice mode disclaimer banner when mode is practice", () => {
+  it("shows the Practice Mode line and leaves the incident slot empty", () => {
     mockModeStore.mockImplementation((selector: (s: Record<string, unknown>) => unknown) =>
       selector({ mode: "practice" }),
     );
 
     renderApp();
 
-    expect(screen.getByTestId("primary-banner")).toHaveAttribute("data-banner-kind", "practice_sample");
-    expect(screen.getByText(/practice mode/i)).toBeInTheDocument();
-    expect(screen.getByText(/simulated/i)).toBeInTheDocument();
+    const bar = screen.getByTestId("mode-honesty-bar");
+    expect(bar).toHaveAttribute("data-mode", "practice");
+    expect(bar).toHaveTextContent(
+      "Practice — SandboxEngine fills. Not your funded broker account.",
+    );
+    expect(screen.queryByTestId("incident-strip")).not.toBeInTheDocument();
   });
 
-  it("shows exactly one Explore sample banner and never a Live-risk stack", () => {
+  it("shows the Explore Mode line and never an incident strip", () => {
     mockModeStore.mockImplementation((selector: (s: Record<string, unknown>) => unknown) =>
       selector({ mode: "explore" }),
     );
 
     renderApp();
 
-    const banners = screen.getAllByTestId("primary-banner");
-    expect(banners).toHaveLength(1);
-    expect(banners[0]).toHaveAttribute("data-banner-kind", "explore_sample");
-    expect(banners[0]).toHaveTextContent(/sample only/i);
-    expect(banners[0]).not.toHaveTextContent(/Live/i);
+    const bar = screen.getByTestId("mode-honesty-bar");
+    expect(bar).toHaveAttribute("data-mode", "explore");
+    expect(bar).toHaveTextContent(
+      "Explore — sample data only. No broker session, no live orders.",
+    );
+    expect(screen.queryByTestId("incident-strip")).not.toBeInTheDocument();
   });
 
-  it("shows the Live feed-disconnected banner when the feed is down", () => {
+  it("keeps the Live Mode line when the feed-disconnected incident is showing", () => {
     mockBrokerConnected.value = false;
     renderApp();
 
-    const banners = screen.getAllByTestId("primary-banner");
-    expect(banners).toHaveLength(1);
-    expect(banners[0]).toHaveAttribute("data-banner-kind", "feed_disconnected");
-    expect(banners[0]).toHaveTextContent(/feed disconnected/i);
+    const strip = screen.getByTestId("incident-strip");
+    expect(strip).toHaveAttribute("data-banner-kind", "feed_disconnected");
+    expect(strip).toHaveTextContent(/feed disconnected/i);
+    const bar = screen.getByTestId("mode-honesty-bar");
+    expect(bar).toHaveTextContent(
+      "Live — real broker session. Orders and money move for real.",
+    );
+    const header = screen.getByRole("banner");
+    const order = Array.from(header.querySelectorAll("[data-testid]")).map((node) =>
+      node.getAttribute("data-testid"),
+    );
+    expect(order.indexOf("topbar")).toBeLessThan(order.indexOf("incident-strip"));
+    expect(order.indexOf("incident-strip")).toBeLessThan(order.indexOf("mode-honesty-bar"));
+    expect(order.indexOf("mode-honesty-bar")).toBeLessThan(order.indexOf("ticker-strip"));
   });
 
-  it("shows Live risk instead of feed-disconnected when daily-loss is active", () => {
+  it("shows Live risk above the Mode line when daily-loss is active", () => {
     mockBrokerConnected.value = false;
     useSettingsStore.setState({
       riskLimits: { ...useSettingsStore.getState().riskLimits, mtmStoploss: 5000 },
@@ -285,10 +299,12 @@ describe("AppLayout", () => {
     useTradingStore.setState({ totalPnl: -2500 });
     renderApp();
 
-    const banners = screen.getAllByTestId("primary-banner");
-    expect(banners).toHaveLength(1);
-    expect(banners[0]).toHaveAttribute("data-banner-kind", "live_risk");
-    expect(banners[0]).toHaveTextContent(/Live risk/i);
+    const strip = screen.getByTestId("incident-strip");
+    expect(strip).toHaveAttribute("data-banner-kind", "live_risk");
+    expect(strip).toHaveTextContent(/Live risk/i);
+    expect(screen.getByTestId("mode-honesty-bar")).toHaveTextContent(
+      "Live — real broker session. Orders and money move for real.",
+    );
   });
 
   it("hides the ticker strip on Compact desk until desk tools expand", () => {

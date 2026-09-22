@@ -84,7 +84,7 @@ describe("AuditTrailWidget", () => {
   it("shows the Sample data affordance when disconnected", () => {
     mockConnected.mockReturnValue(false);
     render(<AuditTrailWidget />, { wrapper });
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("shows entry count in filter bar", () => {

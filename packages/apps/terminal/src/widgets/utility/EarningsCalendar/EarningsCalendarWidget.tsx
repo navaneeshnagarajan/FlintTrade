@@ -193,9 +193,6 @@ function EarningsCalendarWidget() {
   // connected.
   const liveEntries = (liveData?.entries as EarningsEntry[] | undefined) ?? [];
   const usingLocalSample = !isConnected;
-  // Fail closed: a present payload without an explicit `false` is sample.
-  const showingSample =
-    usingLocalSample || (liveData != null && liveData.is_sample_data !== false);
   const allEntries: EarningsEntry[] = usingLocalSample ? SAMPLE_EARNINGS : liveEntries;
   const hasEntries = allEntries.length > 0;
 
@@ -245,11 +242,7 @@ function EarningsCalendarWidget() {
       <div className="flex-none flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-border-default">
         <CalendarDays size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Earnings Calendar</span>
-        {showingSample && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample data
-          </span>
-        )}
+        
         <div className="flex-1" />
         <Select value={sectorFilter} onValueChange={setSectorFilter}>
           <SelectTrigger className="h-6 w-28 text-xxs" aria-label="Filter by sector">

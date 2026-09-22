@@ -309,7 +309,6 @@ export function RiskReturnTab() {
       <p className="text-xs text-text-muted">
         Returns are trailing 1-year annualised. Volatility = annualised std dev of daily returns.
         Sharpe = excess return / volatility. Risk-free rate assumed 6.5% p.a.
-        {isDemo ? " Sample data shown — connect broker for live data." : ""}
       </p>
     </div>
   );

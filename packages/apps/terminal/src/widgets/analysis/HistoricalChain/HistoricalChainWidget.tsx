@@ -92,23 +92,6 @@ function fmtIv(v: number | undefined): string {
   return `${(v > 1.5 ? v : v * 100).toFixed(1)}%`;
 }
 
-/**
- * True when a present payload is NOT explicitly flagged live.
- *
- * Fail-closed: a payload must carry `is_sample_data: false` to be treated as
- * real. Matches GammaDensity's `carriesExplicitLiveFlag`, the reference
- * implementation in this family.
- */
-function carriesSampleFlag(payload: unknown): boolean {
-  // Nothing has arrived yet — the loading state covers this, not the badge.
-  if (typeof payload !== "object" || payload === null) return false;
-  // Fail CLOSED once a payload is present: only an explicit
-  // `is_sample_data: false` counts as evidence of live data. This used to
-  // test `=== true`, so a payload that omitted the flag entirely — a backend
-  // stub, a shape change, a proxy that dropped it — rendered as live.
-  return (payload as { is_sample_data?: unknown }).is_sample_data !== false;
-}
-
 // ---------------------------------------------------------------------------
 // Main widget
 // ---------------------------------------------------------------------------
@@ -157,11 +140,6 @@ function HistoricalChainWidget() {
   );
   const capturedAt = chainData?.chain?.[0]?.captured_at ?? null;
 
-  // Badge keys off the payload FLAG: the archive endpoints serve real captures
-  // (no local sample fallback exists here), but if the backend ever flags a
-  // payload is_sample_data the fabrication must be visible.
-  const isSample = carriesSampleFlag(expData) || carriesSampleFlag(chainData);
-
   const captureMutation = useMutation({
     mutationFn: (capture: CaptureRequest) =>
       captureHistoricalChain(capture.symbol, capture.expiry, capture.exchange),
@@ -207,16 +185,7 @@ function HistoricalChainWidget() {
         <span className="text-xs font-semibold text-text-primary">
           Historical Chain
         </span>
-        {isSample && (
-          <span
-            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-            role="status"
-            aria-label="Showing sample data, not a real archived chain"
-            title="Sample data — the backend flagged this payload as fabricated sample values."
-          >
-            Sample data
-          </span>
-        )}
+        
         <div className="flex-1" />
 
         {/* Symbol selector */}

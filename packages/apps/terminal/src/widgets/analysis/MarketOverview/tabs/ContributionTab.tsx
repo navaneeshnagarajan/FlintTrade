@@ -89,7 +89,6 @@ function ContributionTab() {
 
   const response = isConnected && live ? live : { is_sample_data: true, contribution: SAMPLE_INDEX_CONTRIBUTION };
   const contribution = response.contribution;
-  const isSample = response.is_sample_data !== false;
 
   const maxAbs = useMemo(
     () => contribution.constituents.reduce((m, c) => Math.max(m, Math.abs(c.contribution_pct)), 0),
@@ -105,7 +104,7 @@ function ContributionTab() {
           <h3 className="text-sm font-semibold text-text-primary">Index Contribution</h3>
           <p className="text-[10px] text-text-muted">
             Weights as of {contribution.weights_as_of}
-            {isSample && <span className="ml-1 text-amber-500">· Sample data</span>}
+            
           </p>
         </div>
         <div className="flex items-center gap-2">

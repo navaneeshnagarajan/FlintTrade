@@ -1,13 +1,10 @@
 /**
- * placeholderCardBadges.test — every home Bento card that renders fabricated
- * placeholder data (no live source wired yet) MUST carry a visible Demo/Sample
- * affordance, per the no-mock-data house rule. These cards previously rendered
- * fake world-index prices / sector moves / "NSE" breadth / an AI thesis / SIPs /
- * news headlines indistinguishable from the live cards beside them.
+ * placeholderCardBadges.test — home Bento cards that still render fabricated
+ * numbers stay quiet. The Mode honesty bar owns the Explore disclaimer, so
+ * these cards no longer carry a per-card Sample chip.
  *
- * BreadthCard is now LIVE-capable (it fetches /ft-api/v1/breadth/current and
- * drops the badge when the backend returns genuine non-sample data), so it is
- * exercised in both its disconnected (sample) and connected (live) states.
+ * BreadthCard is LIVE-capable (it fetches /ft-api/v1/breadth/current and
+ * labels the footer NSE only for genuine non-sample data).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -48,24 +45,17 @@ beforeEach(() => {
   mockConnected.mockReturnValue(false);
 });
 
-describe("home placeholder cards carry canonical static Sample/Unavailable/Live/Stale labels (no noisy aria-live)", () => {
-  it.each(CARDS)("$name renders a static provenance badge (no role=status / aria-live)", ({ node, badgeTestId }) => {
+describe("home placeholder cards stay quiet — the Mode honesty bar owns Explore", () => {
+  it.each(CARDS)("$name does not render a per-card Sample badge", ({ node, badgeTestId }) => {
       renderCard(node);
-      const badge = screen.getByTestId(badgeTestId);
-      expect(badge).toBeInTheDocument();
-      expect(badge.getAttribute("title")).toBeTruthy();
-      // Static provenance: never status/live-region (no noisy announcements).
-      expect(badge).not.toHaveAttribute("role", "status");
-      expect(badge).not.toHaveAttribute("aria-live");
-      // No user-visible Demo default — canonical Sample/Unavailable/Live/Stale only.
-      expect(badge.textContent?.trim()).not.toMatch(/^demo$/i);
-      expect(["Sample", "Unavailable", "Live", "Stale"]).toContain(badge.textContent?.trim());
+      expect(screen.queryByTestId(badgeTestId)).not.toBeInTheDocument();
     });
 
-  it("BreadthCard (disconnected) labels its fabricated numbers Sample, not live NSE data", () => {
+  it("BreadthCard (disconnected) shows the placeholder totals without a Sample chip or live NSE label", () => {
     renderCard(<BreadthCard />);
     expect(screen.queryByText(/NSE ·/)).not.toBeInTheDocument();
-    expect(screen.getByText(/Sample ·/)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample ·/)).not.toBeInTheDocument();
+    expect(screen.getByText("1,320")).toBeInTheDocument();
   });
 
   it("BreadthCard flips to live NSE breadth (no Demo badge) when the backend returns non-sample data", async () => {
@@ -103,8 +93,10 @@ describe("home placeholder cards carry canonical static Sample/Unavailable/Live/
     try {
       renderCard(<BreadthCard />);
       await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-      expect(screen.getByTestId("breadth-demo-badge")).toBeInTheDocument();
-      expect(screen.getByText(/Sample ·/)).toBeInTheDocument();
+      expect(screen.queryByTestId("breadth-demo-badge")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Sample ·/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/NSE ·/)).not.toBeInTheDocument();
+      expect(screen.getByText("1,320")).toBeInTheDocument();
     } finally {
       vi.unstubAllGlobals();
     }

@@ -47,7 +47,7 @@ describe("ArbitrageScannerWidget", () => {
 
     render(<ArbitrageScannerWidget />, { wrapper });
 
-    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(screen.getByTestId("feature-teaser")).toHaveAttribute("data-feature", "Arbitrage Scanner");
     // Both section tables present (exact match avoids the subtitle collision).
     expect(screen.getByText("Cash-future basis")).toBeInTheDocument();
@@ -106,7 +106,7 @@ describe("ArbitrageScannerWidget", () => {
 
     render(<ArbitrageScannerWidget />, { wrapper });
 
-    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("feature-teaser")).not.toBeInTheDocument();
   });
 

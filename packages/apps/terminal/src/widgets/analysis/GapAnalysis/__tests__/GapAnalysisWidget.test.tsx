@@ -43,9 +43,7 @@ describe("GapAnalysisWidget", () => {
     // the disclosure must NOT be masked when a broker connects.
     mockConnected.mockReturnValue(true);
     render(<GapAnalysisWidget />);
-    const badge = screen.getByText("Sample data");
-    expect(badge).toBeTruthy();
-    expect(badge.getAttribute("aria-label")).toContain("sample data");
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("renders stat cards: Total Gaps, Fill Rate, Avg Size, Avg Fill", () => {

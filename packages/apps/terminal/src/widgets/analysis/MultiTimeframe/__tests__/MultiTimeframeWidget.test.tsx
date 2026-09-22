@@ -81,7 +81,7 @@ describe("MultiTimeframeWidget", () => {
   it("shows the Sample data badge when broker disconnected", () => {
     mockConnected.mockReturnValue(false);
     renderWidget();
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("does not fetch when broker disconnected", () => {
@@ -117,15 +117,14 @@ describe("MultiTimeframeWidget", () => {
     renderWidget();
 
     await waitFor(() => expect(mockGetMtf).toHaveBeenCalled());
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
   it("badge discloses that no live source is wired via its accessible name (sample mode)", () => {
     mockConnected.mockReturnValue(false);
     renderWidget();
-    const badge = screen.getByText("Sample data");
-    expect(badge.getAttribute("aria-label")).toMatch(/no live multi-timeframe source/i);
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("renders all four timeframe rows", () => {

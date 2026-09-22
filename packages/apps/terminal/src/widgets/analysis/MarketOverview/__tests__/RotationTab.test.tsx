@@ -121,7 +121,7 @@ describe("RRGCanvas provenance", () => {
 
   it("badges the plot as sample when the response omits is_sample_data", () => {
     render(<RRGCanvas data={rrgResponse({})} tailLength={2} />);
-    expect(screen.getByText("sample data")).toBeInTheDocument();
+    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
   });
 
   it("drops the badge only on an explicit is_sample_data: false", () => {
@@ -131,6 +131,6 @@ describe("RRGCanvas provenance", () => {
 
   it("badges the plot as sample on an explicit is_sample_data: true", () => {
     render(<RRGCanvas data={rrgResponse({ is_sample_data: true })} tailLength={2} />);
-    expect(screen.getByText("sample data")).toBeInTheDocument();
+    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
   });
 });

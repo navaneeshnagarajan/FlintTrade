@@ -6,7 +6,7 @@ import { DemoBadge } from "@/routes/home/DemoBadge";
 import { readFileSync } from "fs";
 import { join } from "path";
 
-const LABELS: ProvenanceKind[] = ["Sample", "Unavailable", "Live", "Stale"];
+const LABELS: ProvenanceKind[] = ["Unavailable", "Live", "Stale"];
 
 const DEFAULT_TITLES: Record<ProvenanceKind, string> = {
   Sample: "Sample data — not live",
@@ -27,11 +27,17 @@ describe("ProvenanceBadge (Slice 3 canonical atom)", () => {
     expect(badge).not.toHaveAttribute("aria-live");
   });
 
+  it("renders nothing for Sample — Mode honesty owns that disclaimer", () => {
+    const { container } = render(<ProvenanceBadge label="Sample" placement="inline" />);
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+  });
+
   it("inline placement omits absolute positioning and uses inline test id", () => {
-    render(<ProvenanceBadge label="Sample" placement="inline" />);
+    render(<ProvenanceBadge label="Live" placement="inline" />);
     const badge = screen.getByTestId("provenance-badge-inline");
-    expect(badge).toHaveTextContent("Sample");
-    expect(badge).toHaveAttribute("data-provenance", "Sample");
+    expect(badge).toHaveTextContent("Live");
+    expect(badge).toHaveAttribute("data-provenance", "Live");
     expect(badge.className).not.toMatch(/\babsolute\b/);
     expect(badge).not.toHaveAttribute("role", "status");
     expect(badge).not.toHaveAttribute("aria-live");
@@ -67,12 +73,9 @@ describe("ProvenanceBadge (Slice 3 canonical atom)", () => {
 });
 
 describe("DemoBadge route compatibility shim", () => {
-  it("defaults visible label Sample, test id home-demo-badge, data-provenance=Sample, no live region", () => {
-    render(<DemoBadge />);
-    const badge = screen.getByTestId("home-demo-badge");
-    expect(badge).toHaveTextContent("Sample");
-    expect(badge).toHaveAttribute("data-provenance", "Sample");
-    expect(badge).not.toHaveAttribute("role", "status");
-    expect(badge).not.toHaveAttribute("aria-live");
+  it("renders nothing when the default label is Sample", () => {
+    const { container } = render(<DemoBadge />);
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("home-demo-badge")).not.toBeInTheDocument();
   });
 });

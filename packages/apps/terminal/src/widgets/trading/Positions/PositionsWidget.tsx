@@ -41,9 +41,9 @@
  * still goes through the existing gated paths — no new order path is
  * introduced here.
  *
- * DATA HONESTY. Explore renders ONE labelled sample book (`sampleBook.ts`)
- * behind a "Sample" badge and a watermark, and no write control is reachable
- * there (they require Live plus a connected broker). Practice reads the
+ * DATA HONESTY. Explore renders ONE sample book (`sampleBook.ts`) with no
+ * per-widget Sample chip — the Mode honesty bar owns that line — and no write
+ * control is reachable there (they require Live plus a connected broker). Practice reads the
  * sandbox; Live reads the broker. A stale feed says so, and a failed feed says
  * the figures are frozen and when.
  */
@@ -1013,9 +1013,9 @@ function PositionsWidget(props: WidgetProps) {
         <div className="flex items-center gap-2">
           {/* Provenance: what book is on screen. Separate from the capability
               chip below, which says what may be done to it. */}
-          {(isExplore || appMode === "practice") && (
+          {appMode === "practice" && (
             <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-              {isExplore ? "Sample" : "Practice"}
+              Practice
             </span>
           )}
           {!isExplore && !accountReadsEnabled && (
@@ -1280,12 +1280,6 @@ function PositionsWidget(props: WidgetProps) {
         </div>
       )}
 
-      {/* Explore-mode watermark */}
-      {isExplore && (
-        <div className="shrink-0 px-3 py-1 border-t border-border-subtle text-xxs text-text-disabled text-center">
-          Sample data — connect a broker to see your positions
-        </div>
-      )}
 
       {/* Convert-position dialog — keyed so state resets per position */}
       {convertIntent && (

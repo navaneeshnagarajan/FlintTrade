@@ -76,7 +76,7 @@ describe("PivotPointsWidget", () => {
 
   it("shows sample data badge when disconnected", () => {
     render(<PivotPointsWidget />);
-    expect(screen.getByText("sample data")).toBeTruthy();
+    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
   });
 
   it("never labels Explore responses as Live when a broker remains connected", async () => {
@@ -85,7 +85,7 @@ describe("PivotPointsWidget", () => {
 
     render(<PivotPointsWidget />);
 
-    expect(screen.getByText("sample data")).toBeInTheDocument();
+    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(mockGetHistory).not.toHaveBeenCalled();
@@ -159,7 +159,7 @@ describe("PivotPointsWidget", () => {
 
     render(<PivotPointsWidget />);
 
-    expect(screen.getByText("sample data")).toBeInTheDocument();
+    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Previous day High")).toHaveValue(SAMPLE_PREV_DAY.high);
     expect(screen.getByText(new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(SAMPLE_CURRENT_PRICE))).toBeInTheDocument();
   });
@@ -173,7 +173,7 @@ describe("PivotPointsWidget", () => {
     expect(await screen.findByText(
       new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(LIVE_LATEST_DAY.close),
     )).toBeInTheDocument();
-    expect(screen.getByText("sample data")).toBeInTheDocument();
+    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Previous day High")).toHaveValue(SAMPLE_PREV_DAY.high);
   });
 
@@ -184,7 +184,7 @@ describe("PivotPointsWidget", () => {
     render(<PivotPointsWidget />);
 
     expect(await screen.findByText("History unavailable")).toBeInTheDocument();
-    expect(screen.getByText("sample data")).toBeInTheDocument();
+    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Previous day High")).toHaveValue(SAMPLE_PREV_DAY.high);
   });
 
@@ -196,7 +196,7 @@ describe("PivotPointsWidget", () => {
     render(<PivotPointsWidget />);
 
     await waitFor(() => expect(screen.getByLabelText("Previous day High")).toHaveValue(LIVE_PREVIOUS_DAY.high));
-    expect(screen.getByText("sample data")).toBeInTheDocument();
+    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
     expect(screen.getByText(new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(SAMPLE_CURRENT_PRICE))).toBeInTheDocument();
   });
 
@@ -226,7 +226,7 @@ describe("PivotPointsWidget", () => {
     render(<PivotPointsWidget />);
 
     await waitFor(() => expect(mockGetQuotes).toHaveBeenCalledTimes(1));
-    expect(screen.getByText("sample data")).toBeInTheDocument();
+    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Previous day High")).toHaveValue(SAMPLE_PREV_DAY.high);
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
@@ -243,7 +243,7 @@ describe("PivotPointsWidget", () => {
       target: { value: "23000" },
     });
 
-    expect(screen.getByText("sample data")).toBeInTheDocument();
+    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 });

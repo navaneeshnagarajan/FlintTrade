@@ -78,8 +78,8 @@ const INTERMEDIATE_WIDGETS: string[] = [
 
 /**
  * Widgets deliberately kept OUT of the Add Widget picker. Empty today — every
- * catalogued widget is functional and honest (renders real data, or carries a
- * permanent "Sample data" disclosure for explore-mode sample content). Add an
+ * catalogued widget is functional and honest (renders real data, or sample
+ * content while the Mode honesty bar discloses Explore). Add an
  * id here, with a reason, to hide a widget without removing it from the catalog.
  */
 const WIDGET_PICKER_DENY_LIST = new Set<string>([]);

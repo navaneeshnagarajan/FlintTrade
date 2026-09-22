@@ -230,16 +230,7 @@ function CorrelationMatrixWidget() {
           >
             Live
           </span>
-        ) : (
-          <span
-            className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-            role="status"
-            aria-label="Showing sample data; no live correlation source is wired yet"
-            title="No live data wired yet — showing a sample correlation matrix so the widget is usable in explore mode."
-          >
-            Sample data
-          </span>
-        )}
+        ) : null}
         <div className="flex-1" />
       </div>
 

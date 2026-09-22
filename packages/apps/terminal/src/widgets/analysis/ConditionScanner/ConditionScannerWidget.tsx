@@ -495,27 +495,15 @@ function ConditionScannerWidget(props: WidgetProps) {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Radar size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Condition Scanner</span>
-        {view === "scans" && run && (
-          // Fails closed: only an explicit `false` earns the affirmative "Live" claim.
-          run.is_sample_data !== false ? (
-            <span
-              className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-              role="status"
-              aria-label="Scan ran on sample data; connect a broker to scan live prices"
-              title="The backend scanned deterministic sample bars — connect a broker to scan live OHLCV."
-            >
-              Sample data
-            </span>
-          ) : (
-            <span
-              className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
-              role="status"
-              aria-label="Scan ran on live broker data"
-              title="Live — the backend scanned real OHLCV from the connected broker."
-            >
-              Live
-            </span>
-          )
+        {view === "scans" && run && run.is_sample_data === false && (
+          <span
+            className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+            role="status"
+            aria-label="Scan ran on live broker data"
+            title="Live — the backend scanned real OHLCV from the connected broker."
+          >
+            Live
+          </span>
         )}
         <div className="flex-1" />
         {view === "scans" ? (
@@ -613,40 +601,22 @@ function ConditionScannerWidget(props: WidgetProps) {
         </TooltipProvider>
       </nav>
 
-      {/* Provenance banner — per view, and only for data actually on screen. */}
+      {/* Live provenance only. Sample disclosure is the Mode honesty bar. */}
       {view === "scans" ? (
-        run && (
-          run.is_sample_data !== false ? (
-            <div className="flex-none px-2 py-1 bg-warning/5 border-b border-warning/20">
-              <span className="text-xxs text-warning" role="status">
-                Sample scan — connect a broker read account to scan live prices
-              </span>
-            </div>
-          ) : (
-            <div className="flex-none px-2 py-1 bg-profit/5 border-b border-profit/20">
-              <span className="text-xxs text-profit" role="status">
-                Live scan — the backend scanned real broker OHLCV
-              </span>
-            </div>
-          )
-        )
+        run && run.is_sample_data === false ? (
+          <div className="flex-none px-2 py-1 bg-profit/5 border-b border-profit/20">
+            <span className="text-xxs text-profit" role="status">
+              Live scan — the backend scanned real broker OHLCV
+            </span>
+          </div>
+        ) : null
       ) : sectorMovers.isLive ? (
         <div className="flex-none px-2 py-1 bg-profit/5 border-b border-profit/20">
           <span className="text-xxs text-profit" role="status">
             Live sectors — derived from NIFTY 50 quotes, refreshed every minute
           </span>
         </div>
-      ) : (
-        <div className="flex-none px-2 py-1 bg-warning/5 border-b border-warning/20">
-          <span className="text-xxs text-warning" role="status">
-            {sectorMovers.wantsLive
-              ? sectorMovers.error
-                ? "Sample data — the live sector feed is unavailable right now"
-                : "Sample data — waiting for live NIFTY 50 quotes"
-              : "Sample data — leave Explore and connect OpenAlgo for live sector movers"}
-          </span>
-        </div>
-      )}
+      ) : null}
 
       {/* Selected-scan conditions */}
       {view === "scans" && selectedScan && (

@@ -272,11 +272,7 @@ export const RRGCanvas = memo(function RRGCanvas({ data, tailLength }: RRGCanvas
       />
 
       {/* Sample data indicator — fails closed, as PortfolioRRGTab already does. */}
-      {data.is_sample_data !== false && (
-        <div className="absolute top-1 right-1 text-xxs text-text-disabled bg-surface-card/80 px-1 py-0.5 rounded border border-border-default">
-          sample data
-        </div>
-      )}
+      
 
       {/* Hover tooltip */}
       {hoveredData && (

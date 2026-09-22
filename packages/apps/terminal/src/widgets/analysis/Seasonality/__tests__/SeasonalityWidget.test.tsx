@@ -105,8 +105,8 @@ describe("SeasonalityWidget — data honesty", () => {
   it("disconnected renders the sample statistics behind the amber affordances", () => {
     renderWidget();
 
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
-    expect(screen.getByText(/· Sample data/)).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(screen.queryByText(/· Sample data/)).not.toBeInTheDocument();
     // Sample monthly tiles render (all 12 months present in the sample set).
     expect(screen.getByText("Jan")).toBeInTheDocument();
     expect(screen.getByText("Dec")).toBeInTheDocument();
@@ -145,8 +145,8 @@ describe("SeasonalityWidget — data honesty", () => {
     mockFetch.mockResolvedValue({ ...liveData(), is_sample_data: true });
     renderWidget();
 
-    expect(await screen.findByText("Sample data")).toBeInTheDocument();
-    expect(screen.getByText(/· Sample data/)).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(screen.queryByText(/· Sample data/)).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 

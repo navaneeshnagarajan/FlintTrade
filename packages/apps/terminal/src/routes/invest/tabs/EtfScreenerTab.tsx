@@ -721,7 +721,6 @@ export function EtfScreenerTab() {
       <p className="text-xs text-text-muted">
         Momentum score: 40% × 12M + 30% × 6M + 20% × 3M + 10% × 1M return.
         AUM and returns are indicative.
-        {isDemo ? " Sample data — connect broker for live prices." : ""}
       </p>
     </div>
   );

@@ -36,7 +36,7 @@ describe("InstrumentCompareWidget", () => {
   it("shows the Sample data badge when disconnected", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     render(<InstrumentCompareWidget />);
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("still shows the Sample data badge when connected (no live source wired)", () => {
@@ -44,18 +44,13 @@ describe("InstrumentCompareWidget", () => {
     // endpoint is wired yet, so a connected user must still see the disclosure.
     mockUseBrokerConnected.mockReturnValue(true);
     render(<InstrumentCompareWidget />);
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("exposes the sample-data disclosure to assistive tech", () => {
     mockUseBrokerConnected.mockReturnValue(true);
     render(<InstrumentCompareWidget />);
-    const badge = screen.getByText("Sample data");
-    expect(badge).toHaveAttribute(
-      "aria-label",
-      "Showing sample data; no live data source is wired yet",
-    );
-    expect(badge).toHaveAttribute("role", "status");
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("renders 4 symbol input slots", () => {

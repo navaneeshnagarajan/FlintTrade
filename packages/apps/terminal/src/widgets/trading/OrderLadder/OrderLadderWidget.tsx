@@ -538,7 +538,7 @@ function OrderLadderWidget(props: Props) {
   const spread = bestBid != null && bestAsk != null && bestAsk >= bestBid ? bestAsk - bestBid : null;
 
   const feedLabel = isExplore
-    ? "Explore · sample"
+    ? null
     : isMarketHours({ symbol, exchange }) ? "Live · 1s" : "Closed · snapshot";
   const updatedLabel = !isExplore && depthQuery.dataUpdatedAt
     ? `Book updated ${new Date(depthQuery.dataUpdatedAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}`
@@ -633,12 +633,7 @@ function OrderLadderWidget(props: Props) {
             ))}
           </SelectContent>
         </Select>
-        {isExplore && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-            aria-label="Showing sample data">
-            Sample data
-          </span>
-        )}
+        
         <div className="flex-1" />
         {pendingOrders.length > 0 && <span className="text-xxs text-warning font-mono">{pendingOrders.length} open</span>}
       </div>
@@ -725,7 +720,7 @@ function OrderLadderWidget(props: Props) {
           </div>
           <div className="flex items-center justify-between text-xxs">
             <span className="font-mono tabular-nums text-profit font-semibold">{bidDomPct.toFixed(1)}% bid</span>
-            <span className="text-text-muted" title={updatedLabel}>{feedLabel}</span>
+            <span className="text-text-muted" title={updatedLabel}>{feedLabel ?? ""}</span>
             <span className="font-mono tabular-nums text-loss font-semibold">{(100 - bidDomPct).toFixed(1)}% ask</span>
           </div>
         </div>

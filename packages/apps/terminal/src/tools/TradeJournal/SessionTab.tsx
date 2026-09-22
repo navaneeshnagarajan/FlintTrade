@@ -269,12 +269,11 @@ export function SessionTab() {
 
   const isLive = liveTrades !== null;
   const sessionTrades = liveTrades ?? SAMPLE_SESSION_TRADES;
-  // The Orders bar carries its OWN provenance. `isLive` is derived from the
-  // tradebook alone, so a session with real closed round trips but an empty or
-  // failed order book used to render the sample 14/12/1/1 counts underneath a
-  // green "Live" badge — the same fail-open the trade log below was fixed for.
-  const ordersAreLive = liveOrderSummary !== null;
-  const orderSummary = liveOrderSummary ?? SAMPLE_ORDER_SUMMARY;
+  // A live session with an empty order book is zeros, not the Explore sample
+  // counts. The Mode honesty bar owns the Explore disclaimer.
+  const orderSummary = isLive
+    ? (liveOrderSummary ?? { placed: 0, filled: 0, rejected: 0, pending: 0 })
+    : (liveOrderSummary ?? SAMPLE_ORDER_SUMMARY);
 
   const metrics = useMemo(() => computeSessionMetrics(sessionTrades), [sessionTrades]);
   const idleMinutes = Math.max(0, metrics.sessionMinutes - metrics.activeMinutes);
@@ -289,20 +288,15 @@ export function SessionTab() {
         {/* Provenance: Live only when today's tradebook produced at least
             one CLOSED round trip; the disclosed sample renders otherwise
             (fresh session, explore mode, or no fills yet). */}
-        <span
-          className={cn(
-            "px-1.5 py-0.5 text-xxs rounded border",
-            isLive
-              ? "bg-profit/10 text-profit border-profit/30"
-              : "bg-warning/10 text-warning border-warning/30",
-          )}
-          role="status"
-          aria-label={isLive
-            ? "Showing statistics computed from today's real closed trades"
-            : "Showing sample data — no closed trades in today's tradebook yet"}
-        >
-          {isLive ? "Live" : "Sample data"}
-        </span>
+        {isLive && (
+          <span
+            className="px-1.5 py-0.5 text-xxs rounded border bg-profit/10 text-profit border-profit/30"
+            role="status"
+            aria-label="Showing statistics computed from today's real closed trades"
+          >
+            Live
+          </span>
+        )}
         <div className="flex-1" />
         <span className={cn("text-sm font-bold font-mono tabular-nums", metrics.totalPnl >= 0 ? "text-profit" : "text-loss")}>
           {fmtPnl(metrics.totalPnl)}
@@ -325,15 +319,7 @@ export function SessionTab() {
             <p id="ss-orders" className="text-xxs font-medium text-text-muted uppercase tracking-wide">
               Orders
             </p>
-            {isLive && !ordersAreLive && (
-              <span
-                className="px-1.5 py-0.5 text-xxs rounded border bg-warning/10 text-warning border-warning/30"
-                role="status"
-                aria-label="Sample order counts — today's order book is empty or unavailable"
-              >
-                Sample
-              </span>
-            )}
+            
           </div>
           <OrderBar summary={orderSummary} />
         </section>

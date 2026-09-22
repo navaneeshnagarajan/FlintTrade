@@ -47,20 +47,6 @@ function fmtPnL(v: number): string {
   return `${sign}${abs.toFixed(0)}`;
 }
 
-/**
- * True when the payload carries the backend's `is_sample_data: true` honesty
- * flag (propagated onto object payloads by the ftApi response unwrapper).
- */
-function carriesSampleFlag(payload: unknown): boolean {
-  return (
-    typeof payload === "object" &&
-    payload !== null &&
-    // Fail closed: only an explicit `false` counts as live, so a payload
-    // that omits the flag entirely is treated as sample rather than real.
-    (payload as { is_sample_data?: unknown }).is_sample_data !== false
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Leg row sub-component
 // ---------------------------------------------------------------------------
@@ -152,10 +138,6 @@ function StraddlePnLWidget() {
     useStraddlePnL(symbol, exchange, expiry, adjustments, isConnected);
 
   const data = isConnected ? liveData : SAMPLE_STRADDLE_PNL_DATA;
-  // Honesty affordance keyed on the payload FLAG, not connection state alone:
-  // the backend serves clearly-flagged sample premiums (is_sample_data) when
-  // it has no live chain, even while a broker is connected.
-  const isSample = !isConnected || carriesSampleFlag(liveData);
 
   // Build Plotly traces
   const { plotData, plotLayout } = useMemo<{
@@ -297,16 +279,7 @@ function StraddlePnLWidget() {
 
       {/* Controls */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
-        {isSample && (
-          <span
-            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-            role="status"
-            aria-label="Showing sample data, not live straddle premiums"
-            title="Sample data — fabricated sample premiums, not a live option chain."
-          >
-            Sample data
-          </span>
-        )}
+        
         <Select value={symbol} onValueChange={(v) => { setSymbol(v); setAdjustments([]); }}>
           <SelectTrigger className="h-7 px-2 text-xs w-36">
             <SelectValue />

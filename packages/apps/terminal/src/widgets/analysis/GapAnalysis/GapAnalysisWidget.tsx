@@ -198,14 +198,7 @@ function GapAnalysisWidget() {
         {/* Honest disclosure — the widget renders SAMPLE_GAP_EVENTS
             unconditionally (no gap-analysis backend is wired). The badge must
             stay visible even when a broker is connected. */}
-        <span
-          className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-          role="status"
-          aria-label="Showing sample data; no live gap-analysis source is wired yet"
-          title="No live data wired yet — showing sample gap events so the widget is usable in explore mode."
-        >
-          Sample data
-        </span>
+        
         <div className="flex-1" />
       </div>
 

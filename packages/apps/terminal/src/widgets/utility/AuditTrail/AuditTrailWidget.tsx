@@ -172,9 +172,7 @@ function AuditTrailWidget() {
   // Connected users only ever see live rows. Never fall back to the SAMPLE
   // constant on an empty/undefined live response — that would render
   // fabricated audit rows to a real user. The SAMPLE constant is reserved for
-  // the explore (not-connected) branch, and is always paired with a visible
-  // "Sample data" affordance.
-  const showingSampleData = !isConnected;
+  // the explore (not-connected) branch. The Mode honesty bar discloses it.
   const liveEntries = liveData?.entries;
   // Memoised so the `?? []` fallback does not hand the filter memo below a new
   // array on every render.
@@ -209,11 +207,7 @@ function AuditTrailWidget() {
         <span className="text-xxs text-text-muted px-1.5 py-px rounded bg-surface-hover border border-border-subtle">
           Audit log
         </span>
-        {showingSampleData && (
-          <span className="text-xxs text-accent px-1.5 py-px rounded bg-accent/10 border border-accent/20">
-            Sample data
-          </span>
-        )}
+        
         <div className="flex-1" />
         <Button
           variant="outline"

@@ -239,11 +239,7 @@ function TickSpeedWidget() {
           ? <Wifi size={12} className="text-profit" aria-label="Connected" />
           : <WifiOff size={12} className="text-text-muted" aria-label="Disconnected" />
         }
-        {!wsConnected && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
+        
       </div>
 
       {/* Metrics */}

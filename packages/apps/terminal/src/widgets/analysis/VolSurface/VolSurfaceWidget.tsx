@@ -38,23 +38,6 @@ const SYMBOL_EXCHANGE: Record<string, string> = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * True when a present payload is NOT explicitly flagged live.
- *
- * Fail-closed: a payload must carry `is_sample_data: false` to be treated as
- * real. Matches GammaDensity's `carriesExplicitLiveFlag`, the reference
- * implementation in this family.
- */
-function carriesSampleFlag(payload: unknown): boolean {
-  // Nothing has arrived yet — the loading state covers this, not the badge.
-  if (typeof payload !== "object" || payload === null) return false;
-  // Fail CLOSED once a payload is present: only an explicit
-  // `is_sample_data: false` counts as evidence of live data. This used to
-  // test `=== true`, so a payload that omitted the flag entirely — a backend
-  // stub, a shape change, a proxy that dropped it — rendered as live.
-  return (payload as { is_sample_data?: unknown }).is_sample_data !== false;
-}
-
 // ---------------------------------------------------------------------------
 // Main widget
 // ---------------------------------------------------------------------------
@@ -80,10 +63,6 @@ function VolSurfaceWidget() {
     useVolSurface(symbol, exchange, expiryDates, strikeCount, isConnected);
 
   const data = isConnected ? liveData : SAMPLE_VOL_SURFACE_DATA;
-  // Honesty affordance keyed on the payload FLAG, not connection state alone:
-  // the backend serves a clearly-flagged sample surface (is_sample_data) when
-  // it has no live chain, even while a broker is connected.
-  const isSample = !isConnected || carriesSampleFlag(liveData);
 
   const plotData = useMemo<Data[]>(() => {
     if (!data?.iv_matrix?.length) return [];
@@ -140,16 +119,7 @@ function VolSurfaceWidget() {
 
       {/* Controls */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default flex-wrap">
-        {isSample && (
-          <span
-            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-            role="status"
-            aria-label="Showing sample data, not a live volatility surface"
-            title="Sample data — fabricated sample values, not a live option chain."
-          >
-            Sample data
-          </span>
-        )}
+        
         <Select value={symbol} onValueChange={setSymbol}>
           <SelectTrigger className="h-7 px-2 text-xs w-36">
             <SelectValue />

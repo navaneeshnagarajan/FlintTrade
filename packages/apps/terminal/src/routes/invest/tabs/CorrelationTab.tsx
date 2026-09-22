@@ -282,7 +282,7 @@ export function CorrelationTab() {
   const symbols = data?.symbols ?? DEMO_SYMBOLS;
   const matrix = data?.matrix ?? DEMO_MATRIX;
   const regime = data?.regime ?? "Risk-On";
-  const rationale = data?.regime_rationale ?? "Sample data — regime based on rolling 30-day index correlations";
+  const rationale = data?.regime_rationale ?? "Regime based on rolling 30-day index correlations";
   const vix = data?.vix ?? 14.2;
   const dxy = data?.dxy ?? 103.8;
 
@@ -382,7 +382,6 @@ export function CorrelationTab() {
       <p className="text-xs text-text-muted">
         Correlation computed from daily closing prices over a rolling 30-day window.
         Values change daily and should not be treated as permanent relationships.
-        {isDemo ? " Sample data shown — connect broker for live data." : ""}
       </p>
     </div>
   );

@@ -570,9 +570,9 @@ describe("ChartWidget", () => {
     expect(chartArea).toBeInTheDocument();
   });
 
-  it("labels Explore OHLCV as sample history", () => {
+  it("does not label Explore OHLCV with a Sample history chip", () => {
     render(<ChartWidget />);
-    expect(screen.getByText("Sample history")).toBeInTheDocument();
+    expect(screen.queryByText("Sample history")).not.toBeInTheDocument();
   });
 
   it("refreshes the quote when the account data scope changes", async () => {
@@ -1422,7 +1422,7 @@ describe("ChartWidget selection-follow (selectedSymbolAtom)", () => {
         <ChartWidget />
       </Provider>,
     );
-    expect(screen.getByText("Sample history")).toBeInTheDocument();
+    expect(screen.queryByText("Sample history")).not.toBeInTheDocument();
 
     act(() => {
       store.set(selectedSymbolAtom, { symbol: "TCS", exchange: "NSE" });
@@ -1431,7 +1431,7 @@ describe("ChartWidget selection-follow (selectedSymbolAtom)", () => {
     await waitFor(() => {
       expect(screen.getByText("TCS")).toBeInTheDocument();
     });
-    expect(screen.getByText("Sample history")).toBeInTheDocument();
+    expect(screen.queryByText("Sample history")).not.toBeInTheDocument();
   });
 
   it("does not silently retarget when the shared bus is empty", () => {

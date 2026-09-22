@@ -73,7 +73,7 @@ describe("PortfolioAllocationWidget", () => {
 
   it("shows sample data badge when disconnected", () => {
     render(<PortfolioAllocationWidget />, { wrapper });
-    expect(screen.getByText("Sample")).toBeTruthy();
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
   });
 
   it("renders the donut chart", () => {

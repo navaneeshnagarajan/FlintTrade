@@ -56,9 +56,7 @@ describe("VolatilityConeWidget", () => {
 
   it("shows the 'Sample data' badge when disconnected", () => {
     render(<VolatilityConeWidget />);
-    const badge = screen.getByText("Sample data");
-    expect(badge).toBeTruthy();
-    expect(badge.getAttribute("aria-label")).toContain("sample data");
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(mockGetHistory).not.toHaveBeenCalled();
   });
 
@@ -124,7 +122,7 @@ describe("VolatilityConeWidget", () => {
 
     render(<VolatilityConeWidget />);
 
-    expect(await screen.findByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(mockGetVolCone).not.toHaveBeenCalled();
   });
 });

@@ -1,8 +1,8 @@
 /**
- * FT-UX-001 — single primary-banner kind for shared chrome.
+ * Incident kind for the strip under TopBar.
  *
- * Explore / Practice always own the strip. Live risk beats a disconnected
- * feed so the desk never stacks two announcement banners.
+ * Mode honesty is always on and is not chosen here. Explore and Practice
+ * leave the incident slot empty. On Live, risk beats a disconnected feed.
  */
 
 import { useQuery } from "@tanstack/react-query";

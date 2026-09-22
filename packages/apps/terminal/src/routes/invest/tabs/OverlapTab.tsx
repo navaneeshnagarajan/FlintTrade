@@ -16,7 +16,6 @@ import {
   ShieldAlert,
   PieChart,
   BarChart3,
-  Eye,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -213,7 +212,6 @@ export function OverlapTab() {
 
   // Use sample data when no live holdings available
   const holdings = liveHoldings.length > 0 ? liveHoldings : SAMPLE_HOLDINGS;
-  const usingSample = liveHoldings.length === 0;
 
   const overlaps = useMemo(() => computeOverlaps(holdings), [holdings]);
   const sectors = useMemo(() => computeSectorConcentration(holdings), [holdings]);
@@ -223,16 +221,6 @@ export function OverlapTab() {
 
   return (
     <div className="space-y-6">
-      {/* Sample data notice */}
-      {usingSample && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-warning/5 border border-warning/20 rounded-lg">
-          <Eye className="size-3.5 text-warning shrink-0" />
-          <span className="text-xs text-warning">
-            Showing sample portfolio with deliberate overlaps. Connect your broker to see real data.
-          </span>
-        </div>
-      )}
-
       {/* Summary stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard

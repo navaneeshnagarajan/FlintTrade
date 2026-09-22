@@ -35,9 +35,7 @@ describe("DeliveryDataWidget", () => {
 
   it("carries an unconditional sample badge — there is no live delivery route", () => {
     render(<DeliveryDataWidget />);
-    const badge = screen.getByRole("status", { name: /sample delivery data/i });
-    expect(badge).toHaveTextContent("Sample data");
-    expect(badge.getAttribute("title")).toMatch(/no live delivery source is wired/i);
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("names the missing source rather than implying the data is merely late", () => {

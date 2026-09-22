@@ -145,8 +145,8 @@ describe("OI Chart expiry honesty (FT-TRADE-007)", () => {
   it("badges Explore sample expiries as Sample, not live", async () => {
     renderWidget();
 
-    expect(await screen.findByRole("status", { name: /sample data/i })).toBeInTheDocument();
-    expect(screen.getByTestId("expiry-strip")).toHaveTextContent("17 Sept");
+    expect(await screen.findByTestId("expiry-strip")).toHaveTextContent("17 Sept");
+    expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("status", { name: /^Live/ })).toBeNull();
   });
 
@@ -218,7 +218,7 @@ describe("OI Chart expiry honesty (FT-TRADE-007)", () => {
     await waitFor(() => expect(apiMocks.getOptionChain).toHaveBeenCalledWith(
       "NIFTY", "NFO", "2026-09-24", expect.any(AbortSignal), "explore:mock",
     ));
-    expect(screen.getByRole("status", { name: /sample data/i })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: /sample data/i })).not.toBeInTheDocument();
     expect(useOptionExpiryStore.getState().selectedByIdentity[
       optionExpiryIdentity("explore:mock", "NIFTY", "NFO")
     ]).toBe("2026-09-24");

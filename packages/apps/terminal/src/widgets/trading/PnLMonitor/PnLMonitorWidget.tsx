@@ -290,10 +290,7 @@ function PnLMonitorWidget(props: WidgetProps) {
     : mode === "live" && !accountReadsEnabled ? "unavailable"
     : null;
 
-  const provenance =
-    provenanceKind === "practice" ? "Practice data"
-    : provenanceKind === "sample" ? "Sample data"
-    : null;
+  const provenance = provenanceKind === "practice" ? "Practice data" : null;
 
   // Target / SL status badge (from the retired MTM Monitor), on the corrected
   // net P&L rather than a raw position sum.
@@ -321,16 +318,8 @@ function PnLMonitorWidget(props: WidgetProps) {
             <span
               className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 whitespace-nowrap"
               role="status"
-              aria-label={
-                provenance === "Practice data"
-                  ? "Showing practice-account data from your Practice account"
-                  : "Showing sample positions; not connected to a live broker"
-              }
-              title={
-                provenance === "Practice data"
-                  ? "Practice mode — P&L is computed from your Practice account."
-                  : "Not connected — P&L is computed from sample positions, not your real account."
-              }
+              aria-label="Showing practice-account data from your Practice account"
+              title="Practice mode — P&L is computed from your Practice account."
             >
               {provenance}
             </span>

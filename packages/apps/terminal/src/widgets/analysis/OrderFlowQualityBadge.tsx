@@ -19,6 +19,7 @@ const PROVENANCE_LABELS = {
 /** Compact quality disclosure shared by both order-flow visualisations. */
 export function OrderFlowQualityBadge({ data }: OrderFlowQualityBadgeProps) {
   const { quality, provenance } = getOrderFlowQualitySummary(data);
+  if (quality === "sample") return null;
   const provenanceLabel = PROVENANCE_LABELS[provenance];
   const presentation = quality === "exact"
     ? {
@@ -32,12 +33,7 @@ export function OrderFlowQualityBadge({ data }: OrderFlowQualityBadgeProps) {
             : "Estimated",
           className: "border-amber-500/40 text-amber-400 bg-amber-500/10",
         }
-      : quality === "sample"
-        ? {
-            label: "Sample data",
-            className: "border-amber-500/40 text-amber-400 bg-amber-500/10",
-          }
-        : {
+      : {
             label: "Quality unknown",
             className: "border-border-default text-text-muted bg-surface-hover",
           };

@@ -55,9 +55,7 @@ describe("OiPcrStrip", () => {
       />,
     );
 
-    const badge = screen.getByTestId("oi-pcr-sample-badge");
-    expect(badge).toHaveTextContent("Sample");
-    expect(badge).toHaveAccessibleName("Sample — not live open interest");
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
     expect(screen.queryByRole("status", { name: /^Live/ })).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: "OI profile by strike" })).toBeInTheDocument();
   });
@@ -79,7 +77,7 @@ describe("OiPcrStrip", () => {
 
     const strip = screen.getByTestId("oi-pcr-strip");
     expect(strip).toHaveTextContent("No OI for this expiry");
-    expect(screen.getByTestId("oi-pcr-sample-badge")).toBeInTheDocument();
+    expect(screen.queryByTestId("oi-pcr-sample-badge")).not.toBeInTheDocument();
     expect(screen.queryByRole("img", { name: "OI profile by strike" })).not.toBeInTheDocument();
     expect(strip.querySelector("[data-oi-bar]")).toBeNull();
     expect(screen.queryByText(/PCR/)).not.toBeInTheDocument();

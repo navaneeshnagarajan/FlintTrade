@@ -123,7 +123,7 @@ describe("Dealer Gamma widget — density view", () => {
 
     render(<GammaDensityWidget {...densityProps()} />, { wrapper });
 
-    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(screen.getByTestId("feature-teaser")).toHaveAttribute("data-feature", "Dealer Gamma");
     expect(screen.getByTestId("density-chart")).toBeInTheDocument();
     // Gamma-wall stat card present.
@@ -155,7 +155,7 @@ describe("Dealer Gamma widget — density view", () => {
     render(<GammaDensityWidget {...densityProps()} />, { wrapper });
 
     expect(await screen.findByText(/No future expiry/i)).toBeInTheDocument();
-    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh dealer gamma" })).toBeDisabled();
     expect(mockHook).toHaveBeenLastCalledWith("NIFTY", "NFO", "", false);
   });
@@ -195,7 +195,7 @@ describe("Dealer Gamma widget — density view", () => {
     render(<GammaDensityWidget {...densityProps()} />, { wrapper });
 
     await waitFor(() => expect(mockHook).toHaveBeenLastCalledWith("NIFTY", "NFO", "2099-07-30", true));
-    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("does not retain a live-labelled Gamma Density payload after a refetch error", async () => {
@@ -209,7 +209,7 @@ describe("Dealer Gamma widget — density view", () => {
     render(<GammaDensityWidget {...densityProps()} />, { wrapper });
 
     await waitFor(() => expect(mockHook).toHaveBeenLastCalledWith("NIFTY", "NFO", "2099-07-30", true));
-    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(screen.queryByText("16.4%")).not.toBeInTheDocument();
   });
 });
@@ -274,7 +274,7 @@ describe("Dealer Gamma widget — exposure view (absorbed GEX)", () => {
 
     expect(await screen.findByText(/network error/i)).toBeInTheDocument();
     // A failed fetch still shows the sample surface, and must say so.
-    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("renders sample exposure behind the teaser when disconnected", () => {
@@ -284,7 +284,7 @@ describe("Dealer Gamma widget — exposure view (absorbed GEX)", () => {
 
     expect(screen.getByTestId("feature-teaser")).toHaveAttribute("data-feature", "Dealer Gamma");
     expect(screen.getAllByTestId("plotly-chart")).toHaveLength(2);
-    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   // Provenance coverage the retired GEX suite never had: its flag check failed
@@ -308,7 +308,7 @@ describe("Dealer Gamma widget — exposure view (absorbed GEX)", () => {
     render(<GammaDensityWidget {...exposureProps()} />, { wrapper });
 
     await waitFor(() => expect(mockGexHook).toHaveBeenLastCalledWith("NIFTY", "NFO", "2099-07-30", true));
-    expect(await screen.findByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     // Rendered, but never without the affordance.
     expect(screen.getByText("+150.00M")).toBeInTheDocument();
   });
@@ -324,7 +324,7 @@ describe("Dealer Gamma widget — exposure view (absorbed GEX)", () => {
     render(<GammaDensityWidget {...exposureProps()} />, { wrapper });
 
     await waitFor(() => expect(mockGexHook).toHaveBeenLastCalledWith("NIFTY", "NFO", "2099-07-30", true));
-    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(screen.queryByText("+150.00M")).not.toBeInTheDocument();
   });
 

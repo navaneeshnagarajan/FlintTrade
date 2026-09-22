@@ -553,14 +553,7 @@ function SectorsTab({ initialView }: SectorsTabProps) {
           <span className="font-heading font-semibold text-sm text-text-secondary uppercase tracking-wider">
             {selectedSector && isMapView ? selectedSector : "Sectors"}
           </span>
-          {isMapView && isSampleSectorData && (
-            <Badge
-              variant="outline"
-              className="text-xxs px-1.5 py-0 border-warning/30 text-warning bg-warning/10"
-            >
-              Sample data
-            </Badge>
-          )}
+          
         </div>
 
         <div className="flex items-center gap-1.5">

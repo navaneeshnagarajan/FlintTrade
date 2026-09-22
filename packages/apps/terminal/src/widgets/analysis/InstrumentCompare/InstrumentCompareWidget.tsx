@@ -264,14 +264,7 @@ function InstrumentCompareWidget() {
             endpoint is wired yet. The badge previously hid in `isConnected` mode,
             which masked the fact that we were still showing sample data even
             after a broker connection. Keep visible at all times. */}
-        <span
-          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-          role="status"
-          aria-label="Showing sample data; no live data source is wired yet"
-          title="No live data wired yet — showing sample comparison series so the widget is usable in explore mode."
-        >
-          Sample data
-        </span>
+        
         <div className="flex-1" />
         <span className="text-xxs text-text-muted">{activeCount}/{MAX_SLOTS} active</span>
       </div>

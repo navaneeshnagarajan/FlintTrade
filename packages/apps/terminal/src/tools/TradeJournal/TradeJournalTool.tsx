@@ -152,14 +152,7 @@ export default function TradeJournalTool({ onClose }: Props) {
 
         {/* Status badges */}
         <div className="flex items-center gap-2 shrink-0">
-          {isExploreMode && !effectiveIsLoading && !effectiveIsError && (
-            <Badge
-              variant="outline"
-              className="text-xxs border-amber-500/40 bg-amber-500/10 text-amber-300 font-normal"
-            >
-              Sample Data
-            </Badge>
-          )}
+          
           {effectiveIsLoading && (
             <span className="text-xs text-text-muted flex items-center gap-1">
               <RefreshCw size={11} className="animate-spin" />

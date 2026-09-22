@@ -166,12 +166,12 @@ describe("ConditionScannerWidget", () => {
     expect(await screen.findByText("RELIANCE")).toBeInTheDocument();
     expect(screen.getByText(/1 of 50 matched/)).toBeInTheDocument();
     // response-driven badge: the backend says it scanned sample bars
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     // …and the absorbed banner, which names the remedy the badge only carries
     // in a tooltip.
     expect(
-      screen.getByText(/Sample scan — connect a broker read account/i),
-    ).toBeInTheDocument();
+      screen.queryByText(/Sample scan — connect a broker read account/i),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("RSI below 30", { selector: "td *, td" })).toBeInTheDocument();
   });
 
@@ -195,8 +195,8 @@ describe("ConditionScannerWidget", () => {
     await chooseScanAndRun();
 
     expect(await screen.findByText("RELIANCE")).toBeInTheDocument();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
-    expect(screen.getByText(/Sample scan — connect a broker read account/i)).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sample scan — connect a broker read account/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
     expect(screen.queryByText(/Live scan/i)).not.toBeInTheDocument();
   });
@@ -321,8 +321,8 @@ describe("ConditionScannerWidget", () => {
     expect(await screen.findByText("Auto")).toBeInTheDocument();
     expect(screen.getByText("Banking")).toBeInTheDocument();
     expect(
-      screen.getByText(/Sample data — leave Explore and connect OpenAlgo/i),
-    ).toBeInTheDocument();
+      screen.queryByText(/Sample data — leave Explore and connect OpenAlgo/i),
+    ).not.toBeInTheDocument();
     // scan controls belong to the scans view only
     expect(screen.queryByRole("button", { name: /^run$/i })).not.toBeInTheDocument();
   });

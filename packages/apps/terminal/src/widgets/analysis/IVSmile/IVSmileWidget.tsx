@@ -498,15 +498,6 @@ function IVSmileWidget(props: WidgetProps) {
           >
             Live
           </span>
-        ) : isSample ? (
-          <span
-            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-            role="status"
-            aria-label="Showing sample IV curves while disconnected"
-            title="Disconnected Explore state; values are deterministic sample data."
-          >
-            Sample data
-          </span>
         ) : loading ? (
           <span
             className="inline-flex items-center rounded border border-border-default bg-surface-hover px-1.5 py-0.5 text-[10px] font-medium text-text-muted"

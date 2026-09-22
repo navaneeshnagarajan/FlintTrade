@@ -159,7 +159,7 @@ describe("FundingRateWidget", () => {
     await waitFor(() => {
       expect(screen.queryByText("BTCUSD")).toBeTruthy();
     });
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Refresh funding rates")).toBeNull();
   });
 
@@ -175,7 +175,7 @@ describe("FundingRateWidget", () => {
     await waitFor(() => {
       expect(screen.queryByText("BTCUSD")).toBeTruthy();
     });
-    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Refresh funding rates")).toBeNull();
     expect(screen.queryByText(/Updated:/)).toBeNull();
   });
@@ -348,7 +348,7 @@ describe("FundingRateWidget", () => {
     mockUseIsCryptoBroker.mockReturnValue(false);
     render(<FundingRateWidget />, { wrapper });
 
-    expect(await screen.findByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByTestId("fundingrate-crypto-gate")).not.toBeInTheDocument();
   });
 });

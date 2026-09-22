@@ -236,15 +236,7 @@ export function CalendarTab() {
       <div className="flex-none flex items-center gap-2 px-3 py-1.5 bg-surface-card border-b border-border-default">
         <Calendar size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Daily P&L Calendar</span>
-        {isExplore && (
-          <span
-            className="ml-1 px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-            role="status"
-            aria-label="Showing sample journal data — explore mode"
-          >
-            Sample data
-          </span>
-        )}
+        
         {!isExplore && journalQuery.isError && (
           <span className="ml-1 text-xxs text-loss" role="status">Failed to load journal</span>
         )}

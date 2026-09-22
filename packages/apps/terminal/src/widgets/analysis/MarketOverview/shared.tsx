@@ -1,11 +1,8 @@
 /**
  * Shared provenance chrome for the Market Overview widget.
  *
- * Every section that can be either live or sample renders a {@link ProvenanceBadge}
- * driven by a fail-closed check on its own source; sections with no live path
- * at all render {@link ProvenanceBadge} unconditionally. The "one badge that
- * lies trains the operator to ignore the one that matters" rule from the
- * source widgets is preserved verbatim.
+ * Live sections still show a Live chip. Sample chips are retired: the Mode
+ * honesty bar owns that disclaimer, so a sample section stays quiet.
  */
 
 import { ProvenanceBadge } from "@/components/data/ProvenanceBadge";
