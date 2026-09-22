@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { listBrokerAccounts } from "@/services/brokerAccountsApi";
 import { useBrokerStore } from "@/stores/brokerStore";
-import { noteObservedFailure, useOperatorSignalStore } from "@/stores/operatorSignalStore";
+import { clearBrokerFault, noteObservedFailure, useOperatorSignalStore } from "@/stores/operatorSignalStore";
 
 export const BROKER_ACCOUNTS_QUERY_KEY = ["broker", "accounts"] as const;
 
@@ -30,14 +30,16 @@ export function useBrokerAccounts(enabled = true) {
     const httpStatus = "status" in query.error && typeof query.error.status === "number"
       ? query.error.status
       : null;
-    noteObservedFailure({ message, httpStatus });
+    noteObservedFailure({ message, httpStatus, provenance: "broker" });
   }, [query.error]);
 
   useEffect(() => {
-    if (enabled && query.data) {
-      setAccounts(query.data);
-    }
-  }, [enabled, query.data, setAccounts]);
+    // dataUpdatedAt moves on every successful fetch, including a structurally
+    // unchanged account list, so a recovered broker is not left latched.
+    if (!enabled || query.status !== "success" || query.data === undefined) return;
+    setAccounts(query.data);
+    clearBrokerFault();
+  }, [enabled, query.data, query.dataUpdatedAt, query.status, setAccounts]);
 
   // Return query for loading/error state only — UI reads accounts from store
   return { isLoading: query.isLoading, error: query.error, refetch: query.refetch };

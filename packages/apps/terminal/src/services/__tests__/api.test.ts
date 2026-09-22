@@ -3672,6 +3672,32 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(body).not.toHaveProperty("apikey");
   });
 
+  it("refuses a Live placeOrder while a money-path incident is latched and still allows Practice", async () => {
+    const { useOperatorSignalStore } = await import("@/stores/operatorSignalStore");
+    useOperatorSignalStore.setState({ brokerRateLimited: true });
+    mockConnectionState.apiKey = "test-key-123";
+    mockModeState.mode = "live";
+    const order = {
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY",
+      quantity: 1,
+      product: "MIS",
+      orderType: "MARKET",
+    } as unknown as Parameters<typeof placeOrder>[0];
+
+    await expect(placeOrder(order)).rejects.toThrow(/rate-limit/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    mockModeState.mode = "practice";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "success", data: { orderId: "PR-1" } }),
+    );
+    await placeOrder(order, { mode: "practice" });
+    expect(fetchSpy).toHaveBeenCalled();
+    useOperatorSignalStore.setState({ brokerRateLimited: false });
+  });
+
   it("fails closed instead of retargeting when the active native account is not yet connected", async () => {
     // Re-audit finding #1: after a reload the persisted active native account
     // rehydrates as not-yet-connected (status !== "connected") until the first

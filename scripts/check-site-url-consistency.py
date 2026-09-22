@@ -43,6 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # step with reality — invariant 4 above fails the check when it drifts, and
 # scripts/apply-site-url.py rewrites exactly these files.
 SITE_URL_FILES = [
+    "packages/apps/terminal/src/lib/operatorProbeUrls.ts",
     "packages/apps/terminal/src/tools/Settings/AboutSection.tsx",
     "docs/DESKTOP.md",
     "docs/USER_GUIDE.md",

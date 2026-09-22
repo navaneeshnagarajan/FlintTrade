@@ -186,11 +186,17 @@ export function honestBrokerStatus(input: {
   return null;
 }
 
-export function classifyObservedFailure(input: {
-  message: string;
-  httpStatus: number | null;
-}): ObservedFailure | null {
+export type FailureProvenance = "general" | "broker" | "order";
+
+export function classifyObservedFailure(
+  input: {
+    message: string;
+    httpStatus: number | null;
+  },
+  provenance: FailureProvenance = "general",
+): ObservedFailure | null {
   const failureClass = classFromText(input.message, input.httpStatus);
+  if (isBrokerTrustClass(failureClass) && provenance === "general") return null;
   if (failureClass === "freeze") return { kind: "freeze" };
   if (failureClass === "broker_rate_limit") {
     return { kind: "rate_limit", message: input.message, httpStatus: input.httpStatus };

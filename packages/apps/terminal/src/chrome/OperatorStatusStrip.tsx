@@ -45,11 +45,13 @@ export function OperatorStatusStrip({
     if (retrying) return;
     setRetrying(true);
     try {
-      if (incident?.muteBrokerSmoke) {
+      const failureClass = incident?.failureClass ?? "";
+      const brokerTrust = failureClass === "exchange" || failureClass.startsWith("broker_");
+      if (brokerTrust) {
         await queryClient.refetchQueries({ queryKey: BROKER_ACCOUNTS_QUERY_KEY });
         const state = queryClient.getQueryState(BROKER_ACCOUNTS_QUERY_KEY);
         if (state?.status === "success") {
-          useOperatorSignalStore.getState().clearBrokerRateLimit();
+          useOperatorSignalStore.getState().clearBrokerFault();
         }
       }
       await queryClient.refetchQueries({ queryKey: ["operator", "ping"] });

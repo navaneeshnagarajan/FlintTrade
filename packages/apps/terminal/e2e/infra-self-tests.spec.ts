@@ -7,6 +7,7 @@ import {
   createSyntheticFixtureRegistry,
   expect as journeyExpect,
   registerExploreAdvisorStatusProbe,
+  registerOperatorStatusProbes,
   test as journeyTest,
   type BenignConsoleError,
   type HttpMethod,
@@ -328,6 +329,36 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
     });
     expect(registry.callCount("GET", ADVISOR_STATUS_PATH)).toBe(1);
     await expect(registry.dispose()).resolves.toBeUndefined();
+  });
+
+  baseTest("registers operator status probes as reads", async ({ page }) => {
+    const { EDGE_PROBE_URLS, PUBLIC_INTERNET_PROBE_URL } = await import("../src/lib/operatorProbeUrls");
+    const registry = await createRegistry(page, "operator status probes");
+    registerOperatorStatusProbes(registry, { expectedCalls: { minimum: 1, maximum: 2 } });
+    await expect(fetchJson(page, "GET", "/ft-api/api/v1/ping")).resolves.toEqual({ status: "ok" });
+    await expect(fetchJson(page, "GET", "/ft-api/health")).resolves.toEqual({ status: "healthy" });
+    await expect(fetchJson(page, "GET", "/ft-api/v1/config/llm")).resolves.toMatchObject({
+      status: "success",
+    });
+    await page.evaluate(async ({ edgeUrls, internetUrl }) => {
+      for (const url of edgeUrls) {
+        await fetch(url, { mode: "no-cors" });
+      }
+      await fetch(internetUrl, { mode: "no-cors" });
+    }, {
+      edgeUrls: [...EDGE_PROBE_URLS],
+      internetUrl: PUBLIC_INTERNET_PROBE_URL,
+    });
+    expect(registry.callCount("GET", "/ft-api/api/v1/ping")).toBe(1);
+    expect(registry.callCount("GET", "/")).toBe(2);
+    await expect(registry.dispose()).resolves.toBeUndefined();
+  });
+
+  baseTest("does not accept a POST on the operator ping probe", async ({ page }) => {
+    const registry = await createRegistry(page, "operator ping write");
+    registerOperatorStatusProbes(registry, { expectedCalls: 1 });
+    await expectFetchToFail(page, "POST", "/ft-api/api/v1/ping");
+    await expect(registry.dispose()).rejects.toThrow(/method mismatch: received POST \/ft-api\/api\/v1\/ping/);
   });
 
   baseTest("assertSatisfied checks usage without disposing the registry", async ({ page }) => {

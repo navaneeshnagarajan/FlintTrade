@@ -680,7 +680,7 @@ function OrderPadWidget(props: WidgetProps) {
       const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
         ? err.status
         : null;
-      noteObservedFailure({ message: msg, httpStatus });
+      noteObservedFailure({ message: msg, httpStatus, provenance: "order" });
       const retryable = isRetryableError(msg) && !/rate limit/i.test(msg);
       showToast("error", msg, 6000, retryable);
       emitNotification({

@@ -97,7 +97,10 @@ async function throwHttpError(resp: Response, endpoint: string): Promise<never> 
     // Not a JSON body — fall through to the generic message.
   }
   const resolved = message ?? `FT API ${endpoint}: HTTP ${resp.status}`;
-  noteObservedFailure({ message: resolved, httpStatus: resp.status });
+  // General helpers have no broker or order provenance. Host and backend
+  // faults may still latch; broker classes must not, or Chat and backtests
+  // would mute Live.
+  noteObservedFailure({ message: resolved, httpStatus: resp.status, provenance: "general" });
   throw new FtApiError(resolved, resp.status, data);
 }
 

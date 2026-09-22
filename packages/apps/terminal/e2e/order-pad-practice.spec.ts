@@ -1,6 +1,6 @@
 import type { Page, Request } from "@playwright/test";
 
-import { expect, registerExploreAdvisorStatusProbe, test } from "./fixture-registry";
+import { expect, registerExploreAdvisorStatusProbe, registerOperatorStatusProbes, test } from "./fixture-registry";
 
 const LIVE_AUTHORITY_PAYLOAD = {
   sub: "synthetic-order-pad-operator",
@@ -205,7 +205,10 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
       return { json: { status: "success", data: { positions: [] } } };
     },
   });
-  registerExploreAdvisorStatusProbe(syntheticApi, { expectedCalls: 2 });
+  // The desk mounts Chat readiness beside the tutor pill. Strict Mode can
+  // invoke each read twice; the place handler below stays the JWT check.
+  registerExploreAdvisorStatusProbe(syntheticApi, { expectedCalls: { minimum: 2, maximum: 6 } });
+  registerOperatorStatusProbes(syntheticApi, { expectedCalls: { minimum: 1, maximum: 4 } });
   syntheticApi.register({
     name: "read inactive safety configuration",
     method: "GET",

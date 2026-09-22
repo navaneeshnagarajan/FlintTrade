@@ -364,6 +364,24 @@ describe("operator incident classifier", () => {
         httpStatus: null,
       }),
     ).toMatchObject({ kind: "reject", failureClass: "backend_unreachable" });
+    expect(
+      classifyObservedFailure({
+        message: "Internal server error",
+        httpStatus: 500,
+      }),
+    ).toBeNull();
+    expect(
+      classifyObservedFailure({
+        message: "Too many requests",
+        httpStatus: 429,
+      }),
+    ).toBeNull();
+    expect(
+      classifyObservedFailure({
+        message: "Broker REST bad gateway",
+        httpStatus: 502,
+      }, "order"),
+    ).toMatchObject({ kind: "reject", failureClass: "broker_rest" });
   });
 
   it("keeps a real exchange reject when the session clock is also closed", () => {

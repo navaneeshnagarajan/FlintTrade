@@ -45,6 +45,7 @@ interface OperatorSignalStore extends OperatorSignalSnapshot {
   setPublicInternet: (publicInternet: OperatorSignalSnapshot["publicInternet"]) => void;
   setLlmChrome: (llmChrome: string | null) => void;
   clearBrokerRateLimit: () => void;
+  clearBrokerFault: () => void;
   applyObserved: (
     observed: NonNullable<ReturnType<typeof classifyObservedFailure>>,
     broker: string | null,
@@ -69,10 +70,14 @@ export const useOperatorSignalStore = create<OperatorSignalStore>((set, get) => 
       && classifyObservedFailure({
         message: state.brokerReject.message,
         httpStatus: state.brokerReject.httpStatus,
-      })?.kind === "rate_limit"
+      }, "broker")?.kind === "rate_limit"
       ? null
       : state.brokerReject,
   })),
+  clearBrokerFault: () => set({
+    brokerRateLimited: false,
+    brokerReject: null,
+  }),
   applyObserved: (observed, broker) => {
     if (observed.kind === "freeze") {
       set({ nativeHttpFreeze: true });
@@ -103,15 +108,20 @@ export function resetOperatorSignals(): void {
   useOperatorSignalStore.setState(INITIAL);
 }
 
+export function clearBrokerFault(): void {
+  useOperatorSignalStore.getState().clearBrokerFault();
+}
+
 export function noteObservedFailure(input: {
   message: string;
   httpStatus: number | null;
   broker?: string | null;
+  provenance?: "general" | "broker" | "order";
 }): void {
   const observed = classifyObservedFailure({
     message: input.message,
     httpStatus: input.httpStatus,
-  });
+  }, input.provenance ?? "general");
   if (!observed) return;
   useOperatorSignalStore.getState().applyObserved(observed, input.broker ?? null);
 }

@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { BROKER_ACCOUNTS_QUERY_KEY, useBrokerAccounts } from "@/hooks/useBrokerAccounts";
+import { clearBrokerFault } from "@/stores/operatorSignalStore";
 import { canPromotePrimaryAccount } from "@/lib/brokerAccountRules";
 import { brokerAccountKey, useBrokerStore } from "@/stores/brokerStore";
 import {
@@ -602,6 +603,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
         setAccountLabel("");
       }
       setNotice(r.message);
+      if (!r.oauth) clearBrokerFault();
       // OAuth completes out-of-band. Settings has no passive Explore poll, so
       // keep a bounded, user-triggered handshake alive until this exact account
       // appears; setup relies on its existing continuous observer.
@@ -678,6 +680,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
     onSuccess: (_r, sel) => {
       setError("");
       setNotice(`${sel.adapter} account ${sel.account} re-authenticated.`);
+      clearBrokerFault();
       invalidateAccountQueries();
     },
     onError: (e: unknown, sel) => {

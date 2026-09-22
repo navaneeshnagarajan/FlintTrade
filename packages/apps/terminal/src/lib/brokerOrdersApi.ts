@@ -205,7 +205,7 @@ async function request<T>(
     });
   } catch {
     const message = "Cannot reach the FlintTrade backend — check that it is running.";
-    noteObservedFailure({ message, httpStatus: null });
+    noteObservedFailure({ message, httpStatus: null, provenance: "order" });
     throw new BrokerOrdersApiError(message);
   }
 
@@ -219,7 +219,7 @@ async function request<T>(
 
   if (!resp.ok || isErrorBody) {
     const failureMessage = message ?? `Broker orders API ${path}: HTTP ${resp.status}`;
-    noteObservedFailure({ message: failureMessage, httpStatus: resp.status });
+    noteObservedFailure({ message: failureMessage, httpStatus: resp.status, provenance: "order" });
     throw new BrokerOrdersApiError(failureMessage, resp.status);
   }
 

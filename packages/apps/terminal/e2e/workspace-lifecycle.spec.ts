@@ -1,4 +1,4 @@
-import { expect, registerExploreAdvisorStatusProbe, test } from "./fixture-registry";
+import { expect, registerExploreAdvisorStatusProbe, registerOperatorStatusProbes, test } from "./fixture-registry";
 import { seedExploreDemoSession } from "./helpers";
 
 interface PersistedWorkspaceState {
@@ -28,6 +28,7 @@ test("creates, clones, switches, and restores two canonical workspaces", async (
   registerExploreAdvisorStatusProbe(syntheticApi, {
     expectedCalls: { minimum: 1, maximum: 8 },
   });
+  registerOperatorStatusProbes(syntheticApi);
   await page.goto("/trade");
 
   const workspace = page.locator('[data-tour-target="workspace"]');
