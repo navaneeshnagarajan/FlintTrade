@@ -38,7 +38,7 @@ revision and may be newer than an installed app.
 | Tailwind CSS 4, Radix UI, shadcn/ui patterns | Styling, design tokens, and accessible interactive primitives. shadcn components are owned source files, not a single runtime package with one version. |
 | FlexLayout 0.11 and FINOS FDC3 2 | Dockable panels and saved workspaces; in-process symbol linking and widget intents. |
 | Lightweight Charts 5 | Price charts through FlintTrade's shared chart runtime and theme. [TradingView attribution](REFERENCES.md) is also visible in About. |
-| FINOS Perspective 3, Glide Data Grid 6, TanStack Table 9 | Portfolio pivot analytics, canvas grids, and headless sortable/filterable tables respectively. |
+| FINOS Perspective 3, Glide Data Grid 6, TanStack Table 8 | Portfolio pivot analytics, canvas grids, and headless sortable/filterable tables respectively. |
 | Zustand 5, Jotai 2, TanStack Query 5 | UI/derived state, streaming quote atoms, and cached REST responses respectively. See the [state boundaries](ARCHITECTURE.md#state-architecture). |
 | React Router 8, React Hook Form 7, Zod 4 | Route loading, form state, and runtime validation. |
 | Three.js, React Three Fiber, Drei, Plotly | Specialist 3D and analytical visualisations. Shared standard charts use FlintTrade's design-system primitives. |

@@ -56,12 +56,13 @@ import {
 import type { WidgetProps } from "@/types/widgets";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
-  useTable,
+  useReactTable,
+  getCoreRowModel,
+  getSortedRowModel,
   flexRender,
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { sortedTableFeatures } from "@/lib/tableFeatures";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -128,21 +129,22 @@ function fmtPct(v: number): string {
 // Sortable table (absorbed from the retired scanner)
 // ---------------------------------------------------------------------------
 
-interface SortableTableProps<T extends object> {
+interface SortableTableProps<T> {
   data: T[];
-  columns: ColumnDef<typeof sortedTableFeatures, T, unknown>[];
+  columns: ColumnDef<T, unknown>[];
   label: string;
 }
 
-function SortableTable<T extends object>({ data, columns, label }: SortableTableProps<T>) {
+function SortableTable<T>({ data, columns, label }: SortableTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>([]);
 
-  const table = useTable({
-    features: sortedTableFeatures,
+  const table = useReactTable({
     data,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
   });
 
   return (
@@ -249,7 +251,7 @@ function AddToWatchlistBtn({ symbol, exchange }: { symbol: string; exchange: str
 // Column definitions
 // ---------------------------------------------------------------------------
 
-function scanColumns(): ColumnDef<typeof sortedTableFeatures, ScannerResultRow, unknown>[] {
+function scanColumns(): ColumnDef<ScannerResultRow, unknown>[] {
   return [
     {
       accessorKey: "symbol",
@@ -336,7 +338,7 @@ function scanColumns(): ColumnDef<typeof sortedTableFeatures, ScannerResultRow, 
   ];
 }
 
-function sectorColumns(): ColumnDef<typeof sortedTableFeatures, SectorMoverRow, unknown>[] {
+function sectorColumns(): ColumnDef<SectorMoverRow, unknown>[] {
   return [
     {
       accessorKey: "sector",

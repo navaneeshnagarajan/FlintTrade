@@ -99,10 +99,11 @@ import { cn } from "@/lib/utils";
 import {
   type ColumnDef,
   flexRender,
+  getCoreRowModel,
+  getSortedRowModel,
   type SortingState,
-  useTable,
+  useReactTable,
 } from "@tanstack/react-table";
-import { sortedTableFeatures } from "@/lib/tableFeatures";
 import {
   Table,
   TableBody,
@@ -903,7 +904,7 @@ function PositionsWidget(props: WidgetProps) {
     [renderRowActions, rows],
   );
 
-  const columns = useMemo<ColumnDef<typeof sortedTableFeatures, PositionRow>[]>(
+  const columns = useMemo<ColumnDef<PositionRow>[]>(
     () => [
       {
         accessorKey: "symbol",
@@ -977,12 +978,13 @@ function PositionsWidget(props: WidgetProps) {
     [renderRowActions],
   );
 
-  const table = useTable({
-    features: sortedTableFeatures,
+  const table = useReactTable({
     data: rows,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
   });
 
   const emptyMessage = isExplore

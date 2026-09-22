@@ -302,7 +302,7 @@ identify the exact resolved versions; the table below describes version families
 | Analytics | FINOS Perspective 3.8 | WASM streaming pivot engine behind the Portfolio Pivot widget. |
 | Charts | Flint chart core over Lightweight Charts v5 | Runtime adapter, shared theme, drawing, indicator, and mini-chart contracts. |
 | Streaming grid | Glide Data Grid | Canvas-rendered, 100K updates/sec. |
-| Static grid | TanStack Table v9 | Headless, sortable, filterable. |
+| Static grid | TanStack Table v8 | Headless, sortable, filterable. |
 | State | Zustand v5 + Jotai + TanStack Query v5 | Separation of concerns by boundary. |
 | Forms | react-hook-form + zod | Runtime validation, type inference. |
 | Router | react-router (v8; RouterProvider from `react-router/dom`) | Lazy-loaded route modules. |
