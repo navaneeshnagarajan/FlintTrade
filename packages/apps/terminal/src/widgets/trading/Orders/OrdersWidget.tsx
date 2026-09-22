@@ -1,6 +1,6 @@
 // Migrated to TSX — Phase 4 Batch 1
 // Replaces direct getOrderbook() call with useOrders() TanStack Query hook.
-// Uses TanStack Table + shadcn Table + shadcn Badge for status.
+// Uses TanStack Table v8 + shadcn Table + shadcn Badge for status.
 // Open orders carry per-order Cancel and Modify actions wired to the REAL
 // broker order id through the existing gated cancel/modify routes.
 import { useMemo, useState, useEffect, useCallback, useRef, memo } from "react";
@@ -10,10 +10,11 @@ import { Input } from "@/components/ui/input";
 import {
   type ColumnDef,
   flexRender,
+  getCoreRowModel,
+  getSortedRowModel,
   type SortingState,
-  useTable,
+  useReactTable,
 } from "@tanstack/react-table";
-import { sortedTableFeatures } from "@/lib/tableFeatures";
 import {
   Table,
   TableBody,
@@ -591,7 +592,7 @@ function OrdersWidget(_props: WidgetProps) {
     [modifyIntent, refreshOrders],
   );
 
-  const columns = useMemo<ColumnDef<typeof sortedTableFeatures, OrderRow>[]>(
+  const columns = useMemo<ColumnDef<OrderRow>[]>(
     () => [
       {
         accessorKey: "symbol",
@@ -615,7 +616,7 @@ function OrdersWidget(_props: WidgetProps) {
       },
       {
         id: "quantity",
-        accessorFn: (row) => row.quantityNum,
+        accessorFn: (row) => Number(row.quantity),
         header: "Qty",
         cell: ({ row }) => (
           <span className="font-mono tabular-nums">{row.original.quantity}</span>
@@ -623,7 +624,7 @@ function OrdersWidget(_props: WidgetProps) {
       },
       {
         id: "price",
-        accessorFn: (row) => row.priceNum,
+        accessorFn: (row) => (row.price === "MKT" ? 0 : Number(row.price)),
         header: "Price",
         cell: ({ row }) => (
           <span className="font-mono tabular-nums">{row.original.price}</span>
@@ -707,12 +708,13 @@ function OrdersWidget(_props: WidgetProps) {
     [canManageOrders, isExplore, actionPending, currentIdentity],
   );
 
-  const table = useTable({
-    features: sortedTableFeatures,
+  const table = useReactTable({
     data: rows,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
   });
 
   return (

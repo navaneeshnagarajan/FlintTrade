@@ -23,12 +23,13 @@
 
 import { useState } from "react";
 import {
-  useTable,
+  useReactTable,
+  getCoreRowModel,
+  getSortedRowModel,
   type ColumnDef,
   type SortingState,
   flexRender,
 } from "@tanstack/react-table";
-import { sortedTableFeatures } from "@/lib/tableFeatures";
 import {
   AlertCircle,
   ArrowUpDown,
@@ -111,7 +112,7 @@ function TableSkeleton() {
 
 // ─── Column definitions ──────────────────────────────────────────────────────
 
-const columns: ColumnDef<typeof sortedTableFeatures, StockFundamentals>[] = [
+const columns: ColumnDef<StockFundamentals>[] = [
   {
     accessorKey: "symbol",
     header: "Symbol",
@@ -239,12 +240,13 @@ export function StocksTab() {
   const stocks = data?.stocks ?? [];
   const sectors = data?.sectors ?? [];
 
-  const table = useTable({
-    features: sortedTableFeatures,
+  const table = useReactTable({
     data: stocks,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
   });
 
   // ─── Render ────────────────────────────────────────────────────────────
