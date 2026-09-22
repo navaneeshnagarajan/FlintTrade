@@ -15,6 +15,7 @@ function closedHost(): OperatorSignals {
     transportReason: null,
     health: "unhealthy",
     publicSite: "ok",
+    publicInternet: "unknown",
     nativeHttpFreeze: false,
     brokerRateLimited: false,
     brokerReject: null,

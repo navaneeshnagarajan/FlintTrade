@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { probeDeskHealth } from "../operatorProbes";
+import { INSTALL_PROBE_URL, probeDeskHealth, probePublicInternet, probePublicSite, PUBLIC_INTERNET_PROBE_URL } from "../operatorProbes";
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -34,5 +34,30 @@ describe("desk health probe", () => {
   it("reads overall_status when that is the field the desk returned", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ overall_status: "unhealthy" }, 503));
     await expect(probeDeskHealth(asFetch(fetchImpl))).resolves.toBe("unhealthy");
+  });
+});
+
+describe("edge/CDN and public-internet probes", () => {
+  it("treats an install fetch failure as a public-site miss", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === INSTALL_PROBE_URL) throw new Error("failed to fetch");
+      return new Response(null, { status: 200 });
+    });
+    await expect(probePublicSite(asFetch(fetchImpl))).resolves.toBe("unreachable");
+  });
+
+  it("probes a neutral host for the public internet, not the product site", async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL) => new Response(null, { status: 200 }));
+    await expect(probePublicInternet(asFetch(fetchImpl))).resolves.toBe("ok");
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(PUBLIC_INTERNET_PROBE_URL);
+    expect(PUBLIC_INTERNET_PROBE_URL).not.toContain("flinttrade.vercel.app");
+    expect(PUBLIC_INTERNET_PROBE_URL).not.toContain("dhan");
+  });
+
+  it("reports the public internet unreachable when that fetch throws", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("getaddrinfo ENOTFOUND");
+    });
+    await expect(probePublicInternet(asFetch(fetchImpl))).resolves.toBe("unreachable");
   });
 });

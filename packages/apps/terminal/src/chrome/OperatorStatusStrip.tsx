@@ -55,6 +55,7 @@ export function OperatorStatusStrip({
       await queryClient.refetchQueries({ queryKey: ["operator", "ping"] });
       await queryClient.refetchQueries({ queryKey: ["operator", "health"] });
       await queryClient.refetchQueries({ queryKey: ["operator", "edge"] });
+      await queryClient.refetchQueries({ queryKey: ["operator", "internet"] });
     } finally {
       setRetrying(false);
     }

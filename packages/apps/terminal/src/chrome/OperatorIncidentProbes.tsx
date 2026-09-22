@@ -5,7 +5,7 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAdvisorLlmStatus } from "@/hooks/useAdvisorLlmStatus";
-import { probeDeskHealth, probeLocalPing, probePublicSite } from "@/lib/operatorProbes";
+import { probeDeskHealth, probeLocalPing, probePublicInternet, probePublicSite } from "@/lib/operatorProbes";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 
 export function OperatorIncidentProbes() {
@@ -31,6 +31,14 @@ export function OperatorIncidentProbes() {
     refetchOnWindowFocus: false,
     staleTime: 60_000,
   });
+  const internet = useQuery({
+    queryKey: ["operator", "internet"],
+    queryFn: () => probePublicInternet(),
+    refetchInterval: 300_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
+  });
   const llm = useAdvisorLlmStatus();
 
   useEffect(() => {
@@ -47,6 +55,11 @@ export function OperatorIncidentProbes() {
     if (!edge.data) return;
     useOperatorSignalStore.getState().setPublicSite(edge.data);
   }, [edge.data]);
+
+  useEffect(() => {
+    if (!internet.data) return;
+    useOperatorSignalStore.getState().setPublicInternet(internet.data);
+  }, [internet.data]);
 
   useEffect(() => {
     useOperatorSignalStore.getState().setLlmChrome(llm.chrome);

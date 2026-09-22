@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyObservedFailure,
   classifyOperatorSignals,
+  EDGE_STATUS_LINKS,
   honestBrokerStatus,
   liveWritesMuted,
   type OperatorSignals,
@@ -14,6 +15,7 @@ function signals(overrides: Partial<OperatorSignals> = {}): OperatorSignals {
     transportReason: null,
     health: "healthy",
     publicSite: "ok",
+    publicInternet: "unknown",
     nativeHttpFreeze: false,
     brokerRateLimited: false,
     brokerReject: null,
@@ -94,10 +96,9 @@ const MONEY_PATH_FIXTURES: Array<{ name: string; signals: OperatorSignals }> = [
   {
     name: "network_local",
     signals: signals({
-      localPing: "transport",
-      transportReason: "dns",
+      localPing: "ok",
+      publicInternet: "unreachable",
       publicSite: "unreachable",
-      health: "unknown",
     }),
   },
 ];
@@ -153,13 +154,17 @@ describe("operator incident classifier", () => {
       signals({ publicSite: "unreachable", localPing: "ok" }),
     );
     expect(incident?.failureClass).toBe("edge");
+    expect(incident?.plainClass).toBe("edge/CDN");
+    expect(incident?.headline).toBe("Public site/CDN unreachable");
     expect(incident?.level).toBe("info");
     expect(incident?.moneyPath).toBe(false);
     expect(liveWritesMuted(incident)).toBe(false);
-    expect(incident?.rectify.toLowerCase()).toContain("public site");
-    expect(incident?.headline.toLowerCase()).toContain("cdn");
     expect(incident?.headline.toLowerCase()).not.toContain("cloudflare");
     expect(incident?.rectify.toLowerCase()).not.toContain("cloudflare");
+    expect(EDGE_STATUS_LINKS.map((link) => link.href)).toEqual([
+      "https://www.cloudflarestatus.com/",
+      "https://www.vercel-status.com/",
+    ]);
     expect(
       honestBrokerStatus({
         connected: true,
@@ -170,16 +175,58 @@ describe("operator incident classifier", () => {
     ).toBe("Connected (read)");
   });
 
-  it("does not blame the public site when the local uplink is down", () => {
+  it("does not paint network_local when the process itself did not answer", () => {
     const incident = classifyOperatorSignals(
       signals({
         localPing: "transport",
-        transportReason: "failed_fetch",
+        transportReason: "timeout",
         publicSite: "unreachable",
+        publicInternet: "unreachable",
         health: "unknown",
       }),
     );
+    expect(incident?.failureClass).toBe("backend_unreachable");
+  });
+
+  it("paints network_local only when the process is up and the public internet failed", () => {
+    const incident = classifyOperatorSignals(
+      signals({
+        localPing: "ok",
+        publicInternet: "unreachable",
+        publicSite: "unreachable",
+      }),
+    );
     expect(incident?.failureClass).toBe("network_local");
+    expect(incident?.moneyPath).toBe(true);
+  });
+
+  it("keeps a site/CDN miss as edge/CDN when the public internet probe is still ok", () => {
+    const incident = classifyOperatorSignals(
+      signals({
+        localPing: "ok",
+        publicSite: "unreachable",
+        publicInternet: "ok",
+      }),
+    );
+    expect(incident?.failureClass).toBe("edge");
+    expect(incident?.plainClass).toBe("edge/CDN");
+  });
+
+  it("does not invent network_local from a single broker timeout", () => {
+    const incident = classifyOperatorSignals(
+      signals({
+        localPing: "ok",
+        publicInternet: "ok",
+        publicSite: "ok",
+        brokerReject: {
+          message: "Broker request timed out",
+          httpStatus: null,
+          broker: "dhan",
+        },
+      }),
+    );
+    expect(incident?.failureClass).not.toBe("network_local");
+    expect(incident).toBeNull();
   });
 
   it("treats a same-origin failure with a reachable public site as backend unreachable", () => {

@@ -15,6 +15,7 @@ export interface OperatorSignalSnapshot {
   transportReason: TransportReason | null;
   health: "unknown" | "healthy" | "degraded" | "unhealthy";
   publicSite: "unknown" | "ok" | "unreachable";
+  publicInternet: "unknown" | "ok" | "unreachable";
   nativeHttpFreeze: boolean;
   brokerRateLimited: boolean;
   brokerReject: BrokerRejectSignal | null;
@@ -28,6 +29,7 @@ const INITIAL: OperatorSignalSnapshot = {
   transportReason: null,
   health: "unknown",
   publicSite: "unknown",
+  publicInternet: "unknown",
   nativeHttpFreeze: false,
   brokerRateLimited: false,
   brokerReject: null,
@@ -40,6 +42,7 @@ interface OperatorSignalStore extends OperatorSignalSnapshot {
   setPing: (probe: { localPing: OperatorSignalSnapshot["localPing"]; transportReason: TransportReason | null }) => void;
   setHealth: (health: OperatorSignalSnapshot["health"]) => void;
   setPublicSite: (publicSite: OperatorSignalSnapshot["publicSite"]) => void;
+  setPublicInternet: (publicInternet: OperatorSignalSnapshot["publicInternet"]) => void;
   setLlmChrome: (llmChrome: string | null) => void;
   clearBrokerRateLimit: () => void;
   applyObserved: (
@@ -58,6 +61,7 @@ export const useOperatorSignalStore = create<OperatorSignalStore>((set, get) => 
   }),
   setHealth: (health) => set({ health }),
   setPublicSite: (publicSite) => set({ publicSite }),
+  setPublicInternet: (publicInternet) => set({ publicInternet }),
   setLlmChrome: (llmChrome) => set({ llmChrome }),
   clearBrokerRateLimit: () => set((state) => ({
     brokerRateLimited: false,

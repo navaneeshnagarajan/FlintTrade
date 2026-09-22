@@ -9,14 +9,16 @@
  *
  * Detectably wired:
  * - exchange — broker reject text (circuit / halt). Not the session clock.
- * - edge — public site / CDN fetch failed while local ping is ok. Info only.
+ * - edge — class name edge/CDN. Install/update or public-site fetch failed
+ *   while `/api/v1/ping` is still ok. Info only. Not a vendor name.
  * - broker_auth / broker_rest / broker_stream / broker_rate_limit /
  *   broker_maintenance — account status, reject text, HTTP status, Dhan WS.
  * - host_unhealthy — `/health` overall status, or an HTTP error from our process.
  * - backend_unreachable — same-origin transport while the public site is up
  *   or still unknown, or the Task 9D native HTTP freeze 503.
- * - network_local — DNS, timeout, or transport while the public site is
- *   also unreachable (ISP / local uplink).
+ * - network_local — the process answers ping and a neutral public-internet
+ *   probe failed (gateway, DNS, or ping). Not a site/CDN miss, and not a
+ *   single broker timeout.
  * - llm_provider — advisor chrome error or disconnected. Not a Live-write gate.
  *
  * Strip priority inside this classifier: host tier (network_local,
@@ -28,7 +30,8 @@
  * Honest unknown / not invented:
  * - exchange while the only signal is the session clock or CAS
  * - Neo broker_stream until SFeed
- * - ISP while the public-site probe is still unknown (backend_unreachable)
+ * - network_local from a broker timeout, a local-ping timeout, or a
+ *   site/CDN miss while the desk ping is ok (that miss is edge/CDN)
  * - edge while the public-site probe has not returned
  */
 
@@ -72,6 +75,8 @@ export interface OperatorSignals {
   transportReason: TransportReason | null;
   health: "unknown" | "healthy" | "degraded" | "unhealthy";
   publicSite: "unknown" | "ok" | "unreachable";
+  /** Neutral reachability. Unknown must not become network_local. */
+  publicInternet: "unknown" | "ok" | "unreachable";
   nativeHttpFreeze: boolean;
   brokerRateLimited: boolean;
   brokerReject: BrokerRejectSignal | null;
@@ -104,7 +109,7 @@ export type ObservedFailure =
 
 const PLAIN_CLASS: Record<FailureClass, string> = {
   exchange: "exchange/session",
-  edge: "public site / CDN",
+  edge: "edge/CDN",
   broker_auth: "broker sign-in",
   broker_rest: "broker connection",
   broker_stream: "broker stream",
@@ -120,7 +125,7 @@ const RECTIFY: Record<FailureClass, string> = {
   exchange:
     "Wait for the session and check the exchange status page. Manage open risk in your broker app. FlintTrade cannot reverse a reject or file a dispute.",
   edge:
-    "The public site / CDN is unreachable. This desk is local — a site outage does not cancel broker orders. Install from the repository if you need the desk. FlintTrade does not hold funds.",
+    "Public site/CDN unreachable. This desk is local — a site outage does not cancel broker orders. Install from the repository if you need the desk. FlintTrade does not hold funds.",
   broker_auth:
     "Sign in again under Settings → Brokers. FlintTrade will not place a Live order until sign-in succeeds.",
   broker_rest:
@@ -138,8 +143,14 @@ const RECTIFY: Record<FailureClass, string> = {
   backend_unreachable:
     "Restart the desk and read the desk health detail before any Live order. A restart does not recover broker fills. FlintTrade does not hold funds.",
   network_local:
-    "The local network or ISP link failed before any broker response. Check the link or switch network, then retry health. Live orders stay closed.",
+    "The desk is up and cannot reach the public internet. Check the link or switch network, then retry. Live orders stay closed. FlintTrade does not hold funds.",
 };
+
+/** Status pages for edge/CDN. Extend the list; neither vendor is the class name. */
+export const EDGE_STATUS_LINKS: readonly { label: string; href: string }[] = [
+  { label: "Cloudflare status", href: "https://www.cloudflarestatus.com/" },
+  { label: "Vercel status", href: "https://www.vercel-status.com/" },
+];
 
 const FREEZE_RECTIFY =
   "Native broker account changes stay frozen until the HTTP cutover. This is not a broker outage, and FlintTrade does not hold funds.";
@@ -271,6 +282,16 @@ function pickIncident(signals: OperatorSignals): OperatorIncident | null {
     );
   }
 
+  if (signals.localPing === "ok" && signals.publicInternet === "unreachable") {
+    return makeIncident(
+      "network_local",
+      "blocked",
+      true,
+      false,
+      "Local network — the local network or ISP link failed",
+    );
+  }
+
   const rejectClass = signals.brokerReject
     ? classFromText(signals.brokerReject.message, signals.brokerReject.httpStatus)
     : null;
@@ -320,14 +341,12 @@ function pickIncident(signals: OperatorSignals): OperatorIncident | null {
     return makeIncident("broker_stream", "degraded", true, false, "Broker stream — the broker stream is down");
   }
 
-  if (signals.publicSite === "unreachable" && signals.localPing === "ok") {
-    return makeIncident(
-      "edge",
-      "info",
-      false,
-      false,
-      "Public site / CDN — the public site / CDN is unreachable",
-    );
+  if (
+    signals.localPing === "ok"
+    && signals.publicSite === "unreachable"
+    && signals.publicInternet !== "unreachable"
+  ) {
+    return makeIncident("edge", "info", false, false, "Public site/CDN unreachable");
   }
 
   if (signals.llmChrome === "error" || signals.llmChrome === "disconnected") {
@@ -339,16 +358,8 @@ function pickIncident(signals: OperatorSignals): OperatorIncident | null {
 
 function transportIncident(signals: OperatorSignals): OperatorIncident | null {
   if (signals.localPing !== "transport") return null;
-  const reason = signals.transportReason;
-  if (reason === "dns" || reason === "timeout" || signals.publicSite === "unreachable") {
-    return makeIncident(
-      "network_local",
-      "blocked",
-      true,
-      false,
-      "Local network — the local network or ISP link failed",
-    );
-  }
+  // The process did not answer. That is not network_local: the uplink class
+  // requires the process to be up and the public internet to have failed.
   const headline = signals.publicSite === "unknown"
     ? "Backend unreachable — the desk did not answer"
     : "Backend unreachable — the FlintTrade backend is unreachable";

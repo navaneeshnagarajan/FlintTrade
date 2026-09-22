@@ -22,6 +22,7 @@ export function useOperatorIncident(): OperatorIncident | null {
   const transportReason = useOperatorSignalStore((s) => s.transportReason);
   const health = useOperatorSignalStore((s) => s.health);
   const publicSite = useOperatorSignalStore((s) => s.publicSite);
+  const publicInternet = useOperatorSignalStore((s) => s.publicInternet);
   const nativeHttpFreeze = useOperatorSignalStore((s) => s.nativeHttpFreeze);
   const brokerRateLimited = useOperatorSignalStore((s) => s.brokerRateLimited);
   const brokerReject = useOperatorSignalStore((s) => s.brokerReject);
@@ -43,6 +44,7 @@ export function useOperatorIncident(): OperatorIncident | null {
       transportReason,
       health,
       publicSite,
+      publicInternet,
       nativeHttpFreeze,
       brokerRateLimited,
       brokerReject,
@@ -74,6 +76,7 @@ export function useOperatorIncident(): OperatorIncident | null {
     nativeHttpFreeze,
     observedBackendUnreachable,
     observedHostDown,
+    publicInternet,
     publicSite,
     sessionClockClosed,
     transportReason,

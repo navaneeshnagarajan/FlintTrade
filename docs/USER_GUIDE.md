@@ -357,7 +357,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Strip | What it means | What to do |
 |---|---|---|
 | Exchange (`exchange`) | Unavailable or Degraded — exchange/session. A broker reject names a halt or circuit. The session clock and CAS chip never raise this. | Wait for the session. Check [NSE circuit breakers](https://www.nseindia.com/products-services/equity-market-circuit-breakers). Manage open risk in the broker app. |
-| Public site / CDN (`edge`) | The public site / CDN is unreachable and the local desk ping succeeded, so the desk is local. | Install from the repository. [Cloudflare status](https://www.cloudflarestatus.com/) and [Vercel status](https://www.vercel-status.com/). A site outage does not cancel broker orders. |
+| edge/CDN | Public site/CDN unreachable. The install/update or public-site fetch failed and the local desk ping (`/api/v1/ping`) still succeeded. | Install from the repository. [Cloudflare status](https://www.cloudflarestatus.com/) and [Vercel status](https://www.vercel-status.com/). A site outage does not cancel broker orders. |
 | Broker sign-in (`broker_auth`) | The broker session or token failed. Connected (read) only after a read smoke succeeds. | Sign in again under Settings → Brokers. Retry once. No automatic re-smoke. |
 | Broker connection (`broker_rest`) | The broker API failed. | Check the broker status page, then retry once. |
 | Broker stream (`broker_stream`) | Dhan's market stream dropped. Kotak Neo has no stream class until SFeed. | Wait for the stream. Do not treat quotes as live. |
@@ -366,7 +366,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Chat provider (`llm_provider`) | Chat is unavailable. Trading chrome stays as it was. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
-| Local network (`network_local`) | The local uplink or ISP failed: DNS, timeout, or the desk and the public site both failed before any broker HTTP status. | Check the link or switch network, then retry health. |
+| Local network (`network_local`) | The desk process is up and cannot reach the public internet (gateway, DNS, or ping). A site/CDN miss with the desk ping still ok is edge/CDN. A single broker timeout is not this class. | Check the link or switch network, then retry. |
 
 Dispute and status links, if you need them, are the broker's or the
 regulator's — not a FlintTrade claims desk:

@@ -11,6 +11,7 @@ function signals(overrides: Partial<OperatorSignals> = {}): OperatorSignals {
     transportReason: null,
     health: "healthy",
     publicSite: "ok",
+    publicInternet: "unknown",
     nativeHttpFreeze: false,
     brokerRateLimited: false,
     brokerReject: {
