@@ -448,9 +448,6 @@ export default function AppLayout() {
   }, []);
 
   const { kind: primaryBannerKind, incident: operatorIncident } = usePrimaryBanner();
-  const incidentKind = primaryBannerKind === "explore_sample" || primaryBannerKind === "practice_sample"
-    ? null
-    : primaryBannerKind;
 
   return (
     <div className="relative h-screen flex flex-col bg-surface-base overflow-hidden">
@@ -499,8 +496,8 @@ export default function AppLayout() {
       {operatorProbesEnabled() ? <OperatorIncidentProbes /> : null}
       <header className="relative z-20 flex flex-col shrink-0">
         <TopBarV2 />
-        {incidentKind ? (
-          <OperatorStatusStrip kind={incidentKind} incident={operatorIncident} />
+        {primaryBannerKind ? (
+          <OperatorStatusStrip kind={primaryBannerKind} incident={operatorIncident} />
         ) : null}
         <ModeHonestyBar mode={mode} />
         {showTickerStrip && <TickerBar mode={tickerMode} />}
@@ -531,7 +528,7 @@ export default function AppLayout() {
       {showWelcome && mode !== "explore" && (
         <DailyWelcome onDismiss={handleDismissWelcome} />
       )}
-      <NoConnectionOverlay suppress={incidentKind === "live_risk"} />
+      <NoConnectionOverlay suppress={primaryBannerKind === "live_risk"} />
       {authStatus === "pin-required" && <LockScreen />}
       <KeyboardShortcutsDialog
         isOpen={showShortcuts}

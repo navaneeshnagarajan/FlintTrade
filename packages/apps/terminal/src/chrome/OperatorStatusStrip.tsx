@@ -69,9 +69,7 @@ export function OperatorStatusStrip({
     ? "bg-loss/10 border-loss/20 text-loss"
     : level === "degraded"
       ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
-      : kind === "practice_sample"
-        ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
-        : "bg-text-muted/10 border-text-muted/20 text-text-muted";
+      : "bg-text-muted/10 border-text-muted/20 text-text-muted";
 
   return (
     <div

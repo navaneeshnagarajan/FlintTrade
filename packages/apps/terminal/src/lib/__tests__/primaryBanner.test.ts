@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { classifyOperatorSignals, type OperatorSignals } from "../operatorIncident";
 import {
-  EXPLORE_SAMPLE_BANNER,
   FEED_DISCONNECTED_BANNER,
   LIVE_RISK_BANNER,
   primaryBannerCopy,
@@ -27,21 +26,18 @@ function closedHost(): OperatorSignals {
 }
 
 describe("FT-UX-001 primary banner priority", () => {
-  it("Explore always wins over live risk and feed disconnected", () => {
+  it("Explore leaves the incident slot empty", () => {
     expect(
       selectPrimaryBanner({
         mode: "explore",
         liveRiskActive: true,
         feedDisconnected: true,
       }),
-    ).toBe("explore_sample");
-    expect(primaryBannerCopy("explore_sample")).toBe(EXPLORE_SAMPLE_BANNER);
+    ).toBeNull();
   });
 
-  it("Practice shows the simulated-results banner only", () => {
-    expect(selectPrimaryBanner({ mode: "practice", feedDisconnected: true })).toBe(
-      "practice_sample",
-    );
+  it("Practice leaves the incident slot empty", () => {
+    expect(selectPrimaryBanner({ mode: "practice", feedDisconnected: true })).toBeNull();
   });
 
   it("Live risk beats feed disconnected", () => {
@@ -92,7 +88,7 @@ describe("FT-UX-001 primary banner priority", () => {
         feedDisconnected: true,
         incident,
       }),
-    ).toBe("explore_sample");
+    ).toBeNull();
   });
 
   it("Chat and a public-site outage do not hide a disconnected feed", () => {
