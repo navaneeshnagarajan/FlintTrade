@@ -243,16 +243,16 @@ control plane only.
 When native connect returns, Dhan, Upstox, and Kotak Neo are evidence-gated
 as enabled in the catalogue. Kotak Neo is Connected (read) / API smoke only
 after persisted REST smoke evidence (FT-MONDAY-002) — never placeable Live;
-Neo has no sandbox (`Live read only until funded unlock.`). Monday Neo is
-REST-only; live SFeed is not wired. Upstox Developer Apps analytics tokens
+Neo has no sandbox (`Live read only until funded unlock.`). Kotak Neo
+Connected (read) / API smoke is REST-only; live SFeed is not wired. Upstox Developer Apps analytics tokens
 would connect as read-only sessions. INDmoney uses a dashboard-generated token that resets
 at the daily 06:00 IST dashboard cycle, but remains disabled until its
 smart-parent, atomic reduce-only, and live order-safety blockers clear. Groww
 retains its displayed activation blockers and may also require approving the
 API-key session in Groww Cloud before FlintTrade can mint a token. Native HTTP
 remains frozen until Task 9D / Task 7C.2 — Setup → Brokers still fails on the
-frozen routes; Monday MSI smoke uses the in-process native read path, not a
-restored Brokers HTTP session. Localhost postback URLs are for diagnostics
+frozen routes; MSI static-IP host native read smoke uses the in-process
+native read path, not a restored Brokers HTTP session. Localhost postback URLs are for diagnostics
 unless you expose FlintTrade through a broker-reachable tunnel or public URL.
 
 The Brokers screen also shows **Broker MCP assistants** for OpenAlgo, Dhan,
@@ -269,14 +269,14 @@ FlintTrade keeps its own backend, native sandbox, analytics, automation, and a
 first-party broker gateway whose HTTP connect and read surfaces are frozen
 until Task 9D and Task 7C.2.
 
-**Monday dual-broker smoke (FT-MONDAY-002).** The Monday path is
-native Dhan + Kotak Neo on the MSI static-IP host, non-funded live REST
-API smoke (quotes / depth / hist / chain where the SDK allows). Monday
-Neo is REST-only; live SFeed / `create_websocket` is not wired.
-Prefer native; OpenAlgo is Settings / fallback only — not the Monday
-primary connect CTA. Native HTTP remains frozen on this unreleased
+**Native Dhan + Kotak Neo Connected (read) / API smoke (FT-MONDAY-002).**
+The path is native Dhan + Kotak Neo on the MSI static-IP host, non-funded
+live REST API smoke (quotes / depth / hist / chain where the SDK allows).
+Kotak Neo is REST-only; live SFeed / `create_websocket` is not wired.
+Prefer native; OpenAlgo is Settings / fallback only — not the primary
+connect CTA. Native HTTP remains frozen on this unreleased
 line until Task 9D and Task 7C.2 — Setup → Brokers HTTP still fails;
-Monday MSI is the in-process read path. Dhan and Neo chrome is
+MSI static-IP host native read smoke is the in-process read path. Dhan and Neo chrome is
 **Connected (read)** or **API smoke** only after persisted REST smoke
 evidence (`read_smoke_ok`) — never placeable Live orders, and a failed
 login/read never fakes Connected. Native Setup Continue ignores
@@ -296,19 +296,19 @@ Before enabling any order-capable integration, exercise the order path in
 | Mode | Order behaviour | Best for |
 |---|---|---|
 | **Explore** | Demo/sample data; no Live broker order authority. On `/trade`, Order Pad **Sample Buy** opens a sample review and records a local sample fill (no broker) | First-time visitors, screenshots, docs |
-| **Practice** | Orders simulated by FlintTrade's native `SandboxEngine` (primary paper path) | Strategy tests, Monday fills, AI/desk work |
+| **Practice** | Orders simulated by FlintTrade's native `SandboxEngine` (primary paper path) | Strategy tests, Practice SandboxEngine fills, AI analysis |
 | **Live** | Real orders sent through the configured broker path | Gated broker integration, only after user review |
 
 The current mode is shown in the top bar and is server-enforced via the JWT
 claim — switching to Live requires a deliberate confirmation step.
 
-**Monday fills path (FT-MONDAY-001).** Locked 2026-09-20 and now the
+**Practice SandboxEngine fills (FT-MONDAY-001).** This is the
 shipped Practice path. Explore is sample-only. Practice is the
 primary paper path: orders place and record fills on FlintTrade's
-native `SandboxEngine`. AI and desk surfaces read that Practice
+native `SandboxEngine`. AI and terminal surfaces read that Practice
 book. Practice never leaks a live broker order. Live stays
-fail-closed until MSI native smoke is trusted and funded unlock.
-OpenAlgo is a Settings fallback only — not the primary Monday
+fail-closed until MSI native read smoke is trusted and funded unlock.
+OpenAlgo is a Settings fallback only — not the primary
 connect CTA. Setup's primary connect action is **Continue without
 a broker**. Dhan Sandbox is optional OpenAlgo paper. Learn →
 Practice Trading never offers Neo Practice — Kotak Neo has no
@@ -378,15 +378,18 @@ Compact-only-on-Trade (FT-UX-001). Mode and status stay reachable
    auto-fills Quantity from that instrument's current lot size — do
    not hardcode 50. Learn Glossary teaches dated Jan 2026 NSE-cycle
    figures separately. Choose **MARKET**. Side = **BUY**.
-6. Click **Sample Buy** (Explore) or **Practice Buy** (Practice) and confirm the review. The order
+6. Click **Practice Buy** and confirm the review. The sandbox order
    appears in the **Positions** widget immediately; the **Orders**
-   widget shows it as filled (simulated).
+   widget shows it as filled (simulated). **Sample Buy** on Explore is
+   only the local sample fill from step 2 — it does not appear as a new
+   Positions or Orders row, and it never calls the order API.
 7. Close the position from the Positions widget. Confirm your simulated
    P&L is recorded in the **P&L Monitor** widget.
 
-You have just exercised the full FlintTrade order path — front-end → JWT
+You have just exercised the Practice order path — front-end → JWT
 guard → mode guard → FlintTrade sandbox → simulated fill → REST
-refresh of Positions and Orders. No real money moved.
+refresh of Positions and Orders. No real money moved. Explore Sample
+Buy never enters that path.
 
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
@@ -443,7 +446,7 @@ backend rejects Explore orders if the UI slips (FT-TRADE-009).
 
 ### Learn → Practice Trading (OpenAlgo fallback)
 
-This is a fallback path, not the primary Monday fills path. The
+This is a fallback path, not the primary Practice fills path. The
 primary paper path is Practice mode on `/trade` through the native
 `SandboxEngine` (FT-MONDAY-001). Explore `/learn` → **Practice
 Trading** still walks through optional OpenAlgo broker Practice /
@@ -456,7 +459,7 @@ text "Configure OpenAlgo in Settings → Broker Gateway.", and an
 `/settings#api`. The CTA does not send operators to Settings →
 Brokers (`/settings#brokers`). Point the Broker Gateway at that
 OpenAlgo Practice instance only as fallback paper, then return to
-native Practice `SandboxEngine` fills for Monday desk and AI work.
+native Practice `SandboxEngine` fills for Practice and AI analysis.
 
 On Explore `/learn` → Glossary → Lot Size, the glossary teaches dated
 Jan 2026 NSE-cycle index lots (`NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 ·
@@ -945,10 +948,10 @@ Connected sample advisor. Any later demo replies must be labelled
 **Sample replies**. Signals **Live** / **Polling** stay separate from Chat
 LLM readiness.
 
-Monday product (FT-MONDAY-003): when an LLM is configured, Chat may
+AI Chat live-read context (FT-MONDAY-003): when an LLM is configured, Chat may
 use Practice SandboxEngine fills and native live-read feeds for
 analysis. That is analysis context, not a guarantee of profitable
-alphas, and profitable alphas are not a Monday ship criterion. Chat
+alphas, and profitable alphas are not a release criterion. Chat
 does not place Live orders — Live place stays fail-closed. This does
 not lift the native broker HTTP freeze and does not claim every Chat
 turn already has live ticks. Chat never shows green **Connected** without a real LLM.
@@ -1201,7 +1204,7 @@ the managed runtime is absent. Chat never shows green **Connected**
 without a real LLM. When that LLM is configured, Chat may use
 Practice fills and native live-read feeds for analysis
 (FT-MONDAY-003); Suggest stays labelled illustrative, and profitable
-alphas are not a Monday ship criterion.
+alphas are not a release criterion.
 A configured but broken probe shows **Error** or **Disconnected** with
 **Retry**. Returning to Chat after saving Settings → AI re-checks
 readiness (advisor and Settings hydration), so the gate should not stay

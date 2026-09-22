@@ -118,7 +118,7 @@ approved-key login/account-read proof but still needs market-data/API
 permission, static-IP resolution, and order-safety proof.
 Portal/static-IP evidence is not enough by itself to promote Groww.
 Native HTTP remains frozen (Task 9D / Task 7C.2); Setup → Brokers still fails.
-Monday MSI smoke is the in-process native read path, not a restored Brokers
+MSI static-IP host native read smoke is the in-process native read path, not a restored Brokers
 HTTP session.
 
 The Electron shell has machine authority but no trading authority. It owns
@@ -376,10 +376,14 @@ deployment can split that state.
 
 ### Safety layers
 
-Every order placed through FlintTrade is checked by five safety layers
-inside `packages/services/engine/`. `_check_order_locked` fail-fasts in
-this runtime order (not L1–L5 numerical order), so the first refusal an
-operator sees is the earliest of:
+Every **Live** order placed through FlintTrade is checked by five safety
+layers inside `packages/services/engine/`. Practice orders skip this
+chain: the mode guard sends them to `SandboxEngine` only. Explore
+placement is refused by the backend (`mode_blocked`); Order Pad Sample
+Buy is a local client fill (no HTTP order route, no SafetySystem).
+`_check_order_locked` fail-fasts in this runtime order (not L1–L5
+numerical order), so the first Live refusal an operator sees is the
+earliest of:
 
 1. **L5 Kill switch** — an explicit operator action (UI button, API, or Telegram)
    that cancels open orders and requests position flattening through the gated
@@ -468,23 +472,25 @@ flowchart TD
     REST[REST poll · TanStack Query] --> Cache[Query cache\npositions · orders · holdings]
     Cache --> UI2[Positions · Orderbook · Funds]
 
-    UI1 --> Order[Order placement\nthrough engine]
+    UI1 --> Order[Order placement]
     UI2 --> Order
-    Order --> Safety[5-layer safety system]
-    Safety --> ModeGuard[Mode guard]
-    ModeGuard --> Router[Broker router]
-    Router --> Sandbox[Native sandbox\npractice mode]
+    Order --> ModeGuard[Mode guard]
+    ModeGuard --> Sandbox[Native sandbox\npractice mode]
+    ModeGuard --> Safety[5-layer safety system\nlive only]
+    Safety --> Router[Broker router]
     Router --> Adapter[Native adapter or\nOpenAlgo-compatible API]
     Adapter --> Broker[Broker]
     Broker -. fill .-> Tick
 ```
 
 Ticks fan in to per-instrument Jotai atoms which power every chart and
-quote widget. REST data populates a separate query cache. Orders flow
-out through the safety layers and the mode guard. Practice orders stay
-inside FlintTrade's native sandbox; live orders route through a native
-broker adapter or an OpenAlgo-compatible endpoint. Fills come back through
-the tick stream and reconcile with the REST cache via
+quote widget. REST data populates a separate query cache. Orders hit the
+mode guard first. Practice orders stay inside FlintTrade's native
+sandbox; they never enter SafetySystem or `BrokerRouter`. Live orders
+then run the safety layers and the gated broker router, and route
+through a native broker adapter or an OpenAlgo-compatible endpoint.
+Fills come back through the tick stream and reconcile with the REST
+cache via
 `packages/services/engine/src/flinttrade_engine/reconciliation.py`.
 
 ---

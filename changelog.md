@@ -19,14 +19,14 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Added
 
-- **Practice `SandboxEngine` primary Monday fills (FT-MONDAY-001).**
+- **Practice `SandboxEngine` primary fills (FT-MONDAY-001).**
   Practice places and records native `SandboxEngine`
-  fills end-to-end as the primary paper path. Desk
+  fills end-to-end as the primary paper path. The terminal
   and AI read that same Practice book. Explore stays
   sample-only. Live stays fail-closed until MSI
-  native smoke is trusted and funded unlock. Practice
+  native read smoke is trusted and funded unlock. Practice
   never leaks a live broker order. OpenAlgo is
-  Settings fallback only — not the Monday primary
+  Settings fallback only — not the primary
   connect CTA. Kotak Neo has no sandbox — never offer
   Neo Practice.
 - **Service connections and in-process `BrokerReadPort`.** The backend now
@@ -53,7 +53,7 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Changed
 
 - **Native Dhan + Kotak Neo Connected (read) smoke (FT-MONDAY-002).**
-  Monday path is native Dhan + Neo on the MSI
+  The path is native Dhan + Neo on the MSI
   static-IP host with non-funded live REST API smoke
   (quotes / depth / hist / chain where the SDK
   allows). Live SFeed / `create_websocket` is not
@@ -75,7 +75,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   Suggest stays labelled illustrative.
   Chat never shows green **Connected** without a real LLM.
   AI does not place Live orders — Live place stays fail-closed.
-  Measure later: profitable alphas are not a Monday ship criterion.
+  Measure later: profitable alphas are not a release criterion.
   This does not lift the native broker HTTP freeze. Refs #254.
 
 - **Desk chrome: one TopBar + one ticker + flex shell (FT-UX-002).**
@@ -127,6 +127,20 @@ changelog rebuilds itself from the first release cut after this baseline.
   `gate_broker_write` → `BrokerRouter`) stay unchanged.
 
 ### Fixed
+
+- **Docs: correct GTT proxy, Practice walkthrough, and Live safety path.**
+  `USER_GUIDE` Practice walkthrough no longer treats Explore
+  Sample Buy as a sandbox Positions/Orders fill.
+  `API.md` no longer claims `/orders/gtt-*` is gated like
+  regular Live place — those verbs 501 after unlock; gated
+  GTT is `/orders/forever`. `API.md` documents
+  `GET /api/v1/advisor/status` `source` (`env` / `stored` /
+  `default`). `ARCHITECTURE.md` mode-guards Practice to
+  `SandboxEngine` and runs L1–L5 only on Live.
+  `DEVELOPER_GUIDE.md` no longer says every order is checked
+  by L1–L5: those layers are Live-only. Practice goes to
+  `SandboxEngine`. Explore placement is `mode_blocked`;
+  Sample Buy is a local fill.
 
 - **Restore Connected honesty on `/ai` (FT-AI-004 regression).**
   LLM readiness is global config truth (stored Settings

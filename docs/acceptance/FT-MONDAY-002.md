@@ -1,4 +1,4 @@
-# FT-MONDAY-002 — Native Dhan + Kotak Neo dual-broker smoke
+# FT-MONDAY-002 — Native Dhan + Kotak Neo Connected (read) / API smoke
 
 Product tip for GitHub issue [#253](https://github.com/navaneeshnagarajan/FlintTrade/issues/253)
 on tracking PR #257. Native Dhan + Kotak Neo Connected (read) / API smoke
@@ -7,22 +7,22 @@ cutover (Task 9D / Task 7C.2) is not lifted.
 
 ## Finding
 
-Parallel Monday path: native Dhan + Kotak Neo connected on the MSI host
-(static IP) with **non-funded** accounts → live REST API responses
+Native Connected (read) path: native Dhan + Kotak Neo connected on the MSI
+static-IP host with **non-funded** accounts → live REST API responses
 (quotes / depth / historical / option chain where the SDK allows),
-latency, and honest errors — fix during the Monday session. Live SFeed /
+latency, and honest errors. Live SFeed /
 `create_websocket` is not wired in this tip.
 
-## Locked (2026-09-20)
+## Locked behaviour
 
 - Kotak Neo has **no sandbox**. Live read / API smoke only until funded
   Live unlock. Never offer “Neo Practice”. Operator copy is
   `Live read only until funded unlock.`
 - Prefer **native** Dhan + Neo. OpenAlgo is Settings / fallback only —
-  not the Monday primary connect CTA.
+  not the primary connect CTA.
 - `dhanhq` stays on latest stable **2.2.0** (not RC).
 - Neo v3 is PyPI `kotakneoapi` **3.0.7**. The v2 `neo-api-client` git
-  pin is gone. HS feed is retired. Monday Neo path is **REST-only**
+  pin is gone. HS feed is retired. The Kotak Neo path is **REST-only**
   (quotes / depth / historical / option chain where the SDK allows).
   Live SFeed / `create_websocket` is **not** wired in this tip (out of
   scope / deferred).
@@ -33,10 +33,10 @@ latency, and honest errors — fix during the Monday session. Live SFeed /
 |---|---|
 | **Explore** | Sample-only. No Live broker order authority. |
 | **Practice** | FlintTrade `SandboxEngine` fills (primary paper). Not a broker sandbox. |
-| **Live** | Fail-closed until MSI native smoke is trusted **and** funded unlock. |
+| **Live** | Fail-closed until MSI native read smoke is trusted **and** funded unlock. |
 
 Dhan Sandbox remains optional paper via OpenAlgo only. It is not the
-Monday primary fill path.
+primary Practice fill path.
 
 ## MSI broker chrome
 
@@ -45,13 +45,13 @@ persisted REST smoke evidence (`read_smoke_ok`) — not login-only. A
 failed login or read never fakes Connected. That chrome must never
 imply placeable Live orders.
 
-Monday smoke does **not** require funded Live unlock.
+This native read smoke does **not** require funded Live unlock.
 
 ## OpenAlgo
 
-Settings / fallback only. Not the Monday primary connect CTA.
+Settings / fallback only. Not the primary connect CTA.
 
-## AI (shared PASS bar)
+## AI (shared acceptance bar)
 
 Chat may use live reads when an LLM is configured. Suggest stays
 illustrative. Never paint green Connected without a real LLM
@@ -64,10 +64,10 @@ illustrative. Never paint green Connected without a real LLM
   persisted REST smoke evidence — never login-only. A failed login or
   read never fakes Connected.
 - Live reads work or fail honestly (REST quotes / depth / historical /
-  option chain where the SDK allows). Monday Neo smoke is REST-only;
+  option chain where the SDK allows). Kotak Neo smoke is REST-only;
   live SFeed / `create_websocket` is not wired and is not required for
-  Monday PASS.
-- No funded Live unlock required for Monday smoke.
+  this acceptance.
+- No funded Live unlock required for this native read smoke.
 - Neo never offered as Practice; copy stays
   `Live read only until funded unlock.`
 - Prefer native; OpenAlgo remains fallback only.

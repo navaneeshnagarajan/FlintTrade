@@ -96,10 +96,10 @@ token path. INDstocks' FAQ advertises an
 package exists yet, so there is deliberately no SDK pin for it. Kotak Neo has
 adapter/mapping coverage plus a pinned-SDK-grounded emergency planner, but no
 promoted Live order proof yet. Neo has **no sandbox** —
-never offer Neo Practice; Monday chrome copy is `Live read only until
+never offer Neo Practice; operator copy is `Live read only until
 funded unlock.` FT-MONDAY-002 ships native Dhan + Neo on the MSI
-static-IP host as the preferred Monday connect path (OpenAlgo is
-Settings / fallback only). Monday Neo smoke is REST-only (quotes /
+static-IP host as the preferred native connect path (OpenAlgo is
+Settings / fallback only). Kotak Neo Connected (read) / API smoke is REST-only (quotes /
 depth / hist / chain where the SDK allows); live SFeed /
 `create_websocket` is not wired. `dhanhq` stays on latest stable 2.2.0;
 Neo is PyPI `kotakneoapi` 3.0.7 (the `neo-api-client` 2.0.0 git pin
@@ -137,8 +137,11 @@ under `[packages]` / gateway metadata. The 2026-05 sync added
 - **GTT (Good Till Triggered) orders** — `placegttorder`, `modifygttorder`,
   `cancelgttorder`, `gttorderbook`. Live broker support: Dhan + Zerodha.
   Other brokers return a clean 501 ("GTT orders are not supported for
-  broker 'X' yet"). FlintTrade exposes these through the safety proxy
-  at `/api/v1/orders/gtt-{place,modify,cancel}`.
+  broker 'X' yet") on the OpenAlgo service itself. FlintTrade still
+  registers `/api/v1/orders/gtt-{place,modify,cancel}` so Explore and
+  Practice are refused; Live `gtt-*` returns HTTP 501 rather than
+  forwarding that upstream 501. Gated forever/GTT is
+  `POST /api/v1/orders/forever`.
 - **New exchanges** — `NCO` (NSE Commodities), `MCX_INDEX`, `GLOBAL_INDEX`.
 - **WhatsApp bot** — `POST /api/v1/whatsapp/notify` exists upstream in
   OpenAlgo. FlintTrade no longer proxies or exposes it: WhatsApp support was
