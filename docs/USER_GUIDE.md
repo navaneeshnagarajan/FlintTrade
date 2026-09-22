@@ -341,6 +341,39 @@ Widgets stay quiet: they do not repeat a Sample chip. Mode is not provenance. A 
 when one is showing, sits between the TopBar and this line and does not
 replace it.
 
+**Operator status strip.** One sticky strip sits between the TopBar and the Mode line. It is
+Info, Degraded, or Blocked. Explore and Practice sample copy is the Mode line, not this strip. Live risk, a broken desk, a broker fault, or a
+local-network fault uses Degraded or Blocked. There is not a second banner
+for the same fact. While the strip is Blocked or Degraded on the money path,
+broker chrome says **Unavailable** or **Degraded** plus the failure in plain
+words — never **Connected** or **Connected (read)**. Live place and Position
+Mirror start stay muted, with one rectify line. Kill All and the safety
+layers stay reachable. Chat being down does not close Live orders. A public
+site outage does not mean the local desk cancelled broker orders.
+
+FlintTrade does not hold client funds, reverse broker fills, or file a
+dispute. Rectify steps point at the broker, the exchange, or the host:
+
+| Strip | What it means | What to do |
+|---|---|---|
+| Exchange | A broker reject names a halt or circuit. The session clock alone never raises this. | Wait for the session. Check [NSE circuit breakers](https://www.nseindia.com/products-services/equity-market-circuit-breakers). Manage open risk in the broker app. |
+| Public site | `flinttrade.vercel.app` did not answer and the local desk ping did. | Use a repository install if you need the desk. [Cloudflare status](https://www.cloudflarestatus.com/) and [Vercel status](https://www.vercel-status.com/). |
+| Broker sign-in | The broker session or token failed. | Sign in again under Settings → Brokers. Retry once. No automatic re-smoke. |
+| Broker connection | The broker API failed. | Check the broker status page, then retry once. |
+| Broker stream | Dhan's market stream dropped. Kotak Neo has no stream class until SFeed. | Wait for the stream. Do not treat quotes as live. |
+| Broker rate limit | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
+| Broker maintenance | The broker reported maintenance. | Wait, then check the broker status page. |
+| Chat provider | The configured Chat provider is down. | Retest or switch provider under Settings. Keep trading without Chat. |
+| Host | Desk health failed, the backend did not answer, or native broker HTTP returned the Task 9D freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. |
+| Local network | The desk and the public site both failed before any broker HTTP status, or DNS/timeout said the uplink failed. | Check the link or switch network, then retry health. |
+
+Dispute and status links, if you need them, are the broker's or the
+regulator's — not a FlintTrade claims desk:
+
+- Dhan support: https://dhan.co/customer-service/ and grievances: https://dhan.co/grievance/
+- Kotak Neo trade API: https://www.kotakneo.com/support/trading/trade-api-and-terminals/ and the complaint procedure: https://www.kotakneo.com/support/procedure-for-filing-a-complaint-with-kotak-securities/
+- SEBI SCORES: https://scores.sebi.gov.in and SMART ODR: https://smartodr.in
+
 **Feed freshness (FT-CORE-002).** Explore disclosure is that Mode line.
 Per-widget Sample chips are retired. Per-symbol ticker Sample chips are
 optional, and the Market Clock freshness chip appears only when that

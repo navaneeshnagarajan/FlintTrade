@@ -32,6 +32,8 @@ export interface MirrorStartGateInput {
   targetCount: number;
   activeAccountCount: number;
   accountsLoadState: AccountsLoadState;
+  /** One-line rectify when a money-path incident mutes Live mirror start. */
+  liveWriteBlock?: string | null;
 }
 
 /** Resolve whether the accounts query has a successful list, failed, or is still pending. */
@@ -51,9 +53,11 @@ export function mirrorStartHelper({
   targetCount,
   activeAccountCount,
   accountsLoadState,
+  liveWriteBlock,
 }: MirrorStartGateInput): string | null {
   if (mode === "explore") return EXPLORE_MIRROR_START_HELPER;
   if (mode === "practice") return PRACTICE_MIRROR_START_HELPER;
+  if (liveWriteBlock && liveWriteBlock.trim()) return liveWriteBlock;
   if (accountsLoadState === "loading") return MIRROR_START_LOADING_HELPER;
   if (accountsLoadState === "error") return MIRROR_START_ERROR_HELPER;
   if (activeAccountCount === 0) return MIRROR_START_CONNECT_HELPER;

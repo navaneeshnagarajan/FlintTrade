@@ -1,24 +1,46 @@
 import { describe, expect, it } from "vitest";
+import { classifyOperatorSignals, type OperatorSignals } from "../operatorIncident";
 import {
+  EXPLORE_SAMPLE_BANNER,
   FEED_DISCONNECTED_BANNER,
   LIVE_RISK_BANNER,
   primaryBannerCopy,
   selectPrimaryBanner,
 } from "../primaryBanner";
 
-describe("incident banner under the Mode line", () => {
-  it("Explore never takes the incident slot", () => {
+function closedHost(): OperatorSignals {
+  return {
+    feedDisconnected: true,
+    localPing: "ok",
+    transportReason: null,
+    health: "unhealthy",
+    publicSite: "ok",
+    nativeHttpFreeze: false,
+    brokerRateLimited: false,
+    brokerReject: null,
+    activeAccount: null,
+    wsFailure: null,
+    llmChrome: "ready",
+    sessionClockClosed: false,
+  };
+}
+
+describe("FT-UX-001 primary banner priority", () => {
+  it("Explore always wins over live risk and feed disconnected", () => {
     expect(
       selectPrimaryBanner({
         mode: "explore",
         liveRiskActive: true,
         feedDisconnected: true,
       }),
-    ).toBeNull();
+    ).toBe("explore_sample");
+    expect(primaryBannerCopy("explore_sample")).toBe(EXPLORE_SAMPLE_BANNER);
   });
 
-  it("Practice never takes the incident slot", () => {
-    expect(selectPrimaryBanner({ mode: "practice", feedDisconnected: true })).toBeNull();
+  it("Practice shows the simulated-results banner only", () => {
+    expect(selectPrimaryBanner({ mode: "practice", feedDisconnected: true })).toBe(
+      "practice_sample",
+    );
   });
 
   it("Live risk beats feed disconnected", () => {
@@ -32,7 +54,7 @@ describe("incident banner under the Mode line", () => {
     expect(primaryBannerCopy("live_risk")).toBe(LIVE_RISK_BANNER);
   });
 
-  it("Live feed disconnect is the fallback incident", () => {
+  it("Live feed disconnect is the fallback primary", () => {
     expect(
       selectPrimaryBanner({
         mode: "live",
@@ -43,7 +65,47 @@ describe("incident banner under the Mode line", () => {
     expect(primaryBannerCopy("feed_disconnected")).toBe(FEED_DISCONNECTED_BANNER);
   });
 
-  it("Live with no risk and a connected feed has no incident banner", () => {
+  it("a money-path incident outranks a disconnected feed, and Live risk still wins", () => {
+    const incident = classifyOperatorSignals(closedHost());
+    expect(incident?.failureClass).toBe("host");
+    expect(
+      selectPrimaryBanner({
+        mode: "live",
+        liveRiskActive: false,
+        feedDisconnected: true,
+        incident,
+      }),
+    ).toBe("host");
+    expect(
+      selectPrimaryBanner({
+        mode: "live",
+        liveRiskActive: true,
+        feedDisconnected: true,
+        incident,
+      }),
+    ).toBe("live_risk");
+    expect(
+      selectPrimaryBanner({
+        mode: "explore",
+        liveRiskActive: true,
+        feedDisconnected: true,
+        incident,
+      }),
+    ).toBe("explore_sample");
+  });
+
+  it("Chat and a public-site outage do not hide a disconnected feed", () => {
+    const llm = classifyOperatorSignals({ ...closedHost(), health: "healthy", llmChrome: "error" });
+    expect(
+      selectPrimaryBanner({
+        mode: "live",
+        feedDisconnected: true,
+        incident: llm,
+      }),
+    ).toBe("feed_disconnected");
+  });
+
+  it("Live with no risk and a connected feed has no primary banner", () => {
     expect(
       selectPrimaryBanner({
         mode: "live",

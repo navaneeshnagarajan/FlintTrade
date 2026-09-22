@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
+import { OperatorIncidentProbes } from "@/chrome/OperatorIncidentProbes";
+import { OperatorStatusStrip } from "@/chrome/OperatorStatusStrip";
 import TopBarV2 from "@/chrome/TopBarV2";
-import IncidentStripSlot from "@/chrome/IncidentStripSlot";
 import ModeHonestyBar from "@/chrome/ModeHonestyBar";
 import DockSidebar from "@/chrome/DockSidebar";
 import PageTransition from "@/components/motion/PageTransition";
@@ -30,8 +31,9 @@ import KeyboardShortcutsDialog from "@/components/KeyboardShortcuts/KeyboardShor
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import { appendAISymbolContext } from "@/lib/aiSymbolContext";
+import { operatorProbesEnabled } from "@/lib/operatorProbes";
 import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
-import { usePrimaryBannerKind } from "@/hooks/usePrimaryBannerKind";
+import { usePrimaryBanner } from "@/hooks/usePrimaryBannerKind";
 import { useChromeCollapse } from "@/chrome/useChromeCollapse";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -445,7 +447,10 @@ export default function AppLayout() {
     setShowWelcome(false);
   }, []);
 
-  const incidentKind = usePrimaryBannerKind();
+  const { kind: primaryBannerKind, incident: operatorIncident } = usePrimaryBanner();
+  const incidentKind = primaryBannerKind === "explore_sample" || primaryBannerKind === "practice_sample"
+    ? null
+    : primaryBannerKind;
 
   return (
     <div className="relative h-screen flex flex-col bg-surface-base overflow-hidden">
@@ -491,12 +496,12 @@ export default function AppLayout() {
       >
         Skip to main content
       </a>
+      {operatorProbesEnabled() ? <OperatorIncidentProbes /> : null}
       <header className="relative z-20 flex flex-col shrink-0">
         <TopBarV2 />
-        {/* #270 incident strip mounts in this slot when Info / Degraded / Blocked.
-            The existing Live-risk and feed-disconnected banner uses it until then
-            and never replaces the Mode line below. */}
-        <IncidentStripSlot kind={incidentKind} />
+        {incidentKind ? (
+          <OperatorStatusStrip kind={incidentKind} incident={operatorIncident} />
+        ) : null}
         <ModeHonestyBar mode={mode} />
         {showTickerStrip && <TickerBar mode={tickerMode} />}
       </header>
