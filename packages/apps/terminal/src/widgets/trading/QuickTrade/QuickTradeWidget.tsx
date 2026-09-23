@@ -21,7 +21,12 @@ import { useState, useCallback, useEffect, memo } from "react";
 import { Zap, CheckCircle2, AlertCircle, Loader2, MousePointerClick } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
+import { readOperatorIncident } from "@/hooks/useOperatorIncident";
+import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
+import { liveWritesMuted } from "@/lib/operatorIncident";
 import { placeOrder, getSymbol } from "@/services/api";
+import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { useModeStore } from "@/stores/modeStore";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -198,6 +203,8 @@ function QuickTradeWidget(props: WidgetProps) {
   const hasInstrument = symbol !== "" && exchange !== "";
 
   const [lots, setLots] = useState<LotPreset>(1);
+  const [admission, setAdmission] = useState<LayaNotice | null>(null);
+  const decisionStatus = useOperatorSignalStore((state) => state.decisionStatus);
   const [product, setProduct] = useState<ProductType>("MIS");
   const [orderType, setOrderType] = useState<OrderType>("MARKET");
   const [limitPrice, setLimitPrice] = useState<string>("");
@@ -205,6 +212,16 @@ function QuickTradeWidget(props: WidgetProps) {
   const [isPending, setIsPending] = useState(false);
   const [pendingAction, setPendingAction] = useState<"BUY" | "SELL" | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+
+  useEffect(() => {
+    setAdmission(null);
+  }, [symbol, exchange, lots, product, orderType, limitPrice]);
+
+  // A denial belongs to the status and mode that produced it. When either
+  // changes, Buy and Sell are retryable. A clamp stays until the ticket changes.
+  useEffect(() => {
+    setAdmission((current) => (current?.kind === "deny" ? null : current));
+  }, [decisionStatus, mode]);
 
   // Real lot size for the instrument — null until confirmed by the backend.
   const [lotSize, setLotSize] = useState<number | null>(null);
@@ -273,6 +290,7 @@ function QuickTradeWidget(props: WidgetProps) {
           orderType: orderType,
           strategy: "quicktrade",
         });
+        setAdmission(null);
         setStatus({
           type: "success",
           message: `${action} order placed · ${lots} lot(s) = ${quantity} qty`,
@@ -280,13 +298,22 @@ function QuickTradeWidget(props: WidgetProps) {
         track("trade", `quicktrade_${action.toLowerCase()}`);
         setTimeout(() => setStatus(null), 4000);
       } catch (err) {
+        const notice = layaNoticeFromOrderError(err, {
+          suppressDeny: mode === "live" && liveWritesMuted(readOperatorIncident()),
+        });
+        if (notice) {
+          setAdmission(notice);
+          setStatus(null);
+          return;
+        }
+        setAdmission(null);
         const msg = err instanceof Error ? err.message : "Order failed";
         setStatus({ type: "error", message: msg });
       } finally {
         setIsPending(false);
       }
     },
-    [symbol, exchange, lots, product, orderType, limitPrice, track, resolveQuantity],
+    [symbol, exchange, lots, product, orderType, limitPrice, mode, track, resolveQuantity],
   );
 
   const handleAction = useCallback(
@@ -446,11 +473,14 @@ function QuickTradeWidget(props: WidgetProps) {
         {/* Status */}
         <StatusBanner status={status} />
 
+        <LayaDegradedLimitsNote status={decisionStatus} />
+        <LayaAdmissionNotice notice={admission} />
+
         {/* BUY / SELL */}
         <div className="flex gap-2 mt-auto">
           <Button
             onClick={() => handleAction("BUY")}
-            disabled={isPending}
+            disabled={isPending || admission?.kind === "deny"}
             aria-label={`Buy ${lots} lots of ${symbol}`}
             className="flex-1 h-10 text-sm font-bold bg-profit hover:bg-profit/80 text-white border-0"
           >
@@ -461,7 +491,7 @@ function QuickTradeWidget(props: WidgetProps) {
           </Button>
           <Button
             onClick={() => handleAction("SELL")}
-            disabled={isPending}
+            disabled={isPending || admission?.kind === "deny"}
             aria-label={`Sell ${lots} lots of ${symbol}`}
             className="flex-1 h-10 text-sm font-bold bg-loss hover:bg-loss/80 text-white border-0"
           >

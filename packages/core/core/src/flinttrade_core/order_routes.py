@@ -461,6 +461,28 @@ def _gather_safety_state(
     )
 
 
+def _laya_place_response(body: dict[str, Any], *, mode: str, source: str) -> tuple[Any, int] | None:
+    """Admit one operator place before SafetySystem or the practice sandbox.
+
+    ``source`` is fixed by this server entry. The request body cannot choose it.
+    A refusal or a clamp returns before any write ticket is minted.
+    """
+    from flinttrade_engine.laya import place_block, process_laya, proposal_from_place_fields  # noqa: PLC0415
+
+    proposal = proposal_from_place_fields(body, mode=mode, source=source)
+    blocked = place_block(process_laya().admit(proposal), proposal.quantity)
+    if blocked is None:
+        return None
+    status = int(blocked.pop("http_status"))
+    logger.info(
+        "Laya %s | mode=%s symbol=%s",
+        blocked.get("code"),
+        mode,
+        body.get("symbol", "?"),
+    )
+    return jsonify(blocked), status
+
+
 def _safety_state_unavailable_response() -> tuple[Any, int]:
     return jsonify({
         "status": "error",
@@ -1064,6 +1086,11 @@ def _dispatch_live_order(
         )
         return jsonify({"status": "error", "message": "Order validation failed"}), 400
 
+    if ft_action == "place":
+        laya_block = _laya_place_response(body, mode=_MODE_LIVE, source="operator")
+        if laya_block is not None:
+            return laya_block
+
     _t0 = time.perf_counter()
     safe_account = account_ref(account_id)
     try:
@@ -1645,6 +1672,11 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     # Practice mode — paper trading via SandboxEngine
     # ------------------------------------------------------------------
     if mode == _MODE_PRACTICE:
+        if ft_action == "place":
+            laya_block = _laya_place_response(body, mode=_MODE_PRACTICE, source="operator")
+            if laya_block is not None:
+                return laya_block
+
         sandbox = current_app.config.get("DATA_SANDBOX_ENGINE")
         if sandbox is None:
             logger.error(
@@ -1715,8 +1747,9 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     # ------------------------------------------------------------------
     # Live mode — single gated, selector-bound execution channel (C1).
     #
-    # ``place`` runs the full SafetySystem (L1-L5) + one-shot HMAC gate +
-    # per-account ACL via the BrokerRouter. ``modify`` and ``cancel`` run the
+    # ``place`` admits through Laya, then runs the full SafetySystem (L1-L5)
+    # + one-shot HMAC gate + per-account ACL via the BrokerRouter. A denial
+    # or a quantity clamp returns before that gate. ``modify`` and ``cancel`` run the
     # same one-shot gate + ACL and remain behind the L5 kill switch, and
     # ``cancel-all`` for an explicitly-named native broker routes through the
     # gated ``cancel_all_orders`` verb.

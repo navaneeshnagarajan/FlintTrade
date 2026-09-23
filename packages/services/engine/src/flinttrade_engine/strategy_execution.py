@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from flinttrade_core.models import Order
 
+from .laya import place_block, process_laya, proposal_from_place_fields
 from .request_context import RequestContext
 from .safety import SafetySystem, gate_order
 
@@ -47,9 +48,10 @@ class GatedStrategyDispatcher:
     """Canonical live strategy order dispatcher.
 
     The dispatcher resolves the current request identity and router generation
-    for each mutation, runs the safety layers, mints a one-shot context through
-    :func:`gate_order`, and hands the write to ``BrokerRouter``. It deliberately
-    exposes no raw adapter or OpenAlgo client.
+    for each mutation, admits the place through Laya, runs the safety layers,
+    mints a one-shot context through :func:`gate_order`, and hands the write to
+    ``BrokerRouter``. It deliberately exposes no raw adapter or OpenAlgo client.
+    Chat is not an admission source.
     """
 
     def __init__(
@@ -89,6 +91,10 @@ class GatedStrategyDispatcher:
         selected_adapter, selected_account = selected_target
         if (selected_adapter, selected_account) != (self._adapter_id, self._account_id):
             raise RuntimeError("Live strategy dispatch target does not match the request selector")
+
+        blocked = _laya_place_block(order)
+        if blocked is not None:
+            raise RuntimeError(str(blocked["message"]))
 
         if self._portfolio_state_provider is None:
             raise RuntimeError("Live strategy dispatch requires a portfolio safety-state provider")
@@ -136,6 +142,25 @@ class GatedStrategyDispatcher:
             )
             lease.acknowledge(reservation, result)
             return result
+
+
+def _laya_place_block(order: Order) -> dict[str, object] | None:
+    """Admit one automate place before SafetySystem. Chat is not a source."""
+    proposal = proposal_from_place_fields(
+        {
+            "symbol": order.symbol,
+            "exchange": order.exchange,
+            "action": order.action,
+            "quantity": order.quantity,
+            "order_type": order.pricetype,
+            "product": order.product,
+            "price": order.price,
+            "trigger_price": order.trigger_price,
+        },
+        mode="live",
+        source="automate",
+    )
+    return place_block(process_laya().admit(proposal), proposal.quantity)
 
 
 _CANONICAL_GATED_DISPATCH_ORDER = GatedStrategyDispatcher.dispatch_order

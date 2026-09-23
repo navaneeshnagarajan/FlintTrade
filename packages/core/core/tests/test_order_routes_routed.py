@@ -45,6 +45,15 @@ def _bind_secret() -> None:
     set_safety_gate_secret(_SECRET)
 
 
+@pytest.fixture(autouse=True)
+def _laya_ready_for_open_place() -> None:
+    """Seed Ready so an open live place in this module still reaches SafetySystem."""
+    from flinttrade_engine.laya import DecisionStatus, process_laya
+
+    process_laya().set_status(DecisionStatus.READY)
+    yield
+
+
 def _app(backend_lease_proof, broker_router: object | None = None, safety: object | None = None) -> Flask:
     if safety is None:
         safety = _passing_safety()
