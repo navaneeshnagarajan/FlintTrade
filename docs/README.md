@@ -51,7 +51,7 @@ to fully-original implementations is ongoing. FlintTrade is licensed under
 | [releases/](releases/) | Everyone | Per-version release notes (chronological). |
 | [setup/](setup/) | Contributor / Operator | Platform setup plus static IP, email, backup, and multi-user notes. |
 | [product-modes.mdx](product-modes.mdx) | User / Contributor | Explore / Practice / Live versus Sample / Unavailable / Live / Stale provenance, and Home versus Trade ownership. |
-| [acceptance/](acceptance/) | Maintainer | Tracking PASS bars. [FT-MONDAY-002](acceptance/FT-MONDAY-002.md) locks native Dhan + Neo MSI Connected (read) / API smoke. [FT-MONDAY-003](acceptance/FT-MONDAY-003.md) ships AI Chat Practice + native live-read context (Suggest stays illustrative; Live place fail-closed). |
+| [acceptance/](acceptance/) | Maintainer | Tracking PASS bars. [FT-MONDAY-002](acceptance/FT-MONDAY-002.md) locks native Dhan + Neo MSI Connected (read) / API smoke. [FT-MONDAY-003](acceptance/FT-MONDAY-003.md) ships AI Chat Practice + native live-read context (Suggest stays illustrative; Live place fail-closed). [FT-SETUP-FLOW-001](acceptance/FT-SETUP-FLOW-001.md) locks first-run Setup to Create operator, vault, then the Practice desk (tracking; wizard unchanged). |
 | [screenshots/](screenshots/) | Documentation | UI screenshots referenced from user-facing docs. |
 | [superpowers/specs/](superpowers/specs/) | Contributor | Historical design specs (brainstorming gate output). Treat as in-flight only when a current PR still implements them. |
 
