@@ -356,10 +356,11 @@ cancelled broker orders.
 
 The TopBar desk status cluster shows **Broker**, **Laya**, and **LLM** as
 separate labels. Broker is **Connected**, **Connected (read)**, or
-**Unavailable**. Laya is **Ready**, **Degraded**, or **Down**; with no
-status yet it shows **Degraded**, not **Ready**, and that does not open
-this strip. LLM is **Not configured**, or **Connected (suggest only)**
-when Chat is ready.
+**Unavailable**. Laya is **Ready**, **Degraded**, or **Down**. Laya starts
+**Down**. The desk ping publishes Ready, Degraded, or Down and does not
+invent Ready. Only **Down** opens this strip and mutes Live place and
+Position Mirror start; **Degraded** does not. LLM is **Not configured**, or
+**Connected (suggest only)** when Chat is ready.
 
 FlintTrade does not hold client funds, reverse broker fills, or file a
 dispute. Rectify steps point at the broker, the exchange, or the host:
