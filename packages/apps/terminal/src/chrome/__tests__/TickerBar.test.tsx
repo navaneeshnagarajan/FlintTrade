@@ -15,7 +15,12 @@ import { createStore } from "jotai";
 import type { WsTick } from "@/types/api";
 
 // Mock the indicesSummaryAtom via the marketAtoms module
-const mockIndicesData: { name: string; data: WsTick | null }[] = [];
+const mockIndicesData: {
+  name: string;
+  data: WsTick | null;
+  venue?: string;
+  exchange?: string;
+}[] = [];
 
 vi.mock("@/atoms/marketAtoms", async (importOriginal) => {
   const { atom } = require("jotai");
@@ -50,7 +55,9 @@ function renderTickerBar() {
   );
 }
 
-function setIndices(indices: { name: string; data: WsTick | null }[]) {
+function setIndices(
+  indices: { name: string; data: WsTick | null; venue?: string; exchange?: string }[],
+) {
   mockIndicesData.length = 0;
   mockIndicesData.push(...indices);
 }
@@ -220,15 +227,116 @@ describe("TickerBar", () => {
       expect(screen.getAllByText("72,500.00").length).toBeGreaterThan(0);
     });
 
-    it("MCX section has accessible label", () => {
+    it("groups the MCX badge with the venues that feed the tape", () => {
       setIndices([
         { name: "GOLD", data: null },
       ]);
       renderTickerBar();
 
-      expect(
-        screen.getByLabelText("MCX commodities section"),
-      ).toBeInTheDocument();
+      const badges = screen.getByLabelText("Venue badges");
+      expect(badges).toHaveAttribute("data-venues", "MCX");
+      expect(screen.getByLabelText("MCX closed")).toBeInTheDocument();
+    });
+  });
+
+  describe("venue badges match the feeding tape", () => {
+    const equityAndMcx = [
+      { name: "NIFTY 50", data: null },
+      { name: "SENSEX", data: null },
+      { name: "BANK NIFTY", data: null },
+      { name: "VIX", data: null },
+      { name: "GOLD", data: null },
+      { name: "SILVER", data: null },
+      { name: "CRUDEOIL", data: null },
+      { name: "NATGAS", data: null },
+    ];
+
+    it("shows NSE, BSE and MCX when equity indices scroll with MCX commodities", () => {
+      setIndices(equityAndMcx);
+      renderTickerBar();
+
+      const badges = screen.getByTestId("ticker-venue-badges");
+      expect(badges).toHaveAttribute("data-venues", "NSE,BSE,MCX");
+      expect(screen.getByLabelText("NSE closed")).toBeInTheDocument();
+      expect(screen.getByLabelText("BSE closed")).toBeInTheDocument();
+      expect(screen.getByLabelText("MCX closed")).toBeInTheDocument();
+      expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
+      expect(screen.getAllByText("NIFTY 50").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("SENSEX").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("BANK NIFTY").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("VIX").length).toBeGreaterThan(0);
+    });
+
+    it("keeps each venue's session state when only MCX is open", () => {
+      mockIsMarketHours.mockImplementation((exchange?: string) => exchange === "MCX");
+      setIndices(equityAndMcx);
+      renderTickerBar();
+
+      expect(screen.getByLabelText("NSE closed")).toHaveAttribute(
+        "title",
+        "NSE session is closed",
+      );
+      expect(screen.getByLabelText("BSE closed")).toBeInTheDocument();
+      expect(screen.getByLabelText("MCX open")).toHaveAttribute(
+        "title",
+        "MCX session is open (09:00–23:30 IST)",
+      );
+    });
+
+    it("omits MCX when the tape is equity indices only", () => {
+      setIndices([
+        { name: "NIFTY 50", data: null },
+        { name: "SENSEX", data: null },
+        { name: "BANK NIFTY", data: null },
+        { name: "VIX", data: null },
+      ]);
+      renderTickerBar();
+
+      expect(screen.getByTestId("ticker-venue-badges")).toHaveAttribute(
+        "data-venues",
+        "NSE,BSE",
+      );
+      expect(screen.queryByLabelText(/MCX (open|closed)/i)).not.toBeInTheDocument();
+    });
+
+    it("adds NFO when an F&O symbol feeds the marquee", () => {
+      setIndices([
+        { name: "NIFTY 50", data: null },
+        { name: "NIFTY 24500 CE", exchange: "NFO", data: null },
+        { name: "GOLD", data: null },
+      ]);
+      renderTickerBar();
+
+      expect(screen.getByTestId("ticker-venue-badges")).toHaveAttribute(
+        "data-venues",
+        "NSE,NFO,MCX",
+      );
+      expect(screen.getByLabelText("NFO closed")).toHaveAttribute(
+        "title",
+        "NFO session is closed",
+      );
+    });
+
+    it("omits the badge strip when the marquee has no symbols", () => {
+      setIndices([]);
+      renderTickerBar();
+
+      expect(screen.queryByTestId("ticker-venue-badges")).not.toBeInTheDocument();
+      expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
+    });
+
+    it("shows Unavailable instead of a fake venue strip when symbols have no venue", () => {
+      setIndices([{ name: "MYSTERY SCRIP", data: null }]);
+      renderTickerBar();
+
+      expect(screen.getByTestId("ticker-venue-badges")).toHaveAttribute(
+        "data-venues",
+        "unavailable",
+      );
+      expect(screen.getByLabelText("Venues unavailable")).toHaveTextContent("Unavailable");
+      expect(screen.queryByLabelText(/NSE (open|closed)/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/BSE (open|closed)/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/MCX (open|closed)/i)).not.toBeInTheDocument();
     });
   });
 
@@ -239,8 +347,36 @@ describe("TickerBar", () => {
     renderTickerBar();
 
     expect(screen.getByTestId("ticker-strip")).toBeInTheDocument();
-    expect(screen.getByTestId("ticker-marquee")).toBeInTheDocument();
+    const marquee = screen.getByTestId("ticker-marquee");
+    expect(marquee).toHaveAttribute("data-motion", "marquee");
+    expect(marquee.querySelector(".ticker-track")).not.toBeNull();
+    expect(screen.queryByTestId("ticker-reduced-motion")).not.toBeInTheDocument();
     expect(screen.getAllByRole("region", { name: "Market indices" })).toHaveLength(1);
     expect(screen.queryByRole("region", { name: "Ticker prices" })).not.toBeInTheDocument();
+  });
+
+  it("freezes the marquee and labels reduced motion", () => {
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList);
+
+    setIndices([
+      { name: "NIFTY 50", data: { ltp: 23500.5, prevClose: 23400 } as WsTick },
+      { name: "SENSEX", data: { ltp: 77200 } as WsTick },
+    ]);
+    renderTickerBar();
+
+    const marquee = screen.getByTestId("ticker-marquee");
+    expect(marquee).toHaveAttribute("data-motion", "reduced");
+    expect(marquee.querySelector(".ticker-track")).toBeNull();
+    expect(screen.getByTestId("ticker-reduced-motion")).toHaveTextContent("Reduced motion");
+    expect(screen.getAllByText("NIFTY 50")).toHaveLength(1);
   });
 });
