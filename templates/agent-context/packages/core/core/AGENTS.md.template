@@ -7,19 +7,20 @@
 - openalgo-python-library → SDK patterns, 80+ technical indicators
 - All OpenAlgo SDKs (Node, Java, Go, Rust, .NET) → API pattern reference
 
-## Depends on: none (foundation package)
+## Dependencies
+
+See `packages/core/core/pyproject.toml` for declared dependencies and optional extras.
 
 ## Rules
 - Read root CLAUDE.md for project-wide rules
-- Use packages/core/core/src/openalgo_client.py for ALL OpenAlgo API calls
-- Never reference specific brokers
+- Use `flinttrade_core.openalgo_client` (`packages/core/core/src/flinttrade_core/openalgo_client.py`) for the optional OpenAlgo REST bridge. Live writes must obtain a `SafetyContext` through `gate_order`/`gate_broker_write` and flow through `BrokerRouter`; never call broker writes directly.
+- Keep shared service logic broker-neutral; broker-specific implementations and capability differences belong in gateway adapters.
 - Tests are in the `tests/` directory. Add new test files as needed.
-- Update root CHANGELOG.md
+- Update root `changelog.md` only for shipped user-visible or API changes; do not add entries for tests, behaviour-preserving refactors or in-flight design.
 - Branch: follow root AGENTS.md; verify live main before opening or merging a PR.
 
-## Sandbox/Analyzer mode
-- OpenAlgo has built-in Analyzer mode (sandbox): /api/v1/analyzer/toggle and /api/v1/analyzer/status
-- FlintTrade must support toggling between live and sandbox mode
-- OpenAlgo Analyzer mode provides virtual capital for paper trading
-- All orders in sandbox mode go through OpenAlgo's analyzer, not real broker
-- UI must show clear visual indicator (colored theme) when in sandbox mode
+## Explore, Practice and Live modes
+- Enforce the signed session JWT's mode server-side. Explore cannot place orders; Live also requires the current unlock and safety gates.
+- Core Practice order dispatch uses FlintTrade's internal `SandboxEngine` (`flinttrade_core.order_routes`), never a real broker. Endpoints without Practice parity must reject that mode rather than fall through to live execution.
+- OpenAlgo Analyzer is a separate capability of the optional bridge. Its toggle must not replace FlintTrade's mode checks or Practice routing.
+- Keep the active mode clear in the UI and preserve fail-closed order entrypoints.

@@ -20,7 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ml = [
-    "scikit-learn>=1.4",
+    "scikit-learn>=1.9.1",
     "scipy>=1.18.1",
     # Hyper-parameter optimisation for the strategy tuner (hyperopt_strategy.py).
     "optuna>=5.0.0",
