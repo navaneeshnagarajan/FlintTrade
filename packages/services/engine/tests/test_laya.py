@@ -33,30 +33,24 @@ def _proposal(**overrides: Any) -> Proposal:
 
 
 @pytest.mark.unit
-def test_default_status_stays_degraded_until_a_heartbeat() -> None:
-    engine = Laya(max_quantity=10)
-    assert engine.status is DecisionStatus.DEGRADED
-    assert engine.status is not DecisionStatus.READY
-    refused = engine.admit(_proposal(quantity=4))
-    assert refused.allow is False
-    assert refused.limits.max_quantity == 1
-    assert engine.note_heartbeat() is DecisionStatus.READY
-    assert engine.admit(_proposal(quantity=4)).allow is True
-
-
-@pytest.mark.unit
-def test_heartbeat_does_not_clear_down_or_an_explicit_degraded_status() -> None:
+def test_status_is_required_and_heartbeat_does_not_invent_ready() -> None:
     down = Laya(status=DecisionStatus.DOWN, max_quantity=10)
+    assert down.status is DecisionStatus.DOWN
     assert down.note_heartbeat() is DecisionStatus.DOWN
-    explicit = Laya(status=DecisionStatus.DEGRADED, max_quantity=10, degraded_max_quantity=1)
-    assert explicit.note_heartbeat() is DecisionStatus.DEGRADED
+    assert down.admit(_proposal(quantity=1)).allow is False
+    ready = Laya(status=DecisionStatus.READY, max_quantity=10)
+    assert ready.note_heartbeat() is DecisionStatus.READY
+    degraded = Laya(status=DecisionStatus.DEGRADED, max_quantity=10, degraded_max_quantity=1)
+    assert degraded.note_heartbeat() is DecisionStatus.DEGRADED
 
 
 @pytest.mark.unit
-def test_process_laya_starts_degraded_and_ping_heartbeat_marks_ready() -> None:
+def test_process_laya_starts_down_until_an_explicit_status() -> None:
     reset_process_laya_for_tests()
     engine = process_laya()
-    assert engine.status is DecisionStatus.DEGRADED
+    assert engine.status is DecisionStatus.DOWN
+    assert engine.note_heartbeat() is DecisionStatus.DOWN
+    engine.set_status(DecisionStatus.READY)
     assert engine.note_heartbeat() is DecisionStatus.READY
     reset_process_laya_for_tests()
 
@@ -99,7 +93,7 @@ def test_down_refuses_live_and_practice_with_no_model_fallback() -> None:
 
 @pytest.mark.unit
 def test_explore_and_chat_sources_are_refused() -> None:
-    engine = Laya(max_quantity=10)
+    engine = Laya(status=DecisionStatus.READY, max_quantity=10)
     explore = engine.admit(_proposal(mode="explore"))
     chat = engine.admit(_proposal(source="chat"))
     assert explore.allow is False
@@ -110,7 +104,7 @@ def test_explore_and_chat_sources_are_refused() -> None:
 
 @pytest.mark.unit
 def test_limit_without_a_price_is_refused() -> None:
-    verdict = Laya(max_quantity=10).admit(_proposal(order_type="LIMIT", price=None))
+    verdict = Laya(status=DecisionStatus.READY, max_quantity=10).admit(_proposal(order_type="LIMIT", price=None))
     assert verdict.allow is False
 
 

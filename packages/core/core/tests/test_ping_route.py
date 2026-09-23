@@ -64,15 +64,19 @@ class TestPingRoute:
         # Verify IST offset (+05:30) is embedded in the timestamp
         assert "+05:30" in ts or "T" in ts
 
-    def test_ping_heartbeat_reports_laya_and_does_not_invent_ready(self, client) -> None:  # type: ignore[no-untyped-def]
-        """A fresh process is Degraded until ping, then Ready. Down stays Down."""
+    def test_ping_publishes_laya_down_until_status_is_explicit(self, client) -> None:  # type: ignore[no-untyped-def]
+        """A fresh process is Down. Ping does not invent Ready."""
         reset_process_laya_for_tests()
-        assert process_laya().status is DecisionStatus.DEGRADED
+        assert process_laya().status is DecisionStatus.DOWN
         first = client.get("/api/v1/ping").get_json()
         assert first is not None
-        assert first["laya"] == "ready"
-        process_laya().set_status(DecisionStatus.DOWN)
+        assert first["laya"] == "down"
+        process_laya().set_status(DecisionStatus.READY)
         second = client.get("/api/v1/ping").get_json()
         assert second is not None
-        assert second["laya"] == "down"
+        assert second["laya"] == "ready"
+        process_laya().set_status(DecisionStatus.DEGRADED)
+        third = client.get("/api/v1/ping").get_json()
+        assert third is not None
+        assert third["laya"] == "degraded"
         reset_process_laya_for_tests()

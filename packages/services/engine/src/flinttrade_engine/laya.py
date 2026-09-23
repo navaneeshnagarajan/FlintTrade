@@ -102,8 +102,7 @@ class Laya:
     """Admit or refuse a proposal. Never places.
 
     Args:
-        status: Ready, Degraded, or Down. Omit it until a heartbeat: the
-            engine then stays Degraded and does not present Ready.
+        status: Ready, Degraded, or Down. Required. There is no Ready default.
         max_quantity: Ceiling while Ready.
         degraded_max_quantity: Tighter ceiling while Degraded.
     """
@@ -111,7 +110,7 @@ class Laya:
     def __init__(
         self,
         *,
-        status: DecisionStatus | None = None,
+        status: DecisionStatus,
         max_quantity: int = 100,
         degraded_max_quantity: int = 1,
     ) -> None:
@@ -119,9 +118,7 @@ class Laya:
             raise ValueError("quantity bounds must be positive")
         if degraded_max_quantity > max_quantity:
             raise ValueError("degraded bound cannot exceed the ready bound")
-        # No heartbeat yet. An explicit status is already authoritative.
-        self._heard = status is not None
-        self._status = DecisionStatus.DEGRADED if status is None else status
+        self._status = status
         self._max_quantity = max_quantity
         self._degraded_max_quantity = degraded_max_quantity
 
@@ -133,17 +130,13 @@ class Laya:
     def set_status(self, status: DecisionStatus) -> None:
         """Record Ready, Degraded, or Down. This is authoritative."""
         self._status = status
-        self._heard = True
 
     def note_heartbeat(self) -> DecisionStatus:
-        """Record that the desk heard Laya.
+        """Return the status a desk heartbeat should publish.
 
-        The fail-closed default becomes Ready. Down and an explicit status
-        stay as they are.
+        A heartbeat does not invent Ready. Down stays Down until
+        :meth:`set_status` says otherwise.
         """
-        if not self._heard and self._status is not DecisionStatus.DOWN:
-            self._status = DecisionStatus.READY
-            self._heard = True
         return self._status
 
     def admit(self, proposal: Proposal) -> Verdict:
@@ -214,11 +207,11 @@ _process_laya: Laya | None = None
 
 
 def process_laya() -> Laya:
-    """Process-wide Laya. Degraded until :meth:`Laya.note_heartbeat`."""
+    """Process-wide Laya. Down until :meth:`Laya.set_status` says otherwise."""
     global _process_laya
     with _process_lock:
         if _process_laya is None:
-            _process_laya = Laya()
+            _process_laya = Laya(status=DecisionStatus.DOWN)
         return _process_laya
 
 

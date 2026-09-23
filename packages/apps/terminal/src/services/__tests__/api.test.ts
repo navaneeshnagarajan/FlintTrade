@@ -186,7 +186,7 @@ function deferred<T>() {
 describe("OpenAlgo API client (api.ts)", () => {
   let fetchSpy: MockInstance<typeof globalThis.fetch>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     fetchSpy = vi.spyOn(globalThis, "fetch");
     // Reset rate limiter mocks to allow requests by default
     vi.mocked(orderLimiter.tryConsume).mockReturnValue(true);
@@ -196,6 +196,8 @@ describe("OpenAlgo API client (api.ts)", () => {
     mockConnectionState.openAlgoHydrated = true;
     mockConnectionState.status = "connected";
     mockModeState.mode = "live";
+    const { useOperatorSignalStore } = await import("@/stores/operatorSignalStore");
+    useOperatorSignalStore.setState({ decisionStatus: "ready" });
     mockBrokerState.accounts = [
       {
         account_id: "U1",

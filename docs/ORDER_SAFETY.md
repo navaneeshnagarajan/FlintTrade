@@ -68,9 +68,10 @@ admission surface; the server place path does not run it before SafetySystem.
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down — Live orders paused."). That class closes Live place and Position
 Mirror start on the shared client place path. Kill All stays reachable.
-Broker may stay **Connected** or **Connected (read)**. With no status yet,
-the Laya surface shows Degraded, not Ready. Degraded does not open that
-class and does not mute Live.
+Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
+The desk ping publishes Ready, Degraded, or Down and does not invent Ready.
+Degraded does not open that class and does not mute Live. `Laya.admit` on
+every server place remains follow-up work and is not this mute.
 
 | Concern | Automate risk note | SafetySystem | Ticket guards | Laya |
 | --- | --- | --- | --- | --- |

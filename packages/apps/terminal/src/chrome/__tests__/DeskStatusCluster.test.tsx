@@ -37,9 +37,9 @@ describe("DeskStatusCluster", () => {
     );
   });
 
-  it("shows Laya Degraded until a heartbeat arrives", () => {
+  it("shows Laya Down until a heartbeat reports otherwise", () => {
     render(<DeskStatusCluster />);
-    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Degraded");
+    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Down");
     expect(screen.getByTestId("laya-surface")).not.toHaveTextContent("Ready");
   });
 

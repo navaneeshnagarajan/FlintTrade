@@ -203,8 +203,7 @@ def ping() -> tuple[Any, int]:
 
     Returns:
         JSON ``{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down"}``.
-        ``laya`` is Degraded until this process records a heartbeat. A missing
-        heartbeat is never reported as Ready. Down is not cleared by a later ping.
+        ``laya`` starts Down. A ping publishes that status and does not invent Ready.
     """
     from flinttrade_engine.laya import process_laya  # noqa: PLC0415
 

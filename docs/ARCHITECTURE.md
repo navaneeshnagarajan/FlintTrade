@@ -396,7 +396,7 @@ earliest of:
    position over 60 % of free margin.
 5. **L3 Portfolio risk** — net delta and net vega caps across the book.
 
-Laya is a separate decision-status and admission surface (Ready, Degraded, or Down): with no status yet the desk shows Degraded rather than Ready, Live place and Position Mirror start mute only when it is Down, and it does not replace L1–L5 or `gate_order` (see [ORDER_SAFETY.md](ORDER_SAFETY.md)).
+Laya is a separate decision-status and admission surface (Ready, Degraded, or Down): it starts Down, the desk ping publishes that status and does not invent Ready, Live place and Position Mirror start mute when it is Down, and it does not replace L1–L5 or `gate_order` (see [ORDER_SAFETY.md](ORDER_SAFETY.md)).
 
 ### Broker reads versus gated writes
 

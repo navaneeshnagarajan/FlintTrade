@@ -53,7 +53,18 @@ describe("OperatorIncidentProbes Laya heartbeat", () => {
     });
   });
 
-  it("does not keep Ready when the heartbeat omits Laya", async () => {
+  it("records Ready only when the heartbeat says Ready", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/v1/ping")) return jsonResponse({ status: "ok", laya: "ready" });
+      return jsonResponse({ status: "healthy" });
+    }));
+    renderProbes();
+    await waitFor(() => {
+      expect(useOperatorSignalStore.getState().decisionStatus).toBe("ready");
+    });
+  });
+
+  it("stays Down when the heartbeat omits Laya", async () => {
     useOperatorSignalStore.setState({ decisionStatus: "ready" });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).includes("/api/v1/ping")) return jsonResponse({ status: "ok" });
@@ -61,7 +72,7 @@ describe("OperatorIncidentProbes Laya heartbeat", () => {
     }));
     renderProbes();
     await waitFor(() => {
-      expect(useOperatorSignalStore.getState().decisionStatus).toBeNull();
+      expect(useOperatorSignalStore.getState().decisionStatus).toBe("down");
     });
     expect(useOperatorSignalStore.getState().decisionStatus).not.toBe("ready");
   });
