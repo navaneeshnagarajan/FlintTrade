@@ -133,6 +133,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Fixed
 
+- **Ticker venue badges match the marquee (FT-CORE-TICKER-001).**
+  Pinned badges follow the venues that feed the tape: NSE, BSE, and
+  MCX on the default tape, and NFO when an F&O symbol feeds. A venue
+  with no feeding symbol is omitted. Symbols that do not resolve to a
+  venue show **Unavailable**. An empty tape omits the badge strip.
+  The marquee runs continuously when motion is allowed. With
+  `prefers-reduced-motion: reduce`, the tape freezes and shows
+  **Reduced motion**. The Sample freshness chip may stay; it must
+  not hide venue honesty.
+
 - **Tools Quick Settings on the Trade desk (FT-UX-QUICK-SETTINGS-001).**
   Tools → Quick Settings opens density, theme, and similar controls
   without leaving the desk. Tools → Settings still opens the full

@@ -464,6 +464,15 @@ Invest, Automate, Learn, and Ditto. This is not a silent widen of
 Compact-only-on-Trade (FT-UX-001). Mode and status stay reachable
 (desk-first; skinny-browser defensive collapse is fine).
 
+**Ticker venue badges (FT-CORE-TICKER-001).** Pinned badges match the
+venues that feed the marquee: NSE, BSE, and MCX on the default tape,
+and NFO when an F&O symbol feeds. A venue with no feeding symbol is
+omitted. Symbols that do not resolve to a venue show **Unavailable**.
+An empty tape omits the badge strip. The marquee runs continuously
+when motion is allowed. With `prefers-reduced-motion: reduce`, the
+tape freezes and shows **Reduced motion**. The Sample freshness chip
+may stay; it must not hide venue honesty.
+
 ### Walkthrough
 
 1. Open `/trade` (http://127.0.0.1:5100/trade on the installed web app;
