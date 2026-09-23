@@ -44,7 +44,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   Selecting a symbol in `/trade` Watchlist retargets
   Chart, Option Chain, and Scalper to that symbol —
   no retype. Keyboard retarget is optional later.
-  Explore retarget is allowed and keeps Sample labels.
+  Explore retarget is allowed. Disclosure stays the
+  Mode honesty line, not a widget Sample chip.
   An empty watchlist never silently retargets.
 
 - **Option Chain OI profile + PCR strip (FT-TRADE-012).**
@@ -210,9 +211,9 @@ changelog rebuilds itself from the first release cut after this baseline.
   stores) stay off the default pair.
 
 - **Explore Schedules Pause gated for sample jobs (FT-AUTO-004).**
-  Explore `/automate` → Schedules seeded jobs rely on
-  the global Explore sample banner for disclosure —
-  no extra Sample chip once Pause is gated. Seeded
+  Explore `/automate` → Schedules seeded jobs: the
+  Mode honesty line owns disclosure — no extra
+  Sample chip once Pause is gated. Seeded
   Explore jobs show status Sample/Demo (or muted),
   not a production-looking Active badge. Pause on
   those jobs is disabled, with title helper `Sample
@@ -222,10 +223,10 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 - **Explore Stock Baskets disable demo Edit/Delete (FT-INVEST-002).**
   Explore `/invest#basket` seeded cards (NIFTY IT,
-  Banking, and any other sample set) rely on the
-  global Explore sample banner for disclosure — no
-  card-level Sample chip. Bare ₹ / P&L under that
-  banner is acceptable once actions cannot look live.
+  Banking, and any other sample set): the Mode
+  honesty line owns disclosure — no card-level
+  Sample chip. Bare ₹ / P&L under that banner is
+  acceptable once actions cannot look live.
   Edit and Delete on seeded Explore baskets are
   disabled, with title helper `Sample basket —
   editing unavailable in Explore`. User-created
@@ -260,19 +261,29 @@ changelog rebuilds itself from the first release cut after this baseline.
 - **Holdings badge matches the visible table (FT-TRADE-010).**
   Practice/Explore `/invest` → Holdings with no broker
   shows `N holdings` for the rows currently in the table
-  plus a muted Sample chip — never `0 holdings` over a
-  10-row sample table. Dashboard and "N stocks" use the
-  same N. Practice waits until the holdings query has
-  settled empty before the sample fallback, so a cold
-  load does not flash the wrong N. Dashboard
-  `Net Worth (Equity + Cash)` uses the same shared demo
-  book as Holdings. A broker read failure shows muted
-  `Failed to load holdings` plus `Refresh` — never
-  `0 holdings`, `No holdings`, or a sample table under
-  a failed load. A connected broker with no positions
-  shows `0 holdings` and an honest empty state (no
-  sample table under a zero badge). Connected positions
-  use the live count only, with no Sample chip.
+  — never `0 holdings` over a populated sample table.
+  Dashboard and "N stocks" use the same N. Practice waits
+  until the holdings query has settled empty before the
+  sample fallback, so a cold load does not flash the
+  wrong N. Dashboard `Net Worth (Equity + Cash)` uses the
+  same shared demo book as Holdings. There is no Sample
+  chip on the Holdings table or header. When the sample
+  book is shown — Explore always, and Practice after that
+  empty settle — Holdings and Dashboard keep `DemoBanner`
+  (`Showing sample data — connect a broker for live data`)
+  in Explore as well as Practice. Explore also has the
+  Mode honesty line (`Explore — sample data only. No
+  broker session, no live orders.`). The Practice Mode
+  line (`Practice — SandboxEngine fills. Not your funded
+  broker account.`) does not call that book sample;
+  `DemoBanner` is the required Practice disclosure for it.
+  A broker read failure shows muted `Failed to load holdings`
+  plus `Refresh` —
+  never `0 holdings`, `No holdings`, or a sample table
+  under a failed load. A connected broker with no
+  positions shows `0 holdings` and an honest empty state
+  (no sample table under a zero badge). Connected
+  positions use the live count only.
 
 - **Explore Execution Logs mode honesty (FT-AUTO-003).**
   Explore `/automate` → Execution Logs shows the muted
@@ -349,7 +360,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   only the selected expiry (the chain’s
   selection when both widgets are open;
   otherwise the nearest listed). Explore sample
-  expiries stay listed and are badged Sample.
+  expiries stay listed. The Mode honesty line is
+  the disclosure — expiries are not badged Sample.
   No expiries or no OI is an honest empty —
   `No expiries for this symbol` or `No OI for
   this expiry` — with no bars and no PCR/max-pain
@@ -362,7 +374,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   quote source as the ticker tape (Jotai tick atoms
   from the Explore demo feed) for NIFTY, BANKNIFTY,
   SBIN, RELIANCE, HDFCBANK, and any other symbol on
-  that feed. A Sample data badge discloses this.
+  that feed. The Mode honesty line is the disclosure.
   Missing quotes show `—` (or a brief `…` while the
   first fetch is in flight), never silent blank
   chrome. Unchecking a column hides it; checking it
