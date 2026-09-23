@@ -320,7 +320,7 @@ def test_from_kotak_funds_real_limits_shape():
 
 def test_from_kotak_funds_check_margin_fallback():
     # If a build returns the data-wrapped check-margin shape, fall back to it.
-    funds = from_kotak_funds({"data": {"avlCash": "100.00", "totMrgnUsd": "40.00"}})
+    funds = from_kotak_funds({"data": {"status": "success", "avlCash": "100.00", "totMrgnUsd": "40.00"}})
     assert funds["available_balance"] == "100.00" and funds["used_margin"] == "40.00"
 
 

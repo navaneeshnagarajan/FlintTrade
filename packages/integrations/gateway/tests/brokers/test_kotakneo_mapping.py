@@ -13,6 +13,8 @@ import json
 
 import pytest
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
+from flinttrade_core.exceptions import SessionExpired
 from flinttrade_core.models import Order
 from flinttrade_gateway.brokers.kotakneo_mapping import (
     KotakNeoMappingError,
@@ -22,6 +24,7 @@ from flinttrade_gateway.brokers.kotakneo_mapping import (
     decode_kotak_order_feed,
     ensure_ok,
     from_kotak_depth,
+    from_kotak_funds,
     from_kotak_order,
     from_kotak_position,
     from_kotak_scrip_master,
@@ -37,6 +40,16 @@ from flinttrade_gateway.brokers.kotakneo_mapping import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def test_rejected_limits_cannot_map_to_zero_funds():
+    with pytest.raises(SessionExpired):
+        from_kotak_funds({"stat": "Not_Ok", "errMsg": "session expired"})
+
+
+def test_malformed_successful_limits_do_not_map_invalid_number_to_zero():
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_funds({"stat": "Ok", "Net": "not a number", "MarginUsed": "5"})
 
 
 # ---------------------------------------------------------------------------

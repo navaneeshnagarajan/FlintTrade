@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from flinttrade_core.exceptions import BrokerError
+from flinttrade_core.exceptions import BrokerError, BrokerInternal, SessionExpired
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter, _ROUTER_TOKEN
@@ -251,21 +251,20 @@ class _EnvelopeNeo(MockNeo):
 async def test_reads_tolerate_empty_and_error_envelope():
     adapter = _adapter(_EnvelopeNeo())
     session = await _session(adapter)
-    with pytest.raises(KotakNeoMappingError, match="rejected"):
+    with pytest.raises(SessionExpired):
         await adapter.order_book(session)
-    with pytest.raises(KotakNeoMappingError, match="rejected"):
+    with pytest.raises(SessionExpired):
         await adapter.positions(session)
-    funds = await adapter.funds(session)
-    # No data → zeroed funds dict, never a raise.
-    assert funds["available_balance"] == "0.00" and funds["used_margin"] == "0.00"
+    with pytest.raises(SessionExpired):
+        await adapter.funds(session)
 
 
 @pytest.mark.asyncio
-async def test_quotes_bare_list_fallback():
+async def test_quotes_bare_list_is_not_a_success_envelope():
     adapter = _adapter(_EnvelopeNeo())
     session = await _session(adapter)
-    quotes = await adapter.quotes(session, ["NSE:IDEA"])
-    assert len(quotes) == 1 and quotes[0].symbol == "IDEA" and quotes[0].ltp == 9.4
+    with pytest.raises(BrokerInternal):
+        await adapter.quotes(session, ["NSE:IDEA"])
 
 
 @pytest.mark.asyncio

@@ -29,6 +29,8 @@ from typing import Any
 
 from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 
+from .kotakneo_sdk import validate_read_envelope
+
 # Exchange -> NEO exchange-segment code (from settings.exchange_segment).
 EXCHANGE_TO_KOTAK = {
     "NSE": "nse_cm",
@@ -1319,11 +1321,12 @@ def from_kotak_funds(resp: dict[str, Any]) -> dict[str, Any]:
     the ``data``-wrapped check-margin keys (``avlCash``/``totMrgnUsd``) only if a
     gateway build returns that shape instead.
     """
-    data = resp.get("data", resp) if isinstance(resp, dict) else {}
-    if not isinstance(data, dict):
-        data = {}
-    available = _num(data.get("Net", data.get("avlCash", data.get("avlMrgn", 0))))
-    used = _num(data.get("MarginUsed", data.get("totMrgnUsd", data.get("mrgnUsd", 0))))
+    validate_read_envelope(resp, operation="limits")
+    data = resp.get("data", resp)
+    if type(data) is not dict:
+        raise BrokerReadResponseInvalid from None
+    available = _response_decimal(data, "Net", "avlCash", "avlMrgn", required=True)
+    used = _response_decimal(data, "MarginUsed", "totMrgnUsd", "mrgnUsd", required=True)
     return {
         "available_balance": f"{available:.2f}",
         "used_margin": f"{used:.2f}",

@@ -173,6 +173,27 @@ def test_verify_keeps_session_on_transient_error() -> None:
     assert err is None
 
 
+def test_verify_prefers_liveness_and_drops_expired_session() -> None:
+    from flinttrade_core.exceptions import SessionExpired
+    from flinttrade_gateway.native_login import verify_native_session
+
+    class KotakProbe:
+        broker_id = "kotakneo"
+        funds_calls = 0
+
+        async def liveness(self, _session):
+            raise SessionExpired("synthetic expired", broker_id="kotakneo")
+
+        async def funds(self, _session):
+            self.funds_calls += 1
+            return {"stat": "Ok", "Net": "1"}
+
+    adapter = KotakProbe()
+    session = Session("synthetic", 4102444800, "SYNTHETIC", "kotakneo")
+    assert asyncio.run(verify_native_session(adapter, session)) == SESSION_INVALID_RELOGIN_MESSAGE
+    assert adapter.funds_calls == 0
+
+
 def test_verify_keeps_session_on_service_window_error() -> None:
     """Upstox's funds endpoint is offline 12:00 AM–5:30 AM IST nightly and replies
     "... service is accessible from ... service hours". That is NOT proof the token

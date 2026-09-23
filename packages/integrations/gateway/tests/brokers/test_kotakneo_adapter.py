@@ -15,7 +15,7 @@ from typing import Any, AsyncIterator
 
 import pytest
 
-from flinttrade_core.exceptions import BrokerError
+from flinttrade_core.exceptions import BrokerError, CredentialsInvalid, MFARequired, SessionExpired
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers.kotakneo import (
@@ -207,6 +207,74 @@ class MockNeoFull:
         return {"State": "OK"}
 
 
+@pytest.mark.asyncio
+async def test_rejected_limits_do_not_become_zero_funds():
+    class Rejected(MockNeoFull):
+        def funds(self):
+            return {"stat": "Not_Ok", "errMsg": "session expired"}
+
+    adapter = _adapter(Rejected())
+    session = await _session(adapter)
+    with pytest.raises(SessionExpired):
+        await adapter.funds(session)
+    with pytest.raises(SessionExpired):
+        await adapter.balance_snapshot(session)
+
+
+@pytest.mark.asyncio
+async def test_rejected_order_history_does_not_become_an_empty_history():
+    class Rejected(MockNeoFull):
+        def order_history(self, order_id):
+            return {"error": [{"code": "401", "message": "session expired"}]}
+
+    adapter = _adapter(Rejected())
+    session = await _session(adapter)
+    with pytest.raises(SessionExpired):
+        await adapter.order_history(session, "SYNTHETIC")
+
+
+@pytest.mark.asyncio
+async def test_rejected_order_book_surfaces_typed_session_expiry():
+    class Rejected(MockNeoFull):
+        def order_book(self):
+            return {"stat": "Not_Ok", "errMsg": "session expired", "data": []}
+
+    adapter = _adapter(Rejected())
+    session = await _session(adapter)
+    with pytest.raises(SessionExpired):
+        await adapter.order_book(session)
+
+
+@pytest.mark.asyncio
+async def test_rejected_scrip_search_does_not_look_like_an_unknown_symbol():
+    class Rejected(MockNeoFull):
+        def search_scrip(self, exchange_segment, symbol, expiry=None, option_type=None,
+                         strike_price=None, ignore_50multiple=True):
+            return {"error": [{"code": "401", "message": "session expired"}]}
+
+    adapter = _adapter(Rejected())
+    session = await _session(adapter)
+    with pytest.raises(SessionExpired):
+        await adapter.search_scrip(session, "SYNTHETIC")
+
+
+@pytest.mark.asyncio
+async def test_refresh_requires_new_mfa_instead_of_returning_old_session():
+    adapter = _adapter(MockNeoFull())
+    session = await _session(adapter)
+    with pytest.raises(MFARequired):
+        await adapter.refresh(session)
+
+
+@pytest.mark.asyncio
+async def test_login_requires_typed_fresh_mfa_before_constructing_client():
+    adapter = _adapter(MockNeoFull())
+    with pytest.raises(MFARequired):
+        await adapter.login({"consumer_key": "synthetic", "mobile_number": "synthetic", "ucc": "SYNTHETIC", "mpin": "123456"})
+    with pytest.raises(CredentialsInvalid):
+        await adapter.login({"mobile_number": "synthetic", "ucc": "SYNTHETIC", "totp": "000000", "mpin": "123456"})
+
+
 def _adapter(mock: MockNeoFull, **kwargs: Any) -> KotakNeoAdapter:
     return KotakNeoAdapter(
         client_factory=lambda _s: mock,
@@ -287,108 +355,11 @@ async def test_logout_tolerates_facade_without_logout():
     await adapter.logout(session)  # must not raise
 
 
-def test_sdk_rest_wrapper_adds_fin_key_to_login_and_session_calls_only():
-    class FakeRest:
-        def __init__(self) -> None:
-            self.headers: list[dict[str, str]] = []
 
-        def request(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-            self.headers.append(dict(kwargs.get("headers") or {}))
-            return {"ok": True}
-
-    class FakeConfig:
-        def get_neo_fin_key(self) -> str:
-            return "neotradeapi"
-
-    class FakeNeo:
-        def __init__(self) -> None:
-            self.configuration = FakeConfig()
-            self.api_client = type("ApiClient", (), {"rest_client": FakeRest()})()
-
-    neo = FakeNeo()
-    KotakNeoClient._install_fin_key_header_patch(neo)
-    rest = neo.api_client.rest_client
-
-    rest.request(method="POST", url="https://example/orders", headers={"Auth": "A", "Sid": "S"})
-    rest.request(
-        method="POST",
-        url="https://mis.kotaksecurities.com/login/1.0/tradeApiLogin",
-        headers={"Authorization": "plain-token"},
-    )
-    rest.request(
-        method="POST",
-        url="https://mis.kotaksecurities.com/login/1.0/tradeApiValidate",
-        headers={"Authorization": "plain-token", "Auth": "view-token", "sid": "view-sid"},
-    )
-    rest.request(
-        method="GET",
-        url="https://example/script-details/1.0/quotes/neosymbol/nse_cm|26000/all",
-        headers={"Authorization": "plain-token"},
-    )
-    rest.request(
-        method="GET",
-        url="https://example/script-details/1.0/masterscrip/file-paths",
-        headers={"Authorization": "plain-token"},
-    )
-    rest.request(method="POST", url="https://example/orders", headers={"Auth": "A", "neo-fin-key": "custom"})
-
-    assert rest.headers[0]["neo-fin-key"] == "neotradeapi"
-    assert rest.headers[1]["neo-fin-key"] == "neotradeapi"
-    assert rest.headers[2]["neo-fin-key"] == "neotradeapi"
-    assert "neo-fin-key" not in rest.headers[3]
-    assert "neo-fin-key" not in rest.headers[4]
-    assert rest.headers[5]["neo-fin-key"] == "custom"
-
-
-def test_cancel_rest_branch_forwards_documented_amo_trading_symbol():
-    class FakeResponse:
-        def json(self):
-            return {"stat": "Ok", "nOrdNo": "OID-AMO", "stCode": 200}
-
-    class FakeRest:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, Any]] = []
-
-        def request(self, **kwargs):
-            self.calls.append(kwargs)
-            return FakeResponse()
-
-    class FakeConfig:
-        edit_sid = "sid"
-        edit_token = "token"
-        serverId = "server"
-
-        def get_url_details(self, route_key):
-            return f"https://neo.example/{route_key}"
-
-    rest = FakeRest()
+def test_v3_cancel_rejects_removed_trading_symbol_before_sdk_call():
     client = KotakNeoClient.__new__(KotakNeoClient)
-    client._neo = type(
-        "Neo",
-        (),
-        {
-            "configuration": FakeConfig(),
-            "api_client": type("ApiClient", (), {"configuration": FakeConfig(), "rest_client": rest})(),
-        },
-    )()
-
-    response = client.cancel_order("OID-AMO", amo="YES", trading_symbol="IDEA-EQ")
-
-    assert response["stat"] == "Ok"
-    assert rest.calls == [
-        {
-            "url": "https://neo.example/cancel_order",
-            "method": "POST",
-            "query_params": {"sId": "server"},
-            "headers": {
-                "Sid": "sid",
-                "Auth": "token",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            "body": {"on": "OID-AMO", "am": "YES", "ts": "IDEA-EQ"},
-        }
-    ]
-
+    with pytest.raises(BrokerError, match="no trading symbol"):
+        client.cancel_order("OID-AMO", amo="YES", trading_symbol="SYNTHETIC-EQ")
 
 def test_capabilities_record_current_public_websocket_limits_without_runtime_promotion() -> None:
     """Captured Kotak docs advertise 16 channels and 200 subscribed scrips."""
