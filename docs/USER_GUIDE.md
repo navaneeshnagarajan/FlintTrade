@@ -1019,7 +1019,7 @@ analysis. That is analysis context, not a guarantee of profitable
 alphas, and profitable alphas are not a release criterion. Chat
 does not place Live orders — Live place stays fail-closed. This does
 not lift the native broker HTTP freeze and does not claim every Chat
-turn already has live ticks. Chat never shows green **Connected** without a real LLM.
+turn already has live ticks. Chat never shows green **Connected (suggest only)** without a real LLM.
 Suggest stays labelled illustrative and is not this live-read path.
 
 On Explore `/settings#llm`, a demo or unconfigured session shows the empty
