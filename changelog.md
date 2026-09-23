@@ -57,6 +57,15 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
+- **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
+  The required path is Create operator → vault → Practice desk
+  (Step N of 3). Affirming Practice lands on that desk; Trading
+  Defaults, Risk, and Broker are Later/Skip after the landing.
+  TOTP, broker connect, LLM, and Monitoring are Later/Skip, and
+  skipping stays on the Practice desk. First run has no Live
+  unlock. A later Live unlock still needs the authenticator and
+  PIN. Refs #282.
+
 - **Native Dhan + Kotak Neo Connected (read) smoke (FT-MONDAY-002).**
   The path is native Dhan + Neo on the MSI
   static-IP host with non-funded live REST API smoke
