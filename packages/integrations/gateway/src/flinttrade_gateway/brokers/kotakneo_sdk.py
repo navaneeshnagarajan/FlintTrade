@@ -91,9 +91,14 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
     rejected |= isinstance(status_code, int) and status_code >= 400 and not (
         status_code == 1000 and operation == "whatsmyip" and status == "success"
     )
-    if not rejected:
-        if isinstance(data, dict):
+    if isinstance(data, dict):
+        if rejected:
+            nested_code, nested_message = _error_details(data)
+            code = nested_code or code
+            message = nested_message or message
+        else:
             _raise_provider_error(data, operation=operation, auth=auth, write=write)
+    if not rejected:
         return
     reason = f"Kotak Neo {operation} was rejected"
     if (not auth and code in {"401", "403"}) or any(

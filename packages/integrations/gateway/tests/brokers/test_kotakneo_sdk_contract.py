@@ -223,6 +223,23 @@ def test_read_envelope_rejects_nested_margin_auth_error():
         validate_read_envelope({"data": {"stat": "Not_Ok", "errMsg": "session expired"}}, operation="margin_required")
 
 
+@pytest.mark.parametrize("nested,error,code", [
+    ({"status": "failure", "message": "session expired"}, SessionExpired, ""),
+    ({"message": "session expired"}, SessionExpired, ""),
+    ({"status": "failure", "error": [{"code": "401", "message": "synthetic private detail"}]}, SessionExpired, "401"),
+    ({"status": "failure", "error": [{"code": "403", "message": "synthetic private detail"}]}, SessionExpired, "403"),
+    ({"status": "failure", "error": [{"code": "429", "message": "synthetic private detail"}]}, RateLimitError, "429"),
+    ({"status": "failure", "error": [{"code": "500", "message": "synthetic private detail"}]}, BrokerInternal, "500"),
+])
+def test_rejected_outer_envelope_preserves_nested_error_classification(nested, error, code):
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    with pytest.raises(error) as raised:
+        validate_read_envelope({"status": "error", "data": nested}, operation="limits")
+    assert raised.value.broker_code == code
+    assert "synthetic private detail" not in str(raised.value)
+
+
 def test_successful_limits_without_balance_values_is_not_zero_funds():
     from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
 
