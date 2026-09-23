@@ -624,9 +624,13 @@ AMFI sentence ("Updated daily after market close") when the live feed is
 in use.
 
 On Practice or Explore `/invest` → Holdings with no broker, the header
-badge matches the visible table (`N holdings`). Sample disclosure is the
-Mode honesty line, not a chip on the table. The badge is never `0 holdings` over a populated
-sample table. Dashboard and "N stocks" use that same N. Practice waits
+badge matches the visible table (`N holdings`). The badge is never `0 holdings` over a populated
+sample table. There is no Sample chip on the table. Explore sample
+disclosure is the Mode honesty line. On the Practice sample fallback,
+Holdings and Dashboard keep the `DemoBanner`
+(`Showing sample data — connect a broker for live data`);
+the Mode line does not call that book sample. Dashboard and "N stocks"
+use that same N. Practice waits
 until the holdings query has settled empty before the sample fallback,
 so a cold load does not flash the sample N over a pending book.
 Dashboard `Net Worth (Equity + Cash)` uses that same shared demo book

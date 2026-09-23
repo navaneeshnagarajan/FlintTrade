@@ -260,21 +260,25 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 - **Holdings badge matches the visible table (FT-TRADE-010).**
   Practice/Explore `/invest` → Holdings with no broker
-  shows `N holdings` for the rows currently in the table.
-  Sample disclosure is the Mode honesty line, not a chip
-  on the table — never `0 holdings` over a populated
-  sample table. Dashboard and "N stocks" use the same N.
-  Practice waits until the holdings query has
-  settled empty before the sample fallback, so a cold
-  load does not flash the wrong N. Dashboard
-  `Net Worth (Equity + Cash)` uses the same shared demo
-  book as Holdings. A broker read failure shows muted
-  `Failed to load holdings` plus `Refresh` — never
-  `0 holdings`, `No holdings`, or a sample table under
-  a failed load. A connected broker with no positions
-  shows `0 holdings` and an honest empty state (no
-  sample table under a zero badge). Connected positions
-  use the live count only.
+  shows `N holdings` for the rows currently in the table
+  — never `0 holdings` over a populated sample table.
+  Dashboard and "N stocks" use the same N. Practice waits
+  until the holdings query has settled empty before the
+  sample fallback, so a cold load does not flash the
+  wrong N. Dashboard `Net Worth (Equity + Cash)` uses the
+  same shared demo book as Holdings. Explore sample
+  disclosure is the Mode honesty line; there is no Sample
+  chip on the table. On the Practice sample fallback,
+  Holdings and Dashboard keep `DemoBanner` (`Showing
+  sample data — connect a broker for live data`). The
+  Mode line does not call that book sample, and there is
+  no Sample chip on the table. A broker read failure
+  shows muted `Failed to load holdings` plus `Refresh` —
+  never `0 holdings`, `No holdings`, or a sample table
+  under a failed load. A connected broker with no
+  positions shows `0 holdings` and an honest empty state
+  (no sample table under a zero badge). Connected
+  positions use the live count only.
 
 - **Explore Execution Logs mode honesty (FT-AUTO-003).**
   Explore `/automate` → Execution Logs shows the muted
