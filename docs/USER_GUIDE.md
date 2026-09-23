@@ -402,25 +402,23 @@ a Live feed.
 Compact on a desk Trade viewport (~1280 and wider) keeps chart, order pad,
 and positions primary; the ticker strip, full tool ribbon, and watchlist /
 indices / advanced tools start collapsed behind **Watchlist & tools** /
-**Desk tools**. Selecting Compact again re-collapses that disclosure.
+**Desk tools**. **Quick Settings** stays on the TopBar so density and theme
+remain reachable. Selecting Compact again re-collapses that disclosure.
 Phone layouts are unchanged.
 
 **Desk chrome (FT-UX-002).** The desk uses one TopBar and one scrolling
 ticker strip under it. TopBar keeps Mode, session/status, and overflow —
 it is not a second quote rail, so dual index slots in TopBar are gone.
-Settings and Tools collapse to one Tools overflow menu plus at most one
-primary Settings entry (no triple chrome). The Tools overflow (and/or
-TopBar) exposes **Quick Settings** for desk-frequent controls (density,
-theme, and similar) so the operator stays on the Trade desk
-(FT-UX-QUICK-SETTINGS-001). **Tools → Settings** still opens the full
-`/settings` route for deep pages (Monitoring, brokers, auth). Compact
-and other desk-chrome changes keep Quick Settings available; a desk
-that offers only full Settings, with Quick Settings removed, fails this
-bar. Do not reintroduce a third Settings/Tools entry beyond the Tools
-overflow plus at most one primary Settings path. Trade uses the flex
-shell TopBar → TickerStrip → route body first; the same shell then
-rolls to Invest, Automate, Learn, and Ditto. This is not a silent widen
-of Compact-only-on-Trade (FT-UX-001). Mode and status stay reachable
+**Tools → Quick Settings** opens density, theme, and similar controls
+without leaving the desk. **Tools → Settings** opens the full
+`/settings` route for deep pages (Monitoring, brokers, auth). There is
+no separate Settings gear. When Compact Trade collapses the tool
+ribbon, Quick Settings stays on the TopBar; expanding desk tools puts
+it back in the Tools menu. A desk that offers only full Settings, with
+Quick Settings removed, fails this bar. Trade uses the flex shell
+TopBar → TickerStrip → route body first; the same shell then rolls to
+Invest, Automate, Learn, and Ditto. This is not a silent widen of
+Compact-only-on-Trade (FT-UX-001). Mode and status stay reachable
 (desk-first; skinny-browser defensive collapse is fine).
 
 ### Walkthrough

@@ -6,8 +6,10 @@
  *   [Workspace] [ModeIndicator] [FeedFreshness] [Fullscreen] [MarketSessionStatus] [ClockIST] [Avatar]
  *
  * FT-UX-002: TopBar is not a quote rail. The dedicated scrolling ticker
- * lives under this bar (TickerBar / TickerStrip). Settings lives inside
- * the Tools overflow — at most one Settings chrome entry.
+ * lives under this bar (TickerBar / TickerStrip). There is no Settings gear.
+ * Tools → Quick Settings opens density, theme, and similar controls in
+ * place. Tools → Settings opens the full Settings route. Compact Trade
+ * hides the tool ribbon but keeps Quick Settings on this bar.
  *
  * Design:
  *   - Background: rgba(12, 12, 20, 0.85) + backdrop-filter: blur(16px)
@@ -27,8 +29,10 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router";
-import { Search, Maximize2, Minimize2, MoreHorizontal, Wrench } from "lucide-react";
+import { Search, Maximize2, Minimize2, MoreHorizontal, SlidersHorizontal, Wrench } from "lucide-react";
+import { AnimatePresence } from "framer-motion";
 import { LogoIcon } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -56,6 +60,7 @@ import AccountSwitcher from "./AccountSwitcher";
 import ModeIndicator from "./ModeIndicator";
 import type { TickerMode } from "./TickerMarquee";
 import ToolsDropdown from "./ToolsDropdown";
+import QuickAccessPanel from "./QuickAccessPanel";
 import TopBarMoreSheet, { MoreRow } from "./TopBarMoreSheet";
 import { useChromeCollapse } from "./useChromeCollapse";
 import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
@@ -334,9 +339,18 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   const tickerForcedOnNarrow = useDeskChromeStore((s) => s.tickerForcedOnNarrow);
   const setTickerForcedOnNarrow = useDeskChromeStore((s) => s.setTickerForcedOnNarrow);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [quickSettingsOpen, setQuickSettingsOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const toolsRef = useRef<HTMLButtonElement>(null);
+  const compactQuickRef = useRef<HTMLButtonElement>(null);
+  const panelTriggerRef = useRef<HTMLButtonElement | null>(null);
   const hideDeskRibbon = !showToolRibbon && !collapseOverflow;
+
+  const openQuickSettings = useCallback((trigger: HTMLButtonElement | null) => {
+    panelTriggerRef.current = trigger;
+    setQuickSettingsOpen(true);
+    setToolsOpen(false);
+  }, []);
 
   // Maintain broker connection status from either OpenAlgo bridge ping or a
   // live native/gateway broker session. This store still drives older widgets.
@@ -376,6 +390,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   };
 
   const handleSelectTool = useCallback((toolId: ToolId) => {
+    setQuickSettingsOpen(false);
     window.dispatchEvent(
       new CustomEvent("flinttrade:open-tool", { detail: { toolId } }),
     );
@@ -442,6 +457,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
                 size="sm"
                 className="h-7 px-2 gap-1.5 text-text-muted hover:text-text-primary shrink-0"
                 onClick={() => {
+                  setQuickSettingsOpen(false);
                   setToolsOpen((open) => !open);
                 }}
                 aria-label="Tools"
@@ -451,6 +467,29 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
               >
                 <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
                 <span className="text-xs hidden md:inline">Tools</span>
+              </Button>
+            )}
+            {hideDeskRibbon && (
+              <Button
+                ref={compactQuickRef}
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 gap-1 text-text-muted hover:text-text-primary shrink-0"
+                onClick={() => {
+                  if (quickSettingsOpen) {
+                    setQuickSettingsOpen(false);
+                    return;
+                  }
+                  openQuickSettings(compactQuickRef.current);
+                }}
+                aria-label="Quick Settings"
+                aria-expanded={quickSettingsOpen}
+                aria-haspopup="dialog"
+                data-testid="quick-settings-btn"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+                <span className="text-xs">Quick Settings</span>
               </Button>
             )}
             {hideDeskRibbon && (
@@ -510,6 +549,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
             size="sm"
             className="min-h-11 px-2 gap-1.5 text-text-muted hover:text-text-primary"
             onClick={() => {
+              setQuickSettingsOpen(false);
               setToolsOpen((open) => !open);
             }}
             aria-label="Tools"
@@ -553,10 +593,25 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
         </MoreRow>
       </TopBarMoreSheet>
 
+      {createPortal(
+        <AnimatePresence>
+          {quickSettingsOpen ? (
+            <QuickAccessPanel
+              key="quick-settings"
+              onClose={() => setQuickSettingsOpen(false)}
+              triggerRef={panelTriggerRef}
+              anchorRect={panelTriggerRef.current?.getBoundingClientRect()}
+            />
+          ) : null}
+        </AnimatePresence>,
+        document.body,
+      )}
+
       <ToolsDropdown
         isOpen={toolsOpen}
         onClose={() => setToolsOpen(false)}
         onSelectTool={handleSelectTool}
+        onOpenQuickSettings={() => openQuickSettings(toolsRef.current)}
         anchorRect={toolsRef.current?.getBoundingClientRect()}
         allowedToolIds={availableTools}
       />

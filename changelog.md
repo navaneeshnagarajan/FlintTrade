@@ -95,15 +95,6 @@ changelog rebuilds itself from the first release cut after this baseline.
   FT-UX-001 Compact-only-on-Trade, and not a big-bang
   rewrite.
 
-- **Tools Quick Settings for desk controls (FT-UX-QUICK-SETTINGS-001).**
-  Tools → Quick Settings (or TopBar) opens desk-frequent
-  controls (density, theme, and similar) without leaving
-  the Trade desk. Tools → Settings still opens the full
-  Settings route for deep pages (Monitoring, brokers,
-  auth). Compact and other desk-chrome changes keep Quick
-  Settings available; dropping Quick Settings so only full
-  Settings remains fails desk-first. Refs #279.
-
 - **Mode vocabulary and Trade desk density (FT-UX-001).**
   Explore / Practice / Live chips mean execution mode only.
   Explore Order Pad uses Sample Buy / Sample Sell; Practice
@@ -141,6 +132,14 @@ changelog rebuilds itself from the first release cut after this baseline.
   `gate_broker_write` → `BrokerRouter`) stay unchanged.
 
 ### Fixed
+
+- **Tools Quick Settings on the Trade desk (FT-UX-QUICK-SETTINGS-001).**
+  Tools → Quick Settings opens density, theme, and similar controls
+  without leaving the desk. Tools → Settings still opens the full
+  Settings route for deep pages (Monitoring, brokers, auth). Compact
+  Trade keeps Quick Settings on the TopBar when the tool ribbon is
+  collapsed. Dropping Quick Settings so only full Settings remains
+  fails desk-first. Refs #279.
 
 - **Docs: correct GTT proxy, Practice walkthrough, and Live safety path.**
   `USER_GUIDE` Practice walkthrough no longer treats Explore
