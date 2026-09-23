@@ -230,7 +230,10 @@ def health_aggregated() -> tuple[Any, int]:
 
     Returns:
         JSON ``{"status": "ok"|"degraded"|"error", "broker": {...},
-        "duckdb": {...}, "disk": {...}, "memory": {...}}``.
+        "duckdb": {...}, "disk": {...}, "memory": {...}}`` plus ``cpu``,
+        ``gpu``, and ``network`` when the install host can report them.
+        Host memory uses ``used_mb`` / ``total_mb`` / ``used_pct``. Process
+        RSS stays under ``memory.process`` and is not host RAM.
     """
     from flask import current_app  # noqa: PLC0415
 
