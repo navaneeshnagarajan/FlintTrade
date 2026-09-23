@@ -122,6 +122,10 @@ class PortfolioSafetyStateError(RuntimeError):
     """Raised when a complete, locally computed L4 snapshot is unavailable."""
 
 
+class ModifyCapabilityError(PortfolioSafetyStateError):
+    """Raised when authoritative modify context proves a broker rule unsupported."""
+
+
 @dataclass(frozen=True)
 class ProspectiveSafetyInputs:
     """SafetySystem inputs aligned to one proposed order in a request."""
@@ -1457,6 +1461,42 @@ def _recover_omitted_modify_fields(
         changes["disclosed_quantity"] = recovered
 
 
+_MODIFY_IDENTITY_FIELDS = ("symbol", "exchange", "action", "product")
+
+
+def _bind_authoritative_modify_identity(
+    changes: Mapping[str, Any],
+    current: Mapping[str, Any],
+    requested_fields: Collection[str] | None,
+) -> Mapping[str, Any]:
+    """Bind a replacement to the live order identity before risk admission.
+
+    The route's full-replacement mapping supplies defaults even when the caller
+    omitted an identity field. Those defaults are not evidence of the broker
+    order's identity: accepting them would let an MCX order masquerade as NSE,
+    or let a BUY replacement be admitted as SELL, while the v3 SDK modifies only
+    by order id. Explicit mismatches are therefore refusals; omitted fields are
+    replaced with the authoritative values and, for mutable route mappings,
+    written back into the payload that is subsequently signed and dispatched.
+    """
+    bound: MutableMapping[str, Any] = changes if isinstance(changes, MutableMapping) else dict(changes)
+    explicitly_requested = (
+        set(requested_fields)
+        if requested_fields is not None
+        else set(changes).intersection(_MODIFY_IDENTITY_FIELDS)
+    )
+    for field_name in _MODIFY_IDENTITY_FIELDS:
+        authoritative = _text(current[field_name]).strip()
+        requested = _text(changes.get(field_name)).strip()
+        if field_name in explicitly_requested and requested.upper() != authoritative.upper():
+            raise PortfolioSafetyStateError(
+                f"Modify-order {field_name} does not match the authoritative open order"
+            )
+        canonical = authoritative.upper() if field_name != "symbol" else authoritative
+        bound[field_name] = canonical
+    return bound
+
+
 async def classify_modify_intent(
     config: Mapping[str, Any],
     adapter_id: str,
@@ -1490,7 +1530,6 @@ async def classify_modify_intent(
     else:
         selected, fallback = matches[0], None
     current = _normalise_authoritative_order(selected, fallback)
-    _recover_omitted_modify_fields(changes, current, requested_fields, adapter_id)
     if current["status"] not in _ACTIVE_ORDER_STATUSES:
         raise PortfolioSafetyStateError("Authoritative order is not active and modifiable")
     if (
@@ -1504,18 +1543,34 @@ async def classify_modify_intent(
     required = ("symbol", "exchange", "action", "product", "quantity", "pricetype")
     if any(current[field] in (None, "") for field in required):
         raise PortfolioSafetyStateError("Authoritative open order is incomplete")
+    # Regular modify must write the bound identity back into the mapping that is
+    # subsequently signed and dispatched. Advanced broker replacements have a
+    # deliberately sparse transport contract, so bind a copy for classification
+    # without adding unsupported keys to their signed payload.
+    effective_changes = _bind_authoritative_modify_identity(
+        changes if family == "regular" else dict(changes),
+        current,
+        requested_fields,
+    )
+    _recover_omitted_modify_fields(effective_changes, current, requested_fields, adapter_id)
+    if str(adapter_id).strip().lower() == "kotakneo":
+        validity = _text(effective_changes.get("validity") or "DAY").strip().upper()
+        if validity not in {"DAY", "IOC"}:
+            raise ModifyCapabilityError(f"Kotak Neo v3 does not support validity {validity!r}")
+        if _text(current["exchange"]).strip().upper() == "MCX" and validity != "DAY":
+            raise ModifyCapabilityError("Kotak Neo MCX orders support DAY validity only")
 
     if family == "forever" and str(adapter_id).lower() == "upstox" and current["status"] == "OPEN":
         current_quantity = _finite_number(current["quantity"], "authoritative order quantity")
-        proposed_quantity = _finite_number(changes.get("quantity"), "replacement order quantity")
+        proposed_quantity = _finite_number(effective_changes.get("quantity"), "replacement order quantity")
         if proposed_quantity != current_quantity:
             raise PortfolioSafetyStateError("An OPEN Upstox GTT order cannot change quantity")
-        if _text(changes.get("entry_trigger_type")).upper() != "IMMEDIATE":
+        if _text(effective_changes.get("entry_trigger_type")).upper() != "IMMEDIATE":
             raise PortfolioSafetyStateError("An OPEN Upstox GTT ENTRY rule must use IMMEDIATE")
 
     try:
         current_order = Order(**_replacement_order_fields(current, {}))
-        proposed_order = Order(**_replacement_order_fields(current, changes))
+        proposed_order = Order(**_replacement_order_fields(current, effective_changes))
     except Exception as exc:
         raise PortfolioSafetyStateError("Replacement order cannot be classified") from exc
     current_quantity, proposed_quantity = _validated_order_quantities(current, proposed_order)

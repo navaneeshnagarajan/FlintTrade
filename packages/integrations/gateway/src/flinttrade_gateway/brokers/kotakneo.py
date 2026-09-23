@@ -167,6 +167,7 @@ KOTAKNEO_CAPABILITIES = Capabilities(
     rate_limit_orders_per_sec=10,
     # 'tag' is an optional order field, not a mandated algo tag.
     algo_tag_required=False,
+    algo_tag_supported=True,
     # Zero brokerage on supported API execution + zero API subscription charge.
     cost_paid=False,
     cost_inr_per_month=0,
@@ -268,7 +269,13 @@ class KotakNeoAdapter(BrokerAdapter):
         responsibility (they pass through by name); this always resolves a token.
         """
         if self._token_resolver is not None:
-            return str(self._token_resolver(name, exchange))
+            try:
+                return str(self._token_resolver(name, exchange))
+            except (TypeError, ValueError):
+                raise UnsupportedCapabilityError(
+                    "Kotak Neo resolved instrument token is not canonical",
+                    broker_id="kotakneo",
+                ) from None
         scrips = await self.search_scrip(session, name, exchange)
         if not scrips or not scrips[0].get("token"):
             raise BrokerError(

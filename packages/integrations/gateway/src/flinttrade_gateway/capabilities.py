@@ -157,6 +157,10 @@ class Capabilities:
     rate_limit_non_trading_per_sec: int | None = None
     order_modifications_per_order: int | None = None
     algo_tag_required: bool = False
+    # True when the order surface accepts an algo tag. ``algo_tag_required``
+    # distinguishes mandatory programmes; optional adapters receive only a
+    # trusted configured id and stay untagged when no config exists.
+    algo_tag_supported: bool = False
     cost_paid: bool = False
     cost_inr_per_month: int | None = None
     # Per-trade execution brokerage (distinct from the API-subscription cost

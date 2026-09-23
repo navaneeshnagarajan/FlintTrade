@@ -9,6 +9,7 @@ synthetic frames shaped per the pinned v3 SDK.
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 
 import pytest
 
@@ -41,6 +42,61 @@ from flinttrade_gateway.brokers.kotakneo_mapping import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+# Conservative wire bounds: these ordinary Indian-market examples must remain
+# valid, while the compact/oversized cases below must be rejected before Decimal
+# formatting can amplify them into thousands of transport characters.
+_ORDINARY_BROKER_QUANTITY = Decimal("10000000")
+_ORDINARY_BROKER_PRICE = Decimal("99999999.9999")
+_ORDINARY_BROKER_TRIGGER = Decimal("0.0001")
+_OUT_OF_BOUNDS_ORDER_NUMBERS = (
+    pytest.param(
+        "price",
+        Decimal("12345678901234567890123456789012345678901234567890123456789012345"),
+        id="65-significant-digits",
+    ),
+    pytest.param("quantity", Decimal("1e5000"), id="quantity-exponent-positive-5000"),
+    pytest.param("price", Decimal("1e100000"), id="price-exponent-positive-100000"),
+    pytest.param("price", Decimal("1e-5000"), id="price-scale-5000"),
+)
+
+
+@pytest.mark.parametrize(
+    ("value", "accepted"),
+    [
+        (Decimal("9" * 64), True),
+        (Decimal("9" * 65), False),
+        (Decimal("1e-16"), True),
+        (Decimal("1e-17"), False),
+    ],
+)
+@pytest.mark.parametrize("mapper", ["place", "modify", "margin"])
+def test_order_numeric_wire_shape_boundary(mapper, value, accepted):
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    ).model_copy(update={"price": value})
+
+    def mapped_params():
+        if mapper == "place":
+            return to_place_order_params(order, "IDEA-EQ")
+        if mapper == "modify":
+            return to_modify_order_params(
+                "OID-1",
+                {"pricetype": "MARKET", "quantity": "1", "price": value},
+            )
+        return to_margin_params(order, "14366")
+
+    if accepted:
+        assert mapped_params()["price"] == format(value, "f")
+    else:
+        with pytest.raises(KotakNeoMappingError, match="price"):
+            mapped_params()
 
 
 def test_rejected_limits_cannot_map_to_zero_funds():
@@ -297,6 +353,15 @@ def test_modify_amo_string_passthrough():
     )["amo"] == "YES"
 
 
+@pytest.mark.parametrize("amo", [None, 1, "", "sometimes"])
+def test_modify_rejects_explicit_malformed_amo_instead_of_omitting_it(amo):
+    with pytest.raises(KotakNeoMappingError, match="AMO"):
+        to_modify_order_params(
+            "1",
+            {"pricetype": "MARKET", "price": 0, "quantity": 1, "amo": amo},
+        )
+
+
 def test_modify_validity_validated():
     assert to_modify_order_params(
         "1", {"pricetype": "MARKET", "price": 0, "quantity": 1, "validity": "IOC"}
@@ -305,6 +370,69 @@ def test_modify_validity_validated():
         to_modify_order_params(
             "1", {"pricetype": "MARKET", "price": 0, "quantity": 1, "validity": "GTC"}
         )
+
+
+@pytest.mark.parametrize("mapper", ["place", "modify", "margin"])
+def test_order_numeric_bounds_preserve_ordinary_indian_broker_values(mapper):
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="SL",
+        product="MIS",
+        quantity="1",
+        price="1",
+        trigger_price="1",
+    ).model_copy(
+        update={
+            "quantity": _ORDINARY_BROKER_QUANTITY,
+            "price": _ORDINARY_BROKER_PRICE,
+            "trigger_price": _ORDINARY_BROKER_TRIGGER,
+        }
+    )
+
+    if mapper == "place":
+        params = to_place_order_params(order, "IDEA-EQ")
+    elif mapper == "modify":
+        params = to_modify_order_params(
+            "OID-1",
+            {
+                "pricetype": "SL",
+                "quantity": _ORDINARY_BROKER_QUANTITY,
+                "price": _ORDINARY_BROKER_PRICE,
+                "trigger_price": _ORDINARY_BROKER_TRIGGER,
+            },
+        )
+    else:
+        params = to_margin_params(order, "14366")
+
+    assert params["quantity"] == "10000000"
+    assert params["price"] == "99999999.9999"
+    assert params["trigger_price"] == "0.0001"
+
+
+@pytest.mark.parametrize("field,value", _OUT_OF_BOUNDS_ORDER_NUMBERS)
+@pytest.mark.parametrize("mapper", ["place", "modify", "margin"])
+def test_order_numeric_bounds_reject_pathological_decimals_without_expansion(mapper, field, value):
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    ).model_copy(update={field: value})
+
+    with pytest.raises(KotakNeoMappingError, match=field.replace("_", " ")):
+        if mapper == "place":
+            to_place_order_params(order, "IDEA-EQ")
+        elif mapper == "modify":
+            to_modify_order_params(
+                "OID-1",
+                {"pricetype": "MARKET", "quantity": "1", "price": "0", field: value},
+            )
+        else:
+            to_margin_params(order, "14366")
 
 
 @pytest.mark.parametrize(
@@ -522,6 +650,22 @@ def test_margin_params_reject_non_numeric_instrument_token(instrument_token):
         to_margin_params(order, instrument_token)
 
 
+def test_margin_instrument_token_wire_length_is_bounded_before_integer_conversion():
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    )
+
+    assert to_margin_params(order, "9" * 64)["instrument_token"] == "9" * 64
+    for malformed in ("9" * 65, 10**5000):
+        with pytest.raises(KotakNeoMappingError, match="numeric instrument_token"):
+            to_margin_params(order, malformed)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -639,6 +783,42 @@ def test_margin_response_maps_ord_margin_as_common_required_margin():
     ],
 )
 def test_margin_response_rejects_missing_or_malformed_official_success_fields(response):
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_margin(response)
+
+
+@pytest.mark.parametrize("field", ["ordMrgn", "reqdMrgn", "avlCash", "insufFund"])
+def test_margin_response_rejects_compact_numbers_that_expand_beyond_wire_bounds(field):
+    response = {
+        "data": {
+            "stat": "Ok",
+            "stCode": 200,
+            "ordMrgn": "15.50",
+            "reqdMrgn": "0",
+            "avlCash": "38.19",
+            "insufFund": "0",
+            "rmsVldtd": "OK",
+        }
+    }
+    response["data"][field] = "1e100000"
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_margin(response)
+
+
+def test_margin_response_rejects_oversized_primitive_int_as_canonical_read_error():
+    response = {
+        "data": {
+            "stat": "Ok",
+            "stCode": 200,
+            "ordMrgn": 10**5000,
+            "reqdMrgn": "0",
+            "avlCash": "38.19",
+            "insufFund": "0",
+            "rmsVldtd": "OK",
+        }
+    }
+
     with pytest.raises(BrokerReadResponseInvalid):
         from_kotak_margin(response)
 

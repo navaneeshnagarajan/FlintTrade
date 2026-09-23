@@ -75,6 +75,15 @@ KOTAK_TO_SIDE = {"B": "BUY", "S": "SELL"}
 # Order validity codes in the current public docs and pinned SDK validation.
 VALIDITY_ALLOWED = frozenset({"DAY", "IOC"})
 
+# Keep every broker-facing Decimal cheap to validate and bounded when rendered
+# as fixed-point text. Sixty-four significant/integer digits and sixteen
+# fractional digits are deliberately far above ordinary Indian order values,
+# while refusing compact exponent forms that would otherwise expand into an
+# attacker-controlled multi-kilobyte (or larger) SDK payload.
+_MAX_NUMERIC_DIGITS = 64
+_MAX_NUMERIC_INTEGER_DIGITS = 64
+_MAX_NUMERIC_SCALE = 16
+
 # REST quotes quote_type values (Quotes.md). The SDK places the value directly
 # into the URL path, so FlintTrade accepts case-insensitive input but emits
 # Kotak's documented case (notably ``52W``).
@@ -250,9 +259,11 @@ def _response_decimal(
             raise BrokerReadResponseInvalid
         try:
             number = Decimal(str(value))
-        except InvalidOperation:
+        except (InvalidOperation, ValueError):
             raise BrokerReadResponseInvalid from None
         if not number.is_finite():
+            raise BrokerReadResponseInvalid
+        if not _bounded_decimal_shape(number):
             raise BrokerReadResponseInvalid
         return number
     if required:
@@ -373,6 +384,8 @@ def _strict_decimal(
         raise KotakNeoMappingError(f"Kotak Neo {label} must be a finite number") from None
     if not number.is_finite():
         raise KotakNeoMappingError(f"Kotak Neo {label} must be a finite number")
+    if not _bounded_decimal_shape(number):
+        raise KotakNeoMappingError(f"Kotak Neo {label} exceeds supported numeric bounds")
     if positive and number <= 0:
         raise KotakNeoMappingError(f"Kotak Neo {label} must be positive")
     if not positive and number < 0:
@@ -380,6 +393,19 @@ def _strict_decimal(
     if whole and number != number.to_integral_value():
         raise KotakNeoMappingError(f"Kotak Neo {label} must be a whole number")
     return Decimal(0) if number == 0 else number
+
+
+def _bounded_decimal_shape(number: Decimal) -> bool:
+    """Return whether fixed-point rendering stays within the v3 wire budget."""
+    _sign, digits, exponent = number.as_tuple()
+    significant_digits = len(digits)
+    integer_digits = max(significant_digits + exponent, 0)
+    scale = max(-exponent, 0)
+    return (
+        significant_digits <= _MAX_NUMERIC_DIGITS
+        and integer_digits <= _MAX_NUMERIC_INTEGER_DIGITS
+        and scale <= _MAX_NUMERIC_SCALE
+    )
 
 
 def _decimal_text(number: Decimal) -> str:
@@ -592,7 +618,7 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
         "trigger_price": _decimal_text(trigger),
         "disclosed_quantity": _whole_text(disclosed),
     }
-    if changes.get("amo") is not None:
+    if "amo" in changes:
         amo = changes["amo"]
         amo_value = ("YES" if amo else "NO") if isinstance(amo, bool) else _norm(amo)
         if amo_value not in {"YES", "NO"}:
@@ -932,8 +958,15 @@ def to_margin_params(order: Any, instrument_token: str) -> dict[str, Any]:
     """
     side, ptype, product, exchange, _validity, _variety = validate_v3_order(order)
     quantity, price, trigger, _disclosed = _validated_order_numbers(order, ptype)
-    token = str(instrument_token)
-    if not token.isascii() or not token.isdigit() or int(token) <= 0:
+    if type(instrument_token) is not str:
+        raise KotakNeoMappingError("Kotak Neo margin requires a positive numeric instrument_token")
+    token = instrument_token
+    if (
+        len(token) > _MAX_NUMERIC_INTEGER_DIGITS
+        or not token.isascii()
+        or not token.isdigit()
+        or not any(character != "0" for character in token)
+    ):
         raise KotakNeoMappingError("Kotak Neo margin requires a positive numeric instrument_token")
     params: dict[str, Any] = {
         "exchange_segment": EXCHANGE_TO_KOTAK[exchange],

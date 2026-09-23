@@ -329,14 +329,15 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
 
     Args:
         body: Decoded JSON request body.
-        variety: When set (e.g. ``"gtt"`` for the forever route), the built order
-            carries this variety plus the variety-specific pass-throughs from the
-            body (``validity``, the Dhan OCO second-leg trio ``price1`` /
+        variety: When set (e.g. ``"gtt"`` for the forever route), overrides the
+            request variety and carries the variety-specific pass-throughs from
+            the body (the Dhan OCO second-leg trio ``price1`` /
             ``trigger_price1`` / ``quantity1``, the Upstox protective
             ``target_price`` / ``stop_loss_price`` fields, and broker-specific
-            GTT ``*_trigger_type`` fields). ``None`` (the default) keeps the
-            legacy regular-order shape so the existing ``/place`` behaviour is
-            byte-identical.
+            GTT ``*_trigger_type`` fields). A normal place still preserves an
+            explicitly requested ``variety`` and ``validity`` so the signed
+            order reaching the adapter cannot silently become a regular DAY
+            order.
     """
     from flinttrade_core.models import (  # noqa: PLC0415
         Action,
@@ -357,13 +358,17 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
         raise ValueError(f"quantity must be a whole number of units, got {quantity!r}") from exc
 
     extra: dict[str, Any] = {}
+    requested_variety = variety if variety is not None else body.get("variety")
+    if requested_variety is not None:
+        extra["variety"] = str(requested_variety)
+    if body.get("validity") is not None:
+        extra["validity"] = str(body["validity"])
     if variety is not None:
-        extra["variety"] = variety
         # Variety-specific pass-throughs (Dhan forever OCO, Upstox GTT trigger
-        # conditions + validity). They live on the Order model, so the
-        # SafetyContext canonical hash covers them.
+        # conditions). They live on the Order model, so the SafetyContext
+        # canonical hash covers them.
         for key in (
-            "validity", "price1", "trigger_price1", "quantity1",
+            "price1", "trigger_price1", "quantity1",
             "target_price", "stop_loss_price",
             "entry_trigger_type", "stop_loss_trigger_type", "target_trigger_type",
         ):
@@ -577,7 +582,11 @@ def _admit_modify_intent(
     requested_fields: Collection[str] | None = None,
 ) -> tuple[tuple[Any, int] | None, Any | None, list[Any]]:
     """Prove no-increase intent or run complete admission for a live modify."""
-    from .l2_state import PortfolioSafetyStateError, classify_modify_intent  # noqa: PLC0415
+    from .l2_state import (  # noqa: PLC0415
+        ModifyCapabilityError,
+        PortfolioSafetyStateError,
+        classify_modify_intent,
+    )
 
     try:
         intent = _run_on_client_loop(
@@ -591,6 +600,14 @@ def _admit_modify_intent(
                 requested_fields=requested_fields,
             )
         )
+    except ModifyCapabilityError as refusal:
+        logger.warning(
+            "Modify capability refused | family=%s adapter=%s: %s",
+            family,
+            adapter_id,
+            refusal,
+        )
+        return (jsonify({"status": "error", "message": str(refusal)}), 501), None, []
     except PortfolioSafetyStateError as refusal:
         # Every PortfolioSafetyStateError message is a sentence authored in
         # l2_state (e.g. "An OPEN Upstox GTT order cannot change quantity",
@@ -1414,7 +1431,7 @@ def _modify_changes(body: dict[str, Any]) -> dict[str, Any]:
     Only canonical replacement fields and signed broker context are retained —
     unrelated body keys (apikey, account_id, …) never reach an adapter.
     """
-    return {
+    changes: dict[str, Any] = {
         "symbol": str(body.get("symbol") or ""),
         "exchange": str(body.get("exchange", "NSE")).upper(),
         "action": str(body.get("action", "BUY")).upper(),
@@ -1427,6 +1444,9 @@ def _modify_changes(body: dict[str, Any]) -> dict[str, Any]:
         "validity": str(body.get("validity") or "DAY").upper(),
         "strategy": str(body.get("strategy") or "Flint"),
     }
+    if "amo" in body:
+        changes["amo"] = body["amo"]
+    return changes
 
 
 def _requested_modify_fields(body: Mapping[str, Any]) -> list[str]:
@@ -1442,6 +1462,7 @@ def _requested_modify_fields(body: Mapping[str, Any]) -> list[str]:
         "trigger_price": ("trigger_price",),
         "disclosed_quantity": ("disclosed_quantity",),
         "validity": ("validity",),
+        "amo": ("amo",),
     }
     return sorted(
         field

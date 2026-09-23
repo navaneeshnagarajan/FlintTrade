@@ -10,6 +10,7 @@ market/order feed streams against synthetic frames.
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from typing import Any, AsyncIterator
 
 import pytest
@@ -34,6 +35,18 @@ from flinttrade_gateway.brokers.kotakneo import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+_OUT_OF_BOUNDS_ORDER_NUMBERS = (
+    pytest.param(
+        "price",
+        Decimal("12345678901234567890123456789012345678901234567890123456789012345"),
+        id="65-significant-digits",
+    ),
+    pytest.param("quantity", Decimal("1e5000"), id="quantity-exponent-positive-5000"),
+    pytest.param("price", Decimal("1e100000"), id="price-exponent-positive-100000"),
+    pytest.param("price", Decimal("1e-5000"), id="price-scale-5000"),
+)
 
 
 class MockNeoFull:
@@ -529,6 +542,44 @@ async def test_place_numeric_rejection_precedes_symbol_resolution_and_transport(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", _OUT_OF_BOUNDS_ORDER_NUMBERS)
+@pytest.mark.parametrize("operation", ["place", "modify", "margin"])
+async def test_numeric_bounds_raise_canonical_errors_before_resolution_or_transport(operation, field, value):
+    mock = MockNeoFull()
+    resolver_calls: list[tuple[str, str]] = []
+    adapter = KotakNeoAdapter(
+        client_factory=lambda _session: mock,
+        symbol_resolver=lambda symbol, exchange: resolver_calls.append((symbol, exchange)) or "IDEA-EQ",
+        token_resolver=lambda symbol, exchange: resolver_calls.append((symbol, exchange)) or "14366",
+    )
+    session = await _session(adapter)
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    ).model_copy(update={field: value})
+
+    with pytest.raises(UnsupportedCapabilityError, match=field.replace("_", " ")):
+        if operation == "place":
+            await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+        elif operation == "modify":
+            await adapter.modify_order(
+                session,
+                "OID-1",
+                {"pricetype": "MARKET", "quantity": "1", "price": "0", field: value},
+                _router_token=_ROUTER_TOKEN,
+            )
+        else:
+            await adapter.margin_calculator(session, order)
+
+    assert resolver_calls == []
+    assert mock.calls == []
+
+
+@pytest.mark.asyncio
 async def test_place_order_resolves_trading_symbol_via_search_scrip_when_no_resolver():
     mock = MockNeoFull()
     adapter = KotakNeoAdapter(client_factory=lambda _s: mock)
@@ -616,6 +667,29 @@ async def test_margin_numeric_rejection_precedes_token_resolution_and_transport(
 
 
 @pytest.mark.asyncio
+async def test_margin_calculator_rejects_oversized_integer_token_from_resolver_canonically():
+    mock = MockNeoFull()
+    adapter = KotakNeoAdapter(
+        client_factory=lambda _session: mock,
+        token_resolver=lambda _symbol, _exchange: 10**5000,
+    )
+    session = await _session(adapter)
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    )
+
+    with pytest.raises(UnsupportedCapabilityError, match="instrument token"):
+        await adapter.margin_calculator(session, order)
+
+    assert mock.calls == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "response",
     [
@@ -639,6 +713,78 @@ async def test_margin_calculator_canonicalises_malformed_success_as_broker_inter
     order = Order(
         symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
         product="MIS", quantity="10", price="9.4",
+    )
+
+    with pytest.raises(BrokerInternal):
+        await adapter.margin_calculator(session, order)
+
+    assert len([call for call in mock.calls if call[0] == "margin"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_margin_calculator_canonicalises_huge_official_number_as_broker_internal():
+    class OversizedMarginNeo(MockNeoFull):
+        def margin(self, params):
+            self.calls.append(("margin", params))
+            return {
+                "data": {
+                    "stat": "Ok",
+                    "stCode": 200,
+                    "ordMrgn": "1e100000",
+                    "reqdMrgn": "0",
+                    "avlCash": "38.19",
+                    "insufFund": "0",
+                    "rmsVldtd": "OK",
+                }
+            }
+
+    mock = OversizedMarginNeo()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="LIMIT",
+        product="MIS",
+        quantity="10",
+        price="9.4",
+    )
+
+    with pytest.raises(BrokerInternal):
+        await adapter.margin_calculator(session, order)
+
+    assert len([call for call in mock.calls if call[0] == "margin"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_margin_calculator_canonicalises_oversized_primitive_int_as_broker_internal():
+    class OversizedIntMarginNeo(MockNeoFull):
+        def margin(self, params):
+            self.calls.append(("margin", params))
+            return {
+                "data": {
+                    "stat": "Ok",
+                    "stCode": 200,
+                    "ordMrgn": 10**5000,
+                    "reqdMrgn": "0",
+                    "avlCash": "38.19",
+                    "insufFund": "0",
+                    "rmsVldtd": "OK",
+                }
+            }
+
+    mock = OversizedIntMarginNeo()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="LIMIT",
+        product="MIS",
+        quantity="10",
+        price="9.4",
     )
 
     with pytest.raises(BrokerInternal):

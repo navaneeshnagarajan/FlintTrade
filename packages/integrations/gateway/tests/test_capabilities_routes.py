@@ -145,6 +145,7 @@ class TestCapabilitiesRoute:
         assert caps["requires_static_ip"] is True
         assert caps["auth_model"] == "oauth_renewable_24h"
         assert caps["algo_tag_required"] is True
+        assert caps["algo_tag_supported"] is True
         assert caps["rate_limit_orders_per_sec"] == 10
         assert caps["rate_limit_data_per_sec"] == 5
         assert caps["rate_limit_data_per_day"] == 100_000
@@ -191,6 +192,7 @@ class TestCapabilitiesRoute:
         assert caps["auth_model"] == "mpin_totp_daily"
         assert caps["rate_limit_orders_per_sec"] == 10
         assert caps["algo_tag_required"] is False
+        assert caps["algo_tag_supported"] is True
         assert caps["brokerage_free"] is True
         assert caps["cost_paid"] is False
         assert caps["cost_inr_per_month"] == 0

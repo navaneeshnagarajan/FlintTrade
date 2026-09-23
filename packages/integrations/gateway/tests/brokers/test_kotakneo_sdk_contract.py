@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 from copy import deepcopy
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -15,6 +16,18 @@ from flinttrade_core.exceptions import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+_OUT_OF_BOUNDS_ORDER_NUMBERS = (
+    pytest.param(
+        "price",
+        Decimal("12345678901234567890123456789012345678901234567890123456789012345"),
+        id="65-significant-digits",
+    ),
+    pytest.param("quantity", Decimal("1e5000"), id="quantity-exponent-positive-5000"),
+    pytest.param("price", Decimal("1e100000"), id="price-exponent-positive-100000"),
+    pytest.param("price", Decimal("1e-5000"), id="price-scale-5000"),
+)
 
 
 def test_import_and_exact_sdk_contract_do_not_touch_network_or_cwd_logs(tmp_path):
@@ -396,6 +409,90 @@ async def test_adapter_strict_numeric_validation_stops_installed_sdk_mock_transp
             )
         with pytest.raises(UnsupportedCapabilityError):
             await adapter.margin_calculator(session, bad_quantity)
+        assert requests == []
+    finally:
+        facade.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", _OUT_OF_BOUNDS_ORDER_NUMBERS)
+@pytest.mark.parametrize("operation", ["place", "modify", "margin"])
+async def test_adapter_numeric_bounds_stop_installed_sdk_transport_with_canonical_error(operation, field, value):
+    import time
+
+    import neo_api_client
+
+    from flinttrade_core.models import Order
+    from flinttrade_gateway.brokers._base import ROUTER_TOKEN, Session
+    from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "stat": "Ok",
+                "stCode": 200,
+                "nOrdNo": "OID-1",
+                "data": {
+                    "stat": "Ok",
+                    "stCode": 200,
+                    "ordMrgn": "1",
+                    "reqdMrgn": "0",
+                    "avlCash": "10",
+                    "insufFund": "0",
+                    "rmsVldtd": "OK",
+                },
+            },
+        )
+
+    neo = neo_api_client.NeoAPI(
+        consumer_key="synthetic",
+        access_token=None,
+        transport=httpx.MockTransport(respond),
+    )
+    neo.configuration.edit_token = "synthetic"
+    neo.configuration.edit_sid = "synthetic"
+    neo.configuration.base_url = "https://example.invalid"
+    facade = KotakNeoSdkSession.__new__(KotakNeoSdkSession)
+    facade._neo = neo
+    facade._closed = False
+    adapter = KotakNeoAdapter(
+        client_factory=lambda _session: facade,
+        symbol_resolver=lambda _symbol, _exchange: "SYNTHETIC-EQ",
+        token_resolver=lambda _symbol, _exchange: "123",
+    )
+    session = Session(
+        access_token="synthetic",
+        expires_at=time.time() + 60,
+        account_id="synthetic",
+        adapter_id="kotakneo",
+    )
+    order = Order(
+        symbol="SYNTHETIC",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    ).model_copy(update={field: value})
+
+    try:
+        with pytest.raises(UnsupportedCapabilityError, match=field.replace("_", " ")):
+            if operation == "place":
+                await adapter.place_order(session, order, _router_token=ROUTER_TOKEN)
+            elif operation == "modify":
+                await adapter.modify_order(
+                    session,
+                    "OID-1",
+                    {"pricetype": "MARKET", "quantity": "1", "price": "0", field: value},
+                    _router_token=ROUTER_TOKEN,
+                )
+            else:
+                await adapter.margin_calculator(session, order)
         assert requests == []
     finally:
         facade.close()
