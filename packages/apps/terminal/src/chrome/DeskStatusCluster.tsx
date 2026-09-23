@@ -1,5 +1,5 @@
 /**
- * Broker, Decision, and Chat, each with its own label.
+ * Broker, Laya, and LLM, each with its own label.
  */
 
 import { useBrokerStore } from "@/stores/brokerStore";
@@ -33,15 +33,15 @@ export function DeskStatusCluster() {
   return (
     <div
       role="group"
-      aria-label="Broker, decision, and chat status"
+      aria-label="Broker, Laya, and LLM status"
       data-testid="desk-status"
       className="flex items-center gap-2 text-xxs text-text-muted"
     >
       <span data-testid="broker-surface">Broker {broker}</span>
-      <span data-testid="decision-surface" className={decisionTone}>
-        Decision {decision}
+      <span data-testid="laya-surface" className={decisionTone}>
+        Laya {decision}
       </span>
-      <span data-testid="llm-surface">Chat {chat}</span>
+      <span data-testid="llm-surface">LLM {chat}</span>
     </div>
   );
 }

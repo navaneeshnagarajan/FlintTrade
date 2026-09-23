@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { killAllArmed } from "@/routes/killAllGate";
+import { mirrorStartArmed } from "@/routes/mirrorStartGate";
 import {
   brokerSessionDarkened,
   classifyObservedFailure,
@@ -282,16 +284,37 @@ describe("operator incident classifier", () => {
     ).toBe("Connected");
   });
 
-  it("closes Live when Decision is Down and leaves the broker Connected", () => {
+  it("closes Live when Laya is Down and leaves the broker Connected", () => {
     const incident = classifyOperatorSignals(signals({
       llmChrome: "ready",
       decisionStatus: "down",
     }));
-    expect(incident?.failureClass).toBe("decision");
+    expect(incident?.failureClass).toBe("laya");
+    expect(incident?.failureClass).not.toBe("llm_provider");
     expect(incident?.level).toBe("blocked");
     expect(incident?.moneyPath).toBe(true);
+    expect(incident?.headline).toContain("Laya");
+    expect(incident?.headline).not.toContain("Decision");
+    expect(incident?.plainClass).toBe("Laya");
     expect(liveWritesMuted(incident)).toBe(true);
     expect(brokerSessionDarkened(incident)).toBe(false);
+    expect(
+      mirrorStartArmed({
+        mode: "live",
+        sourceAccount: "native:upstox:U1",
+        targetCount: 1,
+        activeAccountCount: 2,
+        accountsLoadState: "ready",
+        liveWriteBlock: incident?.rectify ?? null,
+      }),
+    ).toBe(false);
+    expect(
+      killAllArmed({
+        mode: "live",
+        riskLoadState: "ready",
+        hasManagedAccounts: true,
+      }),
+    ).toBe(true);
     expect(
       honestBrokerStatus({
         connected: true,
@@ -319,16 +342,16 @@ describe("operator incident classifier", () => {
     ).toBe("Connected");
   });
 
-  it("prefers Decision Down over a Chat incident", () => {
+  it("prefers Laya Down over a Chat incident", () => {
     const incident = classifyOperatorSignals(signals({
       llmChrome: "error",
       decisionStatus: "down",
     }));
-    expect(incident?.failureClass).toBe("decision");
+    expect(incident?.failureClass).toBe("laya");
     expect(liveWritesMuted(incident)).toBe(true);
   });
 
-  it("does not close Live when Decision is only Degraded", () => {
+  it("does not close Live when Laya is only Degraded", () => {
     expect(classifyOperatorSignals(signals({ decisionStatus: "degraded" }))).toBeNull();
   });
 

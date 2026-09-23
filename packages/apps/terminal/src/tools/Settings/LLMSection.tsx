@@ -1642,7 +1642,7 @@ export function LLMSection({
 
       <FieldRow
         label="Provider"
-        hint="Chat is suggest-only and does not place Live orders. Use your own API key, managed Ollama, or a Custom OpenAI-compatible host."
+        hint="Suggest only. Bring your own API key, use managed Ollama, or a Custom OpenAI-compatible host. This does not place Live orders."
       >
         <fieldset
           className="m-0 min-w-0 border-0 p-0 disabled:cursor-not-allowed disabled:opacity-50"

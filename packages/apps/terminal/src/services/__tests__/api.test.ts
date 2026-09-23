@@ -3698,7 +3698,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     useOperatorSignalStore.setState({ brokerRateLimited: false });
   });
 
-  it("refuses a Live place while Decision is Down and still allows Practice", async () => {
+  it("refuses a Live place while Laya is Down and still allows Practice", async () => {
     const { resetOperatorSignals, useOperatorSignalStore } = await import("@/stores/operatorSignalStore");
     resetOperatorSignals();
     useOperatorSignalStore.setState({ decisionStatus: "down", llmChrome: "ready" });

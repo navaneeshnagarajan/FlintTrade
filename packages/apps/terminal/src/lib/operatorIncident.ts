@@ -19,9 +19,11 @@
  * - network_local — the process answers ping and a neutral public-internet
  *   probe failed (gateway, DNS, or ping). Not a site/CDN miss, and not a
  *   single broker timeout.
- * - llm_provider — advisor chrome error or disconnected. Not a Live-write gate.
- * - decision — Laya is Down. Live writes close. Broker and Chat stay their
- *   own surfaces. A Degraded decision does not use this class.
+ * - llm_provider — advisor chrome error or disconnected. Info only.
+ *   Chat or Suggest offline never mutes Live.
+ * - laya — Laya is Down. Money-path Blocked. Live place and mirror close.
+ *   Kill All stays reachable. Broker and LLM stay their own surfaces.
+ *   Degraded does not use this class.
  *
  * Strip priority inside this classifier: host tier (network_local,
  * host_unhealthy, backend_unreachable) then broker trust (exchange and
@@ -46,7 +48,7 @@ export const FAILURE_CLASSES = [
   "broker_rate_limit",
   "broker_maintenance",
   "llm_provider",
-  "decision",
+  "laya",
   "host_unhealthy",
   "backend_unreachable",
   "network_local",
@@ -121,7 +123,7 @@ const PLAIN_CLASS: Record<FailureClass, string> = {
   broker_rate_limit: "broker rate limit",
   broker_maintenance: "broker maintenance",
   llm_provider: "chat provider",
-  decision: "decision",
+  laya: "Laya",
   host_unhealthy: "host unhealthy",
   backend_unreachable: "backend unreachable",
   network_local: "local network",
@@ -144,8 +146,8 @@ const RECTIFY: Record<FailureClass, string> = {
     "The broker reports maintenance. Wait, then check the broker status page. Live orders stay closed. FlintTrade cannot file a dispute.",
   llm_provider:
     "Chat is unavailable. Retest or switch provider under Settings. Trading does not use Chat to place orders.",
-  decision:
-    "Live orders stay closed until Decision is Ready. Chat cannot place an order in its place.",
+  laya:
+    "Live orders stay closed until Laya is Ready. Chat cannot place an order in its place. Kill All stays available.",
   host_unhealthy:
     "Free disk space and restart the desk, then read the desk health detail. Live orders stay closed until the desk and broker trust are back. A restart does not recover broker fills. FlintTrade does not hold funds.",
   backend_unreachable:
@@ -170,9 +172,9 @@ export function liveWritesMuted(incident: OperatorIncident | null): boolean {
   return incident !== null && incident.moneyPath && incident.level !== "info";
 }
 
-/** Broker chrome stays Connected when only Decision is Down. */
+/** Broker chrome stays Connected when only Laya is Down. */
 export function brokerSessionDarkened(incident: OperatorIncident | null): boolean {
-  return liveWritesMuted(incident) && incident?.failureClass !== "decision";
+  return liveWritesMuted(incident) && incident?.failureClass !== "laya";
 }
 
 export function honestBrokerStatus(input: {
@@ -187,7 +189,7 @@ export function honestBrokerStatus(input: {
   }
   if (
     incident
-    && incident.failureClass !== "decision"
+    && incident.failureClass !== "laya"
     && incident.moneyPath
     && incident.level !== "info"
     && (input.connected || input.connectedRead)
@@ -362,7 +364,7 @@ function pickIncident(signals: OperatorSignals): OperatorIncident | null {
   }
 
   if (signals.decisionStatus === "down") {
-    return makeIncident("decision", "blocked", true, false, "Decision — Decision is Down");
+    return makeIncident("laya", "blocked", true, false, "Laya — Laya is Down");
   }
 
   if (

@@ -41,7 +41,7 @@ export function OperatorStatusStrip({
   const rectify = showingIncident ? incident.rectify : null;
   const showRetry = showingIncident
     && incident.failureClass !== "llm_provider"
-    && incident.failureClass !== "decision";
+    && incident.failureClass !== "laya";
 
   async function retryOnce() {
     if (retrying) return;

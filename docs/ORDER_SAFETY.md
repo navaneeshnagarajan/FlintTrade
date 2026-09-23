@@ -52,15 +52,16 @@ exit-all, reducing, multi, cancel-all, smart-cancel):
 New integrations must preserve this split. Do not invent a third path, and
 do not send an extended verb through `gate_order` alone.
 
-## Decision admission
+## Laya admission
 
 Laya is the typed check in front of that chain. An operator or automate
 proposal is admitted or refused as a verdict with `allow`, `reason`, and
 `limits`. Laya does not place an order and does not mint the one-shot write
-ticket. `gate_order` remains the only mint. When Decision is Down, Live
-orders stay closed on the shared place path. Chat downtime does not close
-them. Chat may suggest and explain only: bring your own API key, use managed
-Ollama, or point a Custom OpenAI-compatible host at another local runtime.
+ticket. `gate_order` remains the only mint. When Laya is Down, Live orders
+stay closed on the shared place path and mirror start stays closed. Kill All
+stays reachable. Chat downtime does not close Live. Chat may suggest and
+explain only: bring your own API key, use managed Ollama, or point a Custom
+OpenAI-compatible host at another local runtime.
 
 | Concern | Automate risk note | SafetySystem | Ticket guards | Laya |
 | --- | --- | --- | --- | --- |

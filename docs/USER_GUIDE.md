@@ -949,10 +949,10 @@ later runtime changes and shows the exact operation and admission IDs. Explicit
 acknowledgement records that the unknown result was reviewed; it does not retry
 the action or label it successful.
 
-Chat is suggest-only. A connected chat provider is labelled **Connected
-(suggest only)**. It does not place Live orders, and it is not the decision
-engine. Decision is a separate status: **Ready**, **Degraded**, or **Down**.
-Down closes Live orders. Chat being offline does not.
+Chat is suggest-only. A connected LLM is labelled **Connected (suggest only)**.
+It does not place Live orders, and it is not Laya. Laya is a separate status:
+**Ready**, **Degraded**, or **Down**. Laya Down closes Live orders and mirror
+start. Kill All stays reachable. Chat being offline does not close Live.
 
 Chat itself needs a configured LLM via Settings → AI. The badge and composer
 align with Settings → AI / `#llm` hydration as well as advisor status

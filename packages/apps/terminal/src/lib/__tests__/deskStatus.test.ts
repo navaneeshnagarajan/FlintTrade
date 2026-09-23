@@ -3,7 +3,7 @@ import { classifyOperatorSignals } from "../operatorIncident";
 import { brokerSurfaceLabel, chatSurfaceLabel, decisionSurfaceLabel } from "../deskStatus";
 
 describe("desk status surfaces", () => {
-  it("keeps broker, decision, and chat on separate labels", () => {
+  it("keeps broker, Laya, and LLM on separate labels", () => {
     const incident = classifyOperatorSignals({
       feedDisconnected: false,
       localPing: "ok",

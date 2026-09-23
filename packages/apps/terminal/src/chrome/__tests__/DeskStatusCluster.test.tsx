@@ -10,7 +10,7 @@ describe("DeskStatusCluster", () => {
     useBrokerStore.setState({ accounts: [], activeAccountId: null });
   });
 
-  it("shows Decision Down beside a connected broker and suggest-only chat", () => {
+  it("shows Laya Down beside a connected broker and suggest-only LLM", () => {
     useBrokerStore.setState({
       accounts: [
         {
@@ -29,15 +29,16 @@ describe("DeskStatusCluster", () => {
     useOperatorSignalStore.setState({ decisionStatus: "down", llmChrome: "ready" });
     render(<DeskStatusCluster />);
     expect(screen.getByTestId("broker-surface")).toHaveTextContent("Broker Connected");
-    expect(screen.getByTestId("decision-surface")).toHaveTextContent("Decision Down");
-    expect(screen.getByTestId("llm-surface")).toHaveTextContent("Chat Connected (suggest only)");
+    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Down");
+    expect(screen.getByTestId("llm-surface")).toHaveTextContent("LLM Connected (suggest only)");
+    expect(screen.getByTestId("desk-status").textContent).not.toMatch(/Decision/);
   });
 
-  it("shows Decision Ready when chat is not configured", () => {
+  it("shows Laya Ready when the LLM is not configured", () => {
     useOperatorSignalStore.setState({ decisionStatus: "ready", llmChrome: null });
     render(<DeskStatusCluster />);
     expect(screen.getByTestId("broker-surface")).toHaveTextContent("Broker Unavailable");
-    expect(screen.getByTestId("decision-surface")).toHaveTextContent("Decision Ready");
-    expect(screen.getByTestId("llm-surface")).toHaveTextContent("Chat Not configured");
+    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Ready");
+    expect(screen.getByTestId("llm-surface")).toHaveTextContent("LLM Not configured");
   });
 });

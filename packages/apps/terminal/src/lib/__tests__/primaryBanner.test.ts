@@ -91,21 +91,21 @@ describe("FT-UX-001 primary banner priority", () => {
     ).toBeNull();
   });
 
-  it("Decision Down outranks a disconnected feed and Chat does not", () => {
-    const decision = classifyOperatorSignals({
+  it("Laya Down outranks a disconnected feed and Chat does not", () => {
+    const laya = classifyOperatorSignals({
       ...closedHost(),
       health: "healthy",
       llmChrome: "ready",
       decisionStatus: "down",
     });
-    expect(decision?.failureClass).toBe("decision");
+    expect(laya?.failureClass).toBe("laya");
     expect(
       selectPrimaryBanner({
         mode: "live",
         feedDisconnected: true,
-        incident: decision,
+        incident: laya,
       }),
-    ).toBe("decision");
+    ).toBe("laya");
   });
 
   it("Chat and a public-site outage do not hide a disconnected feed", () => {

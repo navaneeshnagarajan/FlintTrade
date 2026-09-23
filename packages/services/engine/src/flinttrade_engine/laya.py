@@ -141,7 +141,7 @@ class Laya:
         if self._status is DecisionStatus.DOWN:
             return Verdict(
                 allow=False,
-                reason="Decision is Down. Live orders are blocked.",
+                reason="Laya is Down. Live orders are blocked.",
                 limits=limits,
             )
 

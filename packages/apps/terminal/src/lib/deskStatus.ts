@@ -1,5 +1,5 @@
 /**
- * Three operator surfaces. Broker, Decision, and Chat never share one label.
+ * Three operator surfaces. Broker, Laya, and LLM never share one label.
  */
 
 import { advisorLlmChromeLabel, type AdvisorLlmChrome } from "@/services/advisorChat";
