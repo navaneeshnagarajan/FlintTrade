@@ -500,6 +500,8 @@ The terminal has two development proxy namespaces:
 | `/api/v1/admin/activity` | Operator activity feed. |
 | `/api/v1/audit/logs` | Audit-log read on the operations blueprint (not `/v1/operations/…`). |
 
+`GET /api/v1/ping` returns `laya` as `ready`, `degraded`, or `down`. Laya starts Down. The response does not invent Ready.
+
 ### Errors (`/ft-api/v1/errors`, `/ft-api/v1/changelog`)
 
 | Endpoint | Purpose |
