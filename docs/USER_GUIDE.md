@@ -222,14 +222,15 @@ reads as a working operator path.
 3. **Optional: generate an OpenAlgo API key.** From the OpenAlgo dashboard,
    copy the generated API key. This is the key FlintTrade uses for the
    OpenAlgo-compatible bridge only (not your broker's key).
-4. **Set the OpenAlgo key in FlintTrade.** Open Setup → OpenAlgo Bridge, or
-   Settings → Broker Gateway, then paste the OpenAlgo URL and API key. The app
-   stores these settings in the OS workspace and hot-reloads the backend client.
-   If the URL does not include a port, set REST Port (default `5000`); the
-   WebSocket Port defaults to `8765`.
-5. **Verify the bridge.** Use the Test Connection button in the same UI. Source
-   contributors can open `http://localhost:5173/setup`; desktop users use the
-   in-app setup window.
+4. **Set the OpenAlgo key in FlintTrade.** Broker connect is not a required
+   first-run step. After the Practice desk is open, use the optional broker
+   panel (**OpenAlgo Bridge**) or Settings → Broker Gateway, then paste the
+   OpenAlgo URL and API key. The app stores these settings in the OS workspace
+   and hot-reloads the backend client. If the URL does not include a port, set
+   REST Port (default `5000`); the WebSocket Port defaults to `8765`.
+5. **Verify the bridge.** Use the Test Connection button in the same UI.
+   Source contributors open that optional broker panel, or Settings → Broker
+   Gateway; desktop users use the in-app window.
 
 **Native HTTP freeze.** Broker-account mutations (`/v1` account and auth
 writes, native connect / login / set-primary / delete, and OAuth start /
@@ -595,8 +596,8 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] Your FlintTrade JWT is fresh — it expires daily at 8 AM IST.
 - [ ] The authenticator is enrolled, or you will confirm a one-time
       authenticator code in the Live switch dialog (if you chose **Set up
-      later** during setup). Explore and Practice stay password-only until
-      enrolment.
+      later** on the optional authenticator panel). Explore and Practice stay
+      password-only until enrolment. First-run Setup does not unlock Live.
 - [ ] An **exactly 6-digit** Security PIN is set under Settings → Security
       (`/settings#security`). Live cannot be armed until this PIN exists.
 - [ ] The 5-layer safety system is active (see
@@ -620,10 +621,11 @@ See [Laya on place](#laya-on-place).
    the welcome mode picker. The dialog warns that real orders will be
    placed and asks for an **authenticator code** and your **exactly
    6-digit PIN**. Live unlock requires both — a confirmed authenticator
-   enrolment plus the PIN. If you deferred 2FA with **Set up later**,
-   enter a one-time authenticator code in the dialog to enrol, then the
-   PIN. `POST /v1/auth/pin` with `mode: "live"` refuses 403
-   `totp_required` until the authenticator is enabled. The PIN
+   enrolment plus the PIN. If you deferred 2FA with **Set up later** on
+   the optional authenticator panel, enter a one-time authenticator code
+   in the dialog to enrol, then the PIN. `POST /v1/auth/pin` with
+   `mode: "live"` refuses 403 `totp_required` until the authenticator
+   is enabled. The PIN
    alone is not enough. Set the PIN under Settings → Security
    (`/settings#security`) first if you have not already — see
    [Settings reference](#11-settings-reference).
@@ -666,7 +668,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 |---|---|
 | `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP, or PIN). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Explore stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
-| `/setup` | Required first-run path is Create operator → vault → Practice desk (Step N of 3). Affirming Practice lands on the Practice desk; Trading Defaults, Risk, and Broker are Later/Skip after that landing. On the broker Later path, **Continue without a broker** is the primary control. TOTP, broker connect, LLM, and Monitoring are Later/Skip; skipping stays on the Practice desk. Persona is not a required step and is not part of that count. First run has no Live unlock; a later Live unlock still needs the authenticator and PIN. Explore and Practice stay password-only until authenticator enrolment. `/setup-account` is a compatibility alias. |
+| `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Later / Skip panels open on that desk after the affirm and do not change the step count. On the broker Later path, **Continue without a broker** is the first control, above FlintTrade Native and OpenAlgo Bridge. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
@@ -677,6 +679,17 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/ai` | AI Centre — chat, Suggest, signals, sentiment, RAG. |
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
+
+First-run Setup finishes on the Practice desk. Step N of 3 counts only
+Create operator, Vault, and Practice desk. After the affirm, Later / Skip
+covers the authenticator (TOTP; the control may still say **Set up later**),
+broker connect, LLM, Monitoring, trading defaults, and risk. Those panels
+never appear before the affirm, never block Practice, and never change
+Step N of 3. On the broker Later path, **Continue without a broker** is
+the first control, above FlintTrade Native and OpenAlgo Bridge. Persona
+is not a required first-run gate and is not part of that count. First run
+has no Live unlock. Live place stays fail-closed. A later Live unlock,
+outside this path, still needs the authenticator and PIN.
 
 `/home` is the canonical Home / Welcome dashboard. A signed-in
 operator who opens it (address bar, refresh, or same-tab bookmark)

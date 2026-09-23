@@ -58,13 +58,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Changed
 
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
-  The required path is Create operator → vault → Practice desk
-  (Step N of 3). Affirming Practice lands on that desk; Trading
-  Defaults, Risk, and Broker are Later/Skip after the landing.
-  TOTP, broker connect, LLM, and Monitoring are Later/Skip, and
-  skipping stays on the Practice desk. First run has no Live
-  unlock. A later Live unlock still needs the authenticator and
-  PIN. Refs #282.
+  The required path is Create operator, then Vault, then the Practice
+  desk (Step N of 3). Affirming Practice lands on `/trade`.
+  Authenticator, broker connect, LLM, Monitoring, trading defaults,
+  and risk are Later or Skip on that desk. They do not change the
+  step count and do not block Practice. On the broker Later path,
+  **Continue without a broker** is the primary control above
+  FlintTrade Native and OpenAlgo Bridge. First run has no Live
+  unlock. Live place stays fail-closed. Live still needs the
+  authenticator and PIN later. Persona is not a required first-run
+  gate. Refs #282.
 
 - **Native Dhan + Kotak Neo Connected (read) smoke (FT-MONDAY-002).**
   The path is native Dhan + Neo on the MSI
