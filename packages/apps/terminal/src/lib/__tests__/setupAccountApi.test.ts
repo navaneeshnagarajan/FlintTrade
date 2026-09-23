@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { enableFlintTradeTotp, setupFlintTradeAccount } from "../setupAccountApi";
+import { enableFlintTradeTotp, openFlintTradeVault, setupFlintTradeAccount } from "../setupAccountApi";
 
 describe("setupAccountApi", () => {
   beforeEach(() => {
@@ -123,6 +123,28 @@ describe("setupAccountApi", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ totp_code: "123456" }),
+    });
+  });
+
+  it("opens the vault without reading the master password back", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "success",
+          data: { opened: true, already_present: false },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(openFlintTradeVault("VaultKey123!")).resolves.toEqual({
+      opened: true,
+      alreadyPresent: false,
+    });
+    expect(fetch).toHaveBeenCalledWith("/ft-api/v1/auth/setup/vault", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ master_password: "VaultKey123!" }),
     });
   });
 });

@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import type { AppMode } from "@/stores/modeStore";
+import type { OptionalSetupPanel } from "@/routes/setupRouting";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   downgradeMode: vi.fn(),
   persistSetupChoices: vi.fn(() => "/trade"),
   setupFlintTradeAccount: vi.fn(),
+  openFlintTradeVault: vi.fn(),
+  enableFlintTradeTotp: vi.fn(),
 }));
 
 vi.mock("react-router", () => ({
@@ -51,47 +53,38 @@ vi.mock("@/lib/setupAccountApi", () => ({
     }
   },
   setupFlintTradeAccount: mocks.setupFlintTradeAccount,
+  openFlintTradeVault: mocks.openFlintTradeVault,
+  enableFlintTradeTotp: mocks.enableFlintTradeTotp,
 }));
 
 // Keep the shell light — Meteors/Particles animate on canvas.
 vi.mock("@/components/layout/PublicRouteShell", () => ({
   __esModule: true,
-  default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
-
-// Stub the mode picker: the wizard's contract is its `onSelect(mode)` callback.
-vi.mock("@/routes/ModeSelectRoute", () => ({
-  __esModule: true,
-  default: ({
-    onSelect,
-    initialMode,
-  }: {
-    onSelect: (mode: AppMode, token?: string) => void;
-    initialMode?: AppMode;
-  }) => (
+  default: ({ children, subtitle }: { children: React.ReactNode; subtitle?: string }) => (
     <div>
-      <output aria-label="Initial setup mode">{initialMode ?? "explore"}</output>
-      <button onClick={() => onSelect("explore")}>pick-explore</button>
-      <button onClick={() => onSelect("practice")}>pick-practice</button>
-      <button onClick={() => onSelect("live", "live-token")}>pick-live</button>
+      {subtitle ? <p>{subtitle}</p> : null}
+      {children}
     </div>
   ),
 }));
 
-import SetupAccountRoute, { clearSessionRecoveryMaterialForTests } from "../SetupAccountRoute";
+import SetupAccountRoute, {
+  clearSessionRecoveryMaterialForTests,
+  PRACTICE_LATER_KEY,
+  PracticeLaterSetup,
+} from "../SetupAccountRoute";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 
 const PROGRESS_KEY = "flinttrade:setup-progress";
 
-/** Seed persisted wizard progress so the route renders the final mode step. */
-function seedModeStepProgress(): void {
+/** Seed persisted progress on the Practice desk, after the vault is open. */
+function seedPracticeDesk(): void {
   localStorage.setItem(
     PROGRESS_KEY,
     JSON.stringify({
       accountCreated: true,
-      totpUri: "otpauth://totp/x?secret=ABC",
-      backupCodes: ["AAAA1111"],
+      vaultOpened: true,
       persona: "trader",
       connection: {
         host: "http://localhost:5000",
@@ -102,8 +95,8 @@ function seedModeStepProgress(): void {
       trading: null,
       risk: null,
       mode: null,
-      displayName: "nav",
-      currentStep: 6,
+      displayName: "operator",
+      currentStep: 2,
     }),
   );
 }
@@ -124,7 +117,7 @@ function submitAccountCreation(): void {
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 }
 
-describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () => {
+describe("SetupAccountRoute — mandatory Practice path", () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
@@ -133,50 +126,82 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     mocks.downgradeMode.mockReset();
     mocks.persistSetupChoices.mockClear();
     mocks.setupFlintTradeAccount.mockReset();
-    seedModeStepProgress();
+    mocks.enableFlintTradeTotp.mockReset();
+    mocks.openFlintTradeVault.mockImplementation(async (password: string) => {
+      if (!password) {
+        throw new Error("Enter a master password of at least 8 characters.");
+      }
+      return { opened: true, alreadyPresent: false };
+    });
+    seedPracticeDesk();
     useModeStore.getState().setMode("explore");
-    useAuthStore.getState().setLoggedIn("setup-explore-token", "nav", "");
+    useAuthStore.getState().setLoggedIn("setup-explore-token", "operator", "");
   });
 
-  it("restores a valid canonical mode deep link on the current mode step", () => {
-    render(<SetupAccountRoute requestedStep={6} requestedMode="practice" />);
+  it("shows Step 3 of 3 on the Practice desk and does not offer a Live unlock", () => {
+    render(<SetupAccountRoute />);
 
-    expect(screen.getByLabelText("Initial setup mode")).toHaveTextContent("practice");
+    expect(screen.getByText("Step 3 of 3 - Practice desk")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Practice desk" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /live/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /explore/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Set up / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue without a broker" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Trading defaults")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Position lot reference")).not.toBeInTheDocument();
   });
 
-  it("restores a valid completed-step deep link without skipping unfinished steps", () => {
-    render(<SetupAccountRoute requestedStep={3} />);
+  it("does not let an optional deep link skip the vault", () => {
+    localStorage.setItem(
+      PROGRESS_KEY,
+      JSON.stringify({
+        accountCreated: true,
+        vaultOpened: false,
+        persona: null,
+        connection: null,
+        trading: null,
+        risk: null,
+        mode: null,
+        displayName: "operator",
+        currentStep: 6,
+      }),
+    );
 
-    expect(screen.getByRole("tablist", { name: "Connection mode" })).toBeInTheDocument();
-    expect(screen.queryByText("pick-practice")).not.toBeInTheDocument();
+    render(<SetupAccountRoute requestedStep={2} requestedOptional={"broker" satisfies OptionalSetupPanel} />);
+
+    expect(screen.getByRole("heading", { name: "Vault" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open Practice desk" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Step \d+ of [4-9]/)).not.toBeInTheDocument();
   });
 
   it("does not let a deep link skip account creation", () => {
     localStorage.clear();
     useAuthStore.getState().setSetupRequired();
 
-    render(<SetupAccountRoute requestedStep={6} requestedMode="live" />);
+    render(<SetupAccountRoute requestedStep={2} requestedOptional="broker" />);
 
+    expect(screen.getByText("Step 1 of 3 - Create operator")).toBeInTheDocument();
     expect(screen.getByLabelText("Choose a username")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Initial setup mode")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open Practice desk" })).not.toBeInTheDocument();
   });
 
-  it("upgrades the JWT to practice via the mode-transition endpoint before finishing", async () => {
+  it("upgrades the JWT to practice and opens the Practice desk", async () => {
     mocks.downgradeMode.mockResolvedValue("practice-token");
 
     render(<SetupAccountRoute />);
-    fireEvent.click(screen.getByText("pick-practice"));
+    fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
 
     await waitFor(() =>
       expect(mocks.downgradeMode).toHaveBeenCalledWith("practice", "setup-explore-token"),
     );
     await waitFor(() =>
-      expect(mocks.navigate).toHaveBeenCalledWith("/welcome", { replace: true }),
+      expect(mocks.navigate).toHaveBeenCalledWith("/trade", { replace: true }),
     );
     expect(useAuthStore.getState().token).toBe("practice-token");
     expect(useModeStore.getState().mode).toBe("practice");
-    // Setup finished — persisted progress cleared.
     expect(localStorage.getItem(PROGRESS_KEY)).toBeNull();
+    expect(localStorage.getItem(PRACTICE_LATER_KEY)).toBe("1");
+    expect(mocks.downgradeMode).not.toHaveBeenCalledWith("live", expect.anything());
   });
 
   it("does not finish setup when the Practice response belongs to a logged-out session", async () => {
@@ -188,7 +213,7 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     );
 
     render(<SetupAccountRoute />);
-    fireEvent.click(screen.getByText("pick-practice"));
+    fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
     await waitFor(() => expect(mocks.downgradeMode).toHaveBeenCalledOnce());
 
     act(() => useAuthStore.getState().setLoggedOut());
@@ -224,73 +249,21 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     });
   });
 
-  it("offers Set up later on the optional authenticator step", () => {
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
-      accountCreated: true,
-      totpUri: "otpauth://totp/x?secret=LEGACY",
-      backupCodes: ["LEGACY01"],
-      persona: null,
-      connection: null,
-      trading: null,
-      risk: null,
-      mode: null,
-      displayName: "nav",
-      currentStep: 1,
-    }));
+  it("does not open an optional deep link before the Practice affirm", () => {
+    render(<SetupAccountRoute requestedOptional="totp" />);
 
-    render(<SetupAccountRoute />);
-
-    expect(screen.getByRole("button", { name: /set up later/i })).toBeEnabled();
-    expect(screen.getByText(/optional for Explore and Practice/i)).toBeInTheDocument();
+    expect(screen.getByText("Step 3 of 3 - Practice desk")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Practice desk" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /set up later/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue without a broker" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Trading defaults")).not.toBeInTheDocument();
   });
 
-  it("Set up later continues the wizard without enabling 2FA", async () => {
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
-      accountCreated: true,
-      totpUri: "",
-      backupCodes: [],
-      persona: null,
-      connection: null,
-      trading: null,
-      risk: null,
-      mode: null,
-      displayName: "nav",
-      currentStep: 1,
-    }));
-
-    render(<SetupAccountRoute />);
-    fireEvent.click(screen.getByRole("button", { name: /set up later/i }));
-
-    await waitFor(() => {
-      const progress = JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? "null") as {
-        accountCreated?: boolean;
-        currentStep?: number;
-      } | null;
-      expect(progress?.accountCreated).toBe(true);
-      expect(progress?.currentStep).toBe(2);
-    });
-    expect(mocks.navigate).not.toHaveBeenCalled();
-    expect(localStorage.getItem("flinttrade:demo-session")).toBeNull();
-  });
-
-  it("reopening Setup after Set up later still offers Delete account & start over", async () => {
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
-      accountCreated: true,
-      totpUri: "",
-      backupCodes: [],
-      persona: null,
-      connection: null,
-      trading: null,
-      risk: null,
-      mode: null,
-      displayName: "nav",
-      currentStep: 1,
-    }));
-
+  it("keeps Start over on the Practice affirm", () => {
     render(<SetupAccountRoute />);
 
-    expect(screen.getByRole("button", { name: /delete account/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start over" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /set up later/i })).not.toBeInTheDocument();
   });
 
   it("Start over wipes the unfinished account so setup can begin again", async () => {
@@ -303,7 +276,7 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
       trading: null,
       risk: null,
       mode: null,
-      displayName: "nav",
+      displayName: "operator",
       currentStep: 1,
     }));
     vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -326,32 +299,25 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     fetchSpy.mockRestore();
   });
 
-  it("requires password-backed 2FA regeneration after a recovery-step reload", () => {
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
-      accountCreated: true,
-      totpUri: "otpauth://totp/x?secret=LEGACY",
-      backupCodes: ["LEGACY01"],
-      persona: null,
-      connection: null,
-      trading: null,
-      risk: null,
-      mode: null,
-      displayName: "nav",
-      currentStep: 1,
-    }));
-
+  it("leaves optional setup for the Practice desk", async () => {
+    mocks.downgradeMode.mockResolvedValue("practice-token");
     render(<SetupAccountRoute />);
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/not retained/i);
-    expect(screen.getByRole("button", { name: /show QR code/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /reset 2FA/i })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Skip Two-factor authentication" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip Broker connect" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
+
+    await waitFor(() =>
+      expect(mocks.navigate).toHaveBeenCalledWith("/trade", { replace: true }),
+    );
+    expect(localStorage.getItem(PRACTICE_LATER_KEY)).toBe("1");
   });
 
   it("does not finish setup under a Practice badge when the transition fails", async () => {
     mocks.downgradeMode.mockRejectedValue(new Error("mode downgrade to practice failed (503)"));
 
     render(<SetupAccountRoute />);
-    fireEvent.click(screen.getByText("pick-practice"));
+    fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
 
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(/Practice mode could not be enabled/i),
@@ -364,52 +330,23 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     expect(localStorage.getItem(PROGRESS_KEY)).not.toBeNull();
   });
 
-  it("finishes in explore without calling the mode-transition endpoint", async () => {
+  it("does not offer Explore or Live as a first-run finish", () => {
     render(<SetupAccountRoute />);
-    fireEvent.click(screen.getByText("pick-explore"));
 
-    await waitFor(() =>
-      expect(mocks.navigate).toHaveBeenCalledWith("/welcome", { replace: true }),
-    );
-    expect(mocks.downgradeMode).not.toHaveBeenCalled();
-    expect(useModeStore.getState().mode).toBe("explore");
+    expect(screen.queryByRole("button", { name: /explore/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /unlock live|choose live|^live$/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Live is not part of setup/i)).toBeInTheDocument();
   });
 
-  it("installs the live session token and lands on the workspace for live", async () => {
+  it("does not count later setup in the required-step fraction", () => {
     render(<SetupAccountRoute />);
-    fireEvent.click(screen.getByText("pick-live"));
 
-    await waitFor(() =>
-      expect(mocks.navigate).toHaveBeenCalledWith("/trade", { replace: true }),
-    );
-    expect(mocks.downgradeMode).not.toHaveBeenCalled();
-    expect(useAuthStore.getState().token).toBe("live-token");
-    expect(useModeStore.getState().mode).toBe("live");
+    expect(screen.getByText("Step 3 of 3 - Practice desk")).toBeInTheDocument();
+    expect(screen.queryByText("Optional")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Set up Monitoring" })).not.toBeInTheDocument();
   });
 
-  it("rejects a Live unlock response after the setup session is terminated", async () => {
-    render(<SetupAccountRoute />);
-    act(() => useAuthStore.getState().setLoggedOut());
-
-    fireEvent.click(screen.getByText("pick-live"));
-    await act(async () => Promise.resolve());
-
-    expect(useAuthStore.getState()).toMatchObject({
-      status: "logged-out",
-      token: null,
-      username: null,
-    });
-    expect(useModeStore.getState().mode).toBe("explore");
-    expect(mocks.navigate).not.toHaveBeenCalled();
-    expect(localStorage.getItem(PROGRESS_KEY)).not.toBeNull();
-  });
-
-  it("keeps the fresh QR seed through a route remount after account creation", async () => {
-    // Installing the session token right after account creation flips the
-    // auth store and remounts the route. Recovery material is never written
-    // to browser storage, so before the in-memory session cache a brand-new
-    // account landed on step 2 with the QR button disabled and the
-    // misleading "closed or refreshed" message.
+  it("keeps the fresh QR seed through a route remount until authenticator setup", async () => {
     localStorage.clear();
     useAuthStore.getState().setSetupRequired();
     mocks.setupFlintTradeAccount.mockResolvedValue({
@@ -420,14 +357,41 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     const first = render(<SetupAccountRoute />);
     submitAccountCreation();
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /show QR code/i })).toBeEnabled(),
+      expect(screen.getByLabelText("Master password")).toBeInTheDocument(),
     );
+    expect(screen.getByText("Step 2 of 3 - Vault")).toBeInTheDocument();
 
     first.unmount();
-    render(<SetupAccountRoute />);
+    const second = render(<SetupAccountRoute />);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Master password")).toBeInTheDocument(),
+    );
+
+    fireEvent.change(screen.getByLabelText("Master password"), {
+      target: { value: "VaultKey123!" },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm master password"), {
+      target: { value: "VaultKey123!" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+    await waitFor(() =>
+      expect(screen.getByText("Step 3 of 3 - Practice desk")).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: "Set up Two-factor authentication" })).not.toBeInTheDocument();
+
+    mocks.downgradeMode.mockResolvedValue("practice-token");
+    fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
+    await waitFor(() =>
+      expect(mocks.navigate).toHaveBeenCalledWith("/trade", { replace: true }),
+    );
+    second.unmount();
+
+    render(<PracticeLaterSetup />);
+    fireEvent.click(screen.getByRole("button", { name: "Set up Two-factor authentication" }));
 
     expect(screen.getByRole("button", { name: /show QR code/i })).toBeEnabled();
     expect(screen.queryByText(/not retained/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Step \d+ of \d+/)).not.toBeInTheDocument();
   });
 
   it("does not install a late account-setup session or advance the wizard", async () => {

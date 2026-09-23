@@ -35,7 +35,7 @@ describe("setup route authority", () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText("Current setup location")).toHaveTextContent(
-        "/setup?mode=practice&step=mode#mode",
+        "/setup?mode=practice&step=practice#practice",
       );
     });
   });

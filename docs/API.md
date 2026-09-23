@@ -454,7 +454,8 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 | Endpoint | Purpose |
 |---|---|
 | `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. |
-| `POST auth/setup` | First-run enrolment. Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri` plus backup codes and an Explore JWT. Authenticator enrolment is optional for Explore and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. |
+| `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and an Explore setup-session JWT (`setup_session`). That token is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for Explore and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. |
+| `POST auth/setup/vault` | Open the credential vault during first-run Setup. Requires the account-create setup-session JWT. Daily-login tokens are rejected. Body `{ "master_password" }` (at least 8 characters when the vault file is missing). Persists the secret when it is missing and leaves an existing secret untouched. Success is `{ "opened": true, "already_present": bool }` under `data`. The response never returns the secret. |
 | `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Body `{ "password" }`, or the account-create setup JWT (lost-QR start-over). Daily-login session JWTs are rejected. |
 | `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret (password re-confirm) and clear `totp_enabled` until a live code is confirmed again. |
 | `POST auth/login` | Sign in with password (argon2id-hashed). `totp_code` (or a backup code) is required only after authenticator enrolment (`totp_enabled`). Issues a JWT. |
@@ -611,7 +612,7 @@ account-management writes still require the operator's session JWT.
 setup can run without `X-API-Key`. That is not session-free auth: `POST
 /v1/auth/totp/enable`, `/pin`, `/pin/set`, `/mode`, and `/logout` still decode
 an existing session JWT and return 401 without one. Truly unauthenticated prefixes
-include `/v1/auth/setup`, `/v1/auth/login`, `/v1/auth/status`,
+include `/v1/auth/setup` (account create only — `POST /v1/auth/setup/vault` still requires the setup-session JWT and rejects a daily-login token), `/v1/auth/login`, `/v1/auth/status`,
 the password-reset pair (`/v1/auth/forgot-password`,
 `/v1/auth/reset-password`) and the Welcome OTP pair
 (`/v1/auth/forgot-password-otp`, `/v1/auth/reset-password-otp`),
