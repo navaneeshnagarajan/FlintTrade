@@ -61,17 +61,21 @@ Chat may suggest and explain only: bring your own API key, use managed
 Ollama, or point **Custom (OpenAI-compatible)** at another local runtime.
 Chat is not an admission source, and Chat downtime does not close Live.
 
-Money-path mint remains Mode guard → SafetySystem L1–L5 → `gate_order` →
-BrokerRouter. Laya does not replace those layers. `Laya.admit` is a separate
-admission surface; the server place path does not run it before SafetySystem.
+Operator and automate place runs Mode guard → `Laya.admit` → SafetySystem
+L1–L5 → `gate_order` → BrokerRouter. Laya does not replace those layers, and
+`gate_order` remains the only mint. A refusal or a quantity clamp stops before
+SafetySystem. A clamp names the reduced quantity and does not place either
+size until the operator places that quantity. Chat is not an admission source.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down — Live orders paused."). That class closes Live place and Position
 Mirror start on the shared client place path. Kill All stays reachable.
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
 The desk ping publishes Ready, Degraded, or Down and does not invent Ready.
-Degraded does not open that class and does not mute Live. `Laya.admit` on
-every server place remains follow-up work and is not this mute.
+Degraded does not open that class and does not mute Live. Degraded enforces
+the tighter quantity ceiling and the desk says so. Down does not add a second
+deny under a Live control that is already muted. Other write verbs still
+reach SafetySystem without this admission.
 
 | Concern | Automate risk note | SafetySystem | Ticket guards | Laya |
 | --- | --- | --- | --- | --- |

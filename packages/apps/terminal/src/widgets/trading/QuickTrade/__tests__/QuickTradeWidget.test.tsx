@@ -7,12 +7,28 @@ import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 // Mocks — factory functions only; no variable references (hoisting safety)
 // ---------------------------------------------------------------------------
 
-const mockPlaceOrder = vi.hoisted(() => vi.fn());
-const mockGetSymbol = vi.hoisted(() => vi.fn());
+const { mockPlaceOrder, mockGetSymbol, OrderApiError } = vi.hoisted(() => {
+  class OrderApiError extends Error {
+    readonly status: number;
+    readonly body: unknown;
+    constructor(message: string, status: number, body: unknown) {
+      super(message);
+      this.name = "OrderApiError";
+      this.status = status;
+      this.body = body;
+    }
+  }
+  return {
+    mockPlaceOrder: vi.fn(),
+    mockGetSymbol: vi.fn(),
+    OrderApiError,
+  };
+});
 
 vi.mock("@/services/api", () => ({
   placeOrder: mockPlaceOrder,
   getSymbol: mockGetSymbol,
+  OrderApiError,
 }));
 
 vi.mock("@/stores/modeStore", () => ({
@@ -263,6 +279,25 @@ describe("QuickTradeWidget", () => {
       expect(screen.getByRole("status")).toBeTruthy();
       expect(screen.getByText(/Connection refused/i)).toBeTruthy();
     });
+  });
+
+  it("shows Laya denied under Buy and Sell and leaves both off", async () => {
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Quantity must be a positive whole number.", 403, {
+      code: "laya_denied",
+      reason: "Quantity must be a positive whole number.",
+      message: "Quantity must be a positive whole number.",
+      limits: { max_quantity: 1 },
+    }));
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lots/i }));
+    const denied = await screen.findByTestId("laya-denied");
+    expect(denied).toHaveTextContent("Laya denied");
+    expect(denied).toHaveTextContent("Quantity must be a positive whole number.");
+    expect(denied).toHaveTextContent("Max quantity 1.");
+    expect(screen.getByRole("button", { name: /buy 1 lots/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /sell 1 lots/i })).toBeDisabled();
+    expect(screen.queryByText(/Approved by Laya/)).not.toBeInTheDocument();
   });
 
   it("refuses a LIMIT order with no price instead of sending it at zero", async () => {

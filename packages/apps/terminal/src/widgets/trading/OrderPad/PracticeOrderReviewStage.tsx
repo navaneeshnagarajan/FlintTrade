@@ -7,12 +7,15 @@ import {
   orderReviewDetailsLabel,
   orderReviewTitle,
 } from "@/lib/modeVocabulary";
+import { LayaAdmissionNotice } from "@/components/orders/LayaAdmissionNotice";
+import type { LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import type { PracticeOrderReviewSnapshot } from "./practiceOrderReview";
 
 interface PracticeOrderReviewStageProps {
   mode: Exclude<AppMode, "live">;
   review: PracticeOrderReviewSnapshot;
   confirming: boolean;
+  admission?: LayaNotice | null;
   onBack: () => void;
   onConfirm: () => void;
 }
@@ -40,6 +43,7 @@ export function PracticeOrderReviewStage({
   mode,
   review,
   confirming,
+  admission = null,
   onBack,
   onConfirm,
 }: PracticeOrderReviewStageProps) {
@@ -120,6 +124,10 @@ export function PracticeOrderReviewStage({
           Back or any order edit invalidates this review. Confirm submits this exact immutable intent on the paper path.
         </p>
 
+        <div className="mt-3">
+          <LayaAdmissionNotice notice={admission} />
+        </div>
+
         <div className="mt-4 flex gap-2">
           <button
             ref={backRef}
@@ -133,7 +141,7 @@ export function PracticeOrderReviewStage({
           <button
             ref={confirmRef}
             type="button"
-            disabled={confirming}
+            disabled={confirming || admission?.kind === "deny"}
             aria-label={orderReviewConfirmAria(mode)}
             aria-busy={confirming}
             onClick={onConfirm}

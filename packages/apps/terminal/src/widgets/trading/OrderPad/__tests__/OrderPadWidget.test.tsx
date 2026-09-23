@@ -14,11 +14,24 @@ import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("@/services/api", () => ({
-  searchSymbol: vi.fn().mockResolvedValue([]),
-  placeOrder: vi.fn().mockResolvedValue({ orderId: "TEST001" }),
-  getSymbol: vi.fn().mockResolvedValue({ symbol: "NIFTY", exchange: "NSE", lotsize: 50, tick_size: 0.05 }),
-}));
+vi.mock("@/services/api", () => {
+  class OrderApiError extends Error {
+    readonly status: number;
+    readonly body: unknown;
+    constructor(message: string, status: number, body: unknown) {
+      super(message);
+      this.name = "OrderApiError";
+      this.status = status;
+      this.body = body;
+    }
+  }
+  return {
+    searchSymbol: vi.fn().mockResolvedValue([]),
+    placeOrder: vi.fn().mockResolvedValue({ orderId: "TEST001" }),
+    getSymbol: vi.fn().mockResolvedValue({ symbol: "NIFTY", exchange: "NSE", lotsize: 50, tick_size: 0.05 }),
+    OrderApiError,
+  };
+});
 
 vi.mock("@/hooks/useMargin", () => ({
   useMargin: () => ({ data: null, isFetching: false }),
@@ -56,7 +69,7 @@ vi.mock("jotai", async () => {
 // ---------------------------------------------------------------------------
 
 import OrderPadWidget from "../OrderPadWidget";
-import { placeOrder, getSymbol } from "@/services/api";
+import { OrderApiError, placeOrder, getSymbol } from "@/services/api";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import * as jotai from "jotai";
 
@@ -259,6 +272,60 @@ describe("OrderPadWidget", () => {
     // The qty input should still be 1 (clamped at min)
     const qtyInput = decreaseBtn.closest("div")?.querySelector("input") as HTMLInputElement;
     expect(Number(qtyInput.value)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows Laya denied under the confirm control and leaves it off", async () => {
+    mockPlaceOrder.mockRejectedValue(new OrderApiError("Explore cannot place orders.", 403, {
+      code: "laya_denied",
+      reason: "Explore cannot place orders.",
+      message: "Explore cannot place orders.",
+      limits: { max_quantity: 100 },
+    }));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    const confirm = await screen.findByRole("button", {
+      name: /confirm (simulated practice|sample) order/i,
+    });
+    fireEvent.click(confirm);
+    const denied = await screen.findByTestId("laya-denied");
+    expect(denied).toHaveTextContent("Laya denied");
+    expect(denied).toHaveTextContent("Explore cannot place orders.");
+    expect(denied).toHaveTextContent("Max quantity 100.");
+    expect(confirm).toBeDisabled();
+    expect(screen.queryByText(/Approved by Laya/)).not.toBeInTheDocument();
+    expect(denied.textContent).not.toMatch(/llm/i);
+  });
+
+  it("shows a quantity clamp before the place completes", async () => {
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Qty reduced to 1 (Laya limit)", 409, {
+      code: "laya_clamp",
+      message: "Qty reduced to 1 (Laya limit)",
+      applied_quantity: 1,
+      limits: { max_quantity: 1 },
+    }));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    const qty = screen.getByLabelText("Quantity") as HTMLInputElement;
+    fireEvent.change(qty, { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    fireEvent.click(await screen.findByRole("button", {
+      name: /confirm (simulated practice|sample) order/i,
+    }));
+    expect(await screen.findByTestId("laya-clamp")).toHaveTextContent("Qty reduced to 1 (Laya limit)");
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/TEST001/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/order details changed/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /confirm (simulated practice|sample) order/i })).toBeEnabled();
+  });
+
+  it("shows tighter Degraded limits without Blocked chrome", async () => {
+    useOperatorSignalStore.setState({ decisionStatus: "degraded" });
+    render(<OrderPadWidget {...defaultProps} />);
+    const note = await screen.findByTestId("laya-degraded-limits");
+    expect(note).toHaveTextContent("Laya Degraded — tighter limits");
+    expect(note).not.toHaveTextContent("Blocked");
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeEnabled();
   });
 
   it("shows success toast after submitting a valid order", async () => {

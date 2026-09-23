@@ -11,9 +11,17 @@ import pytest
 from flinttrade_core.models import Order
 from flinttrade_engine.request_context import RequestContext
 from flinttrade_engine.safety import SafetyConfig, SafetySystem, set_safety_gate_secret
+from flinttrade_engine.laya import DecisionStatus, process_laya
 from flinttrade_engine.strategy_execution import GatedStrategyDispatcher
 from flinttrade_gateway.brokers._base import ROUTER_TOKEN, Session
 from flinttrade_gateway.router import BrokerRouter
+
+
+@pytest.fixture(autouse=True)
+def _laya_ready_for_open_place() -> None:
+    """Seed Ready so an open strategy place still reaches SafetySystem."""
+    process_laya().set_status(DecisionStatus.READY)
+    yield
 
 
 def _passing_safety() -> SafetySystem:
@@ -217,3 +225,41 @@ def test_live_dispatch_contract_rejects_dispatcher_subclasses() -> None:
 
     with pytest.raises(ValueError, match="canonical gated dispatcher"):
         StrategyExecutionContract.live(object.__new__(LookalikeDispatcher))
+
+
+def _automate_dispatcher(safety: object) -> GatedStrategyDispatcher:
+    request_ctx = RequestContext(
+        jti="laya-strategy",
+        actor_type="agent",
+        actor_id="strategy:laya",
+        mode="live",
+        selector="openalgo:default",
+    )
+    return GatedStrategyDispatcher(
+        safety=safety,
+        request_context_provider=lambda: request_ctx,
+        router_provider=lambda: MagicMock(),
+        adapter_id="openalgo",
+        account_id="default",
+        portfolio_state_provider=_portfolio_state,
+    )
+
+
+@pytest.mark.asyncio
+async def test_down_automate_place_never_reaches_safety() -> None:
+    process_laya().set_status(DecisionStatus.DOWN)
+    safety = MagicMock()
+    dispatcher = _automate_dispatcher(safety)
+    with pytest.raises(RuntimeError, match="Down"):
+        await dispatcher.dispatch_order(Order(symbol="RELIANCE", exchange="NSE", action="BUY", quantity="1"))
+    safety.check_order.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_degraded_automate_clamp_does_not_shrink_and_place() -> None:
+    process_laya().set_status(DecisionStatus.DEGRADED)
+    safety = MagicMock()
+    dispatcher = _automate_dispatcher(safety)
+    with pytest.raises(RuntimeError, match=r"Qty reduced to 1 \(Laya limit\)"):
+        await dispatcher.dispatch_order(Order(symbol="RELIANCE", exchange="NSE", action="BUY", quantity="2"))
+    safety.check_order.assert_not_called()

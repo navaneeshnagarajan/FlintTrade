@@ -6,6 +6,7 @@ import { useBrokerStore } from "@/stores/brokerStore";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { mondayReadChrome } from "@/lib/mondayReadChrome";
+import { LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
 import { brokerSurfaceLabel, chatSurfaceLabel, decisionSurfaceLabel } from "@/lib/deskStatus";
 
 export function DeskStatusCluster() {
@@ -42,6 +43,7 @@ export function DeskStatusCluster() {
       <span data-testid="laya-surface" className={decisionTone}>
         Laya {decision}
       </span>
+      <LayaDegradedLimitsNote status={decisionStatus} />
       <span aria-hidden="true">·</span>
       <span data-testid="llm-surface">LLM {chat}</span>
     </div>

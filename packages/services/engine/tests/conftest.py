@@ -64,6 +64,16 @@ def pytest_configure(config) -> None:  # noqa: ANN001
 
 
 @pytest.fixture(autouse=True)
+def _laya_starts_down() -> None:
+    """Production admission starts Down. Open-place tests seed Ready themselves."""
+    from flinttrade_engine.laya import reset_process_laya_for_tests
+
+    reset_process_laya_for_tests()
+    yield
+    reset_process_laya_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_auth_state(tmp_path_factory):
     """Point AuthState at a per-test DuckDB so JWT revocation state is fresh.
 

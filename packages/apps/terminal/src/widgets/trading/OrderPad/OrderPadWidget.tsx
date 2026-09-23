@@ -66,9 +66,11 @@ import {
   orderSuccessNotificationTitle,
   orderSuccessToast,
 } from "@/lib/modeVocabulary";
-import { useOperatorIncident } from "@/hooks/useOperatorIncident";
+import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
+import { readOperatorIncident, useOperatorIncident } from "@/hooks/useOperatorIncident";
+import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { liveWritesMuted } from "@/lib/operatorIncident";
-import { noteObservedFailure } from "@/stores/operatorSignalStore";
+import { noteObservedFailure, useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { PracticeOrderReviewStage } from "./PracticeOrderReviewStage";
 import {
@@ -403,6 +405,9 @@ function OrderPadWidget(props: WidgetProps) {
   // Practice review/confirm state — paper path for Practice and Explore.
   // The snapshot is immutable; edits or a switch to Live invalidate it.
   const [practiceReview, setPracticeReview] = useState<PracticeOrderReviewSnapshot | null>(null);
+  const [admission, setAdmission] = useState<LayaNotice | null>(null);
+  const practiceReviewRef = useRef<PracticeOrderReviewSnapshot | null>(null);
+  practiceReviewRef.current = practiceReview;
 
   const {
     control,
@@ -438,6 +443,13 @@ function OrderPadWidget(props: WidgetProps) {
   const price = watch("price");
   const trigPrice = watch("trigPrice");
   const discQty = watch("discQty");
+
+  useEffect(() => {
+    setAdmission((current) => {
+      if (current?.kind === "clamp" && current.appliedQuantity === qty) return current;
+      return null;
+    });
+  }, [symbol, exchange, action, orderType, product, qty, price, trigPrice, discQty]);
 
   const priceEnabled = PRICE_ENABLED.has(orderType);
   const triggerEnabled = TRIGGER_ENABLED.has(orderType);
@@ -658,6 +670,7 @@ function OrderPadWidget(props: WidgetProps) {
     setLoading(true);
     try {
       const result = await placeOrder(params, authority);
+      setAdmission(null);
       const orderId = (result as { orderId?: string; order_id?: string; orderid?: string }).orderId ??
         (result as { order_id?: string }).order_id ??
         (result as { orderid?: string }).orderid ?? "";
@@ -676,6 +689,26 @@ function OrderPadWidget(props: WidgetProps) {
       });
       return true;
     } catch (err) {
+      const notice = layaNoticeFromOrderError(err, {
+        suppressDeny: useModeStore.getState().mode === "live" && liveWritesMuted(readOperatorIncident()),
+      });
+      if (notice) {
+        setAdmission(notice);
+        if (notice.kind === "clamp" && notice.appliedQuantity != null) {
+          const nextQty = notice.appliedQuantity;
+          setValue("qty", nextQty);
+          const review = practiceReviewRef.current;
+          if (review) {
+            const nextValues = { ...getValues(), qty: nextQty };
+            setPracticeReview(createPracticeOrderReviewSnapshot(nextValues, {
+              ...review.params,
+              quantity: nextQty,
+            }));
+          }
+        }
+        return false;
+      }
+      setAdmission(null);
       const msg = err instanceof Error ? err.message : "Order failed";
       const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
         ? err.status
@@ -695,10 +728,11 @@ function OrderPadWidget(props: WidgetProps) {
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [getValues, setValue, showToast]);
 
   const appMode = useModeStore((s) => s.mode);
   const operatorIncident = useOperatorIncident();
+  const decisionStatus = useOperatorSignalStore((s) => s.decisionStatus);
   const liveMuted = appMode === "live" && liveWritesMuted(operatorIncident);
   const isPracticeOrExplore = appMode === "practice" || appMode === "explore";
   const currentIntentIdentity = practiceOrderIntentIdentity({
@@ -1362,7 +1396,7 @@ function OrderPadWidget(props: WidgetProps) {
         {/* Submit button */}
         <Button
           type="submit"
-          disabled={loading || !symbol || !qty || liveMuted}
+          disabled={loading || !symbol || !qty || liveMuted || admission?.kind === "deny"}
           className={`${btnBase} ${btnColor}`}
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}
@@ -1370,7 +1404,10 @@ function OrderPadWidget(props: WidgetProps) {
         </Button>
         {liveMuted && operatorIncident ? (
           <p className="text-xs text-loss" data-testid="live-write-rectify">{operatorIncident.rectify}</p>
-        ) : null}
+        ) : (
+          <LayaDegradedLimitsNote status={decisionStatus} />
+        )}
+        {liveMuted || practiceReview ? null : <LayaAdmissionNotice notice={admission} />}
       </form>
 
       {/* Toast */}
@@ -1381,6 +1418,7 @@ function OrderPadWidget(props: WidgetProps) {
           mode={appMode === "live" ? "practice" : appMode}
           review={practiceReview}
           confirming={loading}
+          admission={admission}
           onBack={handlePracticeBack}
           onConfirm={() => void handlePracticeConfirm()}
         />
