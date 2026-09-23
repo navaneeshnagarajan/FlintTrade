@@ -415,8 +415,9 @@ describe("TopBarV2", () => {
     fireEvent.click(screen.getByRole("button", { name: /tools/i }));
 
     expect(screen.getByRole("menu")).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /trade review/i })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /settings/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Trade Review" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Quick Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Settings" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /p&l dashboard/i })).not.toBeInTheDocument();
   });
 
@@ -445,9 +446,55 @@ describe("TopBarV2", () => {
   it("reaches Settings from the single Tools overflow", () => {
     renderTopBarV2();
 
-    fireEvent.click(screen.getByRole("button", { name: /tools/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^tools$/i }));
 
-    expect(screen.getAllByRole("menuitem", { name: /^settings$/i })).toHaveLength(1);
+    expect(screen.getAllByRole("menuitem", { name: "Settings" })).toHaveLength(1);
+    expect(screen.getByRole("menuitem", { name: "Quick Settings" })).toBeInTheDocument();
+    expect(screen.queryByTestId("quick-settings-btn")).not.toBeInTheDocument();
+  });
+
+  it("opens Quick Settings from Tools without leaving Trade", () => {
+    function LocationProbe() {
+      const loc = useLocation();
+      return <div data-testid="location-probe">{loc.pathname}</div>;
+    }
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/trade"]}>
+          <TopBarV2 />
+          <LocationProbe />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const listener = vi.fn();
+    window.addEventListener("flinttrade:open-tool", listener);
+
+    fireEvent.click(screen.getByRole("button", { name: /^tools$/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Quick Settings" }));
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: /quick settings/i })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: /^theme$/i })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: /^density$/i })).toBeInTheDocument();
+    expect(screen.getByTestId("location-probe").textContent).toBe("/trade");
+    window.removeEventListener("flinttrade:open-tool", listener);
+  });
+
+  it("sends Tools Settings to the full Settings route", () => {
+    renderTopBarV2();
+    const listener = vi.fn();
+    window.addEventListener("flinttrade:open-tool", listener);
+
+    fireEvent.click(screen.getByRole("button", { name: /^tools$/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Settings" }));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener.mock.calls[0][0]).toMatchObject({
+      detail: { toolId: "settings" },
+    });
+    expect(screen.queryByRole("dialog", { name: /quick settings/i })).not.toBeInTheDocument();
+    window.removeEventListener("flinttrade:open-tool", listener);
   });
 
   it("renders the user avatar button", () => {
@@ -656,7 +703,8 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
     expect(screen.queryByRole("button", { name: /^settings$/i })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("tools-btn"));
-    expect(screen.getAllByRole("menuitem", { name: /^settings$/i })).toHaveLength(1);
+    expect(screen.getAllByRole("menuitem", { name: "Settings" })).toHaveLength(1);
+    expect(screen.getByRole("menuitem", { name: "Quick Settings" })).toBeInTheDocument();
   });
 
   it("keeps the More sheet below nested account and notification portals", () => {
@@ -698,7 +746,45 @@ describe("FT-UX-001 Compact desk chrome at 1280", () => {
     expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
     expect(screen.getByTestId("topbar-desk-tools-btn")).toBeInTheDocument();
     expect(screen.queryByTestId("tools-btn")).not.toBeInTheDocument();
+    expect(screen.getByTestId("quick-settings-btn")).toBeInTheDocument();
     expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
+  });
+
+  it("keeps Quick Settings on the bar when Compact hides the tool ribbon", () => {
+    function LocationProbe() {
+      const loc = useLocation();
+      return <div data-testid="location-probe">{loc.pathname}</div>;
+    }
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/trade"]}>
+          <TopBarV2 />
+          <LocationProbe />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByTestId("tools-btn")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Quick Settings" }));
+
+    expect(screen.getByRole("dialog", { name: /quick settings/i })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: /^density$/i })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: /^theme$/i })).toBeInTheDocument();
+    expect(screen.getByTestId("location-probe").textContent).toBe("/trade");
+    expect(screen.queryByRole("menuitem", { name: "Settings" })).not.toBeInTheDocument();
+  });
+
+  it("moves Quick Settings into Tools once Compact desk tools are expanded", () => {
+    renderTopBarV2();
+
+    expect(screen.getByTestId("quick-settings-btn")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("topbar-desk-tools-btn"));
+
+    expect(screen.queryByTestId("quick-settings-btn")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("tools-btn"));
+    expect(screen.getByRole("menuitem", { name: "Quick Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Settings" })).toBeInTheDocument();
   });
 
   it("Comfortable restores the tool ribbon without changing Mode honesty", () => {
@@ -743,7 +829,8 @@ describe("FT-UX-002 TopBar chrome consolidation", () => {
     const src = topBarSource();
     expect(src).not.toContain("<TickerMarquee");
     expect(src).not.toContain("gear-btn");
-    expect(src).not.toContain("QuickAccessPanel");
+    expect(src).toContain("QuickAccessPanel");
+    expect(src).toContain("Quick Settings");
   });
 
   it("keeps one Tools overflow and no extra Settings chrome button", () => {

@@ -143,6 +143,14 @@ changelog rebuilds itself from the first release cut after this baseline.
   **Reduced motion**. The Sample freshness chip may stay; it must
   not hide venue honesty.
 
+- **Tools Quick Settings on the Trade desk (FT-UX-QUICK-SETTINGS-001).**
+  Tools → Quick Settings opens density, theme, and similar controls
+  without leaving the desk. Tools → Settings still opens the full
+  Settings route for deep pages (Monitoring, brokers, auth). Compact
+  Trade keeps Quick Settings on the TopBar when the tool ribbon is
+  collapsed. Dropping Quick Settings so only full Settings remains
+  fails desk-first. Refs #279.
+
 - **Docs: correct GTT proxy, Practice walkthrough, and Live safety path.**
   `USER_GUIDE` Practice walkthrough no longer treats Explore
   Sample Buy as a sandbox Positions/Orders fill.
