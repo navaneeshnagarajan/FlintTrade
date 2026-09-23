@@ -43,7 +43,9 @@ export function OperatorIncidentProbes() {
 
   useEffect(() => {
     if (!ping.data) return;
-    useOperatorSignalStore.getState().setPing(ping.data);
+    const store = useOperatorSignalStore.getState();
+    store.setPing(ping.data);
+    store.setDecisionStatus(ping.data.laya ?? "down");
   }, [ping.data]);
 
   useEffect(() => {

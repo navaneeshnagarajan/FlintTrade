@@ -52,6 +52,38 @@ exit-all, reducing, multi, cancel-all, smart-cancel):
 New integrations must preserve this split. Do not invent a third path, and
 do not send an extended verb through `gate_order` alone.
 
+## Laya admission
+
+An operator or automate proposal is admitted or refused as a typed verdict
+with `allow`, `reason`, and `limits`. Laya does not place an order and does
+not mint the one-shot write ticket. `gate_order` remains the only mint.
+Chat may suggest and explain only: bring your own API key, use managed
+Ollama, or point **Custom (OpenAI-compatible)** at another local runtime.
+Chat is not an admission source, and Chat downtime does not close Live.
+
+Money-path mint remains Mode guard → SafetySystem L1–L5 → `gate_order` →
+BrokerRouter. Laya does not replace those layers. `Laya.admit` is a separate
+admission surface; the server place path does not run it before SafetySystem.
+
+When decision status is Down, the desk opens incident class `laya` ("Laya is
+Down — Live orders paused."). That class closes Live place and Position
+Mirror start on the shared client place path. Kill All stays reachable.
+Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
+The desk ping publishes Ready, Degraded, or Down and does not invent Ready.
+Degraded does not open that class and does not mute Live. `Laya.admit` on
+every server place remains follow-up work and is not this mute.
+
+| Concern | Automate risk note | SafetySystem | Ticket guards | Laya |
+| --- | --- | --- | --- | --- |
+| Allow or deny | `allowed` and `reason` | L1–L5 pass or fail | refusal string | verdict `allow` and `reason` |
+| Size | `position_qty` | L1 quantity, L2 limits | lot multiple | `limits.max_quantity` |
+| Price | stop and target | L1 price band | limit and trigger present | price and trigger present |
+| Mode | not modelled | mode guard | Explore refused | Explore refused; Down refuses the proposal |
+| Book, margin, Greeks, daily loss, kill | daily loss is agent config | L2–L5 | not present | not owned |
+
+The automate risk note is not this admission. Lot size, the price band,
+margin, Greeks, daily loss, and the kill switch stay where they are.
+
 ## Unknown Broker Outcomes
 
 If adapter entry occurred but FlintTrade could not persist or receive the

@@ -29,7 +29,9 @@ from .workspace import Workspace
 LLM_API_KEY_REF = "secret://llm/api_key"
 OLLAMA_BASE_URL = ""
 _LEGACY_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
-_LMSTUDIO_RETIRED_ERROR = "LM Studio is retired; use managed Ollama or the Custom provider"
+_LMSTUDIO_RETIRED_ERROR = (
+    "LM Studio is retired; use managed Ollama or a Custom OpenAI-compatible host"
+)
 _LLM_TRANSACTION_VERSION = 1
 _LLM_TRANSACTION_PHASES = {"prepared", "committed"}
 _LLM_TRANSACTION_OPERATIONS = {"replace", "delete"}

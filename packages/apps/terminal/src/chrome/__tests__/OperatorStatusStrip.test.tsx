@@ -45,4 +45,44 @@ describe("OperatorStatusStrip", () => {
     expect(screen.getByTestId("operator-rectify")).toHaveTextContent(/cannot reverse a reject/i);
     expect(strip).not.toHaveTextContent("Connected");
   });
+
+  it("marks Laya Down as Blocked on its own class and leaves Chat as Info", () => {
+    const laya = classifyOperatorSignals(signals({
+      brokerReject: null,
+      sessionClockClosed: false,
+      llmChrome: "ready",
+      decisionStatus: "down",
+    }));
+    const client = new QueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <OperatorStatusStrip kind="laya" incident={laya} />
+      </QueryClientProvider>,
+    );
+    const strip = screen.getByTestId("incident-strip");
+    expect(strip).toHaveAttribute("data-failure-class", "laya");
+    expect(strip).toHaveAttribute("data-strip-level", "blocked");
+    expect(strip).toHaveTextContent("Blocked");
+    expect(strip).toHaveTextContent("Laya is Down — Live orders paused.");
+    expect(strip).not.toHaveTextContent("Laya — Laya is Down");
+    expect(strip).not.toHaveTextContent("Decision");
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId("operator-rectify")).toHaveTextContent(/Kill All stays available/i);
+
+    const chat = classifyOperatorSignals(signals({
+      brokerReject: null,
+      sessionClockClosed: false,
+      llmChrome: "disconnected",
+      decisionStatus: "ready",
+    }));
+    render(
+      <QueryClientProvider client={client}>
+        <OperatorStatusStrip kind="llm_provider" incident={chat} />
+      </QueryClientProvider>,
+    );
+    const chatStrip = screen.getAllByTestId("incident-strip")[1];
+    expect(chatStrip).toHaveAttribute("data-failure-class", "llm_provider");
+    expect(chatStrip).toHaveAttribute("data-strip-level", "info");
+    expect(chatStrip).toHaveTextContent("Info");
+  });
 });

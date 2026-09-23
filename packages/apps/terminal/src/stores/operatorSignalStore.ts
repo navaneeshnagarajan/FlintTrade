@@ -22,6 +22,8 @@ export interface OperatorSignalSnapshot {
   observedHostDown: boolean;
   observedBackendUnreachable: boolean;
   llmChrome: string | null;
+  /** Down until a heartbeat reports Ready or Degraded. Null is not Ready. */
+  decisionStatus: "ready" | "degraded" | "down" | null;
 }
 
 const INITIAL: OperatorSignalSnapshot = {
@@ -36,6 +38,7 @@ const INITIAL: OperatorSignalSnapshot = {
   observedHostDown: false,
   observedBackendUnreachable: false,
   llmChrome: null,
+  decisionStatus: "down",
 };
 
 interface OperatorSignalStore extends OperatorSignalSnapshot {
@@ -44,6 +47,7 @@ interface OperatorSignalStore extends OperatorSignalSnapshot {
   setPublicSite: (publicSite: OperatorSignalSnapshot["publicSite"]) => void;
   setPublicInternet: (publicInternet: OperatorSignalSnapshot["publicInternet"]) => void;
   setLlmChrome: (llmChrome: string | null) => void;
+  setDecisionStatus: (decisionStatus: OperatorSignalSnapshot["decisionStatus"]) => void;
   clearBrokerRateLimit: () => void;
   clearBrokerFault: () => void;
   applyObserved: (
@@ -64,6 +68,7 @@ export const useOperatorSignalStore = create<OperatorSignalStore>((set, get) => 
   setPublicSite: (publicSite) => set({ publicSite }),
   setPublicInternet: (publicInternet) => set({ publicInternet }),
   setLlmChrome: (llmChrome) => set({ llmChrome }),
+  setDecisionStatus: (decisionStatus) => set({ decisionStatus }),
   clearBrokerRateLimit: () => set((state) => ({
     brokerRateLimited: false,
     brokerReject: state.brokerReject

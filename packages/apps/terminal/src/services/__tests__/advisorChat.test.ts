@@ -86,7 +86,7 @@ describe("advisorChat", () => {
 
     expect(advisorLlmChromeLabel("unconfigured")).toBe("Not configured");
     expect(advisorLlmChromeLabel("not_installed")).toBe("Not installed");
-    expect(advisorLlmChromeLabel("ready")).toBe("Connected");
+    expect(advisorLlmChromeLabel("ready")).toBe("Connected (suggest only)");
     expect(advisorLlmChromeLabel("disconnected")).toBe("Disconnected");
     expect(advisorLlmChromeLabel("error")).toBe("Error");
     expect(isAdvisorChatReady("unconfigured")).toBe(false);

@@ -30,7 +30,9 @@ from flinttrade_core.llm_provider_profiles import (
 )
 
 logger = logging.getLogger("flinttrade.ai.llm")
-_LMSTUDIO_RETIRED_ERROR = "LM Studio is retired; use managed Ollama or the Custom provider"
+_LMSTUDIO_RETIRED_ERROR = (
+    "LM Studio is retired; use managed Ollama or a Custom OpenAI-compatible host"
+)
 
 
 def _reject_retired_provider(provider: str) -> None:

@@ -19,7 +19,11 @@
  * - network_local — the process answers ping and a neutral public-internet
  *   probe failed (gateway, DNS, or ping). Not a site/CDN miss, and not a
  *   single broker timeout.
- * - llm_provider — advisor chrome error or disconnected. Not a Live-write gate.
+ * - llm_provider — advisor chrome error or disconnected. Info only.
+ *   Chat or Suggest offline never mutes Live.
+ * - laya — Laya is Down. Money-path Blocked. Live place and mirror close.
+ *   Kill All stays reachable. Broker and LLM stay their own surfaces.
+ *   Degraded does not use this class.
  *
  * Strip priority inside this classifier: host tier (network_local,
  * host_unhealthy, backend_unreachable) then broker trust (exchange and
@@ -44,6 +48,7 @@ export const FAILURE_CLASSES = [
   "broker_rate_limit",
   "broker_maintenance",
   "llm_provider",
+  "laya",
   "host_unhealthy",
   "backend_unreachable",
   "network_local",
@@ -83,6 +88,8 @@ export interface OperatorSignals {
   activeAccount: ActiveAccountSignal | null;
   wsFailure: { kind: "auth" | "network"; reason: string } | null;
   llmChrome: string | null;
+  /** Ready and Degraded do not open an incident. Down closes Live writes. Null is no heartbeat. */
+  decisionStatus?: "ready" | "degraded" | "down" | null;
   /** Present so a closed or CAS session chip cannot become an exchange incident. */
   sessionClockClosed: boolean;
   observedHostDown?: boolean;
@@ -116,6 +123,7 @@ const PLAIN_CLASS: Record<FailureClass, string> = {
   broker_rate_limit: "broker rate limit",
   broker_maintenance: "broker maintenance",
   llm_provider: "chat provider",
+  laya: "Laya",
   host_unhealthy: "host unhealthy",
   backend_unreachable: "backend unreachable",
   network_local: "local network",
@@ -138,6 +146,8 @@ const RECTIFY: Record<FailureClass, string> = {
     "The broker reports maintenance. Wait, then check the broker status page. Live orders stay closed. FlintTrade cannot file a dispute.",
   llm_provider:
     "Chat is unavailable. Retest or switch provider under Settings. Trading does not use Chat to place orders.",
+  laya:
+    "Live orders stay closed until Laya is Ready. Chat cannot place an order in its place. Kill All stays available.",
   host_unhealthy:
     "Free disk space and restart the desk, then read the desk health detail. Live orders stay closed until the desk and broker trust are back. A restart does not recover broker fills. FlintTrade does not hold funds.",
   backend_unreachable:
@@ -162,6 +172,11 @@ export function liveWritesMuted(incident: OperatorIncident | null): boolean {
   return incident !== null && incident.moneyPath && incident.level !== "info";
 }
 
+/** Broker chrome stays Connected when only Laya is Down. */
+export function brokerSessionDarkened(incident: OperatorIncident | null): boolean {
+  return liveWritesMuted(incident) && incident?.failureClass !== "laya";
+}
+
 export function honestBrokerStatus(input: {
   connected: boolean;
   connectedRead: boolean;
@@ -174,6 +189,7 @@ export function honestBrokerStatus(input: {
   }
   if (
     incident
+    && incident.failureClass !== "laya"
     && incident.moneyPath
     && incident.level !== "info"
     && (input.connected || input.connectedRead)
@@ -345,6 +361,10 @@ function pickIncident(signals: OperatorSignals): OperatorIncident | null {
     && signals.wsFailure?.kind === "network"
   ) {
     return makeIncident("broker_stream", "degraded", true, false, "Broker stream — the broker stream is down");
+  }
+
+  if (signals.decisionStatus === "down") {
+    return makeIncident("laya", "blocked", true, false, "Laya is Down — Live orders paused.");
   }
 
   if (

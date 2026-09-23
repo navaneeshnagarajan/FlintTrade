@@ -34,10 +34,11 @@ import { Button } from "@/components/ui/button";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useModeStore } from "@/stores/modeStore";
+import { DeskStatusCluster } from "@/chrome/DeskStatusCluster";
 import WorkspaceSwitcher from "@/chrome/WorkspaceSwitcher";
 import { useDirectBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
-import { liveWritesMuted } from "@/lib/operatorIncident";
+import { brokerSessionDarkened } from "@/lib/operatorIncident";
 import { useSkillContent } from "@/hooks/useSkillContent";
 import {
   MARKET_TIMINGS_MAX_AGE_MS,
@@ -320,7 +321,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
   const mode = useModeStore((s) => s.mode);
   const directBrokerConnected = useDirectBrokerConnected();
   const operatorIncident = useOperatorIncident();
-  const moneyPathClosed = liveWritesMuted(operatorIncident);
+  const moneyPathClosed = brokerSessionDarkened(operatorIncident);
   const storedTickerMode = useSettingsStore((s) => s.tickerMode);
   const setTickerMode = useSettingsStore((s) => s.setTickerMode);
   const tickerMode: TickerMode = tickerModeProp ?? storedTickerMode;
@@ -466,6 +467,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
                 <span className="text-xs">Desk tools</span>
               </Button>
             )}
+            <DeskStatusCluster />
             <NotificationBell />
             <AccountSwitcher />
             {!hideDeskRibbon && <WorkspaceSwitcher />}
@@ -494,6 +496,9 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
         <MoreRow>
           <span className="w-20 shrink-0 text-xs text-text-muted">Account</span>
           <AccountSwitcher />
+        </MoreRow>
+        <MoreRow>
+          <DeskStatusCluster />
         </MoreRow>
         <MoreRow>
           <SearchButton />

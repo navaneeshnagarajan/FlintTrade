@@ -5,7 +5,8 @@
  * Mode honesty owns Explore and Practice, so this slot stays empty there.
  * On Live: Live risk / Kill All, then host (network_local, host_unhealthy,
  * backend_unreachable), then broker trust, then a disconnected feed, then
- * edge, then Chat (llm_provider). Host beats broker inside the incident
+ * edge, then Chat (llm_provider). Laya Down ranks with broker trust.
+ * Host beats broker inside the incident
  * classifier. Toasts stay action feedback and must not duplicate this strip.
  */
 
@@ -48,6 +49,7 @@ function incidentRank(failureClass: FailureClass): number {
   }
   if (failureClass === "edge") return 1;
   if (failureClass === "llm_provider") return 0;
+  // Broker trust and Laya Down. Both close Live place and mirror. Kill All stays reachable.
   return 2;
 }
 

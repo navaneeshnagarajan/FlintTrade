@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { INSTALL_PROBE_URL, probeDeskHealth, probePublicInternet, probePublicSite, PUBLIC_INTERNET_PROBE_URL } from "../operatorProbes";
+import {
+  INSTALL_PROBE_URL,
+  layaHeartbeatFromBody,
+  probeDeskHealth,
+  probeLocalPing,
+  probePublicInternet,
+  probePublicSite,
+  PUBLIC_INTERNET_PROBE_URL,
+} from "../operatorProbes";
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -13,6 +21,32 @@ function asFetch(
 ): typeof fetch {
   return impl as typeof fetch;
 }
+
+describe("Laya heartbeat on desk ping", () => {
+  it("reads Ready, Degraded, or Down and treats a missing field as unknown", () => {
+    expect(layaHeartbeatFromBody({ status: "ok", laya: "ready" })).toBe("ready");
+    expect(layaHeartbeatFromBody({ status: "ok", laya: "degraded" })).toBe("degraded");
+    expect(layaHeartbeatFromBody({ status: "ok", laya: "down" })).toBe("down");
+    expect(layaHeartbeatFromBody({ status: "ok" })).toBeNull();
+    expect(layaHeartbeatFromBody({ laya: "connected" })).toBeNull();
+    expect(layaHeartbeatFromBody(null)).toBeNull();
+  });
+
+  it("does not present Ready when ping fails or omits Laya", async () => {
+    const missing = vi.fn(async () => jsonResponse({ status: "ok" }, 200));
+    await expect(probeLocalPing(asFetch(missing))).resolves.toMatchObject({
+      localPing: "ok",
+      laya: null,
+    });
+    const failed = vi.fn(async () => {
+      throw new Error("failed to fetch");
+    });
+    await expect(probeLocalPing(asFetch(failed))).resolves.toMatchObject({
+      localPing: "transport",
+      laya: null,
+    });
+  });
+});
 
 describe("desk health probe", () => {
   it("keeps a degraded /health 503 as degraded", async () => {

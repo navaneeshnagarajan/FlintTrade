@@ -345,11 +345,24 @@ replace it.
 Info, Degraded, or Blocked. Explore and Practice sample copy is not this strip. Practice sample holdings keep `DemoBanner` — the strip is not that banner. Live risk, a broken desk, a broker fault, or a
 local-network fault uses Degraded or Blocked. There is not a second banner
 for the same fact. While the strip is Blocked or Degraded on the money path,
-broker chrome says **Unavailable** or **Degraded** plus the failure in plain
-words — never **Connected** or **Connected (read)**. Live place and Position
-Mirror start stay muted, with one rectify line. Kill All and the safety
-layers stay reachable. Chat being down does not close Live orders. A public
-site outage does not mean the local desk cancelled broker orders.
+broker chrome normally says **Unavailable** or **Degraded** plus the failure
+in plain words — never **Connected** or **Connected (read)**. Failure class
+Laya is the exception: Broker may stay **Connected** or **Connected (read)**
+while Live place and Position Mirror start stay muted. Other money-path
+classes mute Live place and Position Mirror start the same way, with one
+rectify line. Kill All and the safety layers stay reachable. Chat being down
+does not close Live orders. A public site outage does not mean the local desk
+cancelled broker orders.
+
+The TopBar desk status cluster shows **Broker**, **Laya**, and **LLM** as
+separate labels. Broker is **Connected**, **Connected (read)**, or
+**Unavailable**. Laya is **Ready**, **Degraded**, or **Down**. It starts
+**Down**, including before a heartbeat and when the desk ping omits
+`laya`. Missing status is never painted **Ready**. The desk ping publishes
+Ready, Degraded, or Down and does not invent Ready. Only **Down** opens
+the Laya Blocked strip and mutes Live place and Position Mirror start;
+**Degraded** does not. LLM is **Not configured**, or **Connected (suggest only)**
+when Chat is ready.
 
 FlintTrade does not hold client funds, reverse broker fills, or file a
 dispute. Rectify steps point at the broker, the exchange, or the host:
@@ -363,6 +376,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Broker stream (`broker_stream`) | Dhan's market stream dropped. Kotak Neo has no stream class until SFeed. | Wait for the stream. Do not treat quotes as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
+| Laya (`laya`) | Blocked — Laya is Down ("Laya is Down — Live orders paused."). Live place and Position Mirror start stay closed. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. Kill All stays available. Laya starts Down. A heartbeat may report Ready or Degraded, which closes this strip. | Wait until Laya is Ready. Do not treat Chat as a substitute. |
 | Chat provider (`llm_provider`) | Chat is unavailable. Trading chrome stays as it was. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
@@ -957,20 +971,27 @@ later runtime changes and shows the exact operation and admission IDs. Explicit
 acknowledgement records that the unknown result was reviewed; it does not retry
 the action or label it successful.
 
+Chat is suggest-only. A connected LLM is labelled **Connected (suggest only)**.
+It does not place Live orders, and it is not Laya. Laya is a separate status:
+**Ready**, **Degraded**, or **Down**. Laya starts **Down**. The desk ping
+publishes Ready, Degraded, or Down and does not invent Ready. Only **Down**
+closes Live orders and mirror start. Kill All stays reachable. Chat being
+offline does not close Live.
+
 Chat itself needs a configured LLM via Settings → AI. The badge and composer
 align with Settings → AI / `#llm` hydration as well as advisor status
 (including Explore / `demo-user` and Practice), not a leftover local setting.
 When Settings `#llm` is empty ("No LLM provider configured") or the stored
 provider is blank, Chat on Explore and Practice shows **Not configured** /
 **LLM not configured** unless `advisor/status` reports an explicit
-env-backed provider (`LLM_PROVIDER`). **Connected** must not appear from
+env-backed provider (`LLM_PROVIDER`). **Connected (suggest only)** must not appear from
 an env-default advisor `configured` (empty provider → ollama). Returning
 to Chat after you save Settings → AI re-checks readiness (advisor and
 Settings hydration), so the **Not configured** gate should not stay stuck
 on an outdated result.
 
 When Settings → AI shows Managed Ollama **Not installed**, AI Hub `/ai`
-Chat does not show a green **Connected** badge (FT-AI-004). The badge
+Chat does not show a green **Connected (suggest only)** badge (FT-AI-004). The badge
 follows the real LLM status: **Not configured** / **Not installed**,
 with the primary **Open Settings → AI** CTA to `/settings#llm`.
 Composer input and Send stay disabled until the runtime is installed
@@ -990,7 +1011,7 @@ offers **Retry** (re-check advisor status and Settings hydration) and
 **Open Settings → AI**.
 
 A configured but broken probe shows **Error** or **Disconnected** with
-**Retry** — never a green **Connected**. Explore does not show a fake
+**Retry** — never a green **Connected (suggest only)**. Explore does not show a fake
 Connected sample advisor. Any later demo replies must be labelled
 **Sample replies**. Signals **Live** / **Polling** stay separate from Chat
 LLM readiness.
@@ -1002,6 +1023,7 @@ alphas, and profitable alphas are not a release criterion. Chat
 does not place Live orders — Live place stays fail-closed. This does
 not lift the native broker HTTP freeze and does not claim every Chat
 turn already has live ticks. Chat never shows green **Connected** without a real LLM.
+When Chat is connected, the badge reads **Connected (suggest only)**.
 Suggest stays labelled illustrative and is not this live-read path.
 
 On Explore `/settings#llm`, a demo or unconfigured session shows the empty
@@ -1152,7 +1174,7 @@ settings could not be loaded") to protect a saved configuration, and
 offer **Retry**. Selecting Managed Ollama while the runtime is absent
 shows **Not installed** — that is not a Connected advisor. AI Hub
 `/ai` Chat follows that install state (FT-AI-004) and does not paint
-green **Connected** until the runtime is installed and configured.
+green **Connected (suggest only)** until the runtime is installed and configured.
 
 `/settings#leverage` always shows real leverage content or an honest
 empty. When the broker snapshot is available, the tiles show the
@@ -1236,18 +1258,18 @@ On `/ai` Chat (AI Hub), an unconfigured LLM shows **LLM not configured**
 **Retry** that re-probes advisor status and Settings `#llm` hydration.
 Composer input and Send stay disabled. Explore and Practice Chat both
 look unconfigured when Settings `#llm` is empty or the stored provider
-is blank — **Connected** must not appear from an env-default advisor
+is blank — **Connected (suggest only)** must not appear from an env-default advisor
 `configured`. If leftover transcript messages hide that empty state, the
 header still offers **Retry** and **Open Settings → AI**.
 The Settings empty-state wording stays distinct from Chat's **LLM not
 configured**; they are aligned for readiness.
 
 When Settings → AI shows Managed Ollama **Not installed** (FT-AI-004),
-AI Hub does not show a green **Connected** badge. The badge is
+AI Hub does not show a green **Connected (suggest only)** badge. The badge is
 **Not configured** / **Not installed**, the Settings CTA stays
 visible, and the composer stays gated until the runtime is installed
 and configured. A provider string of ollama is not Connected while
-the managed runtime is absent. Chat never shows green **Connected**
+the managed runtime is absent. Chat never shows green **Connected (suggest only)**
 without a real LLM. When that LLM is configured, Chat may use
 Practice fills and native live-read feeds for analysis
 (FT-MONDAY-003); Suggest stays labelled illustrative, and profitable

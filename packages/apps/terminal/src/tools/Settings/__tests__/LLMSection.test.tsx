@@ -3209,7 +3209,7 @@ describe("LLMSection provider configuration", () => {
     renderOllama({ onProviderChange });
 
     fireEvent.click(screen.getByRole("combobox", { name: "LLM provider" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Custom Endpoint" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Custom (OpenAI-compatible)" }));
     fireEvent.change(screen.getByLabelText("LLM host URL"), {
       target: { value: "https://custom.example.test/v1" },
     });
@@ -3270,7 +3270,7 @@ describe("LLMSection provider configuration", () => {
     ));
   });
 
-  it.each(["Hermes (Nous)", "Custom Endpoint"])(
+  it.each(["Hermes (Nous)", "Custom (OpenAI-compatible)"])(
     "does not retain the managed Ollama host when selecting %s",
     async (providerName) => {
       const onProviderChange = vi.fn().mockResolvedValue(undefined);
@@ -3289,9 +3289,9 @@ describe("LLMSection provider configuration", () => {
     renderOllama({ onProviderChange });
 
     fireEvent.click(screen.getByRole("combobox", { name: "LLM provider" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Custom Endpoint" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Custom (OpenAI-compatible)" }));
     fireEvent.click(screen.getByRole("button", { name: "Apply provider" }));
-    expect(screen.getByText("Host URL is required for Custom Endpoint")).toBeInTheDocument();
+    expect(screen.getByText("Host URL is required for Custom (OpenAI-compatible)")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("LLM host URL"), {
       target: { value: "http://127.0.0.1:9000" },
@@ -3318,7 +3318,7 @@ describe("LLMSection provider configuration", () => {
     const view = renderOllama({ onProviderChange });
 
     fireEvent.click(screen.getByRole("combobox", { name: "LLM provider" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Custom Endpoint" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Custom (OpenAI-compatible)" }));
 
     expect(screen.getByLabelText("LLM host URL")).toBeInTheDocument();
     expect(screen.getByLabelText("LLM provider API key")).toHaveValue("");
@@ -3407,7 +3407,7 @@ describe("LLMSection provider configuration", () => {
       />,
     );
 
-    expect(screen.getByRole("combobox", { name: "LLM provider" })).toHaveTextContent("Custom Endpoint");
+    expect(screen.getByRole("combobox", { name: "LLM provider" })).toHaveTextContent("Custom (OpenAI-compatible)");
     expect(screen.getByLabelText("LLM provider API key")).toHaveValue("custom-secret");
     fireEvent.click(screen.getByRole("button", { name: "Retry provider setup" }));
 
@@ -3506,7 +3506,7 @@ describe("LLMSection provider configuration", () => {
 
     expect(onChange).not.toHaveBeenCalledWith("host", "   ");
     expect(screen.getByLabelText("LLM provider API key")).toHaveValue("");
-    expect(screen.getByRole("alert")).toHaveTextContent("Host URL is required for Custom Endpoint");
+    expect(screen.getByRole("alert")).toHaveTextContent("Host URL is required for Custom (OpenAI-compatible)");
   });
 
   it("tests Grok through the backend client without browser-fetching the provider", async () => {
