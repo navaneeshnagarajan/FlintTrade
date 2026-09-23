@@ -17,11 +17,19 @@ import pytest
 from flinttrade_core.models import OHLCV, Order, Quote
 from flinttrade_engine.scheduler import StrategyRunner, StrategyScheduler, TimeScheduler
 from flinttrade_engine.strategy import BaseStrategy
+from flinttrade_engine.laya import DecisionStatus, process_laya
 from flinttrade_engine.strategy_execution import (
     GatedStrategyDispatcher,
     StrategyExecutionContract,
     StrategyExecutionMode,
 )
+
+@pytest.fixture(autouse=True)
+def _laya_ready_for_open_place() -> None:
+    """Seed Ready so an open strategy place still reaches SafetySystem."""
+    process_laya().set_status(DecisionStatus.READY)
+    yield
+
 
 _MODULE_GLOBAL_RAW_WRITER: Any = None
 _DYNAMIC_GLOBAL_RAW_WRITER: Any = None

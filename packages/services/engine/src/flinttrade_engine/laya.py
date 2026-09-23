@@ -1,9 +1,13 @@
 """Laya — typed decision and risk admission.
 
-Laya allows or refuses a proposal before SafetySystem runs. It does not place
+Laya allows, clamps, or refuses a proposal before SafetySystem runs. It does not place
 an order, and it does not mint a write ticket. The only write ticket
 remains the existing order gate. A Down status refuses every proposal:
 there is no path that treats a chat model as a substitute verdict.
+
+A quantity above the active ceiling is a clamp: the verdict names the smaller
+quantity and does not authorise the original size. The caller must show that
+reduction before any later place. It must not send the reduced size on its own.
 
 Overlap — what already exists, and what this admission still leaves open:
 
@@ -26,9 +30,12 @@ and the kill switch stay outside this module.
 
 from __future__ import annotations
 
+import math
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 _ACTIONS = frozenset({"BUY", "SELL"})
 _MODES = frozenset({"explore", "practice", "live"})
@@ -88,14 +95,18 @@ class Verdict:
     """Admission result. ``allow`` is the only proceed signal.
 
     Attributes:
-        allow: True when the proposal may continue to SafetySystem.
-        reason: Empty when allowed. A refusal the operator can read otherwise.
+        allow: True when some quantity may continue to SafetySystem.
+        reason: Empty when allowed or clamped. A refusal the operator can read otherwise.
         limits: Quantity ceiling in force for this status.
+        applied_quantity: Quantity this verdict will accept. ``0`` on a refusal.
+            Smaller than the request on a clamp. The caller must not place a
+            clamp until the operator has seen the reduced quantity.
     """
 
     allow: bool
     reason: str
     limits: VerdictLimits
+    applied_quantity: int
 
 
 class Laya:
@@ -143,8 +154,8 @@ class Laya:
         """Return a verdict for ``proposal``.
 
         Down refuses before any other rule, so a chat model cannot fill in
-        for a missing decision. Other refusals are schema, source, mode, or
-        the quantity ceiling.
+        for a missing decision. Other refusals are schema, source, or mode.
+        A quantity above the ceiling is a clamp, not a place.
         """
         limits = VerdictLimits(max_quantity=self._active_ceiling())
         if self._status is DecisionStatus.DOWN:
@@ -152,18 +163,25 @@ class Laya:
                 allow=False,
                 reason="Laya is Down. Live orders are blocked.",
                 limits=limits,
+                applied_quantity=0,
             )
 
         reason = self._schema_reason(proposal)
         if reason:
-            return Verdict(allow=False, reason=reason, limits=limits)
+            return Verdict(allow=False, reason=reason, limits=limits, applied_quantity=0)
         if proposal.quantity > limits.max_quantity:
             return Verdict(
-                allow=False,
-                reason=f"Quantity {proposal.quantity} is above the decision ceiling of {limits.max_quantity}.",
+                allow=True,
+                reason="",
                 limits=limits,
+                applied_quantity=limits.max_quantity,
             )
-        return Verdict(allow=True, reason="", limits=limits)
+        return Verdict(
+            allow=True,
+            reason="",
+            limits=limits,
+            applied_quantity=proposal.quantity,
+        )
 
     def _active_ceiling(self) -> int:
         if self._status is DecisionStatus.DEGRADED:
@@ -200,6 +218,117 @@ class Laya:
         ):
             return "Enter a trigger price above zero before this order can be admitted."
         return ""
+
+
+def proposal_from_place_fields(
+    fields: Mapping[str, Any],
+    *,
+    mode: str,
+    source: str,
+) -> Proposal:
+    """Build a proposal from place fields.
+
+    ``source`` is chosen by the server entry. A client field named ``source``
+    is ignored, so a request cannot present itself as chat or as automate.
+    """
+    quantity = _whole_quantity(fields.get("quantity"))
+    order_type = str(fields.get("order_type") or fields.get("pricetype") or "MARKET")
+    return Proposal(
+        symbol=str(fields.get("symbol") or ""),
+        exchange=str(fields.get("exchange") or ""),
+        action=str(fields.get("action") or ""),
+        quantity=quantity if quantity is not None else 0,
+        mode=mode,
+        order_type=order_type,
+        product=str(fields.get("product") or "MIS"),
+        price=_positive_price(fields.get("price")),
+        trigger_price=_positive_price(fields.get("trigger_price")),
+        source=source,
+    )
+
+
+def admission_kind(verdict: Verdict, requested_quantity: int) -> str:
+    """Classify a verdict against the quantity the caller asked to place.
+
+    Returns:
+        ``allow`` when that quantity may continue to SafetySystem.
+        ``clamp`` when only a smaller quantity is acceptable. Nothing is placed.
+        ``deny`` when nothing may continue.
+    """
+    if not verdict.allow:
+        return "deny"
+    if verdict.applied_quantity != requested_quantity:
+        return "clamp"
+    return "allow"
+
+
+def place_block(verdict: Verdict, requested_quantity: int) -> dict[str, Any] | None:
+    """Return a desk refusal body, or ``None`` when the place may continue.
+
+    Clamp and deny both stop before SafetySystem. The message is the server
+    text the desk shows. ``http_status`` is for the HTTP entry only.
+    """
+    kind = admission_kind(verdict, requested_quantity)
+    if kind == "allow":
+        return None
+    limits = {"max_quantity": verdict.limits.max_quantity}
+    if kind == "clamp":
+        return {
+            "status": "error",
+            "code": "laya_clamp",
+            "message": f"Qty reduced to {verdict.applied_quantity} (Laya limit)",
+            "reason": "",
+            "limits": limits,
+            "applied_quantity": verdict.applied_quantity,
+            "http_status": 409,
+        }
+    return {
+        "status": "error",
+        "code": "laya_denied",
+        "message": verdict.reason,
+        "reason": verdict.reason,
+        "limits": limits,
+        "http_status": 403,
+    }
+
+
+def _whole_quantity(raw: object) -> int | None:
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw if raw >= 1 else None
+    if isinstance(raw, float):
+        if not math.isfinite(raw) or not raw.is_integer():
+            return None
+        whole = int(raw)
+        return whole if whole >= 1 else None
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text.isdigit():
+            return None
+        whole = int(text)
+        return whole if whole >= 1 else None
+    return None
+
+
+def _positive_price(raw: object) -> float | None:
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        value = float(raw)
+    elif isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return None
+        try:
+            value = float(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    if not math.isfinite(value) or value <= 0:
+        return None
+    return value
 
 
 _process_lock = threading.Lock()

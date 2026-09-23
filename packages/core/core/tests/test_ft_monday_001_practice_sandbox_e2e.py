@@ -19,6 +19,7 @@ import pytest
 from flask import Flask
 
 from flinttrade_core.auth_routes import _create_token
+from flinttrade_engine.laya import DecisionStatus, process_laya
 from flinttrade_core.order_routes import orders_bp
 from flinttrade_core.rate_limiter import RateLimiter
 from flinttrade_data.sandbox_engine import SandboxEngine
@@ -44,6 +45,13 @@ class _LivePathSentinel:
     def __getattr__(self, name: str) -> object:
         self.accesses.append(name)
         raise RuntimeError(f"live-path sentinel accessed: {name}")
+
+
+@pytest.fixture(autouse=True)
+def _laya_ready_for_open_place() -> None:
+    """Seed Ready so this Practice proof still reaches the sandbox."""
+    process_laya().set_status(DecisionStatus.READY)
+    yield
 
 
 def _practice_token() -> str:

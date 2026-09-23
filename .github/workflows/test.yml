@@ -1,6 +1,7 @@
 name: Test
 on:
   pull_request:
+    # No path filter: a non-draft pull request always instantiates the required Test jobs.
     branches: [main, dev]
     types: [opened, synchronize, ready_for_review, reopened]
   push:

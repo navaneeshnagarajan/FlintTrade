@@ -378,12 +378,21 @@ deployment can split that state.
 
 Every **Live** order placed through FlintTrade is checked by five safety
 layers inside `packages/services/engine/`. Practice orders skip this
-chain: the mode guard sends them to `SandboxEngine` only. Explore
-placement is refused by the backend (`mode_blocked`); Order Pad Sample
-Buy is a local client fill (no HTTP order route, no SafetySystem).
+safety chain. Explore placement is refused by the backend
+(`mode_blocked`); Order Pad Sample Buy is a local client fill (no HTTP
+order route, no Laya admit, no SafetySystem). Operator and automate
+**place** run the mode guard, then `Laya.admit`. Live place then runs
+SafetySystem L1–L5, `gate_order`, and `BrokerRouter`. A refusal or a
+quantity clamp stops before SafetySystem. Practice place is admitted
+before `SandboxEngine` and does not enter those Live layers; other
+Practice verbs go straight to the sandbox. Explore remains
+`mode_blocked` and does not enter `Laya.admit`. Other Live write verbs
+still reach SafetySystem without this admission. See
+[ORDER_SAFETY.md](ORDER_SAFETY.md).
+
 `_check_order_locked` fail-fasts in this runtime order (not L1–L5
-numerical order), so the first Live refusal an operator sees is the
-earliest of:
+numerical order), so the first SafetySystem refusal an operator sees is
+the earliest of:
 
 1. **L5 Kill switch** — an explicit operator action (UI button, API, or Telegram)
    that cancels open orders and requests position flattening through the gated
@@ -396,7 +405,17 @@ earliest of:
    position over 60 % of free margin.
 5. **L3 Portfolio risk** — net delta and net vega caps across the book.
 
-Laya is a separate decision-status and admission surface (Ready, Degraded, or Down): it starts Down, the desk ping publishes that status and does not invent Ready, Live place and Position Mirror start mute when it is Down, and it does not replace L1–L5 or `gate_order` (see [ORDER_SAFETY.md](ORDER_SAFETY.md)).
+Laya admits operator and automate place before SafetySystem (Live) or the
+sandbox (Practice). It does not place an order and does not mint
+`gate_order`, and it does not replace L1–L5. A refusal or a quantity
+clamp stops before those next steps. Only Down mutes Live place and
+Position Mirror start. Degraded leaves Live open and enforces a tighter
+quantity ceiling. Chat is not an admission source. Modify, cancel,
+smart, multi, forever, and the other write verbs still reach
+SafetySystem without this place admission. Laya starts Down; the three
+statuses are Ready, Degraded, and Down. The desk ping publishes the
+stored status and does not invent Ready. Ready and Degraded are recorded
+by `Laya.set_status`. See [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 ### Broker reads versus gated writes
 
@@ -477,8 +496,10 @@ flowchart TD
     UI1 --> Order[Order placement]
     UI2 --> Order
     Order --> ModeGuard[Mode guard]
-    ModeGuard --> Sandbox[Native sandbox\npractice mode]
-    ModeGuard --> Safety[5-layer safety system\nlive only]
+    ModeGuard --> ExploreBlock[Explore refused\nmode_blocked]
+    ModeGuard --> Laya[Laya.admit\noperator and automate place]
+    Laya --> Sandbox[Native sandbox\npractice place]
+    Laya --> Safety[5-layer safety system\nlive place]
     Safety --> Router[Broker router]
     Router --> Adapter[Native adapter or\nOpenAlgo-compatible API]
     Adapter --> Broker[Broker]
@@ -487,10 +508,14 @@ flowchart TD
 
 Ticks fan in to per-instrument Jotai atoms which power every chart and
 quote widget. REST data populates a separate query cache. Orders hit the
-mode guard first. Practice orders stay inside FlintTrade's native
-sandbox; they never enter SafetySystem or `BrokerRouter`. Live orders
-then run the safety layers and the gated broker router, and route
-through a native broker adapter or an OpenAlgo-compatible endpoint.
+mode guard first. Operator and automate place then run `Laya.admit`.
+Explore is refused as `mode_blocked` and does not enter that admission.
+An allowed Practice place stays inside FlintTrade's native sandbox and
+never enters SafetySystem or `BrokerRouter`. Other Practice verbs skip
+`Laya.admit` and stay in that sandbox. An allowed Live place then
+runs the safety layers and the gated broker router, and routes through a
+native broker adapter or an OpenAlgo-compatible endpoint. Other Live
+writes still go from the mode guard to SafetySystem without `Laya.admit`.
 Fills come back through the tick stream and reconcile with the REST
 cache via
 `packages/services/engine/src/flinttrade_engine/reconciliation.py`.

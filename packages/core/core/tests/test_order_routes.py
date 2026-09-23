@@ -89,6 +89,15 @@ def flask_app(monkeypatch_module):
 
 
 @pytest.fixture(autouse=True)
+def _laya_ready_for_open_place() -> None:
+    """Seed Ready so an open place in this module still reaches the sandbox or gate."""
+    from flinttrade_engine.laya import DecisionStatus, process_laya
+
+    process_laya().set_status(DecisionStatus.READY)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_rate_limiter(flask_app):
     """Refill the order-route token buckets before each test.
 
@@ -1078,13 +1087,8 @@ class TestRequestBodyEdgeCases:
         assert resp.status_code == 403
 
     def test_empty_body_in_practice_mode(self, flask_app, client):
-        """Practice mode with empty body — sandbox gets defaults."""
+        """Practice place with an empty body is denied before the sandbox."""
         mock_sandbox = MagicMock()
-        mock_sandbox.place_order.return_value = {
-            "order_id": "SB-EMPTY",
-            "status": "COMPLETE",
-            "message": "Filled",
-        }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         resp = client.post(
@@ -1092,21 +1096,15 @@ class TestRequestBodyEdgeCases:
             json={},
             headers=_auth_headers(mode="practice"),
         )
-        assert resp.status_code == 200
-        # Should call with default/empty values, not crash
-        mock_sandbox.place_order.assert_called_once()
-        call_kwargs = mock_sandbox.place_order.call_args.kwargs
-        assert call_kwargs["symbol"] == ""
-        assert call_kwargs["quantity"] == 0
+        body = resp.get_json()
+        assert resp.status_code == 403
+        assert body["code"] == "laya_denied"
+        assert body["reason"] == "Symbol and exchange are required."
+        mock_sandbox.place_order.assert_not_called()
 
     def test_non_numeric_quantity_defaults_to_zero(self, flask_app, client):
-        """Non-numeric quantity should default to 0, not crash."""
+        """A non-numeric quantity is denied. It is not placed as zero."""
         mock_sandbox = MagicMock()
-        mock_sandbox.place_order.return_value = {
-            "order_id": "SB-005",
-            "status": "COMPLETE",
-            "message": "Filled",
-        }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         body = dict(_SAMPLE_ORDER_BODY)
@@ -1117,9 +1115,11 @@ class TestRequestBodyEdgeCases:
             json=body,
             headers=_auth_headers(mode="practice"),
         )
-        assert resp.status_code == 200
-        call_kwargs = mock_sandbox.place_order.call_args.kwargs
-        assert call_kwargs["quantity"] == 0
+        data = resp.get_json()
+        assert resp.status_code == 403
+        assert data["code"] == "laya_denied"
+        assert data["reason"] == "Quantity must be a positive whole number."
+        mock_sandbox.place_order.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

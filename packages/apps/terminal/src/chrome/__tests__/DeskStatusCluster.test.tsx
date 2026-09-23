@@ -43,6 +43,15 @@ describe("DeskStatusCluster", () => {
     expect(screen.getByTestId("laya-surface")).not.toHaveTextContent("Ready");
   });
 
+  it("shows tighter Degraded limits without Blocked chrome", () => {
+    useOperatorSignalStore.setState({ decisionStatus: "degraded", llmChrome: "ready" });
+    render(<DeskStatusCluster />);
+    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Degraded");
+    expect(screen.getByTestId("laya-degraded-limits")).toHaveTextContent("Laya Degraded — tighter limits");
+    expect(screen.getByTestId("desk-status").textContent).not.toMatch(/Blocked/);
+    expect(screen.getByTestId("laya-degraded-limits").className).not.toMatch(/text-loss/);
+  });
+
   it("shows Laya Ready when the LLM is not configured", () => {
     useOperatorSignalStore.setState({ decisionStatus: "ready", llmChrome: null });
     render(<DeskStatusCluster />);
