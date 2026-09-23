@@ -75,6 +75,7 @@ import { readOpenAlgoConfig } from "@/services/ftApi.openalgo";
 import { DEFAULT_OPENALGO_HOST } from "@/lib/openAlgoDefaults";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
+import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import {
   EXPLORE_MIRROR_START_HELPER,
   MIRROR_START_CONNECT_HELPER,
@@ -210,6 +211,7 @@ async function selectSourceAndTarget() {
 beforeEach(() => {
   vi.clearAllMocks();
   useModeStore.setState({ mode: "explore" });
+  useOperatorSignalStore.setState({ decisionStatus: "ready" });
   useConnectionStore.setState(useConnectionStore.getInitialState());
   mockGet.mockImplementation((path: string) => {
     if (path === "accounts/status") {

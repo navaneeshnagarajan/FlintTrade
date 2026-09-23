@@ -162,6 +162,7 @@ vi.mock("@/stores/authStore", () => ({
 
 import AppLayout from "../AppLayout";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
+import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useDeskChromeStore } from "@/stores/deskChromeStore";
 import { useTradingStore } from "@/stores/tradingStore";
@@ -216,6 +217,7 @@ describe("AppLayout", () => {
     });
     useDeskChromeStore.setState({ toolsExpanded: false, tickerForcedOnNarrow: false });
     mockBrokerConnected.value = true;
+    useOperatorSignalStore.setState({ decisionStatus: "ready" });
     useTradingStore.setState({ totalPnl: 0 });
     mockLocation.pathname = "/trade";
   });

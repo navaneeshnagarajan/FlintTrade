@@ -3,6 +3,7 @@ import { renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useModeStore } from "@/stores/modeStore";
+import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTradingStore } from "@/stores/tradingStore";
 
@@ -37,6 +38,7 @@ describe("usePrimaryBannerKind", () => {
     mockSafety.daily_loss_hard_stop_active = false;
     mockSafety.daily_loss_pause_active = false;
     useModeStore.setState({ mode: "live" });
+    useOperatorSignalStore.setState({ decisionStatus: "ready" });
     useSettingsStore.setState({
       riskLimits: { ...useSettingsStore.getState().riskLimits, mtmStoploss: 0 },
     });
@@ -50,10 +52,17 @@ describe("usePrimaryBannerKind", () => {
     expect(result.current).toBeNull();
   });
 
-  it("Live feed disconnect is the primary when there is no risk alert", () => {
+  it("Live feed disconnect is the primary when Laya is Ready and there is no risk alert", () => {
     mockBrokerConnected.value = false;
     const { result } = renderHook(() => usePrimaryBannerKind(), { wrapper });
     expect(result.current).toBe("feed_disconnected");
+  });
+
+  it("Laya Down outranks a disconnected feed", () => {
+    mockBrokerConnected.value = false;
+    useOperatorSignalStore.setState({ decisionStatus: "down" });
+    const { result } = renderHook(() => usePrimaryBannerKind(), { wrapper });
+    expect(result.current).toBe("laya");
   });
 
   it("client daily-loss alert is Live risk even if the feed is down", () => {

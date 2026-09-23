@@ -57,6 +57,7 @@ vi.mock("jotai", async () => {
 
 import OrderPadWidget from "../OrderPadWidget";
 import { placeOrder, getSymbol } from "@/services/api";
+import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import * as jotai from "jotai";
 
 const mockPlaceOrder = vi.mocked(placeOrder);
@@ -84,6 +85,7 @@ describe("OrderPadWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockMode.current = "practice";
+    useOperatorSignalStore.setState({ decisionStatus: "ready" });
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
     mockGetSymbol.mockReset();
@@ -568,6 +570,7 @@ describe("OrderPadWidget shared pre-trade guards", () => {
 // ---------------------------------------------------------------------------
 describe("OrderPadWidget Practice review/confirm stage", () => {
   beforeEach(() => {
+    useOperatorSignalStore.setState({ decisionStatus: "ready" });
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "PRAC001" });
     mockGetSymbol.mockReset();
