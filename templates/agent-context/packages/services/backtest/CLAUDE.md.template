@@ -11,10 +11,10 @@
 
 ## Rules
 - Read root CLAUDE.md for project-wide rules
-- Use packages/core/core/src/openalgo_client.py for ALL OpenAlgo API calls
-- Never reference specific brokers
+- Use `flinttrade_core.openalgo_client` (`packages/core/core/src/flinttrade_core/openalgo_client.py`) for the optional OpenAlgo REST bridge. Live writes must obtain a `SafetyContext` through `gate_order`/`gate_broker_write` and flow through `BrokerRouter`; never call broker writes directly.
+- Keep shared service logic broker-neutral; broker-specific implementations and capability differences belong in gateway adapters.
 - Tests are in the `tests/` directory. Add new test files as needed.
-- Update root CHANGELOG.md
+- Update root `changelog.md`
 - Branch: follow root AGENTS.md; verify live main before opening or merging a PR.
 
 ## Additional pip libraries

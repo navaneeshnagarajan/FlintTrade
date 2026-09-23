@@ -7,4 +7,4 @@ Read `packages/services/journal/CLAUDE.md` first. This package owns trade journa
 - Do not store broker credentials, fund amounts beyond journal records, or personal IPs in logs.
 - Keep audit-friendly event history deterministic and timestamped.
 - Tests live in `tests/`; add focused tests for migrations and calculations.
-- Update root CHANGELOG.md for user-visible journal behaviour changes.
+- Update root `changelog.md` for user-visible journal behaviour changes.

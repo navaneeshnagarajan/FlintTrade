@@ -1,9 +1,10 @@
 # FlintTrade — gateway
 
-> Direct broker connections (32 brokers), adapter pattern, encrypted credentials, WebSocket bridge. Read `packages/integrations/gateway/CLAUDE.md` first.
+> Native broker adapters and the optional OpenAlgo bridge, gated routing, encrypted credentials and market-data streams. Read `packages/integrations/gateway/CLAUDE.md` first.
 
 ## Absorbs
-- openalgo broker/* modules → 33 broker adapter implementations (via `_resolve_openalgo_root()` in `adapter.py`)
+- `BROKER_CATALOG` in `adapter.py` defines the catalogue; `tests/test_adapter.py` pins its count. Catalogue membership does not imply a native adapter is activated or allowed to place Live orders.
+- OpenAlgo `broker/*` modules remain an optional compatibility path loaded through `_resolve_openalgo_root()` in `adapter.py`; native implementations live in `brokers/`.
 
 ## Depends on: core
 
@@ -14,8 +15,9 @@
 ## Rules
 - Read root CLAUDE.md for project-wide rules.
 - This package is the ONLY place that imports OpenAlgo's `broker.*` modules. All other FlintTrade code must talk to brokers through the gateway adapter layer.
-- Never reference specific brokers in package-level code paths — broker selection happens at runtime via `BrokerRegistry`.
+- Keep shared routing broker-neutral; broker selection happens through `BrokerRegistry`, while broker-specific behaviour belongs in the appropriate native or compatibility adapter.
+- Every live write must obtain a `SafetyContext` through `gate_order`/`gate_broker_write` and pass through `BrokerRouter`; never call an adapter write directly.
 - Credentials are persisted via `CredentialStore` (Fernet-encrypted SQLite). Never log a credential payload, even at DEBUG.
-- Tests are in `tests/`. Tests that need a real broker session must `pytest.skip` when `.local/external/openalgo/` is absent.
-- Update root CHANGELOG.md for adapter-surface changes (new broker, auth-flow change, contract-normalisation change).
+- Tests are in `tests/`. Skip integration tests that require the external OpenAlgo tree when it is unavailable; native adapter tests use mocks independently of that tree. Never assume source availability authorises a real broker session or funded order.
+- Update root `changelog.md` for adapter-surface changes (new broker, auth-flow change, contract-normalisation change).
 - Branch: follow root AGENTS.md; verify live main before opening or merging a PR.
