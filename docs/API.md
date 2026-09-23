@@ -726,10 +726,14 @@ above the active ceiling returns HTTP 409 `laya_clamp` and places neither
 size. The sandbox body below is the response when admission allows the
 requested quantity. The call does not send an order to OpenAlgo or any broker.
 Do not use the OpenAlgo passthrough endpoint as an example for live broker
-execution. Live operator place and automate place use the same FlintTrade
-order proxy after a Live-mode JWT: `Laya.admit`, then the safety gate,
-account ACL check, and broker-router dispatch. Explore place stays
-`mode_blocked` and is not an admission result.
+execution. Live operator place uses this order proxy after a Live-mode JWT
+(`POST /api/v1/orders/place` and the routed place dispatcher). The server
+admits that place through `Laya.admit` as source `operator`, then the
+safety gate, the account ACL check, and BrokerRouter. Automate place uses
+the same admit verdict before SafetySystem and `gate_order`, as source
+`automate` on strategy dispatch and webhook place. It does not use this
+HTTP place route. Explore place stays `mode_blocked` and is not an
+admission result.
 
 ```bash
 curl -X POST http://127.0.0.1:5100/api/v1/orders/place \

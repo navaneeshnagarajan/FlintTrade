@@ -61,11 +61,15 @@ Chat may suggest and explain only: bring your own API key, use managed
 Ollama, or point **Custom (OpenAI-compatible)** at another local runtime.
 Chat is not an admission source, and Chat downtime does not close Live.
 
-Operator and automate place runs Mode guard → `Laya.admit` → SafetySystem
-L1–L5 → `gate_order` → BrokerRouter. Laya does not replace those layers, and
-`gate_order` remains the only mint. A refusal or a quantity clamp stops before
-SafetySystem. A clamp names the reduced quantity and does not place either
-size until the operator places that quantity. Chat is not an admission source.
+On Live, operator place and automate place run Mode guard → `Laya.admit` →
+SafetySystem L1–L5 → `gate_order` → BrokerRouter. Laya does not replace
+those layers, and `gate_order` remains the only mint. Practice place is
+admitted before the sandbox and does not enter SafetySystem. A refusal or
+a quantity clamp stops before SafetySystem on Live and before the sandbox
+on Practice. A clamp names the reduced quantity. Neither size is placed.
+Order Pad and Quick Trade require the operator to place that reduced
+quantity. An automate clamp is a dispatcher error and does not place the
+reduced quantity on its own. Chat is not an admission source.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down — Live orders paused."). That class closes Live place and Position
