@@ -29,8 +29,13 @@ describe("ModeSelectRoute", () => {
     const practiceButton = screen.getByText("Practice").closest("button") as HTMLButtonElement;
     expect(practiceButton).not.toBeNull();
     expect(practiceButton).toHaveTextContent(/no broker needed/i);
+    expect(practiceButton).toHaveTextContent(/primary Practice path/i);
     expect(practiceButton).toHaveTextContent(/SandboxEngine/i);
     expect(practiceButton).not.toHaveTextContent(/broker required/i);
+    expect(practiceButton).not.toHaveTextContent(/\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
+    expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).not.toHaveTextContent(/API smoke/i);
+    expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).toHaveTextContent("Practice");
+    expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).toHaveTextContent("Live");
 
     const exploreButton = screen.getByText("Explore").closest("button") as HTMLButtonElement;
     expect(exploreButton).toHaveTextContent(/sample/i);

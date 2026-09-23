@@ -395,5 +395,9 @@ def test_sfeed_only_facade_rejects_subscribe_as_rest_only():
 
     facade = KotakNeoClient.__new__(KotakNeoClient)
     facade._neo = _SFeedOnly()
-    with pytest.raises(BrokerError, match="REST-only"):
+    with pytest.raises(BrokerError, match="REST-only") as raised:
         facade.subscribe([], False, False)
+    message = str(raised.value)
+    assert "Connected (read)" in message
+    assert "API smoke" in message
+    assert "Monday" not in message

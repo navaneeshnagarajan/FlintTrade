@@ -61,7 +61,7 @@ const MODE_CARDS: ModeCardConfig[] = [
     description: "Practice fills on FlintTrade's SandboxEngine",
     // Practice orders run against the native SandboxEngine, never a broker —
     // claiming "Broker required" here scared off broker-less users (item 2).
-    brokerNote: "No broker needed · primary Monday Practice path",
+    brokerNote: "No broker needed · primary Practice path",
     icon: <FlaskConical size={22} aria-hidden="true" />,
     pillClass: "bg-amber-500/20 text-amber-400",
     borderClass: "border-border-default/70 hover:border-amber-500/50",

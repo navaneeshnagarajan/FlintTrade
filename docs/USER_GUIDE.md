@@ -243,7 +243,7 @@ control plane only.
 
 When native connect returns, Dhan, Upstox, and Kotak Neo are evidence-gated
 as enabled in the catalogue. Kotak Neo is Connected (read) / API smoke only
-after persisted REST smoke evidence (FT-MONDAY-002) — never placeable Live;
+after persisted REST smoke evidence — never placeable Live;
 Neo has no sandbox (`Live read only until funded unlock.`). Kotak Neo
 Connected (read) / API smoke is REST-only; live SFeed is not wired. Upstox Developer Apps analytics tokens
 would connect as read-only sessions. INDmoney uses a dashboard-generated token that resets
@@ -270,7 +270,7 @@ FlintTrade keeps its own backend, native sandbox, analytics, automation, and a
 first-party broker gateway whose HTTP connect and read surfaces are frozen
 until Task 9D and Task 7C.2.
 
-**Native Dhan + Kotak Neo Connected (read) / API smoke (FT-MONDAY-002).**
+**Native Dhan + Kotak Neo Connected (read) / API smoke.**
 The path is native Dhan + Kotak Neo on the MSI static-IP host, non-funded
 live REST API smoke (quotes / depth / hist / chain where the SDK allows).
 Kotak Neo is REST-only; live SFeed / `create_websocket` is not wired.
@@ -285,7 +285,7 @@ gateway/OpenAlgo Dhan/Neo rows; it requires a native source plus
 successful `read_smoke_ok`. Neo has no sandbox: never offer “Neo
 Practice”; copy is `Live read only until funded unlock.` `dhanhq` stays
 on latest stable 2.2.0; Neo is PyPI `kotakneoapi` 3.0.7. Live place stays
-fail-closed. See [FT-MONDAY-002](acceptance/FT-MONDAY-002.md).
+fail-closed.
 
 ---
 
@@ -303,7 +303,7 @@ Before enabling any order-capable integration, exercise the order path in
 The current mode is shown in the top bar and is server-enforced via the JWT
 claim — switching to Live requires a deliberate confirmation step.
 
-**Practice SandboxEngine fills (FT-MONDAY-001).** This is the
+**Practice SandboxEngine fills.** This is the
 shipped Practice path. Explore is sample-only. Practice is the
 primary paper path: orders place and record fills on FlintTrade's
 native `SandboxEngine`. AI and terminal surfaces read that Practice
@@ -459,6 +459,15 @@ Invest, Automate, Learn, and Ditto. This is not a silent widen of
 Compact-only-on-Trade (FT-UX-001). Mode and status stay reachable
 (desk-first; skinny-browser defensive collapse is fine).
 
+**Ticker venue badges (FT-CORE-TICKER-001).** Pinned badges match the
+venues that feed the marquee: NSE, BSE, and MCX on the default tape,
+and NFO when an F&O symbol feeds. A venue with no feeding symbol is
+omitted. Symbols that do not resolve to a venue show **Unavailable**.
+An empty tape omits the badge strip. The marquee runs continuously
+when motion is allowed. With `prefers-reduced-motion: reduce`, the
+tape freezes and shows **Reduced motion**. The Sample freshness chip
+may stay; it must not hide venue honesty.
+
 ### Walkthrough
 
 1. Open `/trade` (http://127.0.0.1:5100/trade on the installed web app;
@@ -549,12 +558,12 @@ backend rejects Explore orders if the UI slips (FT-TRADE-009).
 
 This is a fallback path, not the primary Practice fills path. The
 primary paper path is Practice mode on `/trade` through the native
-`SandboxEngine` (FT-MONDAY-001). Explore `/learn` → **Practice
+`SandboxEngine`. Explore `/learn` → **Practice
 Trading** still walks through optional OpenAlgo broker Practice /
 sandbox setup when you need that fallback. **Dhan Sandbox** remains
 optional OpenAlgo paper. Kotak Neo has **no sandbox** — never offer
 “Neo Practice”. Operator copy is `Live read only until funded unlock.`
-(FT-MONDAY-002). The tab shows "How to start Practice Trading", helper
+The tab shows "How to start Practice Trading", helper
 text "Configure OpenAlgo in Settings → Broker Gateway.", and an
 **Open Settings → Broker Gateway** button that navigates to
 `/settings#api`. The CTA does not send operators to Settings →
@@ -1025,7 +1034,7 @@ flashes the outage copy.
 Open `/ai`. Chat, Signals, Sentiment, and RAG are backed by
 `packages/services/ai`. Suggest is a local filter UI over an
 illustrative strategy list — not a live AI fetch. Suggest stays
-labelled illustrative (FT-MONDAY-003).
+labelled illustrative.
 
 ### Chat
 
@@ -1087,7 +1096,7 @@ Connected sample advisor. Any later demo replies must be labelled
 **Sample replies**. Signals **Live** / **Polling** stay separate from Chat
 LLM readiness.
 
-AI Chat live-read context (FT-MONDAY-003): when an LLM is configured, Chat may
+AI Chat live-read context: when an LLM is configured, Chat may
 use Practice SandboxEngine fills and native live-read feeds for
 analysis. That is analysis context, not a guarantee of profitable
 alphas, and profitable alphas are not a release criterion. Chat
@@ -1111,8 +1120,8 @@ Practice on this machine; see
 **AI Strategy Suggestions** filters a local illustrative recommendation
 list by Market Mood chips (**Volatile**, **Trending**, **Sideways**) and
 your risk profile from persona and experience. Mood is a filter, not a
-draft and not a live AI fetch. Cards stay labelled illustrative
-(FT-MONDAY-003). Suggest is not the Chat live-read path and is not a
+draft and not a live AI fetch. Cards stay labelled illustrative.
+Suggest is not the Chat live-read path and is not a
 profitable-alphas product.
 
 Changing mood — a chip or **Next mood** — immediately replaces the
@@ -1343,8 +1352,8 @@ visible, and the composer stays gated until the runtime is installed
 and configured. A provider string of ollama is not Connected while
 the managed runtime is absent. Chat never shows green **Connected (suggest only)**
 without a real LLM. When that LLM is configured, Chat may use
-Practice fills and native live-read feeds for analysis
-(FT-MONDAY-003); Suggest stays labelled illustrative, and profitable
+Practice fills and native live-read feeds for analysis;
+Suggest stays labelled illustrative, and profitable
 alphas are not a release criterion.
 A configured but broken probe shows **Error** or **Disconnected** with
 **Retry**. Returning to Chat after saving Settings → AI re-checks

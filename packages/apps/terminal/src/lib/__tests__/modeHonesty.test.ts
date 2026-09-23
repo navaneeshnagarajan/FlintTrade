@@ -24,4 +24,13 @@ describe("mode honesty copy", () => {
     const lines = new Set(Object.values(MODE_HONESTY_COPY));
     expect(lines.size).toBe(3);
   });
+
+  it("does not use API smoke as a Mode bar label", () => {
+    for (const line of Object.values(MODE_HONESTY_COPY)) {
+      expect(line).not.toMatch(/API smoke/i);
+    }
+    expect(MODE_HONESTY_COPY.practice.startsWith("Practice")).toBe(true);
+    expect(MODE_HONESTY_COPY.live.startsWith("Live")).toBe(true);
+    expect(MODE_HONESTY_COPY.live).not.toMatch(/API smoke/i);
+  });
 });

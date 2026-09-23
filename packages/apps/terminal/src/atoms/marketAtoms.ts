@@ -111,19 +111,21 @@ export const crudeOilAtom = pinnedTickAtom("MCX:CRUDEOIL");
 export const naturalGasAtom = pinnedTickAtom("MCX:NATURALGAS");
 
 /**
- * Derived atom: indices + MCX summary for TickerBar
- * Matches Groww 915 ticker: NIFTY, SENSEX, BANKNIFTY, VIX + GOLD, SILVER, CRUDEOIL, NATURALGAS
+ * Derived atom: indices + MCX summary for TickerBar.
+ * NSE/BSE indices and MCX metals/energy share one marquee. `venue` is the
+ * public badge (NSE, BSE, MCX) — quote exchanges such as NSE_INDEX stay on
+ * `exchange` and must not be shown as a second venue.
  */
 export const indicesSummaryAtom = atom((get) => {
   return [
-    { name: "NIFTY 50", data: get(niftyAtom) },
-    { name: "SENSEX", data: get(sensexAtom) },
-    { name: "BANK NIFTY", data: get(bankniftyAtom) },
-    { name: "VIX", data: get(vixAtom) },
-    { name: "GOLD", data: get(goldAtom) },
-    { name: "SILVER", data: get(silverAtom) },
-    { name: "CRUDEOIL", data: get(crudeOilAtom) },
-    { name: "NATGAS", data: get(naturalGasAtom) },
+    { name: "NIFTY 50", venue: "NSE", exchange: "NSE_INDEX", data: get(niftyAtom) },
+    { name: "SENSEX", venue: "BSE", exchange: "BSE_INDEX", data: get(sensexAtom) },
+    { name: "BANK NIFTY", venue: "NSE", exchange: "NSE_INDEX", data: get(bankniftyAtom) },
+    { name: "VIX", venue: "NSE", exchange: "NSE_INDEX", data: get(vixAtom) },
+    { name: "GOLD", venue: "MCX", exchange: "MCX", data: get(goldAtom) },
+    { name: "SILVER", venue: "MCX", exchange: "MCX", data: get(silverAtom) },
+    { name: "CRUDEOIL", venue: "MCX", exchange: "MCX", data: get(crudeOilAtom) },
+    { name: "NATGAS", venue: "MCX", exchange: "MCX", data: get(naturalGasAtom) },
   ];
 });
 

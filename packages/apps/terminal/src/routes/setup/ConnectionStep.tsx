@@ -105,7 +105,7 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
         >
           <Info className="size-3.5 mt-0.5 shrink-0" aria-hidden="true" />
           <span>
-            {CONNECTED_READ_LABEL} / API smoke only — never placeable Live orders.
+            {CONNECTED_READ_LABEL} only — never placeable Live orders.
             Neo has no sandbox. {NEO_OPERATOR_COPY}
           </span>
         </div>
@@ -152,7 +152,7 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
       <div className="space-y-3">
         <p className="text-sm text-text-primary">
           Practice uses FlintTrade&apos;s SandboxEngine for paper fills. You do not
-          need a broker for Monday Practice.
+          need a broker for Practice.
         </p>
         <Button
           type="button"
@@ -164,7 +164,7 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
         </Button>
         <p className="text-xs text-text-muted text-center">
           OpenAlgo and native brokers stay in Settings as a fallback — not the
-          primary Monday path.
+          primary Practice path.
         </p>
       </div>
 
@@ -187,15 +187,15 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
 
         {mode === "openalgo" && (
           <p className="text-xs text-text-muted">
-            Settings fallback only — not the Monday primary connect path. Practice
+            Settings fallback only — not the primary connect path. Practice
             fills still use the native SandboxEngine.
           </p>
         )}
         {mode === "direct" && (
           <p className="text-xs text-text-muted">
-            Monday primary broker connect: native Dhan + Kotak Neo. Successful
-            non-funded reads show {CONNECTED_READ_LABEL} / API smoke — never
-            placeable Live orders. Neo has no Practice sandbox. {NEO_OPERATOR_COPY}
+            Native Dhan + Kotak Neo stays {CONNECTED_READ_LABEL}. Successful
+            non-funded reads never become placeable Live orders. Neo has no
+            Practice sandbox. {NEO_OPERATOR_COPY}
           </p>
         )}
 
