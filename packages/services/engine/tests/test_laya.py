@@ -57,27 +57,48 @@ def test_process_laya_starts_down_until_an_explicit_status() -> None:
 
 @pytest.mark.unit
 def test_ready_operator_proposal_is_admitted_with_a_quantity_ceiling() -> None:
+    from flinttrade_engine.laya import admission_kind, place_block
+
     verdict = Laya(status=DecisionStatus.READY, max_quantity=10).admit(_proposal(quantity=4))
     assert verdict.allow is True
     assert verdict.reason == ""
+    assert verdict.applied_quantity == 4
     assert verdict.limits.max_quantity == 10
+    assert admission_kind(verdict, 4) == "allow"
+    assert place_block(verdict, 4) is None
 
 
 @pytest.mark.unit
-def test_quantity_above_the_ceiling_is_refused() -> None:
+def test_quantity_above_the_ceiling_is_a_clamp_and_does_not_place() -> None:
+    from flinttrade_engine.laya import admission_kind, place_block
+
     verdict = Laya(status=DecisionStatus.READY, max_quantity=2).admit(_proposal(quantity=3))
-    assert verdict.allow is False
-    assert "2" in verdict.reason
+    assert verdict.allow is True
+    assert verdict.reason == ""
+    assert verdict.applied_quantity == 2
     assert verdict.limits.max_quantity == 2
+    assert admission_kind(verdict, 3) == "clamp"
+    blocked = place_block(verdict, 3)
+    assert blocked is not None
+    assert blocked["code"] == "laya_clamp"
+    assert blocked["message"] == "Qty reduced to 2 (Laya limit)"
+    assert blocked["http_status"] == 409
 
 
 @pytest.mark.unit
 def test_degraded_uses_the_tighter_ceiling_and_still_admits_inside_it() -> None:
+    from flinttrade_engine.laya import admission_kind
+
     engine = Laya(status=DecisionStatus.DEGRADED, max_quantity=10, degraded_max_quantity=1)
-    assert engine.admit(_proposal(quantity=1)).allow is True
-    refused = engine.admit(_proposal(quantity=2))
-    assert refused.allow is False
-    assert refused.limits.max_quantity == 1
+    inside = engine.admit(_proposal(quantity=1))
+    assert inside.allow is True
+    assert inside.applied_quantity == 1
+    assert admission_kind(inside, 1) == "allow"
+    clamped = engine.admit(_proposal(quantity=2))
+    assert clamped.allow is True
+    assert clamped.applied_quantity == 1
+    assert clamped.limits.max_quantity == 1
+    assert admission_kind(clamped, 2) == "clamp"
 
 
 @pytest.mark.unit
@@ -87,12 +108,15 @@ def test_down_refuses_live_and_practice_with_no_model_fallback() -> None:
     practice = engine.admit(_proposal(mode="practice", source="operator"))
     assert live.allow is False
     assert practice.allow is False
+    assert live.applied_quantity == 0
     assert "Down" in live.reason
     assert "Live" in live.reason
 
 
 @pytest.mark.unit
 def test_explore_and_chat_sources_are_refused() -> None:
+    from flinttrade_engine.laya import admission_kind, proposal_from_place_fields
+
     engine = Laya(status=DecisionStatus.READY, max_quantity=10)
     explore = engine.admit(_proposal(mode="explore"))
     chat = engine.admit(_proposal(source="chat"))
@@ -100,12 +124,35 @@ def test_explore_and_chat_sources_are_refused() -> None:
     assert "Explore" in explore.reason
     assert chat.allow is False
     assert chat.reason
+    assert admission_kind(chat, 1) == "deny"
+    spoofed = proposal_from_place_fields(
+        {"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 1, "source": "chat"},
+        mode="live",
+        source="operator",
+    )
+    assert spoofed.source == "operator"
+    assert engine.admit(spoofed).allow is True
 
 
 @pytest.mark.unit
 def test_limit_without_a_price_is_refused() -> None:
     verdict = Laya(status=DecisionStatus.READY, max_quantity=10).admit(_proposal(order_type="LIMIT", price=None))
     assert verdict.allow is False
+
+
+@pytest.mark.unit
+def test_place_entries_admit_operator_or_automate_and_never_chat() -> None:
+    root = Path(__file__).resolve().parents[4]
+    files = (
+        root / "packages/core/core/src/flinttrade_core/order_routes.py",
+        root / "packages/core/core/src/flinttrade_core/webhook_dispatch.py",
+        root / "packages/services/engine/src/flinttrade_engine/strategy_execution.py",
+    )
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in files)
+    assert 'source="operator"' in combined
+    assert 'source="automate"' in combined
+    assert 'source="chat"' not in combined
+    assert 'source="llm"' not in combined
 
 
 @pytest.mark.unit

@@ -62,8 +62,9 @@ class WebhookOrderDispatcher:
 
     The integration package stays framework-agnostic and fail-closed by default.
     A signed intent reaches the human-order path only when the host injects an
-    endpoint-specific execution authority: typed model -> SafetySystem ->
-    gate_order -> BrokerRouter. Without that authority, no router method runs.
+    endpoint-specific execution authority: typed model -> Laya admission ->
+    SafetySystem -> gate_order -> BrokerRouter. Without that authority, no
+    router method runs. Chat is not an admission source.
     """
 
     def __init__(
@@ -111,6 +112,15 @@ class WebhookOrderDispatcher:
                     payload,
                     "Validated order safety configuration is unavailable; no order was sent.",
                 )
+            laya_block = _laya_automate_block(body)
+            if laya_block is not None:
+                refused = _error("place_order", payload, str(laya_block["message"]))
+                refused["code"] = laya_block["code"]
+                refused["reason"] = laya_block["reason"]
+                refused["limits"] = laya_block["limits"]
+                if "applied_quantity" in laya_block:
+                    refused["applied_quantity"] = laya_block["applied_quantity"]
+                return refused
             selector = f"{adapter_id}:{account_id}"
             async with safety.order_admission_async(selector) as lease:
                 portfolio_state = await self._gather_safety_state(
@@ -600,6 +610,17 @@ def _nonce_and_hash(payload: WebhookPayload) -> tuple[str, str]:
 
 def _order_id(payload: WebhookPayload) -> str:
     return str(payload.data.get("orderid") or payload.data.get("order_id") or "").strip()
+
+
+def _laya_automate_block(body: dict[str, Any]) -> dict[str, Any] | None:
+    """Admit one automate webhook place before SafetySystem.
+
+    Chat is not an admission source. The payload cannot choose the source.
+    """
+    from flinttrade_engine.laya import place_block, process_laya, proposal_from_place_fields  # noqa: PLC0415
+
+    proposal = proposal_from_place_fields(body, mode="live", source="automate")
+    return place_block(process_laya().admit(proposal), proposal.quantity)
 
 
 def _error(action: str, payload: WebhookPayload, message: str) -> dict[str, Any]:

@@ -387,8 +387,8 @@ def dispatch_action_center_approval(approval: Any) -> Any:
     No JWT, ``RequestContext``, ``SafetyContext``, router, or broker session is
     retained in the durable request. This function resolves all of them at
     approval time and delegates to the canonical live placement path, which
-    performs a fresh L1-L5 check before minting a one-shot gate and calling the
-    current ``BrokerRouter``.
+    admits the order through Laya, then performs a fresh L1-L5 check before
+    minting a one-shot gate and calling the current ``BrokerRouter``.
     """
     from flinttrade_engine.action_center import ApprovalDispatchResult  # noqa: PLC0415
 

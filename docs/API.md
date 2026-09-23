@@ -507,7 +507,8 @@ response is JSON
 `{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down"}`.
 `status` is `"ok"`, `timestamp` is ISO8601 IST, and `laya` is `"ready"`,
 `"degraded"`, or `"down"`. Laya starts Down. A ping publishes that process
-status and does not invent Ready. Clients must not treat a missing or
+status and does not invent Ready. Ready and Degraded are recorded by
+`Laya.set_status`, not by ping. Clients must not treat a missing or
 omitted `laya` as Ready; the desk uses `laya ?? "down"`.
 
 ### Errors (`/ft-api/v1/errors`, `/ft-api/v1/changelog`)
@@ -693,8 +694,8 @@ the guard returns one of three verdicts:
 | Verdict | Behaviour |
 |---|---|
 | `explore` | Reject order placement with HTTP 403 and `code: "mode_blocked"`. Explore is for reading, learning, and demo data only. |
-| `practice` | Route supported single-leg order flows to FlintTrade's native `SandboxEngine`; never touch OpenAlgo or a broker. Advanced executor-direct routes that do not yet have sandbox parity fail closed with `practice_unsupported`. |
-| `live` | Require a JWT with `live_mode_unlocked=true`. The core `/orders/place`, modify, cancel, `cancel-all`, and `/orders/forever` paths go through the gated `BrokerRouter`. Other legacy write verbs (`gtt-*`, `open-position`, `close-position`, and similar) return HTTP 501 until they have a gated `BrokerRouter` verb — they do not forward ungated to OpenAlgo. |
+| `practice` | Route supported single-leg order flows to FlintTrade's native `SandboxEngine`; never touch OpenAlgo or a broker. Practice **place** is admitted by `Laya.admit` before that sandbox. A Down refusal or a quantity clamp returns before any fill. Advanced executor-direct routes that do not yet have sandbox parity fail closed with `practice_unsupported`. |
+| `live` | Require a JWT with `live_mode_unlocked=true`. Core operator **place** (`POST /api/v1/orders/place` and the routed live place that shares that dispatcher) and automate place run `Laya.admit` before SafetySystem, then the gated `BrokerRouter`. Modify, cancel, `cancel-all`, smart, multi, forever, and other write verbs still reach SafetySystem without this admission. The core modify, cancel, `cancel-all`, and `/orders/forever` paths go through the gated `BrokerRouter`. Other legacy write verbs (`gtt-*`, `open-position`, `close-position`, and similar) return HTTP 501 until they have a gated `BrokerRouter` verb — they do not forward ungated to OpenAlgo. |
 
 `POST /v1/auth/mode` issues a fresh JWT and revokes the previous `jti`,
 but it accepts **only** downgrades to `practice` or `explore`. Upgrading
@@ -720,11 +721,20 @@ continuation, and environment variables are read as `$env:NAME`).
 ### 7.1 Exercise the practice order path
 
 This example is for a locally issued **Practice-mode** FlintTrade session JWT.
-It routes to FlintTrade's native sandbox and does not send an order to OpenAlgo
-or any broker. Do not use the OpenAlgo passthrough endpoint as an example for
-live broker execution. Live manual, automated, and agent-driven order workflows
-use the same FlintTrade order proxy after a Live-mode JWT, safety gate, account
-ACL check, and broker-router dispatch.
+Place is admitted before the sandbox. Laya starts **Down**, so a place while
+Down returns HTTP 403 `laya_denied` and the sandbox is not called. A quantity
+above the active ceiling returns HTTP 409 `laya_clamp` and places neither
+size. The sandbox body below is the response when admission allows the
+requested quantity. The call does not send an order to OpenAlgo or any broker.
+Do not use the OpenAlgo passthrough endpoint as an example for live broker
+execution. Live operator place uses this order proxy after a Live-mode JWT
+(`POST /api/v1/orders/place` and the routed place dispatcher). The server
+admits that place through `Laya.admit` as source `operator`, then the
+safety gate, the account ACL check, and BrokerRouter. Automate place uses
+the same admit verdict before SafetySystem and `gate_order`, as source
+`automate` on strategy dispatch and webhook place. It does not use this
+HTTP place route. Explore place stays `mode_blocked` and is not an
+admission result.
 
 ```bash
 curl -X POST http://127.0.0.1:5100/api/v1/orders/place \
@@ -906,8 +916,14 @@ Most handlers return only `status` + `message`. The core
 `/api/v1/orders/*` proxy rejects Explore (`/orders/place`, modify,
 cancel, `cancel-all`, and the other verbs that share that mode gate)
 with HTTP 403, message "Orders are not available in Explore mode…", and
-`code: "mode_blocked"`. A Live JWT without PIN unlock on that same
-proxy is still message-only: HTTP 403 with "Live mode not unlocked —
+`code: "mode_blocked"`. That mode refusal runs before `Laya.admit`.
+Core operator place, after the mode guard, admits before SafetySystem
+and before the Practice sandbox. A client `source` field is ignored, so
+the request cannot present itself as chat or as automate. A refusal is
+HTTP 403 `laya_denied`. A quantity clamp is HTTP 409 `laya_clamp` and
+places neither size.
+`http_status` is not part of the JSON body. A Live JWT without PIN unlock
+on that same proxy is still message-only: HTTP 403 with "Live mode not unlocked —
 verify PIN first". A `code` field is also emitted on
 `mode_guard`-decorated engine routes (brackets and other
 executor-direct paths), on `POST /api/v1/telegram` Explore refusals,
@@ -918,11 +934,22 @@ Not every endpoint emits `code`:
 
 | Code or status | Meaning |
 |---|---|
-| `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` Explore refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` Explore refusals (same header/claim gate). |
+| `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` Explore refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` Explore refusals (same header/claim gate). Explore place stays on this code. |
+| `laya_denied` | Operator place was refused by `Laya.admit` before SafetySystem or the Practice sandbox — HTTP 403. Body: `status: "error"`, `code: "laya_denied"`, `message` and `reason` (the same server text), and `limits.max_quantity`. There is no `applied_quantity`. |
+| `laya_clamp` | Operator place asked for more than the active quantity ceiling — HTTP 409. Body: `status: "error"`, `code: "laya_clamp"`, `message` (`Qty reduced to <applied_quantity> (Laya limit)`), `reason` (empty string), `limits.max_quantity`, and `applied_quantity`. Neither quantity is placed. The caller places `applied_quantity` itself if it still wants that size. |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
 | `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true` (PIN unlock). |
 | HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |
-| Safety `message` | A safety layer rejected the order; the message names the layer. There is no `SAFETY_LAYER_BLOCK` code. |
+| Safety `message` | A safety layer rejected the order; the message names the layer. There is no `SAFETY_LAYER_BLOCK` code. Operator and automate place reach this only after `Laya.admit` allows the requested quantity. |
+
+Automate place admits before SafetySystem with the same verdict. A webhook
+place puts `code`, `reason`, `limits`, and (on a clamp) `applied_quantity`
+on the dispatcher result; the webhook HTTP receiver wraps a dispatcher
+error as HTTP 422 with that result under `data`. A strategy dispatch
+raises the server `message` and does not place the reduced quantity.
+Modify, cancel, smart, multi, forever, and other write verbs are not
+admitted. Chat is not an admission source. Details of the place path are
+in [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 Auth failures are typically HTTP 401 with a `message` (expired, revoked,
 or missing token). Broker-session expiry arrives as the upstream

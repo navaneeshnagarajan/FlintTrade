@@ -26,6 +26,15 @@ def _safety_secret() -> None:
     set_safety_gate_secret(b"w" * 32)
 
 
+@pytest.fixture(autouse=True)
+def _laya_ready_for_open_place() -> None:
+    """Seed Ready so an armed webhook place still reaches SafetySystem."""
+    from flinttrade_engine.laya import DecisionStatus, process_laya
+
+    process_laya().set_status(DecisionStatus.READY)
+    yield
+
+
 def _app(router: MagicMock, *, backend_lease_factory) -> Flask:
     router.backend_lease_proof = backend_lease_factory()
     app = Flask("webhook-dispatch-test")
@@ -504,3 +513,58 @@ def test_cancel_order_runs_through_gate_and_router_with_signed_extras(*, backend
     assert kwargs["hint"].adapter_id == "dhan"
     assert kwargs["hint"].account_id == "main"
     assert kwargs["safety_ctx"].verify(kwargs["order"], request_ctx, "dhan", "main")
+
+
+def test_down_webhook_place_never_reaches_safety(*, backend_lease_factory) -> None:
+    from flinttrade_engine.laya import DecisionStatus, process_laya
+
+    process_laya().set_status(DecisionStatus.DOWN)
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
+    app = _app(router, backend_lease_factory=backend_lease_factory)
+    dispatcher = _dispatcher(app, "place_order")
+    payload = WebhookPayload(
+        source="custom",
+        action="place_order",
+        symbol="NIFTY",
+        exchange="NSE",
+        data={"side": "BUY", "quantity": "1", "source": "chat"},
+        webhook_nonce="verified-laya-down",
+        webhook_path="/v1/webhook/custom/test-endpoint",
+    )
+
+    result = asyncio.run(dispatcher.place_order(payload))
+
+    assert result["status"] == "error"
+    assert result["code"] == "laya_denied"
+    assert "Down" in result["reason"]
+    assert "Chat" not in result["reason"]
+    app.config["SAFETY"].check_order.assert_not_called()
+    router.place_order.assert_not_called()
+
+
+def test_degraded_webhook_clamp_does_not_place(*, backend_lease_factory) -> None:
+    from flinttrade_engine.laya import DecisionStatus, process_laya
+
+    process_laya().set_status(DecisionStatus.DEGRADED)
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
+    app = _app(router, backend_lease_factory=backend_lease_factory)
+    dispatcher = _dispatcher(app, "place_order")
+    payload = WebhookPayload(
+        source="custom",
+        action="place_order",
+        symbol="NIFTY",
+        exchange="NSE",
+        data={"side": "BUY", "quantity": "4"},
+        webhook_nonce="verified-laya-clamp",
+        webhook_path="/v1/webhook/custom/test-endpoint",
+    )
+
+    result = asyncio.run(dispatcher.place_order(payload))
+
+    assert result["code"] == "laya_clamp"
+    assert result["message"] == "Qty reduced to 1 (Laya limit)"
+    assert result["applied_quantity"] == 1
+    app.config["SAFETY"].check_order.assert_not_called()
+    router.place_order.assert_not_called()

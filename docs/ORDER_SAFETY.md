@@ -17,16 +17,28 @@ or script must not call a broker adapter or `OpenAlgoClient.place_order`
 directly. Placement, regular modify/cancel, and extended verbs use different
 gates — pick the matching one.
 
-**Placement** (new orders, including webhook, strategy, and smart-order
-place):
+**Placement** (operator and automate place: core `/orders/place`, strategy
+dispatch, and webhook place):
 
-1. `SafetySystem.check_order` runs the L5 → L4 → L1 → L2 → L3 layers
-   against the intended order (kill switch, daily P&L, field validation,
+1. The mode guard runs first. Explore stays `mode_blocked` and does not
+   enter `Laya.admit`.
+2. `Laya.admit` then admits or refuses the proposal. A refusal
+   (`laya_denied`) or a quantity clamp (`laya_clamp`) stops before
+   SafetySystem on Live and before the native sandbox on Practice.
+   Neither quantity is placed.
+3. An allowed Live place runs `SafetySystem.check_order` in runtime order
+   L5 → L4 → L1 → L2 → L3 (kill switch, daily P&L, field validation,
    position limits, portfolio risk).
-2. `gate_order` then mints the `SafetyContext` bound to that order and the
+4. `gate_order` then mints the `SafetyContext` bound to that order and the
    selector-bound principal. It does not re-run the layer checks.
-3. `BrokerRouter.place_order` re-HMACs, matches fields, applies the account
+   `gate_order` remains the only mint after an allowed Live place.
+5. `BrokerRouter.place_order` re-HMACs, matches fields, applies the account
    ACL, and consumes the one-shot gate.
+
+An allowed Practice place is admitted, then goes to the native sandbox. It
+does not enter SafetySystem, `gate_order`, or `BrokerRouter`. Modify,
+cancel, smart, multi, forever, and the other write verbs are not this
+admission.
 
 **Regular modify and cancel:**
 
@@ -61,24 +73,38 @@ Chat may suggest and explain only: bring your own API key, use managed
 Ollama, or point **Custom (OpenAI-compatible)** at another local runtime.
 Chat is not an admission source, and Chat downtime does not close Live.
 
-Money-path mint remains Mode guard → SafetySystem L1–L5 → `gate_order` →
-BrokerRouter. Laya does not replace those layers. `Laya.admit` is a separate
-admission surface; the server place path does not run it before SafetySystem.
+Operator and automate place run the mode guard, then `Laya.admit`.
+**Live** place then runs SafetySystem L1–L5, `gate_order`, and
+`BrokerRouter`. Laya does not replace those layers, and `gate_order`
+remains the only mint after an allowed Live place. **Practice** place is
+admitted before the sandbox and does not enter SafetySystem, `gate_order`,
+or `BrokerRouter`. Explore stays `mode_blocked` before admit. A refusal
+(`laya_denied`) or a quantity clamp (`laya_clamp`) stops before
+SafetySystem on Live and before the sandbox on Practice. A clamp names
+the reduced quantity. Neither size is placed. Order Pad and Quick Trade
+require the operator to place that reduced quantity. An automate clamp is
+a dispatcher error and does not place the reduced quantity on its own.
+Chat is not an admission source. Modify, cancel, smart, multi, forever,
+and the other write verbs are not admitted.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down — Live orders paused."). That class closes Live place and Position
 Mirror start on the shared client place path. Kill All stays reachable.
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
-The desk ping publishes Ready, Degraded, or Down and does not invent Ready.
-Degraded does not open that class and does not mute Live. `Laya.admit` on
-every server place remains follow-up work and is not this mute.
+Ready and Degraded are recorded only by `Laya.set_status`; the desk ping
+and `note_heartbeat` publish the stored status and do not invent Ready.
+Degraded does not open that class and does not mute Live. Degraded enforces
+the tighter quantity ceiling and the desk says so. Down does not add a second
+deny under a Live control that is already muted. Other Live write verbs
+still reach SafetySystem without this admission. Other Practice verbs go
+straight to the sandbox.
 
 | Concern | Automate risk note | SafetySystem | Ticket guards | Laya |
 | --- | --- | --- | --- | --- |
 | Allow or deny | `allowed` and `reason` | L1–L5 pass or fail | refusal string | verdict `allow` and `reason` |
 | Size | `position_qty` | L1 quantity, L2 limits | lot multiple | `limits.max_quantity` |
 | Price | stop and target | L1 price band | limit and trigger present | price and trigger present |
-| Mode | not modelled | mode guard | Explore refused | Explore refused; Down refuses the proposal |
+| Mode | not modelled | mode guard | Explore refused | Explore stays `mode_blocked` before admit; Down refuses the proposal |
 | Book, margin, Greeks, daily loss, kill | daily loss is agent config | L2–L5 | not present | not owned |
 
 The automate risk note is not this admission. Lot size, the price band,

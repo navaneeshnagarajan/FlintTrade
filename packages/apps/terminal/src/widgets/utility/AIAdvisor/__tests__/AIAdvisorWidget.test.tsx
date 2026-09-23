@@ -952,3 +952,17 @@ describe("AIAdvisorWidget history panel", () => {
     expect(mockSearchSessions).toHaveBeenCalledWith("51000");
   });
 });
+
+describe("chat admission copy", () => {
+  it("never offers Admit or Approved by Laya", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { dirname, join } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../AIAdvisorWidget.tsx"),
+      "utf8",
+    );
+    expect(source).not.toMatch(/Approved by Laya/);
+    expect(source).not.toMatch(/\bAdmit\b/);
+  });
+});
