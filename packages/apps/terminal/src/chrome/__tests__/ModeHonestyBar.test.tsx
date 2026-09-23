@@ -28,4 +28,15 @@ describe("ModeHonestyBar", () => {
       "Live — real-money capable when a broker is Connected. Orders place only on a live session.",
     );
   });
+
+  it("does not paint API smoke on the Mode bar", () => {
+    for (const mode of ["explore", "practice", "live"] as const) {
+      const { unmount } = render(<ModeHonestyBar mode={mode} />);
+      const bar = screen.getByTestId("mode-honesty-bar");
+      expect(bar).not.toHaveTextContent(/API smoke/i);
+      if (mode === "practice") expect(bar).toHaveTextContent(/^Practice/);
+      if (mode === "live") expect(bar).toHaveTextContent(/^Live/);
+      unmount();
+    }
+  });
 });

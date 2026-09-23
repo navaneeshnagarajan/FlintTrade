@@ -570,6 +570,8 @@ describe("BrokersSection", () => {
     });
     renderSection(false);
     expect(await screen.findAllByText(/Connected \(read\)/)).not.toHaveLength(0);
+    expect(screen.getByText("dhan · Connected (read)")).toBeInTheDocument();
+    expect(screen.getByText(/kotakneo · Connected \(read\)/)).not.toHaveTextContent(/API smoke/i);
     expect(screen.getAllByText(/Live read only until funded unlock/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/ · connected$/)).not.toBeInTheDocument();
   });

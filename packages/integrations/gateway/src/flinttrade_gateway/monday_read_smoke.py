@@ -185,7 +185,7 @@ async def collect_monday_ai_read_snapshot(
     session returns ``ok=False`` and no fabricated quotes.
     """
     if broker_id not in MONDAY_READ_BROKERS:
-        raise ValueError(f"Monday AI reads are Dhan + Neo only, not {broker_id}")
+        raise ValueError(f"Connected (read) / API smoke reads are Dhan + Neo only, not {broker_id}")
     if not monday_read_smoke_ok(session):
         return {
             "broker_id": broker_id,
@@ -260,7 +260,7 @@ async def run_monday_read_smoke(
 ) -> ReadSmokeResult:
     """Login + non-funded read smoke. Never a write. Honest on failure."""
     if broker_id not in MONDAY_READ_BROKERS:
-        raise ValueError(f"Monday read-smoke is Dhan + Neo only, not {broker_id}")
+        raise ValueError(f"Connected (read) / API smoke is Dhan + Neo only, not {broker_id}")
     symbols = list(symbols or ["NSE:RELIANCE"])
     steps: list[ReadSmokeStep] = []
     session: Any = None
