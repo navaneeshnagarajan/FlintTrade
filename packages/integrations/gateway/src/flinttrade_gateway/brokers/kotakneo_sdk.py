@@ -6,6 +6,7 @@ disabled by default before import; an operator's explicit setting is retained.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -26,7 +27,30 @@ def _sdk_class() -> type:
     os.environ.setdefault("NEO_LOG_FILE_ENABLED", "false")
     from neo_api_client import NeoAPI  # noqa: PLC0415
 
+    _install_ip_log_filter()
     return NeoAPI
+
+
+class _ClientIpResponseFilter(logging.Filter):
+    """Redact only the client-IP endpoint's response before SDK rendering."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        event = record.msg
+        if (
+            isinstance(event, dict)
+            and isinstance(event.get("url"), str)
+            and "/get-client-ip" in event["url"].lower()
+            and "response_body" in event
+        ):
+            record.msg = {**event, "response_body": "<redacted>"}
+        return True
+
+
+def _install_ip_log_filter() -> None:
+    """Keep SDK console/file levels and unrelated events intact."""
+    for handler in logging.getLogger("neo_api_client").handlers:
+        if not any(isinstance(existing, _ClientIpResponseFilter) for existing in handler.filters):
+            handler.addFilter(_ClientIpResponseFilter())
 
 
 def _error_details(value: dict[str, Any]) -> tuple[str, str]:
@@ -38,36 +62,45 @@ def _error_details(value: dict[str, Any]) -> tuple[str, str]:
         code = str(error.get("code") or error.get("errorCode") or "")
         message = str(error.get("message") or error.get("emsg") or "")
     elif isinstance(error, BaseException):
-        code, message = "", type(error).__name__
+        code = str(getattr(error, "status", "") or getattr(error, "status_code", "") or "")
+        message = str(getattr(error, "reason", "") or type(error).__name__)
     else:
         code, message = "", str(error or "")
     code = code or str(value.get("errorCode") or value.get("stCode") or "")
     message = message or str(value.get("message") or value.get("errMsg") or value.get("emsg") or "")
-    data = value.get("data")
-    if isinstance(data, dict):
-        message = message or str(data.get("message") or "")
     return code.lower(), message.lower()
 
 
 def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool = False, write: bool = False) -> None:
+    for key in ("Error", "Error Message", "error"):
+        embedded = value.get(key)
+        if isinstance(embedded, BaseException):
+            raise _canonical_exception(embedded, operation)
+        if isinstance(embedded, list):
+            for item in embedded:
+                if isinstance(item, BaseException):
+                    raise _canonical_exception(item, operation)
     code, message = _error_details(value)
     status = value.get("status")
     stat = value.get("stat")
     data = value.get("data")
-    nested_status = data.get("status") if isinstance(data, dict) else None
     rejected = any(key in value for key in ("Error", "Error Message", "error"))
-    rejected |= isinstance(status, str) and status.lower() not in {"ok", "success"}
-    rejected |= isinstance(stat, str) and stat.lower() != "ok"
-    rejected |= isinstance(nested_status, str) and nested_status.lower() not in {"ok", "success"}
+    rejected |= "status" in value and (type(status) is not str or status.lower() not in {"ok", "success"})
+    rejected |= "stat" in value and (type(stat) is not str or stat.lower() != "ok")
     status_code = value.get("stCode")
     rejected |= isinstance(status_code, int) and status_code >= 400 and not (
         status_code == 1000 and operation == "whatsmyip" and status == "success"
     )
     if not rejected:
+        if isinstance(data, dict):
+            _raise_provider_error(data, operation=operation, auth=auth, write=write)
         return
     reason = f"Kotak Neo {operation} was rejected"
     if (not auth and code in {"401", "403"}) or any(
-        marker in message for marker in ("expired", "invalid token", "invalid session", "please login", "please log in")
+        marker in message for marker in (
+            "expired", "invalid token", "invalid session", "please login", "please log in",
+            "complete the 2fa process",
+        )
     ):
         raise SessionExpired(reason, broker_id="kotakneo", broker_code=code)
     if code in {"429", "too_many_requests"} or any(marker in message for marker in ("rate limit", "too many requests")):
@@ -92,6 +125,8 @@ def _canonical_exception(exc: Exception, operation: str) -> BrokerError:
         return exc
     response = getattr(exc, "response", None)
     status_code = getattr(response, "status_code", None)
+    if status_code is None:
+        status_code = getattr(exc, "status", None) or getattr(exc, "status_code", None)
     if status_code in {401, 403}:
         return SessionExpired(f"Kotak Neo {operation} session expired", broker_id="kotakneo", broker_code=str(status_code))
     if status_code == 429:
@@ -99,9 +134,12 @@ def _canonical_exception(exc: Exception, operation: str) -> BrokerError:
     if isinstance(status_code, int) and status_code >= 500:
         return BrokerInternal(f"Kotak Neo {operation} failed", broker_id="kotakneo", broker_code=str(status_code))
     name = type(exc).__name__.lower()
-    if isinstance(exc, TimeoutError) or "timeout" in name:
+    reason = str(getattr(exc, "reason", "") or "").lower()
+    if isinstance(exc, TimeoutError) or "timeout" in name or "timeout" in reason or "timed out" in reason:
         return BrokerTimeout(f"Kotak Neo {operation} timed out", broker_id="kotakneo")
-    if isinstance(exc, ConnectionError) or any(term in name for term in ("connect", "network", "transport")):
+    if isinstance(exc, ConnectionError) or any(
+        term in name or term in reason for term in ("connect", "network", "transport", "dns", "name resolution")
+    ):
         return NetworkError(f"Kotak Neo {operation} could not reach the broker", broker_id="kotakneo")
     return BrokerInternal(f"Kotak Neo {operation} failed", broker_id="kotakneo")
 
@@ -141,7 +179,10 @@ def validate_read_envelope(value: Any, *, operation: str) -> Any:
     status_code = value.get("stCode")
     if status_code is not None and (type(status_code) is not int or status_code not in {200, 1000}):
         raise BrokerInternal(f"Kotak Neo {operation} returned an invalid status code", broker_id="kotakneo")
-    if operation in {"order_report", "order_history_rows", "trade_report", "positions", "holdings", "quotes", "whatsmyip"}:
+    if operation in {
+        "order_report", "order_history", "order_history_rows", "trade_report", "positions", "holdings",
+        "quotes", "whatsmyip",
+    }:
         rows = value.get("data")
         if type(rows) is not list or any(type(row) is not dict for row in rows):
             raise BrokerInternal(f"Kotak Neo {operation} returned malformed rows", broker_id="kotakneo")
@@ -223,6 +264,7 @@ class KotakNeoSdkSession:
 
     def liveness(self) -> None:
         """Probe trade-session auth; never return or log the reported IP."""
+        _install_ip_log_filter()
         self._call("whatsmyip", read=True)
 
     def place_order(self, params: dict[str, Any]) -> dict[str, Any]:

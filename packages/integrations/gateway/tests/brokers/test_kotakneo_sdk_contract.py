@@ -5,11 +5,12 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from copy import deepcopy
 
 import httpx
 import pytest
 from flinttrade_core.exceptions import (
-    BrokerInternal, BrokerTimeout, CredentialsInvalid, MFARequired, RateLimitError, SessionExpired,
+    BrokerInternal, BrokerTimeout, CredentialsInvalid, MFARequired, NetworkError, RateLimitError, SessionExpired,
 )
 
 pytestmark = pytest.mark.unit
@@ -269,3 +270,155 @@ def test_transport_failures_cross_facade_as_canonical_errors(fake_sdk, monkeypat
     monkeypatch.setattr(fake_sdk, "whatsmyip", lambda self: fail(), raising=True)
     with pytest.raises(error):
         session.liveness()
+
+
+@pytest.mark.parametrize("step,mutations", [
+    ("view", {"stat": "Not_Ok", "errMsg": "Invalid credential"}),
+    ("view", {"error": [{"code": "401", "message": "Invalid credential"}]}),
+    ("view", {"status": "success", "error": [{"code": "401", "message": "Invalid credential"}]}),
+    ("trade", {"stat": "Not_Ok", "errMsg": "Invalid MPIN"}),
+    ("trade", {"error": [{"code": "401", "message": "Invalid MPIN"}]}),
+])
+def test_nested_auth_rejection_overrides_valid_identity(fake_sdk, monkeypatch, step, mutations):
+    import neo_api_client
+
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    class InvalidNeo(ExactNeo):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            payload = deepcopy(getattr(self, step))
+            payload["data"].update(mutations)
+            setattr(self, step, payload)
+
+    monkeypatch.setattr(neo_api_client, "NeoAPI", InvalidNeo)
+    with pytest.raises(CredentialsInvalid):
+        KotakNeoSdkSession.login(_credentials())
+
+
+@pytest.mark.parametrize("response,error", [
+    ({"stat": "Ok", "data": {"stat": "Not_Ok", "errMsg": "session expired", "Net": "0", "MarginUsed": "0"}}, SessionExpired),
+    ({"stat": "Ok", "data": {"status": "success", "error": [{"code": "401", "message": "session expired"}], "Net": "0", "MarginUsed": "0"}}, SessionExpired),
+    ({"stat": "Ok", "data": {"status": "success", "error": [{"code": "500", "message": "failed"}], "Net": "0", "MarginUsed": "0"}}, BrokerInternal),
+])
+def test_nested_limits_rejection_never_maps_to_zero_funds(response, error):
+    from flinttrade_gateway.brokers.kotakneo_mapping import from_kotak_funds
+
+    with pytest.raises(error):
+        from_kotak_funds(response)
+
+
+@pytest.mark.parametrize("response", [
+    {"stat": "Ok"},
+    {"stat": "Ok", "data": [None]},
+    {"status": 401, "stat": "Ok", "data": []},
+    {"status": None, "stat": "Ok", "data": []},
+    {"stat": None, "status": "success", "data": []},
+    {"status": "success", "stat": "Not_Ok", "data": []},
+    {"stat": "Ok", "data": {"stat": "Ok"}},
+    {"data": {"stat": "Ok", "data": [None]}},
+])
+def test_order_history_requires_consistent_status_and_real_rows(response):
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    with pytest.raises(BrokerInternal):
+        validate_read_envelope(response, operation="order_history")
+
+
+@pytest.mark.parametrize("response", [
+    {"stat": "Ok", "stCode": 200, "data": []},
+    {"data": {"stat": "Ok", "stCode": 200, "data": []}},
+])
+def test_order_history_accepts_both_official_success_envelopes(response):
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    assert validate_read_envelope(response, operation="order_history") is response
+
+
+@pytest.mark.parametrize("status,error", [
+    (401, SessionExpired), (403, SessionExpired), (429, RateLimitError), (500, BrokerInternal),
+    ("timeout", BrokerTimeout), ("connection", NetworkError),
+])
+def test_installed_sdk_embedded_exceptions_translate_with_offline_transport(status, error):
+    import neo_api_client
+
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    def respond(request):
+        if status == "timeout":
+            raise httpx.ReadTimeout("synthetic", request=request)
+        if status == "connection":
+            raise httpx.ConnectError("synthetic", request=request)
+        return httpx.Response(status, json={"error": "synthetic"})
+
+    neo = neo_api_client.NeoAPI(
+        consumer_key="synthetic", access_token=None, transport=httpx.MockTransport(respond),
+    )
+    neo.api_client.rest_client.raise_on_error = True
+    neo.configuration.edit_token = "synthetic"
+    neo.configuration.edit_sid = "synthetic"
+    session = KotakNeoSdkSession.__new__(KotakNeoSdkSession)
+    session._neo = neo
+    session._closed = False
+    try:
+        with pytest.raises(error) as raised:
+            session.liveness()
+        if isinstance(status, int):
+            assert raised.value.broker_code == str(status)
+        assert "synthetic" not in str(raised.value).lower()
+    finally:
+        session.close()
+
+
+def test_two_factor_required_sdk_reply_is_session_expiry():
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    with pytest.raises(SessionExpired):
+        validate_read_envelope(
+            {"Error Message": "Complete the 2fa process before accessing this application"},
+            operation="whatsmyip",
+        )
+
+
+def test_liveness_sdk_info_logging_does_not_emit_ip(tmp_path):
+    script = """
+import logging
+import os
+import httpx
+from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession, _sdk_class
+
+root_handlers = tuple(logging.getLogger().handlers)
+NeoAPI = _sdk_class()
+assert os.environ['NEO_LOG_LEVEL'] == 'INFO'
+assert os.environ['NEO_LOG_FILE_ENABLED'] == 'true'
+
+def respond(request):
+    return httpx.Response(200, json={
+        'data': [{'ip': 'SYNTHETIC_IP_SENTINEL', 'time': 'synthetic'}],
+        'stCode': 1000, 'status': 'success',
+    })
+
+neo = NeoAPI(consumer_key='synthetic', access_token=None,
+             transport=httpx.MockTransport(respond))
+neo.configuration.edit_token = 'synthetic'
+neo.configuration.edit_sid = 'synthetic'
+session = KotakNeoSdkSession.__new__(KotakNeoSdkSession)
+session._neo = neo
+session._closed = False
+assert session.liveness() is None
+assert tuple(logging.getLogger().handlers) == root_handlers
+session.close()
+"""
+    env = os.environ.copy()
+    env.update({
+        "NEO_LOG_LEVEL": "INFO", "NEO_LOG_FILE_ENABLED": "true",
+        "NEO_LOG_FILE_LEVEL": "INFO", "NEO_LOG_FILE_PATH": str(tmp_path / "sdk.log"),
+    })
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=tmp_path, env=env,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    log = (tmp_path / "sdk.log").read_text()
+    assert "api_request_success" in result.stdout + log
+    assert "SYNTHETIC_IP_SENTINEL" not in result.stdout + result.stderr + log
