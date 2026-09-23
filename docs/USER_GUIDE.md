@@ -402,14 +402,16 @@ admission source.
 
 **Deny.** Order Pad and Quick Trade show **Laya denied**, then the server
 reason. When the server sent a quantity ceiling, the next line is
-**Max quantity N.** Place controls stay off. Kill All stays reachable.
+**Max quantity N.** Place controls stay off until Laya or the mode
+changes; you can then retry. Kill All stays reachable.
 A denial is not a Chat outage: the LLM label stays **Not configured** or
 **Connected (suggest only)**, and the Chat strip stays Info.
 
 **Clamp.** When the quantity is above the Laya ceiling, Order Pad and
 Quick Trade show **Qty reduced to N (Laya limit)** (or the server
 message). Nothing is placed at the original size or the reduced size
-until you place that reduced quantity.
+until you place that reduced quantity. The clamp stays until you change
+the ticket.
 
 **Degraded.** Live stays open. The desk says **Laya Degraded — tighter
 limits** on the status cluster and under those place controls. That line
@@ -1349,7 +1351,8 @@ Positions, Order Ladder, and Option Chain may still show a place error
 as a toast.
 
 1. **Laya denied** — read the server reason under the headline. Place
-   controls stay off. **Max quantity N.** is the ceiling the server sent.
+   controls stay off until Laya or the mode changes. **Max quantity N.**
+   is the ceiling the server sent.
    While the strip reads **Laya is Down — Live orders paused.**, Live place
    is already muted there. Ready or Degraded allows another attempt. Chat
    cannot place instead.
