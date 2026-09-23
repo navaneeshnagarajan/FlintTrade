@@ -79,7 +79,7 @@ OpenAlgo 501). Gated forever/GTT is:
 | `positionbook` | Open positions (intraday and overnight). |
 | `holdings` | Long-term holdings (CNC / delivery). |
 | `margin` | Pre-trade margin estimate for a list of positions. |
-| `ping` | Health check (POST). |
+| `ping` | OpenAlgo health check (POST). Distinct from FlintTrade `GET /api/v1/ping`. |
 | `analyzer` | Read sandbox / analyzer mode status. |
 | `analyzer/toggle` | Toggle sandbox / live mode. |
 
@@ -494,13 +494,21 @@ The terminal has two development proxy namespaces:
 | `/api/v1/latency/recent` | Recent latency records. |
 | `/api/v1/reconciliation/outcomes` | Unresolved broker-write outcomes, including the exact selector, business date, non-secret persisted intent, fresh-snapshot evidence and any retryable `PENDING_AUDIT` or `PENDING_ROUTER_CLEAR` decision. Requires an authenticated session with `admin.observability.read`; results and remaining-outcome counts are filtered through the current router's account ACL. |
 | `/api/v1/reconciliation/outcomes/<attempt_id>/resolve` (**POST**) | Record `confirmed_applied`, `confirmed_not_applied`, or basket-only `confirmed_partial` after broker verification. Requires an authenticated, PIN-unlocked Live JWT, session scope `admin.observability.run`, current-router selector ACL, exact `CONFIRM <APPLIED\|NOT_APPLIED\|PARTIAL> <broker>:<account>:<attempt>` confirmation, a newly adopted exact-selector reconciliation generation, and a durable hash-chained audit receipt. Snapshots are monotonic; same-time conflicts and malformed reports fail closed, and historical observations remain evidence. Applied placement IDs must be first observed after invocation and match every persisted material identity field; basket requests map applied IDs to `broker_order_item_indexes` and partition all remaining children in `not_applied_item_indexes`. Modify and cancel recovery require operation-specific evidence. A `PENDING_AUDIT` retry requires newer evidence, archives the prior revision and receives a new resolution ID; a `PENDING_ROUTER_CLEAR` retry resumes the committed decision without another broker read. Success and structured-error responses carry the exact attempt and canonical decision; the terminal runtime-validates identity, status and primitive types before updating state. Ambiguous and unsupported cases remain blocked; this route performs no broker write. |
-| `/health`, `/health/detail`, `/healthz`, `/readyz`, `/api/v1/ping` | Process health and compatibility probes. |
+| `/health`, `/health/detail`, `/healthz`, `/readyz` | Process health and compatibility probes. |
+| `GET /api/v1/ping` | Process liveness. The body includes `laya` (`ready`, `degraded`, or `down`). |
 | `/v1/admin/system` | CPU, memory, disk, network, uptime, and process metrics for the Admin system panel. |
 | `/v1/audit/*` | Scoped audit trail (`admin.audit.read` where required). |
 | `/api/v1/admin/activity` | Operator activity feed. |
 | `/api/v1/audit/logs` | Audit-log read on the operations blueprint (not `/v1/operations/…`). |
 
-`GET /api/v1/ping` returns `laya` as `ready`, `degraded`, or `down`. Laya starts Down. The response does not invent Ready.
+`GET /api/v1/ping` is the FlintTrade process probe, not the OpenAlgo
+passthrough `ping` (POST). It is exempt from the API-key check. The
+response is JSON
+`{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down"}`.
+`status` is `"ok"`, `timestamp` is ISO8601 IST, and `laya` is `"ready"`,
+`"degraded"`, or `"down"`. Laya starts Down. A ping publishes that process
+status and does not invent Ready. Clients must not treat a missing or
+omitted `laya` as Ready; the desk uses `laya ?? "down"`.
 
 ### Errors (`/ft-api/v1/errors`, `/ft-api/v1/changelog`)
 
