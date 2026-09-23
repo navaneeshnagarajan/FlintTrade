@@ -1,12 +1,11 @@
 # FT-SETUP-COPY-001 — Scrub calendar-day operator copy from Setup
 
-Tracking only. This pull request does not change product strings, wizard
-flow, or broker behaviour.
-
 Operator-visible Setup, Mode Select, Broker Connect, and the operator
-guide still use a weekday pack name as a product path. Product language
+guide used a weekday pack name as a product path. Product language
 for those surfaces is **Practice**, **Connected (read)**, **Live**, and
-**API smoke**.
+**API smoke**. Wizard flow and broker behaviour are unchanged.
+
+The quotes below are the strings this tip replaced.
 
 ## Locked behaviour
 
@@ -27,9 +26,7 @@ OpenAlgo stays Settings / fallback, not the primary connect CTA.
 
 ## Verified operator surfaces
 
-Checked on the tree this note was added to. Quotes below are the
-current operator strings, recorded so the follow-up can replace them
-without a second search.
+Quotes below are the operator strings this tip replaced.
 
 ### Mode Select
 
@@ -140,7 +137,6 @@ finding:
 
 ## Out of scope
 
-- Any product-string edit in this pull request.
 - Setup wizard structure, step order, or which control is the primary
   continue action (**FT-SETUP-FLOW-001**).
 - Exchange-calendar copy that states a real session fact, including
@@ -150,10 +146,9 @@ finding:
   unlock. Those stay on their existing acceptance tips.
 - Renaming modules or tests whose only “leak” is an identifier.
 
-## Acceptance (follow-up implementation)
+## Acceptance
 
-This pull request is done when the tracking note exists. The product
-fix, in a later change, is done when all of the following hold:
+The product fix is done when all of the following hold:
 
 1. Mode Select, the setup connection step, and Broker Connect (including
    Settings → Brokers) show Practice, Connected (read), Live, and API
@@ -174,4 +169,7 @@ fix, in a later change, is done when all of the following hold:
 
 ## Status
 
-Open. Product copy is unchanged.
+Done. Operator chrome, the operator guide, and the public setup notes
+use Practice, Connected (read), Live, and API smoke. The Kotak Neo
+subscribe error uses the same language. Internal identifiers and
+acceptance-doc IDs are unchanged.

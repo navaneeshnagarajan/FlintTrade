@@ -37,7 +37,7 @@ describe("ConnectionStep", () => {
     vi.unstubAllGlobals();
   });
 
-  it("does not present OpenAlgo as the primary Monday connect CTA", () => {
+  it("does not present OpenAlgo as the primary connect CTA", () => {
     const onComplete = vi.fn();
     render(<ConnectionStep onComplete={onComplete} />);
 
@@ -170,7 +170,7 @@ describe("ConnectionStep", () => {
     fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
 
     expect(screen.getByText("Native brokers section")).toBeInTheDocument();
-    expect(screen.getByText(/Monday primary broker connect/i)).toBeInTheDocument();
+    expect(screen.getByText(/Native Dhan \+ Kotak Neo Connected \(read\) \/ API smoke/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Connected \(read\)/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Live read only until funded unlock/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Dhan, Upstox, INDmoney/i)).not.toBeInTheDocument();

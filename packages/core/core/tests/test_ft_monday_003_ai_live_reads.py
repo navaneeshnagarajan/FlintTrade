@@ -86,8 +86,10 @@ async def test_monday_ai_snapshot_rejects_non_monday_broker() -> None:
     """Upstox / others are not the Monday AI live-read path."""
     adapter = _ReadAdapter()
     session = _session()
-    with pytest.raises(ValueError, match="Dhan \\+ Neo"):
+    with pytest.raises(ValueError, match="Dhan \\+ Neo") as raised:
         await collect_monday_ai_read_snapshot("upstox", "Main", adapter, session)
+    assert "Monday" not in str(raised.value)
+    assert "Connected (read)" in str(raised.value)
     assert adapter.calls == []
 
 

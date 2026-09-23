@@ -152,7 +152,7 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
       <div className="space-y-3">
         <p className="text-sm text-text-primary">
           Practice uses FlintTrade&apos;s SandboxEngine for paper fills. You do not
-          need a broker for Monday Practice.
+          need a broker for Practice.
         </p>
         <Button
           type="button"
@@ -164,7 +164,7 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
         </Button>
         <p className="text-xs text-text-muted text-center">
           OpenAlgo and native brokers stay in Settings as a fallback — not the
-          primary Monday path.
+          primary Practice path.
         </p>
       </div>
 
@@ -187,13 +187,13 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
 
         {mode === "openalgo" && (
           <p className="text-xs text-text-muted">
-            Settings fallback only — not the Monday primary connect path. Practice
+            Settings fallback only — not the primary connect path. Practice
             fills still use the native SandboxEngine.
           </p>
         )}
         {mode === "direct" && (
           <p className="text-xs text-text-muted">
-            Monday primary broker connect: native Dhan + Kotak Neo. Successful
+            Native Dhan + Kotak Neo Connected (read) / API smoke. Successful
             non-funded reads show {CONNECTED_READ_LABEL} / API smoke — never
             placeable Live orders. Neo has no Practice sandbox. {NEO_OPERATOR_COPY}
           </p>

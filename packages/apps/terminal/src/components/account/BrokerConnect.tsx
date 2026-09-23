@@ -770,11 +770,11 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
         <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
         <div className="space-y-2">
           <p>
-            <strong className="text-text-primary">Monday path is native Dhan + Kotak Neo Connected (read).</strong>{" "}
+            <strong className="text-text-primary">Native Dhan + Kotak Neo is Connected (read).</strong>{" "}
             Native connection is currently enabled for{" "}
             {connectableNativeLabel || "the currently selectable native brokers"}. Non-funded live
             reads are {CONNECTED_READ_LABEL} / {API_SMOKE_LABEL} — never placeable Live orders. Neo
-            has no sandbox: {NEO_OPERATOR_COPY} OpenAlgo is Settings / fallback only, not the Monday
+            has no sandbox: {NEO_OPERATOR_COPY} OpenAlgo is Settings / fallback only, not the
             primary connect CTA. Native order placement stays fail-closed.{" "}
             {unavailableNativeLabel
               ? `${unavailableNativeLabel} ${unavailableNativeVerb} visible as catalogued adapters and remain disabled until their activation blockers clear.`
