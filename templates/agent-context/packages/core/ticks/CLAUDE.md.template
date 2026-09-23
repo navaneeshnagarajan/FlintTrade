@@ -21,12 +21,13 @@ maturin build --release  # release build
 ```bash
 python -m pytest packages/core/ticks/tests/ -v --import-mode=importlib
 ```
-2 test files, ~73 tests.
 
-## Depends on: none (standalone Rust/PyO3 package)
+## Dependencies
+
+Python bindings expose `tick_engine`; declared build requirements and Rust dependencies live in `packages/core/ticks/pyproject.toml` and `packages/core/ticks/Cargo.toml`.
 
 ## Rules
 - Read root CLAUDE.md for project-wide rules
 - Tests are in the `tests/` directory. Add new test files as needed.
-- Update root `changelog.md`
+- Update root `changelog.md` only for shipped user-visible or API changes (for example, added/removed exports or signature changes); do not add entries for tests, behaviour-preserving refactors or in-flight design.
 - Branch: follow root AGENTS.md; verify live main before opening or merging a PR.

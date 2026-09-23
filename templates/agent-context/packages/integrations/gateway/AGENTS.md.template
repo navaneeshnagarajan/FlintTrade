@@ -6,7 +6,9 @@
 - `BROKER_CATALOG` in `adapter.py` defines the catalogue; `tests/test_adapter.py` pins its count. Catalogue membership does not imply a native adapter is activated or allowed to place Live orders.
 - OpenAlgo `broker/*` modules remain an optional compatibility path loaded through `_resolve_openalgo_root()` in `adapter.py`; native implementations live in `brokers/`.
 
-## Depends on: core
+## Dependencies
+
+See `packages/integrations/gateway/pyproject.toml` for declared dependencies and optional extras.
 
 ## Path resolution
 - OpenAlgo is an external test-dep, not bundled. `adapter.py:_resolve_openalgo_root()` looks for the broker tree at `.local/external/openalgo/` first (the canonical location since commit `3da42e4`, 2026-04-30), with a legacy fallback to `infra/openalgo/` for older checkouts.
@@ -19,5 +21,5 @@
 - Every live write must obtain a `SafetyContext` through `gate_order`/`gate_broker_write` and pass through `BrokerRouter`; never call an adapter write directly.
 - Credentials are persisted via `CredentialStore` (Fernet-encrypted SQLite). Never log a credential payload, even at DEBUG.
 - Tests are in `tests/`. Skip integration tests that require the external OpenAlgo tree when it is unavailable; native adapter tests use mocks independently of that tree. Never assume source availability authorises a real broker session or funded order.
-- Update root `changelog.md` for adapter-surface changes (new broker, auth-flow change, contract-normalisation change).
+- Update root `changelog.md` only for shipped user-visible or API changes, including adapter-surface changes (new broker, auth-flow change, contract-normalisation change); do not add entries for tests, behaviour-preserving refactors or in-flight design.
 - Branch: follow root AGENTS.md; verify live main before opening or merging a PR.

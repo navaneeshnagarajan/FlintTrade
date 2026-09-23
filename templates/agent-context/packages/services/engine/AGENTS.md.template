@@ -7,24 +7,19 @@
 - openengine → event-driven architecture, BaseStrategy interface, live trader
 - algomirror → strategy_executor.py parallel execution patterns
 
-## Depends on: core
+## Dependencies
+
+See `packages/services/engine/pyproject.toml` for declared dependencies and optional extras.
 
 ## Rules
 - Read root CLAUDE.md for project-wide rules
 - Use `flinttrade_core.openalgo_client` (`packages/core/core/src/flinttrade_core/openalgo_client.py`) for the optional OpenAlgo REST bridge. Live writes must obtain a `SafetyContext` through `gate_order`/`gate_broker_write` and flow through `BrokerRouter`; never call broker writes directly.
 - Keep shared service logic broker-neutral; broker-specific implementations and capability differences belong in gateway adapters.
 - Tests are in the `tests/` directory. Add new test files as needed.
-- Update root `changelog.md`
+- Update root `changelog.md` only for shipped user-visible or API changes; do not add entries for tests, behaviour-preserving refactors or in-flight design.
 - Branch: follow root AGENTS.md; verify live main before opening or merging a PR.
 
-## Multi-exchange safety
-- Auto square-off times differ: equity 3:15 PM, currency 4:45 PM, MCX 11:30 PM
-- Position limits may differ per exchange segment
-- Rate limits apply across ALL exchanges combined (10 OPS total, not per exchange)
-
-## Crypto safety (Delta Exchange)
-- 24/7 market — no auto square-off time
-- Leverage up to 100x — position size limits critical
-- Liquidation price monitoring required
-- Funding rate impact on perpetual positions
-- No circuit breakers in crypto — wider stop losses needed
+## Exchange and broker safety
+- Use `TimeScheduler` in `src/flinttrade_engine/scheduler.py` for effective sessions, holidays and square-off timing; calendar and instrument rules can adjust schedule defaults.
+- Broker API throttles come from adapter capabilities and configured overrides in `flinttrade_gateway.rate_limiter`. Where algo tagging is required, `AlgoTagGuard` in `src/flinttrade_engine/algo_tag_guard.py` enforces its configured per-(broker, exchange) order ceiling.
+- Use the selected adapter's capabilities, instrument metadata and configured risk limits for supported products, leverage and position sizing. Do not infer permission to trade or fixed broker limits from an exchange label.
