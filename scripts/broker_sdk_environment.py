@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -28,7 +29,9 @@ for dist in md.distributions():
         except ValueError:
             direct = None
         result[name] = {"version": dist.version, "direct_url": direct}
-    if "neo_api_client" in (dist.read_text("top_level.txt") or "").splitlines():
+    top_level = (dist.read_text("top_level.txt") or "").splitlines()
+    record_owns = any(str(file).replace("\\\\", "/").split("/")[0] == "neo_api_client" for file in (dist.files or ()))
+    if "neo_api_client" in top_level or record_owns:
         result.setdefault("namespace_owners", []).append(name)
 print(json.dumps(result))
 """
@@ -73,15 +76,20 @@ def _healthy(state: dict[str, Any], version: str, commit: str) -> bool:
     direct = installed.get("direct_url")
     if not isinstance(direct, dict):
         return False
-    url = urlsplit(str(direct.get("url", "")))
-    vcs = direct.get("vcs_info") or {}
-    return (
-        url.scheme == "https" and url.hostname == "github.com"
-        and url.path == "/Kotak-Neo/kotak-neo-python.git" and not url.query and not url.fragment
-        and url.username is None and url.password is None and url.port is None
-        and vcs.get("vcs") == "git" and vcs.get("commit_id") == commit
-        and vcs.get("requested_revision", commit) == commit
-    )
+    vcs = direct.get("vcs_info")
+    if not isinstance(vcs, dict):
+        return False
+    try:
+        url = urlsplit(direct.get("url", ""))
+        return (
+            url.scheme == "https" and url.hostname == "github.com"
+            and url.path == "/Kotak-Neo/kotak-neo-python.git" and not url.query and not url.fragment
+            and url.username is None and url.password is None and url.port is None
+            and vcs.get("vcs") == "git" and vcs.get("commit_id") == commit
+            and vcs.get("requested_revision", commit) == commit
+        )
+    except (TypeError, ValueError, AttributeError):
+        return False
 
 
 def remove_kotak_distributions(
@@ -90,7 +98,10 @@ def remove_kotak_distributions(
     """Remove both overlapping Kotak distributions from a pip-only environment."""
     state = _probe(python, run)
     if "kotakneoapi" in state or "neo-api-client" in state:
-        _invoke(run, [str(python), "-m", "pip", "uninstall", "-y", "kotakneoapi", "neo-api-client"])
+        if shutil.which("uv"):
+            _invoke(run, ["uv", "pip", "uninstall", "--python", str(python), "kotakneoapi", "neo-api-client"])
+        else:
+            _invoke(run, [str(python), "-m", "pip", "uninstall", "-y", "kotakneoapi", "neo-api-client"])
 
 
 def repair_kotakneo_environment(
@@ -103,7 +114,7 @@ def repair_kotakneo_environment(
     version, commit = _pin()
     if _healthy(_probe(python, run), version, commit):
         return
-    _invoke(run, [str(python), "-m", "pip", "uninstall", "-y", "kotakneoapi", "neo-api-client"])
+    _invoke(run, ["uv", "pip", "uninstall", "--python", str(python), "kotakneoapi", "neo-api-client"])
     _invoke(run, ["uv", "sync", "--frozen", "--all-packages", "--reinstall-package", "kotakneoapi"])
     if not _healthy(_probe(python, run), version, commit):
         raise RuntimeError("Kotak Neo sync did not produce the pinned Git distribution with exclusive namespace")

@@ -23,8 +23,10 @@ def test_repair_replaces_stale_distributions_then_is_idempotent(python: Path) ->
         calls.append(argv)
         if "-c" in argv:
             return subprocess.CompletedProcess(argv, 0, json.dumps(state), "")
-        if argv[1:5] == ["-m", "pip", "uninstall", "-y"]:
-            assert argv[0] == str(python)
+        if argv[1:3] == ["-m", "pip"]:
+            return subprocess.CompletedProcess(argv, 1, "", "No module named pip")
+        if argv[:4] == ["uv", "pip", "uninstall", "--python"]:
+            assert argv[4] == str(python)
             assert set(argv[5:]) == {"kotakneoapi", "neo-api-client"}
             state.clear()
             return subprocess.CompletedProcess(argv, 0, "", "")
@@ -63,6 +65,83 @@ def test_interrupted_repair_fails_closed() -> None:
         return subprocess.CompletedProcess(argv, 1, "", "network interrupted")
 
     with pytest.raises(RuntimeError, match="sync"):
+        repair_kotakneo_environment(Path("/repo/.venv/bin/python"), run=run)
+    assert any("uninstall" in command for command in commands)
+    assert any("--reinstall-package" in command for command in commands)
+
+
+def test_remove_kotak_without_interpreter_pip_when_uv_is_available() -> None:
+    from scripts.broker_sdk_environment import remove_kotak_distributions
+
+    commands: list[list[str]] = []
+
+    def run(args, **_kwargs):
+        argv = list(map(str, args))
+        commands.append(argv)
+        if "-c" in argv:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"kotakneoapi": {"version": "3.0.7"}}), "")
+        if argv[1:3] == ["-m", "pip"]:
+            return subprocess.CompletedProcess(argv, 1, "", "No module named pip")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    remove_kotak_distributions(Path("/repo/.venv/bin/python"), run=run)
+
+    assert commands[-1] == ["uv", "pip", "uninstall", "--python", "/repo/.venv/bin/python",
+                            "kotakneoapi", "neo-api-client"]
+
+
+def test_repair_accepts_record_only_namespace_evidence(tmp_path: Path) -> None:
+    from scripts.broker_sdk_environment import repair_kotakneo_environment
+
+    dist = tmp_path / "kotakneoapi-3.0.7.dist-info"
+    dist.mkdir()
+    (dist / "METADATA").write_text("Metadata-Version: 2.3\nName: kotakneoapi\nVersion: 3.0.7\n")
+    (dist / "RECORD").write_text("neo_api_client/__init__.py,,\n")
+    package = tmp_path / "neo_api_client"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (dist / "direct_url.json").write_text(json.dumps({
+        "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
+        "vcs_info": {"vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"},
+    }))
+    python = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"
+    commands: list[list[str]] = []
+
+    def run(args, **kwargs):
+        argv = list(map(str, args))
+        commands.append(argv)
+        if "-c" not in argv:
+            raise AssertionError(f"Healthy RECORD-only SDK must not be reinstalled: {argv}")
+        return subprocess.run(
+            [str(python), "-S", "-c", argv[2]],
+            env=os.environ | {"PYTHONPATH": str(tmp_path)}, **kwargs,
+        )
+
+    repair_kotakneo_environment(python, run=run)
+
+    assert len(commands) == 1
+
+
+@pytest.mark.parametrize("direct_url", [
+    {"url": "https://github.com:bad/Kotak-Neo/kotak-neo-python.git", "vcs_info": {"vcs": "git"}},
+    {"url": "https://[broken/Kotak-Neo/kotak-neo-python.git", "vcs_info": {"vcs": "git"}},
+    {"url": "https://github.com/Kotak-Neo/kotak-neo-python.git", "vcs_info": ["git"]},
+])
+def test_malformed_provenance_is_repairable_and_fails_closed_if_persistent(direct_url) -> None:
+    from scripts.broker_sdk_environment import repair_kotakneo_environment
+
+    commands: list[list[str]] = []
+    state = {"kotakneoapi": {"version": "3.0.7", "direct_url": direct_url},
+             "namespace_owners": ["kotakneoapi"]}
+
+    def run(args, **_kwargs):
+        argv = list(map(str, args))
+        commands.append(argv)
+        if "-c" in argv:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(state), "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with pytest.raises(RuntimeError, match="pinned Git distribution"):
         repair_kotakneo_environment(Path("/repo/.venv/bin/python"), run=run)
     assert any("uninstall" in command for command in commands)
     assert any("--reinstall-package" in command for command in commands)

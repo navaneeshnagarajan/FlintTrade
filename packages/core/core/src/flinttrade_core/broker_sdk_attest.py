@@ -96,7 +96,7 @@ def _owns_neo_namespace(dist: metadata.Distribution) -> bool:
     top_level = dist.read_text("top_level.txt") or ""
     if "neo_api_client" in top_level.splitlines():
         return True
-    return any(str(file).split("/")[0] == "neo_api_client" for file in (dist.files or ()))
+    return any(str(file).replace("\\", "/").split("/")[0] == "neo_api_client" for file in (dist.files or ()))
 
 
 def _kotak_provenance_matches(dist: metadata.Distribution, source_commit: str) -> bool:
@@ -105,23 +105,22 @@ def _kotak_provenance_matches(dist: metadata.Distribution, source_commit: str) -
         return False
     try:
         data = json.loads(raw)
-        url = urlsplit(data["url"])
         vcs = data["vcs_info"]
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         return False
     if not isinstance(vcs, dict):
         return False
-    if (
-        url.scheme != "https"
-        or url.hostname != "github.com"
-        or url.username is not None
-        or url.password is not None
-        or url.port is not None
-        or url.path != "/Kotak-Neo/kotak-neo-python.git"
-        or url.query or url.fragment
-        or vcs.get("vcs") != "git"
-        or vcs.get("commit_id") != source_commit
-    ):
+    try:
+        url = urlsplit(data["url"])
+        origin_ok = (
+            url.scheme == "https" and url.hostname == "github.com"
+            and url.username is None and url.password is None and url.port is None
+            and url.path == "/Kotak-Neo/kotak-neo-python.git"
+            and not url.query and not url.fragment
+        )
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return False
+    if not origin_ok or vcs.get("vcs") != "git" or vcs.get("commit_id") != source_commit:
         return False
     requested = vcs.get("requested_revision")
     return requested is None or requested == source_commit
@@ -140,6 +139,8 @@ def _attest_kotak(pin: dict[str, Any]) -> tuple[str | None, str]:
     if not kotak:
         return None, STATUS_MISSING
     installed = kotak[0].version
+    if not _owns_neo_namespace(kotak[0]):
+        return installed, STATUS_CONFLICT
     if installed != str(pin.get("version", "")):
         return installed, STATUS_MISMATCH
     source_commit = str(pin.get("source_commit", ""))
