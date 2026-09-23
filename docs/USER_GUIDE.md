@@ -360,8 +360,9 @@ separate labels. Broker is **Connected**, **Connected (read)**, or
 **Down**, including before a heartbeat and when the desk ping omits
 `laya`. Missing status is never painted **Ready**. The desk ping publishes
 Ready, Degraded, or Down and does not invent Ready. Only **Down** opens
-the Laya Blocked strip and mutes Live place and Position Mirror start;
-**Degraded** does not. LLM is **Not configured**, or **Connected (suggest only)**
+the Laya Blocked strip and mutes Live place and Position Mirror start.
+**Degraded** leaves Live open, shows **Laya Degraded — tighter limits**,
+and does not look Blocked. LLM is **Not configured**, or **Connected (suggest only)**
 when Chat is ready.
 
 FlintTrade does not hold client funds, reverse broker fills, or file a
@@ -376,8 +377,8 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Broker stream (`broker_stream`) | Dhan's market stream dropped. Kotak Neo has no stream class until SFeed. | Wait for the stream. Do not treat quotes as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
-| Laya (`laya`) | Blocked — Laya is Down ("Laya is Down — Live orders paused."). Live place and Position Mirror start stay closed. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. Kill All stays available. Laya starts Down. A heartbeat may report Ready or Degraded, which closes this strip. | Wait until Laya is Ready. Do not treat Chat as a substitute. |
-| Chat provider (`llm_provider`) | Chat is unavailable. Trading chrome stays as it was. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
+| Laya (`laya`) | Blocked — Laya is Down ("Laya is Down — Live orders paused."). Live place and Position Mirror start stay closed. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. Kill All stays available. Laya starts Down. A heartbeat may report Ready or Degraded, which closes this strip. | Wait until Laya is Ready. Do not treat Chat as a substitute. |
+| Chat provider (`llm_provider`) | Info — Chat is unavailable. Trading chrome stays as it was. A Laya denial is not this strip. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
 | Local network (`network_local`) | The desk process is up and cannot reach the public internet (gateway, DNS, or ping). A site/CDN miss with the desk ping still ok is edge/CDN. A single broker timeout is not this class. | Check the link or switch network, then retry. |
@@ -388,6 +389,39 @@ regulator's — not a FlintTrade claims desk:
 - Dhan support: https://dhan.co/customer-service/ and grievances: https://dhan.co/grievance/
 - Kotak Neo trade API: https://www.kotakneo.com/support/trading/trade-api-and-terminals/ and the complaint procedure: https://www.kotakneo.com/support/procedure-for-filing-a-complaint-with-kotak-securities/
 - SEBI SCORES: https://scores.sebi.gov.in and SMART ODR: https://smartodr.in
+
+### Laya on place
+
+Operator place and automate place run in this order: Mode guard →
+Laya.admit → SafetySystem → gate_order → BrokerRouter. Laya does not
+place the order and does not replace those layers. A refusal or a
+quantity clamp stops before SafetySystem. Chat never admits an order.
+
+**Deny.** Under the place control the desk shows **Laya denied**, then
+the server reason. When the server sent a quantity ceiling, a limits
+line follows (for example `Max quantity 1.`). Place controls stay off.
+Kill All stays reachable. A denial is not a Chat outage: the LLM label
+stays **Not configured** or **Connected (suggest only)**, and the Chat
+strip stays Info.
+
+**Clamp.** When the quantity is above the Laya ceiling, the desk shows
+**Qty reduced to N (Laya limit)** before you confirm. Nothing is placed
+at the original size or the reduced size until you place that reduced
+quantity. The quantity is never shrunk in silence.
+
+**Degraded.** Live stays open. The desk says **Laya Degraded — tighter
+limits** on the status cluster and under the place control. That line
+is not the Blocked strip, and it does not mute Live place or Position
+Mirror start.
+
+**Down.** Laya starts **Down**. Only **Down** opens the Laya Blocked
+strip and mutes Live place and Position Mirror start. While that mute
+is up, the place control does not also show **Laya denied**. Kill All
+stays reachable. Broker may stay **Connected** or **Connected (read)**.
+
+**Chat.** Chat never shows **Admit** or **Approved by Laya**, and Chat
+never places an order by admitting one. Chat being offline does not
+close Live.
 
 **Feed freshness (FT-CORE-002).** Explore disclosure is that Mode line.
 Per-widget Sample chips are retired. Per-symbol ticker Sample chips are
@@ -441,9 +475,10 @@ Compact-only-on-Trade (FT-UX-001). Mode and status stay reachable
    P&L is recorded in the **P&L Monitor** widget.
 
 You have just exercised the Practice order path — front-end → JWT
-guard → mode guard → FlintTrade sandbox → simulated fill → REST
-refresh of Positions and Orders. No real money moved. Explore Sample
-Buy never enters that path.
+guard → mode guard → Laya.admit → FlintTrade sandbox → simulated fill
+→ REST refresh of Positions and Orders. No real money moved. A refusal
+or a quantity clamp stops before the sandbox and is shown under the
+place control. Explore Sample Buy never enters that path.
 
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
@@ -559,6 +594,11 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] Daily P&L pause and hard-stop percentages are configured in Settings → Risk.
 - [ ] You have read the risk and user-responsibility notes in
       [disclaimer.md](../disclaimer.md).
+
+Operator and automate Live place run Mode guard → Laya.admit →
+SafetySystem → gate_order → BrokerRouter. Laya does not place the
+order. A refusal or a quantity clamp stops before SafetySystem.
+See [Laya on place](#laya-on-place).
 
 ### Walkthrough
 
@@ -972,7 +1012,9 @@ acknowledgement records that the unknown result was reviewed; it does not retry
 the action or label it successful.
 
 Chat is suggest-only. A connected LLM is labelled **Connected (suggest only)**.
-It does not place Live orders, and it is not Laya. Laya is a separate status:
+It does not place Live orders, and it is not Laya. Chat never shows **Admit**
+or **Approved by Laya**, and Chat never places an order by admitting one.
+Laya is a separate status:
 **Ready**, **Degraded**, or **Down**. Laya starts **Down**. The desk ping
 publishes Ready, Degraded, or Down and does not invent Ready. Only **Down**
 closes Live orders and mirror start. Kill All stays reachable. Chat being
@@ -1020,7 +1062,8 @@ AI Chat live-read context (FT-MONDAY-003): when an LLM is configured, Chat may
 use Practice SandboxEngine fills and native live-read feeds for
 analysis. That is analysis context, not a guarantee of profitable
 alphas, and profitable alphas are not a release criterion. Chat
-does not place Live orders — Live place stays fail-closed. This does
+does not place Live orders — Live place stays fail-closed. Chat never
+shows **Admit** or **Approved by Laya**. This does
 not lift the native broker HTTP freeze and does not claim every Chat
 turn already has live ticks. Chat never shows green **Connected** without a real LLM.
 When Chat is connected, the badge reads **Connected (suggest only)**.
@@ -1293,9 +1336,14 @@ when it detects the 401.
    review (no broker). Switch to **Practice** for the native sandbox
    path, or unlock **Live** for a real broker order.
 2. Open the **Orders** widget and look at the rejection reason column.
+   A Laya denial or clamp is shown under the place control and stops
+   before SafetySystem. **Laya denied** includes the server reason, and
+   a limits line when one was sent. **Qty reduced to N (Laya limit)**
+   is shown before confirm; the quantity is not shrunk in silence.
 3. Check the FlintTrade backend logs — the console where you ran
-   `python scripts/ft.py start` (or `make start`) — every rejected order is
-   logged with the safety-layer that blocked it.
+   `python scripts/ft.py start` (or `make start`). A safety-layer refusal
+   is logged with the layer that blocked it. A Laya refusal is not that
+   layer.
 
 ### Front-end shows stale prices
 
