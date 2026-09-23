@@ -1,6 +1,7 @@
 /**
  * Setup / Mode Select / Broker Connect must not name a calendar day as a
- * product path. Chrome stays Practice, Connected (read), Live, and API smoke.
+ * product path. Mode chrome stays Practice, Connected (read), and Live.
+ * API smoke is not a Mode label.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -44,6 +45,13 @@ function productionFiles(): string[] {
   ];
 }
 
+const MODE_CHROME = [
+  join(SRC, "routes", "ModeSelectRoute.tsx"),
+  join(SRC, "chrome", "ModeHonestyBar.tsx"),
+  join(SRC, "chrome", "ModeIndicator.tsx"),
+  join(SRC, "lib", "modeHonesty.ts"),
+];
+
 describe("Setup chrome copy", () => {
   it("does not name a calendar day as a product path", () => {
     const offenders: string[] = [];
@@ -56,6 +64,17 @@ describe("Setup chrome copy", () => {
         const rel = file.slice(SRC.length + 1).replace(/\\/g, "/");
         offenders.push(`${rel}:${line}: ${match[0]}`);
       }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("does not paint API smoke on Mode chips or the Mode bar", () => {
+    const offenders: string[] = [];
+    for (const file of MODE_CHROME) {
+      const stripped = stripComments(readFileSync(file, "utf8"));
+      if (!/API smoke/i.test(stripped)) continue;
+      const rel = file.slice(SRC.length + 1).replace(/\\/g, "/");
+      offenders.push(rel);
     }
     expect(offenders).toEqual([]);
   });

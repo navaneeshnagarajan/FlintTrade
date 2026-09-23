@@ -1,17 +1,20 @@
 # FT-SETUP-COPY-001 — Scrub calendar-day operator copy from Setup
 
 Operator-visible Setup, Mode Select, Broker Connect, and the operator
-guide used a weekday pack name as a product path. Product language
-for those surfaces is **Practice**, **Connected (read)**, **Live**, and
-**API smoke**. Wizard flow and broker behaviour are unchanged.
+guide used a weekday pack name as a product path. Mode chrome is
+**Practice**, **Connected (read)**, and **Live**. **API smoke** is not a
+Mode chip or Mode bar label. It may appear only in broker-connect helper
+copy for a non-funded read. Wizard flow and broker behaviour are unchanged.
 
 The quotes below are the strings this tip replaced.
 
 ## Locked behaviour
 
-1. Operator-visible Setup, Mode Select, Broker Connect, and related
-   chrome use product language only. A calendar day or weekday pack name
-   is not a product path in UI strings.
+1. Mode chips and the Mode bar use **Practice**, **Connected (read)**,
+   and **Live**. **API smoke** is not a Mode chip or Mode bar label, and
+   it does not rename Live or Connected (read). It may appear only in
+   broker-connect helper copy for a non-funded read. A calendar day or
+   weekday pack name is not a product path in UI strings.
 2. Code identifiers and acceptance-doc IDs may keep internal tracking
    names in developer docs and in source that is not shown as operator
    chrome. Operator strings and `docs/USER_GUIDE.md` operator copy must
@@ -150,9 +153,10 @@ finding:
 
 The product fix is done when all of the following hold:
 
-1. Mode Select, the setup connection step, and Broker Connect (including
-   Settings → Brokers) show Practice, Connected (read), Live, and API
-   smoke, and do not name a weekday pack as a path.
+1. Mode Select, the Mode bar, and account status use Practice, Connected
+   (read), and Live. API smoke is not a Mode label. Broker-connect helper
+   copy may still name the non-funded read check API smoke. Those surfaces
+   do not name a weekday pack as a path.
 2. `docs/USER_GUIDE.md` operator copy, plus the operator-facing setup
    prose in `docs/setup/QUICKSTART.md`, `docs/setup/static-ip-setup.md`,
    and `docs/COMPATIBILITY.md`, no longer advertise the internal
@@ -169,7 +173,7 @@ The product fix is done when all of the following hold:
 
 ## Status
 
-Done. Operator chrome, the operator guide, and the public setup notes
-use Practice, Connected (read), Live, and API smoke. The Kotak Neo
-subscribe error uses the same language. Internal identifiers and
+Done. Mode chrome is Practice, Connected (read), and Live. API smoke
+stays in broker-connect helper copy for a non-funded read, and it is
+not a Mode chip or Mode bar label. Internal identifiers and
 acceptance-doc IDs are unchanged.

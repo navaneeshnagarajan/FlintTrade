@@ -773,7 +773,8 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
             <strong className="text-text-primary">Native Dhan + Kotak Neo is Connected (read).</strong>{" "}
             Native connection is currently enabled for{" "}
             {connectableNativeLabel || "the currently selectable native brokers"}. Non-funded live
-            reads are {CONNECTED_READ_LABEL} / {API_SMOKE_LABEL} — never placeable Live orders. Neo
+            reads stay {CONNECTED_READ_LABEL}. The non-funded read check is {API_SMOKE_LABEL} —
+            never placeable Live orders. Neo
             has no sandbox: {NEO_OPERATOR_COPY} OpenAlgo is Settings / fallback only, not the
             primary connect CTA. Native order placement stays fail-closed.{" "}
             {unavailableNativeLabel
@@ -1012,7 +1013,7 @@ export function BrokerConnect({ pollAccounts = true }: BrokerConnectProps) {
                       {moneyPathChrome
                         ? ` · ${honest}`
                         : connected && mondayReadChrome(a)
-                        ? ` · ${CONNECTED_READ_LABEL} · ${API_SMOKE_LABEL}${
+                        ? ` · ${CONNECTED_READ_LABEL}${
                             a.broker === "kotakneo" ? ` · ${NEO_OPERATOR_COPY}` : ""
                           }${a.expires_at ? ` · ${expiryLabel(a.expires_at)}` : ""}`
                         : connected

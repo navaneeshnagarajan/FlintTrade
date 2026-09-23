@@ -105,7 +105,7 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
         >
           <Info className="size-3.5 mt-0.5 shrink-0" aria-hidden="true" />
           <span>
-            {CONNECTED_READ_LABEL} / API smoke only — never placeable Live orders.
+            {CONNECTED_READ_LABEL} only — never placeable Live orders.
             Neo has no sandbox. {NEO_OPERATOR_COPY}
           </span>
         </div>
@@ -193,9 +193,9 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
         )}
         {mode === "direct" && (
           <p className="text-xs text-text-muted">
-            Native Dhan + Kotak Neo Connected (read) / API smoke. Successful
-            non-funded reads show {CONNECTED_READ_LABEL} / API smoke — never
-            placeable Live orders. Neo has no Practice sandbox. {NEO_OPERATOR_COPY}
+            Native Dhan + Kotak Neo stays {CONNECTED_READ_LABEL}. Successful
+            non-funded reads never become placeable Live orders. Neo has no
+            Practice sandbox. {NEO_OPERATOR_COPY}
           </p>
         )}
 
