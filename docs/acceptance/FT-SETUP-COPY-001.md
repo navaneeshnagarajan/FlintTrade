@@ -18,7 +18,8 @@ for those surfaces is **Practice**, **Connected (read)**, **Live**, and
    chrome. Operator strings and `docs/USER_GUIDE.md` operator copy must
    not advertise those names.
 3. Setup wizard complexity (step count, layout, which connect action is
-   primary) is a separate UX call. This finding is copy honesty only.
+   primary) is a separate UX call (**FT-SETUP-FLOW-001**). This finding
+   is copy honesty only.
 
 Existing product sentences stay. Kotak Neo copy remains
 `Live read only until funded unlock.` Live place stays fail-closed.
@@ -92,6 +93,17 @@ The follow-up removes the tracking IDs from the operator guide. The
 acceptance docs `docs/acceptance/FT-MONDAY-001.md` (if present),
 `FT-MONDAY-002.md`, and `FT-MONDAY-003.md` may keep those IDs.
 
+The same operator-copy rule covers these setup pages, which cite the
+same tracking IDs in running prose:
+
+- `docs/setup/QUICKSTART.md` (broker-access section)
+- `docs/setup/static-ip-setup.md` (native Dhan + Kotak Neo section)
+- `docs/COMPATIBILITY.md` (Kotak Neo catalogue paragraph)
+
+Contributor docs may keep the IDs: `docs/ARCHITECTURE.md`,
+`docs/DEVELOPER_GUIDE.md`, `docs/INVENTORY.md`, and the maintainer index
+in `docs/README.md`.
+
 ### Operator-reachable error text
 
 Not Setup chrome, but an operator can see it if a Kotak Neo subscribe
@@ -103,9 +115,10 @@ fails closed:
 `Kotak Neo Monday path is REST-only (quotes, depth, historical, option chain). Live SFeed create_websocket is not wired.`
 
 `packages/integrations/gateway/src/flinttrade_gateway/monday_read_smoke.py`
-raises `ValueError` with `Monday read-smoke is Dhan + Neo only`. Treat
-that message as in scope if it is shown to an operator; the function
-name may stay.
+raises `ValueError` with `Monday read-smoke is Dhan + Neo only` and
+`Monday AI reads are Dhan + Neo only`. Callers found in-tree are tests.
+Treat either message as in scope if a route shows `str(exc)` to an
+operator; the function names may stay.
 
 ## May keep internal names
 
@@ -115,8 +128,10 @@ finding:
 - Identifiers such as `isMondayReadBroker`, `mondayReadChrome`,
   `nativeMonday`, `MONDAY_READ_BROKERS`, and `run_monday_read_smoke`.
 - Developer comments, including the file headers on `ConnectionStep.tsx`
-  and `SetupAccountRoute.tsx`, and the comment in
-  `ModeSelectRoute.test.tsx`.
+  and `SetupAccountRoute.tsx`, the comment in
+  `ModeSelectRoute.test.tsx`, and the `read_smoke_ok` notes in
+  `types/broker.ts` and `services/ftApi.native.ts`. Those notes are not
+  rendered.
 - Acceptance-doc IDs `FT-MONDAY-001`, `FT-MONDAY-002`, and
   `FT-MONDAY-003` inside `docs/acceptance/`.
 - Account switcher and incident chrome. `AccountSwitcher` passes the
@@ -127,7 +142,7 @@ finding:
 
 - Any product-string edit in this pull request.
 - Setup wizard structure, step order, or which control is the primary
-  continue action.
+  continue action (**FT-SETUP-FLOW-001**).
 - Exchange-calendar copy that states a real session fact, including
   welcome copy that markets resume on a weekday at 09:15, seasonality
   weekday columns, and IST weekday arithmetic.
@@ -143,8 +158,11 @@ fix, in a later change, is done when all of the following hold:
 1. Mode Select, the setup connection step, and Broker Connect (including
    Settings → Brokers) show Practice, Connected (read), Live, and API
    smoke, and do not name a weekday pack as a path.
-2. `docs/USER_GUIDE.md` operator copy no longer advertises the internal
-   tracking IDs listed above. Developer acceptance docs may keep them.
+2. `docs/USER_GUIDE.md` operator copy, plus the operator-facing setup
+   prose in `docs/setup/QUICKSTART.md`, `docs/setup/static-ip-setup.md`,
+   and `docs/COMPATIBILITY.md`, no longer advertise the internal
+   tracking IDs listed above. Developer acceptance docs and the
+   contributor docs named above may keep them.
 3. The Kotak Neo subscribe error, if it remains operator-visible, uses
    the same product language (REST-only Connected (read) / API smoke;
    live SFeed not wired).
