@@ -1,29 +1,25 @@
 /**
- * SetupAccountRoute — the authoritative /setup wizard (7 steps, 0-indexed).
+ * SetupAccountRoute — the authoritative /setup wizard.
  *
- * Step 0: Account Security  — username, email, password, optional PIN (POSTs /v1/auth/setup)
- * Step 1: Two-Factor Auth   — optional enrol; “Set up later” continues the wizard
- * Step 2: Persona           — Trader / Investor / Beginner
- * Step 3: Broker Connection — optional; Monday primary CTA is skip (Practice SandboxEngine)
- * Step 4: Trading Defaults  — exchange, product, quantity
- * Step 5: Risk Limits       — MTM caps, position size, order rate
- * Step 6: Choose Mode       — Explore / Practice / Live (selecting a mode FINISHES setup)
+ * Required steps (Step N of 3 only):
+ *   0: Create operator — username, email, password, optional PIN
+ *   1: Vault — open the credential vault with a master password
+ *   2: Practice desk — affirm Practice and land on the desk
  *
- * Non-secret progress — `accountCreated`, persona, connection metadata,
- * trading/risk form values, and `currentStep` — is persisted to **localStorage**
- * under the key `flinttrade:setup-progress` so it survives refresh, tab close,
- * and browser restart. TOTP material, backup codes, and broker credentials stay
- * in memory only.
+ * Later / Skip (never counted, never shown before the affirm, never
+ * block Practice): authenticator, broker connect, LLM, Monitoring,
+ * trading defaults, and risk limits. They open on the Practice desk
+ * after landing. Persona is not a first-run gate.
+ * First run has no Live unlock.
+ *
+ * Non-secret progress is persisted to localStorage under
+ * `flinttrade:setup-progress`. TOTP material, backup codes, broker
+ * credentials, and the master password stay out of browser storage.
  *
  * Progress is cleared ONLY by explicit user action:
- *   (a) selecting a mode on step 6 (Finish setup)
- *   (b) clicking "Start over" in the header (wipes the unfinished account)
- *   (c) hitting HTTP 409 on account creation (opens the 2FA wipe hatches)
- *   (d) Set up later on the 2FA step (keeps unfinished-setup progress and
- *       continues the wizard without enabling authenticator login)
- *
- * On completion navigates to /welcome (which shows the sign-in form since an
- * account now exists).
+ *   (a) opening the Practice desk
+ *   (b) clicking "Start over" (wipes the unfinished account)
+ *   (c) deleting the account from the vault or authenticator recovery
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -49,12 +45,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import PublicRouteShell from "@/components/layout/PublicRouteShell";
 import { StepIndicator } from "@/routes/setup/StepIndicator";
-import { PersonaPicker, type Persona } from "@/routes/setup/PersonaStep";
+import type { Persona } from "@/routes/setup/PersonaStep";
 import { ConnectionStep } from "@/routes/setup/ConnectionStep";
 import type { ConnectionFormValues } from "@/routes/setup/connectionForm";
-import { TradingStep, type TradingDefaultsFormValues } from "@/routes/setup/TradingStep";
-import { RiskStep, type RiskFormValues } from "@/routes/setup/RiskStep";
-import ModeSelectRoute from "@/routes/ModeSelectRoute";
+import type { TradingDefaultsFormValues } from "@/routes/setup/TradingStep";
+import type { RiskFormValues } from "@/routes/setup/RiskStep";
+import { LlmStep, type LlmFormValues } from "@/routes/setup/LlmStep";
+import { normaliseLlmHost, providerSelection } from "@/lib/llmProviders";
+import { TradingStep } from "@/routes/setup/TradingStep";
+import { RiskStep } from "@/routes/setup/RiskStep";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { downgradeMode } from "@/lib/modeAuth";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import {
@@ -62,8 +62,18 @@ import {
   isAuthSessionFenceCurrent,
   useAuthStore,
 } from "@/stores/authStore";
-import { AccountSetupError, enableFlintTradeTotp, setupFlintTradeAccount } from "@/lib/setupAccountApi";
+import {
+  AccountSetupError,
+  enableFlintTradeTotp,
+  openFlintTradeVault,
+  setupFlintTradeAccount,
+} from "@/lib/setupAccountApi";
 import { persistSetupChoices } from "@/routes/setup/applySetupChoices";
+import {
+  REQUIRED_SETUP_STEP_COUNT,
+  REQUIRED_SETUP_STEP_LABELS,
+  type OptionalSetupPanel,
+} from "@/routes/setupRouting";
 
 // ---------------------------------------------------------------------------
 // Session-storage progress tracking
@@ -72,19 +82,18 @@ import { persistSetupChoices } from "@/routes/setup/applySetupChoices";
 const PROGRESS_KEY = "flinttrade:setup-progress";
 
 /**
- * 7 linear steps. TOTP is step 1 (not an invisible sub-phase of step 0).
- *   0: Account Security  (one-way — submitting creates the account)
- *   1: Two-Factor Auth   (one-way — confirmation cannot be undone)
- *   2: Persona
- *   3: Broker Connection
- *   4: Trading Defaults
- *   5: Risk Limits
- *   6: Choose Mode       ("Finish setup" lives on this step)
+ * Required steps only. Optional panels are not stored as step indexes.
+ *   0: Create operator (one-way — submitting creates the account)
+ *   1: Vault
+ *   2: Practice desk
  *
- * All form values from steps 2–5 are persisted so Back/Next preserve entries.
+ * Legacy records may still carry persona, trading, and risk values. They
+ * are kept so a refresh does not drop them, and they are not gates.
  */
 interface SetupProgress {
   accountCreated: boolean;
+  /** True once the credential vault has been opened on this machine. */
+  vaultOpened: boolean;
   totpUri: string;
   backupCodes: string[];
   persona: Persona | null;
@@ -93,7 +102,7 @@ interface SetupProgress {
   risk: Partial<RiskFormValues> | null;
   mode: AppMode | null;
   displayName: string;
-  /** 0..6 — the step index the user is currently viewing. */
+  /** 0..2 — the required step the operator is on. */
   currentStep: number;
 }
 
@@ -102,6 +111,7 @@ const appModeEnum = z.enum(["explore", "practice", "live"]);
 
 const persistedSetupProgressSchema = z.object({
   accountCreated: z.boolean(),
+  vaultOpened: z.boolean().optional().default(false),
   persona: personaEnum.nullable(),
   connection: z
     .object({
@@ -127,11 +137,13 @@ const persistedSetupProgressSchema = z.object({
     .nullable(),
   mode: appModeEnum.nullable(),
   displayName: z.string().optional().default(""),
+  /** Accept legacy 0..6 records, then clamp them onto the required path. */
   currentStep: z.number().int().min(0).max(6),
 });
 
 const EMPTY_PROGRESS: SetupProgress = {
   accountCreated: false,
+  vaultOpened: false,
   totpUri: "",
   backupCodes: [],
   persona: null,
@@ -143,6 +155,12 @@ const EMPTY_PROGRESS: SetupProgress = {
   currentStep: 0,
 };
 
+function requiredStepFor(progress: { accountCreated: boolean; vaultOpened: boolean }): number {
+  if (!progress.accountCreated) return 0;
+  if (!progress.vaultOpened) return 1;
+  return 2;
+}
+
 // Module-scoped, in-memory-only cache of the step-2 recovery material (TOTP
 // URI + backup codes). Recovery material is deliberately NEVER written to
 // browser storage, but the wizard's component state is lost when the route
@@ -152,7 +170,8 @@ const EMPTY_PROGRESS: SetupProgress = {
 // a misleading "closed or refreshed" recovery message. Module scope survives
 // remounts within this JS session and dies on a real refresh or close,
 // exactly matching that message; it is cleared on start-over, account
-// deletion, and setup completion.
+// deletion, and when the operator skips authenticator setup on the desk.
+// Opening the Practice desk keeps it so the later tray can still show the QR.
 let sessionRecoveryMaterial: { totpUri: string; backupCodes: string[] } | null = null;
 
 /** Test-only: drop the in-memory recovery-material cache between tests. */
@@ -171,8 +190,10 @@ function loadProgress(): SetupProgress | null {
     const raw = localStorage.getItem(PROGRESS_KEY);
     const persisted = safeParse(raw, persistedSetupProgressSchema);
     if (!persisted) return null;
+    const vaultOpened = persisted.vaultOpened === true;
     const progress: SetupProgress = {
       ...persisted,
+      vaultOpened,
       // Recovery material and broker credentials are deliberately never
       // restored from browser storage. Older records are rewritten below so
       // secrets left by previous versions are removed on first load.
@@ -181,6 +202,10 @@ function loadProgress(): SetupProgress | null {
       connection: persisted.connection
         ? { ...persisted.connection, apiKey: "" }
         : null,
+      currentStep: requiredStepFor({
+        accountCreated: persisted.accountCreated,
+        vaultOpened,
+      }),
     };
     saveProgress(progress);
     return progress;
@@ -193,6 +218,7 @@ function saveProgress(progress: SetupProgress): void {
   try {
     localStorage.setItem(PROGRESS_KEY, JSON.stringify({
       accountCreated: progress.accountCreated,
+      vaultOpened: progress.vaultOpened,
       persona: progress.persona,
       connection: progress.connection
         ? {
@@ -217,6 +243,33 @@ function clearProgress(): void {
     localStorage.removeItem(PROGRESS_KEY);
   } catch {
     // Non-critical.
+  }
+}
+
+/** Set once the operator opens the Practice desk. Not a required step. */
+export const PRACTICE_LATER_KEY = "flinttrade:setup-later";
+
+export function markPracticeLaterPending(): void {
+  try {
+    localStorage.setItem(PRACTICE_LATER_KEY, "1");
+  } catch {
+    // Storage quota or privacy mode — the desk still opens.
+  }
+}
+
+export function clearPracticeLaterPending(): void {
+  try {
+    localStorage.removeItem(PRACTICE_LATER_KEY);
+  } catch {
+    // Non-critical.
+  }
+}
+
+function practiceLaterPending(): boolean {
+  try {
+    return localStorage.getItem(PRACTICE_LATER_KEY) === "1";
+  } catch {
+    return false;
   }
 }
 
@@ -941,33 +994,467 @@ function TotpDisplay({
 }
 
 // ---------------------------------------------------------------------------
-// Step 2: Persona
+// Step 2: Vault
 // ---------------------------------------------------------------------------
 
-interface PersonaStepWrapperProps {
-  initialSelected?: Persona | null;
-  onComplete: (persona: Persona) => void;
-  onBack: () => void;
+const vaultSchema = z.object({
+  masterPassword: z.string().min(8, "At least 8 characters"),
+  confirmMasterPassword: z.string(),
+}).refine((values) => values.masterPassword === values.confirmMasterPassword, {
+  message: "Master passwords do not match",
+  path: ["confirmMasterPassword"],
+});
+
+type VaultFormValues = z.infer<typeof vaultSchema>;
+
+interface VaultStepProps {
+  onOpened: () => void;
+  onAccountDeleted: () => void;
 }
 
-function PersonaStepWrapper({ initialSelected, onComplete, onBack }: PersonaStepWrapperProps) {
-  const [selected, setSelected] = useState<Persona | null>(initialSelected ?? null);
+function VaultStep({ onOpened, onAccountDeleted }: VaultStepProps) {
+  const [phase, setPhase] = useState<"checking" | "form" | "ready">("checking");
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [serverError, setServerError] = useState("");
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetError, setResetError] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<VaultFormValues>({ resolver: zodResolver(vaultSchema) });
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await openFlintTradeVault("");
+        if (cancelled) return;
+        setPhase(result.alreadyPresent ? "ready" : "form");
+      } catch {
+        if (!cancelled) setPhase("form");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function onSubmit(values: VaultFormValues) {
+    setIsLoading(true);
+    setServerError("");
+    try {
+      await openFlintTradeVault(values.masterPassword);
+      onOpened();
+    } catch (error) {
+      setServerError(
+        error instanceof Error ? error.message : "The vault could not be opened.",
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function submitReset() {
+    if (!resetPassword) return;
+    setResetLoading(true);
+    setResetError("");
+    try {
+      const resp = await fetch(`${getBase()}/v1/auth/setup/reset`, {
+        method: "POST",
+        headers: buildHeaders(true),
+        body: JSON.stringify({ password: resetPassword }),
+      });
+      const data = await resp.json() as { message?: string };
+      if (!resp.ok) {
+        setResetError(data?.message ?? `Request failed (HTTP ${resp.status}).`);
+        return;
+      }
+      onAccountDeleted();
+    } catch {
+      setResetError("Cannot reach the server to delete the account.");
+    } finally {
+      setResetLoading(false);
+    }
+  }
 
   return (
-    <div className="space-y-6">
-      <PersonaPicker selected={selected} onSelect={setSelected} />
-      <div className="flex justify-between items-center mt-6">
-        <Button variant="ghost" onClick={onBack} type="button">
-          Back
-        </Button>
-        <Button
-          onClick={() => selected && onComplete(selected)}
-          disabled={!selected}
-        >
-          Continue
-        </Button>
+    <div className="space-y-5">
+      <div className="flex items-center gap-2 text-accent">
+        <ShieldCheck className="size-5 shrink-0" />
+        <h3 className="text-sm font-semibold text-text-primary">Vault</h3>
+      </div>
+      <p className="text-xs text-text-secondary leading-relaxed">
+        Open the credential vault with a master password. It stays on this
+        machine, it is not your sign-in password, and it is never shown again
+        after you save it.
+      </p>
+
+      {phase === "checking" && (
+        <p className="text-xs text-text-muted">Checking the vault…</p>
+      )}
+
+      {phase === "ready" && (
+        <div className="space-y-4">
+          <p className="text-sm text-text-primary">
+            The vault is already open on this machine.
+          </p>
+          <div className="flex justify-end">
+            <Button type="button" onClick={onOpened}>
+              Continue
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {phase === "form" && (
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+          {serverError && (
+            <div role="alert" className="flex items-start gap-3 p-3 rounded-lg border text-sm bg-loss/10 border-loss/30 text-loss">
+              <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+              <span>{serverError}</span>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="sa-master-password" className="text-xs text-text-secondary uppercase tracking-wider">
+              Master password <span className="text-loss">*</span>
+            </Label>
+            <div className="relative">
+              <Input
+                id="sa-master-password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+                aria-label="Master password"
+                className="pr-10"
+                {...register("masterPassword")}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => setShowPassword((value) => !value)}
+                aria-label={showPassword ? "Hide master password" : "Show master password"}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2"
+              >
+                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </Button>
+            </div>
+            {errors.masterPassword && (
+              <p role="alert" className="text-xs text-loss">{errors.masterPassword.message}</p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="sa-confirm-master-password" className="text-xs text-text-secondary uppercase tracking-wider">
+              Confirm master password <span className="text-loss">*</span>
+            </Label>
+            <Input
+              id="sa-confirm-master-password"
+              type="password"
+              autoComplete="new-password"
+              aria-label="Confirm master password"
+              {...register("confirmMasterPassword")}
+            />
+            {errors.confirmMasterPassword && (
+              <p role="alert" className="text-xs text-loss">{errors.confirmMasterPassword.message}</p>
+            )}
+          </div>
+          <div className="flex justify-end">
+            <Button type="submit" disabled={isLoading}>
+              {isLoading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+              {isLoading ? "Opening vault…" : "Open vault"}
+            </Button>
+          </div>
+        </form>
+      )}
+
+      <div className="pt-3 border-t border-border-default">
+        {resetOpen ? (
+          <div className="space-y-2">
+            <Input
+              type="password"
+              value={resetPassword}
+              onChange={(event) => setResetPassword(event.target.value)}
+              aria-label="Confirm password to delete the account"
+            />
+            {resetError && <p role="alert" className="text-xs text-loss">{resetError}</p>}
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setResetOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void submitReset()}
+                disabled={resetLoading || !resetPassword}
+              >
+                Delete account
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setResetOpen(true)}
+            className="text-[11px] text-text-muted hover:text-loss"
+          >
+            Delete account &amp; start over
+          </Button>
+        )}
       </div>
     </div>
+  );
+}
+
+function PracticeDeskStep() {
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold text-text-primary">Practice desk</h3>
+      <p className="text-xs text-text-secondary leading-relaxed">
+        Open the Practice desk. Orders stay simulated. Live is not part of
+        setup and stays locked until you choose it later.
+      </p>
+    </div>
+  );
+}
+
+type LaterPanel = OptionalSetupPanel | "trading" | "risk";
+
+const LATER_ACTIONS: ReadonlyArray<{
+  id: LaterPanel;
+  title: string;
+  detail: string;
+}> = [
+  {
+    id: "totp",
+    title: "Two-factor authentication",
+    detail: "Optional. Practice does not need an authenticator.",
+  },
+  {
+    id: "broker",
+    title: "Broker connect",
+    detail: "Optional. Practice does not need a broker.",
+  },
+  {
+    id: "llm",
+    title: "LLM",
+    detail: "Optional. You can choose a model later.",
+  },
+  {
+    id: "monitoring",
+    title: "Monitoring",
+    detail: "Optional. System health stays in Settings.",
+  },
+  {
+    id: "trading",
+    title: "Trading defaults",
+    detail: "Optional. Defaults stay in Settings until you set them.",
+  },
+  {
+    id: "risk",
+    title: "Risk",
+    detail: "Optional. Limits stay in Settings until you set them.",
+  },
+];
+
+/**
+ * Later/Skip tray on the Practice desk. Renders nothing until the operator
+ * has affirmed Practice. Skipping a panel does not leave the desk, and the
+ * tray never shows Step N of M.
+ */
+export function PracticeLaterSetup() {
+  const [pending, setPending] = useState(practiceLaterPending);
+  const [panel, setPanel] = useState<LaterPanel | null>(null);
+  const [skipped, setSkipped] = useState<ReadonlySet<LaterPanel>>(() => new Set());
+  const [totpUri, setTotpUri] = useState(sessionRecoveryMaterial?.totpUri ?? "");
+  const [backupCodes, setBackupCodes] = useState<string[]>(
+    sessionRecoveryMaterial?.backupCodes ?? [],
+  );
+
+  if (!pending) return null;
+
+  function skip(id: LaterPanel) {
+    setSkipped((current) => {
+      const next = new Set(current);
+      next.add(id);
+      return next;
+    });
+    if (id === "totp") sessionRecoveryMaterial = null;
+    setPanel(null);
+  }
+
+  function dismiss() {
+    clearPracticeLaterPending();
+    sessionRecoveryMaterial = null;
+    setPending(false);
+    setPanel(null);
+  }
+
+  function rememberChoices(patch: {
+    tradingDefaults?: TradingDefaultsFormValues | null;
+    riskLimits?: RiskFormValues | null;
+    llm?: LlmFormValues | null;
+  }) {
+    const settings = useSettingsStore.getState();
+    if (patch.tradingDefaults) {
+      settings.setTradingDefaults({
+        defaultExchange: patch.tradingDefaults.defaultExchange,
+        defaultProduct: patch.tradingDefaults.defaultProduct,
+        defaultQty: patch.tradingDefaults.defaultQty,
+      });
+    }
+    if (patch.riskLimits) settings.setRiskLimits(patch.riskLimits);
+    if (patch.llm) {
+      const { provider, authMode } = providerSelection(patch.llm.provider);
+      settings.setLLMSetupDraft({
+        provider,
+        authMode,
+        model: patch.llm.model.trim(),
+        host: normaliseLlmHost(provider, (patch.llm.host ?? "").trim()),
+      });
+    }
+    setPanel(null);
+  }
+
+  return (
+    <section
+      aria-label="Optional setup"
+      className="shrink-0 border-b border-border-default bg-surface-card/80 px-3 py-3"
+    >
+      <div className="mx-auto flex max-w-3xl flex-col gap-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-text-primary">Optional</p>
+            <p className="text-xs text-text-muted">
+              You can skip this. Practice is already open.
+            </p>
+          </div>
+          <Button type="button" variant="ghost" size="sm" onClick={dismiss}>
+            Close
+          </Button>
+        </div>
+
+        {panel === null && (
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {LATER_ACTIONS.map((item) => (
+              <li
+                key={item.id}
+                className="rounded-lg border border-border-default p-3 space-y-2"
+              >
+                <div>
+                  <p className="text-sm text-text-primary">
+                    {item.title}
+                    {skipped.has(item.id) ? <span className="text-text-muted"> — later</span> : null}
+                  </p>
+                  <p className="text-xs text-text-muted">{item.detail}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Set up ${item.title}`}
+                    onClick={() => setPanel(item.id)}
+                  >
+                    Set up
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Skip ${item.title}`}
+                    onClick={() => skip(item.id)}
+                  >
+                    Later
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {panel === "totp" && (
+          <TotpDisplay
+            totpUri={totpUri}
+            backupCodes={backupCodes}
+            onConfirmed={() => setPanel(null)}
+            onTotpRegenerated={(uri, codes) => {
+              sessionRecoveryMaterial = { totpUri: uri, backupCodes: codes };
+              setTotpUri(uri);
+              setBackupCodes(codes);
+            }}
+            onAccountDeleted={() => {
+              clearPracticeLaterPending();
+              sessionRecoveryMaterial = null;
+              setPending(false);
+            }}
+            onSetUpLater={() => skip("totp")}
+          />
+        )}
+
+        {panel === "broker" && (
+          <ConnectionStep onComplete={() => setPanel(null)} />
+        )}
+
+        {panel === "llm" && (
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <Button type="button" variant="outline" aria-label="Skip LLM" onClick={() => skip("llm")}>
+                Later
+              </Button>
+            </div>
+            <LlmStep onComplete={(values) => rememberChoices({ llm: values })} />
+          </div>
+        )}
+
+        {panel === "monitoring" && (
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-text-primary">Monitoring</h3>
+            <p className="text-xs text-text-secondary leading-relaxed">
+              Monitoring is optional. Practice does not need it. You can open
+              system health later in Settings.
+            </p>
+            <div className="flex justify-end">
+              <Button type="button" variant="outline" aria-label="Skip Monitoring" onClick={() => skip("monitoring")}>
+                Later
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {panel === "trading" && (
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                aria-label="Skip Trading defaults"
+                onClick={() => skip("trading")}
+              >
+                Later
+              </Button>
+            </div>
+            <TradingStep onComplete={(values) => rememberChoices({ tradingDefaults: values })} />
+          </div>
+        )}
+
+        {panel === "risk" && (
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <Button type="button" variant="outline" aria-label="Skip Risk" onClick={() => skip("risk")}>
+                Later
+              </Button>
+            </div>
+            <RiskStep onComplete={(values) => rememberChoices({ riskLimits: values })} />
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -975,61 +1462,40 @@ function PersonaStepWrapper({ initialSelected, onComplete, onBack }: PersonaStep
 // Main wizard component
 // ---------------------------------------------------------------------------
 
-const STEP_LABELS = [
-  "Account Security",
-  "Two-Factor Auth",
-  "Persona",
-  "Broker Connection",
-  "Trading Defaults",
-  "Risk Limits",
-  "Choose Mode",
-] as const;
-
-const TOTAL_STEPS = STEP_LABELS.length; // 7
-
 export interface SetupAccountRouteProps {
-  /** Requested by the canonical /setup deep link; validated against saved progress. */
+  /** Requested required step. A deep link cannot skip the vault. */
   requestedStep?: number;
-  /** Preselects the final trading mode without submitting or advancing setup. */
-  requestedMode?: AppMode;
+  /**
+   * Optional panel from a legacy deep link. Ignored on the wizard so
+   * Trading Defaults, Risk, Broker, and the other later panels cannot
+   * appear before the Practice affirm.
+   */
+  requestedOptional?: OptionalSetupPanel;
 }
 
 function resolveInitialStep(progress: SetupProgress, requestedStep: number | undefined): number {
-  const persistedStep = Math.min(progress.currentStep, TOTAL_STEPS - 1);
-  if (requestedStep === undefined || !Number.isInteger(requestedStep)) return persistedStep;
-  if (requestedStep < 0 || requestedStep >= TOTAL_STEPS) return persistedStep;
-  if (!progress.accountCreated) return 0;
-  if (requestedStep === persistedStep) return persistedStep;
-
-  // Account/2FA steps are irreversible. A deep link may revisit only a
-  // completed, reversible preferences step; it can never skip forward.
-  if (requestedStep >= 3 && requestedStep < persistedStep) return requestedStep;
-  return persistedStep;
+  const required = requiredStepFor(progress);
+  if (required < 2) return required;
+  if (requestedStep === 1) return 1;
+  return 2;
 }
 
 export default function SetupAccountRoute({
   requestedStep,
-  requestedMode,
 }: SetupAccountRouteProps = {}) {
   const navigate = useNavigate();
   const setMode = useModeStore((s) => s.setMode);
 
-  // ---------------------------------------------------------------------------
-  // Load persisted progress. We trust localStorage as the source of truth for
-  // "where was the user" and only invalidate it on explicit user action
-  // (finish setup, or "Start over" button). Auto-wiping based on client
-  // auth-store heuristics was the source of multiple state-loss bugs.
-  // ---------------------------------------------------------------------------
+  // Load persisted progress. localStorage is the source of truth for where
+  // the operator stopped. It is cleared only by opening the Practice desk,
+  // Start over, or deleting the account.
   const [initialProgress] = useState<SetupProgress>(() => loadProgress() ?? EMPTY_PROGRESS);
 
   const [currentStep, setCurrentStep] = useState(() =>
     resolveInitialStep(initialProgress, requestedStep),
   );
-  const modeSelectionFence = useMemo(
-    () => currentStep === TOTAL_STEPS - 1 ? captureAuthSessionFence() : null,
-    [currentStep],
-  );
   const [accountCreated, setAccountCreated] = useState(initialProgress.accountCreated);
+  const [vaultOpened, setVaultOpened] = useState(initialProgress.vaultOpened);
   // Storage never carries recovery material, so a remount recovers it from
   // the in-memory session cache (see sessionRecoveryMaterial above).
   const [totpUri, setTotpUri] = useState(
@@ -1048,19 +1514,17 @@ export default function SetupAccountRoute({
     initialProgress.trading,
   );
   const [risk, setRisk] = useState<Partial<RiskFormValues> | null>(initialProgress.risk);
+  const [llm, setLlm] = useState<LlmFormValues | null>(null);
   const [displayName, setDisplayName] = useState(initialProgress.displayName);
-  // Mode-step notice: shown when the server refuses to mint a Practice
-  // session, so the user never finishes setup with a UI mode the JWT
-  // doesn't back (Phase 1 G1 divergence class).
+  // Shown when the server refuses to mint a Practice session, so setup
+  // never finishes on a badge the JWT does not back.
   const [modeSyncError, setModeSyncError] = useState("");
 
-  // Persist on every state change so reloads / navigations never lose entries.
-  // Keyed off explicit `accountCreated` — never derived from secondary fields
-  // (an empty TOTP URI from the server must NOT disable persistence).
   useEffect(() => {
     if (!accountCreated) return;
     saveProgress({
       accountCreated: true,
+      vaultOpened,
       totpUri,
       backupCodes,
       persona,
@@ -1071,7 +1535,7 @@ export default function SetupAccountRoute({
       displayName,
       currentStep,
     });
-  }, [currentStep, totpUri, backupCodes, persona, connection, trading, risk, displayName, accountCreated]);
+  }, [currentStep, totpUri, backupCodes, persona, connection, trading, risk, displayName, accountCreated, vaultOpened]);
 
   // No auto-wipe based on authStatus. Progress is cleared only by an explicit
   // user action: "Finish setup" on the final step or the "Start over" button
@@ -1087,7 +1551,7 @@ export default function SetupAccountRoute({
       });
       if (!resp.ok) {
         window.alert(
-          "Could not wipe the unfinished account. Use Delete account & start over and confirm your password, or Set up later and finish Explore.",
+          "Could not wipe the unfinished account. Use Delete account and start over and confirm your password.",
         );
         return;
       }
@@ -1098,6 +1562,7 @@ export default function SetupAccountRoute({
     clearProgress();
     sessionRecoveryMaterial = null;
     setAccountCreated(false);
+    setVaultOpened(false);
     setCurrentStep(0);
     setTotpUri("");
     setBackupCodes([]);
@@ -1105,27 +1570,9 @@ export default function SetupAccountRoute({
     setConnection(null);
     setTrading(null);
     setRisk(null);
+    setLlm(null);
     setDisplayName("");
     useAuthStore.getState().setSetupRequired();
-  }
-
-  function handleSetUpLater() {
-    // Defer authenticator enrolment. Keep unfinished-setup progress so
-    // Start over / Delete account still work, and continue the wizard.
-    saveProgress({
-      accountCreated: true,
-      totpUri: "",
-      backupCodes: [],
-      persona,
-      connection,
-      trading,
-      risk,
-      mode: null,
-      displayName,
-      currentStep: 2,
-    });
-    sessionRecoveryMaterial = null;
-    setCurrentStep(2);
   }
 
   // ---------------------------------------------------------------------------
@@ -1136,6 +1583,7 @@ export default function SetupAccountRoute({
     // Persist synchronously so a reload before the effect fires still lands on step 1.
     saveProgress({
       accountCreated: true,
+      vaultOpened: false,
       totpUri: uri,
       backupCodes: codes,
       persona: null,
@@ -1154,20 +1602,10 @@ export default function SetupAccountRoute({
     setCurrentStep(1);
   }
 
-  function handleTotpConfirmed() {
-    setCurrentStep(2);
-  }
-
-  function handleTotpRegenerated(uri: string, codes: string[]) {
-    sessionRecoveryMaterial = { totpUri: uri, backupCodes: codes };
-    setTotpUri(uri);
-    setBackupCodes(codes);
-    // The persist effect picks this up automatically; no need to save inline.
-  }
-
   function handleAccountAlreadyExists() {
     saveProgress({
       accountCreated: true,
+      vaultOpened: false,
       totpUri: "",
       backupCodes: [],
       persona,
@@ -1179,6 +1617,7 @@ export default function SetupAccountRoute({
       currentStep: 1,
     });
     setAccountCreated(true);
+    setVaultOpened(false);
     setCurrentStep(1);
   }
 
@@ -1189,118 +1628,86 @@ export default function SetupAccountRoute({
     clearProgress();
     sessionRecoveryMaterial = null;
     setAccountCreated(false);
+    setVaultOpened(false);
     setTotpUri("");
     setBackupCodes([]);
     setPersona(null);
     setConnection(null);
     setTrading(null);
     setRisk(null);
+    setLlm(null);
     setDisplayName("");
     setCurrentStep(0);
     useAuthStore.getState().setSetupRequired();
     navigate("/welcome", { replace: true });
   }
 
-  function handlePersonaComplete(p: Persona) {
-    setPersona(p);
-    setCurrentStep(3);
+  function handleVaultOpened() {
+    saveProgress({
+      accountCreated: true,
+      vaultOpened: true,
+      totpUri,
+      backupCodes,
+      persona,
+      connection,
+      trading,
+      risk,
+      mode: null,
+      displayName,
+      currentStep: 2,
+    });
+    setVaultOpened(true);
+    setCurrentStep(2);
   }
 
-  function handleConnectionComplete(values: ConnectionFormValues) {
-    setConnection(values);
-    setCurrentStep(4);
-  }
-
-  function handleTradingComplete(values: TradingDefaultsFormValues) {
-    setTrading(values);
-    setCurrentStep(5);
-  }
-
-  function handleRiskComplete(values: RiskFormValues) {
-    setRisk(values);
-    setCurrentStep(6);
-  }
-
-  async function handleModeSelect(mode: AppMode, liveSessionToken?: string) {
+  async function handleOpenPractice() {
     setModeSyncError("");
-    if (mode === "practice") {
-      // /auth/setup minted an EXPLORE-mode JWT. The server reads the mode from
-      // the JWT claim (never a client header), so flipping the UI to Practice
-      // without minting a practice token leaves the first sandbox order
-      // rejected 403 mode_blocked — the setup-wizard half of the Phase 1 G1
-      // divergence (LoginRoute already reconciles the login-time half).
-      try {
-        const authState = useAuthStore.getState();
-        const practiceToken = await downgradeMode(
-          "practice",
-          authState.token,
-        );
-        if (!useAuthStore.getState().updateToken(
-          practiceToken,
-          authState.sessionGeneration,
-        )) return;
-      } catch {
-        // Do NOT finish setup with a PRACTICE badge over an Explore JWT —
-        // surface the failure and let the user retry Practice or pick
-        // Explore explicitly (both keep UI and JWT in lockstep).
-        setModeSyncError(
-          "Practice mode could not be enabled (the server did not issue a Practice session). " +
-            "Retry Practice, or continue with Explore and switch to Practice later from the TopBar.",
-        );
-        return;
-      }
+    // /auth/setup minted an EXPLORE-mode JWT. The server reads the mode from
+    // the JWT claim, so the Practice desk needs a Practice session before
+    // the first sandbox order.
+    try {
+      const authState = useAuthStore.getState();
+      const practiceToken = await downgradeMode(
+        "practice",
+        authState.token,
+      );
+      if (!useAuthStore.getState().updateToken(
+        practiceToken,
+        authState.sessionGeneration,
+      )) return;
+    } catch {
+      setModeSyncError(
+        "Practice mode could not be enabled (the server did not issue a Practice session). Retry opening the Practice desk.",
+      );
+      return;
     }
-    if (mode === "live") {
-      if (
-        !liveSessionToken ||
-        !modeSelectionFence ||
-        !useAuthStore.getState().setLoggedInIfCurrent(
-          liveSessionToken,
-          displayName || "Trader",
-          "",
-          modeSelectionFence,
-        )
-      ) return;
-    }
-    setMode(mode);
+    setMode("practice");
     const landingRoute = persistSetupChoices({
       persona: persona ?? "trader",
       connection,
       tradingDefaults: trading,
       riskLimits: risk,
+      llm,
       name: displayName || "Trader",
       interests: [],
     });
-    if (mode === "live") {
-      clearProgress();
-      sessionRecoveryMaterial = null;
-      navigate(landingRoute, { replace: true });
-      return;
-    }
-    // Setup finished — clear persisted progress and route to sign-in.
+    markPracticeLaterPending();
     clearProgress();
-    sessionRecoveryMaterial = null;
-    navigate("/welcome", { replace: true });
+    navigate(landingRoute, { replace: true });
   }
-
-  // ---------------------------------------------------------------------------
-  // Back navigation
-  //   Steps 0–1 are sealed once the account exists (creation cannot be
-  //   undone). The optional authenticator step is revisitable so Live can
-  //   still be enrolled before finish. Steps 2–6 freely decrement.
-  // ---------------------------------------------------------------------------
 
   function handleBack() {
     if (currentStep <= 1) {
       navigate("/welcome", { replace: true });
       return;
     }
-    setCurrentStep((s) => s - 1);
+    setCurrentStep(1);
   }
 
-  // completedCount = steps the user has fully submitted to reach currentStep.
+  const label = REQUIRED_SETUP_STEP_LABELS[currentStep] ?? REQUIRED_SETUP_STEP_LABELS[0];
+  const progressLabel = `Step ${currentStep + 1} of ${REQUIRED_SETUP_STEP_COUNT} - ${label}`;
   const completedCount = currentStep;
-  const remaining = TOTAL_STEPS - currentStep - 1;
+  const remaining = REQUIRED_SETUP_STEP_COUNT - currentStep - 1;
 
   return (
     <PublicRouteShell
@@ -1309,14 +1716,13 @@ export default function SetupAccountRoute({
       contentClassName="py-4 sm:py-5"
       eyebrow="Account Setup"
       title="Set up FlintTrade"
-      subtitle={`Step ${currentStep + 1} of ${TOTAL_STEPS} - ${STEP_LABELS[currentStep]}`}
+      subtitle={progressLabel}
     >
       <div className="space-y-4">
-        {currentStep > 0 && currentStep < 6 && (
+        {currentStep > 0 && (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-border-default/70 bg-surface-card/60 px-4 py-2 shadow-xl shadow-black/10 backdrop-blur-xl">
             <p className="text-xs text-text-muted">
-              {completedCount} of {TOTAL_STEPS} completed
-              {remaining > 0 ? ` - ${remaining} remaining` : " - last step"}
+              {`${completedCount} of ${REQUIRED_SETUP_STEP_COUNT} completed${remaining > 0 ? ` - ${remaining} remaining` : " - last step"}`}
             </p>
             <Button
               type="button"
@@ -1326,7 +1732,7 @@ export default function SetupAccountRoute({
               onClick={() => {
                 if (
                   window.confirm(
-                    "Start over from the beginning? This deletes the unfinished account on this machine so you can begin again. Saved 2FA is not required.",
+                    "Start over from the beginning? This deletes the unfinished account on this machine so you can begin again.",
                   )
                 ) {
                   void handleStartOver();
@@ -1338,96 +1744,50 @@ export default function SetupAccountRoute({
           </div>
         )}
 
-        {/* Step indicator */}
         <StepIndicator
-          total={TOTAL_STEPS}
+          total={REQUIRED_SETUP_STEP_COUNT}
           current={currentStep}
-          onStepClick={(i) => {
-            // Only allow jumping to already-completed reversible steps (3+).
-            // Steps 0–2 are sealed (account + 2FA submitted on server).
-            if (i >= 1 && i < currentStep) setCurrentStep(i);
+          onStepClick={(index) => {
+            if (index === 1 && currentStep === 2 && vaultOpened) setCurrentStep(1);
           }}
         />
 
-        {/* Step body — Mode step renders its own full layout */}
-        {currentStep === 6 ? (
-          <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
-            {modeSyncError && (
-              <div
-                role="alert"
-                className="mb-4 flex items-start gap-3 rounded-lg border border-loss/30 bg-loss/10 p-3 text-sm text-loss"
-              >
-                <AlertTriangle className="size-4 shrink-0 mt-0.5" />
-                <span>{modeSyncError}</span>
-              </div>
-            )}
-            <ModeSelectRoute
-              initialMode={requestedMode}
-              onSelect={handleModeSelect}
+        <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
+          {modeSyncError && currentStep === 2 && (
+            <div
+              role="alert"
+              className="mb-4 flex items-start gap-3 rounded-lg border border-loss/30 bg-loss/10 p-3 text-sm text-loss"
+            >
+              <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+              <span>{modeSyncError}</span>
+            </div>
+          )}
+
+          {currentStep === 0 && (
+            <AccountSecurityStep
+              onComplete={handleAccountComplete}
+              onBack={handleBack}
+              onAccountAlreadyExists={handleAccountAlreadyExists}
             />
-          </div>
-        ) : (
-          <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
-            {currentStep === 0 && (
-              <AccountSecurityStep
-                onComplete={handleAccountComplete}
-                onBack={handleBack}
-                onAccountAlreadyExists={handleAccountAlreadyExists}
-              />
-            )}
+          )}
 
-            {currentStep === 1 && (
-              <TotpDisplay
-                totpUri={totpUri}
-                backupCodes={backupCodes}
-                onConfirmed={handleTotpConfirmed}
-                onTotpRegenerated={handleTotpRegenerated}
-                onAccountDeleted={handleAccountDeleted}
-                onSetUpLater={handleSetUpLater}
-              />
-            )}
+          {currentStep === 1 && (
+            <VaultStep
+              onOpened={handleVaultOpened}
+              onAccountDeleted={handleAccountDeleted}
+            />
+          )}
 
-            {currentStep === 2 && (
-              <PersonaStepWrapper
-                initialSelected={persona}
-                onComplete={handlePersonaComplete}
-                onBack={handleBack}
-              />
-            )}
+          {currentStep === 2 && <PracticeDeskStep />}
 
-            {currentStep === 3 && (
-              <ConnectionStep
-                defaultValues={connection ?? undefined}
-                onComplete={handleConnectionComplete}
-              />
-            )}
-
-            {currentStep === 4 && (
-              <TradingStep
-                defaultValues={trading ?? undefined}
-                onComplete={handleTradingComplete}
-              />
-            )}
-
-            {currentStep === 5 && (
-              <RiskStep
-                defaultValues={risk ?? undefined}
-                onComplete={handleRiskComplete}
-              />
-            )}
-          </div>
-        )}
-
-        {/* Back button for steps 3–5 (ConnectionStep, TradingStep, RiskStep
-            render their own Continue buttons). Step 6 (Mode) and 0–2 each
-            own their own Back button. */}
-        {currentStep >= 3 && currentStep <= 5 && (
-          <div className="flex justify-start">
-              <Button variant="ghost" onClick={handleBack} type="button">
-              Back
-            </Button>
-          </div>
-        )}
+          {currentStep === 2 && (
+            <div className="flex justify-end mt-6">
+              <Button type="button" onClick={() => void handleOpenPractice()}>
+                Open Practice desk
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
     </PublicRouteShell>
   );
