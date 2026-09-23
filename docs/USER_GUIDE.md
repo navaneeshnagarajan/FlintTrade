@@ -1184,6 +1184,25 @@ missing snapshot, or load failure — the pane shows
 `Leverage settings unavailable.` plus **Retry**. Selecting the Leverage
 tab never leaves a highlighted tab over a blank content pane.
 
+On Settings → Monitoring (`/settings#monitoring`), **This host** shows
+disk, memory (RAM), CPU, GPU, and network for the machine where
+FlintTrade is installed. Those readings are labelled **This host**.
+Explore sample figures are never shown as host resources.
+**Process (this app)** is the FlintTrade process RSS and VMS, kept
+apart from host Memory; process RSS is never labelled as host Memory.
+When a host metric is missing, or the backend does not answer for that
+reading, the row shows **Unavailable** — never 0/0 or invented sample
+gigabytes.
+
+**Subsystem status** keeps Broker and DuckDB as separate service rows.
+They do not replace host resources and are not merged into the Brokers,
+Laya, or LLM Settings panels. Monitoring stays its own Settings section.
+On Explore, when the backend answers, the panel uses the live health
+document, including a degraded response that still carries host totals.
+When the backend does not answer, Broker and DuckDB stay as service
+rows and Disk, Memory, CPU, GPU, and Network show **Unavailable**.
+Sample disk or RAM is not shown as **This host**.
+
 Settings → **Report Bug** prepares a GitHub issue without background telemetry.
 The form keeps runtime/error diagnostics out of the public draft by default;
 enable the diagnostic-summary switch only after reviewing the displayed
