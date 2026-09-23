@@ -45,6 +45,7 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 // ---------------------------------------------------------------------------
 
 import { createStore, Provider } from "jotai";
+import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import QuickTradeWidget from "../QuickTradeWidget";
@@ -54,6 +55,7 @@ function renderQuickTrade(params: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  useOperatorSignalStore.setState({ decisionStatus: "down" });
   mockPlaceOrder.mockReset();
   mockPlaceOrder.mockResolvedValue({ orderId: "QT001" });
   mockGetSymbol.mockReset();
@@ -298,6 +300,28 @@ describe("QuickTradeWidget", () => {
     expect(screen.getByRole("button", { name: /buy 1 lots/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /sell 1 lots/i })).toBeDisabled();
     expect(screen.queryByText(/Approved by Laya/)).not.toBeInTheDocument();
+  });
+
+  it("clears a Laya denial when decision status recovers and leaves Buy and Sell retryable", async () => {
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Laya is Down. Live orders are blocked.", 403, {
+      code: "laya_denied",
+      reason: "Laya is Down. Live orders are blocked.",
+      message: "Laya is Down. Live orders are blocked.",
+      limits: { max_quantity: 100 },
+    }));
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lots/i }));
+    expect(await screen.findByTestId("laya-denied")).toHaveTextContent("Laya denied");
+    expect(screen.getByRole("button", { name: /buy 1 lots/i })).toBeDisabled();
+
+    act(() => {
+      useOperatorSignalStore.setState({ decisionStatus: "ready" });
+    });
+
+    expect(screen.queryByTestId("laya-denied")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /buy 1 lots/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /sell 1 lots/i })).toBeEnabled();
   });
 
   it("refuses a LIMIT order with no price instead of sending it at zero", async () => {

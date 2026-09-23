@@ -733,6 +733,11 @@ function OrderPadWidget(props: WidgetProps) {
   const appMode = useModeStore((s) => s.mode);
   const operatorIncident = useOperatorIncident();
   const decisionStatus = useOperatorSignalStore((s) => s.decisionStatus);
+  // A denial belongs to the status and mode that produced it. When either
+  // changes, the control is retryable. A clamp stays until the ticket changes.
+  useEffect(() => {
+    setAdmission((current) => (current?.kind === "deny" ? null : current));
+  }, [decisionStatus, appMode]);
   const liveMuted = appMode === "live" && liveWritesMuted(operatorIncident);
   const isPracticeOrExplore = appMode === "practice" || appMode === "explore";
   const currentIntentIdentity = practiceOrderIntentIdentity({

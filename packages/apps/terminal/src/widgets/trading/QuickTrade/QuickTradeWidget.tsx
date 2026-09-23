@@ -217,6 +217,12 @@ function QuickTradeWidget(props: WidgetProps) {
     setAdmission(null);
   }, [symbol, exchange, lots, product, orderType, limitPrice]);
 
+  // A denial belongs to the status and mode that produced it. When either
+  // changes, Buy and Sell are retryable. A clamp stays until the ticket changes.
+  useEffect(() => {
+    setAdmission((current) => (current?.kind === "deny" ? null : current));
+  }, [decisionStatus, mode]);
+
   // Real lot size for the instrument — null until confirmed by the backend.
   const [lotSize, setLotSize] = useState<number | null>(null);
   useEffect(() => {

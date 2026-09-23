@@ -297,6 +297,32 @@ describe("OrderPadWidget", () => {
     expect(denied.textContent).not.toMatch(/llm/i);
   });
 
+  it("clears a Laya denial when decision status changes and leaves confirm retryable", async () => {
+    mockPlaceOrder.mockRejectedValue(new OrderApiError("Laya is Down. Live orders are blocked.", 403, {
+      code: "laya_denied",
+      reason: "Laya is Down. Live orders are blocked.",
+      message: "Laya is Down. Live orders are blocked.",
+      limits: { max_quantity: 100 },
+    }));
+    useOperatorSignalStore.setState({ decisionStatus: "down" });
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    const confirm = await screen.findByRole("button", {
+      name: /confirm (simulated practice|sample) order/i,
+    });
+    fireEvent.click(confirm);
+    expect(await screen.findByTestId("laya-denied")).toHaveTextContent("Laya denied");
+    expect(confirm).toBeDisabled();
+
+    act(() => {
+      useOperatorSignalStore.setState({ decisionStatus: "ready" });
+    });
+
+    expect(screen.queryByTestId("laya-denied")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /confirm (simulated practice|sample) order/i })).toBeEnabled();
+  });
+
   it("shows a quantity clamp before the place completes", async () => {
     mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Qty reduced to 1 (Laya limit)", 409, {
       code: "laya_clamp",
