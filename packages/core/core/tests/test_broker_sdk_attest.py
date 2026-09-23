@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import textwrap
+import json
+from importlib import metadata
 
 import pytest
 
@@ -99,3 +101,51 @@ def test_catalogue_sdk_fields_are_serialisable(lock_file):
         "installed_version": None,
         "status": STATUS_UNKNOWN,
     }
+
+
+@pytest.mark.parametrize(
+    ("direct_url", "include_v2", "expected"),
+    [
+        ({"url": "https://github.com/Kotak-Neo/kotak-neo-python.git", "vcs_info": {
+            "vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"}}, False, "ok"),
+        ({"url": "https://evil.example/kotak-neo-python.git", "vcs_info": {
+            "vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"}}, False, "provenance_mismatch"),
+        ({"url": "https://github.com/other/kotak-neo-python.git", "vcs_info": {
+            "vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"}}, False, "provenance_mismatch"),
+        ({"url": "https://github.com/Kotak-Neo/kotak-neo-python.git", "vcs_info": {
+            "vcs": "git", "commit_id": "0" * 40}}, False, "provenance_mismatch"),
+        (None, False, "provenance_mismatch"),
+        ({"url": "https://github.com/Kotak-Neo/kotak-neo-python.git", "vcs_info": "git"}, False, "provenance_mismatch"),
+        ({"url": "https://github.com/Kotak-Neo/kotak-neo-python.git", "vcs_info": {
+            "vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"}}, True, "conflict"),
+    ],
+)
+def test_kotak_attestation_requires_exact_git_origin_and_exclusive_namespace(
+    tmp_path, monkeypatch, direct_url, include_v2, expected,
+):
+    from flinttrade_core import broker_sdk_attest as attestation
+
+    lock = tmp_path / "brokers.lock"
+    lock.write_text(
+        '[[broker]]\nname = "kotakneoapi"\nversion = "3.0.7"\n'
+        'source_commit = "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"\n',
+        encoding="utf-8",
+    )
+    dist = tmp_path / "kotakneoapi-3.0.7.dist-info"
+    dist.mkdir()
+    (dist / "METADATA").write_text("Metadata-Version: 2.3\nName: kotakneoapi\nVersion: 3.0.7\n")
+    (dist / "top_level.txt").write_text("neo_api_client\n")
+    if direct_url is not None:
+        (dist / "direct_url.json").write_text(json.dumps(direct_url))
+    if include_v2:
+        v2 = tmp_path / "neo_api_client-2.0.0.dist-info"
+        v2.mkdir()
+        (v2 / "METADATA").write_text("Metadata-Version: 2.3\nName: neo-api-client\nVersion: 2.0.0\n")
+        (v2 / "top_level.txt").write_text("neo_api_client\n")
+    real_distributions = metadata.distributions
+    monkeypatch.setattr(attestation.metadata, "distributions", lambda: real_distributions(path=[str(tmp_path)]))
+
+    result = attestation.attest_all(lock)[0]
+
+    assert result.status == expected
+    assert (result in required_failures([result])) is (expected != "ok")

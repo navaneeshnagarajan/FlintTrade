@@ -15,13 +15,16 @@ It is intentionally dependency-light and injectable: ``attest_all`` takes a
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import tomllib
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from importlib import metadata
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from .source_root import discover_source_root
 
@@ -30,8 +33,10 @@ logger = logging.getLogger("flinttrade.core.broker_sdk_attest")
 _PLACEHOLDER = "PLACEHOLDER"
 
 STATUS_OK = "ok"
-STATUS_MISMATCH = "mismatch"
+STATUS_MISMATCH = "version_mismatch"
 STATUS_MISSING = "missing"
+STATUS_PROVENANCE_MISMATCH = "provenance_mismatch"
+STATUS_CONFLICT = "conflict"
 STATUS_SKIPPED = "skipped"  # pin not yet populated (placeholder) — broker not live
 STATUS_NOT_REQUIRED = "not_required"  # REST-native broker has no third-party SDK to attest
 STATUS_UNKNOWN = "unknown"
@@ -82,6 +87,67 @@ def _installed_version(dist: str) -> str | None:
         return None
 
 
+def _distribution_name(dist: metadata.Distribution) -> str:
+    """Normalise installed distribution names per Python packaging conventions."""
+    return re.sub(r"[-_.]+", "-", str(dist.metadata.get("Name", "")).lower())
+
+
+def _owns_neo_namespace(dist: metadata.Distribution) -> bool:
+    top_level = dist.read_text("top_level.txt") or ""
+    if "neo_api_client" in top_level.splitlines():
+        return True
+    return any(str(file).split("/")[0] == "neo_api_client" for file in (dist.files or ()))
+
+
+def _kotak_provenance_matches(dist: metadata.Distribution, source_commit: str) -> bool:
+    raw = dist.read_text("direct_url.json")
+    if not raw:
+        return False
+    try:
+        data = json.loads(raw)
+        url = urlsplit(data["url"])
+        vcs = data["vcs_info"]
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(vcs, dict):
+        return False
+    if (
+        url.scheme != "https"
+        or url.hostname != "github.com"
+        or url.username is not None
+        or url.password is not None
+        or url.port is not None
+        or url.path != "/Kotak-Neo/kotak-neo-python.git"
+        or url.query or url.fragment
+        or vcs.get("vcs") != "git"
+        or vcs.get("commit_id") != source_commit
+    ):
+        return False
+    requested = vcs.get("requested_revision")
+    return requested is None or requested == source_commit
+
+
+def _attest_kotak(pin: dict[str, Any]) -> tuple[str | None, str]:
+    distributions = list(metadata.distributions())
+    kotak = [dist for dist in distributions if _distribution_name(dist) == "kotakneoapi"]
+    old = [dist for dist in distributions if _distribution_name(dist) == "neo-api-client"]
+    other_owners = [
+        dist for dist in distributions
+        if _distribution_name(dist) not in {"kotakneoapi", "neo-api-client"} and _owns_neo_namespace(dist)
+    ]
+    if old or other_owners or len(kotak) > 1:
+        return (kotak[0].version if kotak else None), STATUS_CONFLICT
+    if not kotak:
+        return None, STATUS_MISSING
+    installed = kotak[0].version
+    if installed != str(pin.get("version", "")):
+        return installed, STATUS_MISMATCH
+    source_commit = str(pin.get("source_commit", ""))
+    if not source_commit or not _kotak_provenance_matches(kotak[0], source_commit):
+        return installed, STATUS_PROVENANCE_MISMATCH
+    return installed, STATUS_OK
+
+
 def attest_all(
     lock_path: Path | None = None,
     version_resolver: Callable[[str], str | None] | None = None,
@@ -106,20 +172,26 @@ def attest_all(
         if not pinned or _PLACEHOLDER in pinned.upper():
             results.append(AttestationResult(name, pinned, None, STATUS_SKIPPED))
             continue
-        installed = resolve(_DIST_NAMES.get(name, name))
-        if installed is None:
-            status = STATUS_MISSING
-        elif installed == pinned:
-            status = STATUS_OK
+        if name == "kotakneoapi" and version_resolver is None:
+            installed, status = _attest_kotak(pin)
         else:
-            status = STATUS_MISMATCH
+            installed = resolve(_DIST_NAMES.get(name, name))
+            if installed is None:
+                status = STATUS_MISSING
+            elif installed == pinned:
+                status = STATUS_OK
+            else:
+                status = STATUS_MISMATCH
         results.append(AttestationResult(name, pinned, installed, status))
     return results
 
 
 def required_failures(results: list[AttestationResult]) -> list[AttestationResult]:
     """Results that would block a live broker (missing / version mismatch)."""
-    return [r for r in results if r.status in (STATUS_MISMATCH, STATUS_MISSING)]
+    return [
+        r for r in results
+        if r.status in (STATUS_MISMATCH, STATUS_MISSING, STATUS_PROVENANCE_MISMATCH, STATUS_CONFLICT)
+    ]
 
 
 def attest_all_ok(results: list[AttestationResult]) -> bool:

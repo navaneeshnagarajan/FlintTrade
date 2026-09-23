@@ -35,6 +35,11 @@ import urllib.request
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 
+if __package__:
+    from .broker_sdk_environment import remove_kotak_distributions, repair_kotakneo_environment
+else:
+    from broker_sdk_environment import remove_kotak_distributions, repair_kotakneo_environment
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 """Repository root - ``scripts/ft.py`` lives one level below it."""
 
@@ -987,6 +992,8 @@ def cmd_setup(_args: list[str]) -> int:
     if uv:
         info("Syncing the Python workspace with uv...")
         run([uv, "sync", "--frozen", "--all-packages"])
+        python = resolve_python()
+        repair_kotakneo_environment(Path(python))
         info("OK Python workspace synced")
     else:
         info("uv not found; falling back to the hash-verified pip baseline.")
@@ -995,6 +1002,7 @@ def cmd_setup(_args: list[str]) -> int:
             fail("requirements.lock is missing; install uv from https://docs.astral.sh/uv/ and re-run.")
             return 1
         run([python, "-m", "pip", "install", "--require-hashes", "-r", str(lock)])
+        remove_kotak_distributions(Path(python))
         info("OK Third-party requirements installed")
         # requirements.lock is exported with `--no-emit-workspace`, so it carries
         # ONLY third-party dependencies: none of the thirteen flinttrade_* packages

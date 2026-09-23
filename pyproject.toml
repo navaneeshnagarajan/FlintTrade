@@ -1,6 +1,6 @@
 [tool.uv]
-# kotakneoapi 3.x is a normal PyPI pin (import still ``neo_api_client``).
-# The v2 git ``neo-api-client`` pin and its dependency-metadata override are gone.
+# Kotak v3 runtime follows the immutable official main commit; v3.0.7 is
+# retained as separate release-compatibility evidence in brokers.lock.
 
 [tool.uv.workspace]
 members = [
@@ -38,6 +38,7 @@ dev = [
 ]
 
 [tool.uv.sources]
+kotakneoapi = { git = "https://github.com/Kotak-Neo/kotak-neo-python.git", rev = "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c" }
 flinttrade-ai = { workspace = true }
 flinttrade-automation = { workspace = true }
 flinttrade-backtest = { workspace = true }

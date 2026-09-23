@@ -17,6 +17,8 @@ _EXPORT_ARGS = (
     "--no-dev",
     "--format",
     "requirements-txt",
+    "--no-emit-package",
+    "kotakneoapi",
 )
 
 

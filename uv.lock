@@ -1220,7 +1220,7 @@ requires-dist = [
     { name = "flinttrade-core", editable = "packages/core/core" },
     { name = "growwapi", specifier = "==1.5.0" },
     { name = "httpx", specifier = ">=0.27.0" },
-    { name = "kotakneoapi", specifier = "==3.0.7" },
+    { name = "kotakneoapi", git = "https://github.com/Kotak-Neo/kotak-neo-python.git?rev=5bb34fae39c4a52a0e6b59d7e2d17090cafc340c" },
     { name = "pydantic", specifier = ">=2.13.5" },
     { name = "upstox-python-sdk", specifier = "==2.30.0" },
     { name = "websockets", specifier = ">=17.1" },
@@ -1906,7 +1906,7 @@ wheels = [
 [[package]]
 name = "kotakneoapi"
 version = "3.0.7"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/Kotak-Neo/kotak-neo-python.git?rev=5bb34fae39c4a52a0e6b59d7e2d17090cafc340c#5bb34fae39c4a52a0e6b59d7e2d17090cafc340c" }
 dependencies = [
     { name = "httpx", extra = ["http2"] },
     { name = "numpy" },
@@ -1919,10 +1919,6 @@ dependencies = [
     { name = "tenacity" },
     { name = "websocket-client" },
     { name = "websockets" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c1/26/4008900d07ab59e4ed54981db2da003fa294e1b0dc6b27deb85c45666a94/kotakneoapi-3.0.7.tar.gz", hash = "sha256:4c47aa09bc8c6f348f9280f95c9205609206b69fa7e91f0569d7c1e6302bc80b", size = 84323, upload-time = "2026-09-18T10:17:43.566Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/5c/99de455cad27af60b33432229e6f1a233321702f7167eec5abb8b891ffe2/kotakneoapi-3.0.7-py3-none-any.whl", hash = "sha256:71b661634a88e83859f86a38822ebae69f529d3fbf1246f1a53505092da41d2f", size = 100295, upload-time = "2026-09-18T10:17:42.194Z" },
 ]
 
 [[package]]
