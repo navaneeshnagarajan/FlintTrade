@@ -26,6 +26,7 @@ and the kill switch stay outside this module.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -101,7 +102,8 @@ class Laya:
     """Admit or refuse a proposal. Never places.
 
     Args:
-        status: Ready, Degraded, or Down. Down refuses every proposal.
+        status: Ready, Degraded, or Down. Omit it until a heartbeat: the
+            engine then stays Degraded and does not present Ready.
         max_quantity: Ceiling while Ready.
         degraded_max_quantity: Tighter ceiling while Degraded.
     """
@@ -109,7 +111,7 @@ class Laya:
     def __init__(
         self,
         *,
-        status: DecisionStatus = DecisionStatus.READY,
+        status: DecisionStatus | None = None,
         max_quantity: int = 100,
         degraded_max_quantity: int = 1,
     ) -> None:
@@ -117,7 +119,9 @@ class Laya:
             raise ValueError("quantity bounds must be positive")
         if degraded_max_quantity > max_quantity:
             raise ValueError("degraded bound cannot exceed the ready bound")
-        self._status = status
+        # No heartbeat yet. An explicit status is already authoritative.
+        self._heard = status is not None
+        self._status = DecisionStatus.DEGRADED if status is None else status
         self._max_quantity = max_quantity
         self._degraded_max_quantity = degraded_max_quantity
 
@@ -127,8 +131,20 @@ class Laya:
         return self._status
 
     def set_status(self, status: DecisionStatus) -> None:
-        """Record Ready, Degraded, or Down."""
+        """Record Ready, Degraded, or Down. This is authoritative."""
         self._status = status
+        self._heard = True
+
+    def note_heartbeat(self) -> DecisionStatus:
+        """Record that the desk heard Laya.
+
+        The fail-closed default becomes Ready. Down and an explicit status
+        stay as they are.
+        """
+        if not self._heard and self._status is not DecisionStatus.DOWN:
+            self._status = DecisionStatus.READY
+            self._heard = True
+        return self._status
 
     def admit(self, proposal: Proposal) -> Verdict:
         """Return a verdict for ``proposal``.
@@ -191,3 +207,23 @@ class Laya:
         ):
             return "Enter a trigger price above zero before this order can be admitted."
         return ""
+
+
+_process_lock = threading.Lock()
+_process_laya: Laya | None = None
+
+
+def process_laya() -> Laya:
+    """Process-wide Laya. Degraded until :meth:`Laya.note_heartbeat`."""
+    global _process_laya
+    with _process_lock:
+        if _process_laya is None:
+            _process_laya = Laya()
+        return _process_laya
+
+
+def reset_process_laya_for_tests() -> None:
+    """Drop the process-wide Laya so the next call starts unheard."""
+    global _process_laya
+    with _process_lock:
+        _process_laya = None

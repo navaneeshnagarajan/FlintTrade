@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from flinttrade_engine.laya import DecisionStatus, Laya, Proposal
+from flinttrade_engine.laya import DecisionStatus, Laya, Proposal, process_laya, reset_process_laya_for_tests
 
 _MODULE = Path(__file__).resolve().parents[1] / "src" / "flinttrade_engine" / "laya.py"
 
@@ -33,8 +33,37 @@ def _proposal(**overrides: Any) -> Proposal:
 
 
 @pytest.mark.unit
+def test_default_status_stays_degraded_until_a_heartbeat() -> None:
+    engine = Laya(max_quantity=10)
+    assert engine.status is DecisionStatus.DEGRADED
+    assert engine.status is not DecisionStatus.READY
+    refused = engine.admit(_proposal(quantity=4))
+    assert refused.allow is False
+    assert refused.limits.max_quantity == 1
+    assert engine.note_heartbeat() is DecisionStatus.READY
+    assert engine.admit(_proposal(quantity=4)).allow is True
+
+
+@pytest.mark.unit
+def test_heartbeat_does_not_clear_down_or_an_explicit_degraded_status() -> None:
+    down = Laya(status=DecisionStatus.DOWN, max_quantity=10)
+    assert down.note_heartbeat() is DecisionStatus.DOWN
+    explicit = Laya(status=DecisionStatus.DEGRADED, max_quantity=10, degraded_max_quantity=1)
+    assert explicit.note_heartbeat() is DecisionStatus.DEGRADED
+
+
+@pytest.mark.unit
+def test_process_laya_starts_degraded_and_ping_heartbeat_marks_ready() -> None:
+    reset_process_laya_for_tests()
+    engine = process_laya()
+    assert engine.status is DecisionStatus.DEGRADED
+    assert engine.note_heartbeat() is DecisionStatus.READY
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
 def test_ready_operator_proposal_is_admitted_with_a_quantity_ceiling() -> None:
-    verdict = Laya(max_quantity=10).admit(_proposal(quantity=4))
+    verdict = Laya(status=DecisionStatus.READY, max_quantity=10).admit(_proposal(quantity=4))
     assert verdict.allow is True
     assert verdict.reason == ""
     assert verdict.limits.max_quantity == 10
@@ -42,7 +71,7 @@ def test_ready_operator_proposal_is_admitted_with_a_quantity_ceiling() -> None:
 
 @pytest.mark.unit
 def test_quantity_above_the_ceiling_is_refused() -> None:
-    verdict = Laya(max_quantity=2).admit(_proposal(quantity=3))
+    verdict = Laya(status=DecisionStatus.READY, max_quantity=2).admit(_proposal(quantity=3))
     assert verdict.allow is False
     assert "2" in verdict.reason
     assert verdict.limits.max_quantity == 2

@@ -202,13 +202,19 @@ def ping() -> tuple[Any, int]:
     and responding.  Exempt from API key authentication.
 
     Returns:
-        JSON ``{"status": "ok", "timestamp": "<ISO8601 IST>"}``.
+        JSON ``{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down"}``.
+        ``laya`` is Degraded until this process records a heartbeat. A missing
+        heartbeat is never reported as Ready. Down is not cleared by a later ping.
     """
+    from flinttrade_engine.laya import process_laya  # noqa: PLC0415
+
+    laya = process_laya().note_heartbeat()
     return (
         jsonify(
             {
                 "status": "ok",
                 "timestamp": datetime.now(_IST).isoformat(),
+                "laya": laya.value,
             }
         ),
         200,

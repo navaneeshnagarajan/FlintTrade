@@ -32,18 +32,30 @@ export function operatorProbesEnabled(): boolean {
   return import.meta.env.MODE !== "test";
 }
 
+export type LayaHeartbeat = "ready" | "degraded" | "down";
+
 export interface PingProbe {
   localPing: "ok" | "transport" | "http_error";
   transportReason: TransportReason | null;
+  /** Null when the heartbeat did not name Laya. Never implied Ready. */
+  laya: LayaHeartbeat | null;
+}
+
+export function layaHeartbeatFromBody(body: unknown): LayaHeartbeat | null {
+  if (body === null || typeof body !== "object") return null;
+  const value = (body as { laya?: unknown }).laya;
+  if (value === "ready" || value === "degraded" || value === "down") return value;
+  return null;
 }
 
 export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<PingProbe> {
   try {
     const resp = await fetchImpl(`${getBase()}/api/v1/ping`, { method: "GET", cache: "no-store" });
-    if (!resp.ok) return { localPing: "http_error", transportReason: null };
-    return { localPing: "ok", transportReason: null };
+    if (!resp.ok) return { localPing: "http_error", transportReason: null, laya: null };
+    const body: unknown = await resp.json().catch(() => null);
+    return { localPing: "ok", transportReason: null, laya: layaHeartbeatFromBody(body) };
   } catch (err) {
-    return { localPing: "transport", transportReason: transportReasonFromError(err) };
+    return { localPing: "transport", transportReason: transportReasonFromError(err), laya: null };
   }
 }
 
