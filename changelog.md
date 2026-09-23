@@ -95,6 +95,15 @@ changelog rebuilds itself from the first release cut after this baseline.
   FT-UX-001 Compact-only-on-Trade, and not a big-bang
   rewrite.
 
+- **Tools Quick Settings for desk controls (FT-UX-QUICK-SETTINGS-001).**
+  Tools → Quick Settings (or TopBar) opens desk-frequent
+  controls (density, theme, and similar) without leaving
+  the Trade desk. Tools → Settings still opens the full
+  Settings route for deep pages (Monitoring, brokers,
+  auth). Compact and other desk-chrome changes keep Quick
+  Settings available; dropping Quick Settings so only full
+  Settings remains fails desk-first. Refs #279.
+
 - **Mode vocabulary and Trade desk density (FT-UX-001).**
   Explore / Practice / Live chips mean execution mode only.
   Explore Order Pad uses Sample Buy / Sample Sell; Practice
