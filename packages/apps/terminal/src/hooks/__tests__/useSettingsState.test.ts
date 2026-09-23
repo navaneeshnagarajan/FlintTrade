@@ -689,7 +689,7 @@ describe("useSettingsState", () => {
 
     await act(async () => {
       await expect(result.current.updateLLMProvider("custom", "   "))
-        .rejects.toThrow("Host URL is required for Custom Endpoint");
+        .rejects.toThrow("Host URL is required for Custom (OpenAI-compatible)");
     });
     expect(postCalls(fetchMock)).toHaveLength(1);
   });

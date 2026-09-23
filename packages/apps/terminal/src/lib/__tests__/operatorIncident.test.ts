@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  brokerSessionDarkened,
   classifyObservedFailure,
   classifyOperatorSignals,
   EDGE_STATUS_LINKS,
@@ -279,6 +280,56 @@ describe("operator incident classifier", () => {
         incident,
       }),
     ).toBe("Connected");
+  });
+
+  it("closes Live when Decision is Down and leaves the broker Connected", () => {
+    const incident = classifyOperatorSignals(signals({
+      llmChrome: "ready",
+      decisionStatus: "down",
+    }));
+    expect(incident?.failureClass).toBe("decision");
+    expect(incident?.level).toBe("blocked");
+    expect(incident?.moneyPath).toBe(true);
+    expect(liveWritesMuted(incident)).toBe(true);
+    expect(brokerSessionDarkened(incident)).toBe(false);
+    expect(
+      honestBrokerStatus({
+        connected: true,
+        connectedRead: false,
+        nativeMonday: false,
+        incident,
+      }),
+    ).toBe("Connected");
+  });
+
+  it("lets a connected broker and a ready decision place while Chat is offline", () => {
+    const incident = classifyOperatorSignals(signals({
+      llmChrome: "disconnected",
+      decisionStatus: "ready",
+    }));
+    expect(incident?.failureClass).toBe("llm_provider");
+    expect(liveWritesMuted(incident)).toBe(false);
+    expect(
+      honestBrokerStatus({
+        connected: true,
+        connectedRead: false,
+        nativeMonday: false,
+        incident,
+      }),
+    ).toBe("Connected");
+  });
+
+  it("prefers Decision Down over a Chat incident", () => {
+    const incident = classifyOperatorSignals(signals({
+      llmChrome: "error",
+      decisionStatus: "down",
+    }));
+    expect(incident?.failureClass).toBe("decision");
+    expect(liveWritesMuted(incident)).toBe(true);
+  });
+
+  it("does not close Live when Decision is only Degraded", () => {
+    expect(classifyOperatorSignals(signals({ decisionStatus: "degraded" }))).toBeNull();
   });
 
   it("keeps Chat failures off Live writes and off broker Connected", () => {

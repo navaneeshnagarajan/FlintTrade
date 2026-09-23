@@ -79,10 +79,10 @@ describe("LlmStep", () => {
     render(<LlmStep onComplete={onComplete} />);
 
     fireEvent.click(screen.getByRole("combobox", { name: "LLM provider" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Custom Endpoint" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Custom (OpenAI-compatible)" }));
     fireEvent.click(screen.getByRole("button", { name: "Save and continue" }));
 
-    expect(await screen.findByText("Host URL is required for Custom Endpoint")).toBeInTheDocument();
+    expect(await screen.findByText("Host URL is required for Custom (OpenAI-compatible)")).toBeInTheDocument();
     expect(onComplete).not.toHaveBeenCalled();
     expect(persistLlmConfigPatch).not.toHaveBeenCalled();
   });
@@ -102,7 +102,7 @@ describe("LlmStep", () => {
     render(<LlmStep onComplete={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("combobox", { name: "LLM provider" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Custom Endpoint" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Custom (OpenAI-compatible)" }));
 
     expect(screen.getByLabelText("LLM host URL")).toHaveValue("");
     expect(screen.queryByLabelText("LLM local host URL")).not.toBeInTheDocument();
@@ -130,11 +130,11 @@ describe("LlmStep", () => {
     render(<LlmStep onComplete={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("combobox", { name: "LLM provider" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Custom Endpoint" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Custom (OpenAI-compatible)" }));
     fireEvent.change(screen.getByLabelText("LLM model name"), { target: { value: "custom-model" } });
     fireEvent.click(screen.getByRole("button", { name: "Save and continue" }));
 
-    const error = await screen.findByText("Host URL is required for Custom Endpoint");
+    const error = await screen.findByText("Host URL is required for Custom (OpenAI-compatible)");
     const host = screen.getByLabelText("LLM host URL");
     expect(error).toHaveAttribute("id", "llm-host-error");
     expect(error).toHaveAttribute("role", "alert");

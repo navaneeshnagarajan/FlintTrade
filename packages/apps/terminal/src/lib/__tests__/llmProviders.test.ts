@@ -18,6 +18,10 @@ describe("llmProviders", () => {
     expect(ollama?.defaultHost).toBeUndefined();
     expect(LOCAL_PROVIDERS.has("ollama")).toBe(true);
     expect(LOCAL_PROVIDERS.has("lmstudio")).toBe(false);
+    const custom = LLM_PROVIDERS.find((provider) => provider.id === "custom");
+    expect(custom?.name).toBe("Custom (OpenAI-compatible)");
+    expect(custom?.requiresHost).toBe(true);
+    expect(LLM_PROVIDER_PROFILES.map((profile) => profile.providerId)).not.toContain("lmstudio");
   });
 
   it("exposes Hermes as a local, host-based agent-model provider (matches the backend HERMES provider)", () => {

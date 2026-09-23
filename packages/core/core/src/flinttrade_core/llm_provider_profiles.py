@@ -160,7 +160,7 @@ LLM_PROVIDER_PROFILES: tuple[LLMProviderProfile, ...] = (
     ),
     LLMProviderProfile(
         provider_id=LLMProvider.CUSTOM,
-        display_name="Custom Endpoint",
+        display_name="Custom (OpenAI-compatible)",
         endpoint_template="{host}/v1/chat/completions",
         auth_modes=("api_key",),
         requires_host=True,

@@ -1642,7 +1642,7 @@ export function LLMSection({
 
       <FieldRow
         label="Provider"
-        hint="Managed Ollama runs locally; Hermes uses an operator-supplied local host; cloud and custom providers use their own credentials."
+        hint="Chat is suggest-only and does not place Live orders. Use your own API key, managed Ollama, or a Custom OpenAI-compatible host."
       >
         <fieldset
           className="m-0 min-w-0 border-0 p-0 disabled:cursor-not-allowed disabled:opacity-50"

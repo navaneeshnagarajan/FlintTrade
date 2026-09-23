@@ -187,7 +187,7 @@ export const LLM_PROVIDER_PROFILES = [
     ],
     "defaultHost": "",
     "defaultModel": "",
-    "displayName": "Custom Endpoint",
+    "displayName": "Custom (OpenAI-compatible)",
     "endpointTemplate": "{host}/v1/chat/completions",
     "managedRuntime": false,
     "providerId": "custom",

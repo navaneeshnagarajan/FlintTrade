@@ -42,6 +42,7 @@ function incidentFromSnapshot(snapshot: IncidentSnapshot): OperatorIncident | nu
     observedHostDown: snapshot.signals.observedHostDown,
     observedBackendUnreachable: snapshot.signals.observedBackendUnreachable,
     llmChrome: snapshot.signals.llmChrome,
+    decisionStatus: snapshot.signals.decisionStatus,
     sessionClockClosed: snapshot.sessionClockClosed,
     wsFailure: snapshot.wsFailure,
     activeAccount: active
@@ -91,6 +92,7 @@ export function useOperatorIncident(): OperatorIncident | null {
   const observedHostDown = useOperatorSignalStore((s) => s.observedHostDown);
   const observedBackendUnreachable = useOperatorSignalStore((s) => s.observedBackendUnreachable);
   const llmChrome = useOperatorSignalStore((s) => s.llmChrome);
+  const decisionStatus = useOperatorSignalStore((s) => s.decisionStatus);
   const sessionClockClosed = cashSessionClockClosed();
 
   return useMemo(() => incidentFromSnapshot({
@@ -111,6 +113,7 @@ export function useOperatorIncident(): OperatorIncident | null {
       observedHostDown,
       observedBackendUnreachable,
       llmChrome,
+      decisionStatus,
     },
     sessionClockClosed,
   }), [
@@ -118,6 +121,7 @@ export function useOperatorIncident(): OperatorIncident | null {
     activeAccountId,
     brokerRateLimited,
     brokerReject,
+    decisionStatus,
     health,
     legacyStatus,
     llmChrome,

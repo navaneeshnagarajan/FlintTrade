@@ -3698,6 +3698,58 @@ describe("OpenAlgo API client (api.ts)", () => {
     useOperatorSignalStore.setState({ brokerRateLimited: false });
   });
 
+  it("refuses a Live place while Decision is Down and still allows Practice", async () => {
+    const { resetOperatorSignals, useOperatorSignalStore } = await import("@/stores/operatorSignalStore");
+    resetOperatorSignals();
+    useOperatorSignalStore.setState({ decisionStatus: "down", llmChrome: "ready" });
+    mockModeState.mode = "live";
+    const order = {
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY",
+      quantity: 1,
+      product: "MIS",
+      orderType: "MARKET",
+    } as unknown as Parameters<typeof placeOrder>[0];
+
+    try {
+      await expect(placeOrder(order)).rejects.toThrow(/Live orders stay closed/i);
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      mockModeState.mode = "practice";
+      fetchSpy.mockResolvedValueOnce(
+        jsonResponse({ status: "success", data: { orderId: "PR-2" } }),
+      );
+      await placeOrder(order, { mode: "practice" });
+      expect(fetchSpy).toHaveBeenCalled();
+    } finally {
+      resetOperatorSignals();
+    }
+  });
+
+  it("does not refuse a Live place when only Chat is unavailable", async () => {
+    const { resetOperatorSignals, useOperatorSignalStore } = await import("@/stores/operatorSignalStore");
+    resetOperatorSignals();
+    useOperatorSignalStore.setState({ decisionStatus: "ready", llmChrome: "error" });
+    mockModeState.mode = "live";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "success", data: { orderId: "LIVE-1" } }),
+    );
+    try {
+      await placeOrder({
+        symbol: "RELIANCE",
+        exchange: "NSE",
+        action: "BUY",
+        quantity: 1,
+        product: "MIS",
+        orderType: "MARKET",
+      } as unknown as Parameters<typeof placeOrder>[0]);
+      expect(fetchSpy).toHaveBeenCalled();
+    } finally {
+      resetOperatorSignals();
+    }
+  });
+
   it("fails closed instead of retargeting when the active native account is not yet connected", async () => {
     // Re-audit finding #1: after a reload the persisted active native account
     // rehydrates as not-yet-connected (status !== "connected") until the first

@@ -337,7 +337,7 @@ describe("AIAdvisorWidget", () => {
     { mode: "explore" as const, token: "demo-user" },
     { mode: "practice" as const, token: "practice-jwt" },
   ])(
-    "shows Connected in $mode when stored Settings provider is blank but advisor/status is env-backed",
+    "shows Connected (suggest only) in $mode when stored Settings provider is blank but advisor/status is env-backed",
     async ({ mode, token }) => {
       mockLlmProvider.mockReturnValue("");
       useModeStore.setState({ mode });
@@ -351,7 +351,7 @@ describe("AIAdvisorWidget", () => {
       });
       render(<AIAdvisorWidget />, { wrapper: Providers });
 
-      const badge = await screen.findByText("Connected");
+      const badge = await screen.findByText("Connected (suggest only)");
       expect(badge.className).toMatch(/profit/);
       expect(screen.queryByText("Not configured")).not.toBeInTheDocument();
       expect(await screen.findByPlaceholderText("Ask the AI advisor...")).not.toBeDisabled();
@@ -381,13 +381,13 @@ describe("AIAdvisorWidget", () => {
     },
   );
 
-  it("shows a green Connected badge only after advisor/status is configured and Settings #llm can load", async () => {
+  it("shows a green suggest-only badge only after advisor/status is configured and Settings #llm can load", async () => {
     useModeStore.setState({ mode: "live" });
     useAuthStore.setState({ token: "session-jwt" });
     mockChatLlmProbes({ advisor: "configured", settings: "ready" });
     render(<AIAdvisorWidget />, { wrapper: Providers });
 
-    const badge = await screen.findByText("Connected");
+    const badge = await screen.findByText("Connected (suggest only)");
     expect(badge.className).toMatch(/profit/);
     expect(screen.queryByText("Not configured")).not.toBeInTheDocument();
     expect(await screen.findByPlaceholderText("Ask the AI advisor...")).not.toBeDisabled();

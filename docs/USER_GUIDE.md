@@ -949,20 +949,25 @@ later runtime changes and shows the exact operation and admission IDs. Explicit
 acknowledgement records that the unknown result was reviewed; it does not retry
 the action or label it successful.
 
+Chat is suggest-only. A connected chat provider is labelled **Connected
+(suggest only)**. It does not place Live orders, and it is not the decision
+engine. Decision is a separate status: **Ready**, **Degraded**, or **Down**.
+Down closes Live orders. Chat being offline does not.
+
 Chat itself needs a configured LLM via Settings → AI. The badge and composer
 align with Settings → AI / `#llm` hydration as well as advisor status
 (including Explore / `demo-user` and Practice), not a leftover local setting.
 When Settings `#llm` is empty ("No LLM provider configured") or the stored
 provider is blank, Chat on Explore and Practice shows **Not configured** /
 **LLM not configured** unless `advisor/status` reports an explicit
-env-backed provider (`LLM_PROVIDER`). **Connected** must not appear from
+env-backed provider (`LLM_PROVIDER`). **Connected (suggest only)** must not appear from
 an env-default advisor `configured` (empty provider → ollama). Returning
 to Chat after you save Settings → AI re-checks readiness (advisor and
 Settings hydration), so the **Not configured** gate should not stay stuck
 on an outdated result.
 
 When Settings → AI shows Managed Ollama **Not installed**, AI Hub `/ai`
-Chat does not show a green **Connected** badge (FT-AI-004). The badge
+Chat does not show a green **Connected (suggest only)** badge (FT-AI-004). The badge
 follows the real LLM status: **Not configured** / **Not installed**,
 with the primary **Open Settings → AI** CTA to `/settings#llm`.
 Composer input and Send stay disabled until the runtime is installed
@@ -982,7 +987,7 @@ offers **Retry** (re-check advisor status and Settings hydration) and
 **Open Settings → AI**.
 
 A configured but broken probe shows **Error** or **Disconnected** with
-**Retry** — never a green **Connected**. Explore does not show a fake
+**Retry** — never a green **Connected (suggest only)**. Explore does not show a fake
 Connected sample advisor. Any later demo replies must be labelled
 **Sample replies**. Signals **Live** / **Polling** stay separate from Chat
 LLM readiness.
@@ -1144,7 +1149,7 @@ settings could not be loaded") to protect a saved configuration, and
 offer **Retry**. Selecting Managed Ollama while the runtime is absent
 shows **Not installed** — that is not a Connected advisor. AI Hub
 `/ai` Chat follows that install state (FT-AI-004) and does not paint
-green **Connected** until the runtime is installed and configured.
+green **Connected (suggest only)** until the runtime is installed and configured.
 
 `/settings#leverage` always shows real leverage content or an honest
 empty. When the broker snapshot is available, the tiles show the
@@ -1228,18 +1233,18 @@ On `/ai` Chat (AI Hub), an unconfigured LLM shows **LLM not configured**
 **Retry** that re-probes advisor status and Settings `#llm` hydration.
 Composer input and Send stay disabled. Explore and Practice Chat both
 look unconfigured when Settings `#llm` is empty or the stored provider
-is blank — **Connected** must not appear from an env-default advisor
+is blank — **Connected (suggest only)** must not appear from an env-default advisor
 `configured`. If leftover transcript messages hide that empty state, the
 header still offers **Retry** and **Open Settings → AI**.
 The Settings empty-state wording stays distinct from Chat's **LLM not
 configured**; they are aligned for readiness.
 
 When Settings → AI shows Managed Ollama **Not installed** (FT-AI-004),
-AI Hub does not show a green **Connected** badge. The badge is
+AI Hub does not show a green **Connected (suggest only)** badge. The badge is
 **Not configured** / **Not installed**, the Settings CTA stays
 visible, and the composer stays gated until the runtime is installed
 and configured. A provider string of ollama is not Connected while
-the managed runtime is absent. Chat never shows green **Connected**
+the managed runtime is absent. Chat never shows green **Connected (suggest only)**
 without a real LLM. When that LLM is configured, Chat may use
 Practice fills and native live-read feeds for analysis
 (FT-MONDAY-003); Suggest stays labelled illustrative, and profitable

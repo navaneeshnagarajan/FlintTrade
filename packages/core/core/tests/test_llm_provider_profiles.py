@@ -8,6 +8,14 @@ from flinttrade_core.llm_provider_profiles import (
 )
 
 
+def test_live_catalogue_has_no_lmstudio_id_and_names_the_custom_host() -> None:
+    assert "lmstudio" not in LLM_PROVIDER_BY_ID
+    custom = LLM_PROVIDER_BY_ID["custom"]
+    assert custom.display_name == "Custom (OpenAI-compatible)"
+    assert custom.requires_host is True
+    assert LLM_PROVIDER_BY_ID["ollama"].managed_runtime is True
+
+
 def test_profiles_cover_every_llm_enum_exactly_once() -> None:
     assert tuple(profile.provider_id for profile in LLM_PROVIDER_PROFILES) == tuple(
         provider.value for provider in LLMProvider

@@ -97,7 +97,7 @@ export function advisorAvailabilityToChrome(
 export function advisorLlmChromeLabel(chrome: AdvisorLlmChrome): string {
   switch (chrome) {
     case "ready":
-      return "Connected";
+      return "Connected (suggest only)";
     case "unconfigured":
       return "Not configured";
     case "not_installed":
