@@ -342,7 +342,7 @@ when one is showing, sits between the TopBar and this line and does not
 replace it.
 
 **Operator status strip.** One sticky strip sits between the TopBar and the Mode line. It is
-Info, Degraded, or Blocked. Explore and Practice sample copy is the Mode line, not this strip. Live risk, a broken desk, a broker fault, or a
+Info, Degraded, or Blocked. Explore sample copy is the Mode line, not this strip. Practice sample holdings keep `DemoBanner`. Live risk, a broken desk, a broker fault, or a
 local-network fault uses Degraded or Blocked. There is not a second banner
 for the same fact. While the strip is Blocked or Degraded on the money path,
 broker chrome says **Unavailable** or **Degraded** plus the failure in plain
