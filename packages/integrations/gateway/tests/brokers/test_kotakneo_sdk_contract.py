@@ -167,6 +167,31 @@ def test_login_rejects_false_success_and_bad_identity(fake_sdk, step, invalid, e
     assert ("totp_validate", "123456") not in ExactNeo.instances[-1].calls if step == "view" else True
 
 
+@pytest.mark.parametrize("status_code,nested_code", [(401, "500"), (403, "429"), (401, "429"), (403, "500")])
+def test_login_outer_auth_status_outweighs_nested_failure(fake_sdk, monkeypatch, status_code, nested_code):
+    import neo_api_client
+
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    class RejectedNeo(ExactNeo):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.view = {
+                "status": "error",
+                "stCode": status_code,
+                "data": {
+                    "status": "failure",
+                    "error": [{"code": nested_code, "message": "synthetic nested provider detail"}],
+                },
+            }
+
+    monkeypatch.setattr(neo_api_client, "NeoAPI", RejectedNeo)
+    with pytest.raises(CredentialsInvalid) as raised:
+        KotakNeoSdkSession.login(_credentials())
+    assert raised.value.broker_code == str(status_code)
+    assert "synthetic nested provider detail" not in str(raised.value)
+
+
 def test_missing_mfa_requires_fresh_auth(fake_sdk):
     from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
 
@@ -238,6 +263,42 @@ def test_rejected_outer_envelope_preserves_nested_error_classification(nested, e
         validate_read_envelope({"status": "error", "data": nested}, operation="limits")
     assert raised.value.broker_code == code
     assert "synthetic private detail" not in str(raised.value)
+
+
+@pytest.mark.parametrize("response,error,code", [
+    (
+        {"status": "error", "stCode": 401, "data": {"status": "failure", "error": [{"code": "500", "message": "synthetic backend failure"}]}},
+        SessionExpired,
+        "401",
+    ),
+    (
+        {"status": "error", "stCode": 403, "data": {"status": "failure", "error": [{"code": "500", "message": "synthetic backend failure"}]}},
+        SessionExpired,
+        "403",
+    ),
+    (
+        {"status": "error", "message": "session expired", "data": {"status": "failure", "message": "synthetic backend failure"}},
+        SessionExpired,
+        "",
+    ),
+    (
+        {"status": "error", "stCode": 429, "data": {"status": "failure", "error": [{"code": "500", "message": "synthetic backend failure"}]}},
+        RateLimitError,
+        "429",
+    ),
+    (
+        {"status": "error", "stCode": 500, "data": {"status": "failure", "error": [{"code": "400", "message": "synthetic backend failure"}]}},
+        BrokerInternal,
+        "500",
+    ),
+])
+def test_rejected_outer_envelope_uses_highest_precedence_evidence(response, error, code):
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    with pytest.raises(error) as raised:
+        validate_read_envelope(response, operation="limits")
+    assert raised.value.broker_code == code
+    assert "synthetic backend failure" not in str(raised.value)
 
 
 def test_successful_limits_without_balance_values_is_not_zero_funds():

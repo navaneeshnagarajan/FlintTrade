@@ -72,43 +72,83 @@ def _error_details(value: dict[str, Any]) -> tuple[str, str]:
 
 
 def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool = False, write: bool = False) -> None:
-    for key in ("Error", "Error Message", "error"):
-        embedded = value.get(key)
-        if isinstance(embedded, BaseException):
-            raise _canonical_exception(embedded, operation)
-        if isinstance(embedded, list):
-            for item in embedded:
-                if isinstance(item, BaseException):
-                    raise _canonical_exception(item, operation)
-    code, message = _error_details(value)
-    status = value.get("status")
-    stat = value.get("stat")
-    data = value.get("data")
-    rejected = any(key in value for key in ("Error", "Error Message", "error"))
-    rejected |= "status" in value and (type(status) is not str or status.lower() not in {"ok", "success"})
-    rejected |= "stat" in value and (type(stat) is not str or stat.lower() != "ok")
-    status_code = value.get("stCode")
-    rejected |= isinstance(status_code, int) and status_code >= 400 and not (
-        status_code == 1000 and operation == "whatsmyip" and status == "success"
-    )
-    if isinstance(data, dict):
-        if rejected:
-            nested_code, nested_message = _error_details(data)
-            code = nested_code or code
-            message = nested_message or message
-        else:
-            _raise_provider_error(data, operation=operation, auth=auth, write=write)
+    layers: list[dict[str, Any]] = []
+    current: Any = value
+    while isinstance(current, dict):
+        layers.append(current)
+        current = current.get("data")
+
+    def is_rejected(layer: dict[str, Any]) -> bool:
+        status = layer.get("status")
+        stat = layer.get("stat")
+        status_code = layer.get("stCode")
+        rejected_layer = any(key in layer for key in ("Error", "Error Message", "error"))
+        rejected_layer |= "status" in layer and (
+            type(status) is not str or status.lower() not in {"ok", "success"}
+        )
+        rejected_layer |= "stat" in layer and (type(stat) is not str or stat.lower() != "ok")
+        rejected_layer |= isinstance(status_code, int) and status_code >= 400 and not (
+            status_code == 1000 and operation == "whatsmyip" and status == "success"
+        )
+        return rejected_layer
+
+    rejected = any(is_rejected(layer) for layer in layers)
     if not rejected:
         return
+
+    # A provider may wrap one failure in another envelope. Classify every layer
+    # before choosing an error so a nested generic/5xx detail cannot hide outer
+    # authentication or rate-limit evidence.
+    classified: list[tuple[int, str, str, BrokerError | None]] = []
+    expiry_markers = (
+        "expired", "invalid token", "invalid session", "please login", "please log in",
+        "complete the 2fa process",
+    )
+    rate_markers = ("rate limit", "too many requests")
+    for layer in layers:
+        code, message = _error_details(layer)
+        status_code = layer.get("stCode")
+        if any(marker in message for marker in expiry_markers):
+            classified.append((5, "session", code, None))
+        elif code in {"401", "403"}:
+            classified.append((4, "credentials" if auth else "session", code, None))
+        elif code in {"429", "too_many_requests"} or any(marker in message for marker in rate_markers):
+            classified.append((3, "rate", code, None))
+        elif code.startswith("5") or isinstance(status_code, int) and status_code >= 500:
+            classified.append((2, "internal", code, None))
+        else:
+            classified.append((1, "generic", code, None))
+
+    # Embedded transport exceptions remain canonical, but lower-ranked detail
+    # cannot override a stronger envelope classification.
+    for layer in layers:
+        for key in ("Error", "Error Message", "error"):
+            embedded = layer.get(key)
+            items = embedded if isinstance(embedded, list) else [embedded]
+            for item in items:
+                if isinstance(item, BaseException):
+                    canonical = _canonical_exception(item, operation)
+                    rank = (
+                        5 if isinstance(canonical, SessionExpired)
+                        else 3 if isinstance(canonical, RateLimitError)
+                        else 4 if isinstance(canonical, CredentialsInvalid)
+                        else 2 if isinstance(canonical, BrokerInternal)
+                        else 1
+                    )
+                    classified.append((
+                        rank, "exception", str(getattr(canonical, "broker_code", "") or ""), canonical,
+                    ))
+
+    _rank, classification, code, canonical = max(
+        classified,
+        key=lambda evidence: (evidence[0], evidence[1] == "exception"),
+    )
     reason = f"Kotak Neo {operation} was rejected"
-    if (not auth and code in {"401", "403"}) or any(
-        marker in message for marker in (
-            "expired", "invalid token", "invalid session", "please login", "please log in",
-            "complete the 2fa process",
-        )
-    ):
+    if classification == "session":
         raise SessionExpired(reason, broker_id="kotakneo", broker_code=code)
-    if code in {"429", "too_many_requests"} or any(marker in message for marker in ("rate limit", "too many requests")):
+    if classification == "credentials":
+        raise CredentialsInvalid(reason, broker_id="kotakneo", broker_code=code)
+    if classification == "rate":
         metadata = value.get("rateLimit")
         retry = metadata.get("retryAfter", 0) if isinstance(metadata, dict) else 0
         try:
@@ -116,9 +156,12 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
         except (TypeError, ValueError):
             retry_after = 0.0
         raise RateLimitError(reason, broker_id="kotakneo", broker_code=code, retry_after=retry_after)
+    if classification == "exception":
+        if canonical is not None:
+            raise canonical
     if auth:
         raise CredentialsInvalid(reason, broker_id="kotakneo", broker_code=code)
-    if code.startswith("5") or isinstance(status_code, int) and status_code >= 500:
+    if classification == "internal":
         raise BrokerInternal(reason, broker_id="kotakneo", broker_code=code)
     if write:
         raise OrderRejectedByBroker(reason, broker_id="kotakneo", broker_code=code or "REJECTED")

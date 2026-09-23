@@ -218,6 +218,33 @@ def test_verify_drops_kotak_session_on_nested_expiry_with_outer_rejection() -> N
     assert adapter.funds_calls == 0
 
 
+@pytest.mark.parametrize(
+    "response,expected",
+    [
+        (
+            {"status": "error", "stCode": 401, "data": {"status": "failure", "error": [{"code": "500", "message": "synthetic backend failure"}]}},
+            SESSION_INVALID_RELOGIN_MESSAGE,
+        ),
+        (
+            {"status": "error", "stCode": 429, "data": {"status": "failure", "error": [{"code": "500", "message": "synthetic backend failure"}]}},
+            None,
+        ),
+    ],
+)
+def test_verify_respects_outer_auth_precedence_and_keeps_throttled_session(response, expected) -> None:
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+    from flinttrade_gateway.native_login import verify_native_session
+
+    class KotakProbe:
+        broker_id = "kotakneo"
+
+        async def liveness(self, _session):
+            validate_read_envelope(response, operation="whatsmyip")
+
+    session = Session("synthetic", 4102444800, "SYNTHETIC", "kotakneo")
+    assert asyncio.run(verify_native_session(KotakProbe(), session)) == expected
+
+
 def test_verify_keeps_session_on_service_window_error() -> None:
     """Upstox's funds endpoint is offline 12:00 AM–5:30 AM IST nightly and replies
     "... service is accessible from ... service hours". That is NOT proof the token
