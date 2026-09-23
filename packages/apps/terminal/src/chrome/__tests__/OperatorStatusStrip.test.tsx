@@ -63,7 +63,8 @@ describe("OperatorStatusStrip", () => {
     expect(strip).toHaveAttribute("data-failure-class", "laya");
     expect(strip).toHaveAttribute("data-strip-level", "blocked");
     expect(strip).toHaveTextContent("Blocked");
-    expect(strip).toHaveTextContent("Laya");
+    expect(strip).toHaveTextContent("Laya is Down — Live orders paused.");
+    expect(strip).not.toHaveTextContent("Laya — Laya is Down");
     expect(strip).not.toHaveTextContent("Decision");
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
     expect(screen.getByTestId("operator-rectify")).toHaveTextContent(/Kill All stays available/i);

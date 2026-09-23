@@ -17,9 +17,10 @@ const CHAT_CHROME: readonly AdvisorLlmChrome[] = [
 ];
 
 export function decisionSurfaceLabel(status: DecisionStatus | null | undefined): "Ready" | "Degraded" | "Down" {
-  if (status === "degraded") return "Degraded";
+  if (status === "ready") return "Ready";
   if (status === "down") return "Down";
-  return "Ready";
+  // No heartbeat yet. Do not paint Ready until Laya reports one.
+  return "Degraded";
 }
 
 export function chatSurfaceLabel(chrome: string | null | undefined): string {

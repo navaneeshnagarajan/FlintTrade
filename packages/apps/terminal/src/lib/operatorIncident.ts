@@ -88,8 +88,8 @@ export interface OperatorSignals {
   activeAccount: ActiveAccountSignal | null;
   wsFailure: { kind: "auth" | "network"; reason: string } | null;
   llmChrome: string | null;
-  /** Ready and Degraded do not open an incident. Down closes Live writes. */
-  decisionStatus?: "ready" | "degraded" | "down";
+  /** Ready and Degraded do not open an incident. Down closes Live writes. Null is no heartbeat. */
+  decisionStatus?: "ready" | "degraded" | "down" | null;
   /** Present so a closed or CAS session chip cannot become an exchange incident. */
   sessionClockClosed: boolean;
   observedHostDown?: boolean;
@@ -364,7 +364,7 @@ function pickIncident(signals: OperatorSignals): OperatorIncident | null {
   }
 
   if (signals.decisionStatus === "down") {
-    return makeIncident("laya", "blocked", true, false, "Laya — Laya is Down");
+    return makeIncident("laya", "blocked", true, false, "Laya is Down — Live orders paused.");
   }
 
   if (

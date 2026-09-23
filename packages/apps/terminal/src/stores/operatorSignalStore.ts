@@ -22,7 +22,8 @@ export interface OperatorSignalSnapshot {
   observedHostDown: boolean;
   observedBackendUnreachable: boolean;
   llmChrome: string | null;
-  decisionStatus: "ready" | "degraded" | "down";
+  /** Null until a Laya heartbeat arrives. The chip shows Degraded; only Down closes Live. */
+  decisionStatus: "ready" | "degraded" | "down" | null;
 }
 
 const INITIAL: OperatorSignalSnapshot = {
@@ -37,7 +38,7 @@ const INITIAL: OperatorSignalSnapshot = {
   observedHostDown: false,
   observedBackendUnreachable: false,
   llmChrome: null,
-  decisionStatus: "ready",
+  decisionStatus: null,
 };
 
 interface OperatorSignalStore extends OperatorSignalSnapshot {

@@ -39,4 +39,10 @@ describe("desk status surfaces", () => {
     expect(decisionSurfaceLabel("degraded")).toBe("Degraded");
     expect(decisionSurfaceLabel("ready")).toBe("Ready");
   });
+
+  it("treats a missing Laya heartbeat as Degraded", () => {
+    expect(decisionSurfaceLabel(null)).toBe("Degraded");
+    expect(decisionSurfaceLabel(undefined)).toBe("Degraded");
+    expect(decisionSurfaceLabel(null)).not.toBe("Ready");
+  });
 });

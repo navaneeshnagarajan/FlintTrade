@@ -32,6 +32,15 @@ describe("DeskStatusCluster", () => {
     expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Down");
     expect(screen.getByTestId("llm-surface")).toHaveTextContent("LLM Connected (suggest only)");
     expect(screen.getByTestId("desk-status").textContent).not.toMatch(/Decision/);
+    expect(screen.getByTestId("desk-status").textContent).toMatch(
+      /Broker Connected\s*·\s*Laya Down\s*·\s*LLM Connected \(suggest only\)/,
+    );
+  });
+
+  it("shows Laya Degraded until a heartbeat arrives", () => {
+    render(<DeskStatusCluster />);
+    expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Degraded");
+    expect(screen.getByTestId("laya-surface")).not.toHaveTextContent("Ready");
   });
 
   it("shows Laya Ready when the LLM is not configured", () => {

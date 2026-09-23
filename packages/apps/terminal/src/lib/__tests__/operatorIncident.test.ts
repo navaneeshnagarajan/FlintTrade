@@ -293,7 +293,8 @@ describe("operator incident classifier", () => {
     expect(incident?.failureClass).not.toBe("llm_provider");
     expect(incident?.level).toBe("blocked");
     expect(incident?.moneyPath).toBe(true);
-    expect(incident?.headline).toContain("Laya");
+    expect(incident?.headline).toBe("Laya is Down — Live orders paused.");
+    expect(incident?.headline).not.toContain("Laya — Laya");
     expect(incident?.headline).not.toContain("Decision");
     expect(incident?.plainClass).toBe("Laya");
     expect(liveWritesMuted(incident)).toBe(true);

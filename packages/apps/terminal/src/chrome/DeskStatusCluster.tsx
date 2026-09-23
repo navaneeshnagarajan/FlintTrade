@@ -38,9 +38,11 @@ export function DeskStatusCluster() {
       className="flex items-center gap-2 text-xxs text-text-muted"
     >
       <span data-testid="broker-surface">Broker {broker}</span>
+      <span aria-hidden="true">·</span>
       <span data-testid="laya-surface" className={decisionTone}>
         Laya {decision}
       </span>
+      <span aria-hidden="true">·</span>
       <span data-testid="llm-surface">LLM {chat}</span>
     </div>
   );
