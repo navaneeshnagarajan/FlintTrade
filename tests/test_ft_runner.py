@@ -30,6 +30,7 @@ import importlib.util
 import os
 import platform
 import re
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -60,6 +61,53 @@ def _load_ft() -> ModuleType:
 
 
 ft = _load_ft()
+
+
+@pytest.mark.unit
+def test_arbitrary_name_load_uses_the_exact_sibling_setup_helper(tmp_path: Path) -> None:
+    """Path-based runner imports cannot be redirected by cwd or PYTHONPATH."""
+    shadow_helper = tmp_path / "broker_sdk_environment.py"
+    shadow_helper.write_text(
+        "def remove_kotak_distributions(*args, **kwargs): pass\n"
+        "def repair_kotakneo_environment(*args, **kwargs): pass\n",
+        encoding="utf-8",
+    )
+    expected_helper = _FT_PATH.with_name("broker_sdk_environment.py").resolve()
+    loader = (
+        "import importlib.util, pathlib, sys\n"
+        "path = pathlib.Path(sys.argv[1])\n"
+        "spec = importlib.util.spec_from_file_location('arbitrary_ft_name', path)\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(module)\n"
+        "actual = pathlib.Path(module.repair_kotakneo_environment.__code__.co_filename).resolve()\n"
+        "assert actual == pathlib.Path(sys.argv[2]), (actual, sys.argv[2])\n"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", loader, str(_FT_PATH), str(expected_helper)],
+        cwd=tmp_path,
+        env=os.environ | {"PYTHONPATH": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+def test_direct_runner_version_works_from_a_foreign_cwd(tmp_path: Path) -> None:
+    """The documented script entry point runs from outside the repository."""
+    result = subprocess.run(
+        [sys.executable, str(_FT_PATH), "version"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip()
 
 
 # ---------------------------------------------------------------------------

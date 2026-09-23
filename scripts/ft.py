@@ -21,6 +21,7 @@ Run ``python scripts/ft.py help`` for the full command table.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import platform
 import re
@@ -35,10 +36,16 @@ import urllib.request
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 
-if __package__:
-    from .broker_sdk_environment import remove_kotak_distributions, repair_kotakneo_environment
-else:
-    from broker_sdk_environment import remove_kotak_distributions, repair_kotakneo_environment
+_BROKER_SDK_ENVIRONMENT_PATH = Path(__file__).with_name("broker_sdk_environment.py").resolve()
+_BROKER_SDK_ENVIRONMENT_SPEC = importlib.util.spec_from_file_location(
+    "_flinttrade_broker_sdk_environment", _BROKER_SDK_ENVIRONMENT_PATH
+)
+if _BROKER_SDK_ENVIRONMENT_SPEC is None or _BROKER_SDK_ENVIRONMENT_SPEC.loader is None:
+    raise ImportError(f"cannot load setup helper at {_BROKER_SDK_ENVIRONMENT_PATH}")
+_BROKER_SDK_ENVIRONMENT = importlib.util.module_from_spec(_BROKER_SDK_ENVIRONMENT_SPEC)
+_BROKER_SDK_ENVIRONMENT_SPEC.loader.exec_module(_BROKER_SDK_ENVIRONMENT)
+remove_kotak_distributions = _BROKER_SDK_ENVIRONMENT.remove_kotak_distributions
+repair_kotakneo_environment = _BROKER_SDK_ENVIRONMENT.repair_kotakneo_environment
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 """Repository root - ``scripts/ft.py`` lives one level below it."""
