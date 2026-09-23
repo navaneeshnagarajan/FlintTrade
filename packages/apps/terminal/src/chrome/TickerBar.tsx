@@ -5,14 +5,23 @@ import FeedFreshnessChip from "@/components/FeedFreshnessChip";
 import { isMarketHours } from "@/lib/market";
 import type { WsTick } from "@/types/api";
 import TickerMarquee, { type TickerMode } from "./TickerMarquee";
+import { deriveTickerVenueStrip, type TickerVenueBadge } from "./tickerVenues";
+import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 
-// MCX commodity instruments — these stay visible even when NSE/BSE is closed
-// because MCX trades until 23:30 IST on weekdays.
-const MCX_NAMES = new Set(["GOLD", "SILVER", "CRUDEOIL", "NATGAS"]);
-
-/** True when the MCX session is currently active (weekdays 09:00–23:30 IST). */
-function isMcxOpen(): boolean {
-  return isMarketHours("MCX");
+function VenueBadge({ badge }: { badge: TickerVenueBadge }) {
+  return (
+    <span
+      className={`text-xxs font-mono uppercase tracking-wider px-1 py-0.5 rounded border ${
+        badge.open
+          ? "text-amber-400 border-amber-500/40 bg-amber-500/10"
+          : "text-text-disabled border-border-default"
+      }`}
+      title={badge.title}
+      aria-label={badge.label}
+    >
+      {badge.venue}
+    </span>
+  );
 }
 
 function hasAnyLiveData(indices: { data: WsTick | null }[]): boolean {
@@ -28,16 +37,16 @@ export interface TickerBarProps {
  * TickerBar — the single dedicated scrolling ticker strip under TopBar
  * (FT-UX-002). Reads live prices from indicesSummaryAtom.
  *
- * NSE/BSE indices and MCX commodities share one marquee. An MCX session
- * badge stays pinned at the leading edge so commodity hours stay visible
- * when the cash session is closed.
+ * NSE/BSE indices and MCX commodities share one marquee. Pinned venue
+ * badges are derived from the symbols on that tape (NSE, BSE, MCX, and NFO
+ * when an F&O symbol feeds). A venue that is not on the tape is omitted.
  */
 export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
   const indices = useAtomValue(indicesSummaryAtom);
   const hasData = hasAnyLiveData(indices);
   const navigate = useNavigate();
-  const mcxOpen = isMcxOpen();
-  const mcxIndices = indices.filter((idx) => MCX_NAMES.has(idx.name));
+  const reducedMotion = usePrefersReducedMotion();
+  const venueStrip = deriveTickerVenueStrip(indices, (exchange) => isMarketHours(exchange));
 
   return (
     <div
@@ -50,23 +59,40 @@ export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
         <FeedFreshnessChip />
       </div>
 
-      {mcxIndices.length > 0 && (
+      {venueStrip.kind !== "empty" && (
         <div
           className="flex items-center gap-1.5 px-2 shrink-0 border-r border-border-default h-full"
-          aria-label="MCX commodities section"
+          aria-label="Venue badges"
+          data-testid="ticker-venue-badges"
+          data-venues={
+            venueStrip.kind === "badges"
+              ? venueStrip.badges.map((badge) => badge.venue).join(",")
+              : "unavailable"
+          }
         >
-          <span
-            className={`text-xxs font-mono uppercase tracking-wider px-1 py-0.5 rounded border ${
-              mcxOpen
-                ? "text-amber-400 border-amber-500/40 bg-amber-500/10"
-                : "text-text-disabled border-border-default"
-            }`}
-            title={mcxOpen ? "MCX session is open (09:00–23:30 IST)" : "MCX session is closed"}
-            aria-label={mcxOpen ? "MCX open" : "MCX closed"}
-          >
-            MCX
-          </span>
+          {venueStrip.kind === "unavailable" ? (
+            <span
+              className="text-xxs font-mono uppercase tracking-wider px-1 py-0.5 rounded border text-text-disabled border-border-default"
+              aria-label="Venues unavailable"
+            >
+              Unavailable
+            </span>
+          ) : (
+            venueStrip.badges.map((badge) => (
+              <VenueBadge key={badge.venue} badge={badge} />
+            ))
+          )}
         </div>
+      )}
+
+      {mode === "marquee" && reducedMotion && (
+        <span
+          className="text-xxs text-text-muted px-2 shrink-0 select-none"
+          data-testid="ticker-reduced-motion"
+          title="Scrolling is paused because reduced motion is on"
+        >
+          Reduced motion
+        </span>
       )}
 
       <TickerMarquee
