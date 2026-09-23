@@ -19,6 +19,7 @@ import { useAtomValue } from "jotai";
 import { memo, useRef, useEffect, useState } from "react";
 import { indicesSummaryAtom } from "@/atoms/marketAtoms";
 import type { WsTick } from "@/types/api";
+import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -29,6 +30,10 @@ export type TickerMode = "off" | "pinned" | "scroll" | "marquee";
 export interface TickerSymbol {
   name: string;
   data: WsTick | null;
+  /** Public venue badge (NSE, BSE, NFO, MCX) when the feed knows it. */
+  venue?: string;
+  /** Feed exchange identity. Quote-only index exchanges stay here. */
+  exchange?: string;
 }
 
 export interface TickerMarqueeProps {
@@ -186,6 +191,7 @@ export default function TickerMarquee({
   // Fall back to Jotai atom when no symbols prop provided
   const atomSymbols = useAtomValue(indicesSummaryAtom);
   const symbols: TickerSymbol[] = propSymbols ?? atomSymbols;
+  const reducedMotion = usePrefersReducedMotion();
 
   // Counter bumped every 30 s to force aria-live re-announcement of current prices
   const [announceKey, setAnnounceKey] = useState(0);
@@ -241,8 +247,33 @@ export default function TickerMarquee({
   //
   // Animation duration is computed from the symbol count × per-chip width
   // approximation (80px average) divided by speed (px/s).
+  // Reduced motion keeps a single static copy. TickerBar labels that freeze.
   const estimatedWidth = symbols.length * 120; // ~120px average chip width
   const durationSec = estimatedWidth / speed;
+
+  if (reducedMotion) {
+    return (
+      <div
+        className={`relative overflow-hidden flex items-center ${className}`}
+        {...landmarkProps}
+        data-testid="ticker-marquee"
+        data-motion="reduced"
+      >
+        <div className="flex items-center whitespace-nowrap">
+          <TickerStrip symbols={symbols} />
+        </div>
+        {announce ? (
+          <span key={announceKey} className="sr-only" aria-live="polite" aria-atomic="true">
+            {"Market prices: "}
+            {symbols
+              .filter((s) => s.data?.ltp != null && (s.data.ltp ?? 0) > 0)
+              .map((s) => `${s.name} ${s.data!.ltp}`)
+              .join(", ")}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -255,6 +286,7 @@ export default function TickerMarquee({
       }}
       {...landmarkProps}
       data-testid="ticker-marquee"
+      data-motion="marquee"
     >
       {/*
        * Inline keyframe injection via a <style> tag keeps this self-contained
