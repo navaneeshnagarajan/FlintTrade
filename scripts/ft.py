@@ -35,15 +35,50 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
+from types import ModuleType
+
+
+def _load_module_from_path(module_name: str, module_path: str | Path) -> ModuleType:
+    """Load a module from an exact path with normal ``sys.modules`` semantics.
+
+    An existing entry from the same file is reused. Name collisions from other
+    files receive a numeric suffix and are left untouched. Failed execution
+    removes only the partially initialized module created by this call.
+    """
+    resolved_path = Path(module_path).resolve()
+    suffix = 0
+    while True:
+        candidate_name = module_name if suffix == 0 else f"{module_name}_{suffix}"
+        if candidate_name not in sys.modules:
+            break
+        existing = sys.modules[candidate_name]
+        existing_path = getattr(existing, "__file__", None)
+        if existing_path is not None:
+            try:
+                if Path(existing_path).resolve() == resolved_path:
+                    return existing
+            except (OSError, TypeError, ValueError):
+                pass
+        suffix += 1
+
+    spec = importlib.util.spec_from_file_location(candidate_name, resolved_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load module {candidate_name!r} from {resolved_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[candidate_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        if sys.modules.get(candidate_name) is module:
+            del sys.modules[candidate_name]
+        raise
+    return module
+
 
 _BROKER_SDK_ENVIRONMENT_PATH = Path(__file__).with_name("broker_sdk_environment.py").resolve()
-_BROKER_SDK_ENVIRONMENT_SPEC = importlib.util.spec_from_file_location(
+_BROKER_SDK_ENVIRONMENT = _load_module_from_path(
     "_flinttrade_broker_sdk_environment", _BROKER_SDK_ENVIRONMENT_PATH
 )
-if _BROKER_SDK_ENVIRONMENT_SPEC is None or _BROKER_SDK_ENVIRONMENT_SPEC.loader is None:
-    raise ImportError(f"cannot load setup helper at {_BROKER_SDK_ENVIRONMENT_PATH}")
-_BROKER_SDK_ENVIRONMENT = importlib.util.module_from_spec(_BROKER_SDK_ENVIRONMENT_SPEC)
-_BROKER_SDK_ENVIRONMENT_SPEC.loader.exec_module(_BROKER_SDK_ENVIRONMENT)
 remove_kotak_distributions = _BROKER_SDK_ENVIRONMENT.remove_kotak_distributions
 repair_kotakneo_environment = _BROKER_SDK_ENVIRONMENT.repair_kotakneo_environment
 
