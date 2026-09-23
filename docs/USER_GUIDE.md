@@ -364,6 +364,11 @@ the Laya Blocked strip and mutes Live place and Position Mirror start;
 **Degraded** does not. LLM is **Not configured**, or **Connected (suggest only)**
 when Chat is ready.
 
+Install-host disk, RAM, CPU, GPU, and network stay on Settings → Monitoring
+(`/settings#monitoring`). That page is its own Settings section. See
+[Monitoring](#monitoring). It is not folded into this Broker / Laya / LLM
+cluster.
+
 FlintTrade does not hold client funds, reverse broker fills, or file a
 dispute. Rectify steps point at the broker, the exchange, or the host:
 
@@ -1184,24 +1189,66 @@ missing snapshot, or load failure — the pane shows
 `Leverage settings unavailable.` plus **Retry**. Selecting the Leverage
 tab never leaves a highlighted tab over a blank content pane.
 
-On Settings → Monitoring (`/settings#monitoring`), **This host** shows
-disk, memory (RAM), CPU, GPU, and network for the machine where
-FlintTrade is installed. Those readings are labelled **This host**.
-Explore sample figures are never shown as host resources.
-**Process (this app)** is the FlintTrade process RSS and VMS, kept
-apart from host Memory; process RSS is never labelled as host Memory.
-When a host metric is missing, or the backend does not answer for that
-reading, the row shows **Unavailable** — never 0/0 or invented sample
-gigabytes.
+### Monitoring
 
-**Subsystem status** keeps Broker and DuckDB as separate service rows.
-They do not replace host resources and are not merged into the Brokers,
-Laya, or LLM Settings panels. Monitoring stays its own Settings section.
-On Explore, when the backend answers, the panel uses the live health
-document, including a degraded response that still carries host totals.
-When the backend does not answer, Broker and DuckDB stay as service
-rows and Disk, Memory, CPU, GPU, and Network show **Unavailable**.
-Sample disk or RAM is not shown as **This host**.
+Settings → **Monitoring** (`/settings#monitoring`) reads this install. It
+does not write `workspace.json`. It stays its own Settings section. The
+TopBar **Broker**, **Laya**, and **LLM** labels are a different cluster
+(FT-SET-MONITOR-001).
+
+**Connections.** Four rows: **Broker session**, **OpenAlgo bridge**,
+**WebSocket**, and **FlintTrade Backend**. Each is **Online**, **Degraded**,
+**Down**, or **Unknown**. The OpenAlgo bridge can also show a round-trip in
+milliseconds. These rows are connection state.
+
+**System Health** keeps service rows and machine rows apart.
+
+**Subsystem status** lists **Broker** and **DuckDB** on their own lines.
+Broker shows its note, otherwise its status, otherwise **unknown** — for
+example **Broker — Explore**. DuckDB reads **DuckDB — Healthy** when the
+check passes, and otherwise its note (Explore can read **DuckDB — Explore**)
+or **Error**. Explore on a service row is that service. It does not stand
+in for disk, Memory, CPU, GPU, or network, and it is not merged into the
+TopBar Broker / Laya / LLM cluster.
+
+**This host** is the machine where FlintTrade is installed. The rows are
+**Disk**, **Memory** (RAM on that machine), **CPU**, **GPU**, and
+**Network**. A measured row is labelled **This host**.
+
+- **Disk** shows used and total gigabytes.
+- **Memory** shows used and total RAM.
+- **CPU** shows utilisation against 100%, and the core count when the host
+  reports it.
+- **GPU** is **GPU**, or **GPU —** the reported name. It shows used and
+  total memory, or utilisation against 100%, when the host reports them.
+- **Network** shows cumulative **Sent** and **Received**.
+
+A missing host figure says **Unavailable**. So does a zero or absent disk
+or RAM total, a total that is not from this machine, and any sample that
+looks like real capacity — including an Explore sample disk or RAM total.
+The row stays **Unavailable**. It does not show 0/0 or invented gigabytes.
+When the backend returns a real host reading, including a degraded health
+response that still carries those totals, **This host** shows that reading
+in Explore, Practice, and Live. When Explore has no such reading, the host
+rows stay **Unavailable** while Broker and DuckDB may still say Explore.
+
+**Process (this app)** appears when FlintTrade's own memory is known. It
+shows **RSS**, and **VMS** when that figure is known. A missing RSS on that
+row reads **RSS unknown**. The label is **Process (this app)**. Process
+RSS and VMS are never labelled as host Memory.
+
+**Traffic (this backend session)** shows **Requests / sec**, **Error Rate**
+(as a percentage), and **Top Endpoints** for this backend session. An empty
+window reads **No data yet**.
+
+**Latency (this backend session)** shows **Order Latency by Broker** with
+**Avg**, **p50**, **p95**, and **p99** in milliseconds. An empty table reads
+**No latency data recorded yet**.
+
+While a block is still loading it says so (**Loading health…**, and the
+same form for traffic and latency). If the backend cannot be reached, that
+block reads **Backend unreachable — health unavailable** (traffic and
+latency use the same form).
 
 Settings → **Report Bug** prepares a GitHub issue without background telemetry.
 The form keeps runtime/error diagnostics out of the public draft by default;
