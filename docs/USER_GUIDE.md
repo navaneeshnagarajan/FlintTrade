@@ -342,7 +342,7 @@ when one is showing, sits between the TopBar and this line and does not
 replace it.
 
 **Operator status strip.** One sticky strip sits between the TopBar and the Mode line. It is
-Info, Degraded, or Blocked. Explore sample copy is the Mode line, not this strip. Practice sample holdings keep `DemoBanner`. Live risk, a broken desk, a broker fault, or a
+Info, Degraded, or Blocked. Explore and Practice sample copy is not this strip. Practice sample holdings keep `DemoBanner` — the strip is not that banner. Live risk, a broken desk, a broker fault, or a
 local-network fault uses Degraded or Blocked. There is not a second banner
 for the same fact. While the strip is Blocked or Degraded on the money path,
 broker chrome says **Unavailable** or **Degraded** plus the failure in plain
@@ -625,11 +625,15 @@ in use.
 
 On Practice or Explore `/invest` → Holdings with no broker, the header
 badge matches the visible table (`N holdings`). The badge is never `0 holdings` over a populated
-sample table. There is no Sample chip on the table. Explore sample
-disclosure is the Mode honesty line. On the Practice sample fallback,
-Holdings and Dashboard keep the `DemoBanner`
-(`Showing sample data — connect a broker for live data`);
-the Mode line does not call that book sample. Dashboard and "N stocks"
+sample table. There is no Sample chip on the Holdings table or header.
+When the sample book is shown — Explore always, and Practice after the
+holdings query has settled empty — Holdings and Dashboard keep the
+`DemoBanner` (`Showing sample data — connect a broker for live data`),
+in Explore as well as Practice. Explore also has the Mode honesty line
+(`Explore — sample data only. No broker session, no live orders.`).
+The Practice Mode line (`Practice — SandboxEngine fills. Not your funded
+broker account.`) does not call that book sample; `DemoBanner` is the
+required Practice disclosure for it. Dashboard and "N stocks"
 use that same N. Practice waits
 until the holdings query has settled empty before the sample fallback,
 so a cold load does not flash the sample N over a pending book.

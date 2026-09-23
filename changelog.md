@@ -266,14 +266,19 @@ changelog rebuilds itself from the first release cut after this baseline.
   until the holdings query has settled empty before the
   sample fallback, so a cold load does not flash the
   wrong N. Dashboard `Net Worth (Equity + Cash)` uses the
-  same shared demo book as Holdings. Explore sample
-  disclosure is the Mode honesty line; there is no Sample
-  chip on the table. On the Practice sample fallback,
-  Holdings and Dashboard keep `DemoBanner` (`Showing
-  sample data — connect a broker for live data`). The
-  Mode line does not call that book sample, and there is
-  no Sample chip on the table. A broker read failure
-  shows muted `Failed to load holdings` plus `Refresh` —
+  same shared demo book as Holdings. There is no Sample
+  chip on the Holdings table or header. When the sample
+  book is shown — Explore always, and Practice after that
+  empty settle — Holdings and Dashboard keep `DemoBanner`
+  (`Showing sample data — connect a broker for live data`)
+  in Explore as well as Practice. Explore also has the
+  Mode honesty line (`Explore — sample data only. No
+  broker session, no live orders.`). The Practice Mode
+  line (`Practice — SandboxEngine fills. Not your funded
+  broker account.`) does not call that book sample;
+  `DemoBanner` is the required Practice disclosure for it.
+  A broker read failure shows muted `Failed to load holdings`
+  plus `Refresh` —
   never `0 holdings`, `No holdings`, or a sample table
   under a failed load. A connected broker with no
   positions shows `0 holdings` and an honest empty state
