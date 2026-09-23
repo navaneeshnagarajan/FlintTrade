@@ -412,9 +412,10 @@ clamp stops before those next steps. Only Down mutes Live place and
 Position Mirror start. Degraded leaves Live open and enforces a tighter
 quantity ceiling. Chat is not an admission source. Modify, cancel,
 smart, multi, forever, and the other write verbs still reach
-SafetySystem without this place admission. Laya starts Down (Ready,
-Degraded, or Down); the desk ping publishes that status and does not
-invent Ready. See [ORDER_SAFETY.md](ORDER_SAFETY.md).
+SafetySystem without this place admission. Laya starts Down; the three
+statuses are Ready, Degraded, and Down. The desk ping publishes the
+stored status and does not invent Ready. Ready and Degraded are recorded
+by `Laya.set_status`. See [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 ### Broker reads versus gated writes
 

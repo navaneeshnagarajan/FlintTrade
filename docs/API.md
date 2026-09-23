@@ -507,7 +507,8 @@ response is JSON
 `{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down"}`.
 `status` is `"ok"`, `timestamp` is ISO8601 IST, and `laya` is `"ready"`,
 `"degraded"`, or `"down"`. Laya starts Down. A ping publishes that process
-status and does not invent Ready. Clients must not treat a missing or
+status and does not invent Ready. Ready and Degraded are recorded by
+`Laya.set_status`, not by ping. Clients must not treat a missing or
 omitted `laya` as Ready; the desk uses `laya ?? "down"`.
 
 ### Errors (`/ft-api/v1/errors`, `/ft-api/v1/changelog`)

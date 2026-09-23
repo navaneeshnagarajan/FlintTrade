@@ -61,21 +61,24 @@ Chat may suggest and explain only: bring your own API key, use managed
 Ollama, or point **Custom (OpenAI-compatible)** at another local runtime.
 Chat is not an admission source, and Chat downtime does not close Live.
 
-On Live, operator place and automate place run Mode guard → `Laya.admit` →
-SafetySystem L1–L5 → `gate_order` → BrokerRouter. Laya does not replace
-those layers, and `gate_order` remains the only mint. Practice place is
-admitted before the sandbox and does not enter SafetySystem. A refusal or
-a quantity clamp stops before SafetySystem on Live and before the sandbox
-on Practice. A clamp names the reduced quantity. Neither size is placed.
-Order Pad and Quick Trade require the operator to place that reduced
-quantity. An automate clamp is a dispatcher error and does not place the
-reduced quantity on its own. Chat is not an admission source.
+Operator and automate place run the mode guard, then `Laya.admit`.
+**Live** place then runs SafetySystem L1–L5, `gate_order`, and
+`BrokerRouter`. Laya does not replace those layers, and `gate_order`
+remains the only mint. **Practice** place is admitted before the sandbox
+and does not enter SafetySystem, `gate_order`, or `BrokerRouter`. Explore
+stays `mode_blocked` before admit. A refusal or a quantity clamp stops
+before SafetySystem on Live and before the sandbox on Practice. A clamp
+names the reduced quantity. Neither size is placed. Order Pad and Quick
+Trade require the operator to place that reduced quantity. An automate
+clamp is a dispatcher error and does not place the reduced quantity on
+its own. Chat is not an admission source.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down — Live orders paused."). That class closes Live place and Position
 Mirror start on the shared client place path. Kill All stays reachable.
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
-The desk ping publishes Ready, Degraded, or Down and does not invent Ready.
+Ready and Degraded are recorded only by `Laya.set_status`; the desk ping
+and `note_heartbeat` publish the stored status and do not invent Ready.
 Degraded does not open that class and does not mute Live. Degraded enforces
 the tighter quantity ceiling and the desk says so. Down does not add a second
 deny under a Live control that is already muted. Other write verbs still
