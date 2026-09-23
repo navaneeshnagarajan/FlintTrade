@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from flinttrade_core.exceptions import BrokerError
+from flinttrade_core.exceptions import BrokerError, BrokerInternal
 from flinttrade_engine.request_context import RequestContext
 from flinttrade_engine.safety import (
     EMERGENCY_INTENT_SOURCE,
@@ -29,7 +29,6 @@ from flinttrade_engine.safety import (
 from flinttrade_gateway.brokers._base import ROUTER_TOKEN as _ROUTER_TOKEN
 from flinttrade_gateway.brokers._base import Session
 from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
-from flinttrade_gateway.brokers.kotakneo_mapping import KotakNeoMappingError
 from flinttrade_gateway.router import BrokerRouter
 
 pytestmark = pytest.mark.unit
@@ -302,7 +301,7 @@ async def test_emergency_books_require_explicit_success_and_object_rows(
 
 
 @pytest.mark.asyncio
-async def test_planner_emits_only_exact_regular_and_amo_cancellations() -> None:
+async def test_planner_emits_one_digest_bound_exact_cancellation_per_snapshot() -> None:
     orders = [
         _order_row("01-REG", product="MIS", generation="NA"),
         _order_row(
@@ -321,28 +320,15 @@ async def test_planner_emits_only_exact_regular_and_amo_cancellations() -> None:
     plan = await _plan(adapter, session, policy=_CANCEL_POLICY)
 
     assert plan.pending_verbs == frozenset({"cancel_all_orders"})
-    assert [(write.parent_verb, write.verb, dict(write.payload)) for write in plan.writes] == [
-        (
-            "cancel_all_orders",
-            "cancel_order",
-            {"_op": "cancel_order", "order_id": "01-REG", "variety": "regular", "amo": False},
-        ),
-        (
-            "cancel_all_orders",
-            "cancel_order",
-            {
-                "_op": "cancel_order",
-                "order_id": "02-AMO",
-                "variety": "amo",
-                "amo": True,
-            },
-        ),
-        (
-            "cancel_all_orders",
-            "cancel_order",
-            {"_op": "cancel_order", "order_id": "03-MTF", "variety": "regular", "amo": False},
-        ),
-    ]
+    assert len(plan.writes) == 1
+    payload = dict(plan.writes[0].payload)
+    digest = payload.pop("_emergency_order_book_digest")
+    assert len(digest) == 64 and digest == digest.lower() and all(character in "0123456789abcdef" for character in digest)
+    assert (plan.writes[0].parent_verb, plan.writes[0].verb, payload) == (
+        "cancel_all_orders",
+        "cancel_order",
+        {"_op": "cancel_order", "order_id": "01-REG", "variety": "regular", "amo": False},
+    )
 
     for write in plan.writes:
         extras = {key: write.payload[key] for key in ("variety", "amo", "trading_symbol") if key in write.payload}
@@ -355,8 +341,6 @@ async def test_planner_emits_only_exact_regular_and_amo_cancellations() -> None:
 
     assert [call for call in client.calls if call[0].startswith("cancel")] == [
         ("cancel_order", "01-REG", "NO", False),
-        ("cancel_order", "02-AMO", "YES", False),
-        ("cancel_order", "03-MTF", "NO", False),
     ]
 
 
@@ -378,6 +362,69 @@ async def test_active_historical_bo_or_co_refuses_entire_emergency_batch(unsuppo
     assert not any(call[0].startswith("cancel") or call[0] == "place_order" for call in client.calls)
 
 
+def test_emergency_order_book_digest_is_order_invariant_and_covers_every_planner_field() -> None:
+    first = {
+        "orderid": "OID-1",
+        "status": "open",
+        "symbol": "AXISBANK-EQ",
+        "exchange": "NSE",
+        "exchange_segment": "nse_cm",
+        "product": "MIS",
+        "broker_product": "MIS",
+        "action": "BUY",
+        "quantity": 5,
+        "filled_quantity": 0,
+        "price_type": "L",
+        "tag": "",
+        "variety": "regular",
+        "amo": False,
+    }
+    second = {**first, "orderid": "OID-2", "symbol": "ITC-EQ"}
+    digest = KotakNeoAdapter._emergency_order_book_digest((first, second))
+
+    assert digest == KotakNeoAdapter._emergency_order_book_digest((second, first))
+    for field, replacement in {
+        "orderid": "OID-X",
+        "status": "validation pending",
+        "symbol": "SBIN-EQ",
+        "exchange": "BSE",
+        "exchange_segment": "bse_cm",
+        "product": "CNC",
+        "broker_product": "CNC",
+        "action": "SELL",
+        "quantity": 6,
+        "filled_quantity": 1,
+        "price_type": "MKT",
+        "tag": "TAG-1",
+        "variety": "amo",
+        "amo": True,
+    }.items():
+        assert KotakNeoAdapter._emergency_order_book_digest(({**first, field: replacement}, second)) != digest
+
+
+@pytest.mark.asyncio
+async def test_emergency_preflight_requires_token_and_canonical_digest_before_readback() -> None:
+    client = FakeKotakNeoEmergencyClient(orders=[_order_row("OID-1")])
+    adapter = _adapter(client)
+    payload = {"_op": "cancel_order", "order_id": "OID-1"}
+
+    with pytest.raises(SafetyBypassError):
+        await adapter.preflight_emergency_write(_session(), verb="cancel_order", payload=payload)
+    with pytest.raises(BrokerError, match="digest"):
+        await adapter.preflight_emergency_write(
+            _session(), verb="cancel_order", payload=payload, _router_token=_ROUTER_TOKEN
+        )
+    with pytest.raises(BrokerError, match="digest"):
+        await adapter.preflight_emergency_write(
+            _session(),
+            verb="cancel_order",
+            payload={**payload, "_emergency_order_book_digest": "A" * 64},
+            _router_token=_ROUTER_TOKEN,
+        )
+
+    assert client.calls == []
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "response",
@@ -394,7 +441,7 @@ async def test_concrete_cancellation_requires_matching_explicit_success(response
     client.mutate_on_cancel = False
     adapter = _adapter(client)
 
-    with pytest.raises(KotakNeoMappingError):
+    with pytest.raises(BrokerInternal):
         await adapter.cancel_order(_session(), "OPEN-1", _router_token=_ROUTER_TOKEN)
 
     assert [call[0] for call in client.calls] == ["cancel_order"]
@@ -860,13 +907,13 @@ async def test_unidentified_exit_intent_blocks_new_reducing_writes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reducing_plan_is_bounded_to_ten_positions() -> None:
+async def test_reducing_plan_emits_one_position_per_snapshot() -> None:
     positions = [_position_row(symbol=f"SYNTH-{index}-EQ", quantity=1) for index in range(11)]
     client = FakeKotakNeoEmergencyClient(positions=positions)
 
     plan = await _plan(_adapter(client), _session(), policy=_EXIT_POLICY)
 
-    assert len(plan.writes) == 10
+    assert len(plan.writes) == 1
     assert plan.pending_verbs == frozenset({"exit_all_positions"})
 
 
@@ -913,8 +960,13 @@ async def test_reducing_plan_binds_exact_position_and_uses_a_deterministic_tag()
     assert len(first.writes) == 1
     assert first.writes[0].parent_verb == "exit_all_positions"
     assert first.writes[0].verb == "place_reducing_order"
-    assert dict(first.writes[0].payload) == expected_payload
-    assert dict(second.writes[0].payload) == expected_payload
+    first_payload = dict(first.writes[0].payload)
+    first_digest = first_payload.pop("_emergency_order_book_digest")
+    second_payload = dict(second.writes[0].payload)
+    second_digest = second_payload.pop("_emergency_order_book_digest")
+    assert first_payload == expected_payload
+    assert second_payload == expected_payload
+    assert first_digest == second_digest
 
     order_id = await adapter.place_reducing_order(
         session,
@@ -929,13 +981,13 @@ async def test_reducing_plan_binds_exact_position_and_uses_a_deterministic_tag()
             {
                 "exchange_segment": "nse_fo",
                 "product": "NRML",
-                "price": "0.0",
+                "price": "0",
                 "order_type": "MKT",
                 "quantity": "50",
                 "validity": "DAY",
                 "trading_symbol": symbol,
                 "transaction_type": "B",
-                "trigger_price": "0.0",
+                "trigger_price": "0",
                 "disclosed_quantity": "0",
                 "amo": "NO",
                 "tag": expected_tag,
@@ -1012,6 +1064,217 @@ def test_full_emergency_dispatch_reduces_kotak_position_through_router_token(*, 
     assert len([call for call in client.calls if call[0] == "place_order"]) == 1
 
 
+@pytest.mark.parametrize(
+    ("policy", "orders", "positions"),
+    [
+        (_CANCEL_POLICY, [_order_row("REGULAR-1")], []),
+        (_EXIT_POLICY, [], [_position_row(quantity=5)]),
+        (_FLATTEN_POLICY, [_order_row("REGULAR-1")], [_position_row(quantity=5)]),
+    ],
+    ids=["cancel", "exit", "flatten"],
+)
+def test_dispatcher_refuses_late_bo_before_any_kotak_mutation(
+    backend_lease_factory,
+    policy: EmergencyWritePolicy,
+    orders: list[dict[str, Any]],
+    positions: list[dict[str, Any]],
+) -> None:
+    class LateBoClient(FakeKotakNeoEmergencyClient):
+        def __init__(self) -> None:
+            super().__init__(orders=orders, positions=positions)
+            self._order_reads = 0
+
+        def order_book(self) -> Any:
+            self.calls.append(("order_book",))
+            self._order_reads += 1
+            rows = self.order_rows
+            if self._order_reads > 1:
+                rows = [*rows, _order_row("LATE-BO", product="BO", generation="")]
+            return _book(rows)
+
+    client = LateBoClient()
+    adapter = _adapter(client)
+    session = _session()
+    router = BrokerRouter(
+        {"kotakneo": adapter},
+        lambda _ctx, _adapter_id, _account_id: session,
+        consume_gate=SafetyGate().consume,
+        backend_lease_proof=backend_lease_factory(),
+    )
+    request_ctx = RequestContext(
+        jti="late-bo-jti",
+        actor_type="human",
+        actor_id="fake-operator",
+        mode="live",
+        selector="kotakneo:fake-account",
+    )
+    dispatcher = GatedEmergencyBrokerDispatcher(
+        router_provider=lambda: router,
+        target_provider=lambda: EmergencyBrokerTarget(
+            request_ctx=request_ctx,
+            adapter_id="kotakneo",
+            account_id="fake-account",
+        ),
+        run_awaitable=asyncio.run,
+        planned_readback_attempts=4,
+        planned_quiet_reads=1,
+        planned_readback_delay_seconds=0,
+    )
+
+    result = dispatcher.dispatch(policy, reason="synthetic late BO race")
+
+    assert not result.complete
+    assert all(not outcome.attempted for outcome in result.outcomes)
+    assert not any(call[0].startswith("cancel") or call[0] == "place_order" for call in client.calls)
+
+
+def test_reducing_dispatch_refuses_bo_appearing_after_router_preflight(backend_lease_factory) -> None:
+    class NarrowWindowBoClient(FakeKotakNeoEmergencyClient):
+        def __init__(self) -> None:
+            super().__init__(orders=[], positions=[_position_row(quantity=5)])
+            self._order_reads = 0
+
+        def order_book(self) -> Any:
+            self.calls.append(("order_book",))
+            self._order_reads += 1
+            rows = [] if self._order_reads < 3 else [_order_row("NARROW-BO", product="BO", generation="")]
+            return _book(rows)
+
+    client = NarrowWindowBoClient()
+    adapter = _adapter(client)
+    session = _session()
+    router = BrokerRouter(
+        {"kotakneo": adapter},
+        lambda _ctx, _adapter_id, _account_id: session,
+        consume_gate=SafetyGate().consume,
+        backend_lease_proof=backend_lease_factory(),
+    )
+    request_ctx = RequestContext(
+        jti="narrow-window-bo-jti",
+        actor_type="human",
+        actor_id="fake-operator",
+        mode="live",
+        selector="kotakneo:fake-account",
+    )
+    dispatcher = GatedEmergencyBrokerDispatcher(
+        router_provider=lambda: router,
+        target_provider=lambda: EmergencyBrokerTarget(
+            request_ctx=request_ctx,
+            adapter_id="kotakneo",
+            account_id="fake-account",
+        ),
+        run_awaitable=asyncio.run,
+        planned_readback_attempts=4,
+        planned_quiet_reads=1,
+        planned_readback_delay_seconds=0,
+    )
+
+    result = dispatcher.dispatch(_EXIT_POLICY, reason="synthetic narrow-window BO race")
+
+    assert not result.complete
+    assert result.outcomes and result.outcomes[0].attempted
+    assert not any(call[0] == "place_order" for call in client.calls)
+
+
+def test_dispatcher_replans_a_benign_order_book_change_before_cancelling(backend_lease_factory) -> None:
+    class ChangingRegularClient(FakeKotakNeoEmergencyClient):
+        def __init__(self) -> None:
+            super().__init__(orders=[_order_row("A"), _order_row("B", symbol="ITC-EQ")])
+            self._order_reads = 0
+
+        def order_book(self) -> Any:
+            self.calls.append(("order_book",))
+            self._order_reads += 1
+            if self._order_reads == 2:
+                self.order_rows[0]["GuiOrdId"] = "BENIGN-CHANGE"
+            return _book(self.order_rows)
+
+    client = ChangingRegularClient()
+    adapter = _adapter(client)
+    session = _session()
+    router = BrokerRouter(
+        {"kotakneo": adapter},
+        lambda _ctx, _adapter_id, _account_id: session,
+        consume_gate=SafetyGate().consume,
+        backend_lease_proof=backend_lease_factory(),
+    )
+    request_ctx = RequestContext(
+        jti="benign-change-jti",
+        actor_type="human",
+        actor_id="fake-operator",
+        mode="live",
+        selector="kotakneo:fake-account",
+    )
+    dispatcher = GatedEmergencyBrokerDispatcher(
+        router_provider=lambda: router,
+        target_provider=lambda: EmergencyBrokerTarget(
+            request_ctx=request_ctx,
+            adapter_id="kotakneo",
+            account_id="fake-account",
+        ),
+        run_awaitable=asyncio.run,
+        planned_readback_attempts=8,
+        planned_quiet_reads=1,
+        planned_readback_delay_seconds=0,
+    )
+
+    result = dispatcher.dispatch(_CANCEL_POLICY, reason="synthetic benign replan")
+
+    assert result.complete
+    first_cancel_index = next(index for index, call in enumerate(client.calls) if call[0] == "cancel_order")
+    assert client.calls[:first_cancel_index] == [("order_book",)] * 4
+    assert [call for call in client.calls if call[0] == "cancel_order"] == [
+        ("cancel_order", "A", "NO", False),
+        ("cancel_order", "B", "NO", False),
+    ]
+
+
+def test_dispatcher_keeps_digest_out_of_exact_amo_cancel_signature(backend_lease_factory) -> None:
+    client = FakeKotakNeoEmergencyClient(
+        orders=[
+            _order_row(
+                "AMO-1",
+                status="after market order req received",
+                generation="AMO",
+            )
+        ]
+    )
+    adapter = _adapter(client)
+    session = _session()
+    router = BrokerRouter(
+        {"kotakneo": adapter},
+        lambda _ctx, _adapter_id, _account_id: session,
+        consume_gate=SafetyGate().consume,
+        backend_lease_proof=backend_lease_factory(),
+    )
+    request_ctx = RequestContext(
+        jti="amo-cancel-jti",
+        actor_type="human",
+        actor_id="fake-operator",
+        mode="live",
+        selector="kotakneo:fake-account",
+    )
+    dispatcher = GatedEmergencyBrokerDispatcher(
+        router_provider=lambda: router,
+        target_provider=lambda: EmergencyBrokerTarget(
+            request_ctx=request_ctx,
+            adapter_id="kotakneo",
+            account_id="fake-account",
+        ),
+        run_awaitable=asyncio.run,
+        planned_readback_attempts=4,
+        planned_quiet_reads=1,
+        planned_readback_delay_seconds=0,
+    )
+
+    result = dispatcher.dispatch(_CANCEL_POLICY, reason="synthetic AMO cancel")
+
+    assert result.complete
+    assert [call for call in client.calls if call[0] == "cancel_order"] == [
+        ("cancel_order", "AMO-1", "YES", False)
+    ]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "response",
@@ -1030,7 +1293,7 @@ async def test_reducing_write_requires_explicit_success(response: dict[str, Any]
     plan = await _plan(adapter, session, policy=_EXIT_POLICY)
     client.place_response = response
 
-    with pytest.raises(KotakNeoMappingError):
+    with pytest.raises(BrokerInternal):
         await adapter.place_reducing_order(
             session,
             dict(plan.writes[0].payload),

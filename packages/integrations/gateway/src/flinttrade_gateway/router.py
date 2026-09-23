@@ -140,6 +140,28 @@ async def _invoke_adapter(
     return await method(*args, **kwargs)
 
 
+async def _preflight_emergency_write(
+    adapter: BrokerAdapter,
+    session: AdapterSessionView,
+    *,
+    verb: str,
+    payload: Mapping[str, Any],
+) -> None:
+    """Run an optional emergency preflight without crossing the write boundary."""
+    preflight = getattr(adapter, "preflight_emergency_write", None)
+    if not callable(preflight):
+        return
+    detached_payload = _detached_snapshot(payload)
+    if not isinstance(detached_payload, Mapping):  # pragma: no cover - defensive deepcopy guard
+        raise SafetyBypassError("emergency preflight payload must remain a Mapping")
+    await preflight(
+        session,
+        verb=verb,
+        payload=detached_payload,
+        _router_token=_ROUTER_TOKEN,
+    )
+
+
 def _required(payload: Mapping[str, Any], key: str) -> Any:
     """Fetch a required field from a verified gated payload.
 
@@ -1173,6 +1195,13 @@ class BrokerRouter:
                 )
                 invoked = [False]
                 try:
+                    if emergency_intent:
+                        await _preflight_emergency_write(
+                            self._adapters[adapter_id],
+                            session,
+                            verb="cancel_order",
+                            payload=signed_order,
+                        )
                     result = await _invoke_adapter(
                         self._adapters[adapter_id].cancel_order,
                         self._invocation_callback(
@@ -1288,6 +1317,13 @@ class BrokerRouter:
                 )
                 invoked = [False]
                 try:
+                    if emergency_intent:
+                        await _preflight_emergency_write(
+                            self._adapters[adapter_id],
+                            session,
+                            verb=verb,
+                            payload=signed_payload,
+                        )
                     result = await dispatch(
                         self._adapters[adapter_id],
                         session,

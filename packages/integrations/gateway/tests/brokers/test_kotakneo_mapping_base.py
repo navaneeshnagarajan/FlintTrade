@@ -330,9 +330,11 @@ def test_margin_params_and_parse():
     assert p["exchange_segment"] == "nse_cm" and p["instrument_token"] == "14366"
     assert "trading_symbol" not in p
     assert p["transaction_type"] == "B" and p["order_type"] == "L" and p["quantity"] == "10"
-    margin = from_kotak_margin({"data": {"reqdMrgn": "15.50", "ordMrgn": "15.50",
-                                         "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}})
+    margin = from_kotak_margin({"data": {"stat": "Ok", "stCode": 200, "reqdMrgn": "0",
+                                         "ordMrgn": "15.50", "avlCash": "38.19",
+                                         "insufFund": "0", "rmsVldtd": "OK"}})
     assert margin["required_margin"] == "15.50" and margin["available_balance"] == "38.19"
+    assert margin["order_margin"] == "15.50" and margin["provider_additional_margin"] == "0.00"
     assert margin["rms_validated"] == "OK"
 
 

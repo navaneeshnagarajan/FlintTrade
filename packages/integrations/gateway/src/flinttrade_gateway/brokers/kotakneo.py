@@ -9,10 +9,13 @@ liveness. Streaming is handled by a later migration task.
 from __future__ import annotations
 
 import hashlib
+import hmac
+import json
 import math
+import re
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Mapping
 
 from flinttrade_core.broker_read_port import (
     BalanceEvidence,
@@ -20,7 +23,13 @@ from flinttrade_core.broker_read_port import (
     BrokerBalanceResponseInvalid,
     BrokerReadResponseInvalid,
 )
-from flinttrade_core.exceptions import BrokerError, CredentialsInvalid, MFARequired
+from flinttrade_core.exceptions import (
+    BrokerError,
+    BrokerInternal,
+    CredentialsInvalid,
+    MFARequired,
+    UnsupportedCapabilityError,
+)
 from flinttrade_engine.safety import EmergencyBrokerWrite, EmergencyReductionPlan, EmergencyWritePolicy
 from flinttrade_gateway.capabilities import (
     AuthModel,
@@ -81,8 +90,25 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_gateway.reconciliation import LocalStateSnapshot, ReconciliationReport
 
 _PENDING = "Kotak Neo {0} — streaming wave pending live SDK verification"
-_EMERGENCY_BATCH_LIMIT = 10
+_EMERGENCY_BATCH_LIMIT = 1
 _EMERGENCY_EXIT_TAG_PREFIX = "FTE-KN-"
+_EMERGENCY_ORDER_BOOK_DIGEST_KEY = "_emergency_order_book_digest"
+_EMERGENCY_ORDER_BOOK_DIGEST_FIELDS = (
+    "orderid",
+    "status",
+    "symbol",
+    "exchange",
+    "exchange_segment",
+    "product",
+    "broker_product",
+    "action",
+    "quantity",
+    "filled_quantity",
+    "price_type",
+    "tag",
+    "variety",
+    "amo",
+)
 _EMERGENCY_TERMINAL_ORDER_STATUSES = frozenset({"rejected", "cancelled", "complete", "traded"})
 _EMERGENCY_ACTIVE_ORDER_STATUSES = frozenset(
     {
@@ -141,8 +167,7 @@ KOTAKNEO_CAPABILITIES = Capabilities(
     rate_limit_orders_per_sec=10,
     # 'tag' is an optional order field, not a mandated algo tag.
     algo_tag_required=False,
-    # Zero brokerage on execution + zero API subscription charge (BO square-off
-    # leg attracts standard brokerage — see module docstring).
+    # Zero brokerage on supported API execution + zero API subscription charge.
     cost_paid=False,
     cost_inr_per_month=0,
     brokerage_free=True,
@@ -167,13 +192,10 @@ class KotakNeoAdapter(BrokerAdapter):
             subscribes by numeric scrip token (``pSymbol``), not trading symbol.
             When omitted, ``subscribe`` resolves tokens live via ``search_scrip``
             (index names like ``"Nifty 50"`` pass through unresolved).
-        feed_factory: ``session -> AsyncIterator`` of raw HSM market-feed frames
-            (what ``NeoWebSocket`` hands to ``on_message``); ``stream()`` decodes
-            them via ``kotakneo_mapping.decode_kotak_feed``. Tests inject
-            synthetic frames; live wiring bridges the websocket callbacks into an
-            async queue.
-        order_feed_factory: ``session -> AsyncIterator`` of raw HSI order-feed
-            frames for ``order_stream()``.
+        feed_factory: Compatibility injection point for synthetic market-feed
+            frames until the later public v3 async-feed migration.
+        order_feed_factory: Compatibility injection point for synthetic
+            order-feed frames until that migration.
         local_state_provider: ``session -> LocalStateSnapshot`` supplying the
             flinttrade-side mirror that ``reconcile`` diffs broker state
             against. Defaults to EMPTY local state (every broker-side row then
@@ -473,6 +495,56 @@ class KotakNeoAdapter(BrokerAdapter):
             str(position["broker_product"]),
         )
 
+    @staticmethod
+    def _emergency_order_book_digest(rows: tuple[dict[str, Any], ...]) -> str:
+        """Bind one emergency write to every normalised planning field."""
+        canonical_rows = [
+            {field: row[field] for field in _EMERGENCY_ORDER_BOOK_DIGEST_FIELDS}
+            for row in sorted(rows, key=lambda row: str(row["orderid"]))
+        ]
+        encoded = json.dumps(
+            {"schema": "kotakneo-emergency-order-book-v1", "orders": canonical_rows},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    async def preflight_emergency_write(
+        self,
+        session: Session,
+        *,
+        verb: str,
+        payload: Mapping[str, object],
+        _router_token: object | None = None,
+    ) -> None:
+        """Reject a stale Kotak emergency snapshot before mutation invocation."""
+        self._require_router_token(_router_token, _ROUTER_TOKEN)
+        if verb not in {"cancel_order", "place_reducing_order"}:
+            raise BrokerError("Kotak Neo emergency preflight verb is unsupported", broker_id="kotakneo")
+        digest = payload.get(_EMERGENCY_ORDER_BOOK_DIGEST_KEY)
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise BrokerError("Kotak Neo emergency order-book digest is malformed", broker_id="kotakneo")
+        rows = await self._emergency_order_rows(session)
+        unsupported_active = next(
+            (
+                order
+                for order in rows
+                if order["status"] not in _EMERGENCY_TERMINAL_ORDER_STATUSES
+                and str(order.get("broker_product") or "").upper() in {"BO", "CO"}
+            ),
+            None,
+        )
+        if unsupported_active is not None:
+            product = str(unsupported_active["broker_product"]).upper()
+            raise BrokerError(
+                f"Kotak Neo v3 cannot safely dispatch with an active {product} order",
+                broker_id="kotakneo",
+            )
+        current_digest = self._emergency_order_book_digest(rows)
+        if not hmac.compare_digest(current_digest, digest):
+            raise BrokerError("Kotak Neo emergency order book changed before dispatch", broker_id="kotakneo")
+
     @classmethod
     def _emergency_exit_tag(cls, position: dict[str, Any], *, quantity: int | None = None) -> str:
         signed_quantity = (
@@ -592,9 +664,8 @@ class KotakNeoAdapter(BrokerAdapter):
     async def logout(self, session: Session) -> None:
         """Invalidate the NEO session (clears the trade token) — idempotent.
 
-        ``NeoAPI.logout`` drops the edit token/sid client-side (the v2 SDK's
-        REST logout call is disabled upstream); a facade/mock without ``logout``
-        is tolerated so logout never fails mid-teardown.
+        A facade/mock without ``logout`` is tolerated so logout never fails
+        mid-teardown.
         """
         client = session.extra.get("client") if self._client_factory is None else self._client_factory(session)
         log_off = getattr(client, "logout", None)
@@ -608,21 +679,36 @@ class KotakNeoAdapter(BrokerAdapter):
     async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
         """Place one exact v3 regular/AMO order through the gated path."""
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        M.validate_v3_order(order)
+        try:
+            M.validate_v3_order(order)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
         trading_symbol = await self._resolve_trading_symbol(session, order.symbol, order.exchange)
         tag = session.algo_id or None
-        params = M.to_place_order_params(order, trading_symbol, tag=tag)
+        try:
+            params = M.to_place_order_params(order, trading_symbol, tag=tag)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
         resp = await self._call(self._client(session).place_order, params)
-        return M.extract_order_id(M.require_write_success(resp))
+        try:
+            return M.extract_order_id(M.require_write_success(resp))
+        except M.KotakNeoMappingError as exc:
+            raise BrokerInternal("Kotak Neo place response is invalid", broker_id="kotakneo") from exc
 
     async def modify_order(
         self, session: Session, order_id: str, changes: dict, *, _router_token: object | None = None
     ) -> None:
         """Modify an open order through the exact v3 order-id surface."""
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        params = M.to_modify_order_params(order_id, changes)
+        try:
+            params = M.to_modify_order_params(order_id, changes)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
         resp = await self._call(self._client(session).modify_order, params)
-        M.require_write_success(resp, expected_order_id=str(order_id))
+        try:
+            M.require_write_success(resp, expected_order_id=str(order_id))
+        except M.KotakNeoMappingError as exc:
+            raise BrokerInternal("Kotak Neo modify response is invalid", broker_id="kotakneo") from exc
 
     async def cancel_order(
         self,
@@ -636,18 +722,35 @@ class KotakNeoAdapter(BrokerAdapter):
     ) -> None:
         """Cancel one regular/AMO order through the exact v3 endpoint."""
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        v = str(variety).lower()
+        if not isinstance(variety, str):
+            raise UnsupportedCapabilityError("Kotak Neo cancel variety must be text", broker_id="kotakneo")
+        if not isinstance(amo, bool):
+            raise UnsupportedCapabilityError("Kotak Neo cancel AMO flag must be boolean", broker_id="kotakneo")
+        v = variety.lower()
         if v not in {"", "regular", "amo"}:
-            raise BrokerError(f"Kotak Neo v3 cannot cancel order variety {variety!r}")
+            raise UnsupportedCapabilityError(
+                f"Kotak Neo v3 cannot cancel order variety {variety!r}",
+                broker_id="kotakneo",
+            )
         if trading_symbol is not None:
-            raise BrokerError("Kotak Neo v3 cancel does not accept a trading symbol")
+            raise UnsupportedCapabilityError(
+                "Kotak Neo v3 cancel does not accept a trading symbol",
+                broker_id="kotakneo",
+            )
+        try:
+            canonical_order_id = M.canonical_order_id(order_id)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
         client = self._client(session)
         amo_flag = "YES" if (amo or v == "amo") else "NO"
         if amo_flag == "YES":
-            resp = await self._call(client.cancel_order, str(order_id), amo_flag)
+            resp = await self._call(client.cancel_order, canonical_order_id, amo_flag)
         else:
-            resp = await self._call(client.cancel_order, str(order_id))
-        M.require_write_success(resp, expected_order_id=str(order_id))
+            resp = await self._call(client.cancel_order, canonical_order_id)
+        try:
+            M.require_write_success(resp, expected_order_id=canonical_order_id)
+        except M.KotakNeoMappingError as exc:
+            raise BrokerInternal("Kotak Neo cancel response is invalid", broker_id="kotakneo") from exc
 
     @classmethod
     def _emergency_active_exit_state(
@@ -739,9 +842,11 @@ class KotakNeoAdapter(BrokerAdapter):
         order: dict[str, Any],
         *,
         parent_verb: str,
+        order_book_digest: str,
     ) -> EmergencyBrokerWrite:
         payload: dict[str, object] = {
             "_op": "cancel_order",
+            _EMERGENCY_ORDER_BOOK_DIGEST_KEY: order_book_digest,
             "order_id": str(order["orderid"]),
             "variety": str(order["variety"]),
             "amo": bool(order["amo"]),
@@ -765,6 +870,7 @@ class KotakNeoAdapter(BrokerAdapter):
         """Derive bounded concrete writes from strict Kotak order/position books."""
         requested = frozenset(policy.verbs)
         orders = await self._emergency_order_rows(session)
+        order_book_digest = self._emergency_order_book_digest(orders)
         active_orders = tuple(order for order in orders if order["status"] not in _EMERGENCY_TERMINAL_ORDER_STATUSES)
         unsupported_active = next(
             (order for order in active_orders if str(order.get("broker_product") or "").upper() in {"BO", "CO"}),
@@ -901,7 +1007,11 @@ class KotakNeoAdapter(BrokerAdapter):
 
         if "cancel_all_orders" in pending:
             writes = tuple(
-                self._emergency_cancel_write(order, parent_verb="cancel_all_orders")
+                self._emergency_cancel_write(
+                    order,
+                    parent_verb="cancel_all_orders",
+                    order_book_digest=order_book_digest,
+                )
                 for order in sorted(cancellable, key=lambda row: str(row["orderid"]))[:_EMERGENCY_BATCH_LIMIT]
             )
             return EmergencyReductionPlan(writes=writes, pending_verbs=frozenset(pending))
@@ -914,7 +1024,11 @@ class KotakNeoAdapter(BrokerAdapter):
                     if str(order["orderid"]) not in protected_cancellation_ids
                 )
                 writes = tuple(
-                    self._emergency_cancel_write(order, parent_verb="exit_all_positions")
+                    self._emergency_cancel_write(
+                        order,
+                        parent_verb="exit_all_positions",
+                        order_book_digest=order_book_digest,
+                    )
                     for order in sorted(uncancelled_conflicts, key=lambda row: str(row["orderid"]))[
                         :_EMERGENCY_BATCH_LIMIT
                     ]
@@ -931,6 +1045,7 @@ class KotakNeoAdapter(BrokerAdapter):
                     verb="place_reducing_order",
                     payload={
                         "_op": "place_reducing_order",
+                        _EMERGENCY_ORDER_BOOK_DIGEST_KEY: order_book_digest,
                         "symbol": str(position["symbol"]),
                         "exchange": str(position["exchange"]),
                         "exchange_segment": str(position["exchange_segment"]),
@@ -1033,6 +1148,18 @@ class KotakNeoAdapter(BrokerAdapter):
             raise BrokerError("Kotak Neo reducing position episode changed before dispatch")
 
         current_orders = await self._emergency_order_rows(session)
+        unsupported_active = next(
+            (
+                order
+                for order in current_orders
+                if order["status"] not in _EMERGENCY_TERMINAL_ORDER_STATUSES
+                and str(order.get("broker_product") or "").upper() in {"BO", "CO"}
+            ),
+            None,
+        )
+        if unsupported_active is not None:
+            product = str(unsupported_active["broker_product"]).upper()
+            raise BrokerError(f"Kotak Neo v3 cannot safely dispatch with an active {product} order")
         for order in current_orders:
             if order["status"] in _EMERGENCY_TERMINAL_ORDER_STATUSES:
                 continue
@@ -1059,7 +1186,10 @@ class KotakNeoAdapter(BrokerAdapter):
             self._client(session).place_order,
             M.to_place_order_params(order, symbol, tag=tag),
         )
-        return M.extract_order_id(M.require_write_success(response))
+        try:
+            return M.extract_order_id(M.require_write_success(response))
+        except M.KotakNeoMappingError as exc:
+            raise BrokerInternal("Kotak Neo reducing order response is invalid", broker_id="kotakneo") from exc
 
     # ---------- trading: reads ----------
 
@@ -1088,7 +1218,8 @@ class KotakNeoAdapter(BrokerAdapter):
         resp = await self._call(self._client(session).trade_book)
         rows = self._fixed_rows(resp, operation="trade_report")
         target = str(order_id)
-        return [M.from_kotak_trade(row) for row in rows if str(row.get("nOrdNo")) == target]
+        trades = [M.from_kotak_trade(row) for row in rows]
+        return [trade for trade in trades if trade["orderid"] == target]
 
     async def positions(self, session: Session) -> list[Position]:
         resp = await self._call(self._client(session).positions)
@@ -1110,7 +1241,10 @@ class KotakNeoAdapter(BrokerAdapter):
 
     async def limits(self, session: Session, segment: str = "ALL", exchange: str = "ALL", product: str = "ALL") -> dict:
         """Read v3 no-argument limits; reject unsupported adapter filters."""
-        M.to_limits_params(segment, exchange, product)
+        try:
+            M.to_limits_params(segment, exchange, product)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
         resp = validate_read_envelope(
             await self._call(self._client(session).limits),
             operation="limits",
@@ -1320,11 +1454,23 @@ class KotakNeoAdapter(BrokerAdapter):
         resolved via the shared ``_resolve_token`` path. V3 has no trading-symbol
         margin argument and unresolved/non-numeric tokens fail closed.
         """
-        M.validate_v3_order(order)
+        try:
+            M.validate_v3_order(order)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
         instrument_token = await self._resolve_token(session, order.symbol, order.exchange)
-        params = M.to_margin_params(order, instrument_token)
-        resp = validate_read_envelope(await self._call(self._client(session).margin, params), operation="margin_required")
-        return M.from_kotak_margin(resp)
+        try:
+            params = M.to_margin_params(order, instrument_token)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
+        resp = validate_read_envelope(
+            await self._call(self._client(session).margin, params),
+            operation="margin_required",
+        )
+        try:
+            return M.from_kotak_margin(resp)
+        except BrokerReadResponseInvalid as exc:
+            raise BrokerInternal("Kotak Neo margin response is invalid", broker_id="kotakneo") from exc
 
     async def search_scrip(
         self,
@@ -1475,7 +1621,6 @@ class KotakNeoAdapter(BrokerAdapter):
         ``mode`` maps to NEO's subscription types (``kotakneo_mapping.
         subscription_flags``): LTP/QUOTE → scrip feed (``mws``), FULL/DEPTH →
         5-level depth feed (``dps``), INDEX → index feed (``ifs``). The public
-        docs cap the WebSocket surface at 16 channels and 200 subscribed scrips.
         Each subscription is recorded (token + flags) so ``unsubscribe`` can
         replay it exactly.
         """
@@ -1520,9 +1665,8 @@ class KotakNeoAdapter(BrokerAdapter):
         from flinttrade_core.models import TickEvent  # noqa: PLC0415
 
         if self._feed_factory is None:
-            # Live: the HSM feed is callback-driven inside the SDK; wiring wraps
-            # NeoWebSocket's on_message into an async queue and injects it here.
-            # The decode path (decode_kotak_feed) is implemented and tested.
+            # Live v3 async feed ownership is deliberately deferred to the
+            # streaming migration; only injected synthetic frames work here.
             raise NotImplementedError("Kotak Neo live tick stream needs the HSM market feed (inject feed_factory)")
         async for frame in self._feed_factory(session):
             for tick in M.decode_kotak_feed(frame):
@@ -1538,13 +1682,7 @@ class KotakNeoAdapter(BrokerAdapter):
                 )
 
     def order_stream(self, session: Session) -> AsyncIterator[dict]:
-        """Order-update stream (HSI order feed — ``webSocket_orderfeed.md``).
-
-        Yields normalised order-update dicts (``decode_kotak_order_feed``);
-        connection acks and heartbeats are skipped. Live wiring calls
-        ``subscribe_to_orderfeed`` on the facade and bridges the callbacks into
-        the injected ``order_feed_factory``.
-        """
+        """Compatibility order-update decoder pending the v3 feed migration."""
         return self._order_stream_impl(session)
 
     async def _order_stream_impl(self, session: Session) -> AsyncIterator[dict]:

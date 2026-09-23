@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from flinttrade_core.exceptions import BrokerError, BrokerInternal, SessionExpired
+from flinttrade_core.exceptions import BrokerError, BrokerInternal, SessionExpired, UnsupportedCapabilityError
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter, _ROUTER_TOKEN
-from flinttrade_gateway.brokers.kotakneo_mapping import KotakNeoMappingError
 
 pytestmark = pytest.mark.unit
 
@@ -75,8 +74,8 @@ class MockNeo:
 
     def margin(self, params):
         self.calls.append(("margin", params))
-        return {"data": {"reqdMrgn": "15.50", "ordMrgn": "15.50", "avlCash": "38.19",
-                         "insufFund": "0", "rmsVldtd": "OK", "stat": "Ok"}}
+        return {"data": {"reqdMrgn": "0", "ordMrgn": "15.50", "avlCash": "38.19",
+                         "insufFund": "0", "rmsVldtd": "OK", "stat": "Ok", "stCode": 200}}
 
     def search_scrip(self, exchange_segment, symbol):
         self.calls.append(("search", (exchange_segment, symbol)))
@@ -146,7 +145,7 @@ async def test_bracket_order_is_gated_then_refused_before_transport():
     with pytest.raises(SafetyBypassError):
         await adapter.place_order(session, order)
     assert mock.calls == []
-    with pytest.raises(KotakNeoMappingError, match="variety"):
+    with pytest.raises(UnsupportedCapabilityError, match="variety"):
         await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
     assert mock.calls == []
 
@@ -274,7 +273,7 @@ async def test_iceberg_refused_at_gated_adapter_layer():
     session = await _session(adapter)
     order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
                   product="MIS", quantity="5000", price="9.4", variety="iceberg")
-    with pytest.raises(KotakNeoMappingError, match="variety"):
+    with pytest.raises(UnsupportedCapabilityError, match="variety"):
         await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
     assert mock.calls == []
 

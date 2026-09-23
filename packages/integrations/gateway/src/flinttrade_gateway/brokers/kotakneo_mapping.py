@@ -11,12 +11,8 @@ reported as cumulative buy/sell quantities + amounts rather than a single net
 line, so the net quantity, average price and realised P&L are derived here
 (``Positions.md``); the unrealised leg is left to merge from a live quote.
 
-Streaming: the HSM market feed and HSI order feed deliver JSON frames whose
-key vocabulary is the SDK's ``stock_key_mapping`` / ``index_key_mapping``
-(``settings.py``) — the decoders here (``decode_kotak_feed`` /
-``decode_kotak_order_feed``) normalise those frames so the adapter's
-``stream()`` / ``order_stream()`` stay SDK-free and unit-testable against
-synthetic frames.
+Legacy frame decoders remain as compatibility fixtures for synthetic tests.
+The public v3 async feed lifecycle is owned by the later streaming migration.
 """
 
 from __future__ import annotations
@@ -291,6 +287,13 @@ def _response_exchange(row: dict[str, Any], *names: str) -> str:
         raise BrokerReadResponseInvalid from None
 
 
+def _response_identifier(row: dict[str, Any], name: str) -> str:
+    value = _response_text(row, name, required=True)
+    if value != value.strip() or not value.isprintable() or any(character.isspace() for character in value):
+        raise BrokerReadResponseInvalid
+    return value
+
+
 def _response_product(row: dict[str, Any], name: str = "prod") -> str:
     value = _response_text(row, name, required=True)
     try:
@@ -352,6 +355,81 @@ def _num(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _strict_decimal(
+    value: object,
+    *,
+    label: str,
+    positive: bool = False,
+    whole: bool = False,
+) -> Decimal:
+    """Parse a caller-supplied order number without coercion or defaults."""
+    if isinstance(value, bool) or type(value) not in (int, float, str, Decimal):
+        raise KotakNeoMappingError(f"Kotak Neo {label} must be a finite number")
+    if type(value) is str and not value.strip():
+        raise KotakNeoMappingError(f"Kotak Neo {label} must be a finite number")
+    try:
+        number = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        raise KotakNeoMappingError(f"Kotak Neo {label} must be a finite number") from None
+    if not number.is_finite():
+        raise KotakNeoMappingError(f"Kotak Neo {label} must be a finite number")
+    if positive and number <= 0:
+        raise KotakNeoMappingError(f"Kotak Neo {label} must be positive")
+    if not positive and number < 0:
+        raise KotakNeoMappingError(f"Kotak Neo {label} cannot be negative")
+    if whole and number != number.to_integral_value():
+        raise KotakNeoMappingError(f"Kotak Neo {label} must be a whole number")
+    return Decimal(0) if number == 0 else number
+
+
+def _decimal_text(number: Decimal) -> str:
+    return format(number, "f")
+
+
+def _whole_text(number: Decimal) -> str:
+    return str(int(number))
+
+
+def _canonical_identifier(value: object, *, label: str) -> str:
+    if not isinstance(value, str):
+        raise KotakNeoMappingError(f"Kotak Neo {label} is not canonical")
+    if (
+        not value
+        or value != value.strip()
+        or not value.isprintable()
+        or any(character.isspace() for character in value)
+    ):
+        raise KotakNeoMappingError(f"Kotak Neo {label} is not canonical")
+    return value
+
+
+def _canonical_text(value: object, *, label: str) -> str:
+    if not isinstance(value, str) or not value or value != value.strip() or not value.isprintable():
+        raise KotakNeoMappingError(f"Kotak Neo {label} is not canonical")
+    return value
+
+
+def canonical_order_id(value: object) -> str:
+    """Return a transport-safe broker order id or fail closed."""
+    return _canonical_identifier(value, label="order id")
+
+
+def _validated_order_numbers(order: Any, price_type: str) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+    quantity = _strict_decimal(order.quantity, label="quantity", positive=True, whole=True)
+    price = _strict_decimal(getattr(order, "price", 0), label="price")
+    trigger = _strict_decimal(getattr(order, "trigger_price", 0), label="trigger price")
+    disclosed = _strict_decimal(
+        getattr(order, "disclosed_quantity", 0),
+        label="disclosed quantity",
+        whole=True,
+    )
+    if price_type in {"LIMIT", "SL"} and price <= 0:
+        raise KotakNeoMappingError(f"Kotak Neo {price_type} price must be positive")
+    if price_type in {"SL", "SL-M"} and trigger <= 0:
+        raise KotakNeoMappingError(f"Kotak Neo {price_type} trigger price must be positive")
+    return quantity, price, trigger, disclosed
+
+
 def _present_order_number(record: dict[str, Any], key: str) -> str | None:
     if key not in record:
         return None
@@ -386,11 +464,14 @@ def validate_v3_order(order: Any) -> tuple[str, str, str, str, str, str]:
     validity = _norm(getattr(order, "validity", None) or "DAY")
     if validity not in VALIDITY_ALLOWED:
         raise KotakNeoMappingError(f"Unsupported validity {validity!r}")
+    if exchange == "MCX" and validity != "DAY":
+        raise KotakNeoMappingError("Kotak Neo MCX orders support DAY validity only")
     variety = str(getattr(order, "variety", "regular")).lower()
     if variety not in {"", "regular", "amo"}:
         raise KotakNeoMappingError(f"Kotak Neo v3 does not support order variety {variety!r}")
     if getattr(order, "market_protection", None) is not None:
         raise KotakNeoMappingError("Kotak Neo v3 does not support caller market protection")
+    _validated_order_numbers(order, price_type)
     return side, price_type, product, exchange, validity, variety
 
 
@@ -402,25 +483,27 @@ def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = 
     Raises ``KotakNeoMappingError`` for unmappable enum values.
     """
     side, ptype, product, exchange, validity, variety = validate_v3_order(order)
+    quantity, price, trigger, disclosed = _validated_order_numbers(order, ptype)
+    resolved_symbol = _canonical_identifier(trading_symbol, label="trading symbol")
 
     params: dict[str, Any] = {
         "exchange_segment": EXCHANGE_TO_KOTAK[exchange],
         "product": PRODUCT_TO_KOTAK[product],
-        "price": str(_num(getattr(order, "price", 0))),
+        "price": _decimal_text(price),
         "order_type": ORDER_TYPE_TO_KOTAK[ptype],
-        "quantity": str(int(_num(order.quantity, 0))),
+        "quantity": _whole_text(quantity),
         "validity": validity,
-        "trading_symbol": str(trading_symbol),
+        "trading_symbol": resolved_symbol,
         "transaction_type": SIDE_TO_KOTAK[side],
-        "trigger_price": str(_num(getattr(order, "trigger_price", 0))),
-        "disclosed_quantity": str(int(_num(getattr(order, "disclosed_quantity", 0), 0))),
+        "trigger_price": _decimal_text(trigger),
+        "disclosed_quantity": _whole_text(disclosed),
         "amo": "NO",
     }
 
     if variety == "amo":
         params["amo"] = "YES"
-    if tag:
-        params["tag"] = str(tag)
+    if tag is not None:
+        params["tag"] = _canonical_identifier(tag, label="tag")
     return params
 
 
@@ -434,6 +517,13 @@ _MODIFY_V3_INPUT_FIELDS = frozenset(
         "trigger_price",
         "disclosed_quantity",
         "amo",
+        # Signed route context. These values are validated here but never sent
+        # to the SDK's exact v3 order-id method.
+        "symbol",
+        "exchange",
+        "action",
+        "product",
+        "strategy",
     }
 )
 
@@ -444,9 +534,30 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
     V3 retains only the order-id method. Removed quick-method and legacy fields
     are rejected rather than silently discarded or forwarded to the SDK.
     """
+    if type(changes) is not dict or any(type(key) is not str for key in changes):
+        raise KotakNeoMappingError("Kotak Neo v3 modify changes must be a string-keyed object")
     unsupported = sorted(set(changes) - _MODIFY_V3_INPUT_FIELDS)
     if unsupported:
         raise KotakNeoMappingError(f"Kotak Neo v3 modify does not support fields {unsupported}")
+    canonical_order_id_value = canonical_order_id(order_id)
+    if "symbol" in changes:
+        _canonical_identifier(changes["symbol"], label="symbol")
+    exchange = ""
+    if "exchange" in changes:
+        exchange = _canonical_identifier(changes["exchange"], label="exchange").upper()
+        if exchange not in ORDER_EXCHANGES:
+            raise KotakNeoMappingError(f"Unsupported exchange {exchange!r}")
+    if "action" in changes:
+        action = _norm(changes["action"])
+        if action not in SIDE_TO_KOTAK:
+            raise KotakNeoMappingError(f"Unsupported action {action!r}")
+    if "product" in changes:
+        product = _norm(changes["product"])
+        if product not in PRODUCT_TO_KOTAK:
+            raise KotakNeoMappingError(f"Unsupported product {product!r}")
+    if "strategy" in changes:
+        _canonical_text(changes["strategy"], label="strategy")
+
     ptype = _norm(changes.get("pricetype", changes.get("order_type", "LIMIT")))
     if ptype in ORDER_TYPE_TO_KOTAK:
         mapped_order_type = ORDER_TYPE_TO_KOTAK[ptype]
@@ -457,14 +568,29 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
     validity = str(changes.get("validity", "DAY")).upper()
     if validity not in VALIDITY_ALLOWED:
         raise KotakNeoMappingError(f"Unsupported validity {validity!r}")
+    if exchange == "MCX" and validity != "DAY":
+        raise KotakNeoMappingError("Kotak Neo MCX orders support DAY validity only")
+    quantity = _strict_decimal(changes.get("quantity"), label="quantity", positive=True, whole=True)
+    price = _strict_decimal(changes.get("price", 0), label="price")
+    trigger = _strict_decimal(changes.get("trigger_price", 0), label="trigger price")
+    disclosed = _strict_decimal(
+        changes.get("disclosed_quantity", 0),
+        label="disclosed quantity",
+        whole=True,
+    )
+    semantic_type = KOTAK_TO_ORDER_TYPE.get(mapped_order_type, mapped_order_type)
+    if semantic_type in {"LIMIT", "SL"} and price <= 0:
+        raise KotakNeoMappingError(f"Kotak Neo {semantic_type} price must be positive")
+    if semantic_type in {"SL", "SL-M"} and trigger <= 0:
+        raise KotakNeoMappingError(f"Kotak Neo {semantic_type} trigger price must be positive")
     params: dict[str, Any] = {
-        "order_id": str(order_id),
+        "order_id": canonical_order_id_value,
         "order_type": mapped_order_type,
-        "price": str(_num(changes.get("price", 0))),
-        "quantity": str(int(_num(changes.get("quantity", 0), 0))),
+        "price": _decimal_text(price),
+        "quantity": _whole_text(quantity),
         "validity": validity,
-        "trigger_price": str(_num(changes.get("trigger_price", 0))),
-        "disclosed_quantity": str(int(_num(changes.get("disclosed_quantity", 0), 0))),
+        "trigger_price": _decimal_text(trigger),
+        "disclosed_quantity": _whole_text(disclosed),
     }
     if changes.get("amo") is not None:
         amo = changes["amo"]
@@ -632,6 +758,7 @@ def from_kotak_trade(d: dict[str, Any]) -> dict[str, Any]:
     except KeyError:
         raise BrokerReadResponseInvalid from None
     trade = {
+        "orderid": _response_identifier(d, "nOrdNo"),
         "symbol": _response_text(d, "trdSym", "sym", required=True),
         "exchange": _response_exchange(d, "exSeg"),
         "action": action,
@@ -640,7 +767,6 @@ def from_kotak_trade(d: dict[str, Any]) -> dict[str, Any]:
         "product": _response_product(d),
         "timestamp": _response_text(d, "flDtTm", "exTm", required=True),
     }
-    _put_present(trade, "orderid", _response_text(d, "nOrdNo"))
     return trade
 
 
@@ -805,21 +931,21 @@ def to_margin_params(order: Any, instrument_token: str) -> dict[str, Any]:
     BO/CO varieties.
     """
     side, ptype, product, exchange, _validity, _variety = validate_v3_order(order)
+    quantity, price, trigger, _disclosed = _validated_order_numbers(order, ptype)
     token = str(instrument_token)
     if not token.isascii() or not token.isdigit() or int(token) <= 0:
         raise KotakNeoMappingError("Kotak Neo margin requires a positive numeric instrument_token")
     params: dict[str, Any] = {
         "exchange_segment": EXCHANGE_TO_KOTAK[exchange],
-        "price": str(_num(getattr(order, "price", 0))),
+        "price": _decimal_text(price),
         "order_type": ORDER_TYPE_TO_KOTAK[ptype],
         "product": PRODUCT_TO_KOTAK[product],
-        "quantity": str(int(_num(order.quantity, 0))),
+        "quantity": _whole_text(quantity),
         "instrument_token": token,
         "transaction_type": SIDE_TO_KOTAK[side],
     }
-    trigger = _num(getattr(order, "trigger_price", 0))
     if trigger > 0:
-        params["trigger_price"] = str(trigger)
+        params["trigger_price"] = _decimal_text(trigger)
     return params
 
 
@@ -833,15 +959,35 @@ def to_limits_params(segment: str = "ALL", exchange: str = "ALL", product: str =
 
 def from_kotak_margin(resp: dict[str, Any]) -> dict[str, Any]:
     """Normalise a NEO ``margin_required`` response into FlintTrade margin fields."""
-    data = resp.get("data", resp) if isinstance(resp, dict) else {}
-    if not isinstance(data, dict):
-        data = {}
+    envelope = _response_record(resp)
+    data = _response_record(envelope.get("data"))
+    status = _response_text(data, "stat", required=True)
+    status_code = data.get("stCode")
+    if status.lower() != "ok" or isinstance(status_code, bool) or type(status_code) is not int:
+        raise BrokerReadResponseInvalid
+    if status_code != 200:
+        raise BrokerReadResponseInvalid
+    order_margin = _response_decimal(data, "ordMrgn", required=True)
+    additional_margin = _response_decimal(data, "reqdMrgn", required=True)
+    available_cash = _response_decimal(data, "avlCash", required=True)
+    insufficient = _response_decimal(data, "insufFund", required=True)
+    if any(number < 0 for number in (order_margin, additional_margin, available_cash, insufficient)):
+        raise BrokerReadResponseInvalid
+    rms_validated = _response_text(data, "rmsVldtd", required=True)
+    if rms_validated != rms_validated.strip() or not rms_validated.isprintable():
+        raise BrokerReadResponseInvalid
+    for optional_name in ("totMrgnUsd", "mrgnUsd", "avlMrgn"):
+        if optional_name in data:
+            optional = _response_decimal(data, optional_name, required=True)
+            if optional < 0:
+                raise BrokerReadResponseInvalid
     return {
-        "required_margin": f"{_num(data.get('reqdMrgn', 0)):.2f}",
-        "order_margin": f"{_num(data.get('ordMrgn', 0)):.2f}",
-        "available_balance": f"{_num(data.get('avlCash', data.get('avlMrgn', 0))):.2f}",
-        "insufficient_balance": f"{_num(data.get('insufFund', 0)):.2f}",
-        "rms_validated": str(data.get("rmsVldtd", "")),
+        "required_margin": f"{order_margin:.2f}",
+        "order_margin": f"{order_margin:.2f}",
+        "provider_additional_margin": f"{additional_margin:.2f}",
+        "available_balance": f"{available_cash:.2f}",
+        "insufficient_balance": f"{insufficient:.2f}",
+        "rms_validated": rms_validated,
     }
 
 

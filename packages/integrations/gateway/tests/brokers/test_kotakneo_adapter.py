@@ -14,7 +14,15 @@ from typing import Any, AsyncIterator
 
 import pytest
 
-from flinttrade_core.exceptions import BrokerError, CredentialsInvalid, MFARequired, SessionExpired
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
+from flinttrade_core.exceptions import (
+    BrokerError,
+    BrokerInternal,
+    CredentialsInvalid,
+    MFARequired,
+    SessionExpired,
+    UnsupportedCapabilityError,
+)
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers.kotakneo import (
@@ -24,7 +32,6 @@ from flinttrade_gateway.brokers.kotakneo import (
     _normalise_credentials,
     _ROUTER_TOKEN,
 )
-from flinttrade_gateway.brokers.kotakneo_mapping import KotakNeoMappingError
 
 pytestmark = pytest.mark.unit
 
@@ -143,7 +150,17 @@ class MockNeoFull:
 
     def margin(self, params):
         self.calls.append(("margin", params))
-        return {"data": {"reqdMrgn": "15.50", "avlCash": "38.19", "stat": "Ok"}}
+        return {
+            "data": {
+                "stat": "Ok",
+                "stCode": 200,
+                "ordMrgn": "15.50",
+                "reqdMrgn": "0.00",
+                "avlCash": "38.19",
+                "insufFund": "0.00",
+                "rmsVldtd": "OK",
+            }
+        }
 
     def scrip_master(self, exchange_segment=None):
         self.calls.append(("scrip_master", exchange_segment))
@@ -447,9 +464,67 @@ async def test_unsupported_place_input_is_rejected_before_any_sdk_transport(muta
     )
     object.__setattr__(order, mutation, value)
 
-    with pytest.raises(KotakNeoMappingError):
+    with pytest.raises(UnsupportedCapabilityError):
         await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
 
+    assert mock.calls == []
+
+
+@pytest.mark.asyncio
+async def test_place_order_rejects_mcx_ioc_before_symbol_resolution_or_transport():
+    mock = MockNeoFull()
+    resolver_calls: list[tuple[str, str]] = []
+    adapter = KotakNeoAdapter(
+        client_factory=lambda _session: mock,
+        symbol_resolver=lambda symbol, exchange: resolver_calls.append((symbol, exchange)) or symbol,
+    )
+    session = await _session(adapter)
+    order = Order(
+        symbol="GOLDPETAL25JUNFUT",
+        action="BUY",
+        exchange="MCX",
+        pricetype="LIMIT",
+        product="NRML",
+        quantity="1",
+        price="7000",
+        validity="IOC",
+    )
+
+    with pytest.raises(UnsupportedCapabilityError, match="validity"):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+
+    assert resolver_calls == []
+    assert mock.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("quantity", "1.5"),
+        ("quantity", "0"),
+        ("price", "NaN"),
+        ("price", "Infinity"),
+        ("trigger_price", "bad"),
+        ("disclosed_quantity", "1.5"),
+    ],
+)
+async def test_place_numeric_rejection_precedes_symbol_resolution_and_transport(field, value):
+    mock = MockNeoFull()
+    resolver_calls: list[tuple[str, str]] = []
+    adapter = KotakNeoAdapter(
+        client_factory=lambda _session: mock,
+        symbol_resolver=lambda symbol, exchange: resolver_calls.append((symbol, exchange)) or symbol,
+    )
+    session = await _session(adapter)
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS", quantity="1"
+    ).model_copy(update={field: value})
+
+    with pytest.raises(UnsupportedCapabilityError):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+
+    assert resolver_calls == []
     assert mock.calls == []
 
 
@@ -514,10 +589,62 @@ async def test_margin_calculator_rejects_nonnumeric_token_before_transport():
         symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS", quantity="10", price="9.4"
     )
 
-    with pytest.raises(KotakNeoMappingError, match="numeric instrument_token"):
+    with pytest.raises(UnsupportedCapabilityError, match="numeric instrument_token"):
         await adapter.margin_calculator(session, order)
 
     assert not [call for call in mock.calls if call[0] == "margin"]
+
+
+@pytest.mark.asyncio
+async def test_margin_numeric_rejection_precedes_token_resolution_and_transport():
+    mock = MockNeoFull()
+    resolver_calls: list[tuple[str, str]] = []
+    adapter = KotakNeoAdapter(
+        client_factory=lambda _session: mock,
+        token_resolver=lambda symbol, exchange: resolver_calls.append((symbol, exchange)) or "14366",
+    )
+    session = await _session(adapter)
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS", quantity="1"
+    ).model_copy(update={"quantity": "1.5"})
+
+    with pytest.raises(UnsupportedCapabilityError):
+        await adapter.margin_calculator(session, order)
+
+    assert resolver_calls == []
+    assert mock.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"data": {"stat": "Ok", "stCode": 200, "reqdMrgn": "0", "avlCash": "38.19",
+                  "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "bad", "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "15.5", "reqdMrgn": "0",
+                  "avlCash": "Infinity", "insufFund": "0", "rmsVldtd": "OK"}},
+    ],
+)
+async def test_margin_calculator_canonicalises_malformed_success_as_broker_internal(response):
+    class MalformedMarginNeo(MockNeoFull):
+        def margin(self, params):
+            self.calls.append(("margin", params))
+            return response
+
+    mock = MalformedMarginNeo()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+        product="MIS", quantity="10", price="9.4",
+    )
+
+    with pytest.raises(BrokerInternal):
+        await adapter.margin_calculator(session, order)
+
+    assert len([call for call in mock.calls if call[0] == "margin"]) == 1
 
 
 @pytest.mark.asyncio
@@ -528,7 +655,7 @@ async def test_cancel_cover_leg_is_gated_then_rejected_before_transport():
     with pytest.raises(SafetyBypassError):
         await adapter.cancel_order(session, "OID1", variety="cover")
     assert mock.calls == []
-    with pytest.raises(BrokerError, match="variety"):
+    with pytest.raises(UnsupportedCapabilityError, match="variety"):
         await adapter.cancel_order(session, "OID1", variety="cover", _router_token=_ROUTER_TOKEN)
     assert mock.calls == []
 
@@ -541,7 +668,7 @@ async def test_cancel_bracket_leg_is_gated_then_rejected_before_transport():
     with pytest.raises(SafetyBypassError):
         await adapter.cancel_order(session, "OID2", variety="bracket", amo=True)
     assert mock.calls == []
-    with pytest.raises(BrokerError, match="variety"):
+    with pytest.raises(UnsupportedCapabilityError, match="variety"):
         await adapter.cancel_order(
             session,
             "OID2",
@@ -572,7 +699,7 @@ async def test_cancel_rejects_removed_trading_symbol_before_transport():
     mock = MockNeoFull()
     adapter = _adapter(mock)
     session = await _session(adapter)
-    with pytest.raises(BrokerError, match="trading symbol"):
+    with pytest.raises(UnsupportedCapabilityError, match="trading symbol"):
         await adapter.cancel_order(
             session,
             "OID-SYMBOL",
@@ -587,7 +714,7 @@ async def test_cancel_unknown_variety_refused():
     mock = MockNeoFull()
     adapter = _adapter(mock)
     session = await _session(adapter)
-    with pytest.raises(BrokerError, match="variety"):
+    with pytest.raises(UnsupportedCapabilityError, match="variety"):
         await adapter.cancel_order(session, "OID6", variety="gtt", _router_token=_ROUTER_TOKEN)
     assert mock.calls == []
 
@@ -601,6 +728,11 @@ async def test_modify_forwards_only_exact_v3_surface_and_checks_envelope():
         session,
         "OID7",
         {
+            "symbol": "IDEA",
+            "exchange": "NSE",
+            "action": "BUY",
+            "product": "MIS",
+            "strategy": "Flint",
             "pricetype": "SL",
             "price": 9.5,
             "quantity": 20,
@@ -629,12 +761,38 @@ async def test_modify_forwards_only_exact_v3_surface_and_checks_envelope():
 
 
 @pytest.mark.asyncio
+async def test_modify_mcx_ioc_context_is_rejected_before_transport():
+    mock = MockNeoFull()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+
+    with pytest.raises(UnsupportedCapabilityError, match="validity"):
+        await adapter.modify_order(
+            session,
+            "OID-MCX",
+            {
+                "symbol": "GOLDPETAL25JUNFUT",
+                "exchange": "MCX",
+                "action": "BUY",
+                "product": "NRML",
+                "strategy": "Flint",
+                "pricetype": "LIMIT",
+                "price": "7000",
+                "quantity": "1",
+                "validity": "IOC",
+            },
+            _router_token=_ROUTER_TOKEN,
+        )
+
+    assert mock.calls == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "unsupported",
     [
         {"instrument_token": "14366"},
         {"exchange_segment": "NSE"},
-        {"product": "MIS"},
         {"trading_symbol": "IDEA-EQ"},
         {"transaction_type": "BUY"},
         {"filled_quantity": 1},
@@ -646,11 +804,11 @@ async def test_modify_rejects_removed_fields_before_transport(unsupported):
     mock = MockNeoFull()
     adapter = _adapter(mock)
     session = await _session(adapter)
-    with pytest.raises(KotakNeoMappingError, match="does not support"):
+    with pytest.raises(UnsupportedCapabilityError, match="does not support"):
         await adapter.modify_order(
             session,
             "OID-REMOVED",
-            {"quantity": 1, **unsupported},
+            {"pricetype": "MARKET", "price": 0, "quantity": 1, **unsupported},
             _router_token=_ROUTER_TOKEN,
         )
     assert mock.calls == []
@@ -680,9 +838,14 @@ class _RejectingNeo(MockNeoFull):
 async def test_write_error_envelopes_raise():
     adapter = _adapter(_RejectingNeo())
     session = await _session(adapter)
-    with pytest.raises(KotakNeoMappingError, match="rejected"):
-        await adapter.modify_order(session, "OID8", {"quantity": 1}, _router_token=_ROUTER_TOKEN)
-    with pytest.raises(KotakNeoMappingError, match="2fa"):
+    with pytest.raises(BrokerInternal):
+        await adapter.modify_order(
+            session,
+            "OID8",
+            {"pricetype": "MARKET", "price": 0, "quantity": 1},
+            _router_token=_ROUTER_TOKEN,
+        )
+    with pytest.raises(BrokerInternal):
         await adapter.cancel_order(session, "OID8", _router_token=_ROUTER_TOKEN)
 
 
@@ -711,7 +874,7 @@ async def test_place_order_rejects_ambiguous_or_negative_write_acknowledgement(r
     adapter = _adapter(mock)
     session = await _session(adapter)
     order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS", quantity="1")
-    with pytest.raises(KotakNeoMappingError):
+    with pytest.raises(BrokerInternal):
         await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
 
 
@@ -755,8 +918,13 @@ async def test_modify_order_rejects_ambiguous_or_negative_write_acknowledgement(
     mock = _ModifyAckNeo(response)
     adapter = _adapter(mock)
     session = await _session(adapter)
-    with pytest.raises(KotakNeoMappingError):
-        await adapter.modify_order(session, "OID8", {"quantity": 1}, _router_token=_ROUTER_TOKEN)
+    with pytest.raises(BrokerInternal):
+        await adapter.modify_order(
+            session,
+            "OID8",
+            {"pricetype": "MARKET", "price": 0, "quantity": 1},
+            _router_token=_ROUTER_TOKEN,
+        )
 
 
 @pytest.mark.asyncio
@@ -764,8 +932,13 @@ async def test_modify_order_rejects_acknowledgement_for_a_different_order():
     mock = _ModifyAckNeo({"stat": "Ok", "nOrdNo": "250720000007588", "stCode": 200})
     adapter = _adapter(mock)
     session = await _session(adapter)
-    with pytest.raises(KotakNeoMappingError, match="different order id"):
-        await adapter.modify_order(session, "OID8", {"quantity": 1}, _router_token=_ROUTER_TOKEN)
+    with pytest.raises(BrokerInternal):
+        await adapter.modify_order(
+            session,
+            "OID8",
+            {"pricetype": "MARKET", "price": 0, "quantity": 1},
+            _router_token=_ROUTER_TOKEN,
+        )
 
 
 @pytest.mark.asyncio
@@ -774,7 +947,12 @@ async def test_modify_order_accepts_explicit_success_with_nested_order_id():
     adapter = _adapter(mock)
     session = await _session(adapter)
 
-    await adapter.modify_order(session, "OID8", {"quantity": 1}, _router_token=_ROUTER_TOKEN)
+    await adapter.modify_order(
+        session,
+        "OID8",
+        {"pricetype": "MARKET", "price": 0, "quantity": 1},
+        _router_token=_ROUTER_TOKEN,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -837,6 +1015,33 @@ async def test_order_trades_tolerates_no_trades():
     assert await adapter.order_trades(session, "X") == []
 
 
+@pytest.mark.asyncio
+async def test_order_trades_validates_every_row_before_local_filtering():
+    class MissingOrderIdNeo(MockNeoFull):
+        def trade_book(self):
+            self.calls.append(("trades",))
+            return {
+                "stat": "Ok",
+                "stCode": 200,
+                "data": [
+                    {
+                        "trdSym": "IDEA-EQ",
+                        "exSeg": "nse_cm",
+                        "trnsTp": "B",
+                        "prod": "NRML",
+                        "flDtTm": "22-Jan-2025 14:33:01",
+                        "fldQty": "1",
+                        "avgPrc": "9.39",
+                    }
+                ],
+            }
+
+    adapter = _adapter(MissingOrderIdNeo())
+    session = await _session(adapter)
+    with pytest.raises(BrokerReadResponseInvalid):
+        await adapter.order_trades(session, "OTHER")
+
+
 # ---------------------------------------------------------------------------
 # Limits / scrip master / search filters
 # ---------------------------------------------------------------------------
@@ -867,7 +1072,7 @@ async def test_limits_rejects_all_non_default_filters_before_the_wire(filters):
     mock = MockNeoFull()
     adapter = _adapter(mock)
     session = await _session(adapter)
-    with pytest.raises(KotakNeoMappingError, match="server-side filters"):
+    with pytest.raises(UnsupportedCapabilityError, match="server-side filters"):
         await adapter.limits(session, **filters)
     assert mock.calls == []
 

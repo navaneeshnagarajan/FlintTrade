@@ -24,9 +24,11 @@ from flinttrade_gateway.brokers.kotakneo_mapping import (
     ensure_ok,
     from_kotak_depth,
     from_kotak_funds,
+    from_kotak_margin,
     from_kotak_order,
     from_kotak_position,
     from_kotak_scrip_master,
+    from_kotak_trade,
     is_index_name,
     order_history_rows,
     require_write_success,
@@ -100,7 +102,7 @@ def test_place_order_validity_defaults_to_day_when_unset():
     assert to_place_order_params(order, "IDEA-EQ")["validity"] == "DAY"
 
 
-def test_place_order_validity_passes_through_when_set():
+def test_place_order_mcx_rejects_ioc_before_mapping():
     order = Order(
         symbol="GOLDPETAL25JUNFUT",
         action="BUY",
@@ -111,7 +113,8 @@ def test_place_order_validity_passes_through_when_set():
         price="7000",
         validity="IOC",
     )
-    assert to_place_order_params(order, "GOLDPETAL25JUNFUT")["validity"] == "IOC"
+    with pytest.raises(KotakNeoMappingError, match="MCX.*DAY"):
+        to_place_order_params(order, "GOLDPETAL25JUNFUT")
 
 
 def test_place_order_validity_invalid_raises():
@@ -209,10 +212,8 @@ def test_modify_emits_only_exact_v3_order_id_surface():
     [
         {"instrument_token": "14366"},
         {"exchange_segment": "NSE"},
-        {"product": "MIS"},
         {"trading_symbol": "IDEA-EQ"},
         {"transaction_type": "BUY"},
-        {"action": "BUY"},
         {"filled_quantity": 2},
         {"market_protection": 3},
         {"dd": "NA"},
@@ -220,7 +221,57 @@ def test_modify_emits_only_exact_v3_order_id_surface():
 )
 def test_modify_rejects_removed_quick_and_legacy_fields(unsupported):
     with pytest.raises(KotakNeoMappingError, match="does not support"):
-        to_modify_order_params("250122000624384", {"quantity": 1, **unsupported})
+        to_modify_order_params(
+            "250122000624384",
+            {"pricetype": "MARKET", "price": 0, "quantity": 1, **unsupported},
+        )
+
+
+def test_modify_consumes_signed_route_context_but_emits_only_exact_v3_kwargs():
+    params = to_modify_order_params(
+        "250122000624384",
+        {
+            "symbol": "GOLDPETAL25JUNFUT",
+            "exchange": "MCX",
+            "action": "BUY",
+            "product": "NRML",
+            "strategy": "Flint",
+            "pricetype": "LIMIT",
+            "price": "7000",
+            "quantity": "1",
+            "validity": "DAY",
+            "trigger_price": "0",
+            "disclosed_quantity": "0",
+        },
+    )
+
+    assert params == {
+        "order_id": "250122000624384",
+        "order_type": "L",
+        "price": "7000",
+        "quantity": "1",
+        "validity": "DAY",
+        "trigger_price": "0",
+        "disclosed_quantity": "0",
+    }
+
+
+def test_modify_mcx_context_rejects_ioc():
+    with pytest.raises(KotakNeoMappingError, match="MCX.*DAY"):
+        to_modify_order_params(
+            "250122000624384",
+            {
+                "symbol": "GOLDPETAL25JUNFUT",
+                "exchange": "MCX",
+                "action": "BUY",
+                "product": "NRML",
+                "strategy": "Flint",
+                "pricetype": "LIMIT",
+                "price": "7000",
+                "quantity": "1",
+                "validity": "IOC",
+            },
+        )
 
 
 def test_modify_minimal_omits_optional_keys():
@@ -241,13 +292,157 @@ def test_modify_minimal_omits_optional_keys():
 
 
 def test_modify_amo_string_passthrough():
-    assert to_modify_order_params("1", {"amo": "yes"})["amo"] == "YES"
+    assert to_modify_order_params(
+        "1", {"pricetype": "MARKET", "price": 0, "quantity": 1, "amo": "yes"}
+    )["amo"] == "YES"
 
 
 def test_modify_validity_validated():
-    assert to_modify_order_params("1", {"validity": "IOC"})["validity"] == "IOC"
+    assert to_modify_order_params(
+        "1", {"pricetype": "MARKET", "price": 0, "quantity": 1, "validity": "IOC"}
+    )["validity"] == "IOC"
     with pytest.raises(KotakNeoMappingError, match="validity"):
-        to_modify_order_params("1", {"validity": "GTC"})
+        to_modify_order_params(
+            "1", {"pricetype": "MARKET", "price": 0, "quantity": 1, "validity": "GTC"}
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("quantity", ""),
+        ("quantity", "abc"),
+        ("quantity", "1.5"),
+        ("quantity", "0"),
+        ("quantity", "-1"),
+        ("quantity", True),
+        ("quantity", None),
+        ("price", "abc"),
+        ("price", "NaN"),
+        ("price", "Infinity"),
+        ("price", "-0.01"),
+        ("price", True),
+        ("price", None),
+        ("trigger_price", "abc"),
+        ("trigger_price", "NaN"),
+        ("trigger_price", "-0.01"),
+        ("trigger_price", "Infinity"),
+        ("trigger_price", True),
+        ("trigger_price", None),
+        ("disclosed_quantity", ""),
+        ("disclosed_quantity", "abc"),
+        ("disclosed_quantity", "1.5"),
+        ("disclosed_quantity", "-1"),
+        ("disclosed_quantity", "NaN"),
+        ("disclosed_quantity", "Infinity"),
+        ("disclosed_quantity", True),
+        ("disclosed_quantity", None),
+    ],
+)
+def test_place_rejects_malformed_or_non_finite_numeric_intent(field, value):
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    ).model_copy(update={field: value})
+
+    with pytest.raises(KotakNeoMappingError, match=field.replace("_", " ")):
+        to_place_order_params(order, "IDEA-EQ")
+
+
+@pytest.mark.parametrize(
+    "order",
+    [
+        Order(
+            symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+            product="MIS", quantity="1", price="0",
+        ),
+        Order(
+            symbol="IDEA", action="BUY", exchange="NSE", pricetype="SL",
+            product="MIS", quantity="1", price="9.4", trigger_price="0",
+        ),
+        Order(
+            symbol="IDEA", action="BUY", exchange="NSE", pricetype="SL-M",
+            product="MIS", quantity="1", price="0", trigger_price="0",
+        ),
+    ],
+    ids=["limit-zero-price", "stop-limit-zero-trigger", "stop-market-zero-trigger"],
+)
+def test_place_requires_positive_limit_price_and_stop_trigger(order):
+    with pytest.raises(KotakNeoMappingError):
+        to_place_order_params(order, "IDEA-EQ")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("quantity", ""),
+        ("quantity", "abc"),
+        ("quantity", "1.5"),
+        ("quantity", "0"),
+        ("quantity", "-1"),
+        ("quantity", True),
+        ("price", "NaN"),
+        ("price", "Infinity"),
+        ("price", "-1"),
+        ("price", True),
+        ("trigger_price", "abc"),
+        ("trigger_price", "NaN"),
+        ("trigger_price", "Infinity"),
+        ("trigger_price", "-1"),
+        ("trigger_price", True),
+        ("disclosed_quantity", ""),
+        ("disclosed_quantity", "abc"),
+        ("disclosed_quantity", "1.5"),
+        ("disclosed_quantity", "-1"),
+        ("disclosed_quantity", "NaN"),
+        ("disclosed_quantity", "Infinity"),
+        ("disclosed_quantity", True),
+    ],
+)
+def test_modify_rejects_malformed_or_non_finite_numeric_intent(field, value):
+    changes = {
+        "pricetype": "MARKET",
+        "price": "0",
+        "quantity": "1",
+        "trigger_price": "0",
+        "disclosed_quantity": "0",
+        field: value,
+    }
+    with pytest.raises(KotakNeoMappingError, match=field.replace("_", " ")):
+        to_modify_order_params("OID-1", changes)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"pricetype": "LIMIT", "price": "0", "quantity": "1"},
+        {"pricetype": "SL", "price": "9.4", "quantity": "1", "trigger_price": "0"},
+        {"pricetype": "SL-M", "price": "0", "quantity": "1", "trigger_price": "0"},
+    ],
+)
+def test_modify_requires_positive_limit_price_and_stop_trigger(changes):
+    with pytest.raises(KotakNeoMappingError):
+        to_modify_order_params("OID-1", changes)
+
+
+@pytest.mark.parametrize("order_id", ["", " ", " OID-1", "OID 1", "OID-1\n"])
+def test_modify_requires_canonical_order_id(order_id):
+    with pytest.raises(KotakNeoMappingError, match="order id"):
+        to_modify_order_params(
+            order_id,
+            {"pricetype": "MARKET", "price": "0", "quantity": "1"},
+        )
+
+
+@pytest.mark.parametrize("tag", ["", " ", " TAG-1", "TAG-1\n"])
+def test_place_rejects_noncanonical_tag(tag):
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS")
+    with pytest.raises(KotakNeoMappingError, match="tag"):
+        to_place_order_params(order, "IDEA-EQ", tag=tag)
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +520,142 @@ def test_margin_params_reject_non_numeric_instrument_token(instrument_token):
     )
     with pytest.raises(KotakNeoMappingError, match="numeric instrument_token"):
         to_margin_params(order, instrument_token)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("quantity", ""),
+        ("quantity", "abc"),
+        ("quantity", "1.5"),
+        ("quantity", "0"),
+        ("quantity", "-1"),
+        ("quantity", True),
+        ("price", "abc"),
+        ("price", "NaN"),
+        ("price", "Infinity"),
+        ("price", "-0.01"),
+        ("price", True),
+        ("trigger_price", "abc"),
+        ("trigger_price", "NaN"),
+        ("trigger_price", "-0.01"),
+        ("trigger_price", "-Infinity"),
+        ("trigger_price", True),
+    ],
+)
+def test_margin_params_reject_malformed_or_non_finite_numeric_intent(field, value):
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    ).model_copy(update={field: value})
+    with pytest.raises(KotakNeoMappingError, match=field.replace("_", " ")):
+        to_margin_params(order, "14366")
+
+
+def test_margin_params_never_truncate_fractional_quantity():
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS", quantity="1"
+    ).model_copy(update={"quantity": "1.5"})
+    with pytest.raises(KotakNeoMappingError, match="quantity"):
+        to_margin_params(order, "14366")
+
+
+@pytest.mark.parametrize(
+    "order",
+    [
+        Order(
+            symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+            product="MIS", quantity="1", price="0",
+        ),
+        Order(
+            symbol="IDEA", action="BUY", exchange="NSE", pricetype="SL",
+            product="MIS", quantity="1", price="9.4", trigger_price="0",
+        ),
+        Order(
+            symbol="IDEA", action="BUY", exchange="NSE", pricetype="SL-M",
+            product="MIS", quantity="1", price="0", trigger_price="0",
+        ),
+    ],
+)
+def test_margin_params_require_positive_limit_price_and_stop_trigger(order):
+    with pytest.raises(KotakNeoMappingError):
+        to_margin_params(order, "14366")
+
+
+def test_margin_response_maps_ord_margin_as_common_required_margin():
+    assert from_kotak_margin(
+        {
+            "data": {
+                "stat": "Ok",
+                "stCode": 200,
+                "avlCash": "38.190000",
+                "ordMrgn": "15.500000",
+                "reqdMrgn": "0.000000",
+                "insufFund": "0.000000",
+                "rmsVldtd": "OK",
+            }
+        }
+    ) == {
+        "required_margin": "15.50",
+        "order_margin": "15.50",
+        "provider_additional_margin": "0.00",
+        "available_balance": "38.19",
+        "insufficient_balance": "0.00",
+        "rms_validated": "OK",
+    }
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {},
+        {"data": {}},
+        {"data": {"stat": "Ok", "stCode": 200, "reqdMrgn": "0", "avlCash": "38.19",
+                  "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "NaN", "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "Infinity", "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "-1", "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": True, "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "15.5", "reqdMrgn": "bad",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "15.5", "reqdMrgn": "-1",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "15.5", "reqdMrgn": "0",
+                  "avlCash": "bad", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "15.5", "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "-1", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": "200", "ordMrgn": "15.5", "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "15.5", "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": ""}},
+    ],
+)
+def test_margin_response_rejects_missing_or_malformed_official_success_fields(response):
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_margin(response)
+
+
+def test_trade_mapping_requires_order_id():
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_trade(
+            {
+                "trdSym": "IDEA-EQ",
+                "exSeg": "nse_cm",
+                "trnsTp": "B",
+                "fldQty": "1",
+                "avgPrc": "9.40",
+                "prod": "MIS",
+                "flDtTm": "22-Jan-2025 14:28:16",
+            }
+        )
 
 
 # ---------------------------------------------------------------------------

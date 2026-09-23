@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from contextvars import copy_context
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -189,6 +190,23 @@ class BrokerAdapter(ABC):
     ) -> None:
         """Cancel an existing order. Idempotent. Same invariant as place_order."""
         raise NotImplementedError
+
+    async def preflight_emergency_write(
+        self,
+        session: AdapterSessionView,
+        *,
+        verb: str,
+        payload: Mapping[str, Any],
+        _router_token: object | None = None,
+    ) -> None:
+        """Revalidate adapter-specific emergency assumptions before dispatch.
+
+        The default implementation is deliberately a token-guarded no-op.
+        Adapters with snapshot-coherence requirements may override it; the
+        router invokes the hook after safety and lifecycle preparation but
+        before crossing the broker-write invocation boundary.
+        """
+        self._require_router_token(_router_token, ROUTER_TOKEN)
 
     # ---------- trading: reads (no SafetyContext required) ----------
 

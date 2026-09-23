@@ -21,7 +21,7 @@ import pytest
 from flask import Flask
 
 from flinttrade_core.auth_routes import _create_token
-from flinttrade_core.exceptions import SafetyBypassError
+from flinttrade_core.exceptions import BrokerInternal, SafetyBypassError, UnsupportedCapabilityError
 from flinttrade_core.order_routes import orders_bp
 from flinttrade_engine.safety import SafetyConfig, SafetySystem, set_safety_gate_secret
 from flinttrade_gateway.exceptions import BrokerNotFoundError
@@ -901,6 +901,7 @@ def test_modify_happy_path_returns_200(backend_lease_proof) -> None:
     assert kw["order_id"] == "OA-1"
     assert kw["safety_ctx"].backend_incarnation == str(backend_lease_proof.incarnation)
     assert kw["changes"]["symbol"] == "RELIANCE"
+    assert kw["changes"]["validity"] == "DAY"
     # The gated fingerprint is the canonical modify dict (mint == verify object).
     assert kw["order"]["_op"] == "modify"
     assert kw["order"]["_requested_change_fields"] == [
@@ -913,6 +914,47 @@ def test_modify_happy_path_returns_200(backend_lease_proof) -> None:
         "symbol",
     ]
     assert "_requested_change_fields" not in kw["changes"]
+
+
+@pytest.mark.parametrize("error", [UnsupportedCapabilityError("unsupported"), BrokerInternal("malformed")])
+def test_modify_maps_canonical_adapter_errors_to_stable_status(backend_lease_proof, error) -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(side_effect=error)
+    response = _app(backend_lease_proof, broker_router=router).test_client().post(
+        "/api/v1/orders/modify",
+        json=_MODIFY_BODY,
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == (501 if isinstance(error, UnsupportedCapabilityError) else 500)
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [
+        {"instrument_token": "14366"},
+        {"exchange_segment": "nse_cm"},
+        {"trading_symbol": "RELIANCE-EQ"},
+        {"transaction_type": "B"},
+        {"filled_quantity": "0"},
+        {"market_protection": "0"},
+        {"dd": "NA"},
+    ],
+)
+def test_kotak_modify_route_refuses_explicit_removed_fields_instead_of_dropping_them(
+    backend_lease_proof,
+    removed,
+) -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    response = _app(backend_lease_proof, broker_router=router).test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json={**_MODIFY_BODY, **removed},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 501
+    router.modify_order.assert_not_called()
 
 
 def test_modify_forwards_trigger_price_and_disclosed_quantity(backend_lease_proof) -> None:
@@ -959,6 +1001,79 @@ def test_routed_modify_happy_path_targets_named_broker_account(backend_lease_pro
     assert request_ctx.selector == "upstox:U1"
     assert kw["hint"].adapter_id == "upstox"
     assert kw["hint"].account_id == "U1"
+
+
+def test_kotak_modify_full_route_router_adapter_path_emits_only_v3_kwargs(backend_lease_proof) -> None:
+    from flinttrade_engine.safety import SafetyGate
+    from flinttrade_gateway.brokers._base import Session
+    from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
+    from flinttrade_gateway.router import BrokerRouter
+
+    class ExactModifyClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, str]] = []
+
+        def modify_order(self, params):
+            self.calls.append(dict(params))
+            return {"stat": "Ok", "stCode": 200, "nOrdNo": params["order_id"]}
+
+    client = ExactModifyClient()
+    adapter = KotakNeoAdapter(client_factory=lambda _session: client)
+    adapter.order_book = AsyncMock(
+        return_value=[
+            {
+                "orderid": "OA-1",
+                "status": "OPEN",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "action": "BUY",
+                "quantity": "1",
+                "filled_quantity": "0",
+                "price": "100",
+                "pricetype": "LIMIT",
+                "product": "MIS",
+                "disclosed_quantity": "0",
+            }
+        ]
+    )
+    adapter.margin_calculator = AsyncMock(return_value={"required_margin": "100"})
+    session = Session(
+        access_token="synthetic",
+        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).timestamp(),
+        account_id="default",
+        adapter_id="kotakneo",
+    )
+    router = BrokerRouter(
+        {"kotakneo": adapter},
+        lambda _ctx, _adapter_id, _account_id: session,
+        consume_gate=SafetyGate().consume,
+        backend_lease_proof=backend_lease_proof,
+    )
+    app = _app(backend_lease_proof, broker_router=None, safety=_passing_safety())
+    app.config["BROKER_ROUTER"] = router
+    registry = MagicMock()
+    registry.get_session_for.return_value = session
+    app.config["REGISTRY"] = registry
+    app.config["NATIVE_ADAPTERS"] = {"kotakneo": adapter}
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json=_MODIFY_BODY,
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    assert client.calls == [
+        {
+            "order_id": "OA-1",
+            "order_type": "L",
+            "price": "100",
+            "quantity": "1",
+            "validity": "DAY",
+            "trigger_price": "0",
+            "disclosed_quantity": "0",
+        }
+    ]
 
 
 def test_modify_quantity_increase_runs_full_safety_before_router(backend_lease_proof) -> None:

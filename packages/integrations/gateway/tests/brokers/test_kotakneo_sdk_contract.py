@@ -10,7 +10,8 @@ from copy import deepcopy
 import httpx
 import pytest
 from flinttrade_core.exceptions import (
-    BrokerInternal, BrokerTimeout, CredentialsInvalid, MFARequired, NetworkError, RateLimitError, SessionExpired,
+    BrokerInternal, BrokerTimeout, CredentialsInvalid, MFARequired, NetworkError, OrderRejectedByBroker,
+    RateLimitError, SessionExpired, UnsupportedCapabilityError,
 )
 
 pytestmark = pytest.mark.unit
@@ -209,7 +210,18 @@ class ExactNeo:
                 trigger_price,
             )
         )
-        return {"data": {"status": "success", "reqdMrgn": "1"}}
+        return {
+            "data": {
+                "status": "success",
+                "stat": "Ok",
+                "stCode": 200,
+                "ordMrgn": "1",
+                "reqdMrgn": "0",
+                "avlCash": "10",
+                "insufFund": "0",
+                "rmsVldtd": "OK",
+            }
+        }
 
     def logout(self):
         self.calls.append(("logout",))
@@ -298,6 +310,95 @@ def test_facade_invokes_exact_v3_order_report_limits_and_margin_signatures(fake_
         ("margin_required", "nse_cm", "1", "L", "MIS", "2", "123", "B", "0"),
     ]
     session.close()
+
+
+def test_facade_preserves_provider_write_rejection_as_order_rejected(fake_sdk, monkeypatch):
+    import neo_api_client
+
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    class RejectedNeo(ExactNeo):
+        def modify_order(self, *args, **kwargs):
+            return {"stat": "Not_Ok", "stCode": 400, "errMsg": "synthetic rejection"}
+
+    monkeypatch.setattr(neo_api_client, "NeoAPI", RejectedNeo)
+    session = KotakNeoSdkSession.login(_credentials())
+    with pytest.raises(OrderRejectedByBroker):
+        session.modify_order(
+            {
+                "order_id": "OID-1",
+                "price": "0",
+                "order_type": "MKT",
+                "quantity": "1",
+                "validity": "DAY",
+                "trigger_price": "0",
+                "disclosed_quantity": "0",
+            }
+        )
+    session.close()
+
+
+@pytest.mark.asyncio
+async def test_adapter_strict_numeric_validation_stops_installed_sdk_mock_transport():
+    import time
+
+    import neo_api_client
+
+    from flinttrade_core.models import Order
+    from flinttrade_gateway.brokers._base import ROUTER_TOKEN, Session
+    from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"stat": "Ok", "stCode": 200, "nOrdNo": "OID-1"})
+
+    neo = neo_api_client.NeoAPI(
+        consumer_key="synthetic",
+        access_token=None,
+        transport=httpx.MockTransport(respond),
+    )
+    neo.configuration.edit_token = "synthetic"
+    neo.configuration.edit_sid = "synthetic"
+    neo.configuration.base_url = "https://example.invalid"
+    facade = KotakNeoSdkSession.__new__(KotakNeoSdkSession)
+    facade._neo = neo
+    facade._closed = False
+    adapter = KotakNeoAdapter(
+        client_factory=lambda _session: facade,
+        symbol_resolver=lambda _symbol, _exchange: "SYNTHETIC-EQ",
+        token_resolver=lambda _symbol, _exchange: "123",
+    )
+    session = Session(
+        access_token="synthetic",
+        expires_at=time.time() + 60,
+        account_id="synthetic",
+        adapter_id="kotakneo",
+    )
+    bad_price = Order(
+        symbol="SYNTHETIC", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS"
+    ).model_copy(update={"price": "NaN"})
+    bad_quantity = Order(
+        symbol="SYNTHETIC", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS"
+    ).model_copy(update={"quantity": "1.5"})
+
+    try:
+        with pytest.raises(UnsupportedCapabilityError):
+            await adapter.place_order(session, bad_price, _router_token=ROUTER_TOKEN)
+        with pytest.raises(UnsupportedCapabilityError):
+            await adapter.modify_order(
+                session,
+                "OID-1",
+                {"pricetype": "MARKET", "price": "Infinity", "quantity": "1"},
+                _router_token=ROUTER_TOKEN,
+            )
+        with pytest.raises(UnsupportedCapabilityError):
+            await adapter.margin_calculator(session, bad_quantity)
+        assert requests == []
+    finally:
+        facade.close()
 
 
 @pytest.mark.parametrize("step,invalid,error", [
@@ -396,7 +497,17 @@ def test_read_envelope_allows_main_track_rate_limit_metadata():
 def test_read_envelope_accepts_nested_successful_margin_response():
     from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
 
-    response = {"data": {"stat": "Ok", "reqdMrgn": "15.50", "avlCash": "38.19"}}
+    response = {
+        "data": {
+            "stat": "Ok",
+            "stCode": 200,
+            "ordMrgn": "15.50",
+            "reqdMrgn": "0",
+            "avlCash": "38.19",
+            "insufFund": "0",
+            "rmsVldtd": "OK",
+        }
+    }
     assert validate_read_envelope(response, operation="margin_required") is response
 
 

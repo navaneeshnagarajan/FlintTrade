@@ -1411,9 +1411,8 @@ def _gated_write_dispatch(
 def _modify_changes(body: dict[str, Any]) -> dict[str, Any]:
     """Build the ``ModifyOrder`` field dict (minus orderid) from a request body.
 
-    Only the fields the OpenAlgo ``ModifyOrder`` model accepts — extra body keys
-    (apikey, account_id, …) are dropped so the typed-model construction in the
-    adapter cannot fail on an unexpected field.
+    Only canonical replacement fields and signed broker context are retained —
+    unrelated body keys (apikey, account_id, …) never reach an adapter.
     """
     return {
         "symbol": str(body.get("symbol") or ""),
@@ -1425,6 +1424,7 @@ def _modify_changes(body: dict[str, Any]) -> dict[str, Any]:
         "price": str(body.get("price", "0")),
         "trigger_price": str(body.get("trigger_price", "0")),
         "disclosed_quantity": str(body.get("disclosed_quantity", "0")),
+        "validity": str(body.get("validity") or "DAY").upper(),
         "strategy": str(body.get("strategy") or "Flint"),
     }
 
@@ -1441,6 +1441,7 @@ def _requested_modify_fields(body: Mapping[str, Any]) -> list[str]:
         "price_type": ("pricetype", "order_type"),
         "trigger_price": ("trigger_price",),
         "disclosed_quantity": ("disclosed_quantity",),
+        "validity": ("validity",),
     }
     return sorted(
         field
@@ -1472,6 +1473,25 @@ def _dispatch_live_modify(
     if not order_id:
         return jsonify({"status": "error", "message": "Modify requires an 'orderid'"}), 400
     safe_order = log_ref(order_id, kind="order")
+
+    # Kotak Neo v3 removed the quick/legacy modify arguments below.  Reject an
+    # explicitly supplied field before the request is admitted and signed;
+    # silently dropping one would let the caller believe the broker consumed a
+    # change that can never be represented by the v3 SDK contract.
+    kotakneo_removed_fields = {
+        "dd",
+        "exchange_segment",
+        "filled_quantity",
+        "instrument_token",
+        "market_protection",
+        "trading_symbol",
+        "transaction_type",
+    }
+    if str(adapter_id).strip().lower() == "kotakneo" and kotakneo_removed_fields.intersection(body):
+        return jsonify({
+            "status": "error",
+            "message": "The requested Kotak Neo modify fields are not available in SDK v3.",
+        }), 501
 
     blocked, unavailable = _live_kill_switch_block()
     if unavailable is not None:
