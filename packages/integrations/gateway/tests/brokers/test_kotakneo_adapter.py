@@ -1,9 +1,8 @@
-"""Tests for the Kotak Neo adapter's full-parity surface (mock facade; no SDK).
+"""Tests for the Kotak Neo adapter's v3 surface (mock facade; no SDK).
 
-The base surface (login, gated regular/bracket/cover place, reads, quotes,
+The base surface (login, gated regular/AMO place, reads, quotes,
 margin, scrip search) is covered in ``tests/brokers/test_kotakneo_adapter_base.py``; this
-file exercises the parity wave: AMO, the bracket/cover leg-cancel endpoints,
-full-surface modify, per-order history + fills, filtered limits, scrip master,
+file exercises the parity wave: AMO, v3-only cancel/modify, local fill filtering, scrip master,
 typed quotes + market depth, the HSM subscribe/unsubscribe surface and the
 market/order feed streams against synthetic frames.
 """
@@ -46,16 +45,8 @@ class MockNeoFull:
         self.calls.append(("modify", params))
         return {"stat": "Ok", "nOrdNo": params["order_id"], "stCode": 200}
 
-    def cancel_order(self, order_id, amo="NO", is_verify=False, trading_symbol=None):
-        self.calls.append(("cancel", (order_id, amo, is_verify, trading_symbol)))
-        return {"stat": "Ok", "nOrdNo": order_id, "stCode": 200}
-
-    def cancel_cover_order(self, order_id, amo="NO", is_verify=False, trading_symbol=None):
-        self.calls.append(("cancel_co", (order_id, amo, is_verify, trading_symbol)))
-        return {"stat": "Ok", "nOrdNo": order_id, "stCode": 200}
-
-    def cancel_bracket_order(self, order_id, amo="NO", is_verify=False, trading_symbol=None):
-        self.calls.append(("cancel_bo", (order_id, amo, is_verify, trading_symbol)))
+    def cancel_order(self, order_id, amo="NO", is_verify=False):
+        self.calls.append(("cancel", (order_id, amo, is_verify)))
         return {"stat": "Ok", "nOrdNo": order_id, "stCode": 200}
 
     # -- reads ---------------------------------------------------------------
@@ -102,23 +93,8 @@ class MockNeoFull:
             }
         }
 
-    def trade_book(self, order_id=None):
-        self.calls.append(("trades", order_id))
-        if order_id:
-            return {
-                "stat": "ok",
-                "stCode": 200,
-                "data": {
-                    "nOrdNo": order_id,
-                    "trdSym": "IDEA-EQ",
-                    "exSeg": "nse_cm",
-                    "trnsTp": "B",
-                    "fldQty": 1,
-                    "avgPrc": "9.39",
-                    "prod": "NRML",
-                    "flDtTm": "22-Jan-2025 14:33:01",
-                },
-            }
+    def trade_book(self):
+        self.calls.append(("trades",))
         return {"stat": "ok", "stCode": 200, "data": []}
 
     def positions(self):
@@ -130,8 +106,8 @@ class MockNeoFull:
     def funds(self):
         return {"Net": "19.41", "MarginUsed": "18.78", "CollateralValue": "38.19", "stat": "Ok"}
 
-    def limits(self, segment, exchange, product):
-        self.calls.append(("limits", (segment, exchange, product)))
+    def limits(self):
+        self.calls.append(("limits",))
         return {"Net": "10.00", "MarginUsed": "5.00", "stat": "Ok", "stCode": 200}
 
     def quotes(self, instrument_tokens, quote_type="all"):
@@ -356,22 +332,24 @@ async def test_logout_tolerates_facade_without_logout():
 
 
 
-def test_v3_cancel_rejects_removed_trading_symbol_before_sdk_call():
+def test_v3_cancel_facade_has_no_removed_trading_symbol_argument():
     client = KotakNeoClient.__new__(KotakNeoClient)
-    with pytest.raises(BrokerError, match="no trading symbol"):
+    with pytest.raises(TypeError, match="trading_symbol"):
         client.cancel_order("OID-AMO", amo="YES", trading_symbol="SYNTHETIC-EQ")
 
-def test_capabilities_record_current_public_websocket_limits_without_runtime_promotion() -> None:
-    """Captured Kotak docs advertise 16 channels and 200 subscribed scrips."""
+
+def test_capabilities_remove_v2_order_and_streaming_claims() -> None:
     assert KOTAKNEO_CAPABILITIES.streaming_supported is True
     assert KOTAKNEO_CAPABILITIES.streaming_runtime_ready is False
-    assert KOTAKNEO_CAPABILITIES.streaming_max_connections_per_user == 16
-    assert KOTAKNEO_CAPABILITIES.streaming_max_symbols_per_connection == 200
-    assert KOTAKNEO_CAPABILITIES.streaming_max_total_symbols == 200
+    assert KOTAKNEO_CAPABILITIES.streaming_max_connections_per_user is None
+    assert KOTAKNEO_CAPABILITIES.streaming_max_symbols_per_connection is None
+    assert KOTAKNEO_CAPABILITIES.streaming_max_total_symbols is None
+    assert KOTAKNEO_CAPABILITIES.bracket_order_native is False
+    assert KOTAKNEO_CAPABILITIES.cover_order_native is False
 
 
 # ---------------------------------------------------------------------------
-# Gated writes: AMO + leg-wise cancels + full-surface modify
+# Gated writes: regular/AMO place, cancel and exact v3 modify
 # ---------------------------------------------------------------------------
 
 
@@ -397,6 +375,82 @@ async def test_amo_place_sets_flag_through_gate():
     assert oid == "250122000612876"
     _, params = mock.calls[0]
     assert params["amo"] == "YES" and params["product"] == "CNC"
+
+
+@pytest.mark.asyncio
+async def test_supported_place_emits_exact_v3_kwargs_and_preserves_tag():
+    mock = MockNeoFull()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    session.algo_id = "SYNTHETIC-TAG"
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="SL",
+        product="MIS",
+        quantity="10",
+        price="9.4",
+        trigger_price="9.3",
+        disclosed_quantity="2",
+        validity="IOC",
+    )
+
+    await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+
+    assert mock.calls == [
+        (
+            "place",
+            {
+                "exchange_segment": "nse_cm",
+                "product": "MIS",
+                "price": "9.4",
+                "order_type": "SL",
+                "quantity": "10",
+                "validity": "IOC",
+                "trading_symbol": "IDEA-EQ",
+                "transaction_type": "B",
+                "trigger_price": "9.3",
+                "disclosed_quantity": "2",
+                "amo": "NO",
+                "tag": "SYNTHETIC-TAG",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    [
+        ("variety", "bracket"),
+        ("variety", "cover"),
+        ("product", "MTF"),
+        ("exchange", "CDS"),
+        ("exchange", "BCD"),
+        ("market_protection", True),
+        ("market_protection", False),
+    ],
+)
+async def test_unsupported_place_input_is_rejected_before_any_sdk_transport(mutation, value):
+    mock = MockNeoFull()
+    adapter = KotakNeoAdapter(client_factory=lambda _session: mock)
+    session = await _session(adapter)
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="LIMIT",
+        product="MIS",
+        quantity="10",
+        price="9.4",
+    )
+    object.__setattr__(order, mutation, value)
+
+    with pytest.raises(KotakNeoMappingError):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+
+    assert mock.calls == []
 
 
 @pytest.mark.asyncio
@@ -442,42 +496,60 @@ async def test_margin_calculator_resolves_trading_symbol_via_search_scrip_when_n
     await adapter.margin_calculator(session, order)
     assert [c for c in mock.calls if c[0] == "search"] == [
         ("search", ("nse_cm", "IDEA", None, None, None)),
-        ("search", ("nse_cm", "IDEA", None, None, None)),
     ]
     _, params = [c for c in mock.calls if c[0] == "margin"][0]
-    assert params["trading_symbol"] == "IDEA-EQ"
     assert params["instrument_token"] == "14366"
+    assert "trading_symbol" not in params
 
 
 @pytest.mark.asyncio
-async def test_cancel_cover_leg_is_gated_and_dispatches():
+async def test_margin_calculator_rejects_nonnumeric_token_before_transport():
+    mock = MockNeoFull()
+    adapter = KotakNeoAdapter(
+        client_factory=lambda _session: mock,
+        token_resolver=lambda _symbol, _exchange: "IDEA-EQ",
+    )
+    session = await _session(adapter)
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS", quantity="10", price="9.4"
+    )
+
+    with pytest.raises(KotakNeoMappingError, match="numeric instrument_token"):
+        await adapter.margin_calculator(session, order)
+
+    assert not [call for call in mock.calls if call[0] == "margin"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_cover_leg_is_gated_then_rejected_before_transport():
     mock = MockNeoFull()
     adapter = _adapter(mock)
     session = await _session(adapter)
     with pytest.raises(SafetyBypassError):
         await adapter.cancel_order(session, "OID1", variety="cover")
     assert mock.calls == []
-    await adapter.cancel_order(session, "OID1", variety="cover", _router_token=_ROUTER_TOKEN)
-    assert mock.calls == [("cancel_co", ("OID1", "NO", False, None))]
+    with pytest.raises(BrokerError, match="variety"):
+        await adapter.cancel_order(session, "OID1", variety="cover", _router_token=_ROUTER_TOKEN)
+    assert mock.calls == []
 
 
 @pytest.mark.asyncio
-async def test_cancel_bracket_leg_is_gated_and_dispatches():
+async def test_cancel_bracket_leg_is_gated_then_rejected_before_transport():
     mock = MockNeoFull()
     adapter = _adapter(mock)
     session = await _session(adapter)
     with pytest.raises(SafetyBypassError):
         await adapter.cancel_order(session, "OID2", variety="bracket", amo=True)
     assert mock.calls == []
-    await adapter.cancel_order(
-        session,
-        "OID2",
-        variety="bracket",
-        amo=True,
-        trading_symbol="IDEA-EQ",
-        _router_token=_ROUTER_TOKEN,
-    )
-    assert mock.calls == [("cancel_bo", ("OID2", "YES", False, "IDEA-EQ"))]
+    with pytest.raises(BrokerError, match="variety"):
+        await adapter.cancel_order(
+            session,
+            "OID2",
+            variety="bracket",
+            amo=True,
+            _router_token=_ROUTER_TOKEN,
+        )
+    assert mock.calls == []
 
 
 @pytest.mark.asyncio
@@ -487,18 +559,27 @@ async def test_cancel_regular_and_amo_routes():
     session = await _session(adapter)
     await adapter.cancel_order(session, "OID3", _router_token=_ROUTER_TOKEN)
     await adapter.cancel_order(session, "OID4", amo=True, _router_token=_ROUTER_TOKEN)
-    await adapter.cancel_order(
-        session,
-        "OID5",
-        variety="amo",
-        trading_symbol="IDEA-EQ",
-        _router_token=_ROUTER_TOKEN,
-    )
+    await adapter.cancel_order(session, "OID5", variety="amo", _router_token=_ROUTER_TOKEN)
     assert mock.calls == [
-        ("cancel", ("OID3", "NO", False, None)),
-        ("cancel", ("OID4", "YES", False, None)),
-        ("cancel", ("OID5", "YES", False, "IDEA-EQ")),
+        ("cancel", ("OID3", "NO", False)),
+        ("cancel", ("OID4", "YES", False)),
+        ("cancel", ("OID5", "YES", False)),
     ]
+
+
+@pytest.mark.asyncio
+async def test_cancel_rejects_removed_trading_symbol_before_transport():
+    mock = MockNeoFull()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    with pytest.raises(BrokerError, match="trading symbol"):
+        await adapter.cancel_order(
+            session,
+            "OID-SYMBOL",
+            trading_symbol="IDEA-EQ",
+            _router_token=_ROUTER_TOKEN,
+        )
+    assert mock.calls == []
 
 
 @pytest.mark.asyncio
@@ -512,7 +593,7 @@ async def test_cancel_unknown_variety_refused():
 
 
 @pytest.mark.asyncio
-async def test_modify_forwards_full_surface_and_checks_envelope():
+async def test_modify_forwards_only_exact_v3_surface_and_checks_envelope():
     mock = MockNeoFull()
     adapter = _adapter(mock)
     session = await _session(adapter)
@@ -524,18 +605,55 @@ async def test_modify_forwards_full_surface_and_checks_envelope():
             "price": 9.5,
             "quantity": 20,
             "trigger_price": 9.45,
-            "instrument_token": "14366",
-            "exchange_segment": "NSE",
-            "product": "MIS",
-            "trading_symbol": "IDEA-EQ",
-            "transaction_type": "BUY",
+            "disclosed_quantity": 2,
+            "validity": "IOC",
             "amo": True,
         },
         _router_token=_ROUTER_TOKEN,
     )
-    _, params = mock.calls[0]
-    assert params["instrument_token"] == "14366" and params["exchange_segment"] == "nse_cm"
-    assert params["transaction_type"] == "B" and params["amo"] == "YES"
+    assert mock.calls == [
+        (
+            "modify",
+            {
+                "order_id": "OID7",
+                "order_type": "SL",
+                "price": "9.5",
+                "quantity": "20",
+                "validity": "IOC",
+                "trigger_price": "9.45",
+                "disclosed_quantity": "2",
+                "amo": "YES",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "unsupported",
+    [
+        {"instrument_token": "14366"},
+        {"exchange_segment": "NSE"},
+        {"product": "MIS"},
+        {"trading_symbol": "IDEA-EQ"},
+        {"transaction_type": "BUY"},
+        {"filled_quantity": 1},
+        {"market_protection": 1},
+        {"dd": "NA"},
+    ],
+)
+async def test_modify_rejects_removed_fields_before_transport(unsupported):
+    mock = MockNeoFull()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+    with pytest.raises(KotakNeoMappingError, match="does not support"):
+        await adapter.modify_order(
+            session,
+            "OID-REMOVED",
+            {"quantity": 1, **unsupported},
+            _router_token=_ROUTER_TOKEN,
+        )
+    assert mock.calls == []
 
 
 @pytest.mark.asyncio
@@ -554,7 +672,7 @@ class _RejectingNeo(MockNeoFull):
     def modify_order(self, params):
         return {"stat": "Not_Ok", "errMsg": "Order is not open"}
 
-    def cancel_order(self, order_id, amo="NO", is_verify=False, trading_symbol=None):
+    def cancel_order(self, order_id, amo="NO", is_verify=False):
         return {"Error Message": "Complete the 2fa process before accessing this application"}
 
 
@@ -676,19 +794,40 @@ async def test_order_history_normalises_lifecycle_rows():
 
 
 @pytest.mark.asyncio
-async def test_order_trades_single_fill_dict():
-    mock = MockNeoFull()
+async def test_order_trades_fetches_unfiltered_report_and_preserves_all_matching_fills():
+    class MultiFillNeo(MockNeoFull):
+        def trade_book(self):
+            self.calls.append(("trades",))
+            base = {
+                "trdSym": "IDEA-EQ",
+                "exSeg": "nse_cm",
+                "trnsTp": "B",
+                "prod": "NRML",
+                "flDtTm": "22-Jan-2025 14:33:01",
+            }
+            return {
+                "stat": "ok",
+                "stCode": 200,
+                "data": [
+                    {**base, "nOrdNo": "250122000624384", "fldQty": 1, "avgPrc": "9.39"},
+                    {**base, "nOrdNo": "OTHER", "fldQty": 5, "avgPrc": "9.40"},
+                    {**base, "nOrdNo": "250122000624384", "fldQty": 2, "avgPrc": "9.41"},
+                ],
+            }
+
+    mock = MultiFillNeo()
     adapter = _adapter(mock)
     session = await _session(adapter)
     fills = await adapter.order_trades(session, "250122000624384")
-    assert len(fills) == 1
-    assert fills[0]["orderid"] == "250122000624384" and fills[0]["price"] == "9.39"
-    assert mock.calls == [("trades", "250122000624384")]
+    assert [(fill["quantity"], fill["price"]) for fill in fills] == [("1", "9.39"), ("2", "9.41")]
+    assert {fill["orderid"] for fill in fills} == {"250122000624384"}
+    assert mock.calls == [("trades",)]
 
 
 class _NoTradesNeo(MockNeoFull):
-    def trade_book(self, order_id=None):
-        return {"Error": "There is no trades available with the given order id"}
+    def trade_book(self):
+        self.calls.append(("trades",))
+        return {"stat": "Ok", "stCode": 200, "data": []}
 
 
 @pytest.mark.asyncio
@@ -704,22 +843,32 @@ async def test_order_trades_tolerates_no_trades():
 
 
 @pytest.mark.asyncio
-async def test_limits_filtered_call():
+async def test_limits_default_call_uses_no_sdk_arguments():
     mock = MockNeoFull()
     adapter = _adapter(mock)
     session = await _session(adapter)
-    out = await adapter.limits(session, segment="FO", exchange="NSE", product="NRML")
-    assert mock.calls == [("limits", ("FO", "NSE", "NRML"))]
+    out = await adapter.limits(session)
+    assert mock.calls == [("limits",)]
     assert out["available_balance"] == "10.00" and out["used_margin"] == "5.00"
 
 
 @pytest.mark.asyncio
-async def test_limits_rejects_bad_filters_before_the_wire():
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"segment": "FO"},
+        {"exchange": "NSE"},
+        {"product": "NRML"},
+        {"segment": "FO", "exchange": "NSE", "product": "NRML"},
+        {"segment": "EQUITY"},
+    ],
+)
+async def test_limits_rejects_all_non_default_filters_before_the_wire(filters):
     mock = MockNeoFull()
     adapter = _adapter(mock)
     session = await _session(adapter)
-    with pytest.raises(KotakNeoMappingError, match="segment"):
-        await adapter.limits(session, segment="EQUITY")
+    with pytest.raises(KotakNeoMappingError, match="server-side filters"):
+        await adapter.limits(session, **filters)
     assert mock.calls == []
 
 

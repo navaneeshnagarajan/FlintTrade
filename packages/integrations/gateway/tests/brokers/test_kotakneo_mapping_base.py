@@ -53,39 +53,29 @@ def test_place_order_sl_m_fno_and_string_coercion():
     assert "tag" not in p  # no tag passed → key omitted
 
 
-def test_place_order_bracket_carries_legs_and_bo_product():
+def test_place_order_bracket_is_rejected_by_v3_adapter():
     order = Order(
         symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS",
         quantity="10", price="9.4", variety="bracket", target_price="9.8",
         stop_loss_price="9.1", trailing_jump="0.1",
     )
-    p = to_place_order_params(order, "IDEA-EQ")
-    assert p["product"] == "BO"
-    assert p["square_off_value"] == "9.8" and p["stop_loss_value"] == "9.1"
-    # The OMS leg-type/flag enums must be the DOCUMENTED values, not "abs"/"YES".
-    assert p["stop_loss_type"] == "Absolute" and p["square_off_type"] == "Absolute"
-    assert p["trailing_stop_loss"] == "Y" and p["trailing_sl_value"] == "0.1"
+    with pytest.raises(KotakNeoMappingError, match="variety"):
+        to_place_order_params(order, "IDEA-EQ")
 
 
-def test_place_order_cover_drops_target_uses_co():
+def test_place_order_cover_is_rejected_by_v3_adapter():
     order = Order(
         symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS",
         quantity="10", price="9.4", variety="cover", target_price="9.8", stop_loss_price="9.1",
     )
-    p = to_place_order_params(order, "IDEA-EQ")
-    assert p["product"] == "CO"
-    # A cover order carries its stop level in trigger_price (Place_Order.md: required
-    # for stop-loss and cover order), NOT the bracket-only stop_loss_* leg fields.
-    assert p["trigger_price"] == "9.1"
-    for field in ("stop_loss_value", "stop_loss_type", "square_off_value",
-                  "square_off_type", "trailing_stop_loss", "trailing_sl_value"):
-        assert field not in p  # bracket-only fields excluded from a cover order
+    with pytest.raises(KotakNeoMappingError, match="variety"):
+        to_place_order_params(order, "IDEA-EQ")
 
 
 def test_place_order_bracket_without_legs_raises():
     order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET",
                   product="MIS", quantity="10", variety="bracket")
-    with pytest.raises(KotakNeoMappingError, match="target_price or stop_loss_price"):
+    with pytest.raises(KotakNeoMappingError, match="variety"):
         to_place_order_params(order, "IDEA-EQ")
 
 
@@ -336,8 +326,9 @@ def test_from_kotak_scrip():
 def test_margin_params_and_parse():
     order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
                   product="MIS", quantity="10", price="9.4")
-    p = to_margin_params(order, "IDEA-EQ")
-    assert p["exchange_segment"] == "nse_cm" and p["instrument_token"] == "IDEA-EQ"
+    p = to_margin_params(order, "14366")
+    assert p["exchange_segment"] == "nse_cm" and p["instrument_token"] == "14366"
+    assert "trading_symbol" not in p
     assert p["transaction_type"] == "B" and p["order_type"] == "L" and p["quantity"] == "10"
     margin = from_kotak_margin({"data": {"reqdMrgn": "15.50", "ordMrgn": "15.50",
                                          "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}})

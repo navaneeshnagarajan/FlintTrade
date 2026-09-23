@@ -136,7 +136,7 @@ async def test_place_order_is_gated():
 
 
 @pytest.mark.asyncio
-async def test_bracket_order_flows_through_gated_place():
+async def test_bracket_order_is_gated_then_refused_before_transport():
     mock = MockNeo()
     adapter = _adapter(mock)
     session = await _session(adapter)
@@ -146,11 +146,9 @@ async def test_bracket_order_flows_through_gated_place():
     with pytest.raises(SafetyBypassError):
         await adapter.place_order(session, order)
     assert mock.calls == []
-    # With the token it reaches the broker as a BO order carrying both legs.
-    oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
-    assert oid == "250122000612876"
-    _, params = mock.calls[0]
-    assert params["product"] == "BO" and params["square_off_value"] == "9.8" and params["stop_loss_value"] == "9.1"
+    with pytest.raises(KotakNeoMappingError, match="variety"):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert mock.calls == []
 
 
 @pytest.mark.asyncio
@@ -293,9 +291,7 @@ async def test_margin_calculator_reads_estimate():
 
 @pytest.mark.asyncio
 async def test_margin_calculator_sends_numeric_instrument_token():
-    # Finding #1 — margin must key the scrip by the numeric pSymbol, with the
-    # trading symbol in its own field (Margin_Required.md:35), not the trading
-    # symbol packed into instrument_token.
+    # Margin keys the scrip only by numeric pSymbol (Margin_Required.md:35).
     mock = MockNeo()
     adapter = KotakNeoAdapter(
         client_factory=lambda _s: mock,
@@ -308,7 +304,7 @@ async def test_margin_calculator_sends_numeric_instrument_token():
     await adapter.margin_calculator(session, order)
     _, params = [c for c in mock.calls if c[0] == "margin"][0]
     assert params["instrument_token"] == "14366"
-    assert params["trading_symbol"] == "IDEA-EQ"
+    assert "trading_symbol" not in params
 
 
 @pytest.mark.asyncio

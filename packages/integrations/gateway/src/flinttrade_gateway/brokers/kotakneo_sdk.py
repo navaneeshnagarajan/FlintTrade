@@ -321,10 +321,7 @@ class KotakNeoSdkSession:
     def modify_order(self, params: dict[str, Any]) -> dict[str, Any]:
         return self._call("modify_order", write=True, **params)
 
-    def cancel_order(self, order_id: str, amo: str = "NO", is_verify: bool = False,
-                     trading_symbol: str | None = None) -> dict[str, Any]:
-        if trading_symbol is not None:
-            raise OrderRejectedByBroker("Kotak Neo v3 cancel has no trading symbol", broker_id="kotakneo", broker_code="UNSUPPORTED")
+    def cancel_order(self, order_id: str, amo: str = "NO", is_verify: bool = False) -> dict[str, Any]:
         return self._call("cancel_order", order_id=order_id, amo=amo, isVerify=is_verify, write=True)
 
     def order_book(self) -> dict[str, Any]:
@@ -333,9 +330,7 @@ class KotakNeoSdkSession:
     def order_history(self, order_id: str) -> dict[str, Any]:
         return self._call("order_history", order_id=order_id, read=True)
 
-    def trade_book(self, order_id: str | None = None) -> dict[str, Any]:
-        if order_id is not None:
-            raise BrokerInternal("Kotak Neo v3 trade report has no order filter", broker_id="kotakneo")
+    def trade_book(self) -> dict[str, Any]:
         return self._call("trade_report", read=True)
 
     def positions(self) -> dict[str, Any]:
@@ -347,9 +342,7 @@ class KotakNeoSdkSession:
     def funds(self) -> dict[str, Any]:
         return self._call("limits", read=True)
 
-    def limits(self, segment: str = "ALL", exchange: str = "ALL", product: str = "ALL") -> dict[str, Any]:
-        if (segment, exchange, product) != ("ALL", "ALL", "ALL"):
-            raise BrokerInternal("Kotak Neo v3 limits has no server-side filters", broker_id="kotakneo")
+    def limits(self) -> dict[str, Any]:
         return self.funds()
 
     def quotes(self, instrument_tokens: list[dict[str, str]], quote_type: str = "all") -> Any:

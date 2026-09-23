@@ -1,10 +1,9 @@
-"""Unit tests for the Kotak Neo mapping additions (full v2 parity surface).
+"""Unit tests for the Kotak Neo v3 mapping surface.
 
-Covers the AMO variety, the full modify param surface, margin legs, the NEO
+Covers regular/AMO orders, the exact v3 modify surface, margin requests, the NEO
 error envelopes, order-history unwrapping, limits/scrip-master/depth
 normalisation and the HSM market-feed + HSI order-feed decoders — all against
-synthetic frames shaped per ``.local/reference/broker-docs/kotak-neo/sdk-docs``
-and the v2 SDK (``settings.py`` / ``NeoWebSocket.py``).
+synthetic frames shaped per the pinned v3 SDK.
 """
 
 from __future__ import annotations
@@ -80,13 +79,13 @@ def test_place_order_regular_defaults_amo_no():
     assert to_place_order_params(order, "IDEA-EQ")["amo"] == "NO"
 
 
-def test_place_order_forwards_explicit_market_protection_only():
+@pytest.mark.parametrize("market_protection", [True, False])
+def test_place_order_rejects_caller_market_protection(market_protection):
     base = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET", product="CNC", quantity="10")
     assert "market_protection" not in to_place_order_params(base, "IDEA-EQ")
-    protected = base.model_copy(update={"market_protection": True})
-    disabled = base.model_copy(update={"market_protection": False})
-    assert to_place_order_params(protected, "IDEA-EQ")["market_protection"] == "1"
-    assert to_place_order_params(disabled, "IDEA-EQ")["market_protection"] == "0"
+    protected = base.model_copy(update={"market_protection": market_protection})
+    with pytest.raises(KotakNeoMappingError, match="market protection"):
+        to_place_order_params(protected, "IDEA-EQ")
 
 
 # ---------------------------------------------------------------------------
@@ -145,8 +144,8 @@ def test_place_order_rejects_legacy_validity_before_sdk():
         to_place_order_params(order, "GOLDPETAL25JUNFUT")
 
 
-@pytest.mark.parametrize(("exchange", "expected"), [("BCD", "bcs-fo"), ("MCX", "mcx_fo")])
-def test_place_order_maps_documented_derivative_segments(exchange, expected):
+@pytest.mark.parametrize(("exchange", "expected"), [("BFO", "bse_fo"), ("MCX", "mcx_fo")])
+def test_place_order_maps_supported_v3_derivative_segments(exchange, expected):
     order = Order(
         symbol="SENSEX25JULFUT",
         action="BUY",
@@ -159,12 +158,28 @@ def test_place_order_maps_documented_derivative_segments(exchange, expected):
     assert to_place_order_params(order, "SENSEX25JULFUT")["exchange_segment"] == expected
 
 
+@pytest.mark.parametrize("exchange", ["CDS", "BCD"])
+def test_place_order_rejects_currency_segments(exchange):
+    order = Order(
+        symbol="SYNTHETIC",
+        action="BUY",
+        exchange="NSE",
+        pricetype="LIMIT",
+        product="NRML",
+        quantity="1",
+        price="1",
+    )
+    object.__setattr__(order, "exchange", exchange)
+    with pytest.raises(KotakNeoMappingError, match="exchange"):
+        to_place_order_params(order, "SYNTHETIC")
+
+
 # ---------------------------------------------------------------------------
-# Modify: full documented param surface
+# Modify: exact v3 order-id surface
 # ---------------------------------------------------------------------------
 
 
-def test_modify_full_surface_quick_method():
+def test_modify_emits_only_exact_v3_order_id_surface():
     p = to_modify_order_params(
         "250122000624384",
         {
@@ -172,27 +187,40 @@ def test_modify_full_surface_quick_method():
             "price": 9.5,
             "quantity": 20,
             "trigger_price": 9.45,
-            "instrument_token": "14366",
-            "exchange_segment": "NSE",
-            "product": "MIS",
-            "trading_symbol": "IDEA-EQ",
-            "transaction_type": "BUY",
+            "disclosed_quantity": 5,
+            "validity": "IOC",
             "amo": True,
-            "filled_quantity": 5,
-            "market_protection": "0",
-            "dd": "NA",
         },
     )
-    assert p["order_id"] == "250122000624384"
-    assert p["order_type"] == "SL" and p["trigger_price"] == "9.45"
-    assert p["instrument_token"] == "14366"
-    assert p["exchange_segment"] == "nse_cm"  # FlintTrade exchange mapped to NEO segment
-    assert p["product"] == "MIS"
-    assert p["trading_symbol"] == "IDEA-EQ"
-    assert p["transaction_type"] == "B"  # BUY mapped to NEO single letter
-    assert p["amo"] == "YES"  # bool True normalised
-    assert p["filled_quantity"] == "5"
-    assert p["market_protection"] == "0" and p["dd"] == "NA"
+    assert p == {
+        "order_id": "250122000624384",
+        "order_type": "SL",
+        "price": "9.5",
+        "quantity": "20",
+        "validity": "IOC",
+        "trigger_price": "9.45",
+        "disclosed_quantity": "5",
+        "amo": "YES",
+    }
+
+
+@pytest.mark.parametrize(
+    "unsupported",
+    [
+        {"instrument_token": "14366"},
+        {"exchange_segment": "NSE"},
+        {"product": "MIS"},
+        {"trading_symbol": "IDEA-EQ"},
+        {"transaction_type": "BUY"},
+        {"action": "BUY"},
+        {"filled_quantity": 2},
+        {"market_protection": 3},
+        {"dd": "NA"},
+    ],
+)
+def test_modify_rejects_removed_quick_and_legacy_fields(unsupported):
+    with pytest.raises(KotakNeoMappingError, match="does not support"):
+        to_modify_order_params("250122000624384", {"quantity": 1, **unsupported})
 
 
 def test_modify_minimal_omits_optional_keys():
@@ -223,7 +251,7 @@ def test_modify_validity_validated():
 
 
 # ---------------------------------------------------------------------------
-# Margin: trigger + variety legs
+# Margin: exact v3 regular-order request
 # ---------------------------------------------------------------------------
 
 
@@ -242,7 +270,7 @@ def test_margin_params_carry_trigger_price():
     assert p["trigger_price"] == "9.35"
 
 
-def test_margin_params_bracket_legs_mirror_place():
+def test_margin_params_reject_bracket_variety():
     order = Order(
         symbol="IDEA",
         action="BUY",
@@ -256,14 +284,11 @@ def test_margin_params_bracket_legs_mirror_place():
         stop_loss_price="9.1",
         trailing_jump="0.1",
     )
-    p = to_margin_params(order, "14366")
-    assert p["product"] == "BO"
-    assert p["stop_loss_value"] == "9.1" and p["stop_loss_type"] == "Absolute"
-    assert p["square_off_value"] == "9.8" and p["square_off_type"] == "Absolute"
-    assert p["trailing_stop_loss"] == "Y" and p["trailing_sl_value"] == "0.1"
+    with pytest.raises(KotakNeoMappingError, match="variety"):
+        to_margin_params(order, "14366")
 
 
-def test_margin_params_cover_uses_co():
+def test_margin_params_reject_cover_variety():
     order = Order(
         symbol="IDEA",
         action="BUY",
@@ -275,33 +300,31 @@ def test_margin_params_cover_uses_co():
         variety="cover",
         stop_loss_price="9.1",
     )
+    with pytest.raises(KotakNeoMappingError, match="variety"):
+        to_margin_params(order, "14366")
+
+
+# ---------------------------------------------------------------------------
+# Margin keys the scrip only by numeric instrument_token (pSymbol).
+# ---------------------------------------------------------------------------
+
+
+def test_margin_params_use_only_numeric_instrument_token():
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS", quantity="10", price="9.4"
+    )
     p = to_margin_params(order, "14366")
-    assert p["product"] == "CO" and "square_off_value" not in p
-
-
-# ---------------------------------------------------------------------------
-# Finding #1 — margin keys the scrip by numeric instrument_token (pSymbol),
-# trading symbol rides its own field (Margin_Required.md:35).
-# ---------------------------------------------------------------------------
-
-
-def test_margin_params_use_numeric_instrument_token_and_trading_symbol():
-    order = Order(
-        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS", quantity="10", price="9.4"
-    )
-    p = to_margin_params(order, "IDEA-EQ", instrument_token="14366")
-    # instrument_token = numeric pSymbol; trading_symbol = pTrdSymbol — NOT the
-    # trading symbol packed into instrument_token (the pre-fix bug).
     assert p["instrument_token"] == "14366"
-    assert p["trading_symbol"] == "IDEA-EQ"
+    assert "trading_symbol" not in p
 
 
-def test_margin_params_fall_back_to_symbol_when_token_unresolved():
+@pytest.mark.parametrize("instrument_token", ["", "IDEA-EQ", "14.366", "-14366", "0"])
+def test_margin_params_reject_non_numeric_instrument_token(instrument_token):
     order = Order(
         symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS", quantity="10", price="9.4"
     )
-    p = to_margin_params(order, "IDEA-EQ")  # no numeric token resolvable
-    assert p["instrument_token"] == "IDEA-EQ" and p["trading_symbol"] == "IDEA-EQ"
+    with pytest.raises(KotakNeoMappingError, match="numeric instrument_token"):
+        to_margin_params(order, instrument_token)
 
 
 # ---------------------------------------------------------------------------
@@ -339,11 +362,11 @@ def test_canonical_index_name_uses_documented_case_when_known():
 
 
 # ---------------------------------------------------------------------------
-# Finding #3 — cover order: stop level → trigger_price, NO bracket-only legs.
+# Unsupported advanced varieties must fail instead of degrading to regular.
 # ---------------------------------------------------------------------------
 
 
-def test_place_cover_maps_stop_to_trigger_and_drops_bracket_fields():
+def test_place_cover_is_not_supported_by_v3_adapter():
     order = Order(
         symbol="IDEA",
         action="BUY",
@@ -355,22 +378,11 @@ def test_place_cover_maps_stop_to_trigger_and_drops_bracket_fields():
         variety="cover",
         stop_loss_price="9.1",
     )
-    p = to_place_order_params(order, "IDEA-EQ")
-    assert p["product"] == "CO"
-    assert p["trigger_price"] == "9.1"  # stop level rides trigger_price (CO-required)
-    # Bracket-only fields MUST NOT be present on a cover order (Place_Order.md:88-93).
-    for field in (
-        "stop_loss_value",
-        "stop_loss_type",
-        "square_off_value",
-        "square_off_type",
-        "trailing_stop_loss",
-        "trailing_sl_value",
-    ):
-        assert field not in p
+    with pytest.raises(KotakNeoMappingError, match="variety"):
+        to_place_order_params(order, "IDEA-EQ")
 
 
-def test_place_cover_falls_back_to_trigger_price_when_only_trigger_set():
+def test_place_cover_with_trigger_is_still_unsupported():
     order = Order(
         symbol="IDEA",
         action="SELL",
@@ -382,12 +394,11 @@ def test_place_cover_falls_back_to_trigger_price_when_only_trigger_set():
         variety="cover",
         trigger_price="9.55",
     )
-    p = to_place_order_params(order, "IDEA-EQ")
-    assert p["product"] == "CO" and p["trigger_price"] == "9.55"
-    assert "stop_loss_value" not in p
+    with pytest.raises(KotakNeoMappingError, match="variety"):
+        to_place_order_params(order, "IDEA-EQ")
 
 
-def test_place_cover_without_stop_level_raises():
+def test_place_cover_without_stop_level_is_unsupported():
     order = Order(
         symbol="IDEA",
         action="BUY",
@@ -398,7 +409,7 @@ def test_place_cover_without_stop_level_raises():
         price="0",
         variety="cover",
     )
-    with pytest.raises(KotakNeoMappingError, match="stop level"):
+    with pytest.raises(KotakNeoMappingError, match="variety"):
         to_place_order_params(order, "IDEA-EQ")
 
 
@@ -491,19 +502,17 @@ def test_position_avg_price_multiplier_one_unchanged():
 
 
 # ---------------------------------------------------------------------------
-# Finding #5 — modify quick-method fields are all-or-nothing.
+# V3 removed the quick-method field set entirely.
 # ---------------------------------------------------------------------------
 
 
 def test_modify_partial_quick_fields_rejected():
-    # instrument_token without the rest of the quick-path discriminators is a
-    # partial set the SDK would reject with a ValueError — we reject it cleanly.
-    with pytest.raises(KotakNeoMappingError, match="quick-method"):
+    with pytest.raises(KotakNeoMappingError, match="does not support"):
         to_modify_order_params("1", {"instrument_token": "14366", "quantity": 5})
 
 
 def test_modify_partial_quick_fields_missing_one_rejected():
-    with pytest.raises(KotakNeoMappingError, match="trading_symbol"):
+    with pytest.raises(KotakNeoMappingError, match="does not support"):
         to_modify_order_params(
             "1",
             {
@@ -515,18 +524,18 @@ def test_modify_partial_quick_fields_missing_one_rejected():
         )
 
 
-def test_modify_complete_quick_set_accepted():
-    p = to_modify_order_params(
-        "1",
-        {
-            "instrument_token": "14366",
-            "exchange_segment": "NSE",
-            "product": "MIS",
-            "trading_symbol": "IDEA-EQ",
-            "quantity": 5,
-        },
-    )
-    assert p["instrument_token"] == "14366" and p["trading_symbol"] == "IDEA-EQ"
+def test_modify_complete_quick_set_is_still_rejected():
+    with pytest.raises(KotakNeoMappingError, match="does not support"):
+        to_modify_order_params(
+            "1",
+            {
+                "instrument_token": "14366",
+                "exchange_segment": "NSE",
+                "product": "MIS",
+                "trading_symbol": "IDEA-EQ",
+                "quantity": 5,
+            },
+        )
 
 
 def test_modify_order_id_path_no_quick_fields_accepted():
@@ -730,16 +739,16 @@ def test_from_kotak_order_report_extras():
 
 
 def test_limits_params_defaults_and_normalisation():
-    assert to_limits_params() == {"segment": "ALL", "exchange": "ALL", "product": "ALL"}
-    assert to_limits_params("cash", "nse", "mis") == {"segment": "CASH", "exchange": "NSE", "product": "MIS"}
+    assert to_limits_params() == {}
+    assert to_limits_params("all", "all", "all") == {}
 
 
 def test_limits_params_validation():
-    with pytest.raises(KotakNeoMappingError, match="segment"):
+    with pytest.raises(KotakNeoMappingError, match="server-side filters"):
         to_limits_params(segment="EQUITY")
-    with pytest.raises(KotakNeoMappingError, match="exchange"):
-        to_limits_params(exchange="MCX")  # limits exchange filter is NSE/BSE/ALL only
-    with pytest.raises(KotakNeoMappingError, match="product"):
+    with pytest.raises(KotakNeoMappingError, match="server-side filters"):
+        to_limits_params("CASH", "NSE", "MIS")
+    with pytest.raises(KotakNeoMappingError, match="server-side filters"):
         to_limits_params(product="BO")
 
 

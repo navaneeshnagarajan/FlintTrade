@@ -2,9 +2,8 @@
 
 Kept separate from the adapter so order translation and the (cryptically-keyed)
 NEO response parsing are fully unit-testable without the ``neo-api-client`` SDK
-or live credentials. Field names / enum codes follow the Kotak Neo v2 trade API
-as documented in the staged SDK (``settings.py`` lookup tables) and the local
-broker docs (``.local/reference/broker-docs/kotak-neo/sdk-docs/``).
+or live credentials. Order request fields follow the pinned Kotak Neo v3 SDK;
+legacy response decoding remains for authoritative readback of historical rows.
 
 NEO is an OMS-style API: order/position records use terse abbreviated keys
 (``nOrdNo``, ``trdSym``, ``exSeg``, ``trnsTp``, ``prcTp`` …) and positions are
@@ -46,6 +45,10 @@ EXCHANGE_TO_KOTAK = {
     "NSE_INDEX": "nse_cm",
     "BSE_INDEX": "bse_cm",
 }
+# Segments with an exact v3 order path. Currency segments remain in the read
+# map above so historical broker rows can still be decoded, but cannot be used
+# to mint a new order or margin request.
+ORDER_EXCHANGES = frozenset({"NSE", "BSE", "NFO", "BFO", "MCX"})
 # Reverse map built from the FIRST occurrence of each segment so the primary
 # NSE/BSE rows win over the *_INDEX aliases added after them.
 KOTAK_TO_EXCHANGE: dict[str, str] = {}
@@ -75,11 +78,6 @@ KOTAK_TO_SIDE = {"B": "BUY", "S": "SELL"}
 
 # Order validity codes in the current public docs and pinned SDK validation.
 VALIDITY_ALLOWED = frozenset({"DAY", "IOC"})
-
-# limits() filter enums (settings.segment_limits / exchange_limits / product_limits).
-LIMITS_SEGMENTS = frozenset({"CASH", "CUR", "FO", "ALL"})
-LIMITS_EXCHANGES = frozenset({"NSE", "BSE", "ALL"})
-LIMITS_PRODUCTS = frozenset({"CNC", "MIS", "NRML", "ALL"})
 
 # REST quotes quote_type values (Quotes.md). The SDK places the value directly
 # into the URL path, so FlintTrade accepts case-insensitive input but emits
@@ -367,11 +365,33 @@ def _norm(value: Any, default: str = "") -> str:
     return str(value).upper() if value is not None else default
 
 
-def _market_protection_value(value: Any) -> str:
-    """Return NEO's string ``mp`` value for FlintTrade's optional MPP flag."""
-    if isinstance(value, bool):
-        return "1" if value else "0"
-    return str(value)
+def validate_v3_order(order: Any) -> tuple[str, str, str, str, str, str]:
+    """Validate the regular/AMO order shape supported by the v3 SDK.
+
+    This is deliberately callable before symbol/token resolution so an
+    unsupported write cannot cause even a preparatory SDK request.
+    """
+    side = _norm(order.action)
+    if side not in SIDE_TO_KOTAK:
+        raise KotakNeoMappingError(f"Unsupported action {side!r}")
+    price_type = _norm(getattr(order, "pricetype", "MARKET"))
+    if price_type not in ORDER_TYPE_TO_KOTAK:
+        raise KotakNeoMappingError(f"Unsupported pricetype {price_type!r}")
+    product = _norm(order.product)
+    if product not in PRODUCT_TO_KOTAK:
+        raise KotakNeoMappingError(f"Unsupported product {product!r}")
+    exchange = _norm(order.exchange)
+    if exchange not in ORDER_EXCHANGES:
+        raise KotakNeoMappingError(f"Unsupported exchange {exchange!r}")
+    validity = _norm(getattr(order, "validity", None) or "DAY")
+    if validity not in VALIDITY_ALLOWED:
+        raise KotakNeoMappingError(f"Unsupported validity {validity!r}")
+    variety = str(getattr(order, "variety", "regular")).lower()
+    if variety not in {"", "regular", "amo"}:
+        raise KotakNeoMappingError(f"Kotak Neo v3 does not support order variety {variety!r}")
+    if getattr(order, "market_protection", None) is not None:
+        raise KotakNeoMappingError("Kotak Neo v3 does not support caller market protection")
+    return side, price_type, product, exchange, validity, variety
 
 
 def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = None) -> dict[str, Any]:
@@ -381,23 +401,7 @@ def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = 
     the adapter via ``search_scrip``. NEO expects every numeric field as a string.
     Raises ``KotakNeoMappingError`` for unmappable enum values.
     """
-    side = _norm(order.action)
-    if side not in SIDE_TO_KOTAK:
-        raise KotakNeoMappingError(f"Unsupported action {side!r}")
-    ptype = _norm(getattr(order, "pricetype", "MARKET"))
-    if ptype not in ORDER_TYPE_TO_KOTAK:
-        raise KotakNeoMappingError(f"Unsupported pricetype {ptype!r}")
-    product = _norm(order.product)
-    if product not in PRODUCT_TO_KOTAK:
-        raise KotakNeoMappingError(f"Unsupported product {product!r}")
-    exchange = _norm(order.exchange)
-    if exchange not in EXCHANGE_TO_KOTAK:
-        raise KotakNeoMappingError(f"Unsupported exchange {exchange!r}")
-    # Validity pass-through: None keeps the NEO default (DAY). The field is part
-    # of the SafetyContext-hashed Order, so it cannot be mutated after gating.
-    validity = _norm(getattr(order, "validity", None) or "DAY")
-    if validity not in VALIDITY_ALLOWED:
-        raise KotakNeoMappingError(f"Unsupported validity {validity!r}")
+    side, ptype, product, exchange, validity, variety = validate_v3_order(order)
 
     params: dict[str, Any] = {
         "exchange_segment": EXCHANGE_TO_KOTAK[exchange],
@@ -413,121 +417,49 @@ def to_place_order_params(order: Any, trading_symbol: str, *, tag: str | None = 
         "amo": "NO",
     }
 
-    # Advanced varieties: NEO places bracket (BO) and cover (CO) orders through
-    # the SAME place_order call, overriding the product code and attaching the
-    # target / stop-loss / trailing legs; an AMO is a regular order with the
-    # ``amo`` flag set. NEO has no iceberg/slice endpoint (only
-    # disclosed_quantity), so that variety is refused.
-    variety = str(getattr(order, "variety", "regular")).lower()
     if variety == "amo":
         params["amo"] = "YES"
-    elif variety in ("bracket", "cover"):
-        _apply_variety_legs(order, variety, params)
-    elif variety not in ("regular", ""):
-        raise KotakNeoMappingError(f"Kotak Neo does not support order variety {variety!r}")
-
-    if getattr(order, "market_protection", None) is not None:
-        params["market_protection"] = _market_protection_value(order.market_protection)
     if tag:
         params["tag"] = str(tag)
     return params
 
 
-# Bracket-only NEO leg fields (``Place_Order.md`` marks every one "Applicable
-# only for Bracket Order"). A cover order MUST NOT carry these — its stop level
-# rides ``trigger_price`` instead — so the cover branch strips any that leaked in.
-_BRACKET_ONLY_LEG_FIELDS = (
-    "stop_loss_value",
-    "stop_loss_type",
-    "square_off_value",
-    "square_off_type",
-    "trailing_stop_loss",
-    "trailing_sl_value",
+_MODIFY_V3_INPUT_FIELDS = frozenset(
+    {
+        "pricetype",
+        "order_type",
+        "price",
+        "quantity",
+        "validity",
+        "trigger_price",
+        "disclosed_quantity",
+        "amo",
+    }
 )
-
-
-def _apply_variety_legs(order: Any, variety: str, params: dict[str, Any]) -> None:
-    """Attach bracket/cover legs onto ``params`` (shared by place + margin).
-
-    Bracket (BO) and cover (CO) differ in how the stop level is carried:
-
-    * **Bracket** attaches the protective legs via the bracket-only fields —
-      ``square_off_*``/``stop_loss_*``/``trailing_*``. Their enum values are
-      forwarded verbatim to the OMS, so they MUST match the documented set:
-      square_off_type/stop_loss_type ∈ {"Absolute","Ticks"} and
-      trailing_stop_loss ∈ {"Y","N"} (``Place_Order.md``). Sending "abs"/"YES"
-      silently drops the protective legs on a live order.
-    * **Cover** has only a stop-loss, which the OMS reads from ``trigger_price``
-      (``Place_Order.md``: required for stop-loss and cover order); the
-      bracket-only leg fields do not apply and are dropped. The stop level is
-      taken from ``stop_loss_price`` (falling back to ``trigger_price`` when the
-      caller set only that).
-    """
-    target = _num(getattr(order, "target_price", 0))
-    stop_loss = _num(getattr(order, "stop_loss_price", 0))
-    if variety == "cover":
-        params["product"] = "CO"
-        # CO carries its stop level in trigger_price, NOT a bracket leg field.
-        cover_trigger = stop_loss if stop_loss > 0 else _num(getattr(order, "trigger_price", 0))
-        if cover_trigger <= 0:
-            raise KotakNeoMappingError("A cover order needs a stop level (stop_loss_price or trigger_price)")
-        params["trigger_price"] = str(cover_trigger)
-        # Strip any bracket-only legs that the base place/margin params seeded.
-        for field in _BRACKET_ONLY_LEG_FIELDS:
-            params.pop(field, None)
-        return
-
-    if target <= 0 and stop_loss <= 0:
-        raise KotakNeoMappingError("A bracket order needs a target_price or stop_loss_price")
-    params["product"] = "BO"
-    params["stop_loss_value"] = str(stop_loss)
-    params["stop_loss_type"] = "Absolute"
-    if target > 0:
-        params["square_off_value"] = str(target)
-        params["square_off_type"] = "Absolute"
-    trailing = _num(getattr(order, "trailing_jump", 0))
-    if trailing > 0:
-        params["trailing_stop_loss"] = "Y"
-        params["trailing_sl_value"] = str(trailing)
-
-
-# NEO modify quick-path discriminators (``neo_api.modify_order`` line 361). The
-# SDK takes the quick path only when ALL four are set, and the order-id path only
-# when ``instrument_token``/``exchange_segment``/``trading_symbol`` are ALL unset
-# — any partial set falls through to its ``raise ValueError``. We enforce the
-# all-or-nothing contract here so a clear ``KotakNeoMappingError`` is raised
-# before the SDK does (``Modify_Order.md`` Methods 1 & 2).
-_MODIFY_QUICK_FIELDS = ("instrument_token", "exchange_segment", "product", "trading_symbol")
 
 
 def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, Any]:
     """Translate modify ``changes`` into ``NeoAPI.modify_order`` kwargs.
 
-    The base surface (order-id method, ``Modify_Order.md`` "Method 2") is always
-    emitted; the quick-method extras (``instrument_token`` / ``exchange_segment``
-    / ``product`` / ``trading_symbol`` / ``transaction_type``) plus the ``amo`` /
-    ``market_protection`` / ``filled_quantity`` / ``dd`` flags are forwarded only
-    when present in ``changes``, so the SDK picks the right modification path.
-
-    The four quick-method discriminators are all-or-nothing: the SDK requires the
-    complete set for the quick path (and none of them for the order-id path), so
-    a partial set is rejected with a clear ``KotakNeoMappingError`` here rather
-    than the SDK's opaque ``ValueError``.
+    V3 retains only the order-id method. Removed quick-method and legacy fields
+    are rejected rather than silently discarded or forwarded to the SDK.
     """
-    quick_present = [f for f in _MODIFY_QUICK_FIELDS if changes.get(f)]
-    if quick_present and len(quick_present) != len(_MODIFY_QUICK_FIELDS):
-        missing = [f for f in _MODIFY_QUICK_FIELDS if not changes.get(f)]
-        raise KotakNeoMappingError(
-            "Kotak Neo modify quick-method requires all of "
-            f"{list(_MODIFY_QUICK_FIELDS)} together or none — missing {missing}"
-        )
+    unsupported = sorted(set(changes) - _MODIFY_V3_INPUT_FIELDS)
+    if unsupported:
+        raise KotakNeoMappingError(f"Kotak Neo v3 modify does not support fields {unsupported}")
     ptype = _norm(changes.get("pricetype", changes.get("order_type", "LIMIT")))
+    if ptype in ORDER_TYPE_TO_KOTAK:
+        mapped_order_type = ORDER_TYPE_TO_KOTAK[ptype]
+    elif ptype in ORDER_TYPE_TO_KOTAK.values():
+        mapped_order_type = ptype
+    else:
+        raise KotakNeoMappingError(f"Unsupported order type {ptype!r}")
     validity = str(changes.get("validity", "DAY")).upper()
     if validity not in VALIDITY_ALLOWED:
         raise KotakNeoMappingError(f"Unsupported validity {validity!r}")
     params: dict[str, Any] = {
         "order_id": str(order_id),
-        "order_type": ORDER_TYPE_TO_KOTAK.get(ptype, str(changes.get("order_type", "L"))),
+        "order_type": mapped_order_type,
         "price": str(_num(changes.get("price", 0))),
         "quantity": str(int(_num(changes.get("quantity", 0), 0))),
         "validity": validity,
@@ -536,26 +468,10 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
     }
     if changes.get("amo") is not None:
         amo = changes["amo"]
-        params["amo"] = ("YES" if amo else "NO") if isinstance(amo, bool) else _norm(amo)
-    if changes.get("instrument_token"):
-        params["instrument_token"] = str(changes["instrument_token"])
-    if changes.get("exchange_segment"):
-        seg = _norm(changes["exchange_segment"])
-        params["exchange_segment"] = EXCHANGE_TO_KOTAK.get(seg, str(changes["exchange_segment"]))
-    if changes.get("product"):
-        prod = _norm(changes["product"])
-        params["product"] = PRODUCT_TO_KOTAK.get(prod, prod)
-    if changes.get("trading_symbol"):
-        params["trading_symbol"] = str(changes["trading_symbol"])
-    if changes.get("transaction_type") or changes.get("action"):
-        side = _norm(changes.get("transaction_type", changes.get("action")))
-        params["transaction_type"] = SIDE_TO_KOTAK.get(side, side)
-    if changes.get("filled_quantity") is not None:
-        params["filled_quantity"] = str(int(_num(changes["filled_quantity"], 0)))
-    if changes.get("market_protection") is not None:
-        params["market_protection"] = str(changes["market_protection"])
-    if changes.get("dd"):
-        params["dd"] = str(changes["dd"])
+        amo_value = ("YES" if amo else "NO") if isinstance(amo, bool) else _norm(amo)
+        if amo_value not in {"YES", "NO"}:
+            raise KotakNeoMappingError(f"Unsupported AMO flag {amo!r}")
+        params["amo"] = amo_value
     return params
 
 
@@ -881,63 +797,38 @@ def from_kotak_scrip(rec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def to_margin_params(order: Any, trading_symbol: str, *, instrument_token: str | None = None) -> dict[str, Any]:
+def to_margin_params(order: Any, instrument_token: str) -> dict[str, Any]:
     """Build ``NeoAPI.margin_required`` kwargs from an ``Order`` (pre-trade).
 
-    ``instrument_token`` is the numeric ``pSymbol`` from the ScripMaster files —
-    the field NEO's ``margin_required`` keys the scrip by (``Margin_Required.md``
-    line 35); ``trading_symbol`` is the ``pTrdSymbol`` and rides its own field.
-    When the numeric token is not resolvable the trading symbol is used as a
-    best-effort fallback (NEO may still resolve some scrips by symbol), and the
-    ``trading_symbol`` field is always set so the estimate is unambiguous.
-
-    Mirrors the place-order translation: a bracket/cover variety overrides the
-    product to BO/CO and carries its stop-loss / target / trailing legs so the
-    estimate covers the whole order, and a stop order forwards its
-    ``trigger_price`` (``Margin_Required.md``).
+    ``instrument_token`` must be the positive numeric ``pSymbol``. V3 has no
+    ``trading_symbol`` argument here, and this adapter does not estimate removed
+    BO/CO varieties.
     """
-    side = _norm(order.action)
-    if side not in SIDE_TO_KOTAK:
-        raise KotakNeoMappingError(f"Unsupported action {side!r}")
-    ptype = _norm(getattr(order, "pricetype", "MARKET"))
-    if ptype not in ORDER_TYPE_TO_KOTAK:
-        raise KotakNeoMappingError(f"Unsupported pricetype {ptype!r}")
-    product = _norm(order.product)
-    if product not in PRODUCT_TO_KOTAK:
-        raise KotakNeoMappingError(f"Unsupported product {product!r}")
-    exchange = _norm(order.exchange)
-    if exchange not in EXCHANGE_TO_KOTAK:
-        raise KotakNeoMappingError(f"Unsupported exchange {exchange!r}")
+    side, ptype, product, exchange, _validity, _variety = validate_v3_order(order)
+    token = str(instrument_token)
+    if not token.isascii() or not token.isdigit() or int(token) <= 0:
+        raise KotakNeoMappingError("Kotak Neo margin requires a positive numeric instrument_token")
     params: dict[str, Any] = {
         "exchange_segment": EXCHANGE_TO_KOTAK[exchange],
         "price": str(_num(getattr(order, "price", 0))),
         "order_type": ORDER_TYPE_TO_KOTAK[ptype],
         "product": PRODUCT_TO_KOTAK[product],
         "quantity": str(int(_num(order.quantity, 0))),
-        # instrument_token = numeric pSymbol; trading_symbol = pTrdSymbol.
-        "instrument_token": str(instrument_token) if instrument_token else str(trading_symbol),
-        "trading_symbol": str(trading_symbol),
+        "instrument_token": token,
         "transaction_type": SIDE_TO_KOTAK[side],
     }
     trigger = _num(getattr(order, "trigger_price", 0))
     if trigger > 0:
         params["trigger_price"] = str(trigger)
-    variety = str(getattr(order, "variety", "regular")).lower()
-    if variety in ("bracket", "cover"):
-        _apply_variety_legs(order, variety, params)
     return params
 
 
 def to_limits_params(segment: str = "ALL", exchange: str = "ALL", product: str = "ALL") -> dict[str, str]:
-    """Validate + build the ``NeoAPI.limits`` filter kwargs (``Limits.md``)."""
+    """Reject filters removed from the v3 no-argument ``limits()`` call."""
     seg, exch, prod = _norm(segment, "ALL"), _norm(exchange, "ALL"), _norm(product, "ALL")
-    if seg not in LIMITS_SEGMENTS:
-        raise KotakNeoMappingError(f"Unsupported limits segment {segment!r}")
-    if exch not in LIMITS_EXCHANGES:
-        raise KotakNeoMappingError(f"Unsupported limits exchange {exchange!r}")
-    if prod not in LIMITS_PRODUCTS:
-        raise KotakNeoMappingError(f"Unsupported limits product {product!r}")
-    return {"segment": seg, "exchange": exch, "product": prod}
+    if (seg, exch, prod) != ("ALL", "ALL", "ALL"):
+        raise KotakNeoMappingError("Kotak Neo v3 limits does not support server-side filters")
+    return {}
 
 
 def from_kotak_margin(resp: dict[str, Any]) -> dict[str, Any]:

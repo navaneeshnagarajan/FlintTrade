@@ -2,8 +2,8 @@
 
 The adapter owns broker-neutral orchestration and preserves router-token order
 safety. :mod:`kotakneo_sdk` owns the installed SDK import, authentication,
-validated REST reads, error translation and session liveness. Streaming and
-remaining v3 order/capability refinements are handled by later migration tasks.
+validated REST reads, exact v3 order calls, error translation and session
+liveness. Streaming is handled by a later migration task.
 """
 
 from __future__ import annotations
@@ -119,12 +119,7 @@ def _normalise_credentials(credentials: dict[str, Any]) -> dict[str, Any]:
 
 
 KOTAKNEO_CAPABILITIES = Capabilities(
-    segments=(
-        Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO | Segments.CDS | Segments.BCD | Segments.MCX
-    ),
-    # Native bracket (BO) and cover (CO) orders; no GTT and no iceberg
-    # (only disclosed-quantity). NEO's optional market-protection value is
-    # forwarded when the caller explicitly sets ``Order.market_protection``.
+    segments=(Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO | Segments.MCX),
     order_types=(
         OrderTypes.MARKET
         | OrderTypes.LIMIT
@@ -134,8 +129,6 @@ KOTAKNEO_CAPABILITIES = Capabilities(
         | OrderTypes.CNC
         | OrderTypes.NRML
         | OrderTypes.AMO
-        | OrderTypes.BO
-        | OrderTypes.CO
     ),
     depth_levels=DepthLevels.L5,
     tick_protocol=TickProtocol.KOTAK_NEO_JSON,
@@ -153,21 +146,10 @@ KOTAKNEO_CAPABILITIES = Capabilities(
     cost_paid=False,
     cost_inr_per_month=0,
     brokerage_free=True,
-    brokerage_note=(
-        "Zero brokerage on all API order execution; only statutory charges "
-        "apply. Exception: a bracket order's square-off leg attracts standard "
-        "brokerage."
-    ),
+    brokerage_note="Zero brokerage on supported API order execution; only statutory charges apply.",
     # kotakneoapi 3.x adds historical candles and option chain. HS feed retired.
     option_chain_supported=True,
     streaming_supported=True,
-    # Captured Kotak Neo v2 WebSocket docs: 16 channels and 200 scrips at a
-    # time. Runtime remains disabled until the SDK callback bridge is live-proven.
-    streaming_max_connections_per_user=16,
-    streaming_max_symbols_per_connection=200,
-    streaming_max_total_symbols=200,
-    bracket_order_native=True,
-    cover_order_native=True,
     multi_quote_supported=True,
     modify_qty_supported=True,
 )
@@ -624,15 +606,9 @@ class KotakNeoAdapter(BrokerAdapter):
     # ---------- trading: writes (router-only) ----------
 
     async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
-        """Place one order through the gated path; return the NEO order number.
-
-        Variety dispatch happens inside ``to_place_order_params`` so EVERY
-        variety travels this same gated method: ``regular``, ``amo`` (the
-        ``amo="YES"`` flag), ``bracket``/``cover`` (BO/CO product override +
-        protective legs). ``iceberg`` is refused — NEO has no slice endpoint,
-        only ``disclosed_quantity``.
-        """
+        """Place one exact v3 regular/AMO order through the gated path."""
         self._require_router_token(_router_token, _ROUTER_TOKEN)
+        M.validate_v3_order(order)
         trading_symbol = await self._resolve_trading_symbol(session, order.symbol, order.exchange)
         tag = session.algo_id or None
         params = M.to_place_order_params(order, trading_symbol, tag=tag)
@@ -642,10 +618,7 @@ class KotakNeoAdapter(BrokerAdapter):
     async def modify_order(
         self, session: Session, order_id: str, changes: dict, *, _router_token: object | None = None
     ) -> None:
-        """Modify an open order (gated). ``changes`` may carry the full NEO
-        surface — quick-method extras (``instrument_token``/``exchange_segment``/
-        ``product``/``trading_symbol``/``transaction_type``) and the ``amo``
-        flag are forwarded when present (``Modify_Order.md``)."""
+        """Modify an open order through the exact v3 order-id surface."""
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         params = M.to_modify_order_params(order_id, changes)
         resp = await self._call(self._client(session).modify_order, params)
@@ -661,50 +634,19 @@ class KotakNeoAdapter(BrokerAdapter):
         trading_symbol: str | None = None,
         _router_token: object | None = None,
     ) -> None:
-        """Cancel an order (gated) — variety dispatch within the gated method.
-
-        ``regular``/``amo`` use the plain cancel endpoint; ``cover`` exits via
-        ``quick/order/co/exit`` and ``bracket`` via ``quick/order/bo/exit`` (the
-        dedicated leg-cancel endpoints — ``Cancel_Cover_Order.md`` /
-        ``Cancel_Bracket_Order.md``). ``amo=True`` forwards the pinned SDK's
-        documented ``am=YES`` flag. ``trading_symbol`` remains an optional
-        compatibility field, but the emergency planner does not rely on it.
-        The default call shape (``cancel_order(session, order_id,
-        _router_token=…)``) is exactly what ``BrokerRouter`` dispatches today;
-        the variety/amo/trading_symbol keywords are adapter-level extras for
-        variety-aware callers and are signed by the cancel route before the
-        router forwards them.
-        """
+        """Cancel one regular/AMO order through the exact v3 endpoint."""
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        client = self._client(session)
         v = str(variety).lower()
+        if v not in {"", "regular", "amo"}:
+            raise BrokerError(f"Kotak Neo v3 cannot cancel order variety {variety!r}")
+        if trading_symbol is not None:
+            raise BrokerError("Kotak Neo v3 cancel does not accept a trading symbol")
+        client = self._client(session)
         amo_flag = "YES" if (amo or v == "amo") else "NO"
-        if v in ("regular", "", "amo"):
-            if amo_flag == "YES" or trading_symbol:
-                resp = await self._call(
-                    client.cancel_order,
-                    str(order_id),
-                    amo_flag,
-                    trading_symbol=trading_symbol,
-                )
-            else:
-                resp = await self._call(client.cancel_order, str(order_id))
-        elif v == "cover":
-            resp = await self._call(
-                client.cancel_cover_order,
-                str(order_id),
-                amo_flag,
-                trading_symbol=trading_symbol,
-            )
-        elif v == "bracket":
-            resp = await self._call(
-                client.cancel_bracket_order,
-                str(order_id),
-                amo_flag,
-                trading_symbol=trading_symbol,
-            )
+        if amo_flag == "YES":
+            resp = await self._call(client.cancel_order, str(order_id), amo_flag)
         else:
-            raise BrokerError(f"Kotak Neo cannot cancel order variety {variety!r}")
+            resp = await self._call(client.cancel_order, str(order_id))
         M.require_write_success(resp, expected_order_id=str(order_id))
 
     @classmethod
@@ -823,6 +765,14 @@ class KotakNeoAdapter(BrokerAdapter):
         """Derive bounded concrete writes from strict Kotak order/position books."""
         requested = frozenset(policy.verbs)
         orders = await self._emergency_order_rows(session)
+        active_orders = tuple(order for order in orders if order["status"] not in _EMERGENCY_TERMINAL_ORDER_STATUSES)
+        unsupported_active = next(
+            (order for order in active_orders if str(order.get("broker_product") or "").upper() in {"BO", "CO"}),
+            None,
+        )
+        if unsupported_active is not None:
+            product = str(unsupported_active["broker_product"]).upper()
+            raise BrokerError(f"Kotak Neo v3 cannot safely reduce a batch with an active {product} order")
         if "exit_all_positions" in requested:
             trade_fills = await self._emergency_trade_fills(session)
             known_order_ids = frozenset(str(order["orderid"]) for order in orders)
@@ -833,7 +783,6 @@ class KotakNeoAdapter(BrokerAdapter):
             positions = await self._emergency_positions(session)
         else:
             positions = ()
-        active_orders = tuple(order for order in orders if order["status"] not in _EMERGENCY_TERMINAL_ORDER_STATUSES)
         known_order_ids = frozenset(str(order["orderid"]) for order in orders)
         observed_tags = {str(order["tag"]) for order in orders if str(order.get("tag") or "")}
         positions_by_key = {self._emergency_position_key(position): position for position in positions}
@@ -1135,18 +1084,11 @@ class KotakNeoAdapter(BrokerAdapter):
         return [M.from_kotak_trade(r) for r in self._fixed_rows(resp, operation="trade_report")]  # type: ignore[misc]
 
     async def order_trades(self, session: Session, order_id: str) -> list[dict]:
-        """Fills for ONE order (NEO ``trade_report(order_id)`` — a read).
-
-        The SDK filters server-side rows down to ``{"data": {row}}`` for a
-        single fill (or an error envelope when nothing traded); a multi-fill
-        list is tolerated too. No trades → ``[]``, never a raise.
-        """
-        resp = await self._call(self._client(session).trade_book, str(order_id))
-        if not isinstance(resp, dict):
-            return []
-        data = resp.get("data")
-        rows = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
-        return [M.from_kotak_trade(r) for r in rows if isinstance(r, dict)]
+        """Return every fill for one order from v3's unfiltered trade report."""
+        resp = await self._call(self._client(session).trade_book)
+        rows = self._fixed_rows(resp, operation="trade_report")
+        target = str(order_id)
+        return [M.from_kotak_trade(row) for row in rows if str(row.get("nOrdNo")) == target]
 
     async def positions(self, session: Session) -> list[Position]:
         resp = await self._call(self._client(session).positions)
@@ -1167,16 +1109,10 @@ class KotakNeoAdapter(BrokerAdapter):
         )
 
     async def limits(self, session: Session, segment: str = "ALL", exchange: str = "ALL", product: str = "ALL") -> dict:
-        """Filtered RMS limits (NEO ``limits(segment, exchange, product)``).
-
-        ``funds`` is the unfiltered contract read; this exposes the documented
-        filter surface (segment ∈ CASH/CUR/FO/ALL, exchange ∈ NSE/BSE/ALL,
-        product ∈ CNC/MIS/NRML/ALL — ``Limits.md``). The raw flat response is
-        preserved under ``extra``.
-        """
-        params = M.to_limits_params(segment, exchange, product)
+        """Read v3 no-argument limits; reject unsupported adapter filters."""
+        M.to_limits_params(segment, exchange, product)
         resp = validate_read_envelope(
-            await self._call(self._client(session).limits, params["segment"], params["exchange"], params["product"]),
+            await self._call(self._client(session).limits),
             operation="limits",
         )
         return M.from_kotak_funds(resp)
@@ -1381,18 +1317,12 @@ class KotakNeoAdapter(BrokerAdapter):
 
         Read-only — places nothing, so it needs no gate. NEO keys the scrip by
         its numeric ``pSymbol`` (``Margin_Required.md`` line 35), so the token is
-        resolved via the shared ``_resolve_token`` path and the trading symbol
-        rides its own ``trading_symbol`` field. If the numeric token is not
-        resolvable the trading symbol is used as a best-effort fallback.
+        resolved via the shared ``_resolve_token`` path. V3 has no trading-symbol
+        margin argument and unresolved/non-numeric tokens fail closed.
         """
-        trading_symbol = await self._resolve_trading_symbol(session, order.symbol, order.exchange)
-        try:
-            instrument_token: str | None = await self._resolve_token(session, order.symbol, order.exchange)
-        except BrokerError:
-            # No token resolver and search_scrip could not resolve it — fall back
-            # to keying margin by trading symbol (handled in to_margin_params).
-            instrument_token = None
-        params = M.to_margin_params(order, trading_symbol, instrument_token=instrument_token)
+        M.validate_v3_order(order)
+        instrument_token = await self._resolve_token(session, order.symbol, order.exchange)
+        params = M.to_margin_params(order, instrument_token)
         resp = validate_read_envelope(await self._call(self._client(session).margin, params), operation="margin_required")
         return M.from_kotak_margin(resp)
 

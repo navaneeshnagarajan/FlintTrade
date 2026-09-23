@@ -181,8 +181,7 @@ class TestCapabilitiesRoute:
         assert caps["option_chain_greeks_supported"] is True
         assert caps["mcp"]["remote_url"] == "https://mcp.groww.in/mcp"
 
-    def test_kotak_native_streaming_limits_are_doc_grounded(self, client) -> None:  # type: ignore[no-untyped-def]
-        """Kotak exposes public WebSocket limits without promoting live-stream readiness."""
+    def test_kotak_native_v3_capabilities_drop_v2_only_claims(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/capabilities?broker=kotakneo")
         assert response.status_code == 200
         caps = response.get_json()["capabilities"]
@@ -197,11 +196,14 @@ class TestCapabilitiesRoute:
         assert caps["cost_inr_per_month"] == 0
         assert caps["supports_websocket"] is True
         assert caps["streaming_runtime_ready"] is False
-        assert caps["streaming_max_connections_per_user"] == 16
-        assert caps["streaming_max_symbols_per_connection"] == 200
-        assert caps["streaming_max_total_symbols"] == 200
-        assert caps["bracket_order_native"] is True
-        assert caps["cover_order_native"] is True
+        assert caps["streaming_max_connections_per_user"] is None
+        assert caps["streaming_max_symbols_per_connection"] is None
+        assert caps["streaming_max_total_symbols"] is None
+        assert caps["supports_currency"] is False
+        assert caps["supports_bracket_orders"] is False
+        assert caps["supports_cover_orders"] is False
+        assert caps["bracket_order_native"] is False
+        assert caps["cover_order_native"] is False
         assert caps["gtt_native"] is False
 
     def test_mcp_catalogue_lists_hosted_broker_mcp_servers(self, client) -> None:  # type: ignore[no-untyped-def]

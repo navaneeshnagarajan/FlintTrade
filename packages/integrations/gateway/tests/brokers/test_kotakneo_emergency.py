@@ -174,13 +174,11 @@ class FakeKotakNeoEmergencyClient:
 
     def _cancel(
         self,
-        family: str,
         order_id: str,
         amo: str,
         is_verify: bool,
-        trading_symbol: str | None,
     ) -> Any:
-        self.calls.append((family, order_id, amo, is_verify, trading_symbol))
+        self.calls.append(("cancel_order", order_id, amo, is_verify))
         if self.mutate_on_cancel:
             self.order_rows = [row for row in self.order_rows if row.get("nOrdNo") != order_id]
         if self.cancel_response is not _UNSET:
@@ -192,27 +190,8 @@ class FakeKotakNeoEmergencyClient:
         order_id: str,
         amo: str = "NO",
         is_verify: bool = False,
-        trading_symbol: str | None = None,
     ) -> Any:
-        return self._cancel("cancel_order", order_id, amo, is_verify, trading_symbol)
-
-    def cancel_bracket_order(
-        self,
-        order_id: str,
-        amo: str = "NO",
-        is_verify: bool = False,
-        trading_symbol: str | None = None,
-    ) -> Any:
-        return self._cancel("cancel_bracket_order", order_id, amo, is_verify, trading_symbol)
-
-    def cancel_cover_order(
-        self,
-        order_id: str,
-        amo: str = "NO",
-        is_verify: bool = False,
-        trading_symbol: str | None = None,
-    ) -> Any:
-        return self._cancel("cancel_cover_order", order_id, amo, is_verify, trading_symbol)
+        return self._cancel(order_id, amo, is_verify)
 
     def place_order(self, params: dict[str, Any]) -> Any:
         self.calls.append(("place_order", deepcopy(params)))
@@ -323,7 +302,7 @@ async def test_emergency_books_require_explicit_success_and_object_rows(
 
 
 @pytest.mark.asyncio
-async def test_planner_emits_exact_regular_amo_bracket_and_cover_cancellations() -> None:
+async def test_planner_emits_only_exact_regular_and_amo_cancellations() -> None:
     orders = [
         _order_row("01-REG", product="MIS", generation="NA"),
         _order_row(
@@ -333,9 +312,7 @@ async def test_planner_emits_exact_regular_amo_bracket_and_cover_cancellations()
             generation="AMO",
             symbol="ITC-EQ",
         ),
-        _order_row("03-BO", product="BO", generation="--"),
-        _order_row("04-CO", product="CO", generation=""),
-        _order_row("05-MTF", product="MTF", generation="NA", symbol="SBIN-EQ"),
+        _order_row("03-MTF", product="MTF", generation="NA", symbol="SBIN-EQ"),
     ]
     client = FakeKotakNeoEmergencyClient(orders=orders)
     adapter = _adapter(client)
@@ -363,17 +340,7 @@ async def test_planner_emits_exact_regular_amo_bracket_and_cover_cancellations()
         (
             "cancel_all_orders",
             "cancel_order",
-            {"_op": "cancel_order", "order_id": "03-BO", "variety": "bracket", "amo": False},
-        ),
-        (
-            "cancel_all_orders",
-            "cancel_order",
-            {"_op": "cancel_order", "order_id": "04-CO", "variety": "cover", "amo": False},
-        ),
-        (
-            "cancel_all_orders",
-            "cancel_order",
-            {"_op": "cancel_order", "order_id": "05-MTF", "variety": "regular", "amo": False},
+            {"_op": "cancel_order", "order_id": "03-MTF", "variety": "regular", "amo": False},
         ),
     ]
 
@@ -387,12 +354,28 @@ async def test_planner_emits_exact_regular_amo_bracket_and_cover_cancellations()
         )
 
     assert [call for call in client.calls if call[0].startswith("cancel")] == [
-        ("cancel_order", "01-REG", "NO", False, None),
-        ("cancel_order", "02-AMO", "YES", False, None),
-        ("cancel_bracket_order", "03-BO", "NO", False, None),
-        ("cancel_cover_order", "04-CO", "NO", False, None),
-        ("cancel_order", "05-MTF", "NO", False, None),
+        ("cancel_order", "01-REG", "NO", False),
+        ("cancel_order", "02-AMO", "YES", False),
+        ("cancel_order", "03-MTF", "NO", False),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unsupported_product", ["BO", "CO"])
+async def test_active_historical_bo_or_co_refuses_entire_emergency_batch(unsupported_product: str) -> None:
+    client = FakeKotakNeoEmergencyClient(
+        orders=[
+            _order_row("01-REG", product="MIS", generation="NA"),
+            _order_row("02-UNSUPPORTED", product=unsupported_product, generation=""),
+        ],
+        positions=[_position_row(quantity=5)],
+    )
+
+    with pytest.raises(BrokerError, match="active (?:BO|CO)"):
+        await _plan(_adapter(client), _session(), policy=_FLATTEN_POLICY)
+
+    assert client.calls == [("order_book",)]
+    assert not any(call[0].startswith("cancel") or call[0] == "place_order" for call in client.calls)
 
 
 @pytest.mark.asyncio
@@ -810,10 +793,8 @@ async def test_non_string_trade_fill_identifier_fails_closed() -> None:
         ("SL", "", "CNC"),
         ("SL-M", "", "CNC"),
         ("MKT", "AMO", "CNC"),
-        ("MKT", "", "BO"),
-        ("MKT", "", "CO"),
     ],
-    ids=["stop-limit", "stop-market", "amo", "bracket", "cover"],
+    ids=["stop-limit", "stop-market", "amo"],
 )
 async def test_noncanonical_protected_exit_shape_is_cancelled_instead_of_trusted(
     price_type: str,
@@ -1210,7 +1191,7 @@ def test_real_dispatcher_path_mints_one_shot_context_and_crosses_router_token_bo
     assert result.complete
     assert adapter.router_tokens == [_ROUTER_TOKEN]
     assert [call for call in client.calls if call[0].startswith("cancel")] == [
-        ("cancel_order", "ROUTED-CANCEL", "NO", False, None)
+        ("cancel_order", "ROUTED-CANCEL", "NO", False)
     ]
     assert len(router.cancel_dispatches) == 1
     emergency_context, dispatch = router.cancel_dispatches[0]

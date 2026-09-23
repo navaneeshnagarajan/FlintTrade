@@ -867,7 +867,8 @@ def test_list_native_brokers_catalogue(client, monkeypatch):
     assert brokers["kotakneo"]["native_connect_blockers"] == []
     assert brokers["kotakneo"]["sdk_pin"] == "kotakneoapi"
     assert brokers["kotakneo"]["sdk_attestation"]["status"] == "ok"
-    assert {"BCD", "MCX"} <= set(brokers["kotakneo"]["exchanges"])
+    assert "MCX" in brokers["kotakneo"]["exchanges"]
+    assert {"CDS", "BCD"}.isdisjoint(brokers["kotakneo"]["exchanges"])
     assert brokers["groww"]["connectable"] is False
     assert brokers["groww"]["native_connect_blockers"] == [
         "Broker-side market-data/API permission",

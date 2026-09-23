@@ -113,6 +113,104 @@ class ExactNeo:
         self.calls.append(("whatsmyip",))
         return self.liveness_response
 
+    def place_order(
+        self,
+        exchange_segment,
+        product,
+        price,
+        order_type,
+        quantity,
+        validity,
+        trading_symbol,
+        transaction_type,
+        amo="NO",
+        disclosed_quantity="0",
+        trigger_price="0",
+        tag=None,
+    ):
+        self.calls.append(
+            (
+                "place_order",
+                exchange_segment,
+                product,
+                price,
+                order_type,
+                quantity,
+                validity,
+                trading_symbol,
+                transaction_type,
+                amo,
+                disclosed_quantity,
+                trigger_price,
+                tag,
+            )
+        )
+        return {"stat": "Ok", "stCode": 200, "nOrdNo": "OID-PLACE"}
+
+    def modify_order(
+        self,
+        order_id,
+        price,
+        order_type,
+        quantity,
+        validity,
+        trigger_price="0",
+        disclosed_quantity="0",
+        amo="NO",
+    ):
+        self.calls.append(
+            (
+                "modify_order",
+                order_id,
+                price,
+                order_type,
+                quantity,
+                validity,
+                trigger_price,
+                disclosed_quantity,
+                amo,
+            )
+        )
+        return {"stat": "Ok", "stCode": 200, "nOrdNo": order_id}
+
+    def cancel_order(self, order_id, amo="NO", isVerify=False):
+        self.calls.append(("cancel_order", order_id, amo, isVerify))
+        return {"stat": "Ok", "stCode": 200, "nOrdNo": order_id}
+
+    def trade_report(self):
+        self.calls.append(("trade_report",))
+        return {"stat": "Ok", "stCode": 200, "data": []}
+
+    def limits(self):
+        self.calls.append(("limits",))
+        return {"stat": "Ok", "stCode": 200, "Net": "1", "MarginUsed": "0"}
+
+    def margin_required(
+        self,
+        exchange_segment,
+        price,
+        order_type,
+        product,
+        quantity,
+        instrument_token,
+        transaction_type,
+        trigger_price=None,
+    ):
+        self.calls.append(
+            (
+                "margin_required",
+                exchange_segment,
+                price,
+                order_type,
+                product,
+                quantity,
+                instrument_token,
+                transaction_type,
+                trigger_price,
+            )
+        )
+        return {"data": {"status": "success", "reqdMrgn": "1"}}
+
     def logout(self):
         self.calls.append(("logout",))
         return {"status": "success"}
@@ -138,6 +236,67 @@ def test_legacy_alias_is_consumer_key_and_totp_never_uses_sdk_access_token(fake_
     neo = fake_sdk.instances[-1]
     assert neo.constructor == ("alias", "prod", None, None)
     assert neo.calls == [("totp_login", "synthetic", "SYNTHETIC", "000000"), ("totp_validate", "123456")]
+    session.close()
+
+
+def test_facade_invokes_exact_v3_order_report_limits_and_margin_signatures(fake_sdk):
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    session = KotakNeoSdkSession.login(_credentials())
+    neo = fake_sdk.instances[-1]
+    neo.calls.clear()
+    session.place_order(
+        {
+            "exchange_segment": "nse_cm",
+            "product": "MIS",
+            "price": "1",
+            "order_type": "L",
+            "quantity": "2",
+            "validity": "DAY",
+            "trading_symbol": "SYNTHETIC-EQ",
+            "transaction_type": "B",
+            "amo": "NO",
+            "disclosed_quantity": "0",
+            "trigger_price": "0",
+            "tag": "TAG-1",
+        }
+    )
+    session.modify_order(
+        {
+            "order_id": "OID-1",
+            "price": "2",
+            "order_type": "SL",
+            "quantity": "3",
+            "validity": "IOC",
+            "trigger_price": "1.5",
+            "disclosed_quantity": "1",
+            "amo": "YES",
+        }
+    )
+    session.cancel_order("OID-1", amo="YES", is_verify=True)
+    session.trade_book()
+    session.limits()
+    session.margin(
+        {
+            "exchange_segment": "nse_cm",
+            "price": "1",
+            "order_type": "L",
+            "product": "MIS",
+            "quantity": "2",
+            "instrument_token": "123",
+            "transaction_type": "B",
+            "trigger_price": "0",
+        }
+    )
+
+    assert neo.calls == [
+        ("place_order", "nse_cm", "MIS", "1", "L", "2", "DAY", "SYNTHETIC-EQ", "B", "NO", "0", "0", "TAG-1"),
+        ("modify_order", "OID-1", "2", "SL", "3", "IOC", "1.5", "1", "YES"),
+        ("cancel_order", "OID-1", "YES", True),
+        ("trade_report",),
+        ("limits",),
+        ("margin_required", "nse_cm", "1", "L", "MIS", "2", "123", "B", "0"),
+    ]
     session.close()
 
 
