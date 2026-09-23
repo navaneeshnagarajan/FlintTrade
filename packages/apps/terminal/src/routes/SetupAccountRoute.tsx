@@ -1354,6 +1354,15 @@ export function PracticeLaterSetup() {
                   <p className="text-xs text-text-muted">{item.detail}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {item.id === "broker" && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => skip("broker")}
+                    >
+                      Continue without a broker
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="outline"
@@ -1363,15 +1372,17 @@ export function PracticeLaterSetup() {
                   >
                     Set up
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`Skip ${item.title}`}
-                    onClick={() => skip(item.id)}
-                  >
-                    Later
-                  </Button>
+                  {item.id !== "broker" && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Skip ${item.title}`}
+                      onClick={() => skip(item.id)}
+                    >
+                      Later
+                    </Button>
+                  )}
                 </div>
               </li>
             ))}

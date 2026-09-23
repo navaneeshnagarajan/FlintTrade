@@ -44,10 +44,10 @@ Defaults, or Risk. Opening the desk mints a Practice session and leaves
 setup for `/trade`.
 
 Those later panels open on the Practice desk after landing. Skip or
-Later stays on the desk and does not change Step N of 3. On broker
-connect, **Continue without a broker** is the first control, above
-FlintTrade Native and OpenAlgo Bridge. There is no Live unlock control
-on this path.
+Later stays on the desk and does not change Step N of 3. On the broker
+card, **Continue without a broker** is the primary control. Native,
+OpenAlgo, and MCP stay behind Set up, and inside that panel the same
+control remains above them. There is no Live unlock control on this path.
 
 ## Out of scope
 

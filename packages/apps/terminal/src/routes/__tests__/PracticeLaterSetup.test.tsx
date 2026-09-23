@@ -38,7 +38,9 @@ describe("PracticeLaterSetup", () => {
     expect(screen.getByText("Optional")).toBeInTheDocument();
     expect(screen.queryByText(/Step \d+ of \d+/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Skip Two-factor authentication" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Skip Broker connect" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue without a broker" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "FlintTrade Native" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "OpenAlgo Bridge" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Skip LLM" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Skip Monitoring" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Skip Trading defaults" })).toBeInTheDocument();
@@ -52,7 +54,7 @@ describe("PracticeLaterSetup", () => {
 
     for (const name of [
       "Skip Two-factor authentication",
-      "Skip Broker connect",
+      "Continue without a broker",
       "Skip LLM",
       "Skip Monitoring",
     ]) {
