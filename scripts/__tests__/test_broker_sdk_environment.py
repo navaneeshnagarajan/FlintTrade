@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -70,8 +71,12 @@ def test_interrupted_repair_fails_closed() -> None:
     assert any("--reinstall-package" in command for command in commands)
 
 
-def test_remove_kotak_without_interpreter_pip_when_uv_is_available() -> None:
-    from scripts.broker_sdk_environment import remove_kotak_distributions
+def test_remove_kotak_without_interpreter_pip_when_uv_is_available(monkeypatch) -> None:
+    from scripts import broker_sdk_environment as sdk_environment
+
+    # Make the uv branch independent of the contributor's PATH.
+    monkeypatch.setattr(sdk_environment.shutil, "which", lambda name: "/fixture/uv" if name == "uv" else None)
+    python = Path(sys.executable)
 
     commands: list[list[str]] = []
 
@@ -84,14 +89,25 @@ def test_remove_kotak_without_interpreter_pip_when_uv_is_available() -> None:
             return subprocess.CompletedProcess(argv, 1, "", "No module named pip")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    remove_kotak_distributions(Path("/repo/.venv/bin/python"), run=run)
+    sdk_environment.remove_kotak_distributions(python, run=run)
 
-    assert commands[-1] == ["uv", "pip", "uninstall", "--python", "/repo/.venv/bin/python",
+    assert commands[-1] == ["uv", "pip", "uninstall", "--python", str(python),
                             "kotakneoapi", "neo-api-client"]
 
 
-def test_repair_accepts_record_only_namespace_evidence(tmp_path: Path) -> None:
+def test_repair_accepts_record_only_namespace_evidence(tmp_path: Path, monkeypatch) -> None:
+    from scripts import ft
     from scripts.broker_sdk_environment import repair_kotakneo_environment
+
+    real_resolver = ft.resolve_python
+    resolutions = 0
+
+    def tracked_resolver() -> str:
+        nonlocal resolutions
+        resolutions += 1
+        return real_resolver()
+
+    monkeypatch.setattr(ft, "resolve_python", tracked_resolver)
 
     dist = tmp_path / "kotakneoapi-3.0.7.dist-info"
     dist.mkdir()
@@ -104,7 +120,7 @@ def test_repair_accepts_record_only_namespace_evidence(tmp_path: Path) -> None:
         "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
         "vcs_info": {"vcs": "git", "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"},
     }))
-    python = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"
+    python = Path(ft.resolve_python())
     commands: list[list[str]] = []
 
     def run(args, **kwargs):
@@ -120,6 +136,7 @@ def test_repair_accepts_record_only_namespace_evidence(tmp_path: Path) -> None:
     repair_kotakneo_environment(python, run=run)
 
     assert len(commands) == 1
+    assert resolutions == 1
 
 
 @pytest.mark.parametrize("direct_url", [
