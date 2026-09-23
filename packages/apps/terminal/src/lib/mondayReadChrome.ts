@@ -1,7 +1,8 @@
 /**
- * FT-MONDAY-002 — honest Connected (read) / API smoke chrome.
+ * Honest Connected (read) status for native Dhan and Kotak Neo.
  *
- * Dhan + Kotak Neo on the MSI path are non-funded read smoke only.
+ * The status label is Connected (read). API smoke belongs in broker-connect
+ * helper copy for a non-funded read, not on a Mode chip or this status line.
  * Never imply placeable Live orders. Neo has no Practice sandbox.
  */
 
@@ -33,7 +34,7 @@ export function mondayReadChrome(
 export function mondayAccountStatusLine(account: BrokerAccount): string {
   const chrome = mondayReadChrome(account);
   if (chrome) {
-    const parts = [account.broker, chrome, API_SMOKE_LABEL];
+    const parts = [account.broker, chrome];
     if (account.is_primary) parts.splice(1, 0, "primary");
     if (account.broker === "kotakneo") parts.push(NEO_OPERATOR_COPY);
     return parts.join(" · ");

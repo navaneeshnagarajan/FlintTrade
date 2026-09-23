@@ -488,7 +488,7 @@ class KotakNeoClient:
     # (``create_websocket``) is not wired in this tip — do not half-call it.
 
     SFEED_NOT_WIRED = (
-        "Kotak Neo Monday path is REST-only (quotes, depth, historical, "
+        "Kotak Neo Connected (read) / API smoke is REST-only (quotes, depth, historical, "
         "option chain). Live SFeed create_websocket is not wired."
     )
 
