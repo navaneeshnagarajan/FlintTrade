@@ -1,0 +1,159 @@
+# FT-SETUP-COPY-001 — Scrub calendar-day operator copy from Setup
+
+Tracking only. This pull request does not change product strings, wizard
+flow, or broker behaviour.
+
+Operator-visible Setup, Mode Select, Broker Connect, and the operator
+guide still use a weekday pack name as a product path. Product language
+for those surfaces is **Practice**, **Connected (read)**, **Live**, and
+**API smoke**.
+
+## Locked behaviour
+
+1. Operator-visible Setup, Mode Select, Broker Connect, and related
+   chrome use product language only. A calendar day or weekday pack name
+   is not a product path in UI strings.
+2. Code identifiers and acceptance-doc IDs may keep internal tracking
+   names in developer docs and in source that is not shown as operator
+   chrome. Operator strings and `docs/USER_GUIDE.md` operator copy must
+   not advertise those names.
+3. Setup wizard complexity (step count, layout, which connect action is
+   primary) is a separate UX call. This finding is copy honesty only.
+
+Existing product sentences stay. Kotak Neo copy remains
+`Live read only until funded unlock.` Live place stays fail-closed.
+OpenAlgo stays Settings / fallback, not the primary connect CTA.
+
+## Verified operator surfaces
+
+Checked on the tree this note was added to. Quotes below are the
+current operator strings, recorded so the follow-up can replace them
+without a second search.
+
+### Mode Select
+
+`packages/apps/terminal/src/routes/ModeSelectRoute.tsx` — Practice card
+`brokerNote`, rendered on the mode card:
+
+`No broker needed · primary Monday Practice path`
+
+The Explore and Live notes on the same screen already use product
+language (`No broker needed`, `Broker required · PIN and authenticator
+required`).
+
+### Setup connection step
+
+`packages/apps/terminal/src/routes/setup/ConnectionStep.tsx` renders
+these operator sentences:
+
+- `You do not need a broker for Monday Practice.`
+- `OpenAlgo and native brokers stay in Settings as a fallback — not the primary Monday path.`
+- `Settings fallback only — not the Monday primary connect path.`
+- `Monday primary broker connect: native Dhan + Kotak Neo.`
+
+The same step already uses honest product language beside those leaks:
+`Connected (read) / API smoke only — never placeable Live orders` and
+`Live read only until funded unlock.`
+
+`packages/apps/terminal/src/routes/setup/ConnectionStep.test.tsx` pins
+the leak. The test title and assertion both require the weekday pack
+phrase (`Monday primary broker connect`). The follow-up must retarget
+that assertion at the product-language sentence. Do not delete the
+check that OpenAlgo is not the primary connect CTA.
+
+### Broker Connect (Setup and Settings)
+
+`packages/apps/terminal/src/components/account/BrokerConnect.tsx` is the
+shared Brokers surface (setup direct connect, and Settings → Brokers via
+`packages/apps/terminal/src/tools/Settings/BrokersSection.tsx`). The
+warning banner says:
+
+- Strong copy: `Monday path is native Dhan + Kotak Neo Connected (read).`
+- Following sentence: `OpenAlgo is Settings / fallback only, not the Monday primary connect CTA.`
+
+The rest of that paragraph already uses **Connected (read)**, **API
+smoke**, and fail-closed Live place.
+
+### Operator guide
+
+`docs/USER_GUIDE.md` is operator copy. It advertises internal tracking
+IDs that contain the weekday pack name:
+
+- `(FT-MONDAY-002)` beside native Dhan + Kotak Neo Connected (read) /
+  API smoke (broker setup and the native-read section).
+- `(FT-MONDAY-001)` beside Practice SandboxEngine fills and the Learn →
+  Practice Trading fallback.
+- `(FT-MONDAY-003)` beside AI Suggest labelling, Chat live-read context,
+  and the Settings AI note.
+
+The surrounding sentences are already product language (Practice,
+Connected (read), API smoke, `Live read only until funded unlock.`).
+The follow-up removes the tracking IDs from the operator guide. The
+acceptance docs `docs/acceptance/FT-MONDAY-001.md` (if present),
+`FT-MONDAY-002.md`, and `FT-MONDAY-003.md` may keep those IDs.
+
+### Operator-reachable error text
+
+Not Setup chrome, but an operator can see it if a Kotak Neo subscribe
+fails closed:
+
+`packages/integrations/gateway/src/flinttrade_gateway/brokers/kotakneo.py`
+`SFEED_NOT_WIRED`:
+
+`Kotak Neo Monday path is REST-only (quotes, depth, historical, option chain). Live SFeed create_websocket is not wired.`
+
+`packages/integrations/gateway/src/flinttrade_gateway/monday_read_smoke.py`
+raises `ValueError` with `Monday read-smoke is Dhan + Neo only`. Treat
+that message as in scope if it is shown to an operator; the function
+name may stay.
+
+## May keep internal names
+
+These are not operator chrome. Do not rename them as part of this
+finding:
+
+- Identifiers such as `isMondayReadBroker`, `mondayReadChrome`,
+  `nativeMonday`, `MONDAY_READ_BROKERS`, and `run_monday_read_smoke`.
+- Developer comments, including the file headers on `ConnectionStep.tsx`
+  and `SetupAccountRoute.tsx`, and the comment in
+  `ModeSelectRoute.test.tsx`.
+- Acceptance-doc IDs `FT-MONDAY-001`, `FT-MONDAY-002`, and
+  `FT-MONDAY-003` inside `docs/acceptance/`.
+- Account switcher and incident chrome. `AccountSwitcher` passes the
+  internal flag through, and the painted status is already product
+  language (`Connected (read)`, `Connected`, `Unavailable`, `Degraded`).
+
+## Out of scope
+
+- Any product-string edit in this pull request.
+- Setup wizard structure, step order, or which control is the primary
+  continue action.
+- Exchange-calendar copy that states a real session fact, including
+  welcome copy that markets resume on a weekday at 09:15, seasonality
+  weekday columns, and IST weekday arithmetic.
+- Order gating, native HTTP freeze, connectability, and funded Live
+  unlock. Those stay on their existing acceptance tips.
+- Renaming modules or tests whose only “leak” is an identifier.
+
+## Acceptance (follow-up implementation)
+
+This pull request is done when the tracking note exists. The product
+fix, in a later change, is done when all of the following hold:
+
+1. Mode Select, the setup connection step, and Broker Connect (including
+   Settings → Brokers) show Practice, Connected (read), Live, and API
+   smoke, and do not name a weekday pack as a path.
+2. `docs/USER_GUIDE.md` operator copy no longer advertises the internal
+   tracking IDs listed above. Developer acceptance docs may keep them.
+3. The Kotak Neo subscribe error, if it remains operator-visible, uses
+   the same product language (REST-only Connected (read) / API smoke;
+   live SFeed not wired).
+4. `ConnectionStep.test.tsx` asserts the replacement product sentence
+   and still proves OpenAlgo is not the primary connect CTA.
+5. British English. No personal details, hostnames, account names, or
+   fund amounts in the change.
+6. Wizard layout and broker behaviour are unchanged.
+
+## Status
+
+Open. Product copy is unchanged.
