@@ -58,7 +58,7 @@ An operator or automate proposal is admitted or refused as a typed verdict
 with `allow`, `reason`, and `limits`. Laya does not place an order and does
 not mint the one-shot write ticket. `gate_order` remains the only mint.
 Chat may suggest and explain only: bring your own API key, use managed
-Ollama, or point a Custom OpenAI-compatible host at another local runtime.
+Ollama, or point **Custom (OpenAI-compatible)** at another local runtime.
 Chat is not an admission source, and Chat downtime does not close Live.
 
 Money-path mint remains Mode guard → SafetySystem L1–L5 → `gate_order` →

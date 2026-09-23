@@ -354,12 +354,12 @@ rectify line. Kill All and the safety layers stay reachable. Chat being down
 does not close Live orders. A public site outage does not mean the local desk
 cancelled broker orders.
 
-The TopBar desk status cluster is three surfaces — **Broker** · **Laya** ·
-**LLM** — never one **AI Connected** label. Laya reads **Ready**, **Degraded**,
-or **Down**. With no status yet, Laya shows **Degraded**, not **Ready**.
-A connected LLM reads **Connected (suggest only)**. Chat is not Laya. Only
-Laya **Down** closes Live place and Position Mirror start. Chat offline does
-not. Laya **Degraded** does not mute Live.
+The TopBar desk status cluster shows **Broker**, **Laya**, and **LLM** as
+separate labels. Broker is **Connected**, **Connected (read)**, or
+**Unavailable**. Laya is **Ready**, **Degraded**, or **Down**; with no
+status yet it shows **Degraded**, not **Ready**, and that does not open
+this strip. LLM is **Not configured**, or **Connected (suggest only)**
+when Chat is ready.
 
 FlintTrade does not hold client funds, reverse broker fills, or file a
 dispute. Rectify steps point at the broker, the exchange, or the host:
@@ -373,7 +373,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Broker stream (`broker_stream`) | Dhan's market stream dropped. Kotak Neo has no stream class until SFeed. | Wait for the stream. Do not treat quotes as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
-| Laya (`laya`) | Blocked on the money path when Laya is Down: "Laya is Down — Live orders paused." Live place and Position Mirror start stay muted. Broker may stay **Connected** or **Connected (read)**. With no status yet, the Laya surface shows Degraded and this strip stays closed. | Live orders stay closed until Laya is Ready. Chat cannot place an order in its place. Kill All stays available. |
+| Laya (`laya`) | Blocked — Laya is Down ("Laya is Down — Live orders paused."). Live place and Position Mirror start stay closed. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. Kill All stays available. With no status yet, Laya shows Degraded and this strip stays closed. | Wait until Laya is Ready. Do not treat Chat as a substitute. |
 | Chat provider (`llm_provider`) | Chat is unavailable. Trading chrome stays as it was. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
@@ -972,8 +972,7 @@ Chat is suggest-only. A connected LLM is labelled **Connected (suggest only)**.
 It does not place Live orders, and it is not Laya. Laya is a separate status:
 **Ready**, **Degraded**, or **Down**. With no status yet, the Laya surface
 shows **Degraded**, not **Ready**. Only **Down** closes Live orders and mirror
-start.
-Kill All stays reachable. Chat being offline does not close Live.
+start. Kill All stays reachable. Chat being offline does not close Live.
 
 Chat itself needs a configured LLM via Settings → AI. The badge and composer
 align with Settings → AI / `#llm` hydration as well as advisor status
