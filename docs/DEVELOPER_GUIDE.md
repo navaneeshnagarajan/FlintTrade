@@ -471,12 +471,14 @@ gated-session model; never add plaintext credential storage.
 
 The 5-layer safety system lives in `packages/services/engine/`. Every
 **Live** order placed through FlintTrade is checked by those layers.
-Practice orders skip this chain: the mode guard sends them to
-`SandboxEngine` only. Explore placement is refused by the backend
-(`mode_blocked`); Order Pad Sample Buy is a local client fill (no HTTP
-order route, no SafetySystem). Runtime fail-fast order in
-`_check_order_locked` is **L5 → L4 → L1 → L2 → L3** (not L1–L5 numerical
-order):
+Practice orders skip L1–L5 and go to `SandboxEngine`. Practice place
+admits via `Laya.admit`, then the sandbox; a refusal or a clamp stops
+before the sandbox. Live place is Mode guard → `Laya.admit` →
+SafetySystem L1–L5 → `gate_order`. Explore placement is refused by the
+backend (`mode_blocked`); Order Pad Sample Buy is a local client fill
+(no HTTP order route, no Laya admit, no SafetySystem). Runtime fail-fast
+order in `_check_order_locked` is **L5 → L4 → L1 → L2 → L3** (not L1–L5
+numerical order):
 
 1. **L5 Kill switch** — explicit operator activation through Telegram, the UI,
    or the API cancels open orders and requests position flattening. Automatic
@@ -489,8 +491,8 @@ order):
    single position exceeding 60 % of available margin.
 5. **L3 Portfolio risk** — net delta and net vega caps.
 
-Do not bypass any layer. If you need a fast-path for high-frequency
-orders, add the path inside the layers, not around them.
+Do not bypass Laya or SafetySystem. If you need a fast-path for
+high-frequency orders, add the path inside the layers, not around them.
 
 ### Vite dev proxy paths
 
