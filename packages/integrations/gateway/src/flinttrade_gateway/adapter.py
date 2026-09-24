@@ -1054,7 +1054,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         # for non-funded Connected (read) / API smoke. Live place stays
         # fail-closed. Neo has no sandbox.
         auth_flow=AuthFlowType.totp_form,
-        exchanges=["NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NSE_INDEX", "BSE_INDEX"],
+        exchanges=["NSE", "BSE", "NFO", "BFO", "MCX", "NSE_INDEX", "BSE_INDEX"],
         native=True,
         connectable=True,
         requires_static_ip=True,

@@ -121,7 +121,7 @@ class TickProtocol(Enum):
     KITE_BINARY = "kite_binary"
     DHAN_BINARY = "dhan_binary"
     UPSTOX_JSON = "upstox_json"
-    KOTAK_NEO_JSON = "kotak_neo_json"
+    KOTAK_NEO_BINARY = "kotak_neo_binary"
     OPENALGO_JSON = "openalgo_json"
     GENERIC_JSON = "generic_json"
 
@@ -157,12 +157,16 @@ class Capabilities:
     rate_limit_non_trading_per_sec: int | None = None
     order_modifications_per_order: int | None = None
     algo_tag_required: bool = False
+    # True when the order surface accepts an algo tag. ``algo_tag_required``
+    # distinguishes mandatory programmes; optional adapters receive only a
+    # trusted configured id and stay untagged when no config exists.
+    algo_tag_supported: bool = False
     cost_paid: bool = False
     cost_inr_per_month: int | None = None
     # Per-trade execution brokerage (distinct from the API-subscription cost
     # above). ``brokerage_free`` advertises zero brokerage on order execution
-    # (e.g. Kotak Neo); ``brokerage_note`` carries any caveats (e.g. a bracket
-    # square-off leg that still attracts standard brokerage).
+    # (e.g. Kotak Neo); ``brokerage_note`` carries any caveats, such as
+    # statutory charges that still apply to otherwise brokerage-free orders.
     brokerage_free: bool = False
     brokerage_note: str = ""
     historical_max_lookback_days_intraday: int | None = None

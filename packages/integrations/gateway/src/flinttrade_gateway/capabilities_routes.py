@@ -124,6 +124,7 @@ def _native_capability_fields(broker_name: str) -> dict[str, Any]:
         "rate_limit_non_trading_per_sec": native.rate_limit_non_trading_per_sec,
         "order_modifications_per_order": native.order_modifications_per_order,
         "algo_tag_required": native.algo_tag_required,
+        "algo_tag_supported": native.algo_tag_supported,
         "brokerage_free": native.brokerage_free,
         "brokerage_note": native.brokerage_note,
         "cost_paid": native.cost_paid,

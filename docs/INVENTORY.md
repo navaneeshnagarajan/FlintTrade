@@ -28,7 +28,12 @@ until a real SDK distribution can be pinned.
 Broker SDK source/artifact mirrors can be refreshed into the gitignored
 `.local/sdk-audit/` cache with `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift`;
 tracked runtime installation still comes only from `uv.lock` and `brokers.lock`.
-Closed-market/no-funds verification does not prove funded live order execution.
+Kotak Neo uses exact Git provenance: upstream `main`
+`5bb34fae39c4a52a0e6b59d7e2d17090cafc340c` is the runtime and `v3.0.7`
+peeled to `53cccc45fe56a193b30ffce3c03c71c5c0378538` is the release baseline.
+Both expose `kotakneoapi` 3.0.7 through the retained `neo_api_client` import
+namespace; the old `neo-api-client` distribution is forbidden. Closed-market/
+no-funds verification does not prove funded live order execution.
 
 ## Legend
 
@@ -57,7 +62,7 @@ Closed-market/no-funds verification does not prove funded live order execution.
 | — Dhan: rolling-options history + documented L20 depth feed | 🟡 | Rolling-options history is encoded in routing capabilities; Dhan's L20 depth remains feed-only until FlintTrade wires a runtime depth snapshot bridge (`market_depth_runtime_ready=false`). |
 | — Upstox: historical-data edge | ✅ | `historical_max_lookback/candles` capabilities |
 | — Kotak Neo: low-cost execution metadata | ✅ | `brokerage_free` + `low_cost_execution` use-case |
-| Native adapters (Dhan/Upstox/Kotak Neo/INDmoney/Groww): identity, capabilities, order + **data** surfaces | 🟡 | Adapter and mapping code is present and mock-tested. Dhan and Upstox are connectable after live verification and emergency-planner coverage. INDmoney's fail-closed planner is locally verified but it remains coming soon pending an authoritative restart-time regular/smart-parent discriminator, a broker-atomic reduce-only close primitive, and a funded/live-market order-safety proof. Kotak Neo is connectable for Connected (read) / API smoke on `kotakneoapi` 3.0.7; live order-safety proof remains and Live place stays fail-closed. Neo has no sandbox (never offer Neo Practice). FT-MONDAY-002 ships MSI static-IP host native Dhan + Neo REST read/API smoke (quotes / depth / hist / chain; live SFeed is not wired). Groww retains its documented live blockers. |
+| Native adapters (Dhan/Upstox/Kotak Neo/INDmoney/Groww): identity, capabilities, order + **data** surfaces | 🟡 | Adapter and mapping code is present and mock-tested. Dhan and Upstox are connectable after live verification and emergency-planner coverage. INDmoney's fail-closed planner is locally verified but it remains coming soon pending an authoritative restart-time regular/smart-parent discriminator, a broker-atomic reduce-only close primitive, and a funded/live-market order-safety proof. Kotak Neo is connectable for Connected (read) / API smoke on the exact v3 Git runtime; its async SFeed and order-feed lifecycle is wired and locally synthetic-tested, while the historical live evidence remains REST reads only. Live-account/market-hours feed, funded-order safety, Live catalogue promotion, and cross-platform proof remain outstanding; Live place stays fail-closed. Neo has no sandbox (never offer Neo Practice). Groww retains its documented live blockers. |
 | Native adapters: **order execution** end-to-end (R13/R14) | 🟡 | The gated path they plug into (`SafetySystem → gate_order → BrokerRouter`) is built + tested. Generic terminal place/modify/cancel now route to the active native account when no OpenAlgo key is configured, but funded live native order placement remains unproven because verification used no-funds/closed-market accounts. |
 | Multiple brokers per account, per-broker rate limits | ✅ | `BrokerRateLimiter` + live-apply UI (Account Manager) |
 

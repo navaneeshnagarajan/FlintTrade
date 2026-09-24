@@ -6,6 +6,22 @@ set -euo pipefail
 FLINTTRADE_DIR="${FLINTTRADE_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$FLINTTRADE_DIR"
 
+verify_with_venv() {
+    local source_python="$FLINTTRADE_DIR/.venv/bin/python"
+    if [ ! -x "$source_python" ]; then
+        echo "The synced .venv/bin/python is missing; source verification cannot run." >&2
+        return 1
+    fi
+    "$source_python" -m pytest "$@" --tb=short --import-mode=importlib -q
+}
+
+# A narrow source-setup contract for proving the interpreter selected by the
+# verification step without running the installation again.
+if [ "${1:-}" = "--verify-only" ]; then
+    verify_with_venv
+    exit $?
+fi
+
 # Keep in step with package.json packageManager and scripts/install/*.
 PINNED_PNPM_VERSION="10.34.5"
 
@@ -221,11 +237,17 @@ ok "Root requirements installed"
 # git SDK. Keep the registry-only pip baseline above, then sync the repo-local
 # uv environment so every workspace dependency and broker SDK pin is installed
 # inside .venv for source development.
+SOURCE_PYTHON=python3
+HAVE_UV=false
 if command -v uv >/dev/null 2>&1; then
     uv sync --frozen --all-packages
+    SOURCE_PYTHON="$FLINTTRADE_DIR/.venv/bin/python"
+    "$SOURCE_PYTHON" "$FLINTTRADE_DIR/scripts/broker_sdk_environment.py" repair
+    HAVE_UV=true
     ok "Repo .venv synced with workspace packages and broker SDK pins"
 else
-    warn "uv not found; run 'uv sync --frozen --all-packages' to install repo-local broker SDK pins such as Kotak Neo."
+    python3 "$FLINTTRADE_DIR/scripts/broker_sdk_environment.py" repair
+    ok "Pinned broker SDKs installed and attested in the system Python environment"
 fi
 
 # SC-07: per-package requirements.txt installs removed — requirements.lock is a
@@ -296,7 +318,7 @@ cd "$FLINTTRADE_DIR"
 # command died is how a broken install looks like a good one.
 init_status=0
 PYTHONPATH="$FLINTTRADE_DIR/packages/core/core/src${PATH_SEP}${PYTHONPATH:-}" \
-    python3 -m flinttrade_core.cli init --provision-master-password >/dev/null \
+    "$SOURCE_PYTHON" -m flinttrade_core.cli init --provision-master-password >/dev/null \
     || init_status=$?
 if [ "$init_status" -eq 0 ]; then
     ok "Workspace initialised: $WORKSPACE_DIR"
@@ -330,7 +352,9 @@ fi
 
 if [ -z "$PYTEST_PATHS" ]; then
     warn "No test directories found under $FLINTTRADE_DIR/packages/*/*/tests — skipping verification"
-elif python3 -m pytest $PYTEST_PATHS --tb=short --import-mode=importlib -q; then
+elif [ "$HAVE_UV" = false ]; then
+    warn "uv is unavailable; the managed source environment could not be verified."
+elif verify_with_venv $PYTEST_PATHS; then
     ok "All tests passing"
 else
     warn "Some tests failed — check output above"

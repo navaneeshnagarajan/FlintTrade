@@ -2425,9 +2425,9 @@ def _build_broker_router_from_dependencies(
     resolved_adapters = dependencies.adapters
     brokers_config = dependencies.brokers_config
 
-    # Algo-tag guard (SEBI algo-id relay + per-(broker, exchange) per-second
-    # algo-order ceiling) for adapters advertising ``algo_tag_required``
-    # (Dhan/IndMoney). Built only when the operator configured their
+    # Algo-tag guard (registered-id relay + per-(broker, exchange) per-second
+    # algo-order ceiling) for adapters advertising required or optional tag
+    # support. Built only when the operator configured their
     # broker-registered algo ids in workspace.json
     # ``brokers.algo_tags[broker_id].{algo_id, max_orders_per_sec}``.
     #
@@ -2444,13 +2444,16 @@ def _build_broker_router_from_dependencies(
     if isinstance(algo_tags_cfg, dict) and algo_tags_cfg:
         from flinttrade_engine.algo_tag_guard import AlgoTagConfig, AlgoTagGuard  # noqa: PLC0415
 
-        # Only adapters that actually consult the guard (algo_tag_required) can
-        # be tagged; a typo'd/non-algo broker key is inert, so reject it loudly
-        # rather than logging it as "active".
+        # Only adapters that actually consult the guard can be tagged; a
+        # typo'd/non-tag broker key is inert, so reject it loudly rather than
+        # logging it as "active".
         taggable = {
             aid
             for aid, adapter in resolved_adapters.items()
-            if getattr(getattr(adapter, "capabilities", None), "algo_tag_required", False)
+            if (
+                getattr(getattr(adapter, "capabilities", None), "algo_tag_required", False)
+                or getattr(getattr(adapter, "capabilities", None), "algo_tag_supported", False)
+            )
         }
         tag_configs: dict[str, AlgoTagConfig] = {}
         for broker_id, spec in algo_tags_cfg.items():
@@ -2472,7 +2475,7 @@ def _build_broker_router_from_dependencies(
             if taggable and bid not in taggable:
                 logger.error(
                     "brokers.algo_tags[%r] ignored — %r is not an active algo-tag broker "
-                    "(algo_tag_required). Active: %s",
+                    "(required or optional support). Active: %s",
                     bid,
                     bid,
                     sorted(taggable),
@@ -3786,8 +3789,11 @@ def create_flask_app(
     def _reset_safe_request_context(_error: BaseException | None) -> None:
         token = getattr(_flask_g, "_safe_request_token", None)
         _flask_g._safe_request_token = None
-        if token is not None:
-            reset_safe_request_summary(token)
+        try:
+            if token is not None:
+                reset_safe_request_summary(token)
+        finally:
+            structlog.contextvars.clear_contextvars()
 
     _install_runtime_request_tracking(app)
     app.config["LOG_STREAM_SHUTDOWN_EVENT"] = threading.Event()

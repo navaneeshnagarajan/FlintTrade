@@ -26,6 +26,7 @@ from flinttrade_core.broker_read_port import (
     InstrumentRef,
     LotSizeRequest,
     MarginRequest,
+    OptionChainRequest,
     OrderStateRequest,
     PortfolioGreeksRequest,
     PortfolioPositionRef,
@@ -3286,6 +3287,20 @@ class _KotakNeoClient:
         return self._read("holdings")
 
 
+class _KotakNeoMarketClient(_KotakNeoClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.market_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def historical_data(self, neosymbol, interval, from_date, to_date):
+        self.market_calls.append(("historical_data", (neosymbol, interval, from_date, to_date)))
+        return copy.deepcopy(self.responses["historical_data"])
+
+    def option_chain(self, exchange, underlying, expiry=None, instrument_type=None, count=None):
+        self.market_calls.append(("option_chain", (exchange, underlying, expiry, instrument_type, count)))
+        return copy.deepcopy(self.responses["option_chain"])
+
+
 def _kotakneo_rows(client: _KotakNeoClient) -> None:
     client.responses["order_book"] = {"stat": "Ok", "stCode": 200, "data": [{
         "nOrdNo": "K1",
@@ -3335,6 +3350,79 @@ def _kotakneo_rows(client: _KotakNeoClient) -> None:
         "closingPrice": 0,
         "unrealisedGainLoss": 0,
     }]}
+
+
+@pytest.mark.asyncio
+async def test_kotakneo_market_data_preserves_identity_and_oi_truth_through_bound_service(bind_adapter) -> None:
+    client = _KotakNeoMarketClient()
+    client.responses["historical_data"] = {
+        "status": "success",
+        "interval": "60min",
+        "data": {
+            "candles": [["2026-09-01T09:15:00+05:30", 100, 102, 99, 101, 10, None]],
+        },
+    }
+    client.responses["option_chain"] = {
+        "data": {
+            "common_data": {
+                "unlSymbol": "NIFTY",
+                "exSeg": "nse_fo",
+                "expiryDt": "2026-09-24",
+            },
+            "call": [
+                {
+                    "instrument": {
+                        "neoSymbol": "nse_fo|22000",
+                        "optionType": "CE",
+                        "strikePrice": "22000",
+                    }
+                },
+                {
+                    "instrument": {
+                        "neoSymbol": "nse_fo|22100",
+                        "optionType": "CE",
+                        "strikePrice": "22100",
+                    },
+                    "openInterest": {"current": None},
+                },
+                {
+                    "instrument": {
+                        "neoSymbol": "nse_fo|22200",
+                        "optionType": "CE",
+                        "strikePrice": "22200",
+                    },
+                    "openInterest": {"current": 0},
+                },
+            ],
+            "put": [],
+        }
+    }
+    adapter = KotakNeoAdapter(
+        client_factory=lambda _session: client,
+        token_resolver=lambda _symbol, _exchange: "101",
+    )
+    bound = bind_adapter("kotakneo", adapter, client)
+
+    history = await bound.port.historical(
+        HistoricalRequest(InstrumentRef("TCS", "NSE", "requested-tcs"), "1h", "2026-09-01", "2026-09-02")
+    )
+    chain = await bound.port.option_chain(
+        OptionChainRequest(InstrumentRef("NIFTY", "NSE_INDEX", "requested-nifty"), "2026-09-24")
+    )
+
+    assert isinstance(history, BrokerReadSuccess)
+    assert history.value.instrument == InstrumentRef("TCS", "NSE", "requested-tcs")
+    assert history.value.interval == "1h"
+    assert history.value.bars[0].volume == 10
+    assert isinstance(chain, BrokerReadSuccess)
+    assert chain.value.underlying == InstrumentRef("NIFTY", "NSE_INDEX", "requested-nifty")
+    assert chain.value.expiry == "2026-09-24"
+    assert chain.value.spot_price is None
+    assert [strike.ce_oi for strike in chain.value.strikes] == [None, None, 0]
+    assert client.market_calls == [
+        ("historical_data", ("nse_cm|101", "60min", "2026-09-01", "2026-09-02")),
+        ("option_chain", ("nse_fo", "NIFTY", "2026-09-24", "option", None)),
+    ]
 
 
 @pytest.mark.asyncio
@@ -3627,7 +3715,7 @@ async def test_kotakneo_present_malformed_primary_alias_never_falls_through(
 
 
 @pytest.mark.asyncio
-async def test_kotakneo_trade_optional_order_id_remains_absent(bind_adapter) -> None:
+async def test_kotakneo_trade_missing_order_id_is_malformed(bind_adapter) -> None:
     client = _KotakNeoClient()
     _kotakneo_rows(client)
     client.responses["trade_book"]["data"][0].pop("nOrdNo")
@@ -3635,8 +3723,7 @@ async def test_kotakneo_trade_optional_order_id_remains_absent(bind_adapter) -> 
 
     outcome = await bound.port.trades()
 
-    assert isinstance(outcome, BrokerReadSuccess)
-    assert outcome.value[0].orderid is None
+    assert outcome == BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
     assert client.calls == ["trade_book"]
 
 

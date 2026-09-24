@@ -933,15 +933,16 @@ def test_super_modify_happy_path(*, backend_lease_factory) -> None:
     router = _gated_router(result=None)
     safety = _passing_safety()
     client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
+    changes = {"leg_name": "TARGET_LEG", "price": "105"}
     resp = client.put(
         "/api/v1/orders/super/SUP-1",
-        json={"changes": {"leg_name": "TARGET_LEG", "price": "105"}, "broker": "dhan"},
+        json={"changes": changes, "broker": "dhan"},
         headers=_live_headers(),
     )
     assert resp.status_code == 200
     kw = router.execute_gated.await_args.kwargs
     assert kw["verb"] == "modify_super_order"
-    assert kw["payload"]["changes"]["leg_name"] == "TARGET_LEG"
+    assert kw["payload"]["changes"] == changes
     safety.check_order.assert_not_called()
 
 
@@ -1014,6 +1015,82 @@ def test_advanced_modify_quantity_increase_runs_full_safety_before_gate(
 
     assert response.status_code == 403
     safety.check_order.assert_called_once()
+    router.execute_gated.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("path", "reader_name", "changes"),
+    [
+        (
+            "/api/v1/orders/forever/GTT-1",
+            "forever_orders",
+            _dhan_forever_changes(
+                action="SELL",
+                pricetype="MARKET",
+                quantity=2,
+                price=0,
+                trigger_price=1,
+            ),
+        ),
+        (
+            "/api/v1/orders/super/SUP-1",
+            "super_orders",
+            {"leg_name": "TARGET_LEG", "action": "SELL", "quantity": 2},
+        ),
+    ],
+)
+def test_advanced_modify_cannot_spoof_authoritative_buy_as_sell(
+    path: str,
+    reader_name: str,
+    changes: dict[str, Any],
+    *,
+    backend_lease_factory,
+) -> None:
+    safety = _passing_safety()
+    router = _gated_router(result=None)
+    app, adapter, _registry = _app_with_native_state(
+        router,
+        safety,
+        adapter_id="dhan",
+        account_id="D1",
+        backend_lease_factory=backend_lease_factory,
+    )
+    current = {
+        "orderid": path.rsplit("/", 1)[-1],
+        "status": "PENDING",
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "action": "BUY",
+        "quantity": "1",
+        "filled_quantity": "0",
+        "price": "0",
+        "trigger_price": "1",
+        "pricetype": "MARKET",
+        "product": "MIS",
+    }
+    if reader_name == "forever_orders":
+        current.update(
+            {
+                "order_flag": "SINGLE",
+                "validity": "DAY",
+                "disclosed_quantity": "0",
+            }
+        )
+    else:
+        current["legs"] = [
+            {"leg_name": "TARGET_LEG", "status": "PENDING", "price": "105"}
+        ]
+    setattr(adapter, reader_name, AsyncMock(return_value=[current]))
+
+    response = app.test_client().put(
+        path,
+        json={"changes": changes, "broker": "dhan", "account_id": "D1"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 409
+    assert "action" in response.get_json()["message"].lower()
+    safety.check_order.assert_not_called()
     router.execute_gated.assert_not_called()
 
 

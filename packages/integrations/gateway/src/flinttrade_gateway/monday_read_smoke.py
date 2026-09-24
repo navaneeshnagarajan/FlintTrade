@@ -9,6 +9,7 @@ Neo has no sandbox. Operator copy is ``Live read only until funded unlock.``
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
@@ -281,27 +282,42 @@ async def run_monday_read_smoke(
             operator_copy=_neo_copy(broker_id),
         )
 
-    steps.append(await _timed("quotes", lambda: adapter.quotes(session, symbols)))
-    depth = getattr(adapter, "market_depth", None)
-    if callable(depth):
-        steps.append(await _timed("depth", lambda: depth(session, symbols)))
-    else:
-        steps.append(ReadSmokeStep("depth", False, 0.0, "unsupported", supported=False))
+    try:
+        steps.append(await _timed("quotes", lambda: adapter.quotes(session, symbols)))
+        depth = getattr(adapter, "market_depth", None)
+        if callable(depth):
+            steps.append(await _timed("depth", lambda: depth(session, symbols)))
+        else:
+            steps.append(ReadSmokeStep("depth", False, 0.0, "unsupported", supported=False))
 
-    hist = getattr(adapter, "historical", None)
-    if callable(hist) and historical_req is not None:
-        steps.append(await _timed("history", lambda: hist(session, historical_req)))
-    chain = getattr(adapter, "option_chain", None)
-    if callable(chain) and option_chain_req is not None:
-        steps.append(await _timed("optionchain", lambda: chain(session, option_chain_req)))
+        hist = getattr(adapter, "historical", None)
+        if callable(hist) and historical_req is not None:
+            steps.append(await _timed("history", lambda: hist(session, historical_req)))
+        chain = getattr(adapter, "option_chain", None)
+        if callable(chain) and option_chain_req is not None:
+            steps.append(await _timed("optionchain", lambda: chain(session, option_chain_req)))
+    finally:
+        cleanup = asyncio.create_task(_timed("logout", lambda: adapter.logout(session)))
+        cancellation: asyncio.CancelledError | None = None
+        while True:
+            try:
+                logout_step = await asyncio.shield(cleanup)
+                break
+            except asyncio.CancelledError as exc:
+                if cleanup.cancelled():
+                    raise
+                cancellation = cancellation or exc
+                current = asyncio.current_task()
+                if current is not None:
+                    current.uncancel()
+        steps.append(logout_step)
+        # A logged-out handle must never remain discoverable as connected.
+        stamp_monday_read_smoke(session, False)
+        if cancellation is not None:
+            raise cancellation
 
-    required = [step for step in steps if step.name in {"login", "quotes", "depth"}]
-    ok = all(step.ok or not step.supported for step in required) and all(
-        step.ok for step in required if step.supported
-    )
-    chrome = monday_read_chrome(broker_id, connected=login_step.ok, reads_ok=ok) or ""
-    if ok:
-        chrome = CHROME_CONNECTED_READ
-    if session is not None:
-        stamp_monday_read_smoke(session, ok)
+    mandatory = [step for step in steps if step.name in {"login", "quotes", "logout"}]
+    optional_reads = [step for step in steps if step.name in {"depth", "history", "optionchain"}]
+    ok = all(step.ok for step in mandatory) and all(step.ok or not step.supported for step in optional_reads)
+    chrome = CHROME_CONNECTED_READ if ok else ""
     return ReadSmokeResult(broker_id, ok, chrome, steps, operator_copy=_neo_copy(broker_id))

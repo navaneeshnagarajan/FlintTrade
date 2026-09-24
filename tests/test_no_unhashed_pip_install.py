@@ -15,6 +15,7 @@ exempt — those lines reference the OpenAlgo install dir.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,7 @@ _SCAN_GLOBS = (
 
 # A line that installs from a requirements file.
 _INSTALL_RE = re.compile(r"\b(pip3?|uv pip)\s+install\b")
+_PIP_EXECUTABLE_PATH_RE = re.compile(r"(?:(?:.*[/\\])?pip3?(?:\.exe)?)", re.IGNORECASE)
 _REQ_FILE_RE = re.compile(r"requirements(\.lock|[\w.-]*\.txt)")
 
 # A line that hands a string to an evaluator: there the quoted text *is* the command,
@@ -72,7 +74,15 @@ def _executable_text(line: str) -> str:
     """
     if _EVALUATOR_RE.search(line):
         return line
-    return _QUOTED_RE.sub(" ", line)
+
+    def replace_quoted(match: re.Match[str]) -> str:
+        literal = match.group()
+        content = literal[1:-1]
+        if _PIP_EXECUTABLE_PATH_RE.fullmatch(content):
+            return content
+        return " "
+
+    return _QUOTED_RE.sub(replace_quoted, line)
 
 
 def _iter_files():
@@ -103,9 +113,12 @@ def test_no_unhashed_pip_install() -> None:
                 continue
             if _is_external_openalgo(stripped):
                 continue  # OpenAlgo's own deps — out of our control
+            command_tail = stripped.split("install", 1)[1]
             references_req = bool(_REQ_FILE_RE.search(stripped)) or "-r " in stripped
             if not references_req:
-                continue  # e.g. `pip install --upgrade pip setuptools wheel`
+                if any(re.search(rf"\b{name}\b", command_tail) for name in ("pip", "setuptools", "wheel")):
+                    violations.append(f"{rel}:{n}: unhashed packaging-tool install → {stripped}")
+                continue
             # An install that touches a requirements file MUST be hash-verified.
             if "--require-hashes" in stripped:
                 continue
@@ -118,10 +131,42 @@ def test_no_unhashed_pip_install() -> None:
 
 
 @pytest.mark.unit
+def test_quoted_pip_executable_cannot_hide_a_floating_toolchain_install(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A quoted venv pip path must still be treated as an executable command."""
+    installer = tmp_path / "infra" / "install" / "install-native.sh"
+    installer.parent.mkdir(parents=True)
+    installer.write_text(
+        '"$VENV_DIR/bin/pip" install --upgrade pip setuptools wheel -q\n',
+        encoding="utf-8",
+    )
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(module, "_SCAN_GLOBS", ("infra/**/*.sh",))
+
+    with pytest.raises(AssertionError, match="unhashed packaging-tool install"):
+        test_no_unhashed_pip_install()
+
+
+@pytest.mark.unit
 def test_lock_file_is_hashed() -> None:
     """requirements.lock must actually carry --hash entries."""
     lock = (_REPO_ROOT / "requirements.lock").read_text(encoding="utf-8")
     assert "--hash=sha256:" in lock
+
+
+@pytest.mark.unit
+def test_broker_sdk_build_lock_is_hashed() -> None:
+    """The exact Git SDK must build with a wheel-only, hash-closed backend."""
+    lock = (_REPO_ROOT / "broker-sdk-build.lock").read_text(encoding="utf-8")
+    assert lock.count("--hash=sha256:") == 3
+    assert {line.split("==", 1)[0] for line in lock.splitlines() if "==" in line} == {
+        "packaging",
+        "setuptools",
+        "wheel",
+    }
 
 
 @pytest.mark.unit
@@ -139,6 +184,51 @@ def test_install_paths_sync_uv_for_repo_local_broker_sdk_pins() -> None:
     ]
 
     assert not missing, "Install paths must sync uv.lock broker SDK pins:\n" + "\n".join(missing)
+
+
+@pytest.mark.unit
+def test_supported_install_paths_repair_and_attest_repo_local_broker_sdk_pins() -> None:
+    """Every non-desktop runtime must install the exact broker pin even without uv.
+
+    ``requirements.lock`` is intentionally registry-only, so merely installing it
+    cannot make Kotak Neo available. The shared helper consumes the full commit in
+    ``brokers.lock``, installs it into the runtime interpreter and then verifies
+    PEP 610 provenance plus exclusive namespace ownership.
+    """
+    paths = (
+        "Dockerfile",
+        "infra/scripts/setup.sh",
+        "infra/scripts/setup-production.sh",
+        "infra/scripts/deploy.sh",
+        "infra/install/install-native.sh",
+        "infra/install/update.sh",
+    )
+    missing = []
+    for path in paths:
+        text = (_REPO_ROOT / path).read_text(encoding="utf-8")
+        if "broker_sdk_environment.py" not in text or "repair" not in text:
+            missing.append(path)
+
+    ft = (_REPO_ROOT / "scripts" / "ft.py").read_text(encoding="utf-8")
+    if "repair_kotakneo_environment(Path(python))" not in ft:
+        missing.append("scripts/ft.py")
+
+    assert not missing, "Install paths omit exact broker SDK repair/attestation: " + ", ".join(missing)
+
+
+@pytest.mark.unit
+def test_docker_repairs_broker_sdk_before_copying_builder_environment() -> None:
+    """The runtime image must inherit the attested Git-pinned SDK from its builder."""
+    dockerfile = (_REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "COPY requirements.lock broker-sdk-build.lock brokers.lock ./" in dockerfile
+    assert "COPY scripts/broker_sdk_environment.py scripts/broker_sdk_environment.py" in dockerfile
+    assert "apt-get install -y --no-install-recommends git" in dockerfile
+    assert dockerfile.index("python scripts/broker_sdk_environment.py repair") < dockerfile.index(
+        "FROM python:3.12-slim-bookworm AS runtime"
+    )
+    runtime = dockerfile.split("FROM python:3.12-slim-bookworm AS runtime", 1)[1]
+    assert "COPY VERSION pyproject.toml pnpm-workspace.yaml brokers.lock ./" in runtime
 
 
 @pytest.mark.unit

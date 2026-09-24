@@ -1,60 +1,21 @@
-"""Kotak Neo native adapter (doc-grounded against the NEO v2 API shape).
+"""Kotak Neo native adapter with a strict v3 SDK session boundary.
 
-Implements the BrokerAdapter contract for Kotak Neo: the two-step MPIN+TOTP auth,
-the gated write surface (place/modify/cancel — every variety, including the
-dedicated bracket/cover leg-cancel endpoints), the portfolio reads (order report
-/ per-order history / trade report / per-order fills / positions / holdings /
-limits), pre-trade margin, scrip master/search, typed quotes + market depth and
-the HSM market feed / HSI order feed (injected feed factories). Request/response
-translation lives in ``kotakneo_mapping`` and is unit-tested.
-
-The neo-api-client SDK is dict-based but blocking, so the adapter talks to a
-small facade (``KotakNeoClient``) that owns the ``NeoAPI`` handle and runs the
-2FA; ``login`` builds the live facade and tests inject a mock one. The adapter
-itself only depends on the facade's dict interface, so it is fully mock-testable
-without the SDK.
-
-Auth follows the public NEO v2 SDK shape:
-``NeoAPI(environment='prod', access_token=None, neo_fin_key=None,
-consumer_key=...)`` then ``totp_login(mobile_number, ucc, totp)`` mints a view
-token + session id and ``totp_validate(mpin)`` mints the trade token. The v1
-mobile+password / OTP ``session_2fa`` flow was removed in v2 — TOTP+MPIN is the
-only login. ``refresh`` is a full daily re-login. The SDK pin is present and the
-adapter is mock-tested; native connect stays disabled until a maintainer-entered
-live account login/read probe passes.
-
-The broker's public docs call the TOTP route's ``Authorization`` header a Trade
-API access token, while the Python SDK stores that same header value as
-``consumer_key``. FlintTrade accepts either credential name and normalises the
-docs-facing token into the SDK-facing field.
-
-Cost: Kotak Neo advertises **zero brokerage** on API order execution and a free
-API. The one documented exception is that a bracket order's square-off leg
-attracts standard brokerage even though the initial leg is free.
-
-Market data: live ``quotes`` (all documented quote types) is implemented; the
-NEO trade API exposes **no** historical-candle or option-chain endpoint, so
-those raise explicitly — see ``capabilities``. Streaming uses the SDK's
-callback-driven ``NeoWebSocket`` live, so ``stream()`` / ``order_stream()``
-consume injected async feed factories (tests feed synthetic frames; live wiring
-wraps the websocket callbacks into an async queue) while ``subscribe`` /
-``unsubscribe`` drive the facade's HSM subscription surface.
-
-Safety: writes still require the router's per-process ``_ROUTER_TOKEN`` (§8).
-``build_broker_router``'s native-activation factory registers this adapter
-automatically once its pinned SDK is attested AND vault credentials exist;
-until then it stays dormant. Kotak Neo is ``connectable=True`` for
-Connected (read) / API smoke. Live place stays fail-closed. Neo has no
-Practice sandbox.
+The adapter owns broker-neutral orchestration and preserves router-token order
+safety. :mod:`kotakneo_sdk` owns the installed SDK import, authentication,
+validated REST reads, exact v3 order calls, error translation and session
+liveness. :mod:`kotakneo_streaming` owns session-scoped v3 async feeds.
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
+import json
 import math
+import re
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Mapping
 
 from flinttrade_core.broker_read_port import (
     BalanceEvidence,
@@ -62,7 +23,13 @@ from flinttrade_core.broker_read_port import (
     BrokerBalanceResponseInvalid,
     BrokerReadResponseInvalid,
 )
-from flinttrade_core.exceptions import BrokerError
+from flinttrade_core.exceptions import (
+    BrokerError,
+    BrokerInternal,
+    CredentialsInvalid,
+    MFARequired,
+    UnsupportedCapabilityError,
+)
 from flinttrade_engine.safety import EmergencyBrokerWrite, EmergencyReductionPlan, EmergencyWritePolicy
 from flinttrade_gateway.capabilities import (
     AuthModel,
@@ -75,6 +42,8 @@ from flinttrade_gateway.capabilities import (
 
 from . import kotakneo_mapping as M
 from ._base import BrokerAdapter, Session, run_blocking_sdk_call
+from .kotakneo_sdk import KotakNeoSdkSession as KotakNeoClient, validate_read_envelope
+from .kotakneo_streaming import MAX_STREAM_TOKENS, STREAM_RUNTIME_KEY, KotakNeoStreamRuntime
 
 
 def _balance_number(value: object) -> float:
@@ -122,8 +91,25 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_gateway.reconciliation import LocalStateSnapshot, ReconciliationReport
 
 _PENDING = "Kotak Neo {0} — streaming wave pending live SDK verification"
-_EMERGENCY_BATCH_LIMIT = 10
+_EMERGENCY_BATCH_LIMIT = 1
 _EMERGENCY_EXIT_TAG_PREFIX = "FTE-KN-"
+_EMERGENCY_ORDER_BOOK_DIGEST_KEY = "_emergency_order_book_digest"
+_EMERGENCY_ORDER_BOOK_DIGEST_FIELDS = (
+    "orderid",
+    "status",
+    "symbol",
+    "exchange",
+    "exchange_segment",
+    "product",
+    "broker_product",
+    "action",
+    "quantity",
+    "filled_quantity",
+    "price_type",
+    "tag",
+    "variety",
+    "amo",
+)
 _EMERGENCY_TERMINAL_ORDER_STATUSES = frozenset({"rejected", "cancelled", "complete", "traded"})
 _EMERGENCY_ACTIVE_ORDER_STATUSES = frozenset(
     {
@@ -160,12 +146,7 @@ def _normalise_credentials(credentials: dict[str, Any]) -> dict[str, Any]:
 
 
 KOTAKNEO_CAPABILITIES = Capabilities(
-    segments=(
-        Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO | Segments.CDS | Segments.BCD | Segments.MCX
-    ),
-    # Native bracket (BO) and cover (CO) orders; no GTT and no iceberg
-    # (only disclosed-quantity). NEO's optional market-protection value is
-    # forwarded when the caller explicitly sets ``Order.market_protection``.
+    segments=(Segments.NSE_EQ | Segments.BSE_EQ | Segments.NFO | Segments.BFO | Segments.MCX),
     order_types=(
         OrderTypes.MARKET
         | OrderTypes.LIMIT
@@ -175,11 +156,9 @@ KOTAKNEO_CAPABILITIES = Capabilities(
         | OrderTypes.CNC
         | OrderTypes.NRML
         | OrderTypes.AMO
-        | OrderTypes.BO
-        | OrderTypes.CO
     ),
     depth_levels=DepthLevels.L5,
-    tick_protocol=TickProtocol.KOTAK_NEO_JSON,
+    tick_protocol=TickProtocol.KOTAK_NEO_BINARY,
     auth_model=AuthModel.MPIN_TOTP_DAILY,
     # Trade-token TTL is not stated in the local docs; 24h is the daily-cycle
     # ceiling used for refresh timing (the only JWT shown is a view-scope token).
@@ -189,324 +168,26 @@ KOTAKNEO_CAPABILITIES = Capabilities(
     rate_limit_orders_per_sec=10,
     # 'tag' is an optional order field, not a mandated algo tag.
     algo_tag_required=False,
-    # Zero brokerage on execution + zero API subscription charge (BO square-off
-    # leg attracts standard brokerage — see module docstring).
+    algo_tag_supported=True,
+    # Zero brokerage on supported API execution + zero API subscription charge.
     cost_paid=False,
     cost_inr_per_month=0,
     brokerage_free=True,
-    brokerage_note=(
-        "Zero brokerage on all API order execution; only statutory charges "
-        "apply. Exception: a bracket order's square-off leg attracts standard "
-        "brokerage."
-    ),
+    brokerage_note="Zero brokerage on supported API order execution; only statutory charges apply.",
     # kotakneoapi 3.x adds historical candles and option chain. HS feed retired.
+    historical_intraday_intervals_minutes=[1, 3, 5, 10, 15, 30, 60],
+    historical_calendar_intervals=["1D", "1W"],
     option_chain_supported=True,
     streaming_supported=True,
-    # Captured Kotak Neo v2 WebSocket docs: 16 channels and 200 scrips at a
-    # time. Runtime remains disabled until the SDK callback bridge is live-proven.
-    streaming_max_connections_per_user=16,
-    streaming_max_symbols_per_connection=200,
-    streaming_max_total_symbols=200,
-    bracket_order_native=True,
-    cover_order_native=True,
+    streaming_runtime_ready=True,
+    streaming_max_connections_per_user=None,
+    streaming_max_symbols_per_connection=3000,
+    # The SDK documents 3000 for one SFeed instance, not an account-wide
+    # aggregate across independently authenticated sessions.
+    streaming_max_total_symbols=None,
     multi_quote_supported=True,
     modify_qty_supported=True,
 )
-
-
-class KotakNeoClient:
-    """Dict-based facade over the kotakneoapi 3.x SDK (lazy import).
-
-    Owns the ``NeoAPI`` handle and runs the two-step TOTP+MPIN 2FA at
-    construction so the adapter stays SDK-free. Built by ``KotakNeoAdapter.login``
-    for live use; tests inject a mock with the same method surface instead.
-
-    The public docs' Trade API access token is sent by the SDK as
-    ``consumer_key`` on the TOTP ``Authorization`` header. If a caller supplies
-    only ``access_token``, FlintTrade maps it to that SDK field while still
-    forwarding the original value to ``NeoAPI`` for compatibility with captured
-    portal-token flows. TOTP+MPIN 2FA is still required to mint the trade-scope
-    session.
-    """
-
-    def __init__(self, credentials: dict[str, Any]) -> None:
-        from neo_api_client import NeoAPI  # noqa: PLC0415
-
-        credentials = _normalise_credentials(credentials)
-        self._neo = NeoAPI(
-            environment=str(credentials.get("environment", "prod")),
-            access_token=credentials.get("access_token") or None,
-            neo_fin_key=credentials.get("neo_fin_key"),
-            consumer_key=credentials.get("consumer_key"),
-        )
-        self._install_fin_key_header_patch(self._neo)
-        M.ensure_ok(
-            self._neo.totp_login(
-                mobile_number=credentials.get("mobile_number"),
-                ucc=credentials.get("ucc"),
-                totp=credentials.get("totp"),
-            )
-        )
-        M.ensure_ok(self._neo.totp_validate(mpin=credentials.get("mpin")))
-
-    @staticmethod
-    def _install_fin_key_header_patch(neo: Any) -> None:
-        """Patch the SDK REST client to send ``neo-fin-key`` where required.
-
-        The current Kotak docs require ``neo-fin-key`` on the fixed login calls
-        and on Auth/Sid-backed order/report/portfolio/limits/margin calls, while
-        quotes and scrip-master remain Authorization-only. Some SDK modules omit
-        the fin-key header, so the facade adds it only for login URLs or when
-        the outgoing request already carries ``Auth``/``Sid``. This keeps the
-        SDK surface intact and avoids adding the header to quotes/scrip-master.
-        """
-        api_client = getattr(neo, "api_client", None)
-        rest_client = getattr(api_client, "rest_client", None)
-        original = getattr(rest_client, "request", None)
-        configuration = getattr(neo, "configuration", None)
-        fin_key = getattr(configuration, "get_neo_fin_key", None)
-        if not callable(original) or not callable(fin_key):
-            return
-        if getattr(rest_client, "_flinttrade_fin_key_wrapped", False):
-            return
-
-        def request(*args: Any, **kwargs: Any) -> Any:
-            mutable_args = list(args)
-            positional_headers = len(mutable_args) >= 4 and "headers" not in kwargs
-            headers = mutable_args[3] if positional_headers else kwargs.get("headers")
-            if isinstance(headers, dict):
-                patched = dict(headers)
-                lower = {str(key).lower() for key in patched}
-                url = kwargs.get("url")
-                if url is None and len(mutable_args) >= 2:
-                    url = mutable_args[1]
-                path = str(url or "").lower()
-                login_call = "tradeapilogin" in path or "tradeapivalidate" in path
-                needs_fin_key = "auth" in lower or "sid" in lower or login_call
-                if needs_fin_key and "neo-fin-key" not in lower:
-                    patched["neo-fin-key"] = fin_key()
-                if positional_headers:
-                    mutable_args[3] = patched
-                else:
-                    kwargs["headers"] = patched
-            return original(*mutable_args, **kwargs)
-
-        rest_client.request = request
-        rest_client._flinttrade_fin_key_wrapped = True
-
-    _install_post_login_fin_key_header = _install_fin_key_header_patch
-
-    # -- gated writes -------------------------------------------------------
-
-    def place_order(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._neo.place_order(**params)
-
-    def modify_order(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._neo.modify_order(**params)
-
-    def _cancel_order_rest(
-        self,
-        order_id: str,
-        *,
-        route_key: str,
-        amo: str = "NO",
-        is_verify: bool = False,
-        trading_symbol: str | None = None,
-    ) -> dict[str, Any]:
-        """Call the SDK's cancel REST route with an optional compatibility field.
-
-        The pinned SDK posts ``on`` and ``am``. A third-party mirror also
-        describes ``ts``; retain it only for explicit compatibility callers,
-        while emergency cancellation follows the pinned SDK contract.
-        """
-        from neo_api_client import OrderReportAPI, req_data_validation  # noqa: PLC0415
-
-        if not self._neo.configuration.edit_token or not self._neo.configuration.edit_sid:
-            return {"Error Message": "Complete the 2fa process before accessing this application"}
-        try:
-            req_data_validation.cancel_order_validation(order_id, amo)
-            api_client = self._neo.api_client
-            if is_verify:
-                order_book_resp = OrderReportAPI(api_client).ordered_books()
-                if "data" in order_book_resp:
-                    for item in order_book_resp["data"]:
-                        if item["nOrdNo"] == order_id.strip() and item["ordSt"] in (
-                            "rejected",
-                            "cancelled",
-                            "complete",
-                            "traded",
-                        ):
-                            status = "Traded" if item["ordSt"] == "complete" else item["ordSt"]
-                            return {"Error": "The Given Order Status is " + str(status), "Reason": item["rejRsn"]}
-
-            body_params = {"on": order_id, "am": amo}
-            if trading_symbol:
-                body_params["ts"] = trading_symbol
-            cancel_resp = api_client.rest_client.request(
-                url=api_client.configuration.get_url_details(route_key),
-                method="POST",
-                query_params={"sId": api_client.configuration.serverId},
-                headers={
-                    "Sid": api_client.configuration.edit_sid,
-                    "Auth": api_client.configuration.edit_token,
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                body=body_params,
-            )
-            return cancel_resp.json()
-        except Exception as exc:  # match the SDK wrapper's response contract
-            return {"Error": exc}
-
-    def cancel_order(
-        self,
-        order_id: str,
-        amo: str = "NO",
-        is_verify: bool = False,
-        trading_symbol: str | None = None,
-    ) -> dict[str, Any]:
-        if trading_symbol:
-            return self._cancel_order_rest(
-                order_id,
-                route_key="cancel_order",
-                amo=amo,
-                is_verify=is_verify,
-                trading_symbol=trading_symbol,
-            )
-        return self._neo.cancel_order(order_id, amo=amo, isVerify=is_verify)
-
-    def cancel_cover_order(
-        self,
-        order_id: str,
-        amo: str = "NO",
-        is_verify: bool = False,
-        trading_symbol: str | None = None,
-    ) -> dict[str, Any]:
-        if trading_symbol:
-            return self._cancel_order_rest(
-                order_id,
-                route_key="cancel_cover_order",
-                amo=amo,
-                is_verify=is_verify,
-                trading_symbol=trading_symbol,
-            )
-        return self._neo.cancel_cover_order(order_id, amo=amo, isVerify=is_verify)
-
-    def cancel_bracket_order(
-        self,
-        order_id: str,
-        amo: str = "NO",
-        is_verify: bool = False,
-        trading_symbol: str | None = None,
-    ) -> dict[str, Any]:
-        if trading_symbol:
-            return self._cancel_order_rest(
-                order_id,
-                route_key="cancel_bracket_order",
-                amo=amo,
-                is_verify=is_verify,
-                trading_symbol=trading_symbol,
-            )
-        return self._neo.cancel_bracket_order(order_id, amo=amo, isVerify=is_verify)
-
-    # -- reads ---------------------------------------------------------------
-
-    def order_book(self) -> dict[str, Any]:
-        return self._neo.order_report()
-
-    def order_history(self, order_id: str) -> dict[str, Any]:
-        return self._neo.order_history(order_id=order_id)
-
-    def trade_book(self, order_id: str | None = None) -> dict[str, Any]:
-        return self._neo.trade_report(order_id=order_id)
-
-    def positions(self) -> dict[str, Any]:
-        return self._neo.positions()
-
-    def holdings(self) -> dict[str, Any]:
-        return self._neo.holdings()
-
-    def funds(self) -> dict[str, Any]:
-        return self._neo.limits()
-
-    def limits(self, segment: str = "ALL", exchange: str = "ALL", product: str = "ALL") -> dict[str, Any]:
-        return self._neo.limits(segment=segment, exchange=exchange, product=product)
-
-    def quotes(self, instrument_tokens: list[dict[str, str]], quote_type: str = "all") -> Any:
-        return self._neo.quotes(instrument_tokens=instrument_tokens, quote_type=quote_type)
-
-    def margin(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._neo.margin_required(**params)
-
-    def scrip_master(self, exchange_segment: str | None = None) -> Any:
-        return self._neo.scrip_master(exchange_segment=exchange_segment)
-
-    def search_scrip(
-        self,
-        exchange_segment: str,
-        symbol: str,
-        expiry: str | None = None,
-        option_type: str | None = None,
-        strike_price: str | None = None,
-        ignore_50multiple: bool = True,
-    ) -> Any:
-        return self._neo.search_scrip(
-            exchange_segment=exchange_segment,
-            symbol=symbol,
-            expiry=expiry,
-            option_type=option_type,
-            strike_price=strike_price,
-            ignore_50multiple=ignore_50multiple,
-        )
-
-    def expiries(self, exchange: str, underlying: str, instrument_type: str | None = None) -> Any:
-        return self._neo.expiries(exchange=exchange, underlying=underlying, instrument_type=instrument_type)
-
-    def option_chain(
-        self,
-        exchange: str,
-        underlying: str,
-        expiry: str | None = None,
-        instrument_type: str | None = None,
-        count: int | None = None,
-    ) -> Any:
-        return self._neo.option_chain(
-            exchange=exchange,
-            underlying=underlying,
-            expiry=expiry,
-            instrument_type=instrument_type,
-            count=count,
-        )
-
-    def historical_data(self, neosymbol: str, interval: str, from_date: str, to_date: str) -> Any:
-        return self._neo.historical_data(
-            neosymbol=neosymbol, interval=interval, from_date=from_date, to_date=to_date
-        )
-
-    # -- streaming + session ------------------------------------------------
-    # Monday Neo smoke is REST-only (quotes / depth / historical / option
-    # chain). kotakneoapi 3.x retired the HS callback feed. Live SFeed
-    # (``create_websocket``) is not wired in this tip — do not half-call it.
-
-    SFEED_NOT_WIRED = (
-        "Kotak Neo Connected (read) / API smoke is REST-only (quotes, depth, historical, "
-        "option chain). Live SFeed create_websocket is not wired."
-    )
-
-    def subscribe(self, instrument_tokens: list[dict[str, str]], is_index: bool, is_depth: bool) -> None:
-        subscribe = getattr(self._neo, "subscribe", None)
-        if callable(subscribe):
-            self._neo.subscribe(instrument_tokens=instrument_tokens, isIndex=is_index, isDepth=is_depth)
-            return
-        raise BrokerError(self.SFEED_NOT_WIRED)
-
-    def un_subscribe(self, instrument_tokens: list[dict[str, str]], is_index: bool, is_depth: bool) -> None:
-        self._neo.un_subscribe(instrument_tokens=instrument_tokens, isIndex=is_index, isDepth=is_depth)
-
-    def subscribe_to_orderfeed(self) -> None:
-        self._neo.subscribe_to_orderfeed()
-
-    def logout(self) -> dict[str, Any]:
-        return self._neo.logout()
 
 
 class KotakNeoAdapter(BrokerAdapter):
@@ -517,17 +198,10 @@ class KotakNeoAdapter(BrokerAdapter):
             mock). When omitted, ``login`` builds the live facade and runs 2FA.
         symbol_resolver: ``(symbol, exchange) -> trading_symbol`` — NEO trades by
             its scrip symbol (e.g. ``"IDEA-EQ"``), resolved via ``search_scrip``.
-        token_resolver: ``(symbol, exchange) -> instrument_token`` — the HSM feed
-            subscribes by numeric scrip token (``pSymbol``), not trading symbol.
+        token_resolver: ``(symbol, exchange) -> instrument_token`` — v3 SFeed
+            subscribes with a numeric ``WsToken.instrument_token``, not a trading symbol.
             When omitted, ``subscribe`` resolves tokens live via ``search_scrip``
             (index names like ``"Nifty 50"`` pass through unresolved).
-        feed_factory: ``session -> AsyncIterator`` of raw HSM market-feed frames
-            (what ``NeoWebSocket`` hands to ``on_message``); ``stream()`` decodes
-            them via ``kotakneo_mapping.decode_kotak_feed``. Tests inject
-            synthetic frames; live wiring bridges the websocket callbacks into an
-            async queue.
-        order_feed_factory: ``session -> AsyncIterator`` of raw HSI order-feed
-            frames for ``order_stream()``.
         local_state_provider: ``session -> LocalStateSnapshot`` supplying the
             flinttrade-side mirror that ``reconcile`` diffs broker state
             against. Defaults to EMPTY local state (every broker-side row then
@@ -543,20 +217,12 @@ class KotakNeoAdapter(BrokerAdapter):
         client_factory: Callable[[Session], Any] | None = None,
         symbol_resolver: Callable[[str, str], str] | None = None,
         token_resolver: Callable[[str, str], str] | None = None,
-        feed_factory: Callable[[Session], AsyncIterator[Any]] | None = None,
-        order_feed_factory: Callable[[Session], AsyncIterator[Any]] | None = None,
         local_state_provider: Callable[[Session], LocalStateSnapshot] | None = None,
     ) -> None:
         self._client_factory = client_factory
         self._symbol_resolver = symbol_resolver
         self._token_resolver = token_resolver
-        self._feed_factory = feed_factory
-        self._order_feed_factory = order_feed_factory
         self._local_state_provider = local_state_provider
-        # (exchange_segment, SYMBOL) -> {"token": dict, "is_index": bool,
-        # "is_depth": bool}, so unsubscribe can replay exactly what was
-        # subscribed (NEO's unsubscribe type must match the subscribe type).
-        self._subscriptions: dict[tuple[str, str], dict[str, Any]] = {}
 
     # ---------- identity + capabilities ----------
 
@@ -571,12 +237,18 @@ class KotakNeoAdapter(BrokerAdapter):
     # ---------- helpers ----------
 
     def _client(self, session: Session) -> Any:
-        if self._client_factory is not None:
-            return self._client_factory(session)
         client = session.extra.get("client")
+        if client is None and self._client_factory is not None:
+            client = self._client_factory(session)
         if client is None:
             raise BrokerError("Kotak Neo client not initialised — call login() first")
         return client
+
+    def _stream_runtime(self, session: Session) -> KotakNeoStreamRuntime:
+        runtime = session.extra.get(STREAM_RUNTIME_KEY)
+        if not isinstance(runtime, KotakNeoStreamRuntime):
+            raise BrokerError("Kotak Neo stream runtime not initialised — call login() first", broker_id="kotakneo")
+        return runtime
 
     async def _resolve_trading_symbol(self, session: Session, symbol: str, exchange: str) -> str:
         """Resolve a FlintTrade symbol to NEO's trading symbol (``pTrdSymbol``)."""
@@ -600,14 +272,26 @@ class KotakNeoAdapter(BrokerAdapter):
         responsibility (they pass through by name); this always resolves a token.
         """
         if self._token_resolver is not None:
-            return str(self._token_resolver(name, exchange))
-        scrips = await self.search_scrip(session, name, exchange)
+            try:
+                return M.canonical_instrument_token(self._token_resolver(name, exchange))
+            except (M.KotakNeoMappingError, TypeError, ValueError):
+                raise UnsupportedCapabilityError(
+                    "Kotak Neo resolved instrument token must be a positive numeric instrument_token (instrument token)",
+                    broker_id="kotakneo",
+                ) from None
+        try:
+            scrips = await self.search_scrip(session, name, exchange)
+        except BrokerReadResponseInvalid as exc:
+            raise BrokerInternal("Kotak Neo search response is invalid", broker_id="kotakneo") from exc
         if not scrips or not scrips[0].get("token"):
             raise BrokerError(
                 f"Cannot resolve Kotak Neo instrument token for {name}/{exchange} — "
                 "configure a token resolver or check the symbol"
             )
-        return str(scrips[0]["token"])
+        try:
+            return M.canonical_instrument_token(scrips[0]["token"])
+        except M.KotakNeoMappingError as exc:
+            raise BrokerInternal("Kotak Neo search response is invalid", broker_id="kotakneo") from exc
 
     @staticmethod
     async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -619,47 +303,11 @@ class KotakNeoAdapter(BrokerAdapter):
         return data if isinstance(data, list) else []
 
     @staticmethod
-    def _fixed_rows(resp: object, *, allow_data_only_holdings: bool = False) -> list[dict[str, Any]]:
-        """Validate the documented fixed book envelope without filtering rows."""
-        if type(resp) is not dict or any(type(key) is not str for key in resp):
-            raise BrokerReadResponseInvalid
-        for error_key in ("Error", "Error Message", "error"):
-            if error_key not in resp:
-                continue
-            error_value = resp[error_key]
-            if (
-                (type(error_value) is str and bool(error_value))
-                or (type(error_value) is list and bool(error_value))
-                or (type(error_value) is dict and bool(error_value))
-                or isinstance(error_value, BaseException)
-            ):
-                raise M.KotakNeoMappingError("Kotak Neo fixed read was rejected by the provider")
-            raise BrokerReadResponseInvalid
-        data_only_holdings = allow_data_only_holdings and set(resp) == {"data"}
-        if not data_only_holdings:
-            if "status" in resp:
-                provider_status = resp["status"]
-                if type(provider_status) is not str or not provider_status:
-                    raise BrokerReadResponseInvalid
-                if provider_status.lower() not in {"success", "ok"}:
-                    raise M.KotakNeoMappingError("Kotak Neo fixed read was rejected by the provider")
-            status = resp.get("stat")
-            if type(status) is not str or not status:
-                raise BrokerReadResponseInvalid
-            if status.lower() != "ok":
-                raise M.KotakNeoMappingError("Kotak Neo fixed read was rejected by the provider")
-            if "stCode" in resp:
-                status_code = resp["stCode"]
-                if type(status_code) is not int:
-                    raise BrokerReadResponseInvalid
-                if status_code != 200:
-                    raise M.KotakNeoMappingError("Kotak Neo fixed read returned a non-success status code")
-        if "data" not in resp or type(resp["data"]) is not list:
-            raise BrokerReadResponseInvalid
-        rows = resp["data"]
-        if any(type(row) is not dict or any(type(key) is not str for key in row) for row in rows):
-            raise BrokerReadResponseInvalid
-        return rows
+    def _fixed_rows(resp: object, *, operation: str = "order_report", allow_data_only_holdings: bool = False) -> list[dict[str, Any]]:
+        """Validate the broker envelope before normalising any book rows."""
+        del allow_data_only_holdings  # retained for injected legacy facades
+        validated = validate_read_envelope(resp, operation=operation)
+        return validated["data"]
 
     @staticmethod
     def _emergency_identifier(value: Any, *, label: str) -> str:
@@ -863,6 +511,56 @@ class KotakNeoAdapter(BrokerAdapter):
             str(position["broker_product"]),
         )
 
+    @staticmethod
+    def _emergency_order_book_digest(rows: tuple[dict[str, Any], ...]) -> str:
+        """Bind one emergency write to every normalised planning field."""
+        canonical_rows = [
+            {field: row[field] for field in _EMERGENCY_ORDER_BOOK_DIGEST_FIELDS}
+            for row in sorted(rows, key=lambda row: str(row["orderid"]))
+        ]
+        encoded = json.dumps(
+            {"schema": "kotakneo-emergency-order-book-v1", "orders": canonical_rows},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    async def preflight_emergency_write(
+        self,
+        session: Session,
+        *,
+        verb: str,
+        payload: Mapping[str, object],
+        _router_token: object | None = None,
+    ) -> None:
+        """Reject a stale Kotak emergency snapshot before mutation invocation."""
+        self._require_router_token(_router_token, _ROUTER_TOKEN)
+        if verb not in {"cancel_order", "place_reducing_order"}:
+            raise BrokerError("Kotak Neo emergency preflight verb is unsupported", broker_id="kotakneo")
+        digest = payload.get(_EMERGENCY_ORDER_BOOK_DIGEST_KEY)
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise BrokerError("Kotak Neo emergency order-book digest is malformed", broker_id="kotakneo")
+        rows = await self._emergency_order_rows(session)
+        unsupported_active = next(
+            (
+                order
+                for order in rows
+                if order["status"] not in _EMERGENCY_TERMINAL_ORDER_STATUSES
+                and str(order.get("broker_product") or "").upper() in {"BO", "CO"}
+            ),
+            None,
+        )
+        if unsupported_active is not None:
+            product = str(unsupported_active["broker_product"]).upper()
+            raise BrokerError(
+                f"Kotak Neo v3 cannot safely dispatch with an active {product} order",
+                broker_id="kotakneo",
+            )
+        current_digest = self._emergency_order_book_digest(rows)
+        if not hmac.compare_digest(current_digest, digest):
+            raise BrokerError("Kotak Neo emergency order book changed before dispatch", broker_id="kotakneo")
+
     @classmethod
     def _emergency_exit_tag(cls, position: dict[str, Any], *, quantity: int | None = None) -> str:
         signed_quantity = (
@@ -932,32 +630,39 @@ class KotakNeoAdapter(BrokerAdapter):
     # ---------- auth lifecycle ----------
 
     async def login(self, credentials: dict) -> Session:
-        """Run the v2 TOTP+MPIN login and return a day-scoped session.
+        """Run the v3 TOTP+MPIN login and return a day-scoped session.
 
         Credentials: ``access_token`` (Kotak docs' Trade API token) or
         ``consumer_key`` (the SDK name for the same TOTP ``Authorization``
         header), ``mobile_number`` + ``ucc`` + ``totp`` (view token via
         ``totp_login``) and ``mpin`` (trade token via ``totp_validate``).
-        Optional: ``environment`` (``prod``/``uat``) and ``neo_fin_key``. The v1
-        mobile+password / OTP flow no longer exists in the v2 SDK.
+        Optional: ``environment`` (``prod``/``uat``) and ``neo_fin_key``.
         """
         credentials = _normalise_credentials(credentials)
         if not credentials.get("consumer_key"):
-            raise BrokerError("Kotak Neo login requires 'consumer_key' or 'access_token'")
+            raise CredentialsInvalid("Kotak Neo login requires 'consumer_key' or 'access_token'", broker_id="kotakneo")
         for required in ("mobile_number", "ucc", "mpin", "totp"):
             if not credentials.get(required):
-                raise BrokerError(f"Kotak Neo login requires {required!r}")
-        client = None if self._client_factory is not None else await self._call(KotakNeoClient, dict(credentials))
+                error = MFARequired if required in {"mpin", "totp"} else CredentialsInvalid
+                raise error(f"Kotak Neo login requires {required!r}", broker_id="kotakneo")
         expires_at = datetime.now(tz=UTC).timestamp() + 24 * 3600
-        return Session(
+        session = Session(
             access_token=str(credentials.get("ucc", "")),
             expires_at=expires_at,
             account_id=str(credentials.get("ucc", "")),
             adapter_id="kotakneo",
-            extra={"client": client},
+            extra={},
             # Monday fail-closed: Neo stays read-only until funded unlock.
             read_only_until_at=expires_at,
         )
+        client = (
+            await self._call(self._client_factory, session)
+            if self._client_factory is not None
+            else await self._call(KotakNeoClient, dict(credentials))
+        )
+        session.extra["client"] = client
+        session.extra[STREAM_RUNTIME_KEY] = KotakNeoStreamRuntime(client)
+        return session
 
     def replay_credentials(self, credentials: dict, session: Session) -> dict:
         """The replayable vault payload after a successful login (G7).
@@ -973,51 +678,57 @@ class KotakNeoAdapter(BrokerAdapter):
     async def refresh(self, session: Session) -> Session:
         # NEO tokens are single-day (daily MPIN+TOTP cycle, no refresh token) —
         # a fresh login() is required at expiry.
-        return session
+        raise MFARequired("Fresh Kotak Neo TOTP and MPIN are required", broker_id="kotakneo")
+
+    async def liveness(self, session: Session) -> None:
+        """Check broker authentication without exposing its reported outbound IP."""
+        await self._call(self._client(session).liveness)
 
     async def logout(self, session: Session) -> None:
-        """Invalidate the NEO session (clears the trade token) — idempotent.
-
-        ``NeoAPI.logout`` drops the edit token/sid client-side (the v2 SDK's
-        REST logout call is disabled upstream); a facade/mock without ``logout``
-        is tolerated so logout never fails mid-teardown.
-        """
-        client = session.extra.get("client") if self._client_factory is None else self._client_factory(session)
-        log_off = getattr(client, "logout", None)
-        if callable(log_off):
-            await self._call(log_off)
+        """Close both feeds, local SDK auth and REST transport exactly once."""
+        runtime = session.extra.pop(STREAM_RUNTIME_KEY, None)
+        client = session.extra.pop("client", None)
+        if isinstance(runtime, KotakNeoStreamRuntime):
+            await runtime.close()
+        elif client is not None:
+            await KotakNeoStreamRuntime(client).close()
         session.extra.pop("client", None)
-        return
 
     # ---------- trading: writes (router-only) ----------
 
     async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
-        """Place one order through the gated path; return the NEO order number.
-
-        Variety dispatch happens inside ``to_place_order_params`` so EVERY
-        variety travels this same gated method: ``regular``, ``amo`` (the
-        ``amo="YES"`` flag), ``bracket``/``cover`` (BO/CO product override +
-        protective legs). ``iceberg`` is refused — NEO has no slice endpoint,
-        only ``disclosed_quantity``.
-        """
+        """Place one exact v3 regular/AMO order through the gated path."""
         self._require_router_token(_router_token, _ROUTER_TOKEN)
+        try:
+            M.validate_v3_order(order)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
         trading_symbol = await self._resolve_trading_symbol(session, order.symbol, order.exchange)
         tag = session.algo_id or None
-        params = M.to_place_order_params(order, trading_symbol, tag=tag)
+        try:
+            params = M.to_place_order_params(order, trading_symbol, tag=tag)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
         resp = await self._call(self._client(session).place_order, params)
-        return M.extract_order_id(M.require_write_success(resp))
+        try:
+            return M.extract_order_id(M.require_write_success(resp))
+        except M.KotakNeoMappingError as exc:
+            raise BrokerInternal("Kotak Neo place response is invalid", broker_id="kotakneo") from exc
 
     async def modify_order(
         self, session: Session, order_id: str, changes: dict, *, _router_token: object | None = None
     ) -> None:
-        """Modify an open order (gated). ``changes`` may carry the full NEO
-        surface — quick-method extras (``instrument_token``/``exchange_segment``/
-        ``product``/``trading_symbol``/``transaction_type``) and the ``amo``
-        flag are forwarded when present (``Modify_Order.md``)."""
+        """Modify an open order through the exact v3 order-id surface."""
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        params = M.to_modify_order_params(order_id, changes)
+        try:
+            params = M.to_modify_order_params(order_id, changes)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
         resp = await self._call(self._client(session).modify_order, params)
-        M.require_write_success(resp, expected_order_id=str(order_id))
+        try:
+            M.require_write_success(resp, expected_order_id=str(order_id))
+        except M.KotakNeoMappingError as exc:
+            raise BrokerInternal("Kotak Neo modify response is invalid", broker_id="kotakneo") from exc
 
     async def cancel_order(
         self,
@@ -1029,51 +740,37 @@ class KotakNeoAdapter(BrokerAdapter):
         trading_symbol: str | None = None,
         _router_token: object | None = None,
     ) -> None:
-        """Cancel an order (gated) — variety dispatch within the gated method.
-
-        ``regular``/``amo`` use the plain cancel endpoint; ``cover`` exits via
-        ``quick/order/co/exit`` and ``bracket`` via ``quick/order/bo/exit`` (the
-        dedicated leg-cancel endpoints — ``Cancel_Cover_Order.md`` /
-        ``Cancel_Bracket_Order.md``). ``amo=True`` forwards the pinned SDK's
-        documented ``am=YES`` flag. ``trading_symbol`` remains an optional
-        compatibility field, but the emergency planner does not rely on it.
-        The default call shape (``cancel_order(session, order_id,
-        _router_token=…)``) is exactly what ``BrokerRouter`` dispatches today;
-        the variety/amo/trading_symbol keywords are adapter-level extras for
-        variety-aware callers and are signed by the cancel route before the
-        router forwards them.
-        """
+        """Cancel one regular/AMO order through the exact v3 endpoint."""
         self._require_router_token(_router_token, _ROUTER_TOKEN)
+        if not isinstance(variety, str):
+            raise UnsupportedCapabilityError("Kotak Neo cancel variety must be text", broker_id="kotakneo")
+        if not isinstance(amo, bool):
+            raise UnsupportedCapabilityError("Kotak Neo cancel AMO flag must be boolean", broker_id="kotakneo")
+        v = variety.lower()
+        if v not in {"", "regular", "amo"}:
+            raise UnsupportedCapabilityError(
+                f"Kotak Neo v3 cannot cancel order variety {variety!r}",
+                broker_id="kotakneo",
+            )
+        if trading_symbol is not None:
+            raise UnsupportedCapabilityError(
+                "Kotak Neo v3 cancel does not accept a trading symbol",
+                broker_id="kotakneo",
+            )
+        try:
+            canonical_order_id = M.canonical_order_id(order_id)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
         client = self._client(session)
-        v = str(variety).lower()
         amo_flag = "YES" if (amo or v == "amo") else "NO"
-        if v in ("regular", "", "amo"):
-            if amo_flag == "YES" or trading_symbol:
-                resp = await self._call(
-                    client.cancel_order,
-                    str(order_id),
-                    amo_flag,
-                    trading_symbol=trading_symbol,
-                )
-            else:
-                resp = await self._call(client.cancel_order, str(order_id))
-        elif v == "cover":
-            resp = await self._call(
-                client.cancel_cover_order,
-                str(order_id),
-                amo_flag,
-                trading_symbol=trading_symbol,
-            )
-        elif v == "bracket":
-            resp = await self._call(
-                client.cancel_bracket_order,
-                str(order_id),
-                amo_flag,
-                trading_symbol=trading_symbol,
-            )
+        if amo_flag == "YES":
+            resp = await self._call(client.cancel_order, canonical_order_id, amo_flag)
         else:
-            raise BrokerError(f"Kotak Neo cannot cancel order variety {variety!r}")
-        M.require_write_success(resp, expected_order_id=str(order_id))
+            resp = await self._call(client.cancel_order, canonical_order_id)
+        try:
+            M.require_write_success(resp, expected_order_id=canonical_order_id)
+        except M.KotakNeoMappingError as exc:
+            raise BrokerInternal("Kotak Neo cancel response is invalid", broker_id="kotakneo") from exc
 
     @classmethod
     def _emergency_active_exit_state(
@@ -1165,9 +862,11 @@ class KotakNeoAdapter(BrokerAdapter):
         order: dict[str, Any],
         *,
         parent_verb: str,
+        order_book_digest: str,
     ) -> EmergencyBrokerWrite:
         payload: dict[str, object] = {
             "_op": "cancel_order",
+            _EMERGENCY_ORDER_BOOK_DIGEST_KEY: order_book_digest,
             "order_id": str(order["orderid"]),
             "variety": str(order["variety"]),
             "amo": bool(order["amo"]),
@@ -1191,6 +890,15 @@ class KotakNeoAdapter(BrokerAdapter):
         """Derive bounded concrete writes from strict Kotak order/position books."""
         requested = frozenset(policy.verbs)
         orders = await self._emergency_order_rows(session)
+        order_book_digest = self._emergency_order_book_digest(orders)
+        active_orders = tuple(order for order in orders if order["status"] not in _EMERGENCY_TERMINAL_ORDER_STATUSES)
+        unsupported_active = next(
+            (order for order in active_orders if str(order.get("broker_product") or "").upper() in {"BO", "CO"}),
+            None,
+        )
+        if unsupported_active is not None:
+            product = str(unsupported_active["broker_product"]).upper()
+            raise BrokerError(f"Kotak Neo v3 cannot safely reduce a batch with an active {product} order")
         if "exit_all_positions" in requested:
             trade_fills = await self._emergency_trade_fills(session)
             known_order_ids = frozenset(str(order["orderid"]) for order in orders)
@@ -1201,7 +909,6 @@ class KotakNeoAdapter(BrokerAdapter):
             positions = await self._emergency_positions(session)
         else:
             positions = ()
-        active_orders = tuple(order for order in orders if order["status"] not in _EMERGENCY_TERMINAL_ORDER_STATUSES)
         known_order_ids = frozenset(str(order["orderid"]) for order in orders)
         observed_tags = {str(order["tag"]) for order in orders if str(order.get("tag") or "")}
         positions_by_key = {self._emergency_position_key(position): position for position in positions}
@@ -1320,7 +1027,11 @@ class KotakNeoAdapter(BrokerAdapter):
 
         if "cancel_all_orders" in pending:
             writes = tuple(
-                self._emergency_cancel_write(order, parent_verb="cancel_all_orders")
+                self._emergency_cancel_write(
+                    order,
+                    parent_verb="cancel_all_orders",
+                    order_book_digest=order_book_digest,
+                )
                 for order in sorted(cancellable, key=lambda row: str(row["orderid"]))[:_EMERGENCY_BATCH_LIMIT]
             )
             return EmergencyReductionPlan(writes=writes, pending_verbs=frozenset(pending))
@@ -1333,7 +1044,11 @@ class KotakNeoAdapter(BrokerAdapter):
                     if str(order["orderid"]) not in protected_cancellation_ids
                 )
                 writes = tuple(
-                    self._emergency_cancel_write(order, parent_verb="exit_all_positions")
+                    self._emergency_cancel_write(
+                        order,
+                        parent_verb="exit_all_positions",
+                        order_book_digest=order_book_digest,
+                    )
                     for order in sorted(uncancelled_conflicts, key=lambda row: str(row["orderid"]))[
                         :_EMERGENCY_BATCH_LIMIT
                     ]
@@ -1350,6 +1065,7 @@ class KotakNeoAdapter(BrokerAdapter):
                     verb="place_reducing_order",
                     payload={
                         "_op": "place_reducing_order",
+                        _EMERGENCY_ORDER_BOOK_DIGEST_KEY: order_book_digest,
                         "symbol": str(position["symbol"]),
                         "exchange": str(position["exchange"]),
                         "exchange_segment": str(position["exchange_segment"]),
@@ -1452,6 +1168,18 @@ class KotakNeoAdapter(BrokerAdapter):
             raise BrokerError("Kotak Neo reducing position episode changed before dispatch")
 
         current_orders = await self._emergency_order_rows(session)
+        unsupported_active = next(
+            (
+                order
+                for order in current_orders
+                if order["status"] not in _EMERGENCY_TERMINAL_ORDER_STATUSES
+                and str(order.get("broker_product") or "").upper() in {"BO", "CO"}
+            ),
+            None,
+        )
+        if unsupported_active is not None:
+            product = str(unsupported_active["broker_product"]).upper()
+            raise BrokerError(f"Kotak Neo v3 cannot safely dispatch with an active {product} order")
         for order in current_orders:
             if order["status"] in _EMERGENCY_TERMINAL_ORDER_STATUSES:
                 continue
@@ -1478,7 +1206,10 @@ class KotakNeoAdapter(BrokerAdapter):
             self._client(session).place_order,
             M.to_place_order_params(order, symbol, tag=tag),
         )
-        return M.extract_order_id(M.require_write_success(response))
+        try:
+            return M.extract_order_id(M.require_write_success(response))
+        except M.KotakNeoMappingError as exc:
+            raise BrokerInternal("Kotak Neo reducing order response is invalid", broker_id="kotakneo") from exc
 
     # ---------- trading: reads ----------
 
@@ -1493,53 +1224,51 @@ class KotakNeoAdapter(BrokerAdapter):
         ``validation pending`` → ``open`` → ``complete`` …) normalised to the
         FlintTrade order shape, in the OMS's newest-first ordering.
         """
-        resp = await self._call(self._client(session).order_history, str(order_id))
+        resp = validate_read_envelope(
+            await self._call(self._client(session).order_history, str(order_id)), operation="order_history"
+        )
         return [M.from_kotak_order(r) for r in M.order_history_rows(resp)]
 
     async def trade_book(self, session: Session) -> list[Trade]:
         resp = await self._call(self._client(session).trade_book)
-        return [M.from_kotak_trade(r) for r in self._fixed_rows(resp)]  # type: ignore[misc]
+        return [M.from_kotak_trade(r) for r in self._fixed_rows(resp, operation="trade_report")]  # type: ignore[misc]
 
     async def order_trades(self, session: Session, order_id: str) -> list[dict]:
-        """Fills for ONE order (NEO ``trade_report(order_id)`` — a read).
-
-        The SDK filters server-side rows down to ``{"data": {row}}`` for a
-        single fill (or an error envelope when nothing traded); a multi-fill
-        list is tolerated too. No trades → ``[]``, never a raise.
-        """
-        resp = await self._call(self._client(session).trade_book, str(order_id))
-        if not isinstance(resp, dict):
-            return []
-        data = resp.get("data")
-        rows = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
-        return [M.from_kotak_trade(r) for r in rows if isinstance(r, dict)]
+        """Return every fill for one order from v3's unfiltered trade report."""
+        resp = await self._call(self._client(session).trade_book)
+        rows = self._fixed_rows(resp, operation="trade_report")
+        target = str(order_id)
+        trades = [M.from_kotak_trade(row) for row in rows]
+        return [trade for trade in trades if trade["orderid"] == target]
 
     async def positions(self, session: Session) -> list[Position]:
         resp = await self._call(self._client(session).positions)
-        return [M.from_kotak_position(r) for r in self._fixed_rows(resp)]  # type: ignore[misc]
+        return [M.from_kotak_position(r) for r in self._fixed_rows(resp, operation="positions")]  # type: ignore[misc]
 
     async def holdings(self, session: Session) -> list[dict]:
         resp = await self._call(self._client(session).holdings)
-        return [M.from_kotak_holding(r) for r in self._fixed_rows(resp, allow_data_only_holdings=True)]
+        return [M.from_kotak_holding(r) for r in self._fixed_rows(resp, operation="holdings")]
 
     async def funds(self, session: Session) -> dict:
-        resp = await self._call(self._client(session).funds)
+        resp = validate_read_envelope(await self._call(self._client(session).funds), operation="limits")
         return M.from_kotak_funds(resp)
 
     async def balance_snapshot(self, session: Session) -> BalanceSnapshot:
         """Read the existing limits endpoint without mapper defaults."""
-        return _balance_snapshot_from_kotak(await self._call(self._client(session).funds))
+        return _balance_snapshot_from_kotak(
+            validate_read_envelope(await self._call(self._client(session).funds), operation="limits")
+        )
 
     async def limits(self, session: Session, segment: str = "ALL", exchange: str = "ALL", product: str = "ALL") -> dict:
-        """Filtered RMS limits (NEO ``limits(segment, exchange, product)``).
-
-        ``funds`` is the unfiltered contract read; this exposes the documented
-        filter surface (segment ∈ CASH/CUR/FO/ALL, exchange ∈ NSE/BSE/ALL,
-        product ∈ CNC/MIS/NRML/ALL — ``Limits.md``). The raw flat response is
-        preserved under ``extra``.
-        """
-        params = M.to_limits_params(segment, exchange, product)
-        resp = await self._call(self._client(session).limits, params["segment"], params["exchange"], params["product"])
+        """Read v3 no-argument limits; reject unsupported adapter filters."""
+        try:
+            M.to_limits_params(segment, exchange, product)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
+        resp = validate_read_envelope(
+            await self._call(self._client(session).limits),
+            operation="limits",
+        )
         return M.from_kotak_funds(resp)
 
     # ---------- market data ----------
@@ -1572,9 +1301,8 @@ class KotakNeoAdapter(BrokerAdapter):
             resp = await self._call(client.quotes, tokens)
         else:
             resp = await self._call(client.quotes, tokens, quote_type)
+        resp = validate_read_envelope(resp, operation="quotes")
         rows = self._rows(resp)
-        if not rows and isinstance(resp, list):
-            rows = [r for r in resp if isinstance(r, dict)]
         return rows
 
     @staticmethod
@@ -1655,13 +1383,11 @@ class KotakNeoAdapter(BrokerAdapter):
         if len(resolved_keys) != len(set(resolved_keys)):
             raise BrokerReadResponseInvalid from None
         tokens = M.to_quote_tokens([(token, exchange) for _, exchange, token, _, _ in targets])
-        resp = await self._call(self._client(session).quotes, tokens)
+        resp = validate_read_envelope(await self._call(self._client(session).quotes, tokens), operation="quotes")
         if type(resp) is dict:
             if any(type(key) is not str for key in resp) or "data" not in resp or type(resp["data"]) is not list:
                 raise BrokerReadResponseInvalid from None
             raw_rows = resp["data"]
-        elif type(resp) is list:
-            raw_rows = resp
         else:
             raise BrokerReadResponseInvalid from None
         if len(raw_rows) != len(targets):
@@ -1745,20 +1471,26 @@ class KotakNeoAdapter(BrokerAdapter):
 
         Read-only — places nothing, so it needs no gate. NEO keys the scrip by
         its numeric ``pSymbol`` (``Margin_Required.md`` line 35), so the token is
-        resolved via the shared ``_resolve_token`` path and the trading symbol
-        rides its own ``trading_symbol`` field. If the numeric token is not
-        resolvable the trading symbol is used as a best-effort fallback.
+        resolved via the shared ``_resolve_token`` path. V3 has no trading-symbol
+        margin argument and unresolved/non-numeric tokens fail closed.
         """
-        trading_symbol = await self._resolve_trading_symbol(session, order.symbol, order.exchange)
         try:
-            instrument_token: str | None = await self._resolve_token(session, order.symbol, order.exchange)
-        except BrokerError:
-            # No token resolver and search_scrip could not resolve it — fall back
-            # to keying margin by trading symbol (handled in to_margin_params).
-            instrument_token = None
-        params = M.to_margin_params(order, trading_symbol, instrument_token=instrument_token)
-        resp = await self._call(self._client(session).margin, params)
-        return M.from_kotak_margin(resp)
+            M.validate_v3_order(order)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
+        instrument_token = await self._resolve_token(session, order.symbol, order.exchange)
+        try:
+            params = M.to_margin_params(order, instrument_token)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
+        resp = validate_read_envelope(
+            await self._call(self._client(session).margin, params),
+            operation="margin_required",
+        )
+        try:
+            return M.from_kotak_margin(resp)
+        except BrokerReadResponseInvalid as exc:
+            raise BrokerInternal("Kotak Neo margin response is invalid", broker_id="kotakneo") from exc
 
     async def search_scrip(
         self,
@@ -1789,7 +1521,8 @@ class KotakNeoAdapter(BrokerAdapter):
             resp = await self._call(
                 client.search_scrip, seg, symbol, expiry, option_type, strike_price, ignore_50multiple
             )
-        rows = resp if isinstance(resp, list) else (resp.get("data", []) if isinstance(resp, dict) else [])
+        resp = validate_read_envelope(resp, operation="search_scrip")
+        rows = resp if isinstance(resp, list) else resp.get("data", [])
         return [M.from_kotak_scrip(r) for r in rows if isinstance(r, dict)]
 
     async def scrip_master(self, session: Session, exchange: str | None = None) -> dict:
@@ -1800,97 +1533,80 @@ class KotakNeoAdapter(BrokerAdapter):
         down to that segment's single CSV URL.
         """
         seg = M.EXCHANGE_TO_KOTAK.get(str(exchange).upper(), str(exchange).lower()) if exchange else None
-        resp = await self._call(self._client(session).scrip_master, seg)
+        resp = validate_read_envelope(
+            await self._call(self._client(session).scrip_master, seg), operation="scrip_master"
+        )
         return M.from_kotak_scrip_master(resp)
 
     async def historical(self, session: Session, req: dict) -> Candles:
         """kotakneoapi 3.x historical candles (``historical_data``)."""
         from flinttrade_core.models import OHLCV, Candles  # noqa: PLC0415
 
-        symbol = str(req.get("symbol") or "")
-        exchange = str(req.get("exchange") or "NSE")
-        interval = str(req.get("interval") or "D")
-        from_date = str(req.get("from_date") or req.get("from") or "")
-        to_date = str(req.get("to_date") or req.get("to") or "")
-        token = await self._resolve_token(session, symbol, exchange)
-        seg = M.EXCHANGE_TO_KOTAK.get(exchange.upper(), exchange.lower())
-        neosymbol = str(req.get("neosymbol") or f"{seg}|{token}")
-        resp = await self._call(
-            self._client(session).historical_data, neosymbol, interval, from_date, to_date
-        )
-        rows = resp.get("data", resp) if isinstance(resp, dict) else resp
-        if not isinstance(rows, list):
-            raise BrokerReadResponseInvalid from None
-        bars: list[OHLCV] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                raise BrokerReadResponseInvalid from None
-            bars.append(
-                OHLCV(
-                    timestamp=str(row.get("timestamp") or row.get("datetime") or row.get("date") or ""),
-                    open=float(row.get("open") or 0),
-                    high=float(row.get("high") or 0),
-                    low=float(row.get("low") or 0),
-                    close=float(row.get("close") or 0),
-                    volume=int(row.get("volume") or 0),
-                )
+        try:
+            request = M.to_historical_request(req)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
+
+        token = await self._resolve_token(session, request["symbol"], request["exchange"])
+        segment = M.EXCHANGE_TO_KOTAK[request["exchange"]]
+        resolved_neosymbol = f"{segment}|{token}"
+        supplied_neosymbol = request["neosymbol"]
+        if supplied_neosymbol is not None and supplied_neosymbol != resolved_neosymbol:
+            raise UnsupportedCapabilityError(
+                "Kotak Neo neosymbol differs from the resolved instrument identity",
+                broker_id="kotakneo",
             )
-        return Candles(symbol=symbol, exchange=exchange, interval=interval, bars=bars)
+        resp = await self._call(
+            self._client(session).historical_data,
+            resolved_neosymbol,
+            request["sdk_interval"],
+            request["from_date"],
+            request["to_date"],
+        )
+        rows = M.from_kotak_historical(resp, expected_interval=request["sdk_interval"])
+        return Candles(
+            symbol=request["symbol"],
+            exchange=request["exchange"],
+            interval=request["interval"],
+            bars=[OHLCV(**row) for row in rows],
+        )
 
     async def option_chain(self, session: Session, req: dict) -> OptionChain:
         """kotakneoapi 3.x option chain (REST). Neo has no Practice sandbox."""
         from flinttrade_core.models import OptionChain, OptionChainStrike  # noqa: PLC0415
 
-        underlying = str(req.get("underlying") or req.get("symbol") or "")
-        exchange = str(req.get("exchange") or "NFO")
-        expiry = req.get("expiry")
-        seg = M.EXCHANGE_TO_KOTAK.get(str(exchange).upper(), str(exchange).lower())
+        try:
+            request = M.to_option_chain_request(req)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
         resp = await self._call(
             self._client(session).option_chain,
-            seg,
-            underlying,
-            expiry,
-            req.get("instrument_type"),
-            req.get("count"),
+            request["sdk_exchange"],
+            request["underlying"],
+            request["expiry"],
+            request["instrument_type"],
+            request["count"],
         )
-        payload = resp.get("data", resp) if isinstance(resp, dict) else resp
-        rows = payload if isinstance(payload, list) else (
-            payload.get("strikes", []) if isinstance(payload, dict) else []
+        mapped = M.from_kotak_option_chain(
+            resp,
+            underlying=request["underlying"],
+            exchange=request["exchange"],
+            sdk_exchange=request["sdk_exchange"],
+            requested_expiry=request["expiry"],
         )
-        strikes: list[OptionChainStrike] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                raise BrokerReadResponseInvalid from None
-            ce = row.get("ce") if isinstance(row.get("ce"), dict) else {}
-            pe = row.get("pe") if isinstance(row.get("pe"), dict) else {}
-            strikes.append(
-                OptionChainStrike(
-                    strike_price=float(row.get("strike_price") or row.get("strike") or 0),
-                    ce_ltp=float(ce.get("ltp") or 0),
-                    pe_ltp=float(pe.get("ltp") or 0),
-                )
-            )
-        expiry_s = str(expiry or (payload.get("expiry") if isinstance(payload, dict) else "") or "")
-        return OptionChain(
-            underlying=underlying,
-            underlying_key=underlying,
-            exchange=exchange,
-            expiry=expiry_s,
-            expiry_date=expiry_s,
-            strikes=strikes,
-        )
+        return OptionChain(**{**mapped, "strikes": [OptionChainStrike(**row) for row in mapped["strikes"]]})
 
     # ---------- market data: streaming ----------
 
     async def _resolve_feed_tokens(
         self, session: Session, symbols: list[str], *, is_index: bool
     ) -> list[dict[str, str]]:
-        """Resolve quote symbols to NEO HSM subscription token dicts.
+        """Resolve quote symbols to v3 SFeed immutable WsToken fields.
 
-        The HSM feed subscribes by instrument token (``pSymbol``), not trading
-        symbol — resolved via the injected ``token_resolver`` or a live
+        SFeed subscribes by ``WsToken.instrument_token``, not trading symbol —
+        resolved via the injected ``token_resolver`` or a live
         ``search_scrip`` lookup. Index subscriptions use the index NAME as the
-        token (``webSocket.md`` "For Indexes"), so they pass through unresolved.
+        token, so they pass through unresolved.
         """
         tokens: list[dict[str, str]] = []
         for raw in symbols:
@@ -1901,94 +1617,56 @@ class KotakNeoAdapter(BrokerAdapter):
         return tokens
 
     async def subscribe(self, session: Session, symbols: list[str], mode: str = "FULL") -> None:
-        """Subscribe symbols on the HSM live feed.
-
-        ``mode`` maps to NEO's subscription types (``kotakneo_mapping.
-        subscription_flags``): LTP/QUOTE → scrip feed (``mws``), FULL/DEPTH →
-        5-level depth feed (``dps``), INDEX → index feed (``ifs``). The public
-        docs cap the WebSocket surface at 16 channels and 200 subscribed scrips.
-        Each subscription is recorded (token + flags) so ``unsubscribe`` can
-        replay it exactly.
-        """
+        """Subscribe immutable v3 WsTokens with one exact intent per token."""
         is_index, is_depth = M.subscription_flags(mode)
-        tokens = await self._resolve_feed_tokens(session, symbols, is_index=is_index)
-        await self._call(self._client(session).subscribe, tokens, is_index, is_depth)
-        for raw, tok in zip(symbols, tokens):
-            exchange, name = _split_symbol(raw)
-            self._subscriptions[(M.EXCHANGE_TO_KOTAK.get(exchange, exchange.lower()), name.upper())] = {
-                "token": tok,
-                "is_index": is_index,
-                "is_depth": is_depth,
-            }
-
-    async def unsubscribe(self, session: Session, symbols: list[str]) -> None:
-        """Unsubscribe symbols from the HSM live feed. Idempotent.
-
-        Replays each symbol's RECORDED subscription (token + index/depth flags
-        — NEO's ``mwu``/``ifu``/``dpu`` must match the original ``mws``/``ifs``/
-        ``dps`` type to take effect). Symbols never subscribed are skipped.
-        """
-        client = self._client(session)
-        by_flags: dict[tuple[bool, bool], list[dict[str, str]]] = {}
-        keys: list[tuple[str, str]] = []
+        aliases: list[tuple[str, str]] = []
+        unique_symbols: list[str] = []
+        seen: set[tuple[str, str]] = set()
         for raw in symbols:
             exchange, name = _split_symbol(raw)
-            key = (M.EXCHANGE_TO_KOTAK.get(exchange, exchange.lower()), name.upper())
-            sub = self._subscriptions.get(key)
-            if sub is None:
-                continue  # never subscribed — idempotent no-op
-            by_flags.setdefault((sub["is_index"], sub["is_depth"]), []).append(sub["token"])
-            keys.append(key)
-        for (is_index, is_depth), tokens in by_flags.items():
-            await self._call(client.un_subscribe, tokens, is_index, is_depth)
-        for key in keys:
-            self._subscriptions.pop(key, None)
+            alias = (M.EXCHANGE_TO_KOTAK.get(exchange, exchange.lower()), name.upper())
+            if alias in seen:
+                continue
+            seen.add(alias)
+            aliases.append(alias)
+            unique_symbols.append(raw)
+        if len(aliases) > MAX_STREAM_TOKENS:
+            raise BrokerError(
+                f"Kotak Neo supports at most {MAX_STREAM_TOKENS} token intents per connection",
+                broker_id="kotakneo",
+            )
+        if not aliases:
+            return
+        tokens = await self._resolve_feed_tokens(session, unique_symbols, is_index=is_index)
+        intent = "index" if is_index else "depth" if is_depth else "scrips"
+        await self._stream_runtime(session).add_subscriptions(tokens, intent=intent, aliases=aliases)
+
+    async def unsubscribe(self, session: Session, symbols: list[str]) -> None:
+        """Unsubscribe each alias with its exact session-scoped recorded intent."""
+        aliases: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for raw in symbols:
+            exchange, name = _split_symbol(raw)
+            alias = (M.EXCHANGE_TO_KOTAK.get(exchange, exchange.lower()), name.upper())
+            if alias not in seen:
+                seen.add(alias)
+                aliases.append(alias)
+        await self._stream_runtime(session).remove_subscriptions(aliases)
 
     def stream(self, session: Session) -> AsyncIterator[Any]:
         return self._stream_impl(session)
 
     async def _stream_impl(self, session: Session) -> AsyncIterator[Any]:
-        from flinttrade_core.models import TickEvent  # noqa: PLC0415
+        async for tick in self._stream_runtime(session).market_messages():
+            yield tick
 
-        if self._feed_factory is None:
-            # Live: the HSM feed is callback-driven inside the SDK; wiring wraps
-            # NeoWebSocket's on_message into an async queue and injects it here.
-            # The decode path (decode_kotak_feed) is implemented and tested.
-            raise NotImplementedError("Kotak Neo live tick stream needs the HSM market feed (inject feed_factory)")
-        async for frame in self._feed_factory(session):
-            for tick in M.decode_kotak_feed(frame):
-                yield TickEvent(
-                    symbol=tick.get("symbol", "") or tick.get("token", ""),
-                    exchange=tick.get("exchange", ""),
-                    ltp=float(tick.get("ltp", 0.0)),
-                    volume=int(tick.get("volume", 0)),
-                    bid=float(tick.get("bid", 0.0)),
-                    ask=float(tick.get("ask", 0.0)),
-                    oi=int(tick.get("oi", 0)),
-                    timestamp=str(tick.get("timestamp", "")),
-                )
-
-    def order_stream(self, session: Session) -> AsyncIterator[dict]:
-        """Order-update stream (HSI order feed — ``webSocket_orderfeed.md``).
-
-        Yields normalised order-update dicts (``decode_kotak_order_feed``);
-        connection acks and heartbeats are skipped. Live wiring calls
-        ``subscribe_to_orderfeed`` on the facade and bridges the callbacks into
-        the injected ``order_feed_factory``.
-        """
+    def order_stream(self, session: Session) -> AsyncIterator[Any]:
+        """Yield only SDK-typed, discriminated order and position updates."""
         return self._order_stream_impl(session)
 
-    async def _order_stream_impl(self, session: Session) -> AsyncIterator[dict]:
-        if self._order_feed_factory is None:
-            raise NotImplementedError("Kotak Neo live order feed needs the HSI socket (inject order_feed_factory)")
-        starter = getattr(self._client(session), "subscribe_to_orderfeed", None)
-        if not callable(starter):
-            raise BrokerError("Kotak Neo client does not expose subscribe_to_orderfeed")
-        M.ensure_ok(await self._call(starter))
-        async for frame in self._order_feed_factory(session):
-            update = M.decode_kotak_order_feed(frame)
-            if update is not None:
-                yield update
+    async def _order_stream_impl(self, session: Session) -> AsyncIterator[Any]:
+        async for update in self._stream_runtime(session).order_messages():
+            yield update
 
     # ---------- reconciliation ----------
 

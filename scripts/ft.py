@@ -21,6 +21,7 @@ Run ``python scripts/ft.py help`` for the full command table.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import platform
 import re
@@ -34,6 +35,52 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
+from types import ModuleType
+
+
+def _load_module_from_path(module_name: str, module_path: str | Path) -> ModuleType:
+    """Load a module from an exact path with normal ``sys.modules`` semantics.
+
+    An existing entry from the same file is reused. Name collisions from other
+    files receive a numeric suffix and are left untouched. Failed execution
+    removes only the partially initialized module created by this call.
+    """
+    resolved_path = Path(module_path).resolve()
+    suffix = 0
+    while True:
+        candidate_name = module_name if suffix == 0 else f"{module_name}_{suffix}"
+        if candidate_name not in sys.modules:
+            break
+        existing = sys.modules[candidate_name]
+        existing_path = getattr(existing, "__file__", None)
+        if existing_path is not None:
+            try:
+                if Path(existing_path).resolve() == resolved_path:
+                    return existing
+            except (OSError, TypeError, ValueError):
+                pass
+        suffix += 1
+
+    spec = importlib.util.spec_from_file_location(candidate_name, resolved_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load module {candidate_name!r} from {resolved_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[candidate_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        if sys.modules.get(candidate_name) is module:
+            del sys.modules[candidate_name]
+        raise
+    return module
+
+
+_BROKER_SDK_ENVIRONMENT_PATH = Path(__file__).with_name("broker_sdk_environment.py").resolve()
+_BROKER_SDK_ENVIRONMENT = _load_module_from_path(
+    "_flinttrade_broker_sdk_environment", _BROKER_SDK_ENVIRONMENT_PATH
+)
+remove_kotak_distributions = _BROKER_SDK_ENVIRONMENT.remove_kotak_distributions
+repair_kotakneo_environment = _BROKER_SDK_ENVIRONMENT.repair_kotakneo_environment
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 """Repository root - ``scripts/ft.py`` lives one level below it."""
@@ -987,6 +1034,8 @@ def cmd_setup(_args: list[str]) -> int:
     if uv:
         info("Syncing the Python workspace with uv...")
         run([uv, "sync", "--frozen", "--all-packages"])
+        python = resolve_python()
+        repair_kotakneo_environment(Path(python))
         info("OK Python workspace synced")
     else:
         info("uv not found; falling back to the hash-verified pip baseline.")
@@ -995,17 +1044,16 @@ def cmd_setup(_args: list[str]) -> int:
             fail("requirements.lock is missing; install uv from https://docs.astral.sh/uv/ and re-run.")
             return 1
         run([python, "-m", "pip", "install", "--require-hashes", "-r", str(lock)])
-        info("OK Third-party requirements installed")
+        repair_kotakneo_environment(Path(python))
+        info("OK Third-party requirements and pinned broker SDKs installed")
         # requirements.lock is exported with `--no-emit-workspace`, so it carries
         # ONLY third-party dependencies: none of the thirteen flinttrade_* packages
         # is installed by that command. They are reached through the PYTHONPATH
         # that python_env() builds from every workspace source root, which is what
-        # keeps `start` from dying on `import flinttrade_data`. The one thing this
-        # path cannot supply is the git-pinned Kotak Neo SDK, which uv.lock pins and
-        # requirements.lock deliberately excludes.
+        # keeps `start` from dying on `import flinttrade_data`. Git-pinned broker
+        # SDKs excluded from that registry-only export are installed and attested
+        # separately by broker_sdk_environment.py above.
         info(f"OK Workspace packages linked on PYTHONPATH ({len(workspace_module_names())} packages)")
-        warn("Without uv the git-pinned Kotak Neo broker SDK is unavailable; that broker stays disabled.")
-        warn("Install uv from https://docs.astral.sh/uv/ and re-run setup for the complete environment.")
 
     pnpm = pnpm_argv()
     if pnpm is None:

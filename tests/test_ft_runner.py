@@ -30,6 +30,7 @@ import importlib.util
 import os
 import platform
 import re
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -40,6 +41,7 @@ from flinttrade_core import workspace as core_workspace
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FT_PATH = _REPO_ROOT / "scripts" / "ft.py"
+_BOOTSTRAP_HELPER_PATH = _FT_PATH.with_name("broker_sdk_environment.py")
 _MAKEFILE_PATH = _REPO_ROOT / "Makefile"
 
 
@@ -60,6 +62,53 @@ def _load_ft() -> ModuleType:
 
 
 ft = _load_ft()
+
+
+@pytest.mark.unit
+def test_arbitrary_name_load_uses_the_exact_sibling_setup_helper(tmp_path: Path) -> None:
+    """Path-based runner imports cannot be redirected by cwd or PYTHONPATH."""
+    shadow_helper = tmp_path / "broker_sdk_environment.py"
+    shadow_helper.write_text(
+        "def remove_kotak_distributions(*args, **kwargs): pass\n"
+        "def repair_kotakneo_environment(*args, **kwargs): pass\n",
+        encoding="utf-8",
+    )
+    expected_helper = _FT_PATH.with_name("broker_sdk_environment.py").resolve()
+    loader = (
+        "import importlib.util, pathlib, sys\n"
+        "path = pathlib.Path(sys.argv[1])\n"
+        "spec = importlib.util.spec_from_file_location('arbitrary_ft_name', path)\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(module)\n"
+        "actual = pathlib.Path(module.repair_kotakneo_environment.__code__.co_filename).resolve()\n"
+        "assert actual == pathlib.Path(sys.argv[2]), (actual, sys.argv[2])\n"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", loader, str(_FT_PATH), str(expected_helper)],
+        cwd=tmp_path,
+        env=os.environ | {"PYTHONPATH": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+def test_direct_runner_version_works_from_a_foreign_cwd(tmp_path: Path) -> None:
+    """The documented script entry point runs from outside the repository."""
+    result = subprocess.run(
+        [sys.executable, str(_FT_PATH), "version"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -523,25 +572,95 @@ def test_first_run_provisioning_reports_its_own_failure() -> None:
 
 @pytest.mark.unit
 def test_ft_imports_nothing_outside_the_standard_library() -> None:
-    """``ft.py`` runs before any dependency exists — including ``flinttrade_core``."""
-    tree = ast.parse(_FT_PATH.read_text(encoding="utf-8"), filename=str(_FT_PATH))
+    """The first-run import closure stays dependency-free, including its helper."""
+    _assert_bootstrap_stdlib_only((_FT_PATH, _BOOTSTRAP_HELPER_PATH))
 
-    roots: set[str] = set()
-    relative: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            roots.update(alias.name.split(".")[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                relative.append(f"line {node.lineno}")
-                continue
-            roots.add((node.module or "").split(".")[0])
 
-    assert not relative, f"scripts/ft.py is a standalone script and cannot use relative imports: {relative}"
-
+def _assert_bootstrap_stdlib_only(paths: tuple[Path, ...]) -> None:
+    """Reject imports outside the standard library from each first-run module."""
     allowed = set(sys.stdlib_module_names) | {"__future__"}
-    third_party = sorted(root for root in roots if root and root not in allowed)
-    assert not third_party, f"scripts/ft.py must stay stdlib-only; found: {third_party}"
-    assert not any(root.startswith("flinttrade") for root in roots), (
-        "scripts/ft.py must not import flinttrade_core - it runs before the packages are installed"
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        roots: set[str] = set()
+        relative: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                roots.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    relative.append(f"line {node.lineno}")
+                    continue
+                roots.add((node.module or "").split(".")[0])
+
+        label = path.name
+        assert not relative, f"{label} cannot use relative imports: {relative}"
+        third_party = sorted(root for root in roots if root and root not in allowed)
+        assert not third_party, f"{label} must stay stdlib-only; found: {third_party}"
+        assert not any(root.startswith("flinttrade") for root in roots), (
+            f"{label} must not import flinttrade packages during first-run setup"
+        )
+
+
+@pytest.mark.unit
+def test_bootstrap_stdlib_contract_rejects_a_temporary_forbidden_import(tmp_path: Path) -> None:
+    """The import guard detects a third-party dependency in any bootstrap module."""
+    injected_helper = tmp_path / "broker_sdk_environment.py"
+    injected_helper.write_text("import requests\n", encoding="utf-8")
+
+    with pytest.raises(AssertionError, match=r"broker_sdk_environment.py.*requests"):
+        _assert_bootstrap_stdlib_only((_FT_PATH, injected_helper))
+
+
+@pytest.mark.unit
+def test_bootstrap_loader_registers_reuses_and_avoids_unrelated_module_entries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The helper is importable during execution and repeated loads reuse it safely."""
+    module_name = "_test_flinttrade_bootstrap_helper"
+    unrelated = ModuleType(module_name)
+    unrelated.__file__ = str(tmp_path / "unrelated.py")
+    monkeypatch.setitem(sys.modules, module_name, unrelated)
+
+    helper_path = tmp_path / "bootstrap_helper.py"
+    helper_path.write_text(
+        "import sys\n"
+        "assert sys.modules[__name__].__file__ == __file__\n"
+        "EXECUTIONS = 1\n",
+        encoding="utf-8",
     )
+
+    loaded = ft._load_module_from_path(module_name, helper_path)
+    loaded_again = ft._load_module_from_path(module_name, helper_path)
+
+    assert loaded is loaded_again
+    assert loaded.EXECUTIONS == 1
+    assert loaded.__name__ == f"{module_name}_1"
+    assert sys.modules[module_name] is unrelated
+    assert sys.modules[loaded.__name__] is loaded
+
+
+@pytest.mark.unit
+def test_bootstrap_loader_rolls_back_registration_when_execution_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed helper execution removes its partial entry but preserves collisions."""
+    module_name = "_test_flinttrade_failing_bootstrap_helper"
+    unrelated = ModuleType(module_name)
+    unrelated.__file__ = str(tmp_path / "unrelated.py")
+    monkeypatch.setitem(sys.modules, module_name, unrelated)
+
+    helper_path = tmp_path / "failing_helper.py"
+    helper_path.write_text(
+        "import sys\n"
+        "assert sys.modules[__name__].__file__ == __file__\n"
+        "raise RuntimeError('intentional fixture failure')\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="intentional fixture failure"):
+        ft._load_module_from_path(module_name, helper_path)
+
+    assert sys.modules[module_name] is unrelated
+    assert f"{module_name}_1" not in sys.modules

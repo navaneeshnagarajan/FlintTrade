@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from flinttrade_core.exceptions import BrokerError
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
+from flinttrade_core.exceptions import BrokerError, SessionExpired, UnsupportedCapabilityError
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter, _ROUTER_TOKEN
-from flinttrade_gateway.brokers.kotakneo_mapping import KotakNeoMappingError
 
 pytestmark = pytest.mark.unit
 
@@ -75,8 +75,8 @@ class MockNeo:
 
     def margin(self, params):
         self.calls.append(("margin", params))
-        return {"data": {"reqdMrgn": "15.50", "ordMrgn": "15.50", "avlCash": "38.19",
-                         "insufFund": "0", "rmsVldtd": "OK", "stat": "Ok"}}
+        return {"data": {"reqdMrgn": "0", "ordMrgn": "15.50", "avlCash": "38.19",
+                         "insufFund": "0", "rmsVldtd": "OK", "stat": "Ok", "stCode": 200}}
 
     def search_scrip(self, exchange_segment, symbol):
         self.calls.append(("search", (exchange_segment, symbol)))
@@ -87,11 +87,46 @@ class MockNeo:
 
     def historical_data(self, neosymbol, interval, from_date, to_date):
         self.calls.append(("historical_data", (neosymbol, interval, from_date, to_date)))
-        return {"data": [{"timestamp": "2026-09-20", "open": 1, "high": 2, "low": 1, "close": 2, "volume": 10}]}
+        return {
+            "status": "success",
+            "interval": interval,
+            "data": {"candles": [["2026-09-20T09:15:00+05:30", 1, 2, 1, 2, 10, None]]},
+        }
 
     def option_chain(self, exchange, underlying, expiry=None, instrument_type=None, count=None):
-        self.calls.append(("option_chain", (exchange, underlying, expiry)))
-        return {"data": [{"strike_price": 25000, "ce": {"ltp": 1.5}, "pe": {"ltp": 2.5}}]}
+        self.calls.append(("option_chain", (exchange, underlying, expiry, instrument_type, count)))
+        return {
+            "data": {
+                "common_data": {
+                    "mktLot": "65",
+                    "multiplier": "1",
+                    "unlSymbol": underlying,
+                    "exSeg": exchange,
+                    "expiryDt": expiry or "2026-09-24",
+                },
+                "call": [
+                    {
+                        "instrument": {
+                            "neoSymbol": f"{exchange}|71472",
+                            "optionType": "CE",
+                            "strikePrice": "25000",
+                        },
+                        "quote": {"ltp": "1.5", "volume": 10},
+                        "openInterest": {"current": 100},
+                    }
+                ],
+                "put": [
+                    {
+                        "instrument": {
+                            "neoSymbol": f"{exchange}|71473",
+                            "optionType": "PE",
+                            "strikePrice": "25000.0",
+                        },
+                        "quote": {"ltp": "2.5"},
+                    }
+                ],
+            }
+        }
 
 
 class _NoScripNeo(MockNeo):
@@ -136,7 +171,7 @@ async def test_place_order_is_gated():
 
 
 @pytest.mark.asyncio
-async def test_bracket_order_flows_through_gated_place():
+async def test_bracket_order_is_gated_then_refused_before_transport():
     mock = MockNeo()
     adapter = _adapter(mock)
     session = await _session(adapter)
@@ -146,11 +181,9 @@ async def test_bracket_order_flows_through_gated_place():
     with pytest.raises(SafetyBypassError):
         await adapter.place_order(session, order)
     assert mock.calls == []
-    # With the token it reaches the broker as a BO order carrying both legs.
-    oid = await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
-    assert oid == "250122000612876"
-    _, params = mock.calls[0]
-    assert params["product"] == "BO" and params["square_off_value"] == "9.8" and params["stop_loss_value"] == "9.1"
+    with pytest.raises(UnsupportedCapabilityError, match="variety"):
+        await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
+    assert mock.calls == []
 
 
 @pytest.mark.asyncio
@@ -251,21 +284,20 @@ class _EnvelopeNeo(MockNeo):
 async def test_reads_tolerate_empty_and_error_envelope():
     adapter = _adapter(_EnvelopeNeo())
     session = await _session(adapter)
-    with pytest.raises(KotakNeoMappingError, match="rejected"):
+    with pytest.raises(SessionExpired):
         await adapter.order_book(session)
-    with pytest.raises(KotakNeoMappingError, match="rejected"):
+    with pytest.raises(SessionExpired):
         await adapter.positions(session)
-    funds = await adapter.funds(session)
-    # No data → zeroed funds dict, never a raise.
-    assert funds["available_balance"] == "0.00" and funds["used_margin"] == "0.00"
+    with pytest.raises(SessionExpired):
+        await adapter.funds(session)
 
 
 @pytest.mark.asyncio
-async def test_quotes_bare_list_fallback():
+async def test_quotes_bare_list_is_not_a_success_envelope():
     adapter = _adapter(_EnvelopeNeo())
     session = await _session(adapter)
-    quotes = await adapter.quotes(session, ["NSE:IDEA"])
-    assert len(quotes) == 1 and quotes[0].symbol == "IDEA" and quotes[0].ltp == 9.4
+    with pytest.raises(BrokerReadResponseInvalid):
+        await adapter.quotes(session, ["NSE:IDEA"])
 
 
 @pytest.mark.asyncio
@@ -277,7 +309,7 @@ async def test_iceberg_refused_at_gated_adapter_layer():
     session = await _session(adapter)
     order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
                   product="MIS", quantity="5000", price="9.4", variety="iceberg")
-    with pytest.raises(KotakNeoMappingError, match="variety"):
+    with pytest.raises(UnsupportedCapabilityError, match="variety"):
         await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
     assert mock.calls == []
 
@@ -294,9 +326,7 @@ async def test_margin_calculator_reads_estimate():
 
 @pytest.mark.asyncio
 async def test_margin_calculator_sends_numeric_instrument_token():
-    # Finding #1 — margin must key the scrip by the numeric pSymbol, with the
-    # trading symbol in its own field (Margin_Required.md:35), not the trading
-    # symbol packed into instrument_token.
+    # Margin keys the scrip only by numeric pSymbol (Margin_Required.md:35).
     mock = MockNeo()
     adapter = KotakNeoAdapter(
         client_factory=lambda _s: mock,
@@ -309,7 +339,7 @@ async def test_margin_calculator_sends_numeric_instrument_token():
     await adapter.margin_calculator(session, order)
     _, params = [c for c in mock.calls if c[0] == "margin"][0]
     assert params["instrument_token"] == "14366"
-    assert params["trading_symbol"] == "IDEA-EQ"
+    assert "trading_symbol" not in params
 
 
 @pytest.mark.asyncio
@@ -372,32 +402,142 @@ async def test_v3_historical_and_option_chain():
     session = await _session(adapter)
     candles = await adapter.historical(
         session,
-        {"symbol": "YESBANK", "exchange": "NSE", "interval": "D", "from_date": "2026-09-01", "to_date": "2026-09-20"},
+        {"symbol": "YESBANK", "exchange": "NSE", "interval": "1D", "start_date": "2026-09-01", "end_date": "2026-09-20"},
     )
-    assert candles.symbol == "YESBANK"
-    assert len(candles.bars) == 1
+    assert (candles.symbol, candles.exchange, candles.interval) == ("YESBANK", "NSE", "1D")
+    assert candles.bars[0].model_dump(exclude_unset=True) == {
+        "timestamp": "2026-09-20T09:15:00+05:30",
+        "open": 1.0,
+        "high": 2.0,
+        "low": 1.0,
+        "close": 2.0,
+        "volume": 10,
+    }
     chain = await adapter.option_chain(
         session,
-        {"underlying": "NIFTY", "exchange": "NFO", "expiry": "2026-09-24"},
+        {
+            "underlying": "NIFTY",
+            "exchange": "NSE_INDEX",
+            "expiry": "2026-09-24",
+            "instrument_type": "option",
+            "count": 40,
+        },
     )
-    assert chain.underlying == "NIFTY"
-    assert chain.strikes[0].strike_price == 25000.0
+    assert (chain.underlying, chain.exchange, chain.expiry) == ("NIFTY", "NSE_INDEX", "2026-09-24")
+    assert chain.model_dump(exclude_unset=True) == {
+        "underlying": "NIFTY",
+        "exchange": "NSE_INDEX",
+        "expiry": "2026-09-24",
+        "expiry_date": "2026-09-24",
+        "strikes": [
+            {
+                "strike_price": 25000.0,
+                "ce_instrument_id": "nse_fo|71472",
+                "ce_ltp": 1.5,
+                "ce_oi": 100,
+                "ce_volume": 10,
+                "pe_instrument_id": "nse_fo|71473",
+                "pe_ltp": 2.5,
+            }
+        ],
+    }
     assert ("historical_data", ("nse_cm|11915", "D", "2026-09-01", "2026-09-20")) in mock.calls
-    assert ("option_chain", ("nse_fo", "NIFTY", "2026-09-24")) in mock.calls
+    assert ("option_chain", ("nse_fo", "NIFTY", "2026-09-24", "option", 40)) in mock.calls
 
 
-def test_sfeed_only_facade_rejects_subscribe_as_rest_only():
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"symbol": "YESBANK", "exchange": "NSE", "interval": "2m", "start_date": "2026-09-01", "end_date": "2026-09-02"},
+        {"symbol": "YESBANK", "exchange": "NSE", "interval": "1m", "start_date": "2026-09-02", "end_date": "2026-09-01"},
+        {"symbol": "YESBANK", "exchange": "NSE", "interval": "1m", "start_date": "2026-09-01", "from_date": "2026-09-02", "end_date": "2026-09-03"},
+        {"symbol": "YESBANK", "exchange": "NSE", "interval": "1m", "start_date": "2026-09-01", "from_date": object(), "end_date": "2026-09-03"},
+        {"symbol": "YESBANK", "exchange": "MCX", "interval": "D", "start_date": "2026-09-01", "end_date": "2026-09-02"},
+        {"symbol": " YESBANK", "exchange": "NSE", "interval": "D", "start_date": "2026-09-01", "end_date": "2026-09-02"},
+        {"symbol": "YESBANK", "exchange": "UNKNOWN", "interval": "D", "start_date": "2026-09-01", "end_date": "2026-09-02"},
+        {"symbol": "YESBANK", "exchange": "NSE", "interval": "D", "start_date": "2026-09-01", "end_date": "2026-09-02", "neosymbol": "not-a-neosymbol"},
+    ],
+)
+async def test_invalid_history_is_rejected_before_search_or_sdk_transport(payload):
+    mock = MockNeo()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+
+    with pytest.raises(UnsupportedCapabilityError):
+        await adapter.historical(session, payload)
+    assert not [call for call in mock.calls if call[0] in {"search", "historical_data"}]
+
+
+@pytest.mark.asyncio
+async def test_history_rejects_caller_neosymbol_that_differs_from_resolved_identity():
+    mock = MockNeo()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+
+    with pytest.raises(UnsupportedCapabilityError, match="neosymbol"):
+        await adapter.historical(
+            session,
+            {
+                "symbol": "YESBANK",
+                "exchange": "NSE",
+                "interval": "D",
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-02",
+                "neosymbol": "nse_cm|99999",
+            },
+        )
+    assert ("search", ("nse_cm", "YESBANK")) in mock.calls
+    assert not [call for call in mock.calls if call[0] == "historical_data"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"underlying": "NIFTY", "exchange": "CDS", "instrument_type": "option"},
+        {"underlying": "NIFTY", "exchange": "NFO", "instrument_type": "fut"},
+        {"underlying": "NIFTY", "exchange": "NFO", "instrument_type": "option", "count": 15},
+        {"underlying": "NIFTY", "symbol": "BANKNIFTY", "exchange": "NFO"},
+        {"underlying": "NIFTY", "exchange": "NFO", "expiry": "24-09-2026"},
+    ],
+)
+async def test_invalid_option_request_is_rejected_before_sdk_transport(payload):
+    mock = MockNeo()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+
+    with pytest.raises(UnsupportedCapabilityError):
+        await adapter.option_chain(session, payload)
+    assert not [call for call in mock.calls if call[0] == "option_chain"]
+
+
+@pytest.mark.asyncio
+async def test_explicit_null_option_defaults_reach_transport_as_sdk_defaults():
+    mock = MockNeo()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+
+    chain = await adapter.option_chain(
+        session,
+        {
+            "underlying": None,
+            "symbol": "NIFTY",
+            "exchange": "NSE_INDEX",
+            "expiry": None,
+            "instrument_type": None,
+        },
+    )
+
+    assert chain.expiry == "2026-09-24"
+    assert ("option_chain", ("nse_fo", "NIFTY", None, "option", None)) in mock.calls
+
+
+def test_v3_facade_removes_legacy_direct_subscription_methods():
     from flinttrade_gateway.brokers.kotakneo import KotakNeoClient
 
-    class _SFeedOnly:
-        def create_websocket(self):
-            raise AssertionError("create_websocket must not be called")
-
-    facade = KotakNeoClient.__new__(KotakNeoClient)
-    facade._neo = _SFeedOnly()
-    with pytest.raises(BrokerError, match="REST-only") as raised:
-        facade.subscribe([], False, False)
-    message = str(raised.value)
-    assert "Connected (read)" in message
-    assert "API smoke" in message
-    assert "Monday" not in message
+    assert callable(KotakNeoClient.create_websocket)
+    assert callable(KotakNeoClient.create_order_feed)
+    assert not hasattr(KotakNeoClient, "subscribe")
+    assert not hasattr(KotakNeoClient, "un_subscribe")
+    assert not hasattr(KotakNeoClient, "subscribe_to_orderfeed")

@@ -140,6 +140,28 @@ async def _invoke_adapter(
     return await method(*args, **kwargs)
 
 
+async def _preflight_emergency_write(
+    adapter: BrokerAdapter,
+    session: AdapterSessionView,
+    *,
+    verb: str,
+    payload: Mapping[str, Any],
+) -> None:
+    """Run an optional emergency preflight without crossing the write boundary."""
+    preflight = getattr(adapter, "preflight_emergency_write", None)
+    if not callable(preflight):
+        return
+    detached_payload = _detached_snapshot(payload)
+    if not isinstance(detached_payload, Mapping):  # pragma: no cover - defensive deepcopy guard
+        raise SafetyBypassError("emergency preflight payload must remain a Mapping")
+    await preflight(
+        session,
+        verb=verb,
+        payload=detached_payload,
+        _router_token=_ROUTER_TOKEN,
+    )
+
+
 def _required(payload: Mapping[str, Any], key: str) -> Any:
     """Fetch a required field from a verified gated payload.
 
@@ -445,9 +467,9 @@ class BrokerRouter:
         # never bypass safety. None → no throttle (unchanged behaviour).
         self._rate_limiter = rate_limiter
         # Optional algo-tag guard (flinttrade_engine.algo_tag_guard.AlgoTagGuard).
-        # For adapters advertising ``capabilities.algo_tag_required`` it relays
-        # the operator's broker-registered algo_id onto the dispatch session and
-        # enforces the per-(broker, exchange) per-second algo-order ceiling.
+        # For adapters advertising required or optional algo-tag support it
+        # relays the operator's trusted configured id onto the dispatch session
+        # and enforces the per-(broker, exchange) per-second order ceiling.
         # Below the gate like the rate limiter — it can only tag or refuse a
         # dispatch, never bypass safety. None → no tagging (the adapters'
         # retail-default algo ids apply unchanged).
@@ -863,9 +885,9 @@ class BrokerRouter:
     def _algo_tag(self, adapter_id: str, session: AdapterSessionView, order: Any) -> None:
         """Relay the configured algo_id and count this write for algo-tag brokers.
 
-        Applies only when a guard is wired AND the resolved adapter advertises
-        ``capabilities.algo_tag_required`` AND the guard holds a config for this
-        broker — an operator without an exchange-registered algo keeps the
+        Applies only when a guard is wired, the resolved adapter advertises a
+        required or optional algo-tag surface, and the guard holds a config for
+        this broker. An operator without a trusted configured id keeps the
         adapter/mapping retail defaults. Runs after ``_verify_safety`` (below
         the gate) so it can only stamp or refuse a verified dispatch.
 
@@ -883,9 +905,13 @@ class BrokerRouter:
         """
         guard = self._algo_tag_guard
         caps = getattr(self._adapters[adapter_id], "capabilities", None)
+        supports_algo_tag = bool(
+            getattr(caps, "algo_tag_required", False)
+            or getattr(caps, "algo_tag_supported", False)
+        )
         if (
             guard is None
-            or not getattr(caps, "algo_tag_required", False)
+            or not supports_algo_tag
             or guard.algo_id_for(adapter_id) is None
         ):
             session.algo_id = ""
@@ -1173,6 +1199,13 @@ class BrokerRouter:
                 )
                 invoked = [False]
                 try:
+                    if emergency_intent:
+                        await _preflight_emergency_write(
+                            self._adapters[adapter_id],
+                            session,
+                            verb="cancel_order",
+                            payload=signed_order,
+                        )
                     result = await _invoke_adapter(
                         self._adapters[adapter_id].cancel_order,
                         self._invocation_callback(
@@ -1288,6 +1321,13 @@ class BrokerRouter:
                 )
                 invoked = [False]
                 try:
+                    if emergency_intent:
+                        await _preflight_emergency_write(
+                            self._adapters[adapter_id],
+                            session,
+                            verb=verb,
+                            payload=signed_payload,
+                        )
                     result = await dispatch(
                         self._adapters[adapter_id],
                         session,

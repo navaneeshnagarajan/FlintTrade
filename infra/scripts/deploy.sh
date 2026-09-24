@@ -19,6 +19,7 @@ REPO_DIR="$(flinttrade_production_prefix)"
 flinttrade_assert_safe_install_dir "$REPO_DIR"
 SERVICE_NAME="flinttrade"
 VENV_PIP="$REPO_DIR/.venv/bin/pip"
+VENV_PYTHON="$REPO_DIR/.venv/bin/python"
 
 echo "=== FlintTrade Production Deploy ==="
 echo "Time: $(date '+%Y-%m-%d %H:%M:%S IST')"
@@ -55,6 +56,8 @@ if [ ! -x "$VENV_PIP" ]; then
     exit 1
 fi
 sudo "$VENV_PIP" install --require-hashes -r requirements.lock -q
+echo "Installing and attesting pinned broker SDKs..."
+sudo "$VENV_PYTHON" "$REPO_DIR/scripts/broker_sdk_environment.py" repair
 
 echo "Rebuilding the terminal..."
 flinttrade_build_terminal "$REPO_DIR"

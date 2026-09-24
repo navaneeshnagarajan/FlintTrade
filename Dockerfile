@@ -27,8 +27,13 @@ WORKDIR /app
 # SC-07: hash-verified install only — requirements.lock is the uv-exported,
 # fully-hashed runtime lockfile; --require-hashes refuses any unpinned/tampered
 # wheel. (requirements.txt is the loose dev input, never installed in prod.)
-COPY requirements.lock .
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+COPY requirements.lock broker-sdk-build.lock brokers.lock ./
+COPY scripts/broker_sdk_environment.py scripts/broker_sdk_environment.py
 RUN uv pip install --system --no-cache --require-hashes -r requirements.lock
+RUN python scripts/broker_sdk_environment.py repair
 
 # ---------------------------------------------------------------------------
 # Stage 2: Runtime — minimal image with only what we need
@@ -51,6 +56,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY packages/ packages/
+COPY VERSION pyproject.toml pnpm-workspace.yaml brokers.lock ./
 COPY .env.example .env.example
 
 # Copy entrypoint script
