@@ -9,6 +9,7 @@ synthetic frames shaped per the pinned v3 SDK.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from decimal import Decimal
 
 import pytest
@@ -25,7 +26,9 @@ from flinttrade_gateway.brokers.kotakneo_mapping import (
     ensure_ok,
     from_kotak_depth,
     from_kotak_funds,
+    from_kotak_historical,
     from_kotak_margin,
+    from_kotak_option_chain,
     from_kotak_order,
     from_kotak_position,
     from_kotak_scrip_master,
@@ -34,14 +37,66 @@ from flinttrade_gateway.brokers.kotakneo_mapping import (
     order_history_rows,
     require_write_success,
     subscription_flags,
+    to_historical_request,
     to_limits_params,
     to_margin_params,
     to_modify_order_params,
+    to_option_chain_request,
     to_place_order_params,
     to_quote_tokens,
 )
 
 pytestmark = pytest.mark.unit
+
+
+def _official_option_chain_response() -> dict:
+    """Return the immutable v3.0.7 option-chain sample shape."""
+    return {
+        "data": {
+            "common_data": {
+                "mktLot": "65",
+                "multiplier": "1",
+                "unlSymbol": "NIFTY",
+                "exSeg": "nse_fo",
+                "expiryDt": "2026-06-23",
+            },
+            "call": [
+                {
+                    "instrument": {
+                        "neoSymbol": "nse_fo|71472",
+                        "symbol": "NIFTY26JUN22250CE",
+                        "optionType": "CE",
+                        "strikePrice": "22250",
+                        "moneyness": "ATM",
+                    },
+                    "quote": {"ltp": "166.7500", "volume": 225431505},
+                    "openInterest": {"current": 10715645},
+                }
+            ],
+            "put": [
+                {
+                    "instrument": {
+                        "neoSymbol": "nse_fo|71473",
+                        "symbol": "NIFTY26JUN22250PE",
+                        "optionType": "PE",
+                        "strikePrice": "22250.0",
+                        "moneyness": "ATM",
+                    },
+                    "quote": {"ltp": "99.25", "volume": 100},
+                    "openInterest": {"current": 0},
+                },
+                {
+                    "instrument": {
+                        "neoSymbol": "nse_fo|71475",
+                        "symbol": "NIFTY26JUN22300PE",
+                        "optionType": "PE",
+                        "strikePrice": "22300",
+                    },
+                    "quote": {},
+                },
+            ],
+        }
+    }
 
 
 # Conservative wire bounds: these ordinary Indian-market examples must remain
@@ -1548,3 +1603,536 @@ def test_decode_order_feed_acks_and_garbage_are_none():
     assert decode_kotak_order_feed("not-json") is None
     assert decode_kotak_order_feed(None) is None
     assert decode_kotak_order_feed({"hello": "world"}) is None
+
+
+# ---------------------------------------------------------------------------
+# v3 historical candles
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("requested", "sdk_label"),
+    [
+        ("1m", "1min"),
+        ("3min", "3min"),
+        ("5", "5min"),
+        ("10m", "10min"),
+        ("15min", "15min"),
+        ("30m", "30min"),
+        ("60min", "60min"),
+        ("1h", "60min"),
+        ("1D", "D"),
+        ("D", "D"),
+        ("1W", "W"),
+        ("W", "W"),
+    ],
+)
+def test_historical_request_maps_supported_labels_without_changing_identity(requested, sdk_label):
+    mapped = to_historical_request(
+        {
+            "symbol": "NIFTY",
+            "exchange": "NSE_INDEX",
+            "interval": requested,
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-20",
+        }
+    )
+
+    assert mapped == {
+        "symbol": "NIFTY",
+        "exchange": "NSE_INDEX",
+        "interval": requested,
+        "sdk_interval": sdk_label,
+        "from_date": "2026-09-01",
+        "to_date": "2026-09-20",
+        "neosymbol": None,
+    }
+
+
+def test_historical_request_treats_explicit_null_neosymbol_as_omitted():
+    mapped = to_historical_request(
+        {
+            "symbol": "NIFTY",
+            "exchange": "NSE_INDEX",
+            "interval": "1D",
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-20",
+            "neosymbol": None,
+        }
+    )
+    assert mapped["neosymbol"] is None
+
+
+@pytest.mark.parametrize(
+    ("start_key", "end_key"),
+    [("start_date", "end_date"), ("from_date", "to_date"), ("start", "end"), ("from", "to")],
+)
+def test_historical_request_accepts_each_documented_date_alias_pair(start_key, end_key):
+    mapped = to_historical_request(
+        {
+            "symbol": "NIFTY",
+            "exchange": "NSE",
+            "interval": "D",
+            start_key: "2026-01-01",
+            end_key: "2026-06-29",
+        }
+    )
+    assert mapped["from_date"] == "2026-01-01"
+    assert mapped["to_date"] == "2026-06-29"
+
+
+def test_historical_request_scans_all_same_value_date_aliases():
+    mapped = to_historical_request(
+        {
+            "symbol": "NIFTY",
+            "exchange": "NSE",
+            "interval": "D",
+            "start_date": "2026-01-01",
+            "from_date": "2026-01-01",
+            "start": "2026-01-01",
+            "from": "2026-01-01",
+            "end_date": "2026-01-02",
+            "to_date": "2026-01-02",
+            "end": "2026-01-02",
+            "to": "2026-01-02",
+        }
+    )
+    assert mapped["from_date"] == "2026-01-01"
+    assert mapped["to_date"] == "2026-01-02"
+
+
+def test_historical_request_rejects_a_malformed_secondary_alias_even_when_primary_is_valid():
+    with pytest.raises(KotakNeoMappingError):
+        to_historical_request(
+            {
+                "symbol": "NIFTY",
+                "exchange": "NSE",
+                "interval": "D",
+                "start_date": "2026-01-01",
+                "from_date": object(),
+                "end_date": "2026-01-02",
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"from_date": "2026-09-02"},
+        {"to_date": "2026-09-19"},
+        {"interval": "2m"},
+        {"start_date": "2026-02-30"},
+        {"end_date": "2026-09-01", "start_date": "2026-09-20"},
+        {"end_date": "2026-10-01"},  # 31 inclusive intraday days
+        {"interval": "D", "start_date": "2026-01-01", "end_date": "2026-06-30"},  # 181 inclusive
+        {"exchange": "MCX"},
+    ],
+)
+def test_historical_request_rejects_conflicts_invalid_ranges_and_unsupported_values(updates):
+    request = {
+        "symbol": "NIFTY",
+        "exchange": "NSE",
+        "interval": "1m",
+        "start_date": "2026-09-01",
+        "end_date": "2026-09-30",
+    }
+    request.update(updates)
+    if "from_date" in updates:
+        request["start_date"] = "2026-09-01"
+    if "to_date" in updates:
+        request["end_date"] = "2026-09-20"
+    with pytest.raises(KotakNeoMappingError):
+        to_historical_request(request)
+
+
+def test_historical_response_maps_exact_seven_column_v3_rows():
+    response = {
+        "status": "success",
+        "interval": "1min",
+        "data": {
+            "candles": [
+                ["2026-08-20T09:15:00+0530", 12009.9, 12019.35, 12001.25, 12001.5, 163275, None],
+                ["2026-08-20T09:16:00+05:30", "12001", "12003", "11998.25", "12001", "0", 0],
+            ]
+        },
+    }
+
+    assert from_kotak_historical(response, expected_interval="1min") == [
+        {
+            "timestamp": "2026-08-20T09:15:00+0530",
+            "open": 12009.9,
+            "high": 12019.35,
+            "low": 12001.25,
+            "close": 12001.5,
+            "volume": 163275,
+        },
+        {
+            "timestamp": "2026-08-20T09:16:00+05:30",
+            "open": 12001.0,
+            "high": 12003.0,
+            "low": 11998.25,
+            "close": 12001.0,
+            "volume": 0,
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, 10],
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, 10, None, "extra"],
+        ["not-a-timestamp", 1, 2, 0.5, 1.5, 10, None],
+        ["2026-08-20T09:15:00+0530", True, 2, 0.5, 1.5, 10, None],
+        ["2026-08-20T09:15:00+0530", 1, float("inf"), 0.5, 1.5, 10, None],
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, -1, None],
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, 1.5, None],
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, True, None],
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, 10, -1],
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, 10, 1.5],
+    ],
+)
+def test_historical_response_rejects_malformed_or_invented_candle_values(row):
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_historical(
+            {"status": "success", "interval": "1min", "data": {"candles": [row]}},
+            expected_interval="1min",
+        )
+
+
+def test_historical_response_rejects_a_conflicting_interval_identity():
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_historical(
+            {
+                "status": "success",
+                "interval": "5min",
+                "data": {"candles": [["2026-08-20T09:15:00+05:30", 1, 2, 0.5, 1.5, 10, None]]},
+            },
+            expected_interval="1min",
+        )
+
+
+# ---------------------------------------------------------------------------
+# v3 option chain
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("exchange", "sdk_exchange"),
+    [
+        ("NSE", "nse_fo"),
+        ("NSE_INDEX", "nse_fo"),
+        ("NFO", "nse_fo"),
+        ("BSE", "bse_fo"),
+        ("BSE_INDEX", "bse_fo"),
+        ("BFO", "bse_fo"),
+        ("MCX", "mcx_fo"),
+    ],
+)
+def test_option_request_uses_narrow_derivative_segment_map(exchange, sdk_exchange):
+    mapped = to_option_chain_request(
+        {
+            "underlying": "NIFTY",
+            "exchange": exchange,
+            "expiry": "2026-06-23",
+            "instrument_type": "option",
+            "count": 40,
+        }
+    )
+    assert mapped == {
+        "underlying": "NIFTY",
+        "exchange": exchange,
+        "sdk_exchange": sdk_exchange,
+        "expiry": "2026-06-23",
+        "instrument_type": "option",
+        "count": 40,
+    }
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"exchange": "CDS"},
+        {"exchange": "UNKNOWN"},
+        {"instrument_type": "fut"},
+        {"instrument_type": "future"},
+        {"expiry": ""},
+        {"expiry": "23-06-2026"},
+        {"expiry": "2026-02-30"},
+        {"count": True},
+        {"count": 0},
+        {"count": -10},
+        {"count": 15},
+    ],
+)
+def test_option_request_rejects_unknown_segments_futures_and_invalid_count(updates):
+    request = {"underlying": "NIFTY", "exchange": "NFO", "instrument_type": "option", "count": 40}
+    request.update(updates)
+    with pytest.raises(KotakNeoMappingError):
+        to_option_chain_request(request)
+
+
+def test_option_request_defaults_the_optional_sdk_fields_to_an_option_chain():
+    mapped = to_option_chain_request({"symbol": "NIFTY", "exchange": "NSE_INDEX"})
+    assert mapped["underlying"] == "NIFTY"
+    assert mapped["instrument_type"] == "option"
+    assert mapped["expiry"] is None
+    assert mapped["count"] is None
+
+
+def test_option_request_treats_explicit_null_sdk_defaults_as_omitted():
+    mapped = to_option_chain_request(
+        {
+            "symbol": "NIFTY",
+            "exchange": "NSE_INDEX",
+            "expiry": None,
+            "expiry_date": None,
+            "instrument_type": None,
+        }
+    )
+    assert mapped["instrument_type"] == "option"
+    assert mapped["expiry"] is None
+
+
+def test_option_request_ignores_null_expiry_alias_when_another_alias_is_supplied():
+    mapped = to_option_chain_request(
+        {
+            "symbol": "NIFTY",
+            "exchange": "NSE_INDEX",
+            "expiry": None,
+            "expiry_date": "2026-06-23",
+        }
+    )
+    assert mapped["expiry"] == "2026-06-23"
+
+
+def test_option_request_ignores_null_underlying_alias_when_symbol_is_supplied():
+    mapped = to_option_chain_request(
+        {
+            "underlying": None,
+            "symbol": "NIFTY",
+            "exchange": "NSE_INDEX",
+        }
+    )
+    assert mapped["underlying"] == "NIFTY"
+
+
+def test_option_request_rejects_only_null_underlying_aliases():
+    with pytest.raises(KotakNeoMappingError):
+        to_option_chain_request({"underlying": None, "symbol": None, "exchange": "NSE_INDEX"})
+
+
+def test_option_request_rejects_conflicting_underlying_aliases():
+    with pytest.raises(KotakNeoMappingError):
+        to_option_chain_request({"underlying": "NIFTY", "symbol": "BANKNIFTY", "exchange": "NFO"})
+
+
+def test_option_response_merges_legs_by_numeric_strike_and_maps_only_observed_fields():
+    mapped = from_kotak_option_chain(
+        _official_option_chain_response(),
+        underlying="NIFTY",
+        exchange="NSE_INDEX",
+        sdk_exchange="nse_fo",
+        requested_expiry="2026-06-23",
+    )
+
+    assert mapped == {
+        "underlying": "NIFTY",
+        "exchange": "NSE_INDEX",
+        "expiry": "2026-06-23",
+        "expiry_date": "2026-06-23",
+        "strikes": [
+            {
+                "strike_price": 22250.0,
+                "ce_instrument_id": "nse_fo|71472",
+                "ce_ltp": 166.75,
+                "ce_volume": 225431505,
+                "ce_oi": 10715645,
+                "pe_instrument_id": "nse_fo|71473",
+                "pe_ltp": 99.25,
+                "pe_volume": 100,
+                "pe_oi": 0,
+            },
+            {"strike_price": 22300.0, "pe_instrument_id": "nse_fo|71475"},
+        ],
+    }
+    assert "underlying_key" not in mapped
+    assert "spot_price" not in mapped
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("common_data", "unlSymbol"), "BANKNIFTY"),
+        (("common_data", "exSeg"), "bse_fo"),
+        (("common_data", "expiryDt"), "2026-06-30"),
+        (("common_data", "expiryDt"), None),
+        (("common_data", "expiryDt"), ""),
+        (("call", 0, "instrument", "optionType"), "PE"),
+        (("call", 0, "instrument", "neoSymbol"), "bse_fo|71472"),
+        (("call", 0, "instrument", "neoSymbol"), "nse_fo|0"),
+        (("call", 0, "instrument", "strikePrice"), 0),
+        (("call", 0, "instrument", "strikePrice"), float("inf")),
+    ],
+)
+def test_option_response_rejects_common_and_leg_identity_mismatches(path, value):
+    response = _official_option_chain_response()
+    target = response["data"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+def test_option_response_rejects_duplicate_numeric_strike_within_one_side():
+    response = _official_option_chain_response()
+    duplicate = deepcopy(response["data"]["call"][0])
+    duplicate["instrument"]["neoSymbol"] = "nse_fo|99999"
+    duplicate["instrument"]["strikePrice"] = "22250.00"
+    response["data"]["call"].append(duplicate)
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+@pytest.mark.parametrize(
+    ("container", "field", "value"),
+    [
+        ("quote", "ltp", True),
+        ("quote", "ltp", float("nan")),
+        ("quote", "volume", -1),
+        ("quote", "volume", 1.5),
+        ("openInterest", "current", -1),
+        ("openInterest", "current", 1.5),
+        ("openInterest", "current", True),
+    ],
+)
+def test_option_response_rejects_invalid_observed_market_values(container, field, value):
+    response = _official_option_chain_response()
+    response["data"]["call"][0][container][field] = value
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+def test_option_response_rejects_duplicate_instrument_ids_across_sides():
+    response = _official_option_chain_response()
+    response["data"]["put"][0]["instrument"]["neoSymbol"] = "nse_fo|71472"
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+def test_option_response_rejects_strikes_that_collide_when_published_as_float():
+    response = _official_option_chain_response()
+    response["data"]["call"][0]["instrument"]["strikePrice"] = "9007199254740992"
+    response["data"]["put"][0]["instrument"]["strikePrice"] = "9007199254740993"
+    response["data"]["put"] = response["data"]["put"][:1]
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+def test_option_response_rejects_a_single_strike_that_changes_when_published_as_float():
+    response = _official_option_chain_response()
+    response["data"]["call"][0]["instrument"]["strikePrice"] = "9007199254740993"
+    response["data"]["put"] = []
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+def test_market_data_mapping_never_invokes_untrusted_conversion_hooks():
+    class Hostile:
+        def __str__(self):
+            raise AssertionError("__str__ must not run")
+
+        def __float__(self):
+            raise AssertionError("__float__ must not run")
+
+        def __bool__(self):
+            raise AssertionError("__bool__ must not run")
+
+    hostile = Hostile()
+    with pytest.raises(KotakNeoMappingError):
+        to_historical_request(
+            {
+                "symbol": hostile,
+                "exchange": "NSE",
+                "interval": "D",
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-02",
+            }
+        )
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_historical(
+            {
+                "status": "success",
+                "interval": "D",
+                "data": {"candles": [["2026-01-01T00:00:00+05:30", hostile, 2, 1, 1.5, 10, None]]},
+            },
+            expected_interval="D",
+        )
+    response = _official_option_chain_response()
+    response["data"]["call"][0]["instrument"]["strikePrice"] = hostile
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("１２３", id="unicode-digits"),
+        pytest.param("\ud800", id="surrogate"),
+        pytest.param(10**5000, id="huge-integer"),
+    ],
+)
+def test_market_data_rejects_non_ascii_surrogate_and_unbounded_numeric_values(value):
+    response = _official_option_chain_response()
+    response["data"]["call"][0]["instrument"]["strikePrice"] = value
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )

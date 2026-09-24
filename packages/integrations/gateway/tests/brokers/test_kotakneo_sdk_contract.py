@@ -593,6 +593,204 @@ def test_read_envelope_allows_main_track_rate_limit_metadata():
     assert validate_read_envelope(response, operation="order_report") is response
 
 
+def _official_option_envelope() -> dict:
+    return {
+        "data": {
+            "common_data": {
+                "mktLot": "65",
+                "multiplier": "1",
+                "unlSymbol": "NIFTY",
+                "exSeg": "nse_fo",
+                "expiryDt": "2026-06-23",
+            },
+            "call": [{"instrument": {"neoSymbol": "nse_fo|71472"}}],
+            "put": [],
+        }
+    }
+
+
+def test_read_envelope_accepts_v307_data_only_option_chain_shape():
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    response = _official_option_envelope()
+    assert validate_read_envelope(response, operation="option_chain") is response
+
+
+def test_read_envelope_accepts_main_option_chain_rate_limit_metadata():
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    response = _official_option_envelope()
+    response["rateLimit"] = {
+        "Retry-After": "60",
+        "X-RateLimit-Limit": "100",
+        "X-RateLimit-Remaining": "99",
+        "X-RateLimit-Reset": "1720000000",
+    }
+    assert validate_read_envelope(response, operation="option_chain") is response
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda response: response.update({"unexpected": "field"}),
+        lambda response: response.update({"status": "success"}),
+        lambda response: response.update({"stat": "Ok"}),
+        lambda response: response.update({"status": "success", "token": "secret"}),
+        lambda response: response.update({"rateLimit": {"Retry-After": 60}}),
+        lambda response: response.update({"rateLimit": {"Retry-After": "\ud800"}}),
+        lambda response: response["data"].update({"common_data": []}),
+        lambda response: response["data"]["common_data"].update({"unlSymbol": ""}),
+        lambda response: response["data"]["common_data"].update({"exSeg": True}),
+        lambda response: response["data"]["common_data"].update({"expiryDt": ""}),
+        lambda response: response["data"].update({"call": {}}),
+        lambda response: response["data"].update({"put": [None]}),
+        lambda response: response["data"].update({"fut": []}),
+    ],
+)
+def test_read_envelope_rejects_malformed_data_only_option_chain_shape(mutate):
+    from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    response = _official_option_envelope()
+    mutate(response)
+    with pytest.raises(BrokerReadResponseInvalid):
+        validate_read_envelope(response, operation="option_chain")
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        {"status": "error", "message": "synthetic failure"},
+        {"stat": "Not_Ok", "emsg": "synthetic failure"},
+        {"error": [{"code": "500", "message": "synthetic failure"}]},
+    ],
+)
+def test_read_envelope_never_accepts_plausible_option_data_with_failure_evidence(evidence):
+    from flinttrade_core.exceptions import BrokerInternal
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    response = _official_option_envelope()
+    response.update(evidence)
+    with pytest.raises(BrokerInternal):
+        validate_read_envelope(response, operation="option_chain")
+
+
+@pytest.mark.parametrize(("retry_key", "retry_value"), [("Retry-After", "60"), ("retryAfter", 7)])
+def test_main_shaped_top_level_429_uses_official_and_compatibility_retry_metadata(retry_key, retry_value):
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    response = {
+        "status": "error",
+        "code": 429,
+        "message": "Too many requests",
+        "rateLimit": {retry_key: retry_value},
+    }
+    with pytest.raises(RateLimitError) as raised:
+        validate_read_envelope(response, operation="option_chain")
+    assert raised.value.broker_code == "429"
+    assert raised.value.retry_after == float(retry_value)
+
+
+def test_rate_limit_retry_after_official_spelling_takes_precedence():
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    response = {
+        "status": "error",
+        "code": 429,
+        "message": "Too many requests",
+        "rateLimit": {"Retry-After": "60", "retryAfter": 7},
+    }
+    with pytest.raises(RateLimitError) as raised:
+        validate_read_envelope(response, operation="option_chain")
+    assert raised.value.retry_after == 60.0
+
+
+def test_rate_limit_metadata_dict_subclass_cannot_execute_get_hooks():
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    class HostileMetadata(dict):
+        def get(self, *_args, **_kwargs):
+            raise RuntimeError("provider metadata hook executed")
+
+    response = {
+        "status": "error",
+        "code": 429,
+        "message": "Too many requests",
+        "rateLimit": HostileMetadata({"Retry-After": "60"}),
+    }
+    with pytest.raises(RateLimitError) as raised:
+        validate_read_envelope(response, operation="option_chain")
+    assert raised.value.retry_after == 0
+
+
+@pytest.mark.parametrize(
+    ("top_level_code", "expected_error"),
+    [(429, RateLimitError), (403, SessionExpired)],
+)
+def test_top_level_error_code_is_authoritative_over_conflicting_embedded_code(top_level_code, expected_error):
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    response = {
+        "code": top_level_code,
+        "error": {"code": 500, "message": "conflicting nested detail"},
+        "rateLimit": {"Retry-After": "3"},
+    }
+    with pytest.raises(expected_error) as raised:
+        validate_read_envelope(response, operation="option_chain")
+    assert raised.value.broker_code == str(top_level_code)
+    if top_level_code == 429:
+        assert raised.value.retry_after == 3.0
+
+
+def test_success_transport_stcode_does_not_hide_nested_provider_error_code():
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    response = {
+        "stCode": 200,
+        "error": {"code": 401, "message": "session expired"},
+    }
+    with pytest.raises(SessionExpired) as raised:
+        validate_read_envelope(response, operation="positions")
+    assert raised.value.broker_code == "401"
+
+
+@pytest.mark.parametrize(
+    ("nested_code", "expected_error"),
+    [(401, SessionExpired), (500, BrokerInternal)],
+)
+def test_benign_top_level_code_does_not_hide_nested_provider_error_code(nested_code, expected_error):
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    response = {
+        "code": 200,
+        "error": {"code": nested_code, "message": "nested provider failure"},
+    }
+    with pytest.raises(expected_error) as raised:
+        validate_read_envelope(response, operation="positions")
+    assert raised.value.broker_code == str(nested_code)
+
+
+def test_stcode_int_subclass_cannot_execute_comparison_hooks():
+    from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    class HostileStatusCode(int):
+        def __ge__(self, _other):
+            raise RuntimeError("provider status comparison hook executed")
+
+    response = {"status": "error", "stCode": HostileStatusCode(500), "message": "synthetic"}
+    with pytest.raises(BrokerReadResponseInvalid):
+        validate_read_envelope(response, operation="positions")
+
+
+def test_top_level_string_http_error_code_is_a_declared_provider_failure():
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    with pytest.raises(BrokerInternal) as raised:
+        validate_read_envelope({"code": "503", "message": "synthetic"}, operation="positions")
+    assert raised.value.broker_code == "503"
+
+
 def test_real_sdk_session_preserves_malformed_read_taxonomy():
     from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
     from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession

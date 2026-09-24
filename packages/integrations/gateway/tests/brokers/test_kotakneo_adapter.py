@@ -369,6 +369,10 @@ def test_v3_cancel_facade_has_no_removed_trading_symbol_argument():
 
 
 def test_capabilities_remove_v2_order_and_streaming_claims() -> None:
+    assert KOTAKNEO_CAPABILITIES.historical_intraday_intervals_minutes == [1, 3, 5, 10, 15, 30, 60]
+    assert KOTAKNEO_CAPABILITIES.historical_calendar_intervals == ["1D", "1W"]
+    assert KOTAKNEO_CAPABILITIES.historical_max_lookback_days_intraday is None
+    assert KOTAKNEO_CAPABILITIES.historical_max_lookback_days_daily is None
     assert KOTAKNEO_CAPABILITIES.streaming_supported is True
     assert KOTAKNEO_CAPABILITIES.streaming_runtime_ready is False
     assert KOTAKNEO_CAPABILITIES.streaming_max_connections_per_user is None

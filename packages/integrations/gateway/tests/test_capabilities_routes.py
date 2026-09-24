@@ -207,6 +207,11 @@ class TestCapabilitiesRoute:
         assert caps["bracket_order_native"] is False
         assert caps["cover_order_native"] is False
         assert caps["gtt_native"] is False
+        assert caps["historical_intraday_intervals_minutes"] == [1, 3, 5, 10, 15, 30, 60]
+        assert caps["historical_calendar_intervals"] == ["1D", "1W"]
+        assert caps["historical_intervals"] == ["1m", "3m", "5m", "10m", "15m", "30m", "1h", "1D", "1W"]
+        assert caps["historical_max_lookback_days_intraday"] is None
+        assert caps["historical_max_lookback_days_daily"] is None
 
     def test_mcp_catalogue_lists_hosted_broker_mcp_servers(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/api/v1/broker/mcp")

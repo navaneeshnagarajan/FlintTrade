@@ -60,13 +60,15 @@ def test_kotak_neo_wins_low_cost_execution() -> None:
     assert "zero execution brokerage" in top.rationale
 
 
-def test_kotak_neo_v3_has_option_chain_but_no_lookback_history() -> None:
-    # kotakneoapi 3.x adds option chain. Historical candles exist but we do not
-    # advertise a lookback/interval menu yet, so HISTORICAL_DATA stays 0.
+def test_kotak_neo_v3_advertises_option_chain_and_exact_history_intervals() -> None:
+    # Kotak documents per-request range caps, not total retention. Advertise the
+    # exact interval menu while leaving total lookback unset.
     options = {r.broker_id: r for r in recommend(BrokerUseCase.OPTIONS_ANALYTICS)}
     history = {r.broker_id: r for r in recommend(BrokerUseCase.HISTORICAL_DATA)}
     assert options["kotakneo"].raw_score > 0.0
-    assert history["kotakneo"].raw_score == 0.0
+    assert history["kotakneo"].raw_score == 14.0
+    assert "7 intraday intervals" in history["kotakneo"].rationale
+    assert "lookback" not in history["kotakneo"].rationale
 
 
 def test_dhan_wins_options_history() -> None:
@@ -195,12 +197,12 @@ def test_historical_data_full_ranking_with_indmoney() -> None:
     #   dhan (5 intervals + 1825-day lookback = 70.83)
     #   > groww (5 intervals + 1080-day lookback = 46.0)
     #   > indmoney (12 intervals * 2 = 24.0; lookback honestly unset)
-    #   > upstox (5 intervals + 31-day lookback = 11.03)
-    #   > kotakneo (no candle API = 0.0).
+    #   > kotakneo (7 intervals * 2 = 14.0; total lookback honestly unset)
+    #   > upstox (5 intervals + 31-day lookback = 11.03).
     # Groww's captured docs advertise broad intraday history, but Dhan's real
     # ~5-year intraday depth keeps it #1 — the doc-honest outcome.
     ranked_ids = [r.broker_id for r in recommend(BrokerUseCase.HISTORICAL_DATA)]
-    assert ranked_ids == ["dhan", "groww", "indmoney", "upstox", "kotakneo"]
+    assert ranked_ids == ["dhan", "groww", "indmoney", "kotakneo", "upstox"]
 
 
 def test_indmoney_scores_zero_for_options() -> None:

@@ -174,6 +174,8 @@ KOTAKNEO_CAPABILITIES = Capabilities(
     brokerage_free=True,
     brokerage_note="Zero brokerage on supported API order execution; only statutory charges apply.",
     # kotakneoapi 3.x adds historical candles and option chain. HS feed retired.
+    historical_intraday_intervals_minutes=[1, 3, 5, 10, 15, 30, 60],
+    historical_calendar_intervals=["1D", "1W"],
     option_chain_supported=True,
     streaming_supported=True,
     multi_quote_supported=True,
@@ -1535,78 +1537,59 @@ class KotakNeoAdapter(BrokerAdapter):
         """kotakneoapi 3.x historical candles (``historical_data``)."""
         from flinttrade_core.models import OHLCV, Candles  # noqa: PLC0415
 
-        symbol = str(req.get("symbol") or "")
-        exchange = str(req.get("exchange") or "NSE")
-        interval = str(req.get("interval") or "D")
-        from_date = str(req.get("from_date") or req.get("from") or "")
-        to_date = str(req.get("to_date") or req.get("to") or "")
-        token = await self._resolve_token(session, symbol, exchange)
-        seg = M.EXCHANGE_TO_KOTAK.get(exchange.upper(), exchange.lower())
-        neosymbol = str(req.get("neosymbol") or f"{seg}|{token}")
-        resp = await self._call(
-            self._client(session).historical_data, neosymbol, interval, from_date, to_date
-        )
-        rows = resp.get("data", resp) if isinstance(resp, dict) else resp
-        if not isinstance(rows, list):
-            raise BrokerReadResponseInvalid from None
-        bars: list[OHLCV] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                raise BrokerReadResponseInvalid from None
-            bars.append(
-                OHLCV(
-                    timestamp=str(row.get("timestamp") or row.get("datetime") or row.get("date") or ""),
-                    open=float(row.get("open") or 0),
-                    high=float(row.get("high") or 0),
-                    low=float(row.get("low") or 0),
-                    close=float(row.get("close") or 0),
-                    volume=int(row.get("volume") or 0),
-                )
+        try:
+            request = M.to_historical_request(req)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
+
+        token = await self._resolve_token(session, request["symbol"], request["exchange"])
+        segment = M.EXCHANGE_TO_KOTAK[request["exchange"]]
+        resolved_neosymbol = f"{segment}|{token}"
+        supplied_neosymbol = request["neosymbol"]
+        if supplied_neosymbol is not None and supplied_neosymbol != resolved_neosymbol:
+            raise UnsupportedCapabilityError(
+                "Kotak Neo neosymbol differs from the resolved instrument identity",
+                broker_id="kotakneo",
             )
-        return Candles(symbol=symbol, exchange=exchange, interval=interval, bars=bars)
+        resp = await self._call(
+            self._client(session).historical_data,
+            resolved_neosymbol,
+            request["sdk_interval"],
+            request["from_date"],
+            request["to_date"],
+        )
+        rows = M.from_kotak_historical(resp, expected_interval=request["sdk_interval"])
+        return Candles(
+            symbol=request["symbol"],
+            exchange=request["exchange"],
+            interval=request["interval"],
+            bars=[OHLCV(**row) for row in rows],
+        )
 
     async def option_chain(self, session: Session, req: dict) -> OptionChain:
         """kotakneoapi 3.x option chain (REST). Neo has no Practice sandbox."""
         from flinttrade_core.models import OptionChain, OptionChainStrike  # noqa: PLC0415
 
-        underlying = str(req.get("underlying") or req.get("symbol") or "")
-        exchange = str(req.get("exchange") or "NFO")
-        expiry = req.get("expiry")
-        seg = M.EXCHANGE_TO_KOTAK.get(str(exchange).upper(), str(exchange).lower())
+        try:
+            request = M.to_option_chain_request(req)
+        except M.KotakNeoMappingError as exc:
+            raise UnsupportedCapabilityError(str(exc), broker_id="kotakneo") from None
         resp = await self._call(
             self._client(session).option_chain,
-            seg,
-            underlying,
-            expiry,
-            req.get("instrument_type"),
-            req.get("count"),
+            request["sdk_exchange"],
+            request["underlying"],
+            request["expiry"],
+            request["instrument_type"],
+            request["count"],
         )
-        payload = resp.get("data", resp) if isinstance(resp, dict) else resp
-        rows = payload if isinstance(payload, list) else (
-            payload.get("strikes", []) if isinstance(payload, dict) else []
+        mapped = M.from_kotak_option_chain(
+            resp,
+            underlying=request["underlying"],
+            exchange=request["exchange"],
+            sdk_exchange=request["sdk_exchange"],
+            requested_expiry=request["expiry"],
         )
-        strikes: list[OptionChainStrike] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                raise BrokerReadResponseInvalid from None
-            ce = row.get("ce") if isinstance(row.get("ce"), dict) else {}
-            pe = row.get("pe") if isinstance(row.get("pe"), dict) else {}
-            strikes.append(
-                OptionChainStrike(
-                    strike_price=float(row.get("strike_price") or row.get("strike") or 0),
-                    ce_ltp=float(ce.get("ltp") or 0),
-                    pe_ltp=float(pe.get("ltp") or 0),
-                )
-            )
-        expiry_s = str(expiry or (payload.get("expiry") if isinstance(payload, dict) else "") or "")
-        return OptionChain(
-            underlying=underlying,
-            underlying_key=underlying,
-            exchange=exchange,
-            expiry=expiry_s,
-            expiry_date=expiry_s,
-            strikes=strikes,
-        )
+        return OptionChain(**{**mapped, "strikes": [OptionChainStrike(**row) for row in mapped["strikes"]]})
 
     # ---------- market data: streaming ----------
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -74,6 +75,49 @@ KOTAK_TO_SIDE = {"B": "BUY", "S": "SELL"}
 
 # Order validity codes in the current public docs and pinned SDK validation.
 VALIDITY_ALLOWED = frozenset({"DAY", "IOC"})
+
+HISTORICAL_INTERVALS = {
+    "1": "1min",
+    "1m": "1min",
+    "1min": "1min",
+    "3": "3min",
+    "3m": "3min",
+    "3min": "3min",
+    "5": "5min",
+    "5m": "5min",
+    "5min": "5min",
+    "10": "10min",
+    "10m": "10min",
+    "10min": "10min",
+    "15": "15min",
+    "15m": "15min",
+    "15min": "15min",
+    "30": "30min",
+    "30m": "30min",
+    "30min": "30min",
+    "60": "60min",
+    "60m": "60min",
+    "60min": "60min",
+    "1h": "60min",
+    "d": "D",
+    "1d": "D",
+    "day": "D",
+    "daily": "D",
+    "w": "W",
+    "1w": "W",
+    "week": "W",
+    "weekly": "W",
+}
+
+OPTION_CHAIN_EXCHANGE_TO_KOTAK = {
+    "NSE": "nse_fo",
+    "NSE_INDEX": "nse_fo",
+    "NFO": "nse_fo",
+    "BSE": "bse_fo",
+    "BSE_INDEX": "bse_fo",
+    "BFO": "bse_fo",
+    "MCX": "mcx_fo",
+}
 
 # Keep every broker-facing Decimal cheap to validate and bounded when rendered
 # as fixed-point text. Sixty-four significant/integer digits and sixteen
@@ -467,6 +511,368 @@ def canonical_instrument_token(value: object) -> str:
     ):
         raise KotakNeoMappingError("Kotak Neo instrument token is not canonical")
     return token
+
+
+def _request_record(value: object) -> dict[str, Any]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise KotakNeoMappingError("Kotak Neo market-data request must be an object")
+    return value
+
+
+def _request_identity(value: object, *, label: str) -> str:
+    if type(value) is not str:
+        raise KotakNeoMappingError(f"Kotak Neo {label} must be canonical text")
+    try:
+        value.encode("utf-8")
+    except UnicodeError:
+        raise KotakNeoMappingError(f"Kotak Neo {label} must be canonical text") from None
+    if (
+        not value
+        or len(value) > 256
+        or value != value.strip()
+        or not value.isprintable()
+        or "\x00" in value
+    ):
+        raise KotakNeoMappingError(f"Kotak Neo {label} must be canonical text")
+    return value
+
+
+def _request_alias(
+    request: dict[str, Any],
+    names: tuple[str, ...],
+    *,
+    label: str,
+    required: bool,
+) -> str | None:
+    supplied: list[str] = []
+    for name in names:
+        if name not in request:
+            continue
+        supplied.append(_request_identity(request[name], label=label))
+    if not supplied:
+        if required:
+            raise KotakNeoMappingError(f"Kotak Neo {label} is required")
+        return None
+    if any(value != supplied[0] for value in supplied[1:]):
+        raise KotakNeoMappingError(f"Kotak Neo {label} aliases conflict")
+    return supplied[0]
+
+
+def _canonical_iso_date(value: object, *, label: str) -> str:
+    text = _request_identity(value, label=label)
+    if len(text) != 10 or not text.isascii():
+        raise KotakNeoMappingError(f"Kotak Neo {label} must use YYYY-MM-DD")
+    try:
+        parsed = date.fromisoformat(text)
+    except ValueError:
+        raise KotakNeoMappingError(f"Kotak Neo {label} must use YYYY-MM-DD") from None
+    if parsed.isoformat() != text:
+        raise KotakNeoMappingError(f"Kotak Neo {label} must use YYYY-MM-DD")
+    return text
+
+
+def _canonical_neosymbol(value: object) -> str:
+    text = _request_identity(value, label="neosymbol")
+    if text.count("|") != 1:
+        raise KotakNeoMappingError("Kotak Neo neosymbol must use segment|instrument_token")
+    segment, raw_token = text.split("|", 1)
+    if segment not in set(EXCHANGE_TO_KOTAK.values()):
+        raise KotakNeoMappingError("Kotak Neo neosymbol segment is unsupported")
+    try:
+        token = canonical_instrument_token(raw_token)
+    except KotakNeoMappingError:
+        raise KotakNeoMappingError("Kotak Neo neosymbol instrument token is invalid") from None
+    if text != f"{segment}|{token}":
+        raise KotakNeoMappingError("Kotak Neo neosymbol is not canonical")
+    return text
+
+
+def to_historical_request(request: dict[str, Any]) -> dict[str, Any]:
+    """Validate a FlintTrade history request before any broker-side lookup."""
+    request = _request_record(request)
+    symbol = _request_identity(request.get("symbol"), label="historical symbol")
+    exchange = _request_identity(request.get("exchange", "NSE"), label="historical exchange")
+    if exchange not in EXCHANGE_TO_KOTAK or exchange == "MCX":
+        raise KotakNeoMappingError("Kotak Neo historical exchange is unsupported")
+
+    interval = _request_identity(request.get("interval", "D"), label="historical interval")
+    sdk_interval = HISTORICAL_INTERVALS.get(interval.lower())
+    if sdk_interval is None:
+        raise KotakNeoMappingError("Kotak Neo historical interval is unsupported")
+
+    raw_start = _request_alias(
+        request,
+        ("start_date", "from_date", "start", "from"),
+        label="historical start date",
+        required=True,
+    )
+    raw_end = _request_alias(
+        request,
+        ("end_date", "to_date", "end", "to"),
+        label="historical end date",
+        required=True,
+    )
+    from_date = _canonical_iso_date(raw_start, label="historical start date")
+    to_date = _canonical_iso_date(raw_end, label="historical end date")
+    start_value = date.fromisoformat(from_date)
+    end_value = date.fromisoformat(to_date)
+    if start_value > end_value:
+        raise KotakNeoMappingError("Kotak Neo historical start date must not follow end date")
+    inclusive_days = (end_value - start_value).days + 1
+    max_days = 180 if sdk_interval in {"D", "W"} else 30
+    if inclusive_days > max_days:
+        raise KotakNeoMappingError(f"Kotak Neo historical range exceeds {max_days} days")
+
+    raw_neosymbol = request.get("neosymbol")
+    neosymbol = _canonical_neosymbol(raw_neosymbol) if raw_neosymbol is not None else None
+    return {
+        "symbol": symbol,
+        "exchange": exchange,
+        "interval": interval,
+        "sdk_interval": sdk_interval,
+        "from_date": from_date,
+        "to_date": to_date,
+        "neosymbol": neosymbol,
+    }
+
+
+def _response_market_decimal(value: object, *, whole: bool = False, nullable: bool = False) -> Decimal | None:
+    if value is None:
+        if nullable:
+            return None
+        raise BrokerReadResponseInvalid from None
+    if type(value) is int:
+        if value.bit_length() > 213:
+            raise BrokerReadResponseInvalid from None
+    elif type(value) is float:
+        if not math.isfinite(value):
+            raise BrokerReadResponseInvalid from None
+    elif type(value) is str:
+        try:
+            value.encode("ascii")
+        except UnicodeError:
+            raise BrokerReadResponseInvalid from None
+        unsigned = value.removeprefix("-")
+        integer, separator, fraction = unsigned.partition(".")
+        if (
+            not value
+            or len(value) > 128
+            or value != value.strip()
+            or not integer.isascii()
+            or not integer.isdigit()
+            or separator and (not fraction.isascii() or not fraction.isdigit())
+        ):
+            raise BrokerReadResponseInvalid from None
+    else:
+        raise BrokerReadResponseInvalid from None
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        raise BrokerReadResponseInvalid from None
+    if not number.is_finite() or not _bounded_decimal_shape(number):
+        raise BrokerReadResponseInvalid from None
+    if whole and (number < 0 or number != number.to_integral_value()):
+        raise BrokerReadResponseInvalid from None
+    return number
+
+
+def _response_timestamp(value: object) -> str:
+    if type(value) is not str or not value or len(value) > 128 or value != value.strip():
+        raise BrokerReadResponseInvalid from None
+    try:
+        value.encode("utf-8")
+        if "T" not in value:
+            raise ValueError
+        datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+    except (UnicodeError, ValueError):
+        raise BrokerReadResponseInvalid from None
+    return value
+
+
+def from_kotak_historical(response: object, *, expected_interval: str) -> list[dict[str, Any]]:
+    """Map official seven-column v3 candle rows without inventing values."""
+    envelope = validate_read_envelope(response, operation="historical_data")
+    envelope = _response_record(envelope)
+    if "interval" in envelope:
+        interval = _response_text(envelope, "interval", required=True)
+        if interval != expected_interval:
+            raise BrokerReadResponseInvalid from None
+    data = _response_record(envelope.get("data"))
+    rows = data.get("candles")
+    if type(rows) is not list:
+        raise BrokerReadResponseInvalid from None
+    mapped: list[dict[str, Any]] = []
+    for row in rows:
+        if type(row) is not list or len(row) != 7:
+            raise BrokerReadResponseInvalid from None
+        timestamp = _response_timestamp(row[0])
+        prices = [_response_market_decimal(value) for value in row[1:5]]
+        volume = _response_market_decimal(row[5], whole=True)
+        _response_market_decimal(row[6], whole=True, nullable=True)
+        mapped.append(
+            {
+                "timestamp": timestamp,
+                "open": float(prices[0]),
+                "high": float(prices[1]),
+                "low": float(prices[2]),
+                "close": float(prices[3]),
+                "volume": int(volume),
+            }
+        )
+    return mapped
+
+
+def to_option_chain_request(request: dict[str, Any]) -> dict[str, Any]:
+    """Validate and translate one option-chain request before transport."""
+    request = _request_record(request)
+    underlying_aliases = {
+        name: request[name]
+        for name in ("underlying", "symbol")
+        if name in request and request[name] is not None
+    }
+    underlying = _request_alias(
+        underlying_aliases,
+        ("underlying", "symbol"),
+        label="option-chain underlying",
+        required=True,
+    )
+    exchange = _request_identity(request.get("exchange", "NFO"), label="option-chain exchange")
+    sdk_exchange = OPTION_CHAIN_EXCHANGE_TO_KOTAK.get(exchange)
+    if sdk_exchange is None:
+        raise KotakNeoMappingError("Kotak Neo option-chain exchange is unsupported")
+
+    supplied_expiries = [
+        _canonical_iso_date(request[name], label="option-chain expiry")
+        for name in ("expiry", "expiry_date")
+        if name in request and request[name] is not None
+    ]
+    if len(set(supplied_expiries)) > 1:
+        raise KotakNeoMappingError("Conflicting Kotak Neo option-chain expiry aliases")
+    expiry = supplied_expiries[0] if supplied_expiries else None
+
+    instrument_type = request.get("instrument_type", "option")
+    if instrument_type is None:
+        instrument_type = "option"
+    if type(instrument_type) is not str or instrument_type != "option":
+        raise KotakNeoMappingError("Kotak Neo FlintTrade option chain supports instrument_type=option only")
+
+    count = request.get("count")
+    if count is not None:
+        if type(count) is not int or count <= 0 or count.bit_length() > 31 or count % 10:
+            raise KotakNeoMappingError("Kotak Neo option-chain count must be a positive multiple of 10")
+    return {
+        "underlying": underlying,
+        "exchange": exchange,
+        "sdk_exchange": sdk_exchange,
+        "expiry": expiry,
+        "instrument_type": instrument_type,
+        "count": count,
+    }
+
+
+def _option_leg(
+    value: object,
+    *,
+    side: str,
+    sdk_exchange: str,
+    seen_symbols: set[str],
+) -> tuple[Decimal, dict[str, Any]]:
+    row = _response_record(value)
+    instrument = _response_record(row.get("instrument"))
+    option_type = _response_text(instrument, "optionType", required=True)
+    if option_type != side:
+        raise BrokerReadResponseInvalid from None
+    neosymbol = _response_text(instrument, "neoSymbol", required=True)
+    if neosymbol.count("|") != 1:
+        raise BrokerReadResponseInvalid from None
+    segment, raw_token = neosymbol.split("|", 1)
+    try:
+        token = canonical_instrument_token(raw_token)
+    except KotakNeoMappingError:
+        raise BrokerReadResponseInvalid from None
+    if segment != sdk_exchange or neosymbol != f"{segment}|{token}" or neosymbol in seen_symbols:
+        raise BrokerReadResponseInvalid from None
+    seen_symbols.add(neosymbol)
+
+    strike = _response_market_decimal(instrument.get("strikePrice"))
+    if strike <= 0:
+        raise BrokerReadResponseInvalid from None
+    prefix = "ce" if side == "CE" else "pe"
+    mapped: dict[str, Any] = {f"{prefix}_instrument_id": neosymbol}
+
+    if "quote" in row:
+        quote = _response_record(row["quote"])
+        if "ltp" in quote:
+            mapped[f"{prefix}_ltp"] = float(_response_market_decimal(quote["ltp"]))
+        if "volume" in quote:
+            mapped[f"{prefix}_volume"] = int(_response_market_decimal(quote["volume"], whole=True))
+    if "openInterest" in row:
+        open_interest = _response_record(row["openInterest"])
+        if "current" in open_interest:
+            mapped[f"{prefix}_oi"] = (
+                None
+                if open_interest["current"] is None
+                else int(_response_market_decimal(open_interest["current"], whole=True))
+            )
+    return strike, mapped
+
+
+def from_kotak_option_chain(
+    response: object,
+    *,
+    underlying: str,
+    exchange: str,
+    sdk_exchange: str,
+    requested_expiry: str | None,
+) -> dict[str, Any]:
+    """Map official common/call/put arrays into a truthful canonical chain."""
+    envelope = _response_record(validate_read_envelope(response, operation="option_chain"))
+    data = _response_record(envelope.get("data"))
+    common = _response_record(data.get("common_data"))
+    if _response_text(common, "unlSymbol", required=True) != underlying:
+        raise BrokerReadResponseInvalid from None
+    if _response_text(common, "exSeg", required=True) != sdk_exchange:
+        raise BrokerReadResponseInvalid from None
+    expiry = _response_text(common, "expiryDt", required=True)
+    try:
+        expiry = _canonical_iso_date(expiry, label="option-chain response expiry")
+    except KotakNeoMappingError:
+        raise BrokerReadResponseInvalid from None
+    if requested_expiry is not None and expiry != requested_expiry:
+        raise BrokerReadResponseInvalid from None
+
+    by_strike: dict[Decimal, dict[str, Any]] = {}
+    seen_by_side: dict[str, set[Decimal]] = {"CE": set(), "PE": set()}
+    seen_symbols: set[str] = set()
+    for name, side in (("call", "CE"), ("put", "PE")):
+        rows = data.get(name)
+        if type(rows) is not list:
+            raise BrokerReadResponseInvalid from None
+        for row in rows:
+            strike, leg = _option_leg(row, side=side, sdk_exchange=sdk_exchange, seen_symbols=seen_symbols)
+            if strike in seen_by_side[side]:
+                raise BrokerReadResponseInvalid from None
+            seen_by_side[side].add(strike)
+            by_strike.setdefault(strike, {}).update(leg)
+
+    float_identities: dict[float, Decimal] = {}
+    strikes: list[dict[str, Any]] = []
+    for strike in sorted(by_strike):
+        published = float(strike)
+        if not math.isfinite(published) or Decimal(str(published)) != strike:
+            raise BrokerReadResponseInvalid from None
+        previous = float_identities.get(published)
+        if previous is not None and previous != strike:
+            raise BrokerReadResponseInvalid from None
+        float_identities[published] = strike
+        strikes.append({"strike_price": published, **by_strike[strike]})
+    return {
+        "underlying": underlying,
+        "exchange": exchange,
+        "expiry": expiry,
+        "expiry_date": expiry,
+        "strikes": strikes,
+    }
 
 
 def _validated_order_numbers(order: Any, price_type: str) -> tuple[Decimal, Decimal, Decimal, Decimal]:

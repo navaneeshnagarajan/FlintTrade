@@ -137,20 +137,43 @@ def _error_item(value: object) -> tuple[str, str]:
 
 def _error_details(value: dict[str, Any]) -> tuple[str, str]:
     """Extract only validated classification fields; never render a payload."""
+    # Main-track responses use top-level ``code`` as the authoritative HTTP
+    # classification. Compatibility ``errorCode``/``stCode`` retain their
+    # older fallback semantics so a successful transport stCode cannot mask a
+    # nested provider error.
+    code = ""
+    if "code" in value:
+        raw_code = value["code"]
+        candidate = _error_scalar(raw_code)
+        if (
+            type(raw_code) is int
+            and raw_code >= 400
+            or type(raw_code) is str
+            and (
+                len(raw_code) == 3
+                and raw_code.isascii()
+                and raw_code.isdigit()
+                and raw_code >= "400"
+                or raw_code == "too_many_requests"
+            )
+        ):
+            code = candidate
+
     error: object | None = None
     for key in ("error", "Error", "Error Message"):
         if key in value:
             error = value[key]
             break
 
-    code = ""
     message = ""
     if type(error) is list:
         details = [_error_item(item) for item in error]
         if details:
-            code, message = details[0]
+            embedded_code, message = details[0]
+            code = code or embedded_code
     elif error is not None:
-        code, message = _error_item(error)
+        embedded_code, message = _error_item(error)
+        code = code or embedded_code
 
     if not code:
         for key in ("errorCode", "stCode"):
@@ -194,13 +217,25 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
         status = layer.get("status")
         stat = layer.get("stat")
         status_code = layer.get("stCode")
+        error_code = layer.get("code")
         rejected_layer = any(key in layer for key in ("Error", "Error Message", "error"))
         rejected_layer |= "status" in layer and (
             type(status) is not str or status.lower() not in {"ok", "success"}
         )
         rejected_layer |= "stat" in layer and (type(stat) is not str or stat.lower() != "ok")
-        rejected_layer |= isinstance(status_code, int) and status_code >= 400 and not (
+        rejected_layer |= type(status_code) is int and status_code >= 400 and not (
             status_code == 1000 and operation == "whatsmyip" and status == "success"
+        )
+        rejected_layer |= type(error_code) is int and error_code >= 400
+        rejected_layer |= (
+            type(error_code) is str
+            and (
+                len(error_code) == 3
+                and error_code.isascii()
+                and error_code.isdigit()
+                and error_code >= "400"
+                or error_code == "too_many_requests"
+            )
         )
         return rejected_layer
 
@@ -226,7 +261,7 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
             classified.append((4, "credentials" if auth else "session", code, None))
         elif code in {"429", "too_many_requests"} or any(marker in message for marker in rate_markers):
             classified.append((3, "rate", code, None))
-        elif code.startswith("5") or isinstance(status_code, int) and status_code >= 500:
+        elif code.startswith("5") or type(status_code) is int and status_code >= 500:
             classified.append((2, "internal", code, None))
         else:
             classified.append((1, "generic", code, None))
@@ -264,7 +299,7 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
         raise CredentialsInvalid(reason, broker_id="kotakneo", broker_code=code)
     if classification == "rate":
         metadata = value.get("rateLimit")
-        retry = metadata.get("Retry-After", metadata.get("retryAfter", 0)) if isinstance(metadata, dict) else 0
+        retry = metadata.get("Retry-After", metadata.get("retryAfter", 0)) if type(metadata) is dict else 0
         retry_after = _bounded_retry_after(retry)
         raise RateLimitError(reason, broker_id="kotakneo", broker_code=code, retry_after=retry_after)
     if classification == "exception":
@@ -316,6 +351,54 @@ def _canonical_exception(exc: Exception, operation: str, *, auth: bool = False) 
     return BrokerInternal(f"Kotak Neo {operation} failed", broker_id="kotakneo")
 
 
+def _is_official_option_chain_envelope(value: dict[str, Any]) -> bool:
+    """Validate the sole v3 read that intentionally omits status/stat."""
+    def safe_text(item: object) -> bool:
+        if type(item) is not str or not item or len(item) > 4096:
+            return False
+        try:
+            item.encode("utf-8")
+        except UnicodeError:
+            return False
+        return True
+
+    if set(value) not in ({"data"}, {"data", "rateLimit"}):
+        return False
+    if "rateLimit" in value:
+        metadata = value["rateLimit"]
+        allowed = {"Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"}
+        if (
+            type(metadata) is not dict
+            or not metadata
+            or any(type(key) is not str or key not in allowed for key in metadata)
+            or any(not safe_text(item) for item in metadata.values())
+        ):
+            return False
+    data = value.get("data")
+    if type(data) is not dict or any(type(key) is not str for key in data):
+        return False
+    if set(data) != {"common_data", "call", "put"}:
+        return False
+    common = data.get("common_data")
+    calls = data.get("call")
+    puts = data.get("put")
+    if type(common) is not dict or any(type(key) is not str for key in common):
+        return False
+    for name in ("unlSymbol", "exSeg"):
+        item = common.get(name)
+        if not safe_text(item):
+            return False
+    expiry = common.get("expiryDt")
+    if expiry is not None and not safe_text(expiry):
+        return False
+    return (
+        type(calls) is list
+        and all(type(row) is dict and all(type(key) is str for key in row) for row in calls)
+        and type(puts) is list
+        and all(type(row) is dict and all(type(key) is str for key in row) for row in puts)
+    )
+
+
 def validate_read_envelope(value: Any, *, operation: str) -> Any:
     """Require a successful broker read before callers extract rows or funds."""
     if operation == "search_scrip" and isinstance(value, list) and all(type(row) is dict for row in value):
@@ -325,6 +408,10 @@ def validate_read_envelope(value: Any, *, operation: str) -> Any:
     if type(value) is not dict or any(type(key) is not str for key in value):
         raise BrokerReadResponseInvalid from None
     _raise_provider_error(value, operation=operation)
+    if operation == "option_chain":
+        if _is_official_option_chain_envelope(value):
+            return value
+        raise BrokerReadResponseInvalid from None
     if operation == "scrip_master" and "filesPaths" in value:
         paths = value["filesPaths"]
         if type(paths) is list and all(type(path) is str and path.startswith("https://") for path in paths):
