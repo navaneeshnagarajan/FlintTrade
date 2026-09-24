@@ -7,6 +7,7 @@ disabled by default before import; an operator's explicit setting is retained.
 from __future__ import annotations
 
 import logging
+import math
 import os
 from typing import Any
 
@@ -63,7 +64,12 @@ def _error_scalar(value: object) -> str:
     if value is None:
         return ""
     if type(value) is str:
-        return value
+        if len(value) > 4096:
+            raise BrokerReadResponseInvalid from None
+        try:
+            return value.encode("utf-8").decode("utf-8")
+        except UnicodeError:
+            raise BrokerReadResponseInvalid from None
     if type(value) is int:
         # Python 3.11+ refuses unbounded integer-to-text conversions. Bound the
         # broker-controlled value before rendering so malformed error payloads
@@ -74,15 +80,43 @@ def _error_scalar(value: object) -> str:
     raise BrokerReadResponseInvalid from None
 
 
+def _safe_attribute(value: object, name: str) -> object | None:
+    """Read optional SDK exception metadata without trusting descriptor hooks."""
+    try:
+        return getattr(value, name, None)
+    except Exception:
+        return None
+
+
+def _bounded_retry_after(value: object) -> float:
+    """Return finite non-negative retry metadata or a safe zero fallback."""
+    if type(value) not in (int, float, str):
+        return 0.0
+    if type(value) is int and (value >= 10**64 or value <= -(10**64)):
+        return 0.0
+    if type(value) is str:
+        if len(value) > 64:
+            return 0.0
+        try:
+            value.encode("utf-8")
+        except UnicodeError:
+            return 0.0
+    try:
+        retry_after = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return 0.0
+    return retry_after if math.isfinite(retry_after) and retry_after >= 0 else 0.0
+
+
 def _error_item(value: object) -> tuple[str, str]:
     """Return one validated SDK error item's code and message."""
     if type(value) is str:
-        return "", value
+        return "", _error_scalar(value)
     if isinstance(value, BaseException):
-        status = getattr(value, "status", None)
+        status = _safe_attribute(value, "status")
         if status is None:
-            status = getattr(value, "status_code", None)
-        reason = getattr(value, "reason", None)
+            status = _safe_attribute(value, "status_code")
+        reason = _safe_attribute(value, "reason")
         return _error_scalar(status), _error_scalar(reason) or type(value).__name__
     if type(value) is dict and all(type(key) is str for key in value):
         code = ""
@@ -205,7 +239,7 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
             items = embedded if isinstance(embedded, list) else [embedded]
             for item in items:
                 if isinstance(item, BaseException):
-                    canonical = _canonical_exception(item, operation)
+                    canonical = _canonical_exception(item, operation, auth=auth)
                     rank = (
                         5 if isinstance(canonical, SessionExpired)
                         else 3 if isinstance(canonical, RateLimitError)
@@ -213,9 +247,11 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
                         else 2 if isinstance(canonical, BrokerInternal)
                         else 1
                     )
-                    classified.append((
-                        rank, "exception", str(getattr(canonical, "broker_code", "") or ""), canonical,
-                    ))
+                    try:
+                        canonical_code = _error_scalar(_safe_attribute(canonical, "broker_code"))
+                    except BrokerReadResponseInvalid:
+                        canonical_code = ""
+                    classified.append((rank, "exception", canonical_code, canonical))
 
     _rank, classification, code, canonical = max(
         classified,
@@ -228,11 +264,8 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
         raise CredentialsInvalid(reason, broker_id="kotakneo", broker_code=code)
     if classification == "rate":
         metadata = value.get("rateLimit")
-        retry = metadata.get("retryAfter", 0) if isinstance(metadata, dict) else 0
-        try:
-            retry_after = max(0.0, float(retry))
-        except (TypeError, ValueError):
-            retry_after = 0.0
+        retry = metadata.get("Retry-After", metadata.get("retryAfter", 0)) if isinstance(metadata, dict) else 0
+        retry_after = _bounded_retry_after(retry)
         raise RateLimitError(reason, broker_id="kotakneo", broker_code=code, retry_after=retry_after)
     if classification == "exception":
         if canonical is not None:
@@ -246,21 +279,34 @@ def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool =
     raise BrokerInternal(reason, broker_id="kotakneo", broker_code=code)
 
 
-def _canonical_exception(exc: Exception, operation: str) -> BrokerError:
+def _canonical_exception(exc: Exception, operation: str, *, auth: bool = False) -> BrokerError:
     if isinstance(exc, BrokerError):
         return exc
-    response = getattr(exc, "response", None)
-    status_code = getattr(response, "status_code", None)
+    response = _safe_attribute(exc, "response")
+    status_code = _safe_attribute(response, "status_code") if response is not None else None
     if status_code is None:
-        status_code = getattr(exc, "status", None) or getattr(exc, "status_code", None)
-    if status_code in {401, 403}:
-        return SessionExpired(f"Kotak Neo {operation} session expired", broker_id="kotakneo", broker_code=str(status_code))
-    if status_code == 429:
+        status_code = _safe_attribute(exc, "status")
+    if status_code is None:
+        status_code = _safe_attribute(exc, "status_code")
+    bounded_status = status_code if type(status_code) is int and 100 <= status_code <= 999 else None
+    if bounded_status in {401, 403}:
+        error_type = CredentialsInvalid if auth else SessionExpired
+        return error_type(
+            f"Kotak Neo {operation} {'credentials were rejected' if auth else 'session expired'}",
+            broker_id="kotakneo",
+            broker_code=str(bounded_status),
+        )
+    if bounded_status == 429:
         return RateLimitError(f"Kotak Neo {operation} was rate limited", broker_id="kotakneo", broker_code="429")
-    if isinstance(status_code, int) and status_code >= 500:
-        return BrokerInternal(f"Kotak Neo {operation} failed", broker_id="kotakneo", broker_code=str(status_code))
+    if bounded_status is not None and bounded_status >= 500:
+        return BrokerInternal(
+            f"Kotak Neo {operation} failed", broker_id="kotakneo", broker_code=str(bounded_status)
+        )
     name = type(exc).__name__.lower()
-    reason = str(getattr(exc, "reason", "") or "").lower()
+    try:
+        reason = _error_scalar(_safe_attribute(exc, "reason")).lower()
+    except BrokerReadResponseInvalid:
+        reason = ""
     if isinstance(exc, TimeoutError) or "timeout" in name or "timeout" in reason or "timed out" in reason:
         return BrokerTimeout(f"Kotak Neo {operation} timed out", broker_id="kotakneo")
     if isinstance(exc, ConnectionError) or any(
@@ -371,7 +417,7 @@ class KotakNeoSdkSession:
             _validate_auth(trade, step="Trade", ucc=credentials["ucc"])
         except Exception as exc:
             self.close()
-            raise _canonical_exception(exc, "login") from None
+            raise _canonical_exception(exc, "login", auth=True) from None
 
     @classmethod
     def login(cls, credentials: dict[str, Any]) -> KotakNeoSdkSession:

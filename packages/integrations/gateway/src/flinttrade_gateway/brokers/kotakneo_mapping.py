@@ -235,7 +235,10 @@ def _response_text(
                 continue
             if required:
                 raise BrokerReadResponseInvalid
-        return value.encode("utf-8").decode("utf-8")
+        try:
+            return value.encode("utf-8").decode("utf-8")
+        except UnicodeError:
+            raise BrokerReadResponseInvalid from None
     if required:
         raise BrokerReadResponseInvalid
     return _MISSING

@@ -626,6 +626,69 @@ def test_real_sdk_session_canonicalises_malformed_write_response():
         session.place_order({})
 
 
+@pytest.mark.parametrize("attribute", ["reason", "status"])
+@pytest.mark.parametrize("surface", ["read", "write", "login"])
+def test_sdk_exception_metadata_cannot_escape_as_raw_conversion_errors(
+    monkeypatch,
+    attribute,
+    surface,
+):
+    import neo_api_client
+
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    class HostileSdkError(Exception):
+        pass
+
+    failure = HostileSdkError("synthetic")
+    setattr(failure, attribute, 10**5000)
+
+    class HostileNeo(ExactNeo):
+        def totp_login(self, mobile_number=None, ucc=None, totp=None):
+            if surface == "login":
+                raise failure
+            return super().totp_login(mobile_number=mobile_number, ucc=ucc, totp=totp)
+
+        def positions(self):
+            raise failure
+
+        def place_order(self, **_params):
+            raise failure
+
+    monkeypatch.setattr(neo_api_client, "NeoAPI", HostileNeo)
+    if surface == "login":
+        with pytest.raises(BrokerInternal):
+            KotakNeoSdkSession.login(_credentials())
+        return
+
+    session = KotakNeoSdkSession.login(_credentials())
+    with pytest.raises(BrokerInternal):
+        session.positions() if surface == "read" else session.place_order({})
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_login_http_auth_errors_remain_credentials_failures(monkeypatch, wrapped):
+    import neo_api_client
+
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    response = httpx.Response(401, request=httpx.Request("POST", "https://example.invalid/login"))
+    failure = httpx.HTTPStatusError("synthetic", request=response.request, response=response)
+
+    class UnauthorisedNeo(ExactNeo):
+        def totp_login(self, mobile_number=None, ucc=None, totp=None):
+            if wrapped:
+                payload = deepcopy(self.view)
+                payload["Error"] = failure
+                return payload
+            raise failure
+
+    monkeypatch.setattr(neo_api_client, "NeoAPI", UnauthorisedNeo)
+    with pytest.raises(CredentialsInvalid) as raised:
+        KotakNeoSdkSession.login(_credentials())
+    assert raised.value.broker_code == "401"
+
+
 @pytest.mark.parametrize(
     "response",
     [
@@ -639,6 +702,23 @@ def test_read_envelope_rejects_oversized_error_integers_canonically(response):
 
     with pytest.raises(BrokerReadResponseInvalid):
         validate_read_envelope(response, operation="positions")
+
+
+@pytest.mark.parametrize(
+    "retry_after",
+    [pytest.param(10**5000, id="huge-integer"), pytest.param("1e100000", id="infinite-float")],
+)
+def test_rate_limit_retry_metadata_is_bounded_and_finite(retry_after):
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    response = {
+        "status": "error",
+        "message": "Too many requests",
+        "rateLimit": {"retryAfter": retry_after},
+    }
+    with pytest.raises(RateLimitError) as raised:
+        validate_read_envelope(response, operation="positions")
+    assert raised.value.retry_after == 0
 
 
 def test_read_envelope_accepts_nested_successful_margin_response():
