@@ -2,7 +2,10 @@
  * MonitoringSection — system health, traffic, and latency panels.
  *
  * APIs:
- *   GET /ft-api/api/v1/health         → broker connections, DuckDB, disk, memory
+ *   GET /ft-api/api/v1/health         → broker, DuckDB, and this host's disk,
+ *                                     RAM, CPU, GPU, and network. Process RSS
+ *                                     is separate. Missing host figures are
+ *                                     Unavailable, never Explore sample totals.
  *   GET /ft-api/api/v1/traffic/stats  → requests/sec, error rate, top endpoints
  *   GET /ft-api/api/v1/latency/stats  → order latency per broker (avg/p50/p95/p99)
  */
@@ -38,13 +41,27 @@ function fmtBytes(mb: number): string {
 // Bar indicator (disk / memory)
 // ---------------------------------------------------------------------------
 
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function fmtByteCount(bytes: number): string {
+  const gb = bytes / (1024 ** 3);
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  const mb = bytes / (1024 ** 2);
+  if (mb >= 1) return `${mb.toFixed(0)} MB`;
+  return `${(bytes / 1024).toFixed(0)} KB`;
+}
+
 function UsageBar({
   label,
+  provenance,
   usedPct,
   usedLabel,
   totalLabel,
 }: {
   label: string;
+  provenance: string;
   usedPct: number;
   usedLabel: string;
   totalLabel: string;
@@ -57,8 +74,9 @@ function UsageBar({
         : "bg-profit";
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between text-xs">
+      <div className="flex items-center justify-between gap-2 text-xs">
         <span className="text-text-secondary">{label}</span>
+        <span className="text-xxs uppercase tracking-wider text-text-muted">{provenance}</span>
         <span className="font-mono tabular-nums text-text-muted">
           {usedLabel} / {totalLabel}
         </span>
@@ -71,6 +89,88 @@ function UsageBar({
       </div>
     </div>
   );
+}
+
+function UnavailableRow({ label }: { label: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2 text-xs">
+      <span className="text-text-secondary">{label}</span>
+      <span className="text-text-muted">Unavailable</span>
+    </div>
+  );
+}
+
+function hostDisk(disk: SystemHealth["disk"]): { usedGb: number; totalGb: number; usedPct: number } | null {
+  if (disk?.scope !== "host") return null;
+  const total = finiteNumber(disk.total_gb);
+  const free = finiteNumber(disk.free_gb);
+  const usedField = finiteNumber(disk.used_gb);
+  if (total === null || total <= 0) return null;
+  const used = usedField ?? (free !== null ? total - free : null);
+  if (used === null || used < 0) return null;
+  const usedPct = finiteNumber(disk.used_pct) ?? finiteNumber(disk.percent_used) ?? pct(used, total);
+  return { usedGb: used, totalGb: total, usedPct };
+}
+
+function hostMemory(memory: SystemHealth["memory"]): { usedMb: number; totalMb: number; usedPct: number } | null {
+  if (memory?.scope !== "host") return null;
+  const total = finiteNumber(memory.total_mb);
+  const used = finiteNumber(memory.used_mb);
+  if (total === null || total <= 0 || used === null || used < 0) return null;
+  return {
+    usedMb: used,
+    totalMb: total,
+    usedPct: finiteNumber(memory.used_pct) ?? pct(used, total),
+  };
+}
+
+function processReading(
+  memory: SystemHealth["memory"],
+): { rssMb: number | null; vmsMb: number | null } | null {
+  const nestedRss = finiteNumber(memory?.process?.rss_mb);
+  const nestedVms = finiteNumber(memory?.process?.vms_mb);
+  if (nestedRss !== null || nestedVms !== null) return { rssMb: nestedRss, vmsMb: nestedVms };
+  if (memory?.scope === "host" || memory?.scope === "sample" || memory?.scope === "unavailable") return null;
+  const rssMb = finiteNumber(memory?.rss_mb);
+  const vmsMb = finiteNumber(memory?.vms_mb);
+  if (rssMb === null && vmsMb === null) return null;
+  return { rssMb, vmsMb };
+}
+
+function hostCpu(cpu: SystemHealth["cpu"]): { usedPct: number; cores: number | null } | null {
+  if (!cpu || cpu.scope !== "host") return null;
+  const usedPct = finiteNumber(cpu.used_pct);
+  if (usedPct === null || usedPct < 0) return null;
+  const cores = finiteNumber(cpu.cores);
+  return { usedPct, cores: cores !== null && cores > 0 ? cores : null };
+}
+
+function hostGpu(gpu: SystemHealth["gpu"]): {
+  label: string;
+  usedPct: number | null;
+  usedMb: number | null;
+  totalMb: number | null;
+} | null {
+  if (!gpu || gpu.scope !== "host") return null;
+  const totalMb = finiteNumber(gpu.total_mb);
+  const usedMb = finiteNumber(gpu.used_mb);
+  const usedPct = finiteNumber(gpu.used_pct);
+  const total = totalMb !== null && totalMb > 0 ? totalMb : null;
+  if (total === null && usedPct === null) return null;
+  return {
+    label: gpu.name ? `GPU — ${gpu.name}` : "GPU",
+    usedPct,
+    usedMb,
+    totalMb: total,
+  };
+}
+
+function hostNetwork(network: SystemHealth["network"]): { sent: number; received: number } | null {
+  if (!network || network.scope !== "host") return null;
+  const sent = finiteNumber(network.bytes_sent);
+  const received = finiteNumber(network.bytes_recv);
+  if (sent === null || received === null || sent < 0 || received < 0) return null;
+  return { sent, received };
 }
 
 // ---------------------------------------------------------------------------
@@ -97,20 +197,26 @@ function StatusDot({ ok, label }: { ok: boolean; label: string }) {
 // ---------------------------------------------------------------------------
 
 function HealthPanel({ data }: { data: SystemHealth }) {
-  const diskFreeGb  = data.disk?.free_gb ?? 0;
-  const diskTotalGb = data.disk?.total_gb ?? 0;
-  const diskUsedGb  = diskTotalGb - diskFreeGb;
-  const diskUsedPct = data.disk?.used_pct ?? pct(diskUsedGb, diskTotalGb);
-  const memUsedMb   = data.memory?.used_mb ?? 0;
-  const memTotalMb  = data.memory?.total_mb ?? 0;
-  const memUsedPct  = data.memory?.used_pct ?? pct(memUsedMb, memTotalMb);
+  const disk = hostDisk(data.disk);
+  const memory = hostMemory(data.memory);
+  const process = processReading(data.memory);
+  const cpu = hostCpu(data.cpu);
+  const gpu = hostGpu(data.gpu);
+  const network = hostNetwork(data.network);
+  const gpuPct = gpu == null
+    ? null
+    : gpu.usedPct ?? (
+      gpu.usedMb !== null && gpu.totalMb !== null && gpu.totalMb > 0
+        ? pct(gpu.usedMb, gpu.totalMb)
+        : null
+    );
 
   return (
     <div className="space-y-4">
-      {/* Subsystem status */}
-      <div>
+      {/* Service rows stay separate from install-host resources. */}
+      <div data-testid="subsystem-status">
         <p className="text-xxs text-text-muted uppercase tracking-wider mb-1.5">
-          Subsystem Status
+          Subsystem status
         </p>
         <div className="space-y-1">
           <StatusDot
@@ -124,26 +230,84 @@ function HealthPanel({ data }: { data: SystemHealth }) {
         </div>
       </div>
 
-      {/* Resource usage */}
-      <div>
-        <p className="text-xxs text-text-muted uppercase tracking-wider mb-1.5">
-          Resources
+      <div data-testid="host-resources" className="space-y-2">
+        <p className="text-xxs text-text-muted uppercase tracking-wider">
+          This host
         </p>
-        <div className="space-y-2">
+        {disk ? (
           <UsageBar
             label="Disk"
-            usedPct={diskUsedPct}
-            usedLabel={`${diskUsedGb.toFixed(1)} GB`}
-            totalLabel={`${diskTotalGb.toFixed(0)} GB`}
+            provenance="This host"
+            usedPct={disk.usedPct}
+            usedLabel={`${disk.usedGb.toFixed(1)} GB`}
+            totalLabel={`${disk.totalGb.toFixed(0)} GB`}
           />
+        ) : (
+          <UnavailableRow label="Disk" />
+        )}
+        {memory ? (
           <UsageBar
             label="Memory"
-            usedPct={memUsedPct}
-            usedLabel={fmtBytes(memUsedMb)}
-            totalLabel={fmtBytes(memTotalMb)}
+            provenance="This host"
+            usedPct={memory.usedPct}
+            usedLabel={fmtBytes(memory.usedMb)}
+            totalLabel={fmtBytes(memory.totalMb)}
           />
-        </div>
+        ) : (
+          <UnavailableRow label="Memory" />
+        )}
+        {cpu ? (
+          <UsageBar
+            label="CPU"
+            provenance="This host"
+            usedPct={cpu.usedPct}
+            usedLabel={cpu.cores !== null ? `${cpu.usedPct.toFixed(1)}% · ${cpu.cores} cores` : `${cpu.usedPct.toFixed(1)}%`}
+            totalLabel="100%"
+          />
+        ) : (
+          <UnavailableRow label="CPU" />
+        )}
+        {gpu && gpuPct !== null && gpu.usedMb !== null && gpu.totalMb !== null ? (
+          <UsageBar
+            label={gpu.label}
+            provenance="This host"
+            usedPct={gpuPct}
+            usedLabel={fmtBytes(gpu.usedMb)}
+            totalLabel={fmtBytes(gpu.totalMb)}
+          />
+        ) : gpu && gpuPct !== null ? (
+          <UsageBar
+            label={gpu.label}
+            provenance="This host"
+            usedPct={gpuPct}
+            usedLabel={`${gpuPct.toFixed(1)}%`}
+            totalLabel="100%"
+          />
+        ) : (
+          <UnavailableRow label="GPU" />
+        )}
+        {network ? (
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="text-text-secondary">Network</span>
+            <span className="text-xxs uppercase tracking-wider text-text-muted">This host</span>
+            <span className="font-mono tabular-nums text-text-muted">
+              Sent {fmtByteCount(network.sent)} · Received {fmtByteCount(network.received)}
+            </span>
+          </div>
+        ) : (
+          <UnavailableRow label="Network" />
+        )}
       </div>
+
+      {process && (
+        <div data-testid="process-resources" className="flex items-center justify-between gap-2 text-xs">
+          <span className="text-text-secondary">Process (this app)</span>
+          <span className="font-mono tabular-nums text-text-muted">
+            {process.rssMb !== null ? `RSS ${fmtBytes(process.rssMb)}` : "RSS unknown"}
+            {process.vmsMb !== null ? ` · VMS ${fmtBytes(process.vmsMb)}` : ""}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

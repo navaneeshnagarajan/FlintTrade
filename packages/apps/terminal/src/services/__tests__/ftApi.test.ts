@@ -96,6 +96,141 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     expect(result).toHaveProperty("score", 42);
   });
 
+  it("maps live host disk and RAM, and keeps process RSS off the host totals", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "ok",
+        broker: { status: "ok" },
+        duckdb: { status: "ok" },
+        disk: { status: "ok", free_gb: 40, total_gb: 100, percent_used: 60 },
+        memory: { status: "ok", rss_mb: 180, vms_mb: 900, percent: 1.2 },
+      }),
+    );
+
+    const health = await getHealth();
+
+    expect(health.disk.scope).toBe("host");
+    expect(health.disk.used_pct).toBe(60);
+    expect(health.disk.total_gb).toBe(100);
+    expect(health.memory.scope).toBe("process");
+    expect(health.memory.used_mb).toBeUndefined();
+    expect(health.memory.total_mb).toBeUndefined();
+    expect(health.memory.process).toMatchObject({ scope: "process", rss_mb: 180, vms_mb: 900 });
+  });
+
+  it("reads host totals from a degraded health response", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "degraded",
+        broker: { status: "ok" },
+        duckdb: { status: "ok" },
+        disk: { status: "degraded", free_gb: 10, total_gb: 100, percent_used: 90, scope: "host" },
+        memory: { status: "ok", used_mb: 4096, total_mb: 16384, used_pct: 25, scope: "host" },
+      }, 503),
+    );
+
+    const health = await getHealth();
+
+    expect(health.status).toBe("degraded");
+    expect(health.disk.used_pct).toBe(90);
+    expect(health.memory.scope).toBe("host");
+    expect(health.memory.total_mb).toBe(16384);
+    expect(health.memory.used_mb).toBe(4096);
+  });
+
+  it("drops a 0/0 memory pair instead of presenting it as this host", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "ok",
+        broker: { status: "ok" },
+        duckdb: { status: "ok" },
+        disk: { status: "ok", free_gb: 10, total_gb: 20, used_pct: 50 },
+        memory: { status: "ok", used_mb: 0, total_mb: 0, rss_mb: 42, vms_mb: 80 },
+      }),
+    );
+
+    const health = await getHealth();
+
+    expect(health.memory.scope).toBe("process");
+    expect(health.memory.used_mb).toBeUndefined();
+    expect(health.memory.total_mb).toBeUndefined();
+    expect(health.memory.process?.rss_mb).toBe(42);
+  });
+
+  it("does not paint Explore sample disk or memory as this host", async () => {
+    authState.token = "demo-user";
+    fetchSpy.mockRejectedValueOnce(new TypeError("offline"));
+
+    const health = await getHealth();
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(health.broker.note).toBe("Explore");
+    expect(health.duckdb.note).toBe("Explore");
+    expect(health.disk.scope).not.toBe("host");
+    expect(health.memory.scope).not.toBe("host");
+    expect(health.disk.free_gb).toBeUndefined();
+    expect(health.disk.total_gb).toBeUndefined();
+    expect(health.memory.used_mb).toBeUndefined();
+    expect(health.memory.total_mb).toBeUndefined();
+    const serialised = JSON.stringify(health);
+    expect(serialised).not.toContain("128");
+    expect(serialised).not.toContain("256");
+    expect(serialised).not.toContain("2048");
+    expect(serialised).not.toContain("8192");
+  });
+
+  it("uses the live host payload in Explore when the backend answers", async () => {
+    authState.token = "dev-bypass";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "ok",
+        broker: { status: "ok", note: "connected" },
+        duckdb: { status: "ok" },
+        disk: { status: "ok", free_gb: 70, total_gb: 200, percent_used: 65 },
+        memory: {
+          status: "ok",
+          scope: "host",
+          used_mb: 5000,
+          total_mb: 16000,
+          used_pct: 31.3,
+        },
+        cpu: { status: "ok", scope: "host", used_pct: 4, cores: 4 },
+      }),
+    );
+
+    const health = await getHealth();
+
+    expect(health.disk.scope).toBe("host");
+    expect(health.disk.total_gb).toBe(200);
+    expect(health.memory.scope).toBe("host");
+    expect(health.memory.total_mb).toBe(16000);
+    expect(health.cpu?.scope).toBe("host");
+    expect(health.cpu?.used_pct).toBe(4);
+    expect(JSON.stringify(health)).not.toContain("8192");
+  });
+
+  it("strips an explicit sample health document instead of promoting it to this host", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "ok",
+        broker: { status: "degraded", note: "Explore" },
+        duckdb: { status: "degraded", note: "Explore" },
+        disk: { status: "ok", scope: "sample", free_gb: 128, total_gb: 256, used_pct: 50 },
+        memory: { status: "ok", scope: "sample", used_mb: 2048, total_mb: 8192, used_pct: 25 },
+        cpu: { status: "ok", scope: "sample", used_pct: 50 },
+      }),
+    );
+
+    const health = await getHealth();
+
+    expect(health.disk.scope).toBe("unavailable");
+    expect(health.memory.scope).toBe("unavailable");
+    expect(health.cpu?.scope).toBe("unavailable");
+    expect(health.disk.total_gb).toBeUndefined();
+    expect(health.memory.total_mb).toBeUndefined();
+    expect(health.cpu?.used_pct).toBeUndefined();
+  });
+
   it("normalises a non-empty registered-strategy payload for Automate consumers", async () => {
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({
