@@ -189,7 +189,7 @@ For step-by-step instructions tailored to each operating system, see:
 - [Quick start (cross-platform)](setup/QUICKSTART.md)
 
 ![Welcome screen](screenshots/01-welcome.png)
-*The /welcome route — first-time cinematic introduction with persona pickers.*
+*The /welcome route — first-time cinematic introduction. Get Started opens Setup. Try with sample data stays in Explore.*
 
 ---
 
@@ -450,14 +450,16 @@ indices / advanced tools start collapsed behind **Watchlist & tools** /
 Phone layouts are unchanged.
 
 **Desk chrome (FT-UX-002).** The desk uses one TopBar and one scrolling
-ticker strip under it. TopBar keeps Mode, session/status, and overflow —
+ticker strip. TopBar keeps Mode, session/status, and overflow —
 it is not a second quote rail, so dual index slots in TopBar are gone.
 Settings and Tools collapse to one Tools overflow menu plus at most one
-primary Settings entry (no triple chrome). Trade uses the flex shell
-TopBar → TickerStrip → route body first; the same shell then rolls to
-Invest, Automate, Learn, and Ditto. This is not a silent widen of
-Compact-only-on-Trade (FT-UX-001). Mode and status stay reachable
-(desk-first; skinny-browser defensive collapse is fine).
+primary Settings entry (no triple chrome). The flex shell is TopBar,
+then the operator status strip when one is showing, then the Mode
+honesty line, then the ticker strip, then the route body. Trade uses
+that shell first; the same shell then rolls to Invest, Automate, Learn,
+and Ditto. This is not a silent widen of Compact-only-on-Trade
+(FT-UX-001). Mode and status stay reachable (desk-first; skinny-browser
+defensive collapse is fine).
 
 **Ticker venue badges (FT-CORE-TICKER-001).** Pinned badges match the
 venues that feed the marquee: NSE, BSE, and MCX on the default tape,

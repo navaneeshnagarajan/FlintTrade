@@ -101,7 +101,9 @@ changelog rebuilds itself from the first release cut after this baseline.
   status, and overflow — not a second quote rail. Three
   Settings/Tools entries collapse into one Tools overflow
   menu plus at most one primary Settings entry. App chrome
-  is a flex column: TopBar → TickerStrip → route body.
+  is a flex column: TopBar, then the operator status strip when
+  one is showing, then the Mode honesty line, then TickerStrip,
+  then the route body.
   Trade ships first; the same shell then rolls to Invest,
   Automate, Learn, and Ditto. Not a silent widen of
   FT-UX-001 Compact-only-on-Trade, and not a big-bang
@@ -670,20 +672,13 @@ changelog rebuilds itself from the first release cut after this baseline.
   freeze is excluded. MF Optimizer and AI suggestions + deploy
   are unchanged.
 
-- **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
-  Setup Step 2/7 now has an obvious **Explore first — continue without
-  2FA** path so sample-data Explore/Practice is reachable without
-  finishing authenticator setup. The hatch marks the durable demo
-  session (same as **Try with sample data**) so `/home` survives
-  refresh and a `/welcome` remount instead of bouncing to the
-  password+TOTP wall. Sign-in still requires TOTP. Daily login still
-  requires password + TOTP, and Live still requires the PIN, as
-  designed. **Start over** wipes the unfinished account via the
-  account-create setup JWT so a lost QR seed is recoverable without the
-  TOTP secret. Daily-login session tokens cannot wipe the account. A
-  hard refresh of `/home` after Explore first restores the sample-data
-  session even when `flinttrade:mode` was never persisted; unfinished
-  setup progress stays so Start over / Delete account remain reachable.
+- **Unfinished Setup recovery without the authenticator (FT-SETUP-001).**
+  **Try with sample data** marks a durable demo session so `/home`
+  survives a refresh. **Start over** wipes the unfinished account via
+  the account-create setup JWT, so a lost QR seed is recoverable
+  without the TOTP secret. Daily-login session tokens cannot wipe the
+  account. Daily login is password-only until an authenticator is
+  enrolled. Live still needs that authenticator and the PIN.
 
 - **Strategy Lab stays empty after AI Deploy (FT-DEMO-002).**
   Deploying a suggestion from `/demo-app/ai` (for example “Trend EMA
