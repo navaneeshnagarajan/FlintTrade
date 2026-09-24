@@ -2004,6 +2004,58 @@ def test_cancel_happy_path_returns_200(backend_lease_proof) -> None:
     assert router.cancel_order.await_args.kwargs["order_id"] == "OA-7"
 
 
+@pytest.mark.parametrize("status", ["open pending", "OPEN PENDING"])
+def test_kotak_cancel_open_pending_reaches_adapter(backend_lease_proof, status: str) -> None:
+    """An acknowledged Kotak open-pending order stays cancellable.
+
+    Normalisation uppercases ``open pending`` to ``OPEN PENDING``. That status
+    is an active order state, so the authoritative bind must not answer 409
+    before the gated cancel reaches the adapter.
+    """
+    order = _official_kotak_order()
+    order["ordSt"] = status
+    app, _adapter, client = _real_kotak_route_stack(
+        backend_lease_proof,
+        order_row=order,
+    )
+    router = app.config["TEST_BROKER_ROUTER"]
+    real_cancel = router.cancel_order
+    router.cancel_order = AsyncMock(wraps=real_cancel)
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/cancel",
+        json={"orderid": "OA-1"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    assert "not active" not in response.get_json().get("message", "").lower()
+    kwargs = router.cancel_order.await_args.kwargs
+    assert kwargs["order"]["order_id"] == "OA-1"
+    assert kwargs["order"]["broker_product"] == "CNC"
+    assert client.cancel_calls == [("OA-1", "YES")]
+
+
+def test_kotak_cancel_refuses_terminal_status_before_adapter(backend_lease_proof) -> None:
+    """A completed Kotak order remains non-cancellable before the adapter."""
+    order = _official_kotak_order()
+    order["ordSt"] = "complete"
+    app, _adapter, client = _real_kotak_route_stack(
+        backend_lease_proof,
+        order_row=order,
+    )
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/cancel",
+        json={"orderid": "OA-1"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 409
+    assert "not active" in response.get_json()["message"].lower()
+    assert client.cancel_calls == []
+
+
 def test_kotak_cancel_binds_raw_order_book_amo_into_signed_exact_sdk_call(
     backend_lease_proof,
 ) -> None:

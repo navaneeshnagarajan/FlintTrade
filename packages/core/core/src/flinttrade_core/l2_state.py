@@ -1061,6 +1061,9 @@ async def _read(source: _AccountSource, openalgo_name: str, native_name: str, *a
 # authoritative disclosed quantity. Groww and INDmoney omit the field entirely.
 _FULL_REPLACEMENT_DISCLOSURE_ADAPTERS = frozenset({"openalgo", "dhan", "upstox", "kotakneo"})
 
+# Kotak reports an acknowledged order that is not yet open as "open pending".
+# The adapter classifies that state as active for cancellation, so the
+# authoritative cancel bind accepts the normalised "OPEN PENDING" status.
 _ACTIVE_ORDER_STATUSES = frozenset({
     "ACTIVE",
     "AFTER MARKET ORDER REQ RECEIVED",
@@ -1069,6 +1072,7 @@ _ACTIVE_ORDER_STATUSES = frozenset({
     "MODIFY PENDING",
     "MODIFY VALIDATION PENDING",
     "OPEN",
+    "OPEN PENDING",
     "PARTIAL",
     "PARTIALLY FILLED",
     "PENDING",
