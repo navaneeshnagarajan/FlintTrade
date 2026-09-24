@@ -1,7 +1,7 @@
 """Pure FlintTrade <-> Kotak Neo (NEO OMS) mapping.
 
 Kept separate from the adapter so order translation and the (cryptically-keyed)
-NEO response parsing are fully unit-testable without the ``neo-api-client`` SDK
+NEO response parsing are fully unit-testable without the Kotak Neo v3 SDK
 or live credentials. Order request fields follow the pinned Kotak Neo v3 SDK;
 legacy response decoding remains for authoritative readback of historical rows.
 
@@ -440,6 +440,32 @@ def canonical_order_id(value: object) -> str:
     return _canonical_identifier(value, label="order id")
 
 
+def canonical_instrument_token(value: object) -> str:
+    """Return one bounded positive numeric token without expanding huge ints."""
+    if isinstance(value, bool):
+        raise KotakNeoMappingError("Kotak Neo instrument token is not canonical")
+    if type(value) is int:
+        # 10**5000 cannot safely be converted to text on current Python builds.
+        # A 64-digit positive decimal needs at most 213 bits, so reject larger
+        # primitive ints before calling ``str``.
+        if value <= 0 or value.bit_length() > 213:
+            raise KotakNeoMappingError("Kotak Neo instrument token is not canonical")
+        token = str(value)
+    elif type(value) is str:
+        token = value
+    else:
+        raise KotakNeoMappingError("Kotak Neo instrument token is not canonical")
+    if (
+        not token
+        or len(token) > _MAX_NUMERIC_INTEGER_DIGITS
+        or not token.isascii()
+        or not token.isdigit()
+        or not any(character != "0" for character in token)
+    ):
+        raise KotakNeoMappingError("Kotak Neo instrument token is not canonical")
+    return token
+
+
 def _validated_order_numbers(order: Any, price_type: str) -> tuple[Decimal, Decimal, Decimal, Decimal]:
     quantity = _strict_decimal(order.quantity, label="quantity", positive=True, whole=True)
     price = _strict_decimal(getattr(order, "price", 0), label="price")
@@ -550,6 +576,8 @@ _MODIFY_V3_INPUT_FIELDS = frozenset(
         "action",
         "product",
         "strategy",
+        "broker_product",
+        "variety",
     }
 )
 
@@ -581,6 +609,16 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
         product = _norm(changes["product"])
         if product not in PRODUCT_TO_KOTAK:
             raise KotakNeoMappingError(f"Unsupported product {product!r}")
+    broker_product = _norm(changes.get("broker_product"))
+    if broker_product:
+        if broker_product not in KOTAK_TO_PRODUCT:
+            raise KotakNeoMappingError(f"Unsupported broker product {broker_product!r}")
+        if broker_product in {"BO", "CO"}:
+            variety_name = "bracket" if broker_product == "BO" else "cover"
+            raise KotakNeoMappingError(f"Kotak Neo v3 cannot modify {variety_name} orders")
+    variety = str(changes.get("variety", "")).strip().lower()
+    if variety and variety not in {"regular", "amo"}:
+        raise KotakNeoMappingError(f"Kotak Neo v3 cannot modify order variety {variety!r}")
     if "strategy" in changes:
         _canonical_text(changes["strategy"], label="strategy")
 
@@ -623,6 +661,8 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
         amo_value = ("YES" if amo else "NO") if isinstance(amo, bool) else _norm(amo)
         if amo_value not in {"YES", "NO"}:
             raise KotakNeoMappingError(f"Unsupported AMO flag {amo!r}")
+        if variety and (variety == "amo") != (amo_value == "YES"):
+            raise KotakNeoMappingError("Kotak Neo modify variety and AMO flag disagree")
         params["amo"] = amo_value
     return params
 
@@ -630,7 +670,7 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
 def ensure_ok(resp: Any) -> Any:
     """Raise ``KotakNeoMappingError`` if ``resp`` is a NEO error envelope.
 
-    The neo-api-client returns errors as data, never raises: ``{"Error": ...}``
+    The Kotak Neo v3 SDK returns errors as data, never raises: ``{"Error": ...}``
     (SDK exception wrapper), ``{"Error Message": ...}`` (2FA not complete),
     ``{"error": [...]}`` (validation), ``{"status": "error", "message": ...}``
     (TOTP/MPIN login reject) and ``{"stat": "Not_Ok", "errMsg"/"emsg": ...}``
@@ -722,9 +762,11 @@ def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
     d = _response_record(d)
     side = _response_text(d, "trnsTp", required=True).upper()
     price_type = _response_text(d, "prcTp", required=True).upper()
+    broker_product = _response_text(d, "prod", required=True).upper()
     try:
         action = KOTAK_TO_SIDE[side]
         canonical_price_type = KOTAK_TO_ORDER_TYPE[price_type]
+        canonical_product = KOTAK_TO_PRODUCT[broker_product]
     except KeyError:
         raise BrokerReadResponseInvalid from None
     order = {
@@ -734,8 +776,23 @@ def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
         "exchange": _response_exchange(d, "exSeg"),
         "action": action,
         "pricetype": canonical_price_type,
-        "product": _response_product(d),
+        "product": canonical_product,
+        "broker_product": broker_product,
     }
+    if broker_product == "BO":
+        order["variety"] = "bracket"
+    elif broker_product == "CO":
+        order["variety"] = "cover"
+    if "ordGenTp" in d:
+        raw_generation = d["ordGenTp"]
+        if type(raw_generation) is not str or raw_generation != raw_generation.strip() or not raw_generation.isprintable():
+            raise BrokerReadResponseInvalid
+        generation = raw_generation.upper()
+        if generation not in {"", "NA", "--", "AMO"}:
+            raise BrokerReadResponseInvalid
+        order["amo"] = generation == "AMO"
+        if broker_product not in {"BO", "CO"}:
+            order["variety"] = "amo" if order["amo"] else "regular"
     for field, value in {
         "timestamp": _response_text(d, "ordDtTm", "exchTmstp", "flDtTm", empty_absent=True),
         "validity": _response_text(d, "vldt", "ordDur", empty_absent=True),
@@ -937,9 +994,13 @@ def from_kotak_scrip(rec: dict[str, Any]) -> dict[str, Any]:
     trading symbol the order endpoints expect and ``pSymbol`` is the token.
     """
     seg = str(rec.get("pExchSeg", ""))
+    try:
+        token = canonical_instrument_token(rec.get("pSymbol"))
+    except KotakNeoMappingError:
+        raise BrokerReadResponseInvalid from None
     return {
         "trading_symbol": rec.get("pTrdSymbol", ""),
-        "token": str(rec.get("pSymbol", "")),
+        "token": token,
         "name": rec.get("pSymbolName", rec.get("pDesc", "")),
         "exchange": KOTAK_TO_EXCHANGE.get(seg, seg),
         "isin": rec.get("pISIN", ""),

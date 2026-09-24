@@ -126,6 +126,10 @@ class ModifyCapabilityError(PortfolioSafetyStateError):
     """Raised when authoritative modify context proves a broker rule unsupported."""
 
 
+class CancelCapabilityError(PortfolioSafetyStateError):
+    """Raised when authoritative cancel context proves a broker rule unsupported."""
+
+
 @dataclass(frozen=True)
 class ProspectiveSafetyInputs:
     """SafetySystem inputs aligned to one proposed order in a request."""
@@ -1177,6 +1181,9 @@ def _normalise_authoritative_order(row: Any, fallback: Any = None) -> dict[str, 
             _order_record_value(row, fallback, "action", "transaction_type", "transactionType")
         ).upper(),
         "product": _text(_order_record_value(row, fallback, "product", "product_type", "productType")).upper(),
+        "broker_product": _text(
+            _order_record_value(row, fallback, "broker_product", "brokerProduct")
+        ).upper(),
         "quantity": _order_record_value(row, fallback, "quantity", "qty", "order_quantity"),
         "filled_quantity": _order_record_value(
             row,
@@ -1189,8 +1196,8 @@ def _normalise_authoritative_order(row: Any, fallback: Any = None) -> dict[str, 
         "pricetype": _text(
             _order_record_value(row, fallback, "pricetype", "price_type", "order_type", "orderType")
         ).upper(),
-        "price": _order_record_value(row, fallback, "price") or 0,
-        "trigger_price": _order_record_value(row, fallback, "trigger_price", "triggerPrice") or 0,
+        "price": _order_record_value(row, fallback, "price"),
+        "trigger_price": _order_record_value(row, fallback, "trigger_price", "triggerPrice"),
         "disclosed_quantity": _order_record_value(
             row,
             fallback,
@@ -1199,6 +1206,9 @@ def _normalise_authoritative_order(row: Any, fallback: Any = None) -> dict[str, 
             "disclosedqty",
             "disclosed_qty",
         ),
+        "validity": _text(_order_record_value(row, fallback, "validity", "order_duration")).upper(),
+        "variety": _text(_order_record_value(row, fallback, "variety")).lower(),
+        "amo": _order_record_value(row, fallback, "amo"),
     }
 
 
@@ -1443,9 +1453,54 @@ def _recover_omitted_modify_fields(
     requested_fields: Collection[str] | None,
     adapter_id: str,
 ) -> None:
-    """Restore omitted full-replacement trigger/disclosure from the live order."""
+    """Restore fields required by a broker's full-replacement modify call."""
     if requested_fields is None or not isinstance(changes, MutableMapping):
         return
+    requested = set(requested_fields)
+    if str(adapter_id).strip().lower() == "kotakneo":
+        broker_product = _text(current.get("broker_product")).strip().upper()
+        variety = _text(current.get("variety")).strip().lower()
+        if not broker_product:
+            raise PortfolioSafetyStateError("Authoritative broker product is unavailable")
+        if not variety:
+            raise PortfolioSafetyStateError("Authoritative order variety is unavailable")
+        if broker_product in {"BO", "CO"} or variety in {"bracket", "cover"}:
+            unsupported = "bracket" if broker_product == "BO" or variety == "bracket" else "cover"
+            raise ModifyCapabilityError(f"Kotak Neo v3 cannot modify {unsupported} orders")
+        if variety not in {"regular", "amo"}:
+            raise ModifyCapabilityError(f"Kotak Neo v3 cannot modify order variety {variety!r}")
+
+        authoritative_amo = _canonical_amo(current.get("amo"), label="authoritative AMO flag")
+        if "amo" in requested:
+            requested_amo = _canonical_amo(changes.get("amo"), label="modify AMO flag")
+            if requested_amo is not authoritative_amo:
+                raise PortfolioSafetyStateError(
+                    "Modify-order AMO flag does not match the authoritative open order"
+                )
+        if (variety == "amo") is not authoritative_amo:
+            raise PortfolioSafetyStateError("Authoritative order variety contradicts its AMO flag")
+
+        replacements = {
+            "quantity": ("quantity", "quantity"),
+            "pricetype": ("pricetype", "price_type"),
+            "price": ("price", "price"),
+            "validity": ("validity", "validity"),
+            "trigger_price": ("trigger_price", "trigger_price"),
+            "disclosed_quantity": ("disclosed_quantity", "disclosed_quantity"),
+        }
+        for change_key, (current_key, request_key) in replacements.items():
+            if request_key in requested:
+                continue
+            raw_value = current.get(current_key)
+            if raw_value is None or str(getattr(raw_value, "value", raw_value)).strip() == "":
+                label = change_key.replace("pricetype", "price type").replace("_", " ")
+                raise PortfolioSafetyStateError(f"Authoritative {label} is unavailable")
+            recovered = str(getattr(raw_value, "value", raw_value)).strip()
+            changes[change_key] = recovered.upper() if change_key in {"pricetype", "validity"} else recovered
+        changes["broker_product"] = broker_product
+        changes["variety"] = variety
+        changes["amo"] = authoritative_amo
+
     if "trigger_price" not in requested_fields:
         recovered = _text(current.get("trigger_price"))
         if recovered and recovered != "0":
@@ -1459,6 +1514,19 @@ def _recover_omitted_modify_fields(
             raise PortfolioSafetyStateError("Authoritative disclosed quantity is unavailable")
         recovered = str(getattr(raw_disclosed, "value", raw_disclosed)).strip()
         changes["disclosed_quantity"] = recovered
+
+
+def _canonical_amo(value: Any, *, label: str) -> bool:
+    """Return an exact AMO boolean from broker/request data or fail closed."""
+    if type(value) is bool:
+        return value
+    if type(value) is str:
+        normalised = value.strip().upper()
+        if normalised in {"YES", "TRUE", "AMO"}:
+            return True
+        if normalised in {"NO", "FALSE", "NA", "--"}:
+            return False
+    raise PortfolioSafetyStateError(f"{label.capitalize()} is invalid")
 
 
 _MODIFY_IDENTITY_FIELDS = ("symbol", "exchange", "action", "product")
@@ -1495,6 +1563,57 @@ def _bind_authoritative_modify_identity(
         canonical = authoritative.upper() if field_name != "symbol" else authoritative
         bound[field_name] = canonical
     return bound
+
+
+async def bind_authoritative_cancel_context(
+    config: Mapping[str, Any],
+    adapter_id: str,
+    order_id: str,
+    requested: Mapping[str, Any],
+    *,
+    account_id: str = "default",
+) -> dict[str, Any]:
+    """Bind Kotak cancel arguments to one authoritative active broker row."""
+    source = _resolve_account_source(config, adapter_id, account_id)
+    raw_orders = await _read(source, "orderbook", "order_book")
+    rows = _rows(raw_orders, "data", "orders", "orderbook", "order_book")
+    matches = [row for row in rows if _order_record_id(row) == str(order_id)]
+    if len(matches) != 1:
+        raise PortfolioSafetyStateError("Authoritative open order is unavailable")
+    current = _normalise_authoritative_order(matches[0])
+    if current["status"] not in _ACTIVE_ORDER_STATUSES:
+        raise PortfolioSafetyStateError("Authoritative order is not active and cancellable")
+
+    broker_product = _text(current.get("broker_product")).strip().upper()
+    variety = _text(current.get("variety")).strip().lower()
+    if not broker_product:
+        raise PortfolioSafetyStateError("Authoritative broker product is unavailable")
+    if not variety:
+        raise PortfolioSafetyStateError("Authoritative order variety is unavailable")
+    if broker_product in {"BO", "CO"} or variety in {"bracket", "cover"}:
+        unsupported = "bracket" if broker_product == "BO" or variety == "bracket" else "cover"
+        raise CancelCapabilityError(f"Kotak Neo v3 cannot cancel {unsupported} orders")
+    if variety not in {"regular", "amo"}:
+        raise CancelCapabilityError(f"Kotak Neo v3 cannot cancel order variety {variety!r}")
+    amo = _canonical_amo(current.get("amo"), label="authoritative AMO flag")
+    if (variety == "amo") is not amo:
+        raise PortfolioSafetyStateError("Authoritative order variety contradicts its AMO flag")
+
+    if "variety" in requested:
+        requested_variety = requested["variety"]
+        if type(requested_variety) is not str or not requested_variety.strip():
+            raise PortfolioSafetyStateError("Cancel-order variety is invalid")
+        if requested_variety.strip().lower() != variety:
+            raise PortfolioSafetyStateError(
+                "Cancel-order variety does not match the authoritative open order"
+            )
+    if "amo" in requested:
+        requested_amo = _canonical_amo(requested["amo"], label="cancel AMO flag")
+        if requested_amo is not amo:
+            raise PortfolioSafetyStateError(
+                "Cancel-order AMO flag does not match the authoritative open order"
+            )
+    return {"broker_product": broker_product, "variety": variety, "amo": amo}
 
 
 async def classify_modify_intent(

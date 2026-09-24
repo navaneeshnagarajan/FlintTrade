@@ -690,6 +690,50 @@ async def test_margin_calculator_rejects_oversized_integer_token_from_resolver_c
 
 
 @pytest.mark.asyncio
+async def test_margin_calculator_rejects_oversized_live_search_token_before_margin_transport():
+    """A huge SDK pSymbol must not escape as Python's int-to-str ValueError."""
+
+    class OversizedSearchTokenNeo(MockNeoFull):
+        def search_scrip(
+            self,
+            exchange_segment,
+            symbol,
+            expiry=None,
+            option_type=None,
+            strike_price=None,
+            ignore_50multiple=True,
+        ):
+            self.calls.append(("search", (exchange_segment, symbol)))
+            return [
+                {
+                    "pSymbol": 10**5000,
+                    "pExchSeg": exchange_segment,
+                    "pSymbolName": str(symbol).upper(),
+                    "pTrdSymbol": f"{str(symbol).upper()}-EQ",
+                    "lLotSize": 1,
+                    "dTickSize": 1,
+                }
+            ]
+
+    mock = OversizedSearchTokenNeo()
+    adapter = KotakNeoAdapter(client_factory=lambda _session: mock)
+    session = await _session(adapter)
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    )
+
+    with pytest.raises(BrokerInternal, match="search response is invalid"):
+        await adapter.margin_calculator(session, order)
+
+    assert [call[0] for call in mock.calls] == ["search"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "response",
     [

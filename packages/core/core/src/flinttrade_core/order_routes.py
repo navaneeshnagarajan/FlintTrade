@@ -1066,6 +1066,17 @@ def _dispatch_live_order(
             ),
         }), 503
 
+    if str(adapter_id).strip().lower() == "kotakneo":
+        for field in ("variety", "validity"):
+            if field in body and (
+                body[field] is None
+                or type(body[field]) is str and not body[field].strip()
+            ):
+                return jsonify({
+                    "status": "error",
+                    "message": f"Kotak Neo {field} must not be empty.",
+                }), 501
+
     request_ctx = RequestContext(
         jti=str(payload.get("jti") or ""),
         actor_type="human",
@@ -1507,12 +1518,38 @@ def _dispatch_live_modify(
         "market_protection",
         "trading_symbol",
         "transaction_type",
+        "variety",
     }
-    if str(adapter_id).strip().lower() == "kotakneo" and kotakneo_removed_fields.intersection(body):
-        return jsonify({
-            "status": "error",
-            "message": "The requested Kotak Neo modify fields are not available in SDK v3.",
-        }), 501
+    if str(adapter_id).strip().lower() == "kotakneo":
+        if kotakneo_removed_fields.intersection(body):
+            return jsonify({
+                "status": "error",
+                "message": "The requested Kotak Neo modify fields are not available in SDK v3.",
+            }), 501
+        replacement_keys = {
+            "symbol",
+            "exchange",
+            "action",
+            "product",
+            "quantity",
+            "price",
+            "pricetype",
+            "order_type",
+            "trigger_price",
+            "disclosed_quantity",
+            "validity",
+            "amo",
+        }
+        empty_fields = sorted(
+            field
+            for field in replacement_keys.intersection(body)
+            if body[field] is None or type(body[field]) is str and not body[field].strip()
+        )
+        if empty_fields:
+            return jsonify({
+                "status": "error",
+                "message": f"Kotak Neo modify fields must not be empty: {empty_fields}",
+            }), 501
 
     blocked, unavailable = _live_kill_switch_block()
     if unavailable is not None:
@@ -1622,16 +1659,56 @@ def _dispatch_live_cancel(
         }), 403
 
     extras: dict[str, Any] = {}
-    if body.get("variety") is not None:
-        extras["variety"] = str(body["variety"])
-    if body.get("amo") is not None:
-        extras["amo"] = bool(body["amo"])
-    if body.get("trading_symbol") is not None:
-        extras["trading_symbol"] = str(body["trading_symbol"])
-    if adapter_id == "groww" and body.get("segment") is not None:
-        extras["segment"] = str(body["segment"])
+    authoritative_context: dict[str, Any] = {}
+    if str(adapter_id).strip().lower() == "kotakneo":
+        if "trading_symbol" in body:
+            return jsonify({
+                "status": "error",
+                "message": "Kotak Neo v3 cancel does not accept a trading symbol.",
+            }), 501
+        from .l2_state import (  # noqa: PLC0415
+            CancelCapabilityError,
+            PortfolioSafetyStateError,
+            bind_authoritative_cancel_context,
+        )
 
-    canonical = {"_op": "cancel", "order_id": order_id, **extras}
+        requested = {key: body[key] for key in ("variety", "amo") if key in body}
+        try:
+            authoritative_context = _run_on_client_loop(
+                bind_authoritative_cancel_context(
+                    current_app.config,
+                    adapter_id,
+                    order_id,
+                    requested,
+                    account_id=account_id,
+                )
+            )
+        except CancelCapabilityError as refusal:
+            return jsonify({"status": "error", "message": str(refusal)}), 501
+        except PortfolioSafetyStateError as refusal:
+            return jsonify({"status": "error", "message": str(refusal)}), 409
+        except Exception as exc:  # noqa: BLE001 - broker state must fail closed
+            logger.error(
+                "Cancel authoritative state unavailable | adapter=%s: %s",
+                adapter_id,
+                type(exc).__name__,
+            )
+            return _safety_state_unavailable_response()
+        extras = {
+            "variety": authoritative_context["variety"],
+            "amo": authoritative_context["amo"],
+        }
+    else:
+        if body.get("variety") is not None:
+            extras["variety"] = str(body["variety"])
+        if body.get("amo") is not None:
+            extras["amo"] = bool(body["amo"])
+        if body.get("trading_symbol") is not None:
+            extras["trading_symbol"] = str(body["trading_symbol"])
+        if adapter_id == "groww" and body.get("segment") is not None:
+            extras["segment"] = str(body["segment"])
+
+    canonical = {"_op": "cancel", "order_id": order_id, **authoritative_context, **extras}
     hint = RoutingHint(adapter_id=adapter_id, account_id=account_id)
     return _gated_write_dispatch(
         "cancel",

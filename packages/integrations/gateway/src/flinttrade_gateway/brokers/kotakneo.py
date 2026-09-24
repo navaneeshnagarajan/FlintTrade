@@ -270,19 +270,25 @@ class KotakNeoAdapter(BrokerAdapter):
         """
         if self._token_resolver is not None:
             try:
-                return str(self._token_resolver(name, exchange))
-            except (TypeError, ValueError):
+                return M.canonical_instrument_token(self._token_resolver(name, exchange))
+            except (M.KotakNeoMappingError, TypeError, ValueError):
                 raise UnsupportedCapabilityError(
-                    "Kotak Neo resolved instrument token is not canonical",
+                    "Kotak Neo resolved instrument token must be a positive numeric instrument_token (instrument token)",
                     broker_id="kotakneo",
                 ) from None
-        scrips = await self.search_scrip(session, name, exchange)
+        try:
+            scrips = await self.search_scrip(session, name, exchange)
+        except BrokerReadResponseInvalid as exc:
+            raise BrokerInternal("Kotak Neo search response is invalid", broker_id="kotakneo") from exc
         if not scrips or not scrips[0].get("token"):
             raise BrokerError(
                 f"Cannot resolve Kotak Neo instrument token for {name}/{exchange} — "
                 "configure a token resolver or check the symbol"
             )
-        return str(scrips[0]["token"])
+        try:
+            return M.canonical_instrument_token(scrips[0]["token"])
+        except M.KotakNeoMappingError as exc:
+            raise BrokerInternal("Kotak Neo search response is invalid", broker_id="kotakneo") from exc
 
     @staticmethod
     async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:

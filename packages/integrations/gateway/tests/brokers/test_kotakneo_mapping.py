@@ -1244,6 +1244,48 @@ def test_from_kotak_order_report_extras():
     assert o["tag"] == "FLINT1"
 
 
+@pytest.mark.parametrize(
+    ("broker_product", "generation", "product", "variety", "amo"),
+    [
+        ("CNC", "AMO", "CNC", "amo", True),
+        ("NRML", "NA", "NRML", "regular", False),
+        ("BO", "NA", "MIS", "bracket", False),
+        ("CO", "--", "MIS", "cover", False),
+    ],
+)
+def test_from_kotak_order_retains_authoritative_product_and_generation(
+    broker_product,
+    generation,
+    product,
+    variety,
+    amo,
+):
+    """Removing raw product/generation binding would make signed writes spoofable."""
+    row = {
+        "nOrdNo": "1",
+        "ordSt": "open",
+        "trdSym": "IDEA-EQ",
+        "exSeg": "nse_cm",
+        "trnsTp": "B",
+        "prcTp": "L",
+        "prod": broker_product,
+        "qty": "10",
+        "fldQty": "0",
+        "prc": "9.39",
+        "trgPrc": "0",
+        "dscQty": "0",
+        "vldt": "IOC",
+        "ordGenTp": generation,
+    }
+
+    order = from_kotak_order(row)
+
+    assert order["broker_product"] == broker_product
+    assert order["product"] == product
+    assert order["variety"] == variety
+    assert order["amo"] is amo
+
+
 # ---------------------------------------------------------------------------
 # Limits filters
 # ---------------------------------------------------------------------------
