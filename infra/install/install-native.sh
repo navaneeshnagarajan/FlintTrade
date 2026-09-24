@@ -125,8 +125,7 @@ if [ ! -d "$VENV_DIR" ]; then
     python3.12 -m venv "$VENV_DIR"
 fi
 
-# Activate and install dependencies — SC-07: hash-verified install only
-"$VENV_DIR/bin/pip" install --upgrade pip setuptools wheel -q
+# Install dependencies — SC-07: hash-verified install only
 "$VENV_DIR/bin/pip" install --require-hashes -r "$INSTALL_DIR/requirements.lock" -q
 
 ok "Python dependencies installed"

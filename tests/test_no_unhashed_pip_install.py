@@ -103,9 +103,12 @@ def test_no_unhashed_pip_install() -> None:
                 continue
             if _is_external_openalgo(stripped):
                 continue  # OpenAlgo's own deps — out of our control
+            command_tail = stripped.split("install", 1)[1]
             references_req = bool(_REQ_FILE_RE.search(stripped)) or "-r " in stripped
             if not references_req:
-                continue  # e.g. `pip install --upgrade pip setuptools wheel`
+                if any(re.search(rf"\b{name}\b", command_tail) for name in ("pip", "setuptools", "wheel")):
+                    violations.append(f"{rel}:{n}: unhashed packaging-tool install → {stripped}")
+                continue
             # An install that touches a requirements file MUST be hash-verified.
             if "--require-hashes" in stripped:
                 continue
