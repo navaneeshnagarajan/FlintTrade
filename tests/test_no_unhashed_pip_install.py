@@ -15,6 +15,7 @@ exempt — those lines reference the OpenAlgo install dir.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,7 @@ _SCAN_GLOBS = (
 
 # A line that installs from a requirements file.
 _INSTALL_RE = re.compile(r"\b(pip3?|uv pip)\s+install\b")
+_PIP_EXECUTABLE_PATH_RE = re.compile(r"(?:(?:.*[/\\])?pip3?(?:\.exe)?)", re.IGNORECASE)
 _REQ_FILE_RE = re.compile(r"requirements(\.lock|[\w.-]*\.txt)")
 
 # A line that hands a string to an evaluator: there the quoted text *is* the command,
@@ -72,7 +74,15 @@ def _executable_text(line: str) -> str:
     """
     if _EVALUATOR_RE.search(line):
         return line
-    return _QUOTED_RE.sub(" ", line)
+
+    def replace_quoted(match: re.Match[str]) -> str:
+        literal = match.group()
+        content = literal[1:-1]
+        if _PIP_EXECUTABLE_PATH_RE.fullmatch(content):
+            return content
+        return " "
+
+    return _QUOTED_RE.sub(replace_quoted, line)
 
 
 def _iter_files():
@@ -118,6 +128,26 @@ def test_no_unhashed_pip_install() -> None:
                 violations.append(f"{rel}:{n}: install without --require-hashes → {stripped}")
 
     assert not violations, "Unhashed install paths found (SC-07):\n" + "\n".join(violations)
+
+
+@pytest.mark.unit
+def test_quoted_pip_executable_cannot_hide_a_floating_toolchain_install(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A quoted venv pip path must still be treated as an executable command."""
+    installer = tmp_path / "infra" / "install" / "install-native.sh"
+    installer.parent.mkdir(parents=True)
+    installer.write_text(
+        '"$VENV_DIR/bin/pip" install --upgrade pip setuptools wheel -q\n',
+        encoding="utf-8",
+    )
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(module, "_SCAN_GLOBS", ("infra/**/*.sh",))
+
+    with pytest.raises(AssertionError, match="unhashed packaging-tool install"):
+        test_no_unhashed_pip_install()
 
 
 @pytest.mark.unit
