@@ -1252,9 +1252,11 @@ packaging==26.2 \
     --hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e \
     --hash=sha256:ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661
     # via
+    #   flinttrade-gateway
     #   limits
     #   matplotlib
     #   plotly
+    #   wheel
 pandas==2.3.3 \
     --hash=sha256:0242fe9a49aa8b4d78a4fa03acb397a58833ef6199e9aa40a95f027bb3a1b6e7 \
     --hash=sha256:1611aedd912e1ff81ff41c745822980c49ce4a7907537be8692c8dbc31924593 \
@@ -1806,6 +1808,10 @@ sentry-sdk==2.69.2 \
     --hash=sha256:25bc0a6c55bba0b83398212a7247f4f9f3190f189a1909b68e4807ef4b785895 \
     --hash=sha256:b4d8915a526e626b0b14a2925907554b722d3b8e3e3781570fc35791712af323
     # via flinttrade-core
+setuptools==84.0.0 \
+    --hash=sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670 \
+    --hash=sha256:f4695c21257f0d9b537ec2692c941d02ee143b7cc1276941349a546573b2ef73
+    # via flinttrade-gateway
 six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274 \
     --hash=sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81
@@ -2037,6 +2043,10 @@ werkzeug==3.1.8 \
     # via
     #   flask
     #   flask-cors
+wheel==0.48.0 \
+    --hash=sha256:3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab \
+    --hash=sha256:94800765601e9171bf5d58d066e640662842bcedcbab982b2c90787a2c987322
+    # via flinttrade-gateway
 wrapt==2.3.0 \
     --hash=sha256:0a45ffae742ce91a16e11cb6c7cd71e7f9994f3cbd283b962ab093f5c6dcf525 \
     --hash=sha256:0d3fb71e65b001adfc42684522eeccd9c21d8ba679945abc993439567b66e59f \

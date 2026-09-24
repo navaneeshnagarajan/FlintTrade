@@ -100,18 +100,69 @@ def test_facade_exposes_exact_v3_session_surface():
     assert callable(KotakNeoSdkSession.close)
 
 
+def test_exact_market_rejection_requires_a_fresh_session() -> None:
+    from neo_api_client.websocket.feed.exceptions import AuthenticationError as MarketAuthenticationError
+
+    from flinttrade_gateway.brokers.kotakneo_sdk import canonical_stream_exception
+
+    canonical = canonical_stream_exception(
+        MarketAuthenticationError("Unexpected auth response: {'private': 'detail'}"),
+        "market connect",
+    )
+
+    assert isinstance(canonical, SessionExpired)
+    assert "private" not in str(canonical)
+
+
+def test_exact_market_authentication_timeout_remains_retryable() -> None:
+    from neo_api_client.websocket.feed.exceptions import AuthenticationError as MarketAuthenticationError
+
+    from flinttrade_gateway.brokers.kotakneo_sdk import canonical_stream_exception
+
+    canonical = canonical_stream_exception(MarketAuthenticationError("Authentication timeout"), "market connect")
+
+    assert isinstance(canonical, BrokerTimeout)
+
+
 @pytest.mark.parametrize("surface", ["market", "order"])
-def test_exact_sdk_stream_authentication_errors_require_a_fresh_session(surface: str) -> None:
+def test_exact_sdk_authentication_transport_wrapper_preserves_retryable_cause(surface: str) -> None:
     from neo_api_client.websocket.feed.exceptions import AuthenticationError as MarketAuthenticationError
     from neo_api_client.websocket.orderfeed.exceptions import AuthenticationError as OrderAuthenticationError
 
     from flinttrade_gateway.brokers.kotakneo_sdk import canonical_stream_exception
 
     error_type = MarketAuthenticationError if surface == "market" else OrderAuthenticationError
-    canonical = canonical_stream_exception(error_type("private-authentication-detail"), f"{surface} connect")
+    try:
+        raise error_type("private-wrapper-detail") from ConnectionError("private-transport-detail")
+    except error_type as failure:
+        canonical = canonical_stream_exception(failure, f"{surface} connect")
 
-    assert isinstance(canonical, SessionExpired)
-    assert "private-authentication-detail" not in str(canonical)
+    assert isinstance(canonical, NetworkError)
+    assert "private" not in str(canonical)
+
+
+@pytest.mark.parametrize(
+    ("surface", "message"),
+    [
+        pytest.param("market", "Server downgraded to native_fallback (out of scope)", id="market-protocol-downgrade"),
+        pytest.param("order", "private-unclassified-detail", id="order-unclassified"),
+    ],
+)
+def test_non_rejection_authentication_errors_fail_closed_without_forcing_relogin(
+    surface: str,
+    message: str,
+) -> None:
+    from neo_api_client.websocket.feed.exceptions import AuthenticationError as MarketAuthenticationError
+    from neo_api_client.websocket.orderfeed.exceptions import AuthenticationError as OrderAuthenticationError
+
+    from flinttrade_gateway.brokers.kotakneo_sdk import canonical_stream_exception
+
+    error_type = MarketAuthenticationError if surface == "market" else OrderAuthenticationError
+    failure = error_type(message)
+    canonical = canonical_stream_exception(failure, "stream connect")
+
+    assert isinstance(canonical, BrokerInternal)
+    assert "private" not in str(canonical)
 
 
 class ExactNeo:

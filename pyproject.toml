@@ -6,6 +6,7 @@ build-constraint-dependencies = [
     "setuptools==84.0.0",
     "wheel==0.48.0",
 ]
+no-build-isolation-package = ["kotakneoapi"]
 
 [tool.uv.workspace]
 members = [

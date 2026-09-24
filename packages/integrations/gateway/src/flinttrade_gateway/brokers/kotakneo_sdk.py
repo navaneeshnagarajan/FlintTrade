@@ -839,8 +839,17 @@ def canonical_stream_exception(exc: Exception, operation: str) -> BrokerError:
 
     _install_sdk_log_filter()
     if isinstance(exc, (MarketAuthenticationError, OrderAuthenticationError)):
-        return SessionExpired(
-            f"Kotak Neo {operation} session authentication failed",
-            broker_id="kotakneo",
-        )
+        cause = exc.__cause__
+        if isinstance(cause, Exception):
+            return _canonical_exception(cause, operation)
+        message = exc.args[0] if len(exc.args) == 1 and type(exc.args[0]) is str else ""
+        if isinstance(exc, MarketAuthenticationError):
+            if message == "Authentication timeout":
+                return BrokerTimeout(f"Kotak Neo {operation} timed out", broker_id="kotakneo")
+            if message.startswith("Unexpected auth response:"):
+                return SessionExpired(
+                    f"Kotak Neo {operation} session authentication failed",
+                    broker_id="kotakneo",
+                )
+        return BrokerInternal(f"Kotak Neo {operation} failed", broker_id="kotakneo")
     return _canonical_exception(exc, operation)

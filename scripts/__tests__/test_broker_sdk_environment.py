@@ -213,6 +213,21 @@ def test_uv_sync_uses_the_same_exact_build_constraints() -> None:
         "setuptools==84.0.0",
         "wheel==0.48.0",
     ]
+    assert project["tool"]["uv"]["no-build-isolation-package"] == ["kotakneoapi"]
+
+    gateway = tomllib.loads(
+        (sdk_environment.REPO / "packages/integrations/gateway/pyproject.toml").read_text(encoding="utf-8")
+    )
+    assert {"packaging==26.2", "setuptools==84.0.0", "wheel==0.48.0"} <= set(
+        gateway["project"]["dependencies"]
+    )
+
+    lock = tomllib.loads((sdk_environment.REPO / "uv.lock").read_text(encoding="utf-8"))
+    packages = {entry["name"]: entry for entry in lock["package"]}
+    for name in ("packaging", "setuptools", "wheel"):
+        assert packages[name]["source"] == {"registry": "https://pypi.org/simple"}
+        assert packages[name]["wheels"]
+        assert all(item["hash"].startswith("sha256:") for item in packages[name]["wheels"])
 
 
 def test_remove_kotak_without_interpreter_pip_when_uv_is_available(monkeypatch) -> None:
