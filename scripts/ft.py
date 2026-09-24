@@ -1044,18 +1044,16 @@ def cmd_setup(_args: list[str]) -> int:
             fail("requirements.lock is missing; install uv from https://docs.astral.sh/uv/ and re-run.")
             return 1
         run([python, "-m", "pip", "install", "--require-hashes", "-r", str(lock)])
-        remove_kotak_distributions(Path(python))
-        info("OK Third-party requirements installed")
+        repair_kotakneo_environment(Path(python))
+        info("OK Third-party requirements and pinned broker SDKs installed")
         # requirements.lock is exported with `--no-emit-workspace`, so it carries
         # ONLY third-party dependencies: none of the thirteen flinttrade_* packages
         # is installed by that command. They are reached through the PYTHONPATH
         # that python_env() builds from every workspace source root, which is what
-        # keeps `start` from dying on `import flinttrade_data`. The one thing this
-        # path cannot supply is the git-pinned Kotak Neo SDK, which uv.lock pins and
-        # requirements.lock deliberately excludes.
+        # keeps `start` from dying on `import flinttrade_data`. Git-pinned broker
+        # SDKs excluded from that registry-only export are installed and attested
+        # separately by broker_sdk_environment.py above.
         info(f"OK Workspace packages linked on PYTHONPATH ({len(workspace_module_names())} packages)")
-        warn("Without uv the git-pinned Kotak Neo broker SDK is unavailable; that broker stays disabled.")
-        warn("Install uv from https://docs.astral.sh/uv/ and re-run setup for the complete environment.")
 
     pnpm = pnpm_argv()
     if pnpm is None:

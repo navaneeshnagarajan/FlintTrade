@@ -2,16 +2,15 @@
 
 The base surface (login, gated regular/AMO place, reads, quotes,
 margin, scrip search) is covered in ``tests/brokers/test_kotakneo_adapter_base.py``; this
-file exercises the parity wave: AMO, v3-only cancel/modify, local fill filtering, scrip master,
-typed quotes + market depth, the HSM subscribe/unsubscribe surface and the
-market/order feed streams against synthetic frames.
+file exercises the parity wave: AMO, v3-only cancel/modify, local fill filtering,
+scrip master, typed quotes + market depth, and typed v3 SFeed subscribe/unsubscribe
+plus market/order streams against synthetic messages.
 """
 
 from __future__ import annotations
 
-import json
 from decimal import Decimal
-from typing import Any, AsyncIterator
+from typing import Any
 
 import pytest
 
@@ -33,6 +32,7 @@ from flinttrade_gateway.brokers.kotakneo import (
     _normalise_credentials,
     _ROUTER_TOKEN,
 )
+from flinttrade_gateway.capabilities import TickProtocol
 
 pytestmark = pytest.mark.unit
 
@@ -198,19 +198,12 @@ class MockNeoFull:
 
     # -- streaming + session -------------------------------------------------
 
-    def subscribe(self, instrument_tokens, is_index, is_depth):
-        self.calls.append(("subscribe", (instrument_tokens, is_index, is_depth)))
-
-    def un_subscribe(self, instrument_tokens, is_index, is_depth):
-        self.calls.append(("un_subscribe", (instrument_tokens, is_index, is_depth)))
-
-    def subscribe_to_orderfeed(self):
-        self.calls.append(("subscribe_orderfeed", None))
-        return None
-
     def logout(self):
         self.calls.append(("logout", None))
         return {"State": "OK"}
+
+    def close_rest(self):
+        self.calls.append(("close_rest", None))
 
 
 @pytest.mark.asyncio
@@ -348,17 +341,18 @@ async def test_logout_calls_facade_and_is_idempotent():
     session = await _session(adapter)
     await adapter.logout(session)
     await adapter.logout(session)
-    assert [c for c in mock.calls if c[0] == "logout"] == [("logout", None), ("logout", None)]
+    assert [c for c in mock.calls if c[0] == "logout"] == [("logout", None)]
 
 
 @pytest.mark.asyncio
-async def test_logout_tolerates_facade_without_logout():
+async def test_logout_fails_canonically_when_facade_has_no_required_teardown():
     class Bare:
         pass
 
     adapter = KotakNeoAdapter(client_factory=lambda _s: Bare())
     session = await _session(adapter)
-    await adapter.logout(session)  # must not raise
+    with pytest.raises(BrokerInternal):
+        await adapter.logout(session)
 
 
 
@@ -368,16 +362,17 @@ def test_v3_cancel_facade_has_no_removed_trading_symbol_argument():
         client.cancel_order("OID-AMO", amo="YES", trading_symbol="SYNTHETIC-EQ")
 
 
-def test_capabilities_remove_v2_order_and_streaming_claims() -> None:
+def test_capabilities_advertise_only_the_wired_v3_stream_runtime() -> None:
     assert KOTAKNEO_CAPABILITIES.historical_intraday_intervals_minutes == [1, 3, 5, 10, 15, 30, 60]
     assert KOTAKNEO_CAPABILITIES.historical_calendar_intervals == ["1D", "1W"]
     assert KOTAKNEO_CAPABILITIES.historical_max_lookback_days_intraday is None
     assert KOTAKNEO_CAPABILITIES.historical_max_lookback_days_daily is None
     assert KOTAKNEO_CAPABILITIES.streaming_supported is True
-    assert KOTAKNEO_CAPABILITIES.streaming_runtime_ready is False
+    assert KOTAKNEO_CAPABILITIES.streaming_runtime_ready is True
     assert KOTAKNEO_CAPABILITIES.streaming_max_connections_per_user is None
-    assert KOTAKNEO_CAPABILITIES.streaming_max_symbols_per_connection is None
+    assert KOTAKNEO_CAPABILITIES.streaming_max_symbols_per_connection == 3000
     assert KOTAKNEO_CAPABILITIES.streaming_max_total_symbols is None
+    assert KOTAKNEO_CAPABILITIES.tick_protocol is TickProtocol.KOTAK_NEO_BINARY
     assert KOTAKNEO_CAPABILITIES.bracket_order_native is False
     assert KOTAKNEO_CAPABILITIES.cover_order_native is False
 
@@ -1359,167 +1354,6 @@ async def test_market_depth_normalises_book():
     book = books[0]
     assert book["symbol"] == "IDEA-EQ" and book["exchange"] == "NSE"
     assert book["bids"][0]["price"] == 9.39 and book["asks"][0]["quantity"] == 50
-
-
-# ---------------------------------------------------------------------------
-# HSM subscribe / unsubscribe
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_subscribe_with_token_resolver_and_depth_mode():
-    mock = MockNeoFull()
-    adapter = _adapter(mock, token_resolver=lambda s, e: "14366")
-    session = await _session(adapter)
-    await adapter.subscribe(session, ["NSE:IDEA"], mode="FULL")
-    assert mock.calls == [("subscribe", ([{"instrument_token": "14366", "exchange_segment": "nse_cm"}], False, True))]
-
-
-@pytest.mark.asyncio
-async def test_subscribe_resolves_token_via_search_when_no_resolver():
-    mock = MockNeoFull()
-    adapter = _adapter(mock)
-    session = await _session(adapter)
-    await adapter.subscribe(session, ["NSE:IDEA"], mode="LTP")
-    sub = [c for c in mock.calls if c[0] == "subscribe"]
-    assert sub == [("subscribe", ([{"instrument_token": "14366", "exchange_segment": "nse_cm"}], False, False))]
-
-
-@pytest.mark.asyncio
-async def test_subscribe_index_mode_passes_name_through():
-    mock = MockNeoFull()
-    adapter = _adapter(mock)
-    session = await _session(adapter)
-    await adapter.subscribe(session, ["NSE:nifty 50", "BSE:bankex"], mode="INDEX")
-    assert mock.calls == [
-        (
-            "subscribe",
-            (
-                [
-                    {"instrument_token": "Nifty 50", "exchange_segment": "nse_cm"},
-                    {"instrument_token": "BANKEX", "exchange_segment": "bse_cm"},
-                ],
-                True,
-                False,
-            ),
-        )
-    ]
-
-
-@pytest.mark.asyncio
-async def test_unsubscribe_replays_recorded_subscription_flags():
-    mock = MockNeoFull()
-    adapter = _adapter(mock, token_resolver=lambda s, e: "14366")
-    session = await _session(adapter)
-    await adapter.subscribe(session, ["NSE:IDEA"], mode="DEPTH")
-    await adapter.unsubscribe(session, ["NSE:IDEA"])
-    unsub = [c for c in mock.calls if c[0] == "un_subscribe"]
-    assert unsub == [("un_subscribe", ([{"instrument_token": "14366", "exchange_segment": "nse_cm"}], False, True))]
-
-
-@pytest.mark.asyncio
-async def test_unsubscribe_unknown_symbol_is_noop():
-    mock = MockNeoFull()
-    adapter = _adapter(mock, token_resolver=lambda s, e: "14366")
-    session = await _session(adapter)
-    await adapter.unsubscribe(session, ["NSE:NEVERSUBSCRIBED"])
-    assert mock.calls == []
-
-
-# ---------------------------------------------------------------------------
-# Streams (synthetic frames)
-# ---------------------------------------------------------------------------
-
-
-def _market_frames(_session: Any) -> AsyncIterator[Any]:
-    async def gen():
-        yield json.dumps([{"type": "cn", "msg": "connected"}])  # ack — skipped
-        yield {
-            "type": "stock_feed",
-            "data": [
-                {
-                    "tk": "14366",
-                    "ts": "IDEA-EQ",
-                    "e": "nse_cm",
-                    "ltp": "9.4",
-                    "v": "1000",
-                    "bp": "9.39",
-                    "sp": "9.41",
-                    "oi": "0",
-                    "ltt": "22/01/2025 14:28:16",
-                },
-            ],
-        }
-        yield [{"tk": "Nifty 50", "e": "nse_cm", "name": "if", "iv": "24050.5", "ic": "23990"}]
-
-    return gen()
-
-
-@pytest.mark.asyncio
-async def test_stream_decodes_synthetic_frames():
-    adapter = _adapter(MockNeoFull(), feed_factory=_market_frames)
-    session = await _session(adapter)
-    ticks = [t async for t in adapter.stream(session)]
-    assert len(ticks) == 2
-    assert ticks[0].symbol == "IDEA-EQ" and ticks[0].exchange == "NSE"
-    assert ticks[0].ltp == 9.4 and ticks[0].bid == 9.39 and ticks[0].ask == 9.41
-    assert ticks[1].ltp == 24050.5  # index tick
-
-
-@pytest.mark.asyncio
-async def test_stream_without_factory_raises():
-    adapter = _adapter(MockNeoFull())
-    session = await _session(adapter)
-    with pytest.raises(NotImplementedError, match="feed_factory"):
-        async for _ in adapter.stream(session):  # pragma: no cover - never yields
-            pass
-
-
-def _order_frames(_session: Any) -> AsyncIterator[Any]:
-    async def gen():
-        yield '{"type": "cn"}'  # connection ack — skipped
-        yield {
-            "type": "order_feed",
-            "data": json.dumps(
-                {
-                    "data": {
-                        "nOrdNo": "250122000624384",
-                        "ordSt": "complete",
-                        "trdSym": "IDEA-EQ",
-                        "exSeg": "nse_cm",
-                        "trnsTp": "B",
-                        "prcTp": "L",
-                        "prod": "NRML",
-                        "qty": 1,
-                        "prc": "9.39",
-                        "fldQty": 1,
-                        "avgPrc": "9.39",
-                    }
-                }
-            ),
-        }
-
-    return gen()
-
-
-@pytest.mark.asyncio
-async def test_order_stream_decodes_updates():
-    mock = MockNeoFull()
-    adapter = _adapter(mock, order_feed_factory=_order_frames)
-    session = await _session(adapter)
-    updates = [u async for u in adapter.order_stream(session)]
-    assert mock.calls[0] == ("subscribe_orderfeed", None)
-    assert len(updates) == 1
-    assert updates[0]["orderid"] == "250122000624384" and updates[0]["status"] == "complete"
-
-
-@pytest.mark.asyncio
-async def test_order_stream_without_factory_raises():
-    adapter = _adapter(MockNeoFull())
-    session = await _session(adapter)
-    with pytest.raises(NotImplementedError, match="order_feed_factory"):
-        async for _ in adapter.order_stream(session):  # pragma: no cover - never yields
-            pass
 
 
 # ---------------------------------------------------------------------------

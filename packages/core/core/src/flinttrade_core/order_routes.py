@@ -1636,12 +1636,13 @@ def _dispatch_live_cancel(
     policy instead; that path carries signed emergency intent through the same
     one-shot SafetyContext + per-account ACL.
 
-    Optional ``variety`` / ``amo`` / ``trading_symbol`` body fields (Kotak Neo
-    bracket/cover/AMO exits) and Groww-only ``segment`` (regular order cancel)
-    are forwarded as adapter-level cancel extras. They are written into the
-    canonical cancel fingerprint BEFORE the gate is minted, so the router's
-    field-by-field extras check passes only because the gate signed them — an
-    unhashed extra can never reach the broker.
+    Kotak Neo v3 binds ``variety`` and ``amo`` to the authoritative broker
+    order state; its removed ``trading_symbol`` cancel field is rejected before
+    the gate. Other adapters may forward their supported cancel extras, such as
+    Groww-only ``segment``. Every accepted extra is written into the canonical
+    cancel fingerprint BEFORE the gate is minted, so the router's field-by-field
+    extras check passes only because the gate signed it — an unhashed extra can
+    never reach the broker.
     """
     from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 

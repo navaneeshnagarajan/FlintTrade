@@ -3,7 +3,7 @@
 Kept separate from the adapter so order translation and the (cryptically-keyed)
 NEO response parsing are fully unit-testable without the Kotak Neo v3 SDK
 or live credentials. Order request fields follow the pinned Kotak Neo v3 SDK;
-legacy response decoding remains for authoritative readback of historical rows.
+legacy response fields remain only for authoritative REST readback.
 
 NEO is an OMS-style API: order/position records use terse abbreviated keys
 (``nOrdNo``, ``trdSym``, ``exSeg``, ``trnsTp``, ``prcTp`` …) and positions are
@@ -11,13 +11,12 @@ reported as cumulative buy/sell quantities + amounts rather than a single net
 line, so the net quantity, average price and realised P&L are derived here
 (``Positions.md``); the unrealised leg is left to merge from a live quote.
 
-Legacy frame decoders remain as compatibility fixtures for synthetic tests.
-The public v3 async feed lifecycle is owned by the later streaming migration.
+The native-batch v3 async feed is typed and owned by ``kotakneo_streaming``;
+this module does not decode the retired JSON frame protocol.
 """
 
 from __future__ import annotations
 
-import json
 import math
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -200,51 +199,6 @@ def canonical_index_name(name: str) -> str:
     """Return the case-sensitive index name Kotak documents, where known."""
     text = str(name).strip()
     return _INDEX_NAME_CANONICAL.get(text.upper(), text)
-
-
-# HSM live-feed terse keys -> long names (settings.stock_key_mapping).
-STOCK_FEED_KEYS = {
-    "ltt": "last_traded_time",
-    "v": "volume",
-    "ltp": "last_traded_price",
-    "ltq": "last_traded_quantity",
-    "tbq": "total_buy_quantity",
-    "tsq": "total_sell_quantity",
-    "bp": "buy_price",
-    "sp": "sell_price",
-    "bq": "buy_quantity",
-    "sq": "sell_quantity",
-    "ap": "average_price",
-    "oi": "open_interest",
-    "lo": "low",
-    "h": "high",
-    "lcl": "lower_circuit_limit",
-    "ucl": "upper_circuit_limit",
-    "yh": "52week_high",
-    "yl": "52week_low",
-    "op": "open",
-    "c": "close",
-    "cng": "change",
-    "nc": "net_change_percentage",
-    "to": "total_traded_value",
-    "tk": "instrument_token",
-    "e": "exchange_segment",
-    "ts": "trading_symbol",
-}
-
-# HSM index-feed terse keys -> long names (settings.index_key_mapping).
-INDEX_FEED_KEYS = {
-    "iv": "last_traded_price",
-    "ic": "prev_day_close",
-    "tvalue": "timestamp",
-    "highPrice": "high",
-    "lowPrice": "low",
-    "openingPrice": "open",
-    "cng": "change",
-    "nc": "net_change_percentage",
-    "tk": "instrument_token",
-    "e": "exchange_segment",
-}
 
 
 class KotakNeoMappingError(ValueError):
@@ -1713,10 +1667,10 @@ def from_kotak_depth(rec: dict[str, Any]) -> dict[str, Any]:
 
 
 def subscription_flags(mode: str) -> tuple[bool, bool]:
-    """Map a FlintTrade subscription mode to NEO's ``(isIndex, isDepth)`` pair.
+    """Map a FlintTrade mode to the v3 SFeed index/depth intent pair.
 
-    HSM subscription types (``settings.ReqTypeValues``): scrip feed ``mws``
-    (LTP/QUOTE), depth feed ``dps`` (DEPTH/FULL) and index feed ``ifs`` (INDEX).
+    The pair selects one typed method: ``subscribe_scrips`` for LTP/QUOTE,
+    ``subscribe_depth`` for DEPTH/FULL, or ``subscribe_index`` for INDEX.
     """
     m = _norm(mode, "FULL")
     if m in ("LTP", "QUOTE"):
@@ -1726,138 +1680,6 @@ def subscription_flags(mode: str) -> tuple[bool, bool]:
     if m == "INDEX":
         return True, False
     raise KotakNeoMappingError(f"Unsupported subscription mode {mode!r}")
-
-
-def _feed_records(frame: Any) -> list[dict[str, Any]]:
-    """Extract the record list from one HSM feed delivery (tolerant)."""
-    if isinstance(frame, str):
-        try:
-            frame = json.loads(frame)
-        except ValueError:
-            return []
-    if isinstance(frame, dict):
-        if frame.get("type") in ("stock_feed", "quotes"):
-            frame = frame.get("data", [])
-        elif "tk" in frame or "iv" in frame:
-            frame = [frame]
-        else:
-            return []  # connection ack / unsub ack / heartbeat
-    if not isinstance(frame, list):
-        return []
-    return [r for r in frame if isinstance(r, dict)]
-
-
-def _fv(rec: dict[str, Any], terse: str, key_map: dict[str, str], default: Any = 0) -> Any:
-    """Read a feed field by its terse key, falling back to the mapped long name.
-
-    Raw HSM frames carry the terse keys; SDK-formatted deliveries
-    (``quote_resp_mapper``) carry the long names from the same tables.
-    """
-    if terse in rec:
-        return rec[terse]
-    return rec.get(key_map.get(terse, terse), default)
-
-
-def decode_kotak_feed(frame: Any) -> list[dict[str, Any]]:
-    """Decode one HSM market-feed delivery into normalised tick dicts.
-
-    Accepts what ``NeoWebSocket`` hands to ``on_message`` (``{"type":
-    "stock_feed"|"quotes", "data": [...]}``), a bare record list, or a JSON
-    string; connection/unsubscribe acks decode to ``[]``. Each tick dict
-    carries ``kind`` (``"quote"`` / ``"index"`` / ``"depth"``); depth ticks
-    embed the ``from_kotak_depth`` book under ``"depth"``.
-    """
-    ticks: list[dict[str, Any]] = []
-    for rec in _feed_records(frame):
-        if rec.get("request_type") == "cn" or rec.get("type") == "cn":
-            continue
-        seg = str(rec.get("e", rec.get("exchange_segment", "")) or "")
-        base = {
-            "symbol": str(rec.get("ts", rec.get("trading_symbol", "")) or ""),
-            "exchange": KOTAK_TO_EXCHANGE.get(seg, seg),
-            "token": str(rec.get("tk", rec.get("instrument_token", "")) or ""),
-        }
-        if "iv" in rec or rec.get("name") == "if":
-            ticks.append(
-                {
-                    **base,
-                    "kind": "index",
-                    "ltp": _num(_fv(rec, "iv", INDEX_FEED_KEYS)),
-                    "prev_close": _num(_fv(rec, "ic", INDEX_FEED_KEYS)),
-                    "open": _num(_fv(rec, "openingPrice", INDEX_FEED_KEYS)),
-                    "high": _num(_fv(rec, "highPrice", INDEX_FEED_KEYS)),
-                    "low": _num(_fv(rec, "lowPrice", INDEX_FEED_KEYS)),
-                    "volume": 0,
-                    "bid": 0.0,
-                    "ask": 0.0,
-                    "oi": 0,
-                    "timestamp": str(_fv(rec, "tvalue", INDEX_FEED_KEYS, "") or ""),
-                }
-            )
-        elif rec.get("name") == "dp" or ("bp1" in rec and "ltp" not in rec):
-            book = from_kotak_depth(rec)
-            bids, asks = book.get("bids", []), book.get("asks", [])
-            ticks.append(
-                {
-                    **base,
-                    "kind": "depth",
-                    "ltp": 0.0,
-                    "volume": 0,
-                    "bid": _num(bids[0]["price"]) if bids else 0.0,
-                    "ask": _num(asks[0]["price"]) if asks else 0.0,
-                    "oi": 0,
-                    "timestamp": "",
-                    "depth": book,
-                }
-            )
-        else:
-            ticks.append(
-                {
-                    **base,
-                    "kind": "quote",
-                    "ltp": _num(_fv(rec, "ltp", STOCK_FEED_KEYS)),
-                    "volume": int(_num(_fv(rec, "v", STOCK_FEED_KEYS))),
-                    "bid": _num(_fv(rec, "bp", STOCK_FEED_KEYS)),
-                    "ask": _num(_fv(rec, "sp", STOCK_FEED_KEYS)),
-                    # Best bid/ask size at level 1: NEO's SDK ``stock_key_mapping``
-                    # keys these ``bq``/``sq`` (NOT ``bs`` — that is a depth-frame
-                    # offer-size key), so the long-name fallback resolves them too.
-                    "buy_quantity": int(_num(_fv(rec, "bq", STOCK_FEED_KEYS))),
-                    "sell_quantity": int(_num(_fv(rec, "sq", STOCK_FEED_KEYS))),
-                    "oi": int(_num(_fv(rec, "oi", STOCK_FEED_KEYS))),
-                    "timestamp": str(_fv(rec, "ltt", STOCK_FEED_KEYS, "") or ""),
-                }
-            )
-    return ticks
-
-
-def decode_kotak_order_feed(frame: Any) -> dict[str, Any] | None:
-    """Decode one HSI order-feed delivery into a normalised order update.
-
-    Accepts ``{"type": "order_feed", "data": <payload>}`` (what ``NeoWebSocket``
-    hands to ``on_message``), a bare payload dict, or a JSON string. Connection
-    acks (``{"type": "cn"|"CONNECTION"}``) and undecodable frames return
-    ``None``. An order payload is normalised via ``from_kotak_order`` with the
-    raw record preserved under ``"raw"``.
-    """
-    payload = frame
-    if isinstance(payload, dict) and payload.get("type") == "order_feed":
-        payload = payload.get("data")
-    if isinstance(payload, str):
-        try:
-            payload = json.loads(payload)
-        except ValueError:
-            return None
-    if not isinstance(payload, dict):
-        return None
-    if str(payload.get("type", "")).lower() in ("cn", "connection", "hb"):
-        return None
-    record = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-    if not isinstance(record, dict) or not (record.get("nOrdNo") or record.get("ordSt")):
-        return None
-    update = from_kotak_order(record)
-    update["raw"] = record
-    return update
 
 
 def from_kotak_funds(resp: dict[str, Any]) -> dict[str, Any]:

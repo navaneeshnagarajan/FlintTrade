@@ -246,8 +246,8 @@ if command -v uv >/dev/null 2>&1; then
     HAVE_UV=true
     ok "Repo .venv synced with workspace packages and broker SDK pins"
 else
-    python3 "$FLINTTRADE_DIR/scripts/broker_sdk_environment.py" remove
-    warn "uv not found; run 'uv sync --frozen --all-packages' to install repo-local broker SDK pins such as Kotak Neo."
+    python3 "$FLINTTRADE_DIR/scripts/broker_sdk_environment.py" repair
+    ok "Pinned broker SDKs installed and attested in the system Python environment"
 fi
 
 # SC-07: per-package requirements.txt installs removed — requirements.lock is a

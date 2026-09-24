@@ -106,13 +106,11 @@ in `docs/README.md`.
 
 ### Operator-reachable error text
 
-Not Setup chrome, but an operator can see it if a Kotak Neo subscribe
-fails closed:
-
-`packages/integrations/gateway/src/flinttrade_gateway/brokers/kotakneo.py`
-`SFEED_NOT_WIRED`:
-
-`Kotak Neo Monday path is REST-only (quotes, depth, historical, option chain). Live SFeed create_websocket is not wired.`
+The former “market feed is not wired” operator error is retired. Kotak Neo now
+has a locally tested v3 async market/order-feed lifecycle. This does not change the
+honest product boundary: the recorded broker-account smoke remains non-funded
+REST reads, and live-account/market-hours streaming, funded order safety, Live
+catalogue promotion, and cross-platform proof are still outstanding.
 
 `packages/integrations/gateway/src/flinttrade_gateway/monday_read_smoke.py`
 raises `ValueError` with `Monday read-smoke is Dhan + Neo only` and
@@ -162,9 +160,9 @@ The product fix is done when all of the following hold:
    and `docs/COMPATIBILITY.md`, no longer advertise the internal
    tracking IDs listed above. Developer acceptance docs and the
    contributor docs named above may keep them.
-3. The Kotak Neo subscribe error, if it remains operator-visible, uses
-   the same product language (REST-only Connected (read) / API smoke;
-   live SFeed not wired).
+3. Kotak Neo stream errors do not revive the obsolete “market feed is not
+   wired” wording and do not imply that local synthetic lifecycle
+   tests are live broker proof.
 4. `ConnectionStep.test.tsx` asserts the replacement product sentence
    and still proves OpenAlgo is not the primary connect CTA.
 5. British English. No personal details, hostnames, account names, or

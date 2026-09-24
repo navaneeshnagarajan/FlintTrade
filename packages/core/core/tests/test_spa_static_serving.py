@@ -309,6 +309,20 @@ def test_rate_limited_request_log_uses_the_current_request_id(
     assert limited.status_code == 429
     assert observed == [(200, "accepted-request"), (429, "limited-request")]
 
+
+@pytest.mark.unit
+def test_request_teardown_clears_structured_log_context(
+    built_frontend_app: Flask,
+) -> None:
+    """Background work after a request must not inherit its log identity."""
+    response = built_frontend_app.test_client().get(
+        "/",
+        headers={"X-Request-ID": "completed-request"},
+    )
+
+    assert response.status_code == 200
+    assert structlog.contextvars.get_contextvars() == {}
+
 @pytest.mark.unit
 def test_nested_docs_index_html_exact_sentinel_stays_nested(
     built_frontend_app: Flask,

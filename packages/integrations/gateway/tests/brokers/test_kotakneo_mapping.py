@@ -1,14 +1,12 @@
 """Unit tests for the Kotak Neo v3 mapping surface.
 
 Covers regular/AMO orders, the exact v3 modify surface, margin requests, the NEO
-error envelopes, order-history unwrapping, limits/scrip-master/depth
-normalisation and the HSM market-feed + HSI order-feed decoders — all against
-synthetic frames shaped per the pinned v3 SDK.
+error envelopes, order-history unwrapping, limits/scrip-master/depth and v3
+historical/option-chain normalisation against pinned SDK-shaped fixtures.
 """
 
 from __future__ import annotations
 
-import json
 from copy import deepcopy
 from decimal import Decimal
 
@@ -21,8 +19,6 @@ from flinttrade_gateway.brokers.kotakneo_mapping import (
     KotakNeoMappingError,
     canonical_index_name,
     canonical_quote_type,
-    decode_kotak_feed,
-    decode_kotak_order_feed,
     ensure_ok,
     from_kotak_depth,
     from_kotak_funds,
@@ -1111,67 +1107,6 @@ def test_modify_order_id_path_no_quick_fields_accepted():
 
 
 # ---------------------------------------------------------------------------
-# Finding #6 — stock feed sell_quantity is keyed 'sq', not the depth key 'bs'.
-# ---------------------------------------------------------------------------
-
-
-def test_stock_feed_decode_reads_sell_quantity_from_sq():
-    tick = decode_kotak_feed(
-        [
-            {
-                "tk": "11536",
-                "ts": "TCS-EQ",
-                "e": "nse_cm",
-                "name": "sf",
-                "ltp": "4000.5",
-                "bq": "10",
-                "sq": "7",
-            }
-        ]
-    )[0]
-    assert tick["kind"] == "quote"
-    assert tick["sell_quantity"] == 7 and tick["buy_quantity"] == 10
-
-
-def test_stock_feed_decode_ignores_depth_bs_key_for_sell_quantity():
-    # 'bs' is a depth-frame offer-size key; in a stock frame it must NOT be read
-    # as sell_quantity (the pre-fix STOCK_FEED_KEYS bug).
-    tick = decode_kotak_feed(
-        [
-            {
-                "tk": "11536",
-                "ts": "TCS-EQ",
-                "e": "nse_cm",
-                "name": "sf",
-                "ltp": "4000.5",
-                "bs": "99",
-            }
-        ]
-    )[0]
-    assert tick["sell_quantity"] == 0
-
-
-def test_stock_feed_decode_reads_long_name_sell_quantity():
-    # SDK quote_resp_mapper re-keys 'sq' -> 'sell_quantity'; the long name decodes too.
-    tick = decode_kotak_feed(
-        {
-            "type": "quotes",
-            "data": [
-                {
-                    "instrument_token": "11536",
-                    "trading_symbol": "TCS-EQ",
-                    "exchange_segment": "nse_cm",
-                    "last_traded_price": 4000.5,
-                    "sell_quantity": 5,
-                    "buy_quantity": 8,
-                }
-            ],
-        }
-    )[0]
-    assert tick["sell_quantity"] == 5 and tick["buy_quantity"] == 8
-
-
-# ---------------------------------------------------------------------------
 # Error envelopes
 # ---------------------------------------------------------------------------
 
@@ -1405,8 +1340,8 @@ def test_depth_from_preshaped_sdk_record():
 
 
 def test_depth_from_terse_frame_keys():
-    # Raw HSM depth frame vocabulary (webSocket.md "For Depth"): bp..bp4 bids,
-    # sp..sp4 offers, bq../bs.. sizes, bno/sno order counts.
+    # Legacy terse REST/readback vocabulary: bp..bp4 bids, sp..sp4 offers,
+    # bq../bs.. sizes, and bno/sno order counts.
     rec = {
         "tk": "11536",
         "ts": "TCS-EQ",
@@ -1447,162 +1382,6 @@ def test_subscription_flags_modes():
     assert subscription_flags("INDEX") == (True, False)
     with pytest.raises(KotakNeoMappingError, match="mode"):
         subscription_flags("GREEKS")
-
-
-# ---------------------------------------------------------------------------
-# HSM market-feed decode
-# ---------------------------------------------------------------------------
-
-_STOCK_TICK = {
-    "tk": "11536",
-    "ts": "TCS-EQ",
-    "e": "nse_cm",
-    "ltp": "4000.5",
-    "v": "120000",
-    "bp": "4000.0",
-    "sp": "4001.0",
-    "oi": "0",
-    "ltt": "22/01/2025 14:28:16",
-    "name": "sf",
-}
-
-
-def test_decode_feed_stock_frame_wrapped_and_bare():
-    wrapped = {"type": "stock_feed", "data": [_STOCK_TICK]}
-    for frame in (wrapped, [_STOCK_TICK]):
-        ticks = decode_kotak_feed(frame)
-        assert len(ticks) == 1
-        t = ticks[0]
-        assert t["kind"] == "quote" and t["symbol"] == "TCS-EQ" and t["exchange"] == "NSE"
-        assert t["ltp"] == 4000.5 and t["volume"] == 120000
-        assert t["bid"] == 4000.0 and t["ask"] == 4001.0
-        assert t["timestamp"] == "22/01/2025 14:28:16"
-
-
-def test_decode_feed_json_string_frame():
-    ticks = decode_kotak_feed(json.dumps([_STOCK_TICK]))
-    assert len(ticks) == 1 and ticks[0]["token"] == "11536"
-
-
-def test_decode_feed_sdk_long_key_record():
-    # The SDK's quote_resp_mapper re-keys records to the long names from
-    # settings.stock_key_mapping — both vocabularies must decode.
-    ticks = decode_kotak_feed(
-        {
-            "type": "quotes",
-            "data": [
-                {
-                    "instrument_token": "11536",
-                    "trading_symbol": "TCS-EQ",
-                    "exchange_segment": "nse_cm",
-                    "last_traded_price": 4000.5,
-                    "volume": 120000,
-                    "buy_price": 4000.0,
-                    "sell_price": 4001.0,
-                    "open_interest": 0,
-                    "last_traded_time": "22/01/2025 14:28:16",
-                }
-            ],
-        }
-    )
-    assert len(ticks) == 1
-    t = ticks[0]
-    assert t["kind"] == "quote" and t["symbol"] == "TCS-EQ" and t["ltp"] == 4000.5
-    assert t["volume"] == 120000 and t["bid"] == 4000.0 and t["ask"] == 4001.0
-
-
-def test_decode_feed_index_frame():
-    ticks = decode_kotak_feed(
-        [
-            {
-                "tk": "Nifty 50",
-                "e": "nse_cm",
-                "name": "if",
-                "iv": "24050.5",
-                "ic": "23990.0",
-                "openingPrice": "24000",
-                "highPrice": "24100",
-                "lowPrice": "23950",
-                "tvalue": "1737536296",
-            }
-        ]
-    )
-    assert len(ticks) == 1
-    t = ticks[0]
-    assert t["kind"] == "index" and t["ltp"] == 24050.5 and t["prev_close"] == 23990.0
-    assert t["high"] == 24100.0 and t["timestamp"] == "1737536296"
-
-
-def test_decode_feed_depth_frame_carries_book():
-    ticks = decode_kotak_feed(
-        [
-            {
-                "tk": "11536",
-                "ts": "TCS-EQ",
-                "e": "nse_cm",
-                "name": "dp",
-                "bp": "4000",
-                "bq": "10",
-                "bno1": "2",
-                "sp": "4001",
-                "bs": "5",
-                "sno1": "1",
-            }
-        ]
-    )
-    assert len(ticks) == 1
-    t = ticks[0]
-    assert t["kind"] == "depth" and t["bid"] == 4000.0 and t["ask"] == 4001.0
-    assert t["depth"]["bids"][0]["quantity"] == 10
-
-
-def test_decode_feed_acks_and_garbage_are_empty():
-    assert decode_kotak_feed(json.dumps([{"type": "cn", "msg": "connected"}])) == []
-    assert decode_kotak_feed("Un-Subscribed Successfully!") == []
-    assert decode_kotak_feed({"type": "order_feed", "data": "{}"}) == []
-    assert decode_kotak_feed(None) == []
-    assert decode_kotak_feed([{"request_type": "cn"}]) == []
-
-
-# ---------------------------------------------------------------------------
-# HSI order-feed decode
-# ---------------------------------------------------------------------------
-
-_ORDER_UPDATE = {
-    "nOrdNo": "250122000624384",
-    "ordSt": "complete",
-    "trdSym": "IDEA-EQ",
-    "exSeg": "nse_cm",
-    "trnsTp": "B",
-    "prcTp": "L",
-    "prod": "NRML",
-    "qty": 1,
-    "prc": "9.39",
-    "fldQty": 1,
-    "avgPrc": "9.39",
-}
-
-
-def test_decode_order_feed_wrapped_json_string():
-    frame = {"type": "order_feed", "data": json.dumps({"data": _ORDER_UPDATE})}
-    update = decode_kotak_order_feed(frame)
-    assert update is not None
-    assert update["orderid"] == "250122000624384" and update["status"] == "complete"
-    assert update["action"] == "BUY" and update["exchange"] == "NSE"
-    assert update["raw"]["nOrdNo"] == "250122000624384"
-
-
-def test_decode_order_feed_bare_dict():
-    update = decode_kotak_order_feed(_ORDER_UPDATE)
-    assert update is not None and update["filled_quantity"] == "1"
-
-
-def test_decode_order_feed_acks_and_garbage_are_none():
-    assert decode_kotak_order_feed({"type": "order_feed", "data": '{"type": "cn"}'}) is None
-    assert decode_kotak_order_feed('{"type": "CONNECTION"}') is None
-    assert decode_kotak_order_feed("not-json") is None
-    assert decode_kotak_order_feed(None) is None
-    assert decode_kotak_order_feed({"hello": "world"}) is None
 
 
 # ---------------------------------------------------------------------------

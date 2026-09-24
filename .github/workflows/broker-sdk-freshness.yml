@@ -1,0 +1,43 @@
+name: Broker SDK freshness
+
+# Mutable upstream state must not gate an unrelated pull request, but broker
+# pins must not age silently. This daily/manual job compares brokers.lock with
+# each official repository/registry. For Kotak Neo it independently checks the
+# current main commit, tree, latest stable release tag/commit/tree, PyPI version
+# and release artefact digests.
+
+on:
+  schedule:
+    - cron: '15 2 * * *' # Daily 02:15 UTC = 07:45 IST
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: broker-sdk-freshness
+  cancel-in-progress: true
+
+jobs:
+  upstream-drift:
+    name: Broker SDK pins match official upstreams
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: { python-version: '3.12' }
+      - name: Compare immutable pins with official upstream state
+        run: python scripts/sync_broker_sdk_refs.py --fail-on-drift
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: broker-sdk-freshness-report
+          path: |
+            .local/sdk-audit/manifest.json
+            .local/sdk-audit/README.md
+          retention-days: 30
+          if-no-files-found: warn

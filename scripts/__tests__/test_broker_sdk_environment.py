@@ -11,9 +11,54 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.parametrize("commit", ["main", "5bb34fa", "Z" * 40, "5B" * 20])
+def test_pin_rejects_floating_or_noncanonical_commits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    commit: str,
+) -> None:
+    from scripts import broker_sdk_environment as sdk_environment
+
+    (tmp_path / "brokers.lock").write_text(
+        "[[broker]]\n"
+        'name = "kotakneoapi"\n'
+        'version = "3.0.7"\n'
+        f'source_commit = "{commit}"\n'
+        'homepage = "https://github.com/Kotak-Neo/kotak-neo-python"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sdk_environment, "REPO", tmp_path)
+
+    with pytest.raises(RuntimeError, match="full lowercase Git commit"):
+        sdk_environment._pin()
+
+
+def test_pin_rejects_nonofficial_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import broker_sdk_environment as sdk_environment
+
+    (tmp_path / "brokers.lock").write_text(
+        "[[broker]]\n"
+        'name = "kotakneoapi"\n'
+        'version = "3.0.7"\n'
+        'source_commit = "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"\n'
+        'homepage = "https://example.invalid/Kotak-Neo/kotak-neo-python"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sdk_environment, "REPO", tmp_path)
+
+    with pytest.raises(RuntimeError, match="official repository"):
+        sdk_environment._pin()
+
+
 @pytest.mark.parametrize("python", [Path("/repo/.venv/bin/python"), Path("C:/repo/.venv/Scripts/python.exe")])
-def test_repair_replaces_stale_distributions_then_is_idempotent(python: Path) -> None:
+def test_repair_replaces_stale_distributions_then_is_idempotent(
+    python: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import broker_sdk_environment as sdk_environment
     from scripts.broker_sdk_environment import repair_kotakneo_environment
+
+    monkeypatch.setattr(sdk_environment.shutil, "which", lambda name: "/fixture/uv" if name == "uv" else None)
 
     state = {"kotakneoapi": {"version": "3.0.7", "direct_url": None}, "neo-api-client": {"version": "2.0.0"},
              "namespace_owners": ["kotakneoapi", "neo-api-client"]}
@@ -26,13 +71,17 @@ def test_repair_replaces_stale_distributions_then_is_idempotent(python: Path) ->
             return subprocess.CompletedProcess(argv, 0, json.dumps(state), "")
         if argv[1:3] == ["-m", "pip"]:
             return subprocess.CompletedProcess(argv, 1, "", "No module named pip")
-        if argv[:4] == ["uv", "pip", "uninstall", "--python"]:
+        if argv[:4] == ["/fixture/uv", "pip", "uninstall", "--python"]:
             assert argv[4] == str(python)
             assert set(argv[5:]) == {"kotakneoapi", "neo-api-client"}
             state.clear()
             return subprocess.CompletedProcess(argv, 0, "", "")
-        assert "--frozen" in argv and "--reinstall-package" in argv
-        assert "kotakneoapi" in argv
+        assert argv[:4] == ["/fixture/uv", "pip", "install", "--python"]
+        assert argv[4] == str(python)
+        assert argv[5:8] == ["--no-deps", "--reinstall", (
+            "git+https://github.com/Kotak-Neo/kotak-neo-python.git@"
+            "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"
+        )]
         state["kotakneoapi"] = {
             "version": "3.0.7",
             "direct_url": {
@@ -48,11 +97,14 @@ def test_repair_replaces_stale_distributions_then_is_idempotent(python: Path) ->
     repair_kotakneo_environment(python, run=run)
 
     assert len(calls) == first_commands + 1  # second call probes only
-    assert len([call for call in calls if "--reinstall-package" in call]) == 1
+    assert len([call for call in calls if "--reinstall" in call]) == 1
 
 
-def test_interrupted_repair_fails_closed() -> None:
+def test_interrupted_repair_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import broker_sdk_environment as sdk_environment
     from scripts.broker_sdk_environment import repair_kotakneo_environment
+
+    monkeypatch.setattr(sdk_environment.shutil, "which", lambda name: "/fixture/uv" if name == "uv" else None)
 
     commands: list[list[str]] = []
 
@@ -65,10 +117,55 @@ def test_interrupted_repair_fails_closed() -> None:
             return subprocess.CompletedProcess(argv, 0, "", "")
         return subprocess.CompletedProcess(argv, 1, "", "network interrupted")
 
-    with pytest.raises(RuntimeError, match="sync"):
+    with pytest.raises(RuntimeError, match="environment command"):
         repair_kotakneo_environment(Path("/repo/.venv/bin/python"), run=run)
     assert any("uninstall" in command for command in commands)
-    assert any("--reinstall-package" in command for command in commands)
+    assert any("--reinstall" in command for command in commands)
+
+
+def test_repair_falls_back_to_target_interpreter_pip_without_uv(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import broker_sdk_environment as sdk_environment
+
+    monkeypatch.setattr(sdk_environment.shutil, "which", lambda _name: None)
+    python = Path("/managed/.venv/bin/python")
+    state: dict[str, object] = {"neo-api-client": {"version": "2.0.0"}}
+    commands: list[list[str]] = []
+
+    def run(args, **_kwargs):
+        argv = list(map(str, args))
+        commands.append(argv)
+        if "-c" in argv:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(state), "")
+        if "uninstall" in argv:
+            state.clear()
+        elif "install" in argv:
+            state.update({
+                "kotakneoapi": {
+                    "version": "3.0.7",
+                    "direct_url": {
+                        "url": "https://github.com/Kotak-Neo/kotak-neo-python.git",
+                        "vcs_info": {
+                            "vcs": "git",
+                            "commit_id": "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c",
+                        },
+                    },
+                },
+                "namespace_owners": ["kotakneoapi"],
+            })
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    sdk_environment.repair_kotakneo_environment(python, run=run)
+
+    assert commands[1] == [
+        str(python), "-m", "pip", "uninstall", "-y", "kotakneoapi", "neo-api-client",
+    ]
+    assert commands[2] == [
+        str(python), "-m", "pip", "install", "--no-deps", "--force-reinstall",
+        (
+            "git+https://github.com/Kotak-Neo/kotak-neo-python.git@"
+            "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"
+        ),
+    ]
 
 
 def test_remove_kotak_without_interpreter_pip_when_uv_is_available(monkeypatch) -> None:
@@ -91,7 +188,7 @@ def test_remove_kotak_without_interpreter_pip_when_uv_is_available(monkeypatch) 
 
     sdk_environment.remove_kotak_distributions(python, run=run)
 
-    assert commands[-1] == ["uv", "pip", "uninstall", "--python", str(python),
+    assert commands[-1] == ["/fixture/uv", "pip", "uninstall", "--python", str(python),
                             "kotakneoapi", "neo-api-client"]
 
 
@@ -144,8 +241,14 @@ def test_repair_accepts_record_only_namespace_evidence(tmp_path: Path, monkeypat
     {"url": "https://[broken/Kotak-Neo/kotak-neo-python.git", "vcs_info": {"vcs": "git"}},
     {"url": "https://github.com/Kotak-Neo/kotak-neo-python.git", "vcs_info": ["git"]},
 ])
-def test_malformed_provenance_is_repairable_and_fails_closed_if_persistent(direct_url) -> None:
+def test_malformed_provenance_is_repairable_and_fails_closed_if_persistent(
+    direct_url,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import broker_sdk_environment as sdk_environment
     from scripts.broker_sdk_environment import repair_kotakneo_environment
+
+    monkeypatch.setattr(sdk_environment.shutil, "which", lambda name: "/fixture/uv" if name == "uv" else None)
 
     commands: list[list[str]] = []
     state = {"kotakneoapi": {"version": "3.0.7", "direct_url": direct_url},
@@ -161,7 +264,7 @@ def test_malformed_provenance_is_repairable_and_fails_closed_if_persistent(direc
     with pytest.raises(RuntimeError, match="pinned Git distribution"):
         repair_kotakneo_environment(Path("/repo/.venv/bin/python"), run=run)
     assert any("uninstall" in command for command in commands)
-    assert any("--reinstall-package" in command for command in commands)
+    assert any("--reinstall" in command for command in commands)
 
 
 def test_repair_refuses_unproven_namespace_ownership() -> None:
@@ -182,7 +285,7 @@ def test_repair_refuses_unproven_namespace_ownership() -> None:
 
 
 @pytest.mark.parametrize("uv_available", [True, False])
-def test_native_setup_repairs_or_removes_kotak_before_attestation(monkeypatch, uv_available: bool) -> None:
+def test_native_setup_repairs_kotak_before_attestation(monkeypatch, uv_available: bool) -> None:
     from scripts import ft
 
     class ReachedHook(Exception):
@@ -191,7 +294,7 @@ def test_native_setup_repairs_or_removes_kotak_before_attestation(monkeypatch, u
     calls: list[str] = []
 
     def hook(_python):
-        calls.append("repair" if uv_available else "remove")
+        calls.append("repair")
         raise ReachedHook
 
     monkeypatch.setattr(ft, "IS_WINDOWS", True)
@@ -199,10 +302,9 @@ def test_native_setup_repairs_or_removes_kotak_before_attestation(monkeypatch, u
     monkeypatch.setattr(ft.shutil, "which", lambda name: "/bin/uv" if name == "uv" and uv_available else None)
     monkeypatch.setattr(ft, "run", lambda *_args, **_kwargs: calls.append("install") or 0)
     monkeypatch.setattr(ft, "repair_kotakneo_environment", hook)
-    monkeypatch.setattr(ft, "remove_kotak_distributions", hook)
     with pytest.raises(ReachedHook):
         ft.cmd_setup([])
-    assert calls[-1] == ("repair" if uv_available else "remove")
+    assert calls[-1] == "repair"
 
 
 def test_posix_source_setup_verifies_with_synced_interpreter(tmp_path: Path) -> None:

@@ -3,7 +3,7 @@
 The adapter owns broker-neutral orchestration and preserves router-token order
 safety. :mod:`kotakneo_sdk` owns the installed SDK import, authentication,
 validated REST reads, exact v3 order calls, error translation and session
-liveness. Streaming is handled by a later migration task.
+liveness. :mod:`kotakneo_streaming` owns session-scoped v3 async feeds.
 """
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ from flinttrade_gateway.capabilities import (
 from . import kotakneo_mapping as M
 from ._base import BrokerAdapter, Session, run_blocking_sdk_call
 from .kotakneo_sdk import KotakNeoSdkSession as KotakNeoClient, validate_read_envelope
+from .kotakneo_streaming import MAX_STREAM_TOKENS, STREAM_RUNTIME_KEY, KotakNeoStreamRuntime
 
 
 def _balance_number(value: object) -> float:
@@ -157,7 +158,7 @@ KOTAKNEO_CAPABILITIES = Capabilities(
         | OrderTypes.AMO
     ),
     depth_levels=DepthLevels.L5,
-    tick_protocol=TickProtocol.KOTAK_NEO_JSON,
+    tick_protocol=TickProtocol.KOTAK_NEO_BINARY,
     auth_model=AuthModel.MPIN_TOTP_DAILY,
     # Trade-token TTL is not stated in the local docs; 24h is the daily-cycle
     # ceiling used for refresh timing (the only JWT shown is a view-scope token).
@@ -178,6 +179,12 @@ KOTAKNEO_CAPABILITIES = Capabilities(
     historical_calendar_intervals=["1D", "1W"],
     option_chain_supported=True,
     streaming_supported=True,
+    streaming_runtime_ready=True,
+    streaming_max_connections_per_user=None,
+    streaming_max_symbols_per_connection=3000,
+    # The SDK documents 3000 for one SFeed instance, not an account-wide
+    # aggregate across independently authenticated sessions.
+    streaming_max_total_symbols=None,
     multi_quote_supported=True,
     modify_qty_supported=True,
 )
@@ -191,14 +198,10 @@ class KotakNeoAdapter(BrokerAdapter):
             mock). When omitted, ``login`` builds the live facade and runs 2FA.
         symbol_resolver: ``(symbol, exchange) -> trading_symbol`` — NEO trades by
             its scrip symbol (e.g. ``"IDEA-EQ"``), resolved via ``search_scrip``.
-        token_resolver: ``(symbol, exchange) -> instrument_token`` — the HSM feed
-            subscribes by numeric scrip token (``pSymbol``), not trading symbol.
+        token_resolver: ``(symbol, exchange) -> instrument_token`` — v3 SFeed
+            subscribes with a numeric ``WsToken.instrument_token``, not a trading symbol.
             When omitted, ``subscribe`` resolves tokens live via ``search_scrip``
             (index names like ``"Nifty 50"`` pass through unresolved).
-        feed_factory: Compatibility injection point for synthetic market-feed
-            frames until the later public v3 async-feed migration.
-        order_feed_factory: Compatibility injection point for synthetic
-            order-feed frames until that migration.
         local_state_provider: ``session -> LocalStateSnapshot`` supplying the
             flinttrade-side mirror that ``reconcile`` diffs broker state
             against. Defaults to EMPTY local state (every broker-side row then
@@ -214,20 +217,12 @@ class KotakNeoAdapter(BrokerAdapter):
         client_factory: Callable[[Session], Any] | None = None,
         symbol_resolver: Callable[[str, str], str] | None = None,
         token_resolver: Callable[[str, str], str] | None = None,
-        feed_factory: Callable[[Session], AsyncIterator[Any]] | None = None,
-        order_feed_factory: Callable[[Session], AsyncIterator[Any]] | None = None,
         local_state_provider: Callable[[Session], LocalStateSnapshot] | None = None,
     ) -> None:
         self._client_factory = client_factory
         self._symbol_resolver = symbol_resolver
         self._token_resolver = token_resolver
-        self._feed_factory = feed_factory
-        self._order_feed_factory = order_feed_factory
         self._local_state_provider = local_state_provider
-        # (exchange_segment, SYMBOL) -> {"token": dict, "is_index": bool,
-        # "is_depth": bool}, so unsubscribe can replay exactly what was
-        # subscribed (NEO's unsubscribe type must match the subscribe type).
-        self._subscriptions: dict[tuple[str, str], dict[str, Any]] = {}
 
     # ---------- identity + capabilities ----------
 
@@ -242,12 +237,18 @@ class KotakNeoAdapter(BrokerAdapter):
     # ---------- helpers ----------
 
     def _client(self, session: Session) -> Any:
-        if self._client_factory is not None:
-            return self._client_factory(session)
         client = session.extra.get("client")
+        if client is None and self._client_factory is not None:
+            client = self._client_factory(session)
         if client is None:
             raise BrokerError("Kotak Neo client not initialised — call login() first")
         return client
+
+    def _stream_runtime(self, session: Session) -> KotakNeoStreamRuntime:
+        runtime = session.extra.get(STREAM_RUNTIME_KEY)
+        if not isinstance(runtime, KotakNeoStreamRuntime):
+            raise BrokerError("Kotak Neo stream runtime not initialised — call login() first", broker_id="kotakneo")
+        return runtime
 
     async def _resolve_trading_symbol(self, session: Session, symbol: str, exchange: str) -> str:
         """Resolve a FlintTrade symbol to NEO's trading symbol (``pTrdSymbol``)."""
@@ -644,17 +645,24 @@ class KotakNeoAdapter(BrokerAdapter):
             if not credentials.get(required):
                 error = MFARequired if required in {"mpin", "totp"} else CredentialsInvalid
                 raise error(f"Kotak Neo login requires {required!r}", broker_id="kotakneo")
-        client = None if self._client_factory is not None else await self._call(KotakNeoClient, dict(credentials))
         expires_at = datetime.now(tz=UTC).timestamp() + 24 * 3600
-        return Session(
+        session = Session(
             access_token=str(credentials.get("ucc", "")),
             expires_at=expires_at,
             account_id=str(credentials.get("ucc", "")),
             adapter_id="kotakneo",
-            extra={"client": client},
+            extra={},
             # Monday fail-closed: Neo stays read-only until funded unlock.
             read_only_until_at=expires_at,
         )
+        client = (
+            await self._call(self._client_factory, session)
+            if self._client_factory is not None
+            else await self._call(KotakNeoClient, dict(credentials))
+        )
+        session.extra["client"] = client
+        session.extra[STREAM_RUNTIME_KEY] = KotakNeoStreamRuntime(client)
+        return session
 
     def replay_credentials(self, credentials: dict, session: Session) -> dict:
         """The replayable vault payload after a successful login (G7).
@@ -677,17 +685,14 @@ class KotakNeoAdapter(BrokerAdapter):
         await self._call(self._client(session).liveness)
 
     async def logout(self, session: Session) -> None:
-        """Invalidate the NEO session (clears the trade token) — idempotent.
-
-        A facade/mock without ``logout`` is tolerated so logout never fails
-        mid-teardown.
-        """
-        client = session.extra.get("client") if self._client_factory is None else self._client_factory(session)
-        log_off = getattr(client, "logout", None)
-        if callable(log_off):
-            await self._call(log_off)
+        """Close both feeds, local SDK auth and REST transport exactly once."""
+        runtime = session.extra.pop(STREAM_RUNTIME_KEY, None)
+        client = session.extra.pop("client", None)
+        if isinstance(runtime, KotakNeoStreamRuntime):
+            await runtime.close()
+        elif client is not None:
+            await KotakNeoStreamRuntime(client).close()
         session.extra.pop("client", None)
-        return
 
     # ---------- trading: writes (router-only) ----------
 
@@ -1596,12 +1601,12 @@ class KotakNeoAdapter(BrokerAdapter):
     async def _resolve_feed_tokens(
         self, session: Session, symbols: list[str], *, is_index: bool
     ) -> list[dict[str, str]]:
-        """Resolve quote symbols to NEO HSM subscription token dicts.
+        """Resolve quote symbols to v3 SFeed immutable WsToken fields.
 
-        The HSM feed subscribes by instrument token (``pSymbol``), not trading
-        symbol — resolved via the injected ``token_resolver`` or a live
+        SFeed subscribes by ``WsToken.instrument_token``, not trading symbol —
+        resolved via the injected ``token_resolver`` or a live
         ``search_scrip`` lookup. Index subscriptions use the index NAME as the
-        token (``webSocket.md`` "For Indexes"), so they pass through unresolved.
+        token, so they pass through unresolved.
         """
         tokens: list[dict[str, str]] = []
         for raw in symbols:
@@ -1612,86 +1617,56 @@ class KotakNeoAdapter(BrokerAdapter):
         return tokens
 
     async def subscribe(self, session: Session, symbols: list[str], mode: str = "FULL") -> None:
-        """Subscribe symbols on the HSM live feed.
-
-        ``mode`` maps to NEO's subscription types (``kotakneo_mapping.
-        subscription_flags``): LTP/QUOTE → scrip feed (``mws``), FULL/DEPTH →
-        5-level depth feed (``dps``), INDEX → index feed (``ifs``). The public
-        Each subscription is recorded (token + flags) so ``unsubscribe`` can
-        replay it exactly.
-        """
+        """Subscribe immutable v3 WsTokens with one exact intent per token."""
         is_index, is_depth = M.subscription_flags(mode)
-        tokens = await self._resolve_feed_tokens(session, symbols, is_index=is_index)
-        await self._call(self._client(session).subscribe, tokens, is_index, is_depth)
-        for raw, tok in zip(symbols, tokens):
-            exchange, name = _split_symbol(raw)
-            self._subscriptions[(M.EXCHANGE_TO_KOTAK.get(exchange, exchange.lower()), name.upper())] = {
-                "token": tok,
-                "is_index": is_index,
-                "is_depth": is_depth,
-            }
-
-    async def unsubscribe(self, session: Session, symbols: list[str]) -> None:
-        """Unsubscribe symbols from the HSM live feed. Idempotent.
-
-        Replays each symbol's RECORDED subscription (token + index/depth flags
-        — NEO's ``mwu``/``ifu``/``dpu`` must match the original ``mws``/``ifs``/
-        ``dps`` type to take effect). Symbols never subscribed are skipped.
-        """
-        client = self._client(session)
-        by_flags: dict[tuple[bool, bool], list[dict[str, str]]] = {}
-        keys: list[tuple[str, str]] = []
+        aliases: list[tuple[str, str]] = []
+        unique_symbols: list[str] = []
+        seen: set[tuple[str, str]] = set()
         for raw in symbols:
             exchange, name = _split_symbol(raw)
-            key = (M.EXCHANGE_TO_KOTAK.get(exchange, exchange.lower()), name.upper())
-            sub = self._subscriptions.get(key)
-            if sub is None:
-                continue  # never subscribed — idempotent no-op
-            by_flags.setdefault((sub["is_index"], sub["is_depth"]), []).append(sub["token"])
-            keys.append(key)
-        for (is_index, is_depth), tokens in by_flags.items():
-            await self._call(client.un_subscribe, tokens, is_index, is_depth)
-        for key in keys:
-            self._subscriptions.pop(key, None)
+            alias = (M.EXCHANGE_TO_KOTAK.get(exchange, exchange.lower()), name.upper())
+            if alias in seen:
+                continue
+            seen.add(alias)
+            aliases.append(alias)
+            unique_symbols.append(raw)
+        if len(aliases) > MAX_STREAM_TOKENS:
+            raise BrokerError(
+                f"Kotak Neo supports at most {MAX_STREAM_TOKENS} token intents per connection",
+                broker_id="kotakneo",
+            )
+        if not aliases:
+            return
+        tokens = await self._resolve_feed_tokens(session, unique_symbols, is_index=is_index)
+        intent = "index" if is_index else "depth" if is_depth else "scrips"
+        await self._stream_runtime(session).add_subscriptions(tokens, intent=intent, aliases=aliases)
+
+    async def unsubscribe(self, session: Session, symbols: list[str]) -> None:
+        """Unsubscribe each alias with its exact session-scoped recorded intent."""
+        aliases: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for raw in symbols:
+            exchange, name = _split_symbol(raw)
+            alias = (M.EXCHANGE_TO_KOTAK.get(exchange, exchange.lower()), name.upper())
+            if alias not in seen:
+                seen.add(alias)
+                aliases.append(alias)
+        await self._stream_runtime(session).remove_subscriptions(aliases)
 
     def stream(self, session: Session) -> AsyncIterator[Any]:
         return self._stream_impl(session)
 
     async def _stream_impl(self, session: Session) -> AsyncIterator[Any]:
-        from flinttrade_core.models import TickEvent  # noqa: PLC0415
+        async for tick in self._stream_runtime(session).market_messages():
+            yield tick
 
-        if self._feed_factory is None:
-            # Live v3 async feed ownership is deliberately deferred to the
-            # streaming migration; only injected synthetic frames work here.
-            raise NotImplementedError("Kotak Neo live tick stream needs the HSM market feed (inject feed_factory)")
-        async for frame in self._feed_factory(session):
-            for tick in M.decode_kotak_feed(frame):
-                yield TickEvent(
-                    symbol=tick.get("symbol", "") or tick.get("token", ""),
-                    exchange=tick.get("exchange", ""),
-                    ltp=float(tick.get("ltp", 0.0)),
-                    volume=int(tick.get("volume", 0)),
-                    bid=float(tick.get("bid", 0.0)),
-                    ask=float(tick.get("ask", 0.0)),
-                    oi=int(tick.get("oi", 0)),
-                    timestamp=str(tick.get("timestamp", "")),
-                )
-
-    def order_stream(self, session: Session) -> AsyncIterator[dict]:
-        """Compatibility order-update decoder pending the v3 feed migration."""
+    def order_stream(self, session: Session) -> AsyncIterator[Any]:
+        """Yield only SDK-typed, discriminated order and position updates."""
         return self._order_stream_impl(session)
 
-    async def _order_stream_impl(self, session: Session) -> AsyncIterator[dict]:
-        if self._order_feed_factory is None:
-            raise NotImplementedError("Kotak Neo live order feed needs the HSI socket (inject order_feed_factory)")
-        starter = getattr(self._client(session), "subscribe_to_orderfeed", None)
-        if not callable(starter):
-            raise BrokerError("Kotak Neo client does not expose subscribe_to_orderfeed")
-        M.ensure_ok(await self._call(starter))
-        async for frame in self._order_feed_factory(session):
-            update = M.decode_kotak_order_feed(frame)
-            if update is not None:
-                yield update
+    async def _order_stream_impl(self, session: Session) -> AsyncIterator[Any]:
+        async for update in self._stream_runtime(session).order_messages():
+            yield update
 
     # ---------- reconciliation ----------
 

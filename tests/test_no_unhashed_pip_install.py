@@ -142,6 +142,51 @@ def test_install_paths_sync_uv_for_repo_local_broker_sdk_pins() -> None:
 
 
 @pytest.mark.unit
+def test_supported_install_paths_repair_and_attest_repo_local_broker_sdk_pins() -> None:
+    """Every non-desktop runtime must install the exact broker pin even without uv.
+
+    ``requirements.lock`` is intentionally registry-only, so merely installing it
+    cannot make Kotak Neo available. The shared helper consumes the full commit in
+    ``brokers.lock``, installs it into the runtime interpreter and then verifies
+    PEP 610 provenance plus exclusive namespace ownership.
+    """
+    paths = (
+        "Dockerfile",
+        "infra/scripts/setup.sh",
+        "infra/scripts/setup-production.sh",
+        "infra/scripts/deploy.sh",
+        "infra/install/install-native.sh",
+        "infra/install/update.sh",
+    )
+    missing = []
+    for path in paths:
+        text = (_REPO_ROOT / path).read_text(encoding="utf-8")
+        if "broker_sdk_environment.py" not in text or "repair" not in text:
+            missing.append(path)
+
+    ft = (_REPO_ROOT / "scripts" / "ft.py").read_text(encoding="utf-8")
+    if "repair_kotakneo_environment(Path(python))" not in ft:
+        missing.append("scripts/ft.py")
+
+    assert not missing, "Install paths omit exact broker SDK repair/attestation: " + ", ".join(missing)
+
+
+@pytest.mark.unit
+def test_docker_repairs_broker_sdk_before_copying_builder_environment() -> None:
+    """The runtime image must inherit the attested Git-pinned SDK from its builder."""
+    dockerfile = (_REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "COPY requirements.lock brokers.lock ./" in dockerfile
+    assert "COPY scripts/broker_sdk_environment.py scripts/broker_sdk_environment.py" in dockerfile
+    assert "apt-get install -y --no-install-recommends git" in dockerfile
+    assert dockerfile.index("python scripts/broker_sdk_environment.py repair") < dockerfile.index(
+        "FROM python:3.12-slim-bookworm AS runtime"
+    )
+    runtime = dockerfile.split("FROM python:3.12-slim-bookworm AS runtime", 1)[1]
+    assert "COPY VERSION pyproject.toml pnpm-workspace.yaml brokers.lock ./" in runtime
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "workflow", [".github/workflows/test.yml", ".github/workflows/nightly-cross-platform.yml"]
 )

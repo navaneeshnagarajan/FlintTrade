@@ -559,6 +559,19 @@ def test_deploy_always_refreshes_systemd_unit_before_restart() -> None:
 
 
 @pytest.mark.unit
+def test_production_paths_attest_kotak_sdk_before_start_or_restart() -> None:
+    """The registry-only lock must be followed by exact broker-SDK repair."""
+    installer = _INSTALLER.read_text(encoding="utf-8")
+    deploy = _DEPLOY.read_text(encoding="utf-8")
+    repair = 'scripts/broker_sdk_environment.py" repair'
+
+    assert f'"$INSTALL_DIR/{repair}' in installer
+    assert installer.index(repair) < installer.index("flinttrade_build_terminal")
+    assert f'"$REPO_DIR/{repair}' in deploy
+    assert deploy.index(repair) < deploy.index("sudo systemctl restart flinttrade")
+
+
+@pytest.mark.unit
 def test_installer_validates_and_uses_the_same_system_python() -> None:
     """The version check must cover the interpreter that actually creates .venv."""
     installer = _INSTALLER.read_text(encoding="utf-8")

@@ -9,7 +9,9 @@ from __future__ import annotations
 import logging
 import math
 import os
-from typing import Any
+import threading
+from collections.abc import Mapping
+from typing import Any, Literal
 
 from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.exceptions import (
@@ -26,33 +28,141 @@ from flinttrade_core.exceptions import (
 
 
 def _sdk_class() -> type:
-    os.environ.setdefault("NEO_LOG_FILE_ENABLED", "false")
+    _prepare_sdk_import()
     from neo_api_client import NeoAPI  # noqa: PLC0415
 
-    _install_ip_log_filter()
+    _install_sdk_log_filter()
     return NeoAPI
 
 
-class _ClientIpResponseFilter(logging.Filter):
-    """Redact only the client-IP endpoint's response before SDK rendering."""
+_SECRET_CREDENTIAL_KEYS = frozenset(
+    {
+        "access_token",
+        "api_key",
+        "auth",
+        "authorization",
+        "bearer_token",
+        "consumer_secret",
+        "consumer_key",
+        "edit_sid",
+        "edit_token",
+        "mobile_number",
+        "mobilenumber",
+        "mpin",
+        "neo_fin_key",
+        "otp",
+        "sid",
+        "token",
+        "totp",
+        "trade_token",
+        "ucc",
+        "view_token",
+    }
+)
+
+
+class _NeoSdkLogFilter(logging.Filter):
+    """Redact the IP response and every known session credential value."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._secret_values: set[str] = set()
+        self._secret_lock = threading.Lock()
+
+    def add_credentials(self, credentials: Mapping[str, Any] | None) -> None:
+        if credentials is None:
+            return
+        values: set[str] = set()
+        for key, value in credentials.items():
+            if _normalise_log_key(key) in _SECRET_CREDENTIAL_KEYS and type(value) is str and value:
+                values.add(value)
+        with self._secret_lock:
+            self._secret_values.update(values)
+
+    def _redact(self, value: Any, *, key: object | None = None) -> Any:
+        if key is not None and _normalise_log_key(key) in _SECRET_CREDENTIAL_KEYS:
+            return "<redacted>"
+        if type(value) is str:
+            redacted = value
+            with self._secret_lock:
+                secrets = tuple(sorted(self._secret_values, key=len, reverse=True))
+            for secret in secrets:
+                redacted = redacted.replace(secret, "<redacted>")
+            return redacted
+        if type(value) is dict:
+            return {item_key: self._redact(item, key=item_key) for item_key, item in value.items()}
+        if type(value) is list:
+            return [self._redact(item) for item in value]
+        if type(value) is tuple:
+            return tuple(self._redact(item) for item in value)
+        return value
 
     def filter(self, record: logging.LogRecord) -> bool:
         event = record.msg
+        url = event.get("url") if isinstance(event, dict) else None
+        url_lower = url.lower() if isinstance(url, str) else ""
         if (
             isinstance(event, dict)
-            and isinstance(event.get("url"), str)
-            and "/get-client-ip" in event["url"].lower()
+            and any(
+                marker in url_lower
+                for marker in (
+                    "/get-client-ip",
+                    "/totp/login",
+                    "/totp/validate",
+                    "tradeapilogin",
+                    "tradeapivalidate",
+                )
+            )
             and "response_body" in event
         ):
-            record.msg = {**event, "response_body": "<redacted>"}
+            event = {**event, "response_body": "<redacted>"}
+        if type(event) is str and record.args:
+            record.msg = event
+        else:
+            record.msg = self._redact(event)
+        if record.args:
+            record.args = self._redact(record.args)
         return True
 
 
+_SDK_LOG_FILTER = _NeoSdkLogFilter()
+_SDK_LOG_FACTORY_MARKER = "_flinttrade_neo_redaction_factory"
+
+
+def _normalise_log_key(value: object) -> str:
+    if type(value) is not str:
+        return ""
+    return value.lower().replace("-", "_").replace(" ", "")
+
+
+def _install_sdk_log_filter(credentials: Mapping[str, Any] | None = None) -> None:
+    """Install credential redaction without changing operator log settings."""
+    _SDK_LOG_FILTER.add_credentials(credentials)
+    current_factory = logging.getLogRecordFactory()
+    if not getattr(current_factory, _SDK_LOG_FACTORY_MARKER, False):
+        previous_factory = current_factory
+
+        def redacting_factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
+            record = previous_factory(*args, **kwargs)
+            if type(record.name) is str and (
+                record.name == "neo_api_client" or record.name.startswith("neo_api_client.")
+            ):
+                _SDK_LOG_FILTER.filter(record)
+            return record
+
+        setattr(redacting_factory, _SDK_LOG_FACTORY_MARKER, True)
+        logging.setLogRecordFactory(redacting_factory)
+
+
+def _prepare_sdk_import(credentials: Mapping[str, Any] | None = None) -> None:
+    """Apply file-log defaults and redaction before every lazy SDK import."""
+    os.environ.setdefault("NEO_LOG_FILE_ENABLED", "false")
+    _install_sdk_log_filter(credentials)
+
+
 def _install_ip_log_filter() -> None:
-    """Keep SDK console/file levels and unrelated events intact."""
-    for handler in logging.getLogger("neo_api_client").handlers:
-        if not any(isinstance(existing, _ClientIpResponseFilter) for existing in handler.filters):
-            handler.addFilter(_ClientIpResponseFilter())
+    """Compatibility name for the combined SDK redaction filter."""
+    _install_sdk_log_filter()
 
 
 def _error_scalar(value: object) -> str:
@@ -480,8 +590,6 @@ def _validate_auth(value: Any, *, step: str, ucc: str) -> None:
 class KotakNeoSdkSession:
     """Owned, blocking NeoAPI session. Only this class invokes the installed SDK."""
 
-    SFEED_NOT_WIRED = "Kotak Neo Connected (read) / API smoke is REST-only; SFeed is not wired."
-
     def __init__(self, credentials: dict[str, Any]) -> None:
         key = credentials.get("consumer_key") or credentials.get("access_token")
         if not isinstance(key, str) or not key.strip():
@@ -490,9 +598,13 @@ class KotakNeoSdkSession:
             if not isinstance(credentials.get(field), str) or not credentials[field].strip():
                 raise MFARequired("Fresh Kotak Neo TOTP and MPIN are required", broker_id="kotakneo")
         self._closed = False
+        self._logout_done = False
+        self._rest_closed = False
         self._neo = None
         try:
-            self._neo = _sdk_class()(
+            sdk_class = _sdk_class()
+            _install_sdk_log_filter(credentials)
+            self._neo = sdk_class(
                 consumer_key=key, environment=str(credentials.get("environment") or "prod"),
                 access_token=None, neo_fin_key=credentials.get("neo_fin_key"),
             )
@@ -503,8 +615,12 @@ class KotakNeoSdkSession:
             trade = self._neo.totp_validate(mpin=credentials["mpin"])
             _validate_auth(trade, step="Trade", ucc=credentials["ucc"])
         except Exception as exc:
-            self.close()
-            raise _canonical_exception(exc, "login", auth=True) from None
+            original = _canonical_exception(exc, "login", auth=True)
+            try:
+                self.close()
+            except BrokerError:
+                pass
+            raise original from None
 
     @classmethod
     def login(cls, credentials: dict[str, Any]) -> KotakNeoSdkSession:
@@ -592,34 +708,125 @@ class KotakNeoSdkSession:
         return self._call("historical_data", neosymbol=neosymbol, interval=interval, from_date=from_date,
                           to_date=to_date, read=True)
 
-    def subscribe(self, instrument_tokens: list[dict[str, str]], is_index: bool, is_depth: bool) -> None:
-        raise BrokerError(self.SFEED_NOT_WIRED, broker_id="kotakneo")
+    def create_websocket(self, url: str | None = None, **kwargs: Any) -> Any:
+        """Build the v3 async SFeed client without connecting it."""
+        if self._closed or self._neo is None:
+            raise SessionExpired("Kotak Neo session is closed", broker_id="kotakneo")
+        try:
+            return self._neo.create_websocket(url=url, **kwargs)
+        except Exception as exc:
+            raise _canonical_exception(exc, "create_websocket") from None
 
-    def un_subscribe(self, instrument_tokens: list[dict[str, str]], is_index: bool, is_depth: bool) -> None:
-        raise BrokerError(self.SFEED_NOT_WIRED, broker_id="kotakneo")
+    def create_order_feed(self, **kwargs: Any) -> Any:
+        """Build the v3 async order/position feed without connecting it."""
+        if self._closed or self._neo is None:
+            raise SessionExpired("Kotak Neo session is closed", broker_id="kotakneo")
+        try:
+            return self._neo.create_order_feed(**kwargs)
+        except Exception as exc:
+            raise _canonical_exception(exc, "create_order_feed") from None
 
-    def subscribe_to_orderfeed(self) -> None:
-        raise BrokerError(self.SFEED_NOT_WIRED, broker_id="kotakneo")
+    def logout_sdk(self) -> None:
+        """Run the SDK's local-token logout stage exactly once.
+
+        The pinned SDK currently clears local tokens while its server call is
+        commented out. Calling this method therefore proves local teardown,
+        not server-side token revocation.
+        """
+        if getattr(self, "_logout_done", False):
+            return
+        self._logout_done = True
+        neo = self._neo
+        if neo is None:
+            return
+        try:
+            result = neo.logout()
+        except Exception as exc:
+            raise _canonical_exception(exc, "logout") from None
+        if type(result) is not dict or result.get("State") != "OK":
+            raise BrokerInternal("Kotak Neo logout was not confirmed", broker_id="kotakneo")
+
+    def close_rest(self) -> None:
+        """Close the SDK REST transport exactly once, independently of logout."""
+        if getattr(self, "_rest_closed", False):
+            return
+        self._rest_closed = True
+        neo = self._neo
+        rest = getattr(getattr(neo, "api_client", None), "rest_client", None)
+        close = getattr(rest, "close", None)
+        try:
+            if not callable(close):
+                raise BrokerInternal("Kotak Neo REST close is unavailable", broker_id="kotakneo")
+            close()
+        except BrokerError:
+            raise
+        except Exception as exc:
+            raise _canonical_exception(exc, "REST close") from None
+        finally:
+            self._closed = True
+            self._neo = None
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        neo = self._neo
-        self._neo = None
-        if neo is None:
-            return
+        first_error: BrokerError | None = None
         try:
-            neo.logout()
-        except Exception:
-            pass
-        rest = getattr(getattr(neo, "api_client", None), "rest_client", None)
-        close = getattr(rest, "close", None)
-        if callable(close):
-            try:
-                close()
-            except Exception:
-                pass
+            self.logout_sdk()
+        except BrokerError as exc:
+            first_error = exc
+        try:
+            self.close_rest()
+        except BrokerError as exc:
+            first_error = first_error or exc
+        self._neo = None
+        if first_error is not None:
+            raise first_error
 
     def logout(self) -> None:
         self.close()
+
+
+def make_ws_token(exchange_segment: str, instrument_token: str) -> Any:
+    """Construct the SDK's immutable WsToken behind the sole import boundary."""
+    _prepare_sdk_import()
+    from neo_api_client.websocket.feed import WsToken  # noqa: PLC0415
+
+    _install_sdk_log_filter()
+
+    return WsToken(exchange_segment, instrument_token)
+
+
+def market_feed_message_kind(value: object) -> Literal["scrip", "scrip_lite", "index"] | None:
+    """Classify only typed price-bearing v3 SFeed models."""
+    _prepare_sdk_import()
+    from neo_api_client.websocket.feed import SFeedIndex, SFeedScrip, SFeedScripLite  # noqa: PLC0415
+
+    _install_sdk_log_filter()
+
+    if isinstance(value, SFeedScrip):
+        return "scrip"
+    if isinstance(value, SFeedScripLite):
+        return "scrip_lite"
+    if isinstance(value, SFeedIndex):
+        return "index"
+    return None
+
+
+def order_feed_message_kind(value: object) -> Literal["order", "position"] | None:
+    """Classify only typed order/position v3 feed models; reject raw fallbacks."""
+    _prepare_sdk_import()
+    from neo_api_client.websocket.orderfeed import OrderUpdate, PositionUpdate  # noqa: PLC0415
+
+    _install_sdk_log_filter()
+
+    if isinstance(value, OrderUpdate):
+        return "order"
+    if isinstance(value, PositionUpdate):
+        return "position"
+    return None
+
+
+def canonical_stream_exception(exc: Exception, operation: str) -> BrokerError:
+    """Expose the canonical, sanitised SDK error boundary to the runtime."""
+    return _canonical_exception(exc, operation)

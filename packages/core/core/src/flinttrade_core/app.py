@@ -3789,8 +3789,11 @@ def create_flask_app(
     def _reset_safe_request_context(_error: BaseException | None) -> None:
         token = getattr(_flask_g, "_safe_request_token", None)
         _flask_g._safe_request_token = None
-        if token is not None:
-            reset_safe_request_summary(token)
+        try:
+            if token is not None:
+                reset_safe_request_summary(token)
+        finally:
+            structlog.contextvars.clear_contextvars()
 
     _install_runtime_request_tracking(app)
     app.config["LOG_STREAM_SHUTDOWN_EVENT"] = threading.Event()

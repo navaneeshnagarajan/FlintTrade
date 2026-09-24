@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import logging
+import threading
 from copy import deepcopy
 from decimal import Decimal
 
@@ -238,7 +240,7 @@ class ExactNeo:
 
     def logout(self):
         self.calls.append(("logout",))
-        return {"status": "success"}
+        return {"State": "OK"}
 
 
 @pytest.fixture
@@ -1198,3 +1200,287 @@ session.close()
     log = (tmp_path / "sdk.log").read_text()
     assert "api_request_success" in result.stdout + log
     assert "SYNTHETIC_IP_SENTINEL" not in result.stdout + result.stderr + log
+
+
+def test_facade_exposes_exact_v3_async_factories_and_split_teardown() -> None:
+    import inspect
+
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    assert tuple(inspect.signature(KotakNeoSdkSession.create_websocket).parameters) == (
+        "self", "url", "kwargs",
+    )
+    assert tuple(inspect.signature(KotakNeoSdkSession.create_order_feed).parameters) == ("self", "kwargs")
+    assert callable(KotakNeoSdkSession.logout_sdk)
+    assert callable(KotakNeoSdkSession.close_rest)
+
+
+def test_sdk_log_filter_redacts_full_auth_values_without_reconfiguring_operator_logging(tmp_path):
+    script = """
+import logging
+from flinttrade_gateway.brokers.kotakneo_sdk import _install_sdk_log_filter, _sdk_class
+
+_sdk_class()
+logger = logging.getLogger('neo_api_client')
+handler = logging.FileHandler(r'LOG_PATH')
+handler.setLevel(logging.INFO)
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
+before = (tuple(logger.handlers), logger.level, handler.level, logger.propagate)
+credentials = {
+    'consumer_key': 'CONSUMER_KEY_SENTINEL',
+    'access_token': 'ACCESS_TOKEN_SENTINEL',
+    'mobile_number': 'MOBILE_SENTINEL',
+    'ucc': 'UCC_SENTINEL',
+    'totp': 'TOTP_SENTINEL',
+    'mpin': 'MPIN_SENTINEL',
+    'neo_fin_key': 'FIN_KEY_SENTINEL',
+}
+_install_sdk_log_filter(credentials)
+logger.info({
+    'event': 'operator-visible-event',
+    **credentials,
+    'nested': {
+        'message': 'tokens=' + credentials['totp'] + '/' + credentials['mpin'],
+        'response_body': {'data': {'token': 'MINTED_TOKEN_SENTINEL'}},
+        'Authorization': 'Bearer AUTHORIZATION_SENTINEL',
+        'instrument_token': 'INSTRUMENT_TOKEN_CONTROL',
+    },
+})
+for index, (url, body) in enumerate((
+    ('https://example.invalid/totp/login', 'RAW_LOGIN_TOKEN_SENTINEL'),
+    ('https://example.invalid/totp/validate', {'preview': 'PREVIEW_VALIDATE_SID_SENTINEL'}),
+    ('https://example.invalid/tradeApiLogin', {'data': {'sid': 'TRADE_LOGIN_SID_SENTINEL'}}),
+    ('https://example.invalid/tradeApiValidate', 'TRADE_VALIDATE_TOKEN_SENTINEL'),
+)):
+    logger.info({'event': 'auth-response-' + str(index), 'url': url, 'response_body': body})
+handler.flush()
+after = (tuple(logger.handlers), logger.level, handler.level, logger.propagate)
+assert before == after
+""".replace("LOG_PATH", str(tmp_path / "operator.log"))
+    result = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    output = (tmp_path / "operator.log").read_text() + result.stdout + result.stderr
+    assert "operator-visible-event" in output
+    for fragment in (
+        "CONSUMER_KEY_SENTINEL", "ACCESS_TOKEN_SENTINEL", "MOBILE_SENTINEL", "UCC_SENTINEL",
+        "TOTP_SENTINEL", "MPIN_SENTINEL", "FIN_KEY_SENTINEL",
+        "MINTED_TOKEN", "AUTHORIZATION_SENTINEL",
+        "RAW_LOGIN_TOKEN", "PREVIEW_VALIDATE_SID", "TRADE_LOGIN_SID", "TRADE_VALIDATE_TOKEN",
+    ):
+        assert fragment not in output
+    assert "INSTRUMENT_TOKEN_CONTROL" in output
+
+
+def test_sdk_log_filter_serialises_concurrent_secret_updates_and_redaction() -> None:
+    from flinttrade_gateway.brokers.kotakneo_sdk import _NeoSdkLogFilter
+
+    log_filter = _NeoSdkLogFilter()
+    failures: list[BaseException] = []
+
+    def exercise(worker: int) -> None:
+        try:
+            for sequence in range(500):
+                secret = f"SECRET-{worker}-{sequence}"
+                log_filter.add_credentials({"consumer_key": secret})
+                record = logging.LogRecord(
+                    "neo_api_client", logging.INFO, __file__, 1, "credential=%s", (secret,), None,
+                )
+                assert log_filter.filter(record) is True
+                assert secret not in record.getMessage()
+        except BaseException as exc:  # test records cross-thread assertion failures
+            failures.append(exc)
+
+    threads = [threading.Thread(target=exercise, args=(worker,)) for worker in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert failures == []
+
+
+def test_sdk_log_filter_does_not_mutate_a_handler_shared_with_host_logging() -> None:
+    """Neo credential redaction must never rewrite unrelated host records."""
+    from flinttrade_gateway.brokers.kotakneo_sdk import (
+        _NeoSdkLogFilter,
+        _install_sdk_log_filter,
+    )
+
+    class CaptureHandler(logging.Handler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.messages: list[str] = []
+
+        def emit(self, record: logging.LogRecord) -> None:
+            self.messages.append(record.getMessage())
+
+    root_logger = logging.getLogger()
+    sdk_logger = logging.getLogger("neo_api_client")
+    host_logger = logging.getLogger("flinttrade.sdk-redaction-regression")
+    handler = CaptureHandler()
+    root_level = root_logger.level
+    host_level = host_logger.level
+    root_logger.addHandler(handler)
+    sdk_logger.addHandler(handler)
+    root_logger.setLevel(logging.WARNING)
+    host_logger.setLevel(logging.WARNING)
+    try:
+        _install_sdk_log_filter({"access_token": "x"})
+        host_logger.warning("RAG background indexing failed")
+
+        assert handler.messages[-1] == "RAG background indexing failed"
+        assert not any(isinstance(item, _NeoSdkLogFilter) for item in handler.filters)
+    finally:
+        root_logger.removeHandler(handler)
+        sdk_logger.removeHandler(handler)
+        root_logger.setLevel(root_level)
+        host_logger.setLevel(host_level)
+        handler.close()
+
+
+def test_sdk_log_filter_preserves_printf_templates_while_redacting_arguments() -> None:
+    """A short credential must not corrupt a Neo SDK printf format specifier."""
+    from flinttrade_gateway.brokers.kotakneo_sdk import _NeoSdkLogFilter
+
+    log_filter = _NeoSdkLogFilter()
+    log_filter.add_credentials({"access_token": "1"})
+    record = logging.LogRecord(
+        "neo_api_client",
+        logging.INFO,
+        __file__,
+        1,
+        "latency=%.1f token=%s",
+        (1.2, "1"),
+        None,
+    )
+
+    assert log_filter.filter(record) is True
+    assert record.getMessage() == "latency=1.2 token=<redacted>"
+
+
+def test_login_cleanup_failure_preserves_original_auth_error(monkeypatch) -> None:
+    import neo_api_client
+
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    class FailingCleanupNeo(ExactNeo):
+        def totp_login(self, mobile_number=None, ucc=None, totp=None):
+            raise httpx.HTTPStatusError(
+                "sensitive provider detail",
+                request=httpx.Request("POST", "https://example.invalid/login"),
+                response=httpx.Response(401, request=httpx.Request("POST", "https://example.invalid/login")),
+            )
+
+        def logout(self):
+            raise RuntimeError("cleanup-secret")
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.api_client.rest_client.close = lambda: (_ for _ in ()).throw(RuntimeError("rest-secret"))
+
+    monkeypatch.setattr(neo_api_client, "NeoAPI", FailingCleanupNeo)
+    with pytest.raises(CredentialsInvalid) as raised:
+        KotakNeoSdkSession.login(_credentials())
+    assert raised.value.broker_code == "401"
+    assert "secret" not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"State": "NOT_OK"},
+        {"Error Message": "logout-secret"},
+        {"status": "success"},
+        None,
+    ],
+)
+def test_sdk_logout_rejects_non_success_responses(fake_sdk, response: object) -> None:
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    session = KotakNeoSdkSession.login(_credentials())
+    session._neo.logout = lambda: response
+    with pytest.raises(BrokerInternal) as raised:
+        session.logout_sdk()
+    assert "secret" not in str(raised.value)
+    session.close_rest()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"State": "OK"},
+        {"State": "OK", "message": "You have been successfully logged out"},
+    ],
+)
+def test_sdk_logout_accepts_official_ok_response(fake_sdk, response: dict[str, object]) -> None:
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    session = KotakNeoSdkSession.login(_credentials())
+    session._neo.logout = lambda: response
+    assert session.logout_sdk() is None
+    session.close_rest()
+
+
+@pytest.mark.parametrize("rest_fails", [False, True])
+def test_split_teardown_finalises_facade_even_when_rest_close_fails(fake_sdk, rest_fails: bool) -> None:
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    session = KotakNeoSdkSession.login(_credentials())
+    if rest_fails:
+        session._neo.api_client.rest_client.close = lambda: (_ for _ in ()).throw(RuntimeError("secret"))
+    session.logout_sdk()
+    if rest_fails:
+        with pytest.raises(BrokerInternal):
+            session.close_rest()
+    else:
+        session.close_rest()
+
+    assert session._closed is True
+    assert session._neo is None
+    for operation in (
+        session.order_book,
+        session.create_websocket,
+        session.create_order_feed,
+    ):
+        with pytest.raises(SessionExpired):
+            operation()
+
+
+@pytest.mark.parametrize("missing", ["api_client", "rest_client", "close"])
+def test_split_teardown_requires_rest_close_surface_and_still_finalises(fake_sdk, missing: str) -> None:
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    session = KotakNeoSdkSession.login(_credentials())
+    if missing == "api_client":
+        session._neo.api_client = None
+    elif missing == "rest_client":
+        session._neo.api_client.rest_client = None
+    else:
+        session._neo.api_client.rest_client.close = None
+
+    session.logout_sdk()
+    with pytest.raises(BrokerInternal):
+        session.close_rest()
+    assert session._closed is True
+    assert session._neo is None
+
+
+def test_lazy_token_helper_first_disables_default_cwd_log(tmp_path) -> None:
+    script = """
+import os
+from flinttrade_gateway.brokers.kotakneo_sdk import make_ws_token, market_feed_message_kind
+
+token = make_ws_token('nse_cm', '1')
+assert token.instrument_token == '1'
+assert market_feed_message_kind(object()) is None
+assert os.environ['NEO_LOG_FILE_ENABLED'] == 'false'
+"""
+    env = os.environ.copy()
+    env.pop("NEO_LOG_FILE_ENABLED", None)
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=tmp_path, env=env,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert list(tmp_path.iterdir()) == []

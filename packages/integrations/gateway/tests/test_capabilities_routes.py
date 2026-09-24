@@ -197,9 +197,9 @@ class TestCapabilitiesRoute:
         assert caps["cost_paid"] is False
         assert caps["cost_inr_per_month"] == 0
         assert caps["supports_websocket"] is True
-        assert caps["streaming_runtime_ready"] is False
+        assert caps["streaming_runtime_ready"] is True
         assert caps["streaming_max_connections_per_user"] is None
-        assert caps["streaming_max_symbols_per_connection"] is None
+        assert caps["streaming_max_symbols_per_connection"] == 3000
         assert caps["streaming_max_total_symbols"] is None
         assert caps["supports_currency"] is False
         assert caps["supports_bracket_orders"] is False

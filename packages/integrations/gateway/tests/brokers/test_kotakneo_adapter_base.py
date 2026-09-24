@@ -533,18 +533,11 @@ async def test_explicit_null_option_defaults_reach_transport_as_sdk_defaults():
     assert ("option_chain", ("nse_fo", "NIFTY", None, "option", None)) in mock.calls
 
 
-def test_sfeed_only_facade_rejects_subscribe_as_rest_only():
+def test_v3_facade_removes_legacy_direct_subscription_methods():
     from flinttrade_gateway.brokers.kotakneo import KotakNeoClient
 
-    class _SFeedOnly:
-        def create_websocket(self):
-            raise AssertionError("create_websocket must not be called")
-
-    facade = KotakNeoClient.__new__(KotakNeoClient)
-    facade._neo = _SFeedOnly()
-    with pytest.raises(BrokerError, match="REST-only") as raised:
-        facade.subscribe([], False, False)
-    message = str(raised.value)
-    assert "Connected (read)" in message
-    assert "API smoke" in message
-    assert "Monday" not in message
+    assert callable(KotakNeoClient.create_websocket)
+    assert callable(KotakNeoClient.create_order_feed)
+    assert not hasattr(KotakNeoClient, "subscribe")
+    assert not hasattr(KotakNeoClient, "un_subscribe")
+    assert not hasattr(KotakNeoClient, "subscribe_to_orderfeed")

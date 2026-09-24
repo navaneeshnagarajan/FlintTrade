@@ -91,13 +91,13 @@ def test_options_history_scorer_rewards_rolling_series() -> None:
     assert "No historical options-data API" in msg
 
 
-def test_streaming_requires_runtime_wiring() -> None:
-    # Several brokers document feeds and the adapters can decode injected frames,
-    # but the live SDK/callback streams are not wired into FlintTrade runtime yet.
-    # Do not recommend a broker for "Live streaming" until stream() works without
-    # test/feed-factory injection.
-    assert best_broker_for(BrokerUseCase.STREAMING) is None
+def test_streaming_recommends_only_runtime_ready_feed() -> None:
+    top = best_broker_for(BrokerUseCase.STREAMING)
+    assert top is not None
+    assert top.broker_id == "kotakneo"
+    assert "live streaming" in top.rationale.lower()
     by_broker = {r.broker_id: r for r in recommend(BrokerUseCase.STREAMING)}
+    assert by_broker["kotakneo"].raw_score > 0.0
     assert by_broker["dhan"].raw_score == 0.0
     assert "not enabled yet" in by_broker["dhan"].rationale
 

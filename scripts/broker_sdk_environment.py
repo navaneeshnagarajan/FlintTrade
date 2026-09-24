@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,8 @@ from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[1]
 KOTAK_REPO = "https://github.com/Kotak-Neo/kotak-neo-python.git"
+_KOTAK_HOMEPAGE = KOTAK_REPO.removesuffix(".git")
+_FULL_GIT_SHA = re.compile(r"[0-9a-f]{40}")
 _PROBE = """
 import importlib.metadata as md
 import json
@@ -41,7 +44,13 @@ def _pin() -> tuple[str, str]:
     data = tomllib.loads((REPO / "brokers.lock").read_text(encoding="utf-8"))
     for entry in data.get("broker", []):
         if entry.get("name") == "kotakneoapi":
-            return str(entry["version"]), str(entry["source_commit"])
+            version = str(entry.get("version", ""))
+            commit = str(entry.get("source_commit", ""))
+            if not version or entry.get("homepage") != _KOTAK_HOMEPAGE:
+                raise RuntimeError("Kotak Neo brokers.lock entry does not identify the official repository")
+            if _FULL_GIT_SHA.fullmatch(commit) is None:
+                raise RuntimeError("Kotak Neo source_commit must be a full lowercase Git commit")
+            return version, commit
     raise RuntimeError("Kotak Neo is missing from brokers.lock")
 
 
@@ -98,8 +107,9 @@ def remove_kotak_distributions(
     """Remove both overlapping Kotak distributions from a pip-only environment."""
     state = _probe(python, run)
     if "kotakneoapi" in state or "neo-api-client" in state:
-        if shutil.which("uv"):
-            _invoke(run, ["uv", "pip", "uninstall", "--python", str(python), "kotakneoapi", "neo-api-client"])
+        uv = shutil.which("uv")
+        if uv:
+            _invoke(run, [uv, "pip", "uninstall", "--python", str(python), "kotakneoapi", "neo-api-client"])
         else:
             _invoke(run, [str(python), "-m", "pip", "uninstall", "-y", "kotakneoapi", "neo-api-client"])
 
@@ -114,10 +124,38 @@ def repair_kotakneo_environment(
     version, commit = _pin()
     if _healthy(_probe(python, run), version, commit):
         return
-    _invoke(run, ["uv", "pip", "uninstall", "--python", str(python), "kotakneoapi", "neo-api-client"])
-    _invoke(run, ["uv", "sync", "--frozen", "--all-packages", "--reinstall-package", "kotakneoapi"])
+    uv = shutil.which("uv")
+    if uv:
+        _invoke(run, [uv, "pip", "uninstall", "--python", str(python), "kotakneoapi", "neo-api-client"])
+        _invoke(
+            run,
+            [
+                uv,
+                "pip",
+                "install",
+                "--python",
+                str(python),
+                "--no-deps",
+                "--reinstall",
+                f"git+{KOTAK_REPO}@{commit}",
+            ],
+        )
+    else:
+        _invoke(run, [str(python), "-m", "pip", "uninstall", "-y", "kotakneoapi", "neo-api-client"])
+        _invoke(
+            run,
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "--no-deps",
+                "--force-reinstall",
+                f"git+{KOTAK_REPO}@{commit}",
+            ],
+        )
     if not _healthy(_probe(python, run), version, commit):
-        raise RuntimeError("Kotak Neo sync did not produce the pinned Git distribution with exclusive namespace")
+        raise RuntimeError("Kotak Neo repair did not produce the pinned Git distribution with exclusive namespace")
 
 
 def main(argv: list[str] | None = None) -> int:

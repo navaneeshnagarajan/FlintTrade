@@ -121,7 +121,7 @@ class TickProtocol(Enum):
     KITE_BINARY = "kite_binary"
     DHAN_BINARY = "dhan_binary"
     UPSTOX_JSON = "upstox_json"
-    KOTAK_NEO_JSON = "kotak_neo_json"
+    KOTAK_NEO_BINARY = "kotak_neo_binary"
     OPENALGO_JSON = "openalgo_json"
     GENERIC_JSON = "generic_json"
 
