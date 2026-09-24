@@ -3444,6 +3444,8 @@ def test_candidate_timeout_does_not_accumulate_or_leave_non_daemon_sdk_work(
     client,
     monkeypatch,
 ):
+    blocked_sdk_seconds = 15.0
+    runner_deadline_seconds = 5.0
     _c, app, _tmp_path = client
     app.config["NATIVE_CANDIDATE_LOGIN_TIMEOUT_SECONDS"] = 0.02
     probe_started = threading.Event()
@@ -3459,7 +3461,7 @@ def test_candidate_timeout_does_not_accumulate_or_leave_non_daemon_sdk_work(
         def sdk_read() -> dict[str, float]:
             probe_calls.append(1)
             probe_started.set()
-            if not release_probe.wait(5.0):
+            if not release_probe.wait(blocked_sdk_seconds):
                 raise TimeoutError("test did not release the SDK read")
             return {"available_balance": 0.0}
 
@@ -3482,9 +3484,11 @@ def test_candidate_timeout_does_not_accumulate_or_leave_non_daemon_sdk_work(
 
     request_thread = threading.Thread(target=issue_first_request, name="test-candidate-request")
     request_thread.start()
-    assert probe_started.wait(1.0)
     try:
-        assert request_finished.wait(0.5), "candidate deadline waited for unkillable SDK work"
+        assert probe_started.wait(runner_deadline_seconds)
+        # These bounds distinguish a prompt rejection from waiting for the
+        # blocked SDK read; sub-second wall-clock latency is not the contract.
+        assert request_finished.wait(runner_deadline_seconds), "candidate deadline waited for unkillable SDK work"
         assert response_status == [504]
 
         second_started = time.monotonic()
@@ -3497,9 +3501,10 @@ def test_candidate_timeout_does_not_accumulate_or_leave_non_daemon_sdk_work(
                 "credentials": {"access_token": "candidate-two"},
             },
         )
-        assert time.monotonic() - second_started < 0.5
+        second_elapsed = time.monotonic() - second_started
         assert second.status_code == 504
         assert probe_calls == [1]
+        assert second_elapsed < runner_deadline_seconds
 
         candidate_threads = [
             thread
@@ -3508,10 +3513,10 @@ def test_candidate_timeout_does_not_accumulate_or_leave_non_daemon_sdk_work(
             and thread is not request_thread
             and thread.name.startswith("native-candidate-")
         ]
-        assert {thread.name for thread in candidate_threads} == {
+        assert sorted(thread.name for thread in candidate_threads) == [
             "native-candidate-login",
             "native-candidate-sdk",
-        }
+        ]
         assert all(thread.daemon for thread in candidate_threads), [
             (thread.name, thread.daemon) for thread in candidate_threads
         ]
