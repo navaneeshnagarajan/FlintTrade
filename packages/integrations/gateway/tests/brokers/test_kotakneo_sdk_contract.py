@@ -593,6 +593,54 @@ def test_read_envelope_allows_main_track_rate_limit_metadata():
     assert validate_read_envelope(response, operation="order_report") is response
 
 
+def test_real_sdk_session_preserves_malformed_read_taxonomy():
+    from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    class MalformedNeo:
+        @staticmethod
+        def positions():
+            return {"stat": "Ok", "stCode": 200, "data": [None]}
+
+    session = KotakNeoSdkSession.__new__(KotakNeoSdkSession)
+    session._closed = False
+    session._neo = MalformedNeo()
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        session.positions()
+
+
+def test_real_sdk_session_canonicalises_malformed_write_response():
+    from flinttrade_gateway.brokers.kotakneo_sdk import KotakNeoSdkSession
+
+    class MalformedNeo:
+        @staticmethod
+        def place_order(**_params):
+            return {"status": "error", "errorCode": 10**5000, "message": "synthetic"}
+
+    session = KotakNeoSdkSession.__new__(KotakNeoSdkSession)
+    session._closed = False
+    session._neo = MalformedNeo()
+
+    with pytest.raises(BrokerInternal):
+        session.place_order({})
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"status": "error", "errorCode": 10**5000, "message": "synthetic"},
+        {"status": "error", "error": [{"code": 10**5000, "message": "synthetic"}]},
+    ],
+)
+def test_read_envelope_rejects_oversized_error_integers_canonically(response):
+    from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
+    from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        validate_read_envelope(response, operation="positions")
+
+
 def test_read_envelope_accepts_nested_successful_margin_response():
     from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
 

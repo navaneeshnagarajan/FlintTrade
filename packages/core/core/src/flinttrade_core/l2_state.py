@@ -1467,6 +1467,8 @@ def _recover_omitted_modify_fields(
         if broker_product in {"BO", "CO"} or variety in {"bracket", "cover"}:
             unsupported = "bracket" if broker_product == "BO" or variety == "bracket" else "cover"
             raise ModifyCapabilityError(f"Kotak Neo v3 cannot modify {unsupported} orders")
+        if broker_product not in {"MIS", "CNC", "NRML"}:
+            raise ModifyCapabilityError(f"Kotak Neo v3 cannot modify {broker_product} orders")
         if variety not in {"regular", "amo"}:
             raise ModifyCapabilityError(f"Kotak Neo v3 cannot modify order variety {variety!r}")
 
@@ -1593,6 +1595,8 @@ async def bind_authoritative_cancel_context(
     if broker_product in {"BO", "CO"} or variety in {"bracket", "cover"}:
         unsupported = "bracket" if broker_product == "BO" or variety == "bracket" else "cover"
         raise CancelCapabilityError(f"Kotak Neo v3 cannot cancel {unsupported} orders")
+    if broker_product not in {"MIS", "CNC", "NRML"}:
+        raise CancelCapabilityError(f"Kotak Neo v3 cannot cancel {broker_product} orders")
     if variety not in {"regular", "amo"}:
         raise CancelCapabilityError(f"Kotak Neo v3 cannot cancel order variety {variety!r}")
     amo = _canonical_amo(current.get("amo"), label="authoritative AMO flag")

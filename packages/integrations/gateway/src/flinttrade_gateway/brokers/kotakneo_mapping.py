@@ -613,8 +613,10 @@ def to_modify_order_params(order_id: str, changes: dict[str, Any]) -> dict[str, 
     if broker_product:
         if broker_product not in KOTAK_TO_PRODUCT:
             raise KotakNeoMappingError(f"Unsupported broker product {broker_product!r}")
-        if broker_product in {"BO", "CO"}:
-            variety_name = "bracket" if broker_product == "BO" else "cover"
+        if broker_product not in PRODUCT_TO_KOTAK:
+            variety_name = {"BO": "bracket", "CO": "cover", "MTF": "MTF"}.get(
+                broker_product, broker_product
+            )
             raise KotakNeoMappingError(f"Kotak Neo v3 cannot modify {variety_name} orders")
     variety = str(changes.get("variety", "")).strip().lower()
     if variety and variety not in {"regular", "amo"}:
@@ -993,20 +995,27 @@ def from_kotak_scrip(rec: dict[str, Any]) -> dict[str, Any]:
     NEO returns scrip metadata with ``p``-prefixed keys; the ``pTrdSymbol`` is the
     trading symbol the order endpoints expect and ``pSymbol`` is the token.
     """
-    seg = str(rec.get("pExchSeg", ""))
+    rec = _response_record(rec)
+    seg = _response_text(rec, "pExchSeg", required=True)
+    trading_symbol = _response_text(rec, "pTrdSymbol", required=True)
+    name = _response_text(rec, "pSymbolName", "pDesc", empty_absent=True)
+    isin = _response_text(rec, "pISIN", empty_absent=True)
+    lot_size = _response_number_text(rec, "lLotSize", empty_absent=True)
+    tick_size = _response_number_text(rec, "dTickSize", empty_absent=True)
+    option_type = _response_text(rec, "pOptionType", empty_absent=True)
     try:
         token = canonical_instrument_token(rec.get("pSymbol"))
     except KotakNeoMappingError:
         raise BrokerReadResponseInvalid from None
     return {
-        "trading_symbol": rec.get("pTrdSymbol", ""),
+        "trading_symbol": trading_symbol,
         "token": token,
-        "name": rec.get("pSymbolName", rec.get("pDesc", "")),
+        "name": "" if name is _MISSING else name,
         "exchange": KOTAK_TO_EXCHANGE.get(seg, seg),
-        "isin": rec.get("pISIN", ""),
-        "lot_size": str(rec.get("lLotSize", 0)),
-        "tick_size": str(rec.get("dTickSize", 0)),
-        "option_type": rec.get("pOptionType") or "",
+        "isin": "" if isin is _MISSING else isin,
+        "lot_size": "0" if lot_size is _MISSING else lot_size,
+        "tick_size": "0" if tick_size is _MISSING else tick_size,
+        "option_type": "" if option_type is _MISSING else option_type,
     }
 
 

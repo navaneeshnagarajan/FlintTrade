@@ -1674,7 +1674,10 @@ def test_kotak_modify_refuses_explicit_variety_instead_of_silently_ignoring_it(
     assert client.modify_calls == []
 
 
-@pytest.mark.parametrize(("product", "variety"), [("BO", "bracket"), ("CO", "cover")])
+@pytest.mark.parametrize(
+    ("product", "variety"),
+    [("BO", "bracket"), ("CO", "cover"), ("MTF", "mtf"), ("INTRADAY", "intraday")],
+)
 @pytest.mark.parametrize("operation", ["modify", "cancel"])
 def test_kotak_normal_write_refuses_authoritative_legacy_variety_before_transport(
     backend_lease_proof,

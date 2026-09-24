@@ -65,6 +65,11 @@ def _error_scalar(value: object) -> str:
     if type(value) is str:
         return value
     if type(value) is int:
+        # Python 3.11+ refuses unbounded integer-to-text conversions. Bound the
+        # broker-controlled value before rendering so malformed error payloads
+        # stay inside the canonical adapter error taxonomy.
+        if value >= 10**64 or value <= -(10**64):
+            raise BrokerReadResponseInvalid from None
         return str(value)
     raise BrokerReadResponseInvalid from None
 
@@ -383,6 +388,10 @@ class KotakNeoSdkSession:
             if write and isinstance(value, dict):
                 _raise_provider_error(value, operation=method, write=True)
             return value
+        except BrokerReadResponseInvalid as exc:
+            if read:
+                raise
+            raise _canonical_exception(exc, method) from None
         except Exception as exc:
             raise _canonical_exception(exc, method) from None
 

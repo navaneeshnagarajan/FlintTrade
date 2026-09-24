@@ -323,6 +323,27 @@ def test_from_kotak_scrip():
     assert s["exchange"] == "NSE" and s["name"] == "YESBANK" and s["lot_size"] == "1"
 
 
+@pytest.mark.parametrize(
+    "field",
+    ["pExchSeg", "pTrdSymbol", "pSymbolName", "pISIN", "lLotSize", "dTickSize", "pOptionType"],
+)
+def test_from_kotak_scrip_rejects_unbounded_adjacent_fields_without_raw_value_error(field):
+    row = {
+        "pSymbol": 11915,
+        "pExchSeg": "nse_cm",
+        "pSymbolName": "YESBANK",
+        "pTrdSymbol": "YESBANK-EQ",
+        "pISIN": "INE528G01035",
+        "lLotSize": 1,
+        "dTickSize": 1,
+        "pOptionType": "",
+    }
+    row[field] = 10**5000
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_scrip(row)
+
+
 def test_margin_params_and_parse():
     order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
                   product="MIS", quantity="10", price="9.4")
