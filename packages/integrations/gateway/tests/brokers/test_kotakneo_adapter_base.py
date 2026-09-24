@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from flinttrade_core.exceptions import BrokerError, BrokerInternal, SessionExpired, UnsupportedCapabilityError
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
+from flinttrade_core.exceptions import BrokerError, SessionExpired, UnsupportedCapabilityError
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter, _ROUTER_TOKEN
@@ -260,7 +261,7 @@ async def test_reads_tolerate_empty_and_error_envelope():
 async def test_quotes_bare_list_is_not_a_success_envelope():
     adapter = _adapter(_EnvelopeNeo())
     session = await _session(adapter)
-    with pytest.raises(BrokerInternal):
+    with pytest.raises(BrokerReadResponseInvalid):
         await adapter.quotes(session, ["NSE:IDEA"])
 
 

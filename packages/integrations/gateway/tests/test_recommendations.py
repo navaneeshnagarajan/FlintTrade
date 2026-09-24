@@ -247,4 +247,4 @@ def test_custom_capability_subset_is_respected() -> None:
 
 def test_zero_brokerage_note_surfaced_in_rationale() -> None:
     top = best_broker_for(BrokerUseCase.LOW_COST_EXECUTION)
-    assert "square-off leg" in top.rationale  # the documented brokerage caveat
+    assert "statutory charges" in top.rationale

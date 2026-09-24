@@ -3627,7 +3627,7 @@ async def test_kotakneo_present_malformed_primary_alias_never_falls_through(
 
 
 @pytest.mark.asyncio
-async def test_kotakneo_trade_optional_order_id_remains_absent(bind_adapter) -> None:
+async def test_kotakneo_trade_missing_order_id_is_malformed(bind_adapter) -> None:
     client = _KotakNeoClient()
     _kotakneo_rows(client)
     client.responses["trade_book"]["data"][0].pop("nOrdNo")
@@ -3635,8 +3635,7 @@ async def test_kotakneo_trade_optional_order_id_remains_absent(bind_adapter) -> 
 
     outcome = await bound.port.trades()
 
-    assert isinstance(outcome, BrokerReadSuccess)
-    assert outcome.value[0].orderid is None
+    assert outcome == BrokerReadFailure(BrokerReadErrorCode.MALFORMED_RESPONSE)
     assert client.calls == ["trade_book"]
 
 

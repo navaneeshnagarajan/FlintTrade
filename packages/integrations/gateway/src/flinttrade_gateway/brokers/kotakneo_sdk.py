@@ -10,6 +10,7 @@ import logging
 import os
 from typing import Any
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
 from flinttrade_core.exceptions import (
     BrokerError,
     BrokerInternal,
@@ -53,30 +54,102 @@ def _install_ip_log_filter() -> None:
             handler.addFilter(_ClientIpResponseFilter())
 
 
+def _error_scalar(value: object) -> str:
+    """Render only inert provider classification scalars.
+
+    Broker payloads are untrusted. In particular, calling ``bool``/``str`` on
+    an arbitrary object can execute user-defined hooks while handling an error.
+    """
+    if value is None:
+        return ""
+    if type(value) is str:
+        return value
+    if type(value) is int:
+        return str(value)
+    raise BrokerReadResponseInvalid from None
+
+
+def _error_item(value: object) -> tuple[str, str]:
+    """Return one validated SDK error item's code and message."""
+    if type(value) is str:
+        return "", value
+    if isinstance(value, BaseException):
+        status = getattr(value, "status", None)
+        if status is None:
+            status = getattr(value, "status_code", None)
+        reason = getattr(value, "reason", None)
+        return _error_scalar(status), _error_scalar(reason) or type(value).__name__
+    if type(value) is dict and all(type(key) is str for key in value):
+        code = ""
+        for key in ("code", "errorCode"):
+            if key in value:
+                code = _error_scalar(value[key])
+                if code:
+                    break
+        message = ""
+        for key in ("message", "emsg"):
+            if key in value:
+                message = _error_scalar(value[key])
+                if message:
+                    break
+        return code, message
+    raise BrokerReadResponseInvalid from None
+
+
 def _error_details(value: dict[str, Any]) -> tuple[str, str]:
-    """Extract only classification fields; never render a provider payload."""
-    error = value.get("error") or value.get("Error") or value.get("Error Message")
-    if isinstance(error, list):
-        error = error[0] if error else None
-    if isinstance(error, dict):
-        code = str(error.get("code") or error.get("errorCode") or "")
-        message = str(error.get("message") or error.get("emsg") or "")
-    elif isinstance(error, BaseException):
-        code = str(getattr(error, "status", "") or getattr(error, "status_code", "") or "")
-        message = str(getattr(error, "reason", "") or type(error).__name__)
-    else:
-        code, message = "", str(error or "")
-    code = code or str(value.get("errorCode") or value.get("stCode") or "")
-    message = message or str(value.get("message") or value.get("errMsg") or value.get("emsg") or "")
+    """Extract only validated classification fields; never render a payload."""
+    error: object | None = None
+    for key in ("error", "Error", "Error Message"):
+        if key in value:
+            error = value[key]
+            break
+
+    code = ""
+    message = ""
+    if type(error) is list:
+        details = [_error_item(item) for item in error]
+        if details:
+            code, message = details[0]
+    elif error is not None:
+        code, message = _error_item(error)
+
+    if not code:
+        for key in ("errorCode", "stCode"):
+            if key in value:
+                code = _error_scalar(value[key])
+                if code:
+                    break
+    if not message:
+        for key in ("message", "errMsg", "emsg"):
+            if key in value:
+                message = _error_scalar(value[key])
+                if message:
+                    break
     return code.lower(), message.lower()
 
 
 def _raise_provider_error(value: dict[str, Any], *, operation: str, auth: bool = False, write: bool = False) -> None:
     layers: list[dict[str, Any]] = []
     current: Any = value
-    while isinstance(current, dict):
+    while type(current) is dict:
         layers.append(current)
         current = current.get("data")
+
+    for layer in layers:
+        status = layer.get("status")
+        stat = layer.get("stat")
+        if "status" in layer and type(status) is not str:
+            raise BrokerReadResponseInvalid from None
+        if "stat" in layer and type(stat) is not str:
+            raise BrokerReadResponseInvalid from None
+        if "status" in layer and "stat" in layer:
+            status_success = status.lower() in {"ok", "success"}
+            stat_success = stat.lower() == "ok"
+            has_error_evidence = any(
+                key in layer for key in ("Error", "Error Message", "error", "message", "errMsg", "emsg")
+            )
+            if status_success is not stat_success and not has_error_evidence:
+                raise BrokerReadResponseInvalid from None
 
     def is_rejected(layer: dict[str, Any]) -> bool:
         status = layer.get("status")
@@ -199,13 +272,13 @@ def validate_read_envelope(value: Any, *, operation: str) -> Any:
     if operation == "scrip_master" and isinstance(value, str) and value.startswith("https://"):
         return value
     if type(value) is not dict or any(type(key) is not str for key in value):
-        raise BrokerInternal(f"Kotak Neo {operation} response is malformed", broker_id="kotakneo")
+        raise BrokerReadResponseInvalid from None
     _raise_provider_error(value, operation=operation)
     if operation == "scrip_master" and "filesPaths" in value:
         paths = value["filesPaths"]
         if type(paths) is list and all(type(path) is str and path.startswith("https://") for path in paths):
             return value
-        raise BrokerInternal("Kotak Neo scrip master paths are malformed", broker_id="kotakneo")
+        raise BrokerReadResponseInvalid from None
     if operation == "order_history" and type(value.get("data")) is dict:
         validate_read_envelope(value["data"], operation="order_history_rows")
         return value
@@ -219,25 +292,28 @@ def validate_read_envelope(value: Any, *, operation: str) -> Any:
         data_only_read = (
             operation == "quotes" and status is None and stat is None and type(data) is list
         ) or (operation == "holdings" and set(value) == {"data"} and type(data) is list)
-        nested_success = isinstance(data, dict) and (
-            str(data.get("status", "")).lower() == "success" or str(data.get("stat", "")).lower() == "ok"
+        nested_status = data.get("status") if type(data) is dict else None
+        nested_stat = data.get("stat") if type(data) is dict else None
+        nested_success = type(data) is dict and (
+            type(nested_status) is str and nested_status.lower() == "success"
+            or type(nested_stat) is str and nested_stat.lower() == "ok"
         )
         if not data_only_read and not nested_success:
-            raise BrokerInternal(f"Kotak Neo {operation} response has no success status", broker_id="kotakneo")
+            raise BrokerReadResponseInvalid from None
     status_code = value.get("stCode")
     if status_code is not None and (type(status_code) is not int or status_code not in {200, 1000}):
-        raise BrokerInternal(f"Kotak Neo {operation} returned an invalid status code", broker_id="kotakneo")
+        raise BrokerReadResponseInvalid from None
     if operation in {
         "order_report", "order_history", "order_history_rows", "trade_report", "positions", "holdings",
         "quotes", "whatsmyip",
     }:
         rows = value.get("data")
         if type(rows) is not list or any(type(row) is not dict for row in rows):
-            raise BrokerInternal(f"Kotak Neo {operation} returned malformed rows", broker_id="kotakneo")
+            raise BrokerReadResponseInvalid from None
     if operation == "limits":
         funds = value.get("data", value)
         if type(funds) is not dict or not any(key in funds for key in ("Net", "avlCash", "avlMrgn")):
-            raise BrokerInternal("Kotak Neo limits response is malformed", broker_id="kotakneo")
+            raise BrokerReadResponseInvalid from None
     return value
 
 

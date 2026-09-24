@@ -578,9 +578,11 @@ def test_liveness_discards_ip_and_rejects_expired_response(fake_sdk):
     ({"stat": "Ok", "stCode": 200, "data": [None]}, BrokerInternal),
 ])
 def test_read_envelope_rejects_provider_failure_and_malformed_rows(response, error):
+    from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
     from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
 
-    with pytest.raises(error):
+    expected = BrokerReadResponseInvalid if response.get("data") == [None] else error
+    with pytest.raises(expected):
         validate_read_envelope(response, operation="order_report")
 
 
@@ -669,9 +671,10 @@ def test_rejected_outer_envelope_uses_highest_precedence_evidence(response, erro
 
 
 def test_successful_limits_without_balance_values_is_not_zero_funds():
+    from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
     from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
 
-    with pytest.raises(BrokerInternal):
+    with pytest.raises(BrokerReadResponseInvalid):
         validate_read_envelope({"stat": "Ok", "stCode": 200, "data": {}}, operation="limits")
 
 
@@ -683,13 +686,14 @@ def test_scrip_master_accepts_documented_paths_without_oms_status():
 
 
 def test_data_only_holdings_shape_is_accepted_without_weakening_error_checks():
+    from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
     from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
 
     response = {"data": [{"displaySymbol": "SYNTHETIC", "quantity": 1}]}
     assert validate_read_envelope(response, operation="holdings") is response
     with pytest.raises(SessionExpired):
         validate_read_envelope({"data": [], "error": [{"code": "401", "message": "session expired"}]}, operation="holdings")
-    with pytest.raises(BrokerInternal):
+    with pytest.raises(BrokerReadResponseInvalid):
         validate_read_envelope({"data": [None]}, operation="holdings")
 
 
@@ -764,9 +768,10 @@ def test_nested_limits_rejection_never_maps_to_zero_funds(response, error):
     {"data": {"stat": "Ok", "data": [None]}},
 ])
 def test_order_history_requires_consistent_status_and_real_rows(response):
+    from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
     from flinttrade_gateway.brokers.kotakneo_sdk import validate_read_envelope
 
-    with pytest.raises(BrokerInternal):
+    with pytest.raises(BrokerReadResponseInvalid):
         validate_read_envelope(response, operation="order_history")
 
 
