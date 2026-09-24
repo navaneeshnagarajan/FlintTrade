@@ -100,6 +100,20 @@ def test_facade_exposes_exact_v3_session_surface():
     assert callable(KotakNeoSdkSession.close)
 
 
+@pytest.mark.parametrize("surface", ["market", "order"])
+def test_exact_sdk_stream_authentication_errors_require_a_fresh_session(surface: str) -> None:
+    from neo_api_client.websocket.feed.exceptions import AuthenticationError as MarketAuthenticationError
+    from neo_api_client.websocket.orderfeed.exceptions import AuthenticationError as OrderAuthenticationError
+
+    from flinttrade_gateway.brokers.kotakneo_sdk import canonical_stream_exception
+
+    error_type = MarketAuthenticationError if surface == "market" else OrderAuthenticationError
+    canonical = canonical_stream_exception(error_type("private-authentication-detail"), f"{surface} connect")
+
+    assert isinstance(canonical, SessionExpired)
+    assert "private-authentication-detail" not in str(canonical)
+
+
 class ExactNeo:
     instances = []
 

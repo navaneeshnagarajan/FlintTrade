@@ -24,6 +24,11 @@ members = [
     "flinttrade-ticks",
     "flinttrade-webhooks",
 ]
+build-constraints = [
+    { name = "packaging", specifier = "==26.2" },
+    { name = "setuptools", specifier = "==84.0.0" },
+    { name = "wheel", specifier = "==0.48.0" },
+]
 
 [manifest.dependency-groups]
 dev = [

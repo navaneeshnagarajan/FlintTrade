@@ -125,6 +125,18 @@ def test_lock_file_is_hashed() -> None:
 
 
 @pytest.mark.unit
+def test_broker_sdk_build_lock_is_hashed() -> None:
+    """The exact Git SDK must build with a wheel-only, hash-closed backend."""
+    lock = (_REPO_ROOT / "broker-sdk-build.lock").read_text(encoding="utf-8")
+    assert lock.count("--hash=sha256:") == 3
+    assert {line.split("==", 1)[0] for line in lock.splitlines() if "==" in line} == {
+        "packaging",
+        "setuptools",
+        "wheel",
+    }
+
+
+@pytest.mark.unit
 def test_install_paths_sync_uv_for_repo_local_broker_sdk_pins() -> None:
     """Install scripts must sync uv.lock so git-pinned broker SDKs reach .venv."""
     expected = {
@@ -176,7 +188,7 @@ def test_docker_repairs_broker_sdk_before_copying_builder_environment() -> None:
     """The runtime image must inherit the attested Git-pinned SDK from its builder."""
     dockerfile = (_REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "COPY requirements.lock brokers.lock ./" in dockerfile
+    assert "COPY requirements.lock broker-sdk-build.lock brokers.lock ./" in dockerfile
     assert "COPY scripts/broker_sdk_environment.py scripts/broker_sdk_environment.py" in dockerfile
     assert "apt-get install -y --no-install-recommends git" in dockerfile
     assert dockerfile.index("python scripts/broker_sdk_environment.py repair") < dockerfile.index(

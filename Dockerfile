@@ -30,7 +30,7 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
-COPY requirements.lock brokers.lock ./
+COPY requirements.lock broker-sdk-build.lock brokers.lock ./
 COPY scripts/broker_sdk_environment.py scripts/broker_sdk_environment.py
 RUN uv pip install --system --no-cache --require-hashes -r requirements.lock
 RUN python scripts/broker_sdk_environment.py repair

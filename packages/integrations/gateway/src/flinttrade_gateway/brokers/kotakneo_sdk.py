@@ -829,4 +829,18 @@ def order_feed_message_kind(value: object) -> Literal["order", "position"] | Non
 
 def canonical_stream_exception(exc: Exception, operation: str) -> BrokerError:
     """Expose the canonical, sanitised SDK error boundary to the runtime."""
+    _prepare_sdk_import()
+    from neo_api_client.websocket.feed.exceptions import (  # noqa: PLC0415
+        AuthenticationError as MarketAuthenticationError,
+    )
+    from neo_api_client.websocket.orderfeed.exceptions import (  # noqa: PLC0415
+        AuthenticationError as OrderAuthenticationError,
+    )
+
+    _install_sdk_log_filter()
+    if isinstance(exc, (MarketAuthenticationError, OrderAuthenticationError)):
+        return SessionExpired(
+            f"Kotak Neo {operation} session authentication failed",
+            broker_id="kotakneo",
+        )
     return _canonical_exception(exc, operation)

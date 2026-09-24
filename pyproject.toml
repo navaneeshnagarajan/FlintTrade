@@ -1,6 +1,11 @@
 [tool.uv]
 # Kotak v3 runtime follows the immutable official main commit; v3.0.7 is
 # retained as separate release-compatibility evidence in brokers.lock.
+build-constraint-dependencies = [
+    "packaging==26.2",
+    "setuptools==84.0.0",
+    "wheel==0.48.0",
+]
 
 [tool.uv.workspace]
 members = [

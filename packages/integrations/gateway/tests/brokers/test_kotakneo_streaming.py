@@ -879,6 +879,61 @@ async def test_runtime_reconnects_fresh_feed_and_replays_atomically_with_sdk_rec
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["market", "order"])
+async def test_failed_reconnect_candidate_uses_remaining_budget_and_recovers(kind: str) -> None:
+    async def no_wait() -> None:
+        await asyncio.sleep(0)
+
+    first = _Feed()
+    failed = _Feed(connect_error=ConnectionError("private-connect-detail"))
+    healthy = _Feed()
+    facade = _Facade(
+        market_feeds=[first, failed, healthy] if kind == "market" else None,
+        order_feeds=[first, failed, healthy] if kind == "order" else None,
+    )
+    runtime = KotakNeoStreamRuntime(facade, reconnect_waiter=no_wait)
+    if kind == "market":
+        await runtime.add_subscriptions(
+            [{"exchange_segment": "nse_cm", "instrument_token": "14366"}],
+            intent="scrips",
+            aliases=[("nse_cm", "IDEA")],
+        )
+    stream = runtime.market_messages() if kind == "market" else runtime.order_messages()
+    initial = (
+        _lite(symbol="FIRST")
+        if kind == "market"
+        else OrderUpdate(data=OrderData(nOrdNo="OID-1", ordSt="open", trdSym="IDEA-EQ"))
+    )
+    await first.queue.put(initial)
+    assert await anext(stream) is initial or kind == "market"
+
+    await first.queue.put(_END)
+    resumed = asyncio.create_task(anext(stream))
+    factory_attribute = "market_factory_calls" if kind == "market" else "order_factory_calls"
+
+    async def wait_for_recovery() -> None:
+        while getattr(facade, factory_attribute) < 3:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait_for_recovery(), 1)
+    recovered = (
+        _lite(symbol="RECOVERED")
+        if kind == "market"
+        else OrderUpdate(data=OrderData(nOrdNo="OID-2", ordSt="open", trdSym="IDEA-EQ"))
+    )
+    await healthy.queue.put(recovered)
+
+    received = await asyncio.wait_for(resumed, 1)
+    if kind == "market":
+        assert received.symbol == "RECOVERED"
+    else:
+        assert received is recovered
+    assert first.close_calls == failed.close_calls == 1
+    assert healthy.close_calls == 0
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["market", "order"])
 async def test_marked_sdk_not_connected_iteration_replaces_fresh_feed(kind: str) -> None:
     async def no_wait() -> None:
         await asyncio.sleep(0)

@@ -21,8 +21,14 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 OUTPUT = REPO / "notice.generated"
-LOCKFILES = ("uv.lock", "requirements.lock", "pnpm-lock.yaml", "brokers.lock",
-             "supply-chain/audit-tooling.lock")
+LOCKFILES = (
+    "uv.lock",
+    "requirements.lock",
+    "broker-sdk-build.lock",
+    "pnpm-lock.yaml",
+    "brokers.lock",
+    "supply-chain/audit-tooling.lock",
+)
 
 
 def _render() -> str:

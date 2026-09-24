@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Literal
 
-from flinttrade_core.exceptions import BrokerError, BrokerInternal, NetworkError, SessionExpired
+from flinttrade_core.exceptions import BrokerError, BrokerInternal, BrokerTimeout, NetworkError, SessionExpired
 from flinttrade_core.models import TickEvent
 
 from . import kotakneo_mapping as M
@@ -903,7 +903,7 @@ class KotakNeoStreamRuntime:
         finally:
             self._mutation_tasks.discard(owner)
 
-    async def _replace_market(self, expected: object) -> object | None:
+    async def _replace_market(self, expected: object | None) -> object | None:
         owner = self._track_mutation_task()
         try:
             async with self._mutation_lock:
@@ -919,7 +919,7 @@ class KotakNeoStreamRuntime:
         finally:
             self._mutation_tasks.discard(owner)
 
-    async def _replace_order(self, expected: object) -> object | None:
+    async def _replace_order(self, expected: object | None) -> object | None:
         if self._closed:
             return None
         async with self._order_lock:
@@ -992,12 +992,27 @@ class KotakNeoStreamRuntime:
                     break
                 if self._closed:
                     break
-                replacements += 1
-                if replacements > MAX_STREAM_REPLACEMENTS:
-                    error = BrokerInternal("Kotak Neo market feed replacement limit reached", broker_id="kotakneo")
+                expected: object | None = feed
+                while not self._closed:
+                    replacements += 1
+                    if replacements > MAX_STREAM_REPLACEMENTS:
+                        error = BrokerInternal(
+                            "Kotak Neo market feed replacement limit reached",
+                            broker_id="kotakneo",
+                        )
+                        break
+                    await self._reconnect_waiter()
+                    try:
+                        feed = await self._replace_market(expected)
+                        break
+                    except (BrokerTimeout, NetworkError):
+                        # A failed candidate has already been closed and leaves
+                        # no published feed. Consume the remaining runtime-owned
+                        # budget; if a concurrent mutation publishes first,
+                        # expecting None adopts it without detaching it.
+                        expected = None
+                if error is not None:
                     break
-                await self._reconnect_waiter()
-                feed = await self._replace_market(feed)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1062,12 +1077,23 @@ class KotakNeoStreamRuntime:
                     break
                 if self._closed:
                     break
-                replacements += 1
-                if replacements > MAX_STREAM_REPLACEMENTS:
-                    error = BrokerInternal("Kotak Neo order feed replacement limit reached", broker_id="kotakneo")
+                expected = feed
+                while not self._closed:
+                    replacements += 1
+                    if replacements > MAX_STREAM_REPLACEMENTS:
+                        error = BrokerInternal(
+                            "Kotak Neo order feed replacement limit reached",
+                            broker_id="kotakneo",
+                        )
+                        break
+                    await self._reconnect_waiter()
+                    try:
+                        feed = await self._replace_order(expected)
+                        break
+                    except (BrokerTimeout, NetworkError):
+                        expected = None
+                if error is not None:
                     break
-                await self._reconnect_waiter()
-                feed = await self._replace_order(feed)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

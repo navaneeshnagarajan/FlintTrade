@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[1]
+BUILD_REQUIREMENTS_LOCK = REPO / "broker-sdk-build.lock"
 KOTAK_REPO = "https://github.com/Kotak-Neo/kotak-neo-python.git"
 _KOTAK_HOMEPAGE = KOTAK_REPO.removesuffix(".git")
 _FULL_GIT_SHA = re.compile(r"[0-9a-f]{40}")
@@ -109,9 +110,33 @@ def remove_kotak_distributions(
     if "kotakneoapi" in state or "neo-api-client" in state:
         uv = shutil.which("uv")
         if uv:
-            _invoke(run, [uv, "pip", "uninstall", "--python", str(python), "kotakneoapi", "neo-api-client"])
+            _invoke(
+                run,
+                [
+                    uv,
+                    "pip",
+                    "uninstall",
+                    "--python",
+                    str(python),
+                    "--break-system-packages",
+                    "kotakneoapi",
+                    "neo-api-client",
+                ],
+            )
         else:
-            _invoke(run, [str(python), "-m", "pip", "uninstall", "-y", "kotakneoapi", "neo-api-client"])
+            _invoke(
+                run,
+                [
+                    str(python),
+                    "-m",
+                    "pip",
+                    "uninstall",
+                    "-y",
+                    "--break-system-packages",
+                    "kotakneoapi",
+                    "neo-api-client",
+                ],
+            )
 
 
 def repair_kotakneo_environment(
@@ -126,7 +151,19 @@ def repair_kotakneo_environment(
         return
     uv = shutil.which("uv")
     if uv:
-        _invoke(run, [uv, "pip", "uninstall", "--python", str(python), "kotakneoapi", "neo-api-client"])
+        _invoke(
+            run,
+            [
+                uv,
+                "pip",
+                "uninstall",
+                "--python",
+                str(python),
+                "--break-system-packages",
+                "kotakneoapi",
+                "neo-api-client",
+            ],
+        )
         _invoke(
             run,
             [
@@ -135,13 +172,43 @@ def repair_kotakneo_environment(
                 "install",
                 "--python",
                 str(python),
+                "--break-system-packages",
+                "--require-hashes",
+                "--only-binary=:all:",
+                "--no-deps",
+                "-r",
+                str(BUILD_REQUIREMENTS_LOCK),
+            ],
+        )
+        _invoke(
+            run,
+            [
+                uv,
+                "pip",
+                "install",
+                "--python",
+                str(python),
+                "--break-system-packages",
+                "--no-build-isolation",
                 "--no-deps",
                 "--reinstall",
                 f"git+{KOTAK_REPO}@{commit}",
             ],
         )
     else:
-        _invoke(run, [str(python), "-m", "pip", "uninstall", "-y", "kotakneoapi", "neo-api-client"])
+        _invoke(
+            run,
+            [
+                str(python),
+                "-m",
+                "pip",
+                "uninstall",
+                "-y",
+                "--break-system-packages",
+                "kotakneoapi",
+                "neo-api-client",
+            ],
+        )
         _invoke(
             run,
             [
@@ -149,6 +216,23 @@ def repair_kotakneo_environment(
                 "-m",
                 "pip",
                 "install",
+                "--break-system-packages",
+                "--require-hashes",
+                "--only-binary=:all:",
+                "--no-deps",
+                "-r",
+                str(BUILD_REQUIREMENTS_LOCK),
+            ],
+        )
+        _invoke(
+            run,
+            [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "--break-system-packages",
+                "--no-build-isolation",
                 "--no-deps",
                 "--force-reinstall",
                 f"git+{KOTAK_REPO}@{commit}",

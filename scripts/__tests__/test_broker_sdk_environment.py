@@ -73,12 +73,24 @@ def test_repair_replaces_stale_distributions_then_is_idempotent(
             return subprocess.CompletedProcess(argv, 1, "", "No module named pip")
         if argv[:4] == ["/fixture/uv", "pip", "uninstall", "--python"]:
             assert argv[4] == str(python)
-            assert set(argv[5:]) == {"kotakneoapi", "neo-api-client"}
+            assert argv[5] == "--break-system-packages"
+            assert set(argv[6:]) == {"kotakneoapi", "neo-api-client"}
             state.clear()
             return subprocess.CompletedProcess(argv, 0, "", "")
         assert argv[:4] == ["/fixture/uv", "pip", "install", "--python"]
         assert argv[4] == str(python)
-        assert argv[5:8] == ["--no-deps", "--reinstall", (
+        if "-r" in argv:
+            assert argv[5:] == [
+                "--break-system-packages",
+                "--require-hashes",
+                "--only-binary=:all:",
+                "--no-deps",
+                "-r",
+                str(sdk_environment.BUILD_REQUIREMENTS_LOCK),
+            ]
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        assert argv[5:9] == ["--break-system-packages", "--no-build-isolation", "--no-deps", "--reinstall"]
+        assert argv[9:] == [(
             "git+https://github.com/Kotak-Neo/kotak-neo-python.git@"
             "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"
         )]
@@ -115,6 +127,8 @@ def test_interrupted_repair_fails_closed(monkeypatch: pytest.MonkeyPatch) -> Non
             return subprocess.CompletedProcess(argv, 0, json.dumps({"neo-api-client": {"version": "2.0.0"}}), "")
         if "uninstall" in argv:
             return subprocess.CompletedProcess(argv, 0, "", "")
+        if "--require-hashes" in argv:
+            return subprocess.CompletedProcess(argv, 0, "", "")
         return subprocess.CompletedProcess(argv, 1, "", "network interrupted")
 
     with pytest.raises(RuntimeError, match="environment command"):
@@ -138,7 +152,7 @@ def test_repair_falls_back_to_target_interpreter_pip_without_uv(monkeypatch: pyt
             return subprocess.CompletedProcess(argv, 0, json.dumps(state), "")
         if "uninstall" in argv:
             state.clear()
-        elif "install" in argv:
+        elif "install" in argv and any(value.startswith("git+") for value in argv):
             state.update({
                 "kotakneoapi": {
                     "version": "3.0.7",
@@ -157,14 +171,47 @@ def test_repair_falls_back_to_target_interpreter_pip_without_uv(monkeypatch: pyt
     sdk_environment.repair_kotakneo_environment(python, run=run)
 
     assert commands[1] == [
-        str(python), "-m", "pip", "uninstall", "-y", "kotakneoapi", "neo-api-client",
+        str(python), "-m", "pip", "uninstall", "-y", "--break-system-packages",
+        "kotakneoapi", "neo-api-client",
     ]
     assert commands[2] == [
-        str(python), "-m", "pip", "install", "--no-deps", "--force-reinstall",
+        str(python), "-m", "pip", "install", "--break-system-packages", "--require-hashes",
+        "--only-binary=:all:", "--no-deps", "-r", str(sdk_environment.BUILD_REQUIREMENTS_LOCK),
+    ]
+    assert commands[3] == [
+        str(python), "-m", "pip", "install", "--break-system-packages", "--no-build-isolation",
+        "--no-deps", "--force-reinstall",
         (
             "git+https://github.com/Kotak-Neo/kotak-neo-python.git@"
             "5bb34fae39c4a52a0e6b59d7e2d17090cafc340c"
         ),
+    ]
+
+
+def test_build_requirements_lock_is_exact_wheel_only_and_hash_closed() -> None:
+    from scripts import broker_sdk_environment as sdk_environment
+
+    assert sdk_environment.BUILD_REQUIREMENTS_LOCK.read_text(encoding="utf-8").splitlines() == [
+        "# Build backend for the immutable Kotak Neo Git source. Install only hashed universal wheels.",
+        "packaging==26.2 \\",
+        "    --hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e",
+        "setuptools==84.0.0 \\",
+        "    --hash=sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670",
+        "wheel==0.48.0 \\",
+        "    --hash=sha256:3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab",
+    ]
+
+
+def test_uv_sync_uses_the_same_exact_build_constraints() -> None:
+    import tomllib
+
+    from scripts import broker_sdk_environment as sdk_environment
+
+    project = tomllib.loads((sdk_environment.REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    assert project["tool"]["uv"]["build-constraint-dependencies"] == [
+        "packaging==26.2",
+        "setuptools==84.0.0",
+        "wheel==0.48.0",
     ]
 
 
@@ -188,8 +235,10 @@ def test_remove_kotak_without_interpreter_pip_when_uv_is_available(monkeypatch) 
 
     sdk_environment.remove_kotak_distributions(python, run=run)
 
-    assert commands[-1] == ["/fixture/uv", "pip", "uninstall", "--python", str(python),
-                            "kotakneoapi", "neo-api-client"]
+    assert commands[-1] == [
+        "/fixture/uv", "pip", "uninstall", "--python", str(python), "--break-system-packages",
+        "kotakneoapi", "neo-api-client",
+    ]
 
 
 def test_repair_accepts_record_only_namespace_evidence(tmp_path: Path, monkeypatch) -> None:
