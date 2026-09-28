@@ -44,7 +44,7 @@ class FakeLayaHost:
             def do_POST(self) -> None:  # noqa: N802
                 length = int(self.headers.get("Content-Length", "0") or 0)
                 host.requests.append(self.rfile.read(length))
-                host.headers.append({key: value for key, value in self.headers.items()})
+                host.headers.append(dict(self.headers.items()))
                 if host.delay:
                     time.sleep(host.delay)
                 body = host.response_body

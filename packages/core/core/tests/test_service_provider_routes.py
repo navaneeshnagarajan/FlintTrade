@@ -45,7 +45,7 @@ def test_catalogue_route_is_authenticated_read_only_and_generic_forecast_only(mo
     assert response.status_code == 200
     body = response.get_json()
     assert body["status"] == "success"
-    assert body["data"]["count"] == 64
+    assert body["data"]["count"] == 66
     ids = {item["provider_id"] for item in body["data"]["providers"]}
     assert {
         "broker:dhan",

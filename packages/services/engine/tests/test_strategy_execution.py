@@ -285,7 +285,7 @@ async def test_model_deny_never_reaches_safety() -> None:
     safety = MagicMock()
     dispatcher = _automate_dispatcher(safety)
     order = Order(symbol="RELIANCE", exchange="NSE", action="BUY", quantity="1")
-    order.admission_note = "Chasing the loss from the last trade."  # type: ignore[attr-defined]
+    object.__setattr__(order, "admission_note", "Chasing the loss from the last trade.")
     with pytest.raises(RuntimeError, match="tilt or revenge"):
         await dispatcher.dispatch_order(order)
     safety.check_order.assert_not_called()
@@ -303,13 +303,15 @@ async def test_admission_runs_off_the_event_loop() -> None:
             events.append("decide-start")
             time.sleep(0.3)
             events.append("decide-end")
-            return {"answers": _allowing_answers()}
+            answers = _allowing_answers()
+            answers["tilt"] = {"probabilities": {"A": 0.97, "B": 0.03}}
+            return {"answers": answers}
 
     process_laya().set_decision_client(_Slow())
     safety = MagicMock()
     dispatcher = _automate_dispatcher(safety)
     order = Order(symbol="RELIANCE", exchange="NSE", action="BUY", quantity="1")
-    order.admission_note = "Buying the planned breakout."  # type: ignore[attr-defined]
+    object.__setattr__(order, "admission_note", "Buying the planned breakout.")
 
     async def _watch() -> None:
         await asyncio.sleep(0.05)
@@ -319,6 +321,9 @@ async def test_admission_runs_off_the_event_loop() -> None:
     task = asyncio.create_task(dispatcher.dispatch_order(order))
     await watch
     assert "decide-start" in events
-    assert events.index("loop") < events.index("decide-end")
-    with pytest.raises(RuntimeError):
+    assert "loop" in events
+    assert "decide-end" not in events
+    with pytest.raises(RuntimeError, match="tilt or revenge"):
         await task
+    assert events.index("loop") < events.index("decide-end")
+    safety.check_order.assert_not_called()

@@ -546,4 +546,4 @@ def _fallback_count(payload: Mapping[str, Any], checkpoint: str) -> int:
     raw = bucket.get("count")
     if isinstance(raw, bool) or not isinstance(raw, int):
         return 0
-    return raw if raw > 0 else 0
+    return max(0, raw)

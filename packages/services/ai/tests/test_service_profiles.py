@@ -49,6 +49,9 @@ def test_decision_descriptors_are_not_chat_profiles() -> None:
     assert managed.default_rights.rights.max_evidence_use_scope is EvidenceUseScope.OFFLINE_QUALIFICATION
     assert endpoint.default_rights.rights.max_evidence_use_scope is EvidenceUseScope.OFFLINE_QUALIFICATION
     assert "base checkpoint is not qualified for Live" in managed.activation_blockers
+    assert managed.default_rights.grants[0].evidence[0].revision == (
+        "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851"
+    )
     assert all(not item.provider_id.startswith("decision:") for item in LLM_PROVIDER_PROFILES)
     assert "unsloth" not in managed.resource_requirements[0]
 

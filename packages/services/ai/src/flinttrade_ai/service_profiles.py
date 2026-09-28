@@ -14,7 +14,10 @@ from flinttrade_core.llm_provider_profiles import (
 from flinttrade_core.news_provider_profiles import NEWS_PROVIDER_PROFILES, SENTIMENT_NEWS_CHANNELS
 from flinttrade_core.service_providers import (
     EvidenceUseScope,
+    LicenceFact,
     ProviderDescriptor,
+    RightsBasis,
+    RightsGrant,
     RightsResolution,
     ServiceKind,
     UsageRights,
@@ -98,10 +101,30 @@ def _news_descriptor(provider_id: str, display_name: str) -> ProviderDescriptor:
 
 
 def _decision_rights() -> RightsResolution:
-    """Base checkpoints are not qualified for a Live decision."""
-    return RightsResolution(
-        rights=UsageRights(max_evidence_use_scope=EvidenceUseScope.OFFLINE_QUALIFICATION),
+    """Base checkpoints may be used for offline qualification, not a Live decision.
+
+    The pin matches ``laya_policy.toml``. Live stays closed until a separate
+    qualification record exists for that same revision and digest.
+    """
+    rights = UsageRights(max_evidence_use_scope=EvidenceUseScope.OFFLINE_QUALIFICATION)
+    grant = RightsGrant(
+        grant_id="flinttrade-policy:laya-offline-qualification",
+        basis=RightsBasis.FLINTTRADE_POLICY,
+        rights=rights,
+        evidence=(
+            LicenceFact(
+                fact_id="laya-checkpoint-pin",
+                subject_kind="checkpoint",
+                identifier="convaiinnovations/laya",
+                source_uri="https://huggingface.co/convaiinnovations/laya",
+                revision="55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851",
+                sha256="891102d372688fc2a094dac56a384bc537b87c63f21f9f3dac0be2b7cbc8d86c",
+                reviewed_at="unspecified",
+                basis=RightsBasis.FLINTTRADE_POLICY,
+            ),
+        ),
     )
+    return RightsResolution(rights=rights, grants=(grant,))
 
 
 def _decision_descriptors() -> tuple[ProviderDescriptor, ...]:
