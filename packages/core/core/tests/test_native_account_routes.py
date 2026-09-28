@@ -9,7 +9,8 @@ session path runs offline. Dhan, Upstox, and Kotak Neo are connectable natives
 
 G9: every WRITE on these routes requires a valid operator session JWT — the
 fixture mints one and ``_h()`` attaches it; the dedicated G9 tests pin the
-401-without-JWT behaviour and the preserved loopback read allowance.
+401-without-JWT behaviour. Reads require a session or API key as well; the
+fixture sends a test API key so handler checks still reach the route.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import time
 
 import importlib.util
 import pytest
+from flask.testing import FlaskClient
 from pathlib import Path
 
 # A package-only pytest invocation binds `tests` to core's own test namespace.
@@ -128,6 +130,18 @@ def projection_client(client):
     return ProjectionClient(), app, path
 
 
+_NATIVE_TEST_API_KEY = "native-routes-test-key"
+
+
+class _KeyedClient(FlaskClient):
+    """Attach the fixture API key unless the test already set one."""
+
+    def open(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        headers = dict(kwargs.pop("headers", None) or {})
+        headers.setdefault("X-API-Key", _NATIVE_TEST_API_KEY)
+        return super().open(*args, headers=headers, **kwargs)
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch, backend_lease_factory):
     from flinttrade_core.secure_file import harden_directory
@@ -135,11 +149,10 @@ def client(tmp_path, monkeypatch, backend_lease_factory):
     harden_directory(tmp_path)
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     # Other test modules set OPENALGO_API_KEY / FLINTTRADE_API_KEY via os.environ
-    # directly (not monkeypatch), so the value leaks into this xdist worker and
-    # makes require_auth demand a key. Unset them so these routes run in the
-    # default no-key loopback-allowance mode deterministically.
+    # directly (not monkeypatch), so pin a known key and send it by default.
+    # Handler tests then reach the route; unauthenticated cases use FlaskClient.
     monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
-    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    monkeypatch.setenv("FLINTTRADE_API_KEY", _NATIVE_TEST_API_KEY)
     # The interactive connect/relogin paths now VERIFY the session with a real
     # `funds` read (audit fix). Stub Upstox's funds so the probe is
     # deterministic and never touches the network — tests that want a dead
@@ -165,6 +178,7 @@ def client(tmp_path, monkeypatch, backend_lease_factory):
     # production can set this only through _bind_runtime_emergency_dispatcher.
     app.config["EMERGENCY_DISPATCHER"] = object()
     app.config["EMERGENCY_RUNTIME_READY"] = True
+    app.test_client_class = _KeyedClient
     _REGISTRY_CONTEXT[app.config["REGISTRY"]] = (app, tmp_path)
     with app.test_client() as c:
         yield c, app, tmp_path
@@ -1543,10 +1557,15 @@ def test_write_with_invalid_jwt_is_rejected(client):
     assert resp.status_code == 401
 
 
-def test_reads_keep_the_loopback_allowance(client):
-    """GET list/brokers stay JWT-free — the local capture UI reads them before
-    and after login, and they only reveal presence/status, never credentials."""
-    c, _app, _tmp = client
+def test_reads_require_a_session_or_api_key(client):
+    """Account reads reveal presence and status, so they require a credential."""
+    c, app, _tmp = client
+    saved = app.test_client_class
+    app.test_client_class = FlaskClient
+    raw = app.test_client()
+    app.test_client_class = saved
+    assert raw.get("/api/v1/native/brokers").status_code == 401
+    assert raw.get("/api/v1/native/accounts").status_code == 401
     assert c.get("/api/v1/native/brokers").status_code == 200
     assert c.get("/api/v1/native/accounts").status_code == 200
 
@@ -2607,7 +2626,11 @@ def test_gateway_bp_writes_require_jwt_in_real_app(client):
     # normal validation — anything but 401 proves the guard admitted it).
     resp = c.post("/v1/accounts", json={"broker": "dhan", "credentials": {}}, headers=_h())
     assert resp.status_code != 401
-    # Reads keep the loopback allowance.
+    saved = _app.test_client_class
+    _app.test_client_class = FlaskClient
+    raw = _app.test_client()
+    _app.test_client_class = saved
+    assert raw.get("/v1/accounts").status_code == 401
     assert c.get("/v1/accounts").status_code == 200
 
 

@@ -604,28 +604,27 @@ heartbeat.
 
 `require_auth` accepts a session JWT **or** an `X-API-Key` header
 (`FLINTTRADE_API_KEY`, with `OPENALGO_API_KEY` as a compatibility
-fallback). When neither key is configured, loopback-only requests are
-allowed so a fresh install can reach Setup and sandbox reads. Broker
-account-management writes still require the operator's session JWT.
+fallback) on every mounted route that is not on the public allowlist in
+`flinttrade_core.public_routes`. That allowlist is the only exemption, and
+it is checked before the handler runs, so a new route is protected until
+it is added there. Broker account-management writes still require the
+operator's session JWT after that check.
 
-`/v1/auth/*` is exempt from the global API-key check so login and first-run
-setup can run without `X-API-Key`. That is not session-free auth: `POST
-/v1/auth/totp/enable`, `/pin`, `/pin/set`, `/mode`, and `/logout` still decode
-an existing session JWT and return 401 without one. Truly unauthenticated prefixes
-include `/v1/auth/setup` (account create only — `POST /v1/auth/setup/vault` still requires the setup-session JWT and rejects a daily-login token), `/v1/auth/login`, `/v1/auth/status`,
-the password-reset pair (`/v1/auth/forgot-password`,
-`/v1/auth/reset-password`) and the Welcome OTP pair
-(`/v1/auth/forgot-password-otp`, `/v1/auth/reset-password-otp`),
-`/v1/errors`, `/api/v1/errors`, `/v1/changelog`, `/api/v1/ping`, and the
-other entries in `_PUBLIC_V1_PREFIXES` in `app.py`.
+The allowlist covers first-run setup and login, auth status, password
+recovery, the liveness and aggregated-health probes, public docs and the
+changelog, frontend error reports, the setup-wizard OpenAlgo and
+connectivity probes, signed webhook intake, broker OAuth callbacks and
+postbacks, and the browser CSP report. `POST /v1/auth/setup/vault` is on
+that list so the setup wizard can reach it, and the handler still requires
+the setup-session JWT and rejects a daily-login token. `POST
+/v1/auth/totp/enable`, `/pin`, `/pin/set`, `/mode`, and `/logout` are not
+on the list: they need an existing session JWT and return 401 without one.
 
-When an API key is configured, the unauthenticated health surfaces are
-`GET /api/v1/health` (`health_detail.health_aggregated`) and
-`GET /api/v1/ping` (listed in `_PUBLIC_V1_PREFIXES`). `/health`,
-`/health/detail`, `/healthz`, and `/readyz` then return 401 unless a
-session JWT or API key is supplied — do not point Kubernetes or
-load-balancer probes at those four paths. Coverage is not limited to
-`/ft-api/v1/*` — many operator routes live under `/api/v1`.
+The unauthenticated health surfaces are `GET /api/v1/health` and
+`GET /api/v1/ping`. `/health`, `/health/detail`, `/healthz`, and `/readyz`
+return 401 unless a session JWT or API key is supplied — do not point
+Kubernetes or load-balancer probes at those four paths. Coverage is not
+limited to `/ft-api/v1/*` — many operator routes live under `/api/v1`.
 
 ```
 Authorization: Bearer <jwt>
@@ -651,14 +650,14 @@ in `packages/core/core/src/flinttrade_core/auth_state.py`.
 FlintTrade backend routes accept `X-API-Key` against `FLINTTRADE_API_KEY`
 when configured. `OPENALGO_API_KEY` is retained as a compatibility fallback,
 but it is no longer required for native FlintTrade practice/explore flows.
-When neither key exists, loopback-only local requests are allowed so a fresh
-desktop/dev install can reach read-only setup and sandbox endpoints. Broker
+When neither key exists, non-public routes still require a session JWT,
+including on loopback. Setup, login, and the other allowlisted routes stay
+reachable so a fresh install can finish first-run configuration. Broker
 account-management **writes** (connect/remove/re-authenticate a broker,
 credential capture, OAuth start, rate-limit and rotation config) additionally
-require the operator's logged-in session JWT — the loopback allowance alone is
-not sufficient for them. After that JWT check, production mutations still
-return `503` `broker_account_cutover_unavailable` until Task 9D. The PIN
-quick-unlock likewise requires an existing session (the PIN is a
+require the operator's logged-in session JWT. After that JWT check, production
+mutations still return `503` `broker_account_cutover_unavailable` until Task
+9D. The PIN quick-unlock likewise requires an existing session (the PIN is a
 re-authentication factor, never a standalone login).
 
 The OpenAlgo-compatible passthrough still uses OpenAlgo's own API key. The app

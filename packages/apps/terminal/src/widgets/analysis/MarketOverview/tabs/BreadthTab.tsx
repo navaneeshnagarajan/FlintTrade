@@ -22,6 +22,7 @@ import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useSectorMovers } from "@/hooks/useSectorMovers";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { BreadthHistoryResponseSchema, BreadthResponseSchema } from "@/lib/schemas/ftApi";
+import { buildHeaders } from "@/services/ftApi.helpers";
 import { ProvChip, SampleBadge, SectionHeading } from "../shared";
 import {
   SAMPLE_BREADTH,
@@ -230,7 +231,7 @@ function BreadthTab() {
   const fetchHistory = useMemo(
     () => async () => {
       try {
-        const res = await fetch("/ft-api/v1/breadth/history?days=30");
+        const res = await fetch("/ft-api/v1/breadth/history?days=30", { headers: buildHeaders(false) });
         if (!res.ok) return;
         const parsed = BreadthHistoryResponseSchema.safeParse(await res.json());
         if (!parsed.success) {
@@ -262,7 +263,7 @@ function BreadthTab() {
       try {
         // Registered route is /v1/breadth/current (served at /ft-api/v1/breadth/current);
         // the bare /breadth path 404'd and silently fell back to sample data.
-        const res = await fetch("/ft-api/v1/breadth/current");
+        const res = await fetch("/ft-api/v1/breadth/current", { headers: buildHeaders(false) });
         if (!res.ok) throw new Error("Failed to fetch breadth data");
         const raw: unknown = await res.json();
         const parsed = BreadthResponseSchema.safeParse(raw);

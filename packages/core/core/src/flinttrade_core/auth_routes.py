@@ -2,16 +2,17 @@
 """Auth REST API — setup, login, PIN verify, status, logout.
 
 Blueprint prefix: /v1/auth
-Public endpoints (no API key required):
+Public endpoints (no session or API key required; see public_routes.py):
   - GET  /v1/auth/status   — check if setup complete
   - POST /v1/auth/setup    — one-time account creation
   - POST /v1/auth/login    — daily password login (TOTP only once enrolled)
-  - POST /v1/auth/pin      — PIN quick-unlock (Live also requires TOTP enrolment)
-  - POST /v1/auth/logout   — invalidate session
 Session-bound endpoints (valid session JWT required):
+  - POST /v1/auth/pin      — PIN quick-unlock (Live also requires TOTP enrolment)
   - POST /v1/auth/pin/set  — set/change the quick-unlock PIN (password re-confirm)
   - POST /v1/auth/totp/enable — confirm optional authenticator enrolment
+  - POST /v1/auth/logout   — invalidate the current session
   - POST /v1/auth/setup/vault — open the credential vault during first-run setup
+    (the handler accepts a setup-session JWT, not the daily API key)
 """
 
 from __future__ import annotations

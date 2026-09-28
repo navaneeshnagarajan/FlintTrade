@@ -285,7 +285,7 @@ def test_llm_config_endpoint_requires_control_auth_even_when_global_keys_are_uns
     assert response.status_code == 401
     assert response.get_json() == {
         "status": "error",
-        "message": "LLM configuration requires an authenticated session",
+        "message": "Unauthorized",
     }
     assert not (tmp_path / "secrets" / "llm_api_key").exists()
 

@@ -436,7 +436,7 @@ class TestPinSetEndpoint:
                       headers={"Content-Type": "application/json",
                                "Authorization": f"Bearer {reset}"})
         assert resp.status_code == 401
-        assert "full login session" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
 
     def test_set_pin_rejects_wrong_password(self, client):
         c, _ = client
@@ -807,7 +807,7 @@ class TestPinIsSessionBound:
         resp = c.post("/v1/auth/pin", json={"pin": "123456"},
                       headers={"Content-Type": "application/json"})
         assert resp.status_code == 401
-        assert "sign in with password" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
 
     def test_correct_pin_with_garbage_session_is_rejected(self, client):
         c, _ = client
@@ -855,7 +855,7 @@ class TestGuardsRejectResetTokens:
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
         )
         assert resp.status_code == 401
-        assert "full login session" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
 
     def test_reset_token_rejected_by_pin_unlock(self, client):
         c, _ = client
@@ -868,7 +868,7 @@ class TestGuardsRejectResetTokens:
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
         )
         assert resp.status_code == 401
-        assert "full login session" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
 
 
 class TestSetupSessionReset:
@@ -999,7 +999,7 @@ class TestModeSwitchRejectsResetToken:
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {reset}"},
         )
         assert resp.status_code == 401
-        assert "full login session" in resp.get_json()["message"].lower()
+        assert resp.get_json()["message"] == "Unauthorized"
 
     def test_session_token_can_still_downgrade(self, client):
         c, _ = client

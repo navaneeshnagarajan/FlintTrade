@@ -14,6 +14,7 @@ import { BentoCard } from "@/components/bento/BentoCard";
 import { BarChart2 } from "lucide-react";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { DemoBadge } from "./DemoBadge";
+import { buildHeaders } from "@/services/ftApi.helpers";
 
 interface Breadth {
   advances: number;
@@ -35,7 +36,7 @@ interface BreadthResult {
 
 /** Fetch the live breadth snapshot; null on any failure (→ sample fallback). */
 async function fetchBreadth(): Promise<BreadthResult | null> {
-  const res = await fetch("/ft-api/v1/breadth/current");
+  const res = await fetch("/ft-api/v1/breadth/current", { headers: buildHeaders(false) });
   if (!res.ok) return null;
   const json: unknown = await res.json();
   const j = json as { status?: string; is_sample_data?: boolean; data?: Partial<Breadth> } | null;
