@@ -341,6 +341,10 @@ interface SymbolSuggestion {
   company_name?: string;
 }
 
+function suggestionSymbol(item: SymbolSuggestion): string {
+  return (item.symbol ?? item.ticker ?? item.tradingsymbol ?? "").toUpperCase();
+}
+
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
 /** Prefill params carried by a `flinttrade:addWidget` orderpad request (W2). */
@@ -377,6 +381,7 @@ function OrderPadWidget(props: WidgetProps) {
   const [suggestions, setSuggestions] = useState<SymbolSuggestion[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [searchMiss, setSearchMiss] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<ToastMsg | null>(null);
@@ -433,6 +438,39 @@ function OrderPadWidget(props: WidgetProps) {
       discQty: undefined,
     },
   });
+
+  const appliedPrefillRef = useRef("");
+  const applyPrefill = useCallback((next: OrderPadPrefill) => {
+    if (!next.symbol) return;
+    const key = `${next.symbol}|${next.exchange ?? ""}|${next.action ?? ""}`;
+    if (appliedPrefillRef.current === key) return;
+    appliedPrefillRef.current = key;
+    setValue("symbol", next.symbol);
+    if (next.exchange) setValue("exchange", next.exchange);
+    if (next.action === "BUY" || next.action === "SELL") setValue("action", next.action);
+    setQuery(next.symbol);
+    setSearchMiss(null);
+    setSearchOpen(false);
+  }, [setValue]);
+
+  const prefillSymbol = prefill.symbol;
+  const prefillExchange = prefill.exchange;
+  const prefillAction = prefill.action;
+  useEffect(() => {
+    applyPrefill({ symbol: prefillSymbol, exchange: prefillExchange, action: prefillAction });
+  }, [applyPrefill, prefillSymbol, prefillExchange, prefillAction]);
+
+  // Fired by retargetOrderPad. The docking library does not re-render a tab
+  // whose node object is unchanged, so props.params stay stale.
+  useEffect(() => {
+    function onPrefill(event: Event) {
+      const detail = (event as CustomEvent<{ tabId?: string; params?: OrderPadPrefill }>).detail;
+      if (!detail || detail.tabId !== props.api.id || !detail.params) return;
+      applyPrefill(detail.params);
+    }
+    window.addEventListener("flinttrade:orderPadPrefill", onPrefill);
+    return () => window.removeEventListener("flinttrade:orderPadPrefill", onPrefill);
+  }, [applyPrefill, props.api.id]);
 
   const orderType = watch("orderType") as OrderTypeValue;
   const action = watch("action") as ActionValue;
@@ -642,7 +680,41 @@ function OrderPadWidget(props: WidgetProps) {
     setQuery("");
     setSuggestions([]);
     setSearchOpen(false);
+    setSearchMiss(null);
   }, []);
+
+  const commitTypedSymbol = useCallback(async () => {
+    const q = query.trim().toUpperCase();
+    if (!q || q === symbol.trim().toUpperCase()) {
+      setSearchMiss(null);
+      setSearchOpen(false);
+      return;
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    let list = suggestions;
+    const already = list.find((item) => suggestionSymbol(item) === q);
+    if (!already) {
+      setSearching(true);
+      try {
+        const result = await searchSymbol(q);
+        list = (Array.isArray(result) ? result : []).slice(0, 8) as SymbolSuggestion[];
+        setSuggestions(list);
+      } catch {
+        list = [];
+        setSuggestions([]);
+      } finally {
+        setSearching(false);
+      }
+    }
+    const exact = list.find((item) => suggestionSymbol(item) === q);
+    if (exact) {
+      handleSelect(exact);
+      setSearchMiss(null);
+      return;
+    }
+    setSearchOpen(false);
+    setSearchMiss(q);
+  }, [handleSelect, query, suggestions, symbol]);
 
   const showToast = useCallback((type: "success" | "error", text: string, ms = 4000, retryable = false) => {
     clearTimeout(toastTimerRef.current);
@@ -951,7 +1023,15 @@ function OrderPadWidget(props: WidgetProps) {
           stepMismatch and silently blocks submission before handleSubmit runs. */}
       <form
         noValidate
-        onSubmit={(e) => void handleSubmit(onSubmit)(e)}
+        onSubmit={(e) => {
+          const typed = query.trim().toUpperCase();
+          if (typed && typed !== symbol.trim().toUpperCase()) {
+            e.preventDefault();
+            void commitTypedSymbol();
+            return;
+          }
+          void handleSubmit(onSubmit)(e);
+        }}
         className="flex-1 flex flex-col gap-3 px-3 py-3 overflow-y-auto"
       >
         {/* Symbol search */}
@@ -964,7 +1044,15 @@ function OrderPadWidget(props: WidgetProps) {
                 id="orderpad-symbol"
                 type="text"
                 value={query}
-                onChange={(e) => setQuery(e.target.value.toUpperCase())}
+                onChange={(e) => {
+                  setQuery(e.target.value.toUpperCase());
+                  setSearchMiss(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  void commitTypedSymbol();
+                }}
                 onFocus={() => {
                   if (query !== symbol && suggestions.length > 0) setSearchOpen(true);
                 }}
@@ -1018,6 +1106,11 @@ function OrderPadWidget(props: WidgetProps) {
               </div>
             )}
           </div>
+          {searchMiss && (
+            <p role="status" className="text-xs text-loss mt-0.5">
+              No match for {searchMiss}
+            </p>
+          )}
           {errors.symbol && (
             <span id="orderpad-symbol-error" role="alert" className="text-xs text-loss mt-0.5">
               {errors.symbol.message}

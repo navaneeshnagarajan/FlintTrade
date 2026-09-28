@@ -131,6 +131,34 @@ describe("createWorkspaceApi", () => {
     expect(doc).toContain('"NIFTY"');
   });
 
+  it("retargets an existing Order Pad instead of adding another", () => {
+    const { api, getModel } = makeApi(emptyWorkspaceJson());
+    expect(api.retargetOrderPad({ symbol: "SBIN", exchange: "NSE", action: "BUY" }, "Order — SBIN")).toBe(false);
+
+    api.addPanel({
+      component: "orderpad",
+      title: "Order Pad",
+      params: { symbol: "NIFTY", exchange: "NSE", action: "BUY" },
+    });
+    expect(api.panelCount()).toBe(1);
+
+    const prefill = vi.fn();
+    window.addEventListener("flinttrade:orderPadPrefill", prefill);
+    expect(api.retargetOrderPad(
+      { symbol: "SBIN", exchange: "NSE", action: "SELL" },
+      "Order — SBIN",
+    )).toBe(true);
+    window.removeEventListener("flinttrade:orderPadPrefill", prefill);
+    expect(prefill).toHaveBeenCalledTimes(1);
+
+    expect(api.panelCount()).toBe(1);
+    const doc = JSON.stringify(getModel().toJson());
+    expect(doc).toContain('"SBIN"');
+    expect(doc).toContain('"SELL"');
+    expect(doc).toContain("Order — SBIN");
+    expect(doc.match(/"component":"orderpad"/g)).toHaveLength(1);
+  });
+
   it("loadModelJson replaces the model through the load callback", () => {
     const { api, loadModel } = makeApi(emptyWorkspaceJson());
     api.loadModelJson(

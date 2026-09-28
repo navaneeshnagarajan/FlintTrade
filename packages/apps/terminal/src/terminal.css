@@ -185,6 +185,33 @@ html.density-compact {
   display: flex;
 }
 
+/* Tray tabs — selected state is weight + underline + raised fill, not colour alone.
+   FlexLayout 0.11 paints a lone tab as tab_button_stretch (no --selected class)
+   and a multi-tab strip as tab_button / --selected / --unselected.
+   Text uses primary/secondary tokens (≥4.5:1 on the tab surfaces). The 2px
+   accent underline is a non-text graphic (≥3:1 on the raised selected fill). */
+.flexlayout__theme_dark .flexlayout__tab_button,
+.flexlayout__theme_light .flexlayout__tab_button,
+.flexlayout__theme_dark .flexlayout__tab_button_stretch,
+.flexlayout__theme_light .flexlayout__tab_button_stretch,
+.ft-tray-tab {
+  color: var(--color-text-secondary, #8b8b95);
+  background-color: transparent;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+.flexlayout__theme_dark .flexlayout__tab_button--selected,
+.flexlayout__theme_light .flexlayout__tab_button--selected,
+.flexlayout__theme_dark .flexlayout__tab_button_stretch[aria-selected="true"],
+.flexlayout__theme_light .flexlayout__tab_button_stretch[aria-selected="true"],
+.ft-tray-tab[aria-selected="true"] {
+  color: var(--color-text-primary, #e4e4e7);
+  background-color: var(--color-surface-hover, #24242e);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--color-accent, #22c55e);
+}
+
 /* ---------- react-resizable-panels separator (sash) styling ---------- */
 /* The Separator component renders a div with data-separator attribute.
    These rules give visual feedback on hover/drag without relying on inline

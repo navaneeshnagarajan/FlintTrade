@@ -387,10 +387,12 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     second.unmount();
 
     render(<PracticeLaterSetup />);
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
     fireEvent.click(screen.getByRole("button", { name: "Set up Two-factor authentication" }));
-
-    expect(screen.getByRole("button", { name: /show QR code/i })).toBeEnabled();
     expect(screen.queryByText(/not retained/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Enrol" }));
+    expect(screen.getByRole("button", { name: /reveal QR code/i })).toBeEnabled();
     expect(screen.queryByText(/Step \d+ of \d+/)).not.toBeInTheDocument();
   });
 
