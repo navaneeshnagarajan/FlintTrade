@@ -55,17 +55,24 @@ and [shared design-system manifest](../packages/core/design-system/package.json)
 | Pydantic, httpx, websockets | Validated data models, outbound HTTP clients, and streaming WebSocket connections. |
 | SQLite, DuckDB, PyArrow | Transactional local state, analytical queries, and columnar/Parquet data respectively. SQLite is provided by Python's standard library. |
 | NumPy, pandas, SciPy | Indicator arrays, historical-data processing, numerical statistics, and backtest analytics. |
+| filelock | Cross-process coordination for workspace migrations, provisioning, and local configuration/service state. Owner-validated lock subclasses preserve the lock file and check its ownership. |
+| python-dotenv | Optional repository `.env` fallback for contributor/server configuration; desktop startup does not load this fallback. |
 | structlog and Sentry SDK | Structured service logs and configured error reporting. |
 | argon2-cffi, cryptography, PyJWT, pyotp | Password hashing, encrypted credential storage, signed authentication tokens, and time-based one-time passwords. |
 | DhanHQ, Upstox, Kotak Neo, Groww SDKs | Native broker integration adapters. An SDK upgrade does not establish live-order readiness; broker capabilities and order-safety gates remain separate. |
 | LightGBM, CatBoost, joblib | Model training, inference, and model persistence for analysis/signals. The AI package's optional `ml` extra adds scikit-learn and Optuna support. |
 | pypdf | PDF ingestion for the optional AI `rag` extra. The vector store uses local SQLite/NumPy; local model execution uses the managed Ollama service. |
+| Sentence Transformers | Optional in-process text embeddings through the RAG provider's `SentenceTransformer.encode` adapter. Its requirement is listed in the supplemental `requirements.txt`, outside the frozen workspace installation. |
 
 Start with the [core manifest](../packages/core/core/pyproject.toml),
 [gateway manifest](../packages/integrations/gateway/pyproject.toml), and
 [AI manifest](../packages/services/ai/pyproject.toml). The
 [package map](DEVELOPER_GUIDE.md#1-repository-layout) identifies the remaining
 services. Optional extras are distinct from the default runtime installation.
+The supplemental [requirements.txt](../requirements.txt) is not the frozen
+installation manifest: setup uses `uv.lock` or its `requirements.lock` export.
+Updating its Sentence Transformers requirement does not install that provider in
+the normal workspace; it must already be available when explicitly selected.
 
 ## Desktop, website, and native processing
 

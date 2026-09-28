@@ -1,42 +1,163 @@
-"""Unit tests for the Kotak Neo mapping additions (full v2 parity surface).
+"""Unit tests for the Kotak Neo v3 mapping surface.
 
-Covers the AMO variety, the full modify param surface, margin legs, the NEO
-error envelopes, order-history unwrapping, limits/scrip-master/depth
-normalisation and the HSM market-feed + HSI order-feed decoders — all against
-synthetic frames shaped per ``.local/reference/broker-docs/kotak-neo/sdk-docs``
-and the v2 SDK (``settings.py`` / ``NeoWebSocket.py``).
+Covers regular/AMO orders, the exact v3 modify surface, margin requests, the NEO
+error envelopes, order-history unwrapping, limits/scrip-master/depth and v3
+historical/option-chain normalisation against pinned SDK-shaped fixtures.
 """
 
 from __future__ import annotations
 
-import json
+from copy import deepcopy
+from decimal import Decimal
 
 import pytest
 
+from flinttrade_core.broker_read_port import BrokerReadResponseInvalid
+from flinttrade_core.exceptions import SessionExpired
 from flinttrade_core.models import Order
 from flinttrade_gateway.brokers.kotakneo_mapping import (
     KotakNeoMappingError,
     canonical_index_name,
     canonical_quote_type,
-    decode_kotak_feed,
-    decode_kotak_order_feed,
     ensure_ok,
     from_kotak_depth,
+    from_kotak_funds,
+    from_kotak_historical,
+    from_kotak_margin,
+    from_kotak_option_chain,
     from_kotak_order,
     from_kotak_position,
     from_kotak_scrip_master,
+    from_kotak_trade,
     is_index_name,
     order_history_rows,
     require_write_success,
     subscription_flags,
+    to_historical_request,
     to_limits_params,
     to_margin_params,
     to_modify_order_params,
+    to_option_chain_request,
     to_place_order_params,
     to_quote_tokens,
 )
 
 pytestmark = pytest.mark.unit
+
+
+def _official_option_chain_response() -> dict:
+    """Return the immutable v3.0.7 option-chain sample shape."""
+    return {
+        "data": {
+            "common_data": {
+                "mktLot": "65",
+                "multiplier": "1",
+                "unlSymbol": "NIFTY",
+                "exSeg": "nse_fo",
+                "expiryDt": "2026-06-23",
+            },
+            "call": [
+                {
+                    "instrument": {
+                        "neoSymbol": "nse_fo|71472",
+                        "symbol": "NIFTY26JUN22250CE",
+                        "optionType": "CE",
+                        "strikePrice": "22250",
+                        "moneyness": "ATM",
+                    },
+                    "quote": {"ltp": "166.7500", "volume": 225431505},
+                    "openInterest": {"current": 10715645},
+                }
+            ],
+            "put": [
+                {
+                    "instrument": {
+                        "neoSymbol": "nse_fo|71473",
+                        "symbol": "NIFTY26JUN22250PE",
+                        "optionType": "PE",
+                        "strikePrice": "22250.0",
+                        "moneyness": "ATM",
+                    },
+                    "quote": {"ltp": "99.25", "volume": 100},
+                    "openInterest": {"current": 0},
+                },
+                {
+                    "instrument": {
+                        "neoSymbol": "nse_fo|71475",
+                        "symbol": "NIFTY26JUN22300PE",
+                        "optionType": "PE",
+                        "strikePrice": "22300",
+                    },
+                    "quote": {},
+                },
+            ],
+        }
+    }
+
+
+# Conservative wire bounds: these ordinary Indian-market examples must remain
+# valid, while the compact/oversized cases below must be rejected before Decimal
+# formatting can amplify them into thousands of transport characters.
+_ORDINARY_BROKER_QUANTITY = Decimal("10000000")
+_ORDINARY_BROKER_PRICE = Decimal("99999999.9999")
+_ORDINARY_BROKER_TRIGGER = Decimal("0.0001")
+_OUT_OF_BOUNDS_ORDER_NUMBERS = (
+    pytest.param(
+        "price",
+        Decimal("12345678901234567890123456789012345678901234567890123456789012345"),
+        id="65-significant-digits",
+    ),
+    pytest.param("quantity", Decimal("1e5000"), id="quantity-exponent-positive-5000"),
+    pytest.param("price", Decimal("1e100000"), id="price-exponent-positive-100000"),
+    pytest.param("price", Decimal("1e-5000"), id="price-scale-5000"),
+)
+
+
+@pytest.mark.parametrize(
+    ("value", "accepted"),
+    [
+        (Decimal("9" * 64), True),
+        (Decimal("9" * 65), False),
+        (Decimal("1e-16"), True),
+        (Decimal("1e-17"), False),
+    ],
+)
+@pytest.mark.parametrize("mapper", ["place", "modify", "margin"])
+def test_order_numeric_wire_shape_boundary(mapper, value, accepted):
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    ).model_copy(update={"price": value})
+
+    def mapped_params():
+        if mapper == "place":
+            return to_place_order_params(order, "IDEA-EQ")
+        if mapper == "modify":
+            return to_modify_order_params(
+                "OID-1",
+                {"pricetype": "MARKET", "quantity": "1", "price": value},
+            )
+        return to_margin_params(order, "14366")
+
+    if accepted:
+        assert mapped_params()["price"] == format(value, "f")
+    else:
+        with pytest.raises(KotakNeoMappingError, match="price"):
+            mapped_params()
+
+
+def test_rejected_limits_cannot_map_to_zero_funds():
+    with pytest.raises(SessionExpired):
+        from_kotak_funds({"stat": "Not_Ok", "errMsg": "session expired"})
+
+
+def test_malformed_successful_limits_do_not_map_invalid_number_to_zero():
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_funds({"stat": "Ok", "Net": "not a number", "MarginUsed": "5"})
 
 
 # ---------------------------------------------------------------------------
@@ -67,13 +188,13 @@ def test_place_order_regular_defaults_amo_no():
     assert to_place_order_params(order, "IDEA-EQ")["amo"] == "NO"
 
 
-def test_place_order_forwards_explicit_market_protection_only():
+@pytest.mark.parametrize("market_protection", [True, False])
+def test_place_order_rejects_caller_market_protection(market_protection):
     base = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET", product="CNC", quantity="10")
     assert "market_protection" not in to_place_order_params(base, "IDEA-EQ")
-    protected = base.model_copy(update={"market_protection": True})
-    disabled = base.model_copy(update={"market_protection": False})
-    assert to_place_order_params(protected, "IDEA-EQ")["market_protection"] == "1"
-    assert to_place_order_params(disabled, "IDEA-EQ")["market_protection"] == "0"
+    protected = base.model_copy(update={"market_protection": market_protection})
+    with pytest.raises(KotakNeoMappingError, match="market protection"):
+        to_place_order_params(protected, "IDEA-EQ")
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +209,7 @@ def test_place_order_validity_defaults_to_day_when_unset():
     assert to_place_order_params(order, "IDEA-EQ")["validity"] == "DAY"
 
 
-def test_place_order_validity_passes_through_when_set():
+def test_place_order_mcx_rejects_ioc_before_mapping():
     order = Order(
         symbol="GOLDPETAL25JUNFUT",
         action="BUY",
@@ -99,7 +220,8 @@ def test_place_order_validity_passes_through_when_set():
         price="7000",
         validity="IOC",
     )
-    assert to_place_order_params(order, "GOLDPETAL25JUNFUT")["validity"] == "IOC"
+    with pytest.raises(KotakNeoMappingError, match="MCX.*DAY"):
+        to_place_order_params(order, "GOLDPETAL25JUNFUT")
 
 
 def test_place_order_validity_invalid_raises():
@@ -132,8 +254,8 @@ def test_place_order_rejects_legacy_validity_before_sdk():
         to_place_order_params(order, "GOLDPETAL25JUNFUT")
 
 
-@pytest.mark.parametrize(("exchange", "expected"), [("BCD", "bcs-fo"), ("MCX", "mcx_fo")])
-def test_place_order_maps_documented_derivative_segments(exchange, expected):
+@pytest.mark.parametrize(("exchange", "expected"), [("BFO", "bse_fo"), ("MCX", "mcx_fo")])
+def test_place_order_maps_supported_v3_derivative_segments(exchange, expected):
     order = Order(
         symbol="SENSEX25JULFUT",
         action="BUY",
@@ -146,12 +268,28 @@ def test_place_order_maps_documented_derivative_segments(exchange, expected):
     assert to_place_order_params(order, "SENSEX25JULFUT")["exchange_segment"] == expected
 
 
+@pytest.mark.parametrize("exchange", ["CDS", "BCD"])
+def test_place_order_rejects_currency_segments(exchange):
+    order = Order(
+        symbol="SYNTHETIC",
+        action="BUY",
+        exchange="NSE",
+        pricetype="LIMIT",
+        product="NRML",
+        quantity="1",
+        price="1",
+    )
+    object.__setattr__(order, "exchange", exchange)
+    with pytest.raises(KotakNeoMappingError, match="exchange"):
+        to_place_order_params(order, "SYNTHETIC")
+
+
 # ---------------------------------------------------------------------------
-# Modify: full documented param surface
+# Modify: exact v3 order-id surface
 # ---------------------------------------------------------------------------
 
 
-def test_modify_full_surface_quick_method():
+def test_modify_emits_only_exact_v3_order_id_surface():
     p = to_modify_order_params(
         "250122000624384",
         {
@@ -159,27 +297,88 @@ def test_modify_full_surface_quick_method():
             "price": 9.5,
             "quantity": 20,
             "trigger_price": 9.45,
-            "instrument_token": "14366",
-            "exchange_segment": "NSE",
-            "product": "MIS",
-            "trading_symbol": "IDEA-EQ",
-            "transaction_type": "BUY",
+            "disclosed_quantity": 5,
+            "validity": "IOC",
             "amo": True,
-            "filled_quantity": 5,
-            "market_protection": "0",
-            "dd": "NA",
         },
     )
-    assert p["order_id"] == "250122000624384"
-    assert p["order_type"] == "SL" and p["trigger_price"] == "9.45"
-    assert p["instrument_token"] == "14366"
-    assert p["exchange_segment"] == "nse_cm"  # FlintTrade exchange mapped to NEO segment
-    assert p["product"] == "MIS"
-    assert p["trading_symbol"] == "IDEA-EQ"
-    assert p["transaction_type"] == "B"  # BUY mapped to NEO single letter
-    assert p["amo"] == "YES"  # bool True normalised
-    assert p["filled_quantity"] == "5"
-    assert p["market_protection"] == "0" and p["dd"] == "NA"
+    assert p == {
+        "order_id": "250122000624384",
+        "order_type": "SL",
+        "price": "9.5",
+        "quantity": "20",
+        "validity": "IOC",
+        "trigger_price": "9.45",
+        "disclosed_quantity": "5",
+        "amo": "YES",
+    }
+
+
+@pytest.mark.parametrize(
+    "unsupported",
+    [
+        {"instrument_token": "14366"},
+        {"exchange_segment": "NSE"},
+        {"trading_symbol": "IDEA-EQ"},
+        {"transaction_type": "BUY"},
+        {"filled_quantity": 2},
+        {"market_protection": 3},
+        {"dd": "NA"},
+    ],
+)
+def test_modify_rejects_removed_quick_and_legacy_fields(unsupported):
+    with pytest.raises(KotakNeoMappingError, match="does not support"):
+        to_modify_order_params(
+            "250122000624384",
+            {"pricetype": "MARKET", "price": 0, "quantity": 1, **unsupported},
+        )
+
+
+def test_modify_consumes_signed_route_context_but_emits_only_exact_v3_kwargs():
+    params = to_modify_order_params(
+        "250122000624384",
+        {
+            "symbol": "GOLDPETAL25JUNFUT",
+            "exchange": "MCX",
+            "action": "BUY",
+            "product": "NRML",
+            "strategy": "Flint",
+            "pricetype": "LIMIT",
+            "price": "7000",
+            "quantity": "1",
+            "validity": "DAY",
+            "trigger_price": "0",
+            "disclosed_quantity": "0",
+        },
+    )
+
+    assert params == {
+        "order_id": "250122000624384",
+        "order_type": "L",
+        "price": "7000",
+        "quantity": "1",
+        "validity": "DAY",
+        "trigger_price": "0",
+        "disclosed_quantity": "0",
+    }
+
+
+def test_modify_mcx_context_rejects_ioc():
+    with pytest.raises(KotakNeoMappingError, match="MCX.*DAY"):
+        to_modify_order_params(
+            "250122000624384",
+            {
+                "symbol": "GOLDPETAL25JUNFUT",
+                "exchange": "MCX",
+                "action": "BUY",
+                "product": "NRML",
+                "strategy": "Flint",
+                "pricetype": "LIMIT",
+                "price": "7000",
+                "quantity": "1",
+                "validity": "IOC",
+            },
+        )
 
 
 def test_modify_minimal_omits_optional_keys():
@@ -200,17 +399,233 @@ def test_modify_minimal_omits_optional_keys():
 
 
 def test_modify_amo_string_passthrough():
-    assert to_modify_order_params("1", {"amo": "yes"})["amo"] == "YES"
+    assert to_modify_order_params(
+        "1", {"pricetype": "MARKET", "price": 0, "quantity": 1, "amo": "yes"}
+    )["amo"] == "YES"
+
+
+@pytest.mark.parametrize("amo", [None, 1, "", "sometimes"])
+def test_modify_rejects_explicit_malformed_amo_instead_of_omitting_it(amo):
+    with pytest.raises(KotakNeoMappingError, match="AMO"):
+        to_modify_order_params(
+            "1",
+            {"pricetype": "MARKET", "price": 0, "quantity": 1, "amo": amo},
+        )
 
 
 def test_modify_validity_validated():
-    assert to_modify_order_params("1", {"validity": "IOC"})["validity"] == "IOC"
+    assert to_modify_order_params(
+        "1", {"pricetype": "MARKET", "price": 0, "quantity": 1, "validity": "IOC"}
+    )["validity"] == "IOC"
     with pytest.raises(KotakNeoMappingError, match="validity"):
-        to_modify_order_params("1", {"validity": "GTC"})
+        to_modify_order_params(
+            "1", {"pricetype": "MARKET", "price": 0, "quantity": 1, "validity": "GTC"}
+        )
+
+
+@pytest.mark.parametrize("mapper", ["place", "modify", "margin"])
+def test_order_numeric_bounds_preserve_ordinary_indian_broker_values(mapper):
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="SL",
+        product="MIS",
+        quantity="1",
+        price="1",
+        trigger_price="1",
+    ).model_copy(
+        update={
+            "quantity": _ORDINARY_BROKER_QUANTITY,
+            "price": _ORDINARY_BROKER_PRICE,
+            "trigger_price": _ORDINARY_BROKER_TRIGGER,
+        }
+    )
+
+    if mapper == "place":
+        params = to_place_order_params(order, "IDEA-EQ")
+    elif mapper == "modify":
+        params = to_modify_order_params(
+            "OID-1",
+            {
+                "pricetype": "SL",
+                "quantity": _ORDINARY_BROKER_QUANTITY,
+                "price": _ORDINARY_BROKER_PRICE,
+                "trigger_price": _ORDINARY_BROKER_TRIGGER,
+            },
+        )
+    else:
+        params = to_margin_params(order, "14366")
+
+    assert params["quantity"] == "10000000"
+    assert params["price"] == "99999999.9999"
+    assert params["trigger_price"] == "0.0001"
+
+
+@pytest.mark.parametrize("field,value", _OUT_OF_BOUNDS_ORDER_NUMBERS)
+@pytest.mark.parametrize("mapper", ["place", "modify", "margin"])
+def test_order_numeric_bounds_reject_pathological_decimals_without_expansion(mapper, field, value):
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    ).model_copy(update={field: value})
+
+    with pytest.raises(KotakNeoMappingError, match=field.replace("_", " ")):
+        if mapper == "place":
+            to_place_order_params(order, "IDEA-EQ")
+        elif mapper == "modify":
+            to_modify_order_params(
+                "OID-1",
+                {"pricetype": "MARKET", "quantity": "1", "price": "0", field: value},
+            )
+        else:
+            to_margin_params(order, "14366")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("quantity", ""),
+        ("quantity", "abc"),
+        ("quantity", "1.5"),
+        ("quantity", "0"),
+        ("quantity", "-1"),
+        ("quantity", True),
+        ("quantity", None),
+        ("price", "abc"),
+        ("price", "NaN"),
+        ("price", "Infinity"),
+        ("price", "-0.01"),
+        ("price", True),
+        ("price", None),
+        ("trigger_price", "abc"),
+        ("trigger_price", "NaN"),
+        ("trigger_price", "-0.01"),
+        ("trigger_price", "Infinity"),
+        ("trigger_price", True),
+        ("trigger_price", None),
+        ("disclosed_quantity", ""),
+        ("disclosed_quantity", "abc"),
+        ("disclosed_quantity", "1.5"),
+        ("disclosed_quantity", "-1"),
+        ("disclosed_quantity", "NaN"),
+        ("disclosed_quantity", "Infinity"),
+        ("disclosed_quantity", True),
+        ("disclosed_quantity", None),
+    ],
+)
+def test_place_rejects_malformed_or_non_finite_numeric_intent(field, value):
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    ).model_copy(update={field: value})
+
+    with pytest.raises(KotakNeoMappingError, match=field.replace("_", " ")):
+        to_place_order_params(order, "IDEA-EQ")
+
+
+@pytest.mark.parametrize(
+    "order",
+    [
+        Order(
+            symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+            product="MIS", quantity="1", price="0",
+        ),
+        Order(
+            symbol="IDEA", action="BUY", exchange="NSE", pricetype="SL",
+            product="MIS", quantity="1", price="9.4", trigger_price="0",
+        ),
+        Order(
+            symbol="IDEA", action="BUY", exchange="NSE", pricetype="SL-M",
+            product="MIS", quantity="1", price="0", trigger_price="0",
+        ),
+    ],
+    ids=["limit-zero-price", "stop-limit-zero-trigger", "stop-market-zero-trigger"],
+)
+def test_place_requires_positive_limit_price_and_stop_trigger(order):
+    with pytest.raises(KotakNeoMappingError):
+        to_place_order_params(order, "IDEA-EQ")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("quantity", ""),
+        ("quantity", "abc"),
+        ("quantity", "1.5"),
+        ("quantity", "0"),
+        ("quantity", "-1"),
+        ("quantity", True),
+        ("price", "NaN"),
+        ("price", "Infinity"),
+        ("price", "-1"),
+        ("price", True),
+        ("trigger_price", "abc"),
+        ("trigger_price", "NaN"),
+        ("trigger_price", "Infinity"),
+        ("trigger_price", "-1"),
+        ("trigger_price", True),
+        ("disclosed_quantity", ""),
+        ("disclosed_quantity", "abc"),
+        ("disclosed_quantity", "1.5"),
+        ("disclosed_quantity", "-1"),
+        ("disclosed_quantity", "NaN"),
+        ("disclosed_quantity", "Infinity"),
+        ("disclosed_quantity", True),
+    ],
+)
+def test_modify_rejects_malformed_or_non_finite_numeric_intent(field, value):
+    changes = {
+        "pricetype": "MARKET",
+        "price": "0",
+        "quantity": "1",
+        "trigger_price": "0",
+        "disclosed_quantity": "0",
+        field: value,
+    }
+    with pytest.raises(KotakNeoMappingError, match=field.replace("_", " ")):
+        to_modify_order_params("OID-1", changes)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"pricetype": "LIMIT", "price": "0", "quantity": "1"},
+        {"pricetype": "SL", "price": "9.4", "quantity": "1", "trigger_price": "0"},
+        {"pricetype": "SL-M", "price": "0", "quantity": "1", "trigger_price": "0"},
+    ],
+)
+def test_modify_requires_positive_limit_price_and_stop_trigger(changes):
+    with pytest.raises(KotakNeoMappingError):
+        to_modify_order_params("OID-1", changes)
+
+
+@pytest.mark.parametrize("order_id", ["", " ", " OID-1", "OID 1", "OID-1\n"])
+def test_modify_requires_canonical_order_id(order_id):
+    with pytest.raises(KotakNeoMappingError, match="order id"):
+        to_modify_order_params(
+            order_id,
+            {"pricetype": "MARKET", "price": "0", "quantity": "1"},
+        )
+
+
+@pytest.mark.parametrize("tag", ["", " ", " TAG-1", "TAG-1\n"])
+def test_place_rejects_noncanonical_tag(tag):
+    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS")
+    with pytest.raises(KotakNeoMappingError, match="tag"):
+        to_place_order_params(order, "IDEA-EQ", tag=tag)
 
 
 # ---------------------------------------------------------------------------
-# Margin: trigger + variety legs
+# Margin: exact v3 regular-order request
 # ---------------------------------------------------------------------------
 
 
@@ -229,7 +644,7 @@ def test_margin_params_carry_trigger_price():
     assert p["trigger_price"] == "9.35"
 
 
-def test_margin_params_bracket_legs_mirror_place():
+def test_margin_params_reject_bracket_variety():
     order = Order(
         symbol="IDEA",
         action="BUY",
@@ -243,14 +658,11 @@ def test_margin_params_bracket_legs_mirror_place():
         stop_loss_price="9.1",
         trailing_jump="0.1",
     )
-    p = to_margin_params(order, "14366")
-    assert p["product"] == "BO"
-    assert p["stop_loss_value"] == "9.1" and p["stop_loss_type"] == "Absolute"
-    assert p["square_off_value"] == "9.8" and p["square_off_type"] == "Absolute"
-    assert p["trailing_stop_loss"] == "Y" and p["trailing_sl_value"] == "0.1"
+    with pytest.raises(KotakNeoMappingError, match="variety"):
+        to_margin_params(order, "14366")
 
 
-def test_margin_params_cover_uses_co():
+def test_margin_params_reject_cover_variety():
     order = Order(
         symbol="IDEA",
         action="BUY",
@@ -262,33 +674,219 @@ def test_margin_params_cover_uses_co():
         variety="cover",
         stop_loss_price="9.1",
     )
+    with pytest.raises(KotakNeoMappingError, match="variety"):
+        to_margin_params(order, "14366")
+
+
+# ---------------------------------------------------------------------------
+# Margin keys the scrip only by numeric instrument_token (pSymbol).
+# ---------------------------------------------------------------------------
+
+
+def test_margin_params_use_only_numeric_instrument_token():
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS", quantity="10", price="9.4"
+    )
     p = to_margin_params(order, "14366")
-    assert p["product"] == "CO" and "square_off_value" not in p
-
-
-# ---------------------------------------------------------------------------
-# Finding #1 — margin keys the scrip by numeric instrument_token (pSymbol),
-# trading symbol rides its own field (Margin_Required.md:35).
-# ---------------------------------------------------------------------------
-
-
-def test_margin_params_use_numeric_instrument_token_and_trading_symbol():
-    order = Order(
-        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS", quantity="10", price="9.4"
-    )
-    p = to_margin_params(order, "IDEA-EQ", instrument_token="14366")
-    # instrument_token = numeric pSymbol; trading_symbol = pTrdSymbol — NOT the
-    # trading symbol packed into instrument_token (the pre-fix bug).
     assert p["instrument_token"] == "14366"
-    assert p["trading_symbol"] == "IDEA-EQ"
+    assert "trading_symbol" not in p
 
 
-def test_margin_params_fall_back_to_symbol_when_token_unresolved():
+@pytest.mark.parametrize("instrument_token", ["", "IDEA-EQ", "14.366", "-14366", "0"])
+def test_margin_params_reject_non_numeric_instrument_token(instrument_token):
     order = Order(
         symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS", quantity="10", price="9.4"
     )
-    p = to_margin_params(order, "IDEA-EQ")  # no numeric token resolvable
-    assert p["instrument_token"] == "IDEA-EQ" and p["trading_symbol"] == "IDEA-EQ"
+    with pytest.raises(KotakNeoMappingError, match="numeric instrument_token"):
+        to_margin_params(order, instrument_token)
+
+
+def test_margin_instrument_token_wire_length_is_bounded_before_integer_conversion():
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    )
+
+    assert to_margin_params(order, "9" * 64)["instrument_token"] == "9" * 64
+    for malformed in ("9" * 65, 10**5000):
+        with pytest.raises(KotakNeoMappingError, match="numeric instrument_token"):
+            to_margin_params(order, malformed)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("quantity", ""),
+        ("quantity", "abc"),
+        ("quantity", "1.5"),
+        ("quantity", "0"),
+        ("quantity", "-1"),
+        ("quantity", True),
+        ("price", "abc"),
+        ("price", "NaN"),
+        ("price", "Infinity"),
+        ("price", "-0.01"),
+        ("price", True),
+        ("trigger_price", "abc"),
+        ("trigger_price", "NaN"),
+        ("trigger_price", "-0.01"),
+        ("trigger_price", "-Infinity"),
+        ("trigger_price", True),
+    ],
+)
+def test_margin_params_reject_malformed_or_non_finite_numeric_intent(field, value):
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    ).model_copy(update={field: value})
+    with pytest.raises(KotakNeoMappingError, match=field.replace("_", " ")):
+        to_margin_params(order, "14366")
+
+
+def test_margin_params_never_truncate_fractional_quantity():
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS", quantity="1"
+    ).model_copy(update={"quantity": "1.5"})
+    with pytest.raises(KotakNeoMappingError, match="quantity"):
+        to_margin_params(order, "14366")
+
+
+@pytest.mark.parametrize(
+    "order",
+    [
+        Order(
+            symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
+            product="MIS", quantity="1", price="0",
+        ),
+        Order(
+            symbol="IDEA", action="BUY", exchange="NSE", pricetype="SL",
+            product="MIS", quantity="1", price="9.4", trigger_price="0",
+        ),
+        Order(
+            symbol="IDEA", action="BUY", exchange="NSE", pricetype="SL-M",
+            product="MIS", quantity="1", price="0", trigger_price="0",
+        ),
+    ],
+)
+def test_margin_params_require_positive_limit_price_and_stop_trigger(order):
+    with pytest.raises(KotakNeoMappingError):
+        to_margin_params(order, "14366")
+
+
+def test_margin_response_maps_ord_margin_as_common_required_margin():
+    assert from_kotak_margin(
+        {
+            "data": {
+                "stat": "Ok",
+                "stCode": 200,
+                "avlCash": "38.190000",
+                "ordMrgn": "15.500000",
+                "reqdMrgn": "0.000000",
+                "insufFund": "0.000000",
+                "rmsVldtd": "OK",
+            }
+        }
+    ) == {
+        "required_margin": "15.50",
+        "order_margin": "15.50",
+        "provider_additional_margin": "0.00",
+        "available_balance": "38.19",
+        "insufficient_balance": "0.00",
+        "rms_validated": "OK",
+    }
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {},
+        {"data": {}},
+        {"data": {"stat": "Ok", "stCode": 200, "reqdMrgn": "0", "avlCash": "38.19",
+                  "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "NaN", "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "Infinity", "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "-1", "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": True, "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "15.5", "reqdMrgn": "bad",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "15.5", "reqdMrgn": "-1",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "15.5", "reqdMrgn": "0",
+                  "avlCash": "bad", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "15.5", "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "-1", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": "200", "ordMrgn": "15.5", "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": "OK"}},
+        {"data": {"stat": "Ok", "stCode": 200, "ordMrgn": "15.5", "reqdMrgn": "0",
+                  "avlCash": "38.19", "insufFund": "0", "rmsVldtd": ""}},
+    ],
+)
+def test_margin_response_rejects_missing_or_malformed_official_success_fields(response):
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_margin(response)
+
+
+@pytest.mark.parametrize("field", ["ordMrgn", "reqdMrgn", "avlCash", "insufFund"])
+def test_margin_response_rejects_compact_numbers_that_expand_beyond_wire_bounds(field):
+    response = {
+        "data": {
+            "stat": "Ok",
+            "stCode": 200,
+            "ordMrgn": "15.50",
+            "reqdMrgn": "0",
+            "avlCash": "38.19",
+            "insufFund": "0",
+            "rmsVldtd": "OK",
+        }
+    }
+    response["data"][field] = "1e100000"
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_margin(response)
+
+
+def test_margin_response_rejects_oversized_primitive_int_as_canonical_read_error():
+    response = {
+        "data": {
+            "stat": "Ok",
+            "stCode": 200,
+            "ordMrgn": 10**5000,
+            "reqdMrgn": "0",
+            "avlCash": "38.19",
+            "insufFund": "0",
+            "rmsVldtd": "OK",
+        }
+    }
+
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_margin(response)
+
+
+def test_trade_mapping_requires_order_id():
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_trade(
+            {
+                "trdSym": "IDEA-EQ",
+                "exSeg": "nse_cm",
+                "trnsTp": "B",
+                "fldQty": "1",
+                "avgPrc": "9.40",
+                "prod": "MIS",
+                "flDtTm": "22-Jan-2025 14:28:16",
+            }
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -326,11 +924,11 @@ def test_canonical_index_name_uses_documented_case_when_known():
 
 
 # ---------------------------------------------------------------------------
-# Finding #3 — cover order: stop level → trigger_price, NO bracket-only legs.
+# Unsupported advanced varieties must fail instead of degrading to regular.
 # ---------------------------------------------------------------------------
 
 
-def test_place_cover_maps_stop_to_trigger_and_drops_bracket_fields():
+def test_place_cover_is_not_supported_by_v3_adapter():
     order = Order(
         symbol="IDEA",
         action="BUY",
@@ -342,22 +940,11 @@ def test_place_cover_maps_stop_to_trigger_and_drops_bracket_fields():
         variety="cover",
         stop_loss_price="9.1",
     )
-    p = to_place_order_params(order, "IDEA-EQ")
-    assert p["product"] == "CO"
-    assert p["trigger_price"] == "9.1"  # stop level rides trigger_price (CO-required)
-    # Bracket-only fields MUST NOT be present on a cover order (Place_Order.md:88-93).
-    for field in (
-        "stop_loss_value",
-        "stop_loss_type",
-        "square_off_value",
-        "square_off_type",
-        "trailing_stop_loss",
-        "trailing_sl_value",
-    ):
-        assert field not in p
+    with pytest.raises(KotakNeoMappingError, match="variety"):
+        to_place_order_params(order, "IDEA-EQ")
 
 
-def test_place_cover_falls_back_to_trigger_price_when_only_trigger_set():
+def test_place_cover_with_trigger_is_still_unsupported():
     order = Order(
         symbol="IDEA",
         action="SELL",
@@ -369,12 +956,11 @@ def test_place_cover_falls_back_to_trigger_price_when_only_trigger_set():
         variety="cover",
         trigger_price="9.55",
     )
-    p = to_place_order_params(order, "IDEA-EQ")
-    assert p["product"] == "CO" and p["trigger_price"] == "9.55"
-    assert "stop_loss_value" not in p
+    with pytest.raises(KotakNeoMappingError, match="variety"):
+        to_place_order_params(order, "IDEA-EQ")
 
 
-def test_place_cover_without_stop_level_raises():
+def test_place_cover_without_stop_level_is_unsupported():
     order = Order(
         symbol="IDEA",
         action="BUY",
@@ -385,7 +971,7 @@ def test_place_cover_without_stop_level_raises():
         price="0",
         variety="cover",
     )
-    with pytest.raises(KotakNeoMappingError, match="stop level"):
+    with pytest.raises(KotakNeoMappingError, match="variety"):
         to_place_order_params(order, "IDEA-EQ")
 
 
@@ -478,19 +1064,17 @@ def test_position_avg_price_multiplier_one_unchanged():
 
 
 # ---------------------------------------------------------------------------
-# Finding #5 — modify quick-method fields are all-or-nothing.
+# V3 removed the quick-method field set entirely.
 # ---------------------------------------------------------------------------
 
 
 def test_modify_partial_quick_fields_rejected():
-    # instrument_token without the rest of the quick-path discriminators is a
-    # partial set the SDK would reject with a ValueError — we reject it cleanly.
-    with pytest.raises(KotakNeoMappingError, match="quick-method"):
+    with pytest.raises(KotakNeoMappingError, match="does not support"):
         to_modify_order_params("1", {"instrument_token": "14366", "quantity": 5})
 
 
 def test_modify_partial_quick_fields_missing_one_rejected():
-    with pytest.raises(KotakNeoMappingError, match="trading_symbol"):
+    with pytest.raises(KotakNeoMappingError, match="does not support"):
         to_modify_order_params(
             "1",
             {
@@ -502,85 +1086,24 @@ def test_modify_partial_quick_fields_missing_one_rejected():
         )
 
 
-def test_modify_complete_quick_set_accepted():
-    p = to_modify_order_params(
-        "1",
-        {
-            "instrument_token": "14366",
-            "exchange_segment": "NSE",
-            "product": "MIS",
-            "trading_symbol": "IDEA-EQ",
-            "quantity": 5,
-        },
-    )
-    assert p["instrument_token"] == "14366" and p["trading_symbol"] == "IDEA-EQ"
+def test_modify_complete_quick_set_is_still_rejected():
+    with pytest.raises(KotakNeoMappingError, match="does not support"):
+        to_modify_order_params(
+            "1",
+            {
+                "instrument_token": "14366",
+                "exchange_segment": "NSE",
+                "product": "MIS",
+                "trading_symbol": "IDEA-EQ",
+                "quantity": 5,
+            },
+        )
 
 
 def test_modify_order_id_path_no_quick_fields_accepted():
     p = to_modify_order_params("1", {"quantity": 5, "price": 9.5})
     for f in ("instrument_token", "exchange_segment", "product", "trading_symbol"):
         assert f not in p
-
-
-# ---------------------------------------------------------------------------
-# Finding #6 — stock feed sell_quantity is keyed 'sq', not the depth key 'bs'.
-# ---------------------------------------------------------------------------
-
-
-def test_stock_feed_decode_reads_sell_quantity_from_sq():
-    tick = decode_kotak_feed(
-        [
-            {
-                "tk": "11536",
-                "ts": "TCS-EQ",
-                "e": "nse_cm",
-                "name": "sf",
-                "ltp": "4000.5",
-                "bq": "10",
-                "sq": "7",
-            }
-        ]
-    )[0]
-    assert tick["kind"] == "quote"
-    assert tick["sell_quantity"] == 7 and tick["buy_quantity"] == 10
-
-
-def test_stock_feed_decode_ignores_depth_bs_key_for_sell_quantity():
-    # 'bs' is a depth-frame offer-size key; in a stock frame it must NOT be read
-    # as sell_quantity (the pre-fix STOCK_FEED_KEYS bug).
-    tick = decode_kotak_feed(
-        [
-            {
-                "tk": "11536",
-                "ts": "TCS-EQ",
-                "e": "nse_cm",
-                "name": "sf",
-                "ltp": "4000.5",
-                "bs": "99",
-            }
-        ]
-    )[0]
-    assert tick["sell_quantity"] == 0
-
-
-def test_stock_feed_decode_reads_long_name_sell_quantity():
-    # SDK quote_resp_mapper re-keys 'sq' -> 'sell_quantity'; the long name decodes too.
-    tick = decode_kotak_feed(
-        {
-            "type": "quotes",
-            "data": [
-                {
-                    "instrument_token": "11536",
-                    "trading_symbol": "TCS-EQ",
-                    "exchange_segment": "nse_cm",
-                    "last_traded_price": 4000.5,
-                    "sell_quantity": 5,
-                    "buy_quantity": 8,
-                }
-            ],
-        }
-    )[0]
-    assert tick["sell_quantity"] == 5 and tick["buy_quantity"] == 8
 
 
 # ---------------------------------------------------------------------------
@@ -711,22 +1234,64 @@ def test_from_kotak_order_report_extras():
     assert o["tag"] == "FLINT1"
 
 
+@pytest.mark.parametrize(
+    ("broker_product", "generation", "product", "variety", "amo"),
+    [
+        ("CNC", "AMO", "CNC", "amo", True),
+        ("NRML", "NA", "NRML", "regular", False),
+        ("BO", "NA", "MIS", "bracket", False),
+        ("CO", "--", "MIS", "cover", False),
+    ],
+)
+def test_from_kotak_order_retains_authoritative_product_and_generation(
+    broker_product,
+    generation,
+    product,
+    variety,
+    amo,
+):
+    """Removing raw product/generation binding would make signed writes spoofable."""
+    row = {
+        "nOrdNo": "1",
+        "ordSt": "open",
+        "trdSym": "IDEA-EQ",
+        "exSeg": "nse_cm",
+        "trnsTp": "B",
+        "prcTp": "L",
+        "prod": broker_product,
+        "qty": "10",
+        "fldQty": "0",
+        "prc": "9.39",
+        "trgPrc": "0",
+        "dscQty": "0",
+        "vldt": "IOC",
+        "ordGenTp": generation,
+    }
+
+    order = from_kotak_order(row)
+
+    assert order["broker_product"] == broker_product
+    assert order["product"] == product
+    assert order["variety"] == variety
+    assert order["amo"] is amo
+
+
 # ---------------------------------------------------------------------------
 # Limits filters
 # ---------------------------------------------------------------------------
 
 
 def test_limits_params_defaults_and_normalisation():
-    assert to_limits_params() == {"segment": "ALL", "exchange": "ALL", "product": "ALL"}
-    assert to_limits_params("cash", "nse", "mis") == {"segment": "CASH", "exchange": "NSE", "product": "MIS"}
+    assert to_limits_params() == {}
+    assert to_limits_params("all", "all", "all") == {}
 
 
 def test_limits_params_validation():
-    with pytest.raises(KotakNeoMappingError, match="segment"):
+    with pytest.raises(KotakNeoMappingError, match="server-side filters"):
         to_limits_params(segment="EQUITY")
-    with pytest.raises(KotakNeoMappingError, match="exchange"):
-        to_limits_params(exchange="MCX")  # limits exchange filter is NSE/BSE/ALL only
-    with pytest.raises(KotakNeoMappingError, match="product"):
+    with pytest.raises(KotakNeoMappingError, match="server-side filters"):
+        to_limits_params("CASH", "NSE", "MIS")
+    with pytest.raises(KotakNeoMappingError, match="server-side filters"):
         to_limits_params(product="BO")
 
 
@@ -775,8 +1340,8 @@ def test_depth_from_preshaped_sdk_record():
 
 
 def test_depth_from_terse_frame_keys():
-    # Raw HSM depth frame vocabulary (webSocket.md "For Depth"): bp..bp4 bids,
-    # sp..sp4 offers, bq../bs.. sizes, bno/sno order counts.
+    # Legacy terse REST/readback vocabulary: bp..bp4 bids, sp..sp4 offers,
+    # bq../bs.. sizes, and bno/sno order counts.
     rec = {
         "tk": "11536",
         "ts": "TCS-EQ",
@@ -820,156 +1385,533 @@ def test_subscription_flags_modes():
 
 
 # ---------------------------------------------------------------------------
-# HSM market-feed decode
+# v3 historical candles
 # ---------------------------------------------------------------------------
 
-_STOCK_TICK = {
-    "tk": "11536",
-    "ts": "TCS-EQ",
-    "e": "nse_cm",
-    "ltp": "4000.5",
-    "v": "120000",
-    "bp": "4000.0",
-    "sp": "4001.0",
-    "oi": "0",
-    "ltt": "22/01/2025 14:28:16",
-    "name": "sf",
-}
 
-
-def test_decode_feed_stock_frame_wrapped_and_bare():
-    wrapped = {"type": "stock_feed", "data": [_STOCK_TICK]}
-    for frame in (wrapped, [_STOCK_TICK]):
-        ticks = decode_kotak_feed(frame)
-        assert len(ticks) == 1
-        t = ticks[0]
-        assert t["kind"] == "quote" and t["symbol"] == "TCS-EQ" and t["exchange"] == "NSE"
-        assert t["ltp"] == 4000.5 and t["volume"] == 120000
-        assert t["bid"] == 4000.0 and t["ask"] == 4001.0
-        assert t["timestamp"] == "22/01/2025 14:28:16"
-
-
-def test_decode_feed_json_string_frame():
-    ticks = decode_kotak_feed(json.dumps([_STOCK_TICK]))
-    assert len(ticks) == 1 and ticks[0]["token"] == "11536"
-
-
-def test_decode_feed_sdk_long_key_record():
-    # The SDK's quote_resp_mapper re-keys records to the long names from
-    # settings.stock_key_mapping — both vocabularies must decode.
-    ticks = decode_kotak_feed(
+@pytest.mark.parametrize(
+    ("requested", "sdk_label"),
+    [
+        ("1m", "1min"),
+        ("3min", "3min"),
+        ("5", "5min"),
+        ("10m", "10min"),
+        ("15min", "15min"),
+        ("30m", "30min"),
+        ("60min", "60min"),
+        ("1h", "60min"),
+        ("1D", "D"),
+        ("D", "D"),
+        ("1W", "W"),
+        ("W", "W"),
+    ],
+)
+def test_historical_request_maps_supported_labels_without_changing_identity(requested, sdk_label):
+    mapped = to_historical_request(
         {
-            "type": "quotes",
-            "data": [
-                {
-                    "instrument_token": "11536",
-                    "trading_symbol": "TCS-EQ",
-                    "exchange_segment": "nse_cm",
-                    "last_traded_price": 4000.5,
-                    "volume": 120000,
-                    "buy_price": 4000.0,
-                    "sell_price": 4001.0,
-                    "open_interest": 0,
-                    "last_traded_time": "22/01/2025 14:28:16",
-                }
-            ],
+            "symbol": "NIFTY",
+            "exchange": "NSE_INDEX",
+            "interval": requested,
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-20",
         }
     )
-    assert len(ticks) == 1
-    t = ticks[0]
-    assert t["kind"] == "quote" and t["symbol"] == "TCS-EQ" and t["ltp"] == 4000.5
-    assert t["volume"] == 120000 and t["bid"] == 4000.0 and t["ask"] == 4001.0
+
+    assert mapped == {
+        "symbol": "NIFTY",
+        "exchange": "NSE_INDEX",
+        "interval": requested,
+        "sdk_interval": sdk_label,
+        "from_date": "2026-09-01",
+        "to_date": "2026-09-20",
+        "neosymbol": None,
+    }
 
 
-def test_decode_feed_index_frame():
-    ticks = decode_kotak_feed(
-        [
-            {
-                "tk": "Nifty 50",
-                "e": "nse_cm",
-                "name": "if",
-                "iv": "24050.5",
-                "ic": "23990.0",
-                "openingPrice": "24000",
-                "highPrice": "24100",
-                "lowPrice": "23950",
-                "tvalue": "1737536296",
-            }
-        ]
+def test_historical_request_treats_explicit_null_neosymbol_as_omitted():
+    mapped = to_historical_request(
+        {
+            "symbol": "NIFTY",
+            "exchange": "NSE_INDEX",
+            "interval": "1D",
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-20",
+            "neosymbol": None,
+        }
     )
-    assert len(ticks) == 1
-    t = ticks[0]
-    assert t["kind"] == "index" and t["ltp"] == 24050.5 and t["prev_close"] == 23990.0
-    assert t["high"] == 24100.0 and t["timestamp"] == "1737536296"
+    assert mapped["neosymbol"] is None
 
 
-def test_decode_feed_depth_frame_carries_book():
-    ticks = decode_kotak_feed(
-        [
-            {
-                "tk": "11536",
-                "ts": "TCS-EQ",
-                "e": "nse_cm",
-                "name": "dp",
-                "bp": "4000",
-                "bq": "10",
-                "bno1": "2",
-                "sp": "4001",
-                "bs": "5",
-                "sno1": "1",
-            }
-        ]
+@pytest.mark.parametrize(
+    ("start_key", "end_key"),
+    [("start_date", "end_date"), ("from_date", "to_date"), ("start", "end"), ("from", "to")],
+)
+def test_historical_request_accepts_each_documented_date_alias_pair(start_key, end_key):
+    mapped = to_historical_request(
+        {
+            "symbol": "NIFTY",
+            "exchange": "NSE",
+            "interval": "D",
+            start_key: "2026-01-01",
+            end_key: "2026-06-29",
+        }
     )
-    assert len(ticks) == 1
-    t = ticks[0]
-    assert t["kind"] == "depth" and t["bid"] == 4000.0 and t["ask"] == 4001.0
-    assert t["depth"]["bids"][0]["quantity"] == 10
+    assert mapped["from_date"] == "2026-01-01"
+    assert mapped["to_date"] == "2026-06-29"
 
 
-def test_decode_feed_acks_and_garbage_are_empty():
-    assert decode_kotak_feed(json.dumps([{"type": "cn", "msg": "connected"}])) == []
-    assert decode_kotak_feed("Un-Subscribed Successfully!") == []
-    assert decode_kotak_feed({"type": "order_feed", "data": "{}"}) == []
-    assert decode_kotak_feed(None) == []
-    assert decode_kotak_feed([{"request_type": "cn"}]) == []
+def test_historical_request_scans_all_same_value_date_aliases():
+    mapped = to_historical_request(
+        {
+            "symbol": "NIFTY",
+            "exchange": "NSE",
+            "interval": "D",
+            "start_date": "2026-01-01",
+            "from_date": "2026-01-01",
+            "start": "2026-01-01",
+            "from": "2026-01-01",
+            "end_date": "2026-01-02",
+            "to_date": "2026-01-02",
+            "end": "2026-01-02",
+            "to": "2026-01-02",
+        }
+    )
+    assert mapped["from_date"] == "2026-01-01"
+    assert mapped["to_date"] == "2026-01-02"
+
+
+def test_historical_request_rejects_a_malformed_secondary_alias_even_when_primary_is_valid():
+    with pytest.raises(KotakNeoMappingError):
+        to_historical_request(
+            {
+                "symbol": "NIFTY",
+                "exchange": "NSE",
+                "interval": "D",
+                "start_date": "2026-01-01",
+                "from_date": object(),
+                "end_date": "2026-01-02",
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"from_date": "2026-09-02"},
+        {"to_date": "2026-09-19"},
+        {"interval": "2m"},
+        {"start_date": "2026-02-30"},
+        {"end_date": "2026-09-01", "start_date": "2026-09-20"},
+        {"end_date": "2026-10-01"},  # 31 inclusive intraday days
+        {"interval": "D", "start_date": "2026-01-01", "end_date": "2026-06-30"},  # 181 inclusive
+        {"exchange": "MCX"},
+    ],
+)
+def test_historical_request_rejects_conflicts_invalid_ranges_and_unsupported_values(updates):
+    request = {
+        "symbol": "NIFTY",
+        "exchange": "NSE",
+        "interval": "1m",
+        "start_date": "2026-09-01",
+        "end_date": "2026-09-30",
+    }
+    request.update(updates)
+    if "from_date" in updates:
+        request["start_date"] = "2026-09-01"
+    if "to_date" in updates:
+        request["end_date"] = "2026-09-20"
+    with pytest.raises(KotakNeoMappingError):
+        to_historical_request(request)
+
+
+def test_historical_response_maps_exact_seven_column_v3_rows():
+    response = {
+        "status": "success",
+        "interval": "1min",
+        "data": {
+            "candles": [
+                ["2026-08-20T09:15:00+0530", 12009.9, 12019.35, 12001.25, 12001.5, 163275, None],
+                ["2026-08-20T09:16:00+05:30", "12001", "12003", "11998.25", "12001", "0", 0],
+            ]
+        },
+    }
+
+    assert from_kotak_historical(response, expected_interval="1min") == [
+        {
+            "timestamp": "2026-08-20T09:15:00+0530",
+            "open": 12009.9,
+            "high": 12019.35,
+            "low": 12001.25,
+            "close": 12001.5,
+            "volume": 163275,
+        },
+        {
+            "timestamp": "2026-08-20T09:16:00+05:30",
+            "open": 12001.0,
+            "high": 12003.0,
+            "low": 11998.25,
+            "close": 12001.0,
+            "volume": 0,
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, 10],
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, 10, None, "extra"],
+        ["not-a-timestamp", 1, 2, 0.5, 1.5, 10, None],
+        ["2026-08-20T09:15:00+0530", True, 2, 0.5, 1.5, 10, None],
+        ["2026-08-20T09:15:00+0530", 1, float("inf"), 0.5, 1.5, 10, None],
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, -1, None],
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, 1.5, None],
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, True, None],
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, 10, -1],
+        ["2026-08-20T09:15:00+0530", 1, 2, 0.5, 1.5, 10, 1.5],
+    ],
+)
+def test_historical_response_rejects_malformed_or_invented_candle_values(row):
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_historical(
+            {"status": "success", "interval": "1min", "data": {"candles": [row]}},
+            expected_interval="1min",
+        )
+
+
+def test_historical_response_rejects_a_conflicting_interval_identity():
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_historical(
+            {
+                "status": "success",
+                "interval": "5min",
+                "data": {"candles": [["2026-08-20T09:15:00+05:30", 1, 2, 0.5, 1.5, 10, None]]},
+            },
+            expected_interval="1min",
+        )
 
 
 # ---------------------------------------------------------------------------
-# HSI order-feed decode
+# v3 option chain
 # ---------------------------------------------------------------------------
 
-_ORDER_UPDATE = {
-    "nOrdNo": "250122000624384",
-    "ordSt": "complete",
-    "trdSym": "IDEA-EQ",
-    "exSeg": "nse_cm",
-    "trnsTp": "B",
-    "prcTp": "L",
-    "prod": "NRML",
-    "qty": 1,
-    "prc": "9.39",
-    "fldQty": 1,
-    "avgPrc": "9.39",
-}
+
+@pytest.mark.parametrize(
+    ("exchange", "sdk_exchange"),
+    [
+        ("NSE", "nse_fo"),
+        ("NSE_INDEX", "nse_fo"),
+        ("NFO", "nse_fo"),
+        ("BSE", "bse_fo"),
+        ("BSE_INDEX", "bse_fo"),
+        ("BFO", "bse_fo"),
+        ("MCX", "mcx_fo"),
+    ],
+)
+def test_option_request_uses_narrow_derivative_segment_map(exchange, sdk_exchange):
+    mapped = to_option_chain_request(
+        {
+            "underlying": "NIFTY",
+            "exchange": exchange,
+            "expiry": "2026-06-23",
+            "instrument_type": "option",
+            "count": 40,
+        }
+    )
+    assert mapped == {
+        "underlying": "NIFTY",
+        "exchange": exchange,
+        "sdk_exchange": sdk_exchange,
+        "expiry": "2026-06-23",
+        "instrument_type": "option",
+        "count": 40,
+    }
 
 
-def test_decode_order_feed_wrapped_json_string():
-    frame = {"type": "order_feed", "data": json.dumps({"data": _ORDER_UPDATE})}
-    update = decode_kotak_order_feed(frame)
-    assert update is not None
-    assert update["orderid"] == "250122000624384" and update["status"] == "complete"
-    assert update["action"] == "BUY" and update["exchange"] == "NSE"
-    assert update["raw"]["nOrdNo"] == "250122000624384"
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"exchange": "CDS"},
+        {"exchange": "UNKNOWN"},
+        {"instrument_type": "fut"},
+        {"instrument_type": "future"},
+        {"expiry": ""},
+        {"expiry": "23-06-2026"},
+        {"expiry": "2026-02-30"},
+        {"count": True},
+        {"count": 0},
+        {"count": -10},
+        {"count": 15},
+    ],
+)
+def test_option_request_rejects_unknown_segments_futures_and_invalid_count(updates):
+    request = {"underlying": "NIFTY", "exchange": "NFO", "instrument_type": "option", "count": 40}
+    request.update(updates)
+    with pytest.raises(KotakNeoMappingError):
+        to_option_chain_request(request)
 
 
-def test_decode_order_feed_bare_dict():
-    update = decode_kotak_order_feed(_ORDER_UPDATE)
-    assert update is not None and update["filled_quantity"] == "1"
+def test_option_request_defaults_the_optional_sdk_fields_to_an_option_chain():
+    mapped = to_option_chain_request({"symbol": "NIFTY", "exchange": "NSE_INDEX"})
+    assert mapped["underlying"] == "NIFTY"
+    assert mapped["instrument_type"] == "option"
+    assert mapped["expiry"] is None
+    assert mapped["count"] is None
 
 
-def test_decode_order_feed_acks_and_garbage_are_none():
-    assert decode_kotak_order_feed({"type": "order_feed", "data": '{"type": "cn"}'}) is None
-    assert decode_kotak_order_feed('{"type": "CONNECTION"}') is None
-    assert decode_kotak_order_feed("not-json") is None
-    assert decode_kotak_order_feed(None) is None
-    assert decode_kotak_order_feed({"hello": "world"}) is None
+def test_option_request_treats_explicit_null_sdk_defaults_as_omitted():
+    mapped = to_option_chain_request(
+        {
+            "symbol": "NIFTY",
+            "exchange": "NSE_INDEX",
+            "expiry": None,
+            "expiry_date": None,
+            "instrument_type": None,
+        }
+    )
+    assert mapped["instrument_type"] == "option"
+    assert mapped["expiry"] is None
+
+
+def test_option_request_ignores_null_expiry_alias_when_another_alias_is_supplied():
+    mapped = to_option_chain_request(
+        {
+            "symbol": "NIFTY",
+            "exchange": "NSE_INDEX",
+            "expiry": None,
+            "expiry_date": "2026-06-23",
+        }
+    )
+    assert mapped["expiry"] == "2026-06-23"
+
+
+def test_option_request_ignores_null_underlying_alias_when_symbol_is_supplied():
+    mapped = to_option_chain_request(
+        {
+            "underlying": None,
+            "symbol": "NIFTY",
+            "exchange": "NSE_INDEX",
+        }
+    )
+    assert mapped["underlying"] == "NIFTY"
+
+
+def test_option_request_rejects_only_null_underlying_aliases():
+    with pytest.raises(KotakNeoMappingError):
+        to_option_chain_request({"underlying": None, "symbol": None, "exchange": "NSE_INDEX"})
+
+
+def test_option_request_rejects_conflicting_underlying_aliases():
+    with pytest.raises(KotakNeoMappingError):
+        to_option_chain_request({"underlying": "NIFTY", "symbol": "BANKNIFTY", "exchange": "NFO"})
+
+
+def test_option_response_merges_legs_by_numeric_strike_and_maps_only_observed_fields():
+    mapped = from_kotak_option_chain(
+        _official_option_chain_response(),
+        underlying="NIFTY",
+        exchange="NSE_INDEX",
+        sdk_exchange="nse_fo",
+        requested_expiry="2026-06-23",
+    )
+
+    assert mapped == {
+        "underlying": "NIFTY",
+        "exchange": "NSE_INDEX",
+        "expiry": "2026-06-23",
+        "expiry_date": "2026-06-23",
+        "strikes": [
+            {
+                "strike_price": 22250.0,
+                "ce_instrument_id": "nse_fo|71472",
+                "ce_ltp": 166.75,
+                "ce_volume": 225431505,
+                "ce_oi": 10715645,
+                "pe_instrument_id": "nse_fo|71473",
+                "pe_ltp": 99.25,
+                "pe_volume": 100,
+                "pe_oi": 0,
+            },
+            {"strike_price": 22300.0, "pe_instrument_id": "nse_fo|71475"},
+        ],
+    }
+    assert "underlying_key" not in mapped
+    assert "spot_price" not in mapped
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("common_data", "unlSymbol"), "BANKNIFTY"),
+        (("common_data", "exSeg"), "bse_fo"),
+        (("common_data", "expiryDt"), "2026-06-30"),
+        (("common_data", "expiryDt"), None),
+        (("common_data", "expiryDt"), ""),
+        (("call", 0, "instrument", "optionType"), "PE"),
+        (("call", 0, "instrument", "neoSymbol"), "bse_fo|71472"),
+        (("call", 0, "instrument", "neoSymbol"), "nse_fo|0"),
+        (("call", 0, "instrument", "strikePrice"), 0),
+        (("call", 0, "instrument", "strikePrice"), float("inf")),
+    ],
+)
+def test_option_response_rejects_common_and_leg_identity_mismatches(path, value):
+    response = _official_option_chain_response()
+    target = response["data"]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+def test_option_response_rejects_duplicate_numeric_strike_within_one_side():
+    response = _official_option_chain_response()
+    duplicate = deepcopy(response["data"]["call"][0])
+    duplicate["instrument"]["neoSymbol"] = "nse_fo|99999"
+    duplicate["instrument"]["strikePrice"] = "22250.00"
+    response["data"]["call"].append(duplicate)
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+@pytest.mark.parametrize(
+    ("container", "field", "value"),
+    [
+        ("quote", "ltp", True),
+        ("quote", "ltp", float("nan")),
+        ("quote", "volume", -1),
+        ("quote", "volume", 1.5),
+        ("openInterest", "current", -1),
+        ("openInterest", "current", 1.5),
+        ("openInterest", "current", True),
+    ],
+)
+def test_option_response_rejects_invalid_observed_market_values(container, field, value):
+    response = _official_option_chain_response()
+    response["data"]["call"][0][container][field] = value
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+def test_option_response_rejects_duplicate_instrument_ids_across_sides():
+    response = _official_option_chain_response()
+    response["data"]["put"][0]["instrument"]["neoSymbol"] = "nse_fo|71472"
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+def test_option_response_rejects_strikes_that_collide_when_published_as_float():
+    response = _official_option_chain_response()
+    response["data"]["call"][0]["instrument"]["strikePrice"] = "9007199254740992"
+    response["data"]["put"][0]["instrument"]["strikePrice"] = "9007199254740993"
+    response["data"]["put"] = response["data"]["put"][:1]
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+def test_option_response_rejects_a_single_strike_that_changes_when_published_as_float():
+    response = _official_option_chain_response()
+    response["data"]["call"][0]["instrument"]["strikePrice"] = "9007199254740993"
+    response["data"]["put"] = []
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+def test_market_data_mapping_never_invokes_untrusted_conversion_hooks():
+    class Hostile:
+        def __str__(self):
+            raise AssertionError("__str__ must not run")
+
+        def __float__(self):
+            raise AssertionError("__float__ must not run")
+
+        def __bool__(self):
+            raise AssertionError("__bool__ must not run")
+
+    hostile = Hostile()
+    with pytest.raises(KotakNeoMappingError):
+        to_historical_request(
+            {
+                "symbol": hostile,
+                "exchange": "NSE",
+                "interval": "D",
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-02",
+            }
+        )
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_historical(
+            {
+                "status": "success",
+                "interval": "D",
+                "data": {"candles": [["2026-01-01T00:00:00+05:30", hostile, 2, 1, 1.5, 10, None]]},
+            },
+            expected_interval="D",
+        )
+    response = _official_option_chain_response()
+    response["data"]["call"][0]["instrument"]["strikePrice"] = hostile
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("１２３", id="unicode-digits"),
+        pytest.param("\ud800", id="surrogate"),
+        pytest.param(10**5000, id="huge-integer"),
+    ],
+)
+def test_market_data_rejects_non_ascii_surrogate_and_unbounded_numeric_values(value):
+    response = _official_option_chain_response()
+    response["data"]["call"][0]["instrument"]["strikePrice"] = value
+    with pytest.raises(BrokerReadResponseInvalid):
+        from_kotak_option_chain(
+            response,
+            underlying="NIFTY",
+            exchange="NSE_INDEX",
+            sdk_exchange="nse_fo",
+            requested_expiry="2026-06-23",
+        )

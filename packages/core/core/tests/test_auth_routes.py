@@ -66,6 +66,103 @@ class TestSetupEndpoint:
         assert resp.status_code == 409
 
 
+class TestSetupVault:
+    """First-run vault open. The master password is never returned."""
+
+    def test_writes_a_missing_master_password(self, client, tmp_path, monkeypatch):
+        import flinttrade_core.app as app_mod
+
+        c, _svc = client
+        saved = app_mod._MASTER_PASSWORD
+        vault = tmp_path / "vault-ws"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        try:
+            setup = c.post("/v1/auth/setup", json={
+                "username": "operator",
+                "email": "operator@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "",
+            }, headers={"Content-Type": "application/json"})
+            assert setup.status_code == 201
+            token = setup.get_json()["data"]["token"]
+            secret = "VaultKey123!"
+            resp = c.post(
+                "/v1/auth/setup/vault",
+                json={"master_password": secret},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+            )
+            assert resp.status_code == 200
+            assert resp.get_json()["data"] == {"opened": True, "already_present": False}
+            assert secret not in resp.get_data(as_text=True)
+            assert (vault / "master_password").read_text(encoding="utf-8") == secret
+        finally:
+            app_mod._MASTER_PASSWORD = saved
+
+    def test_does_not_overwrite_an_open_vault(self, client, tmp_path, monkeypatch):
+        import flinttrade_core.app as app_mod
+
+        c, _svc = client
+        saved = app_mod._MASTER_PASSWORD
+        vault = tmp_path / "vault-ws"
+        vault.mkdir()
+        existing = "already-open-secret"
+        (vault / "master_password").write_text(existing, encoding="utf-8")
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        try:
+            setup = c.post("/v1/auth/setup", json={
+                "username": "operator",
+                "email": "operator@example.com",
+                "password": "StrongP@ss123!",
+                "pin": "",
+            }, headers={"Content-Type": "application/json"})
+            token = setup.get_json()["data"]["token"]
+            resp = c.post(
+                "/v1/auth/setup/vault",
+                json={"master_password": "DifferentKey123!"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+            )
+            assert resp.status_code == 200
+            assert resp.get_json()["data"] == {"opened": True, "already_present": True}
+            assert existing not in resp.get_data(as_text=True)
+            assert (vault / "master_password").read_text(encoding="utf-8") == existing
+        finally:
+            app_mod._MASTER_PASSWORD = saved
+
+    def test_rejects_a_daily_login_token_and_a_short_password(self, client, tmp_path, monkeypatch):
+        c, _svc = client
+        vault = tmp_path / "vault-ws"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        setup = c.post("/v1/auth/setup", json={
+            "username": "operator",
+            "email": "operator@example.com",
+            "password": "StrongP@ss123!",
+            "pin": "",
+        }, headers={"Content-Type": "application/json"})
+        token = setup.get_json()["data"]["token"]
+        denied = c.post(
+            "/v1/auth/setup/vault",
+            json={"master_password": "VaultKey123!"},
+            headers=_session_headers(),
+        )
+        assert denied.status_code == 401
+        short = c.post(
+            "/v1/auth/setup/vault",
+            json={"master_password": "short"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+        )
+        assert short.status_code == 400
+        assert not (vault / "master_password").exists()
+
+
 def _enable_totp(svc, password: str = "StrongP@ss123!") -> str:
     """Confirm authenticator enrolment and return the live TOTP code used."""
     import pyotp

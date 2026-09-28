@@ -10,9 +10,14 @@ export interface AccountSetupInput {
 export interface AccountSetupResult {
   totpUri: string;
   backupCodes: string[];
-  /** Explore-mode session token minted at account creation so the rest of the
-   * setup wizard (broker connect, mode select) is authenticated. */
+  /** Explore-mode session token minted at account creation so the vault step
+   * and any optional setup the operator chooses are authenticated. */
   token: string;
+}
+
+export interface VaultOpenResult {
+  opened: true;
+  alreadyPresent: boolean;
 }
 
 export type AccountSetupErrorKind = "account-exists" | "network" | "server";
@@ -101,6 +106,45 @@ export async function setupFlintTradeAccount(input: AccountSetupInput): Promise<
   const token = typeof payload.data.token === "string" ? payload.data.token : "";
 
   return { totpUri, backupCodes, token };
+}
+
+/** Open the credential vault. Never returns the master password. */
+export async function openFlintTradeVault(masterPassword: string): Promise<VaultOpenResult> {
+  let response: Response;
+  try {
+    response = await fetch(`${getBase()}/v1/auth/setup/vault`, {
+      method: "POST",
+      headers: buildHeaders(true),
+      body: JSON.stringify({ master_password: masterPassword }),
+    });
+  } catch {
+    throw new AccountSetupError(
+      "Cannot reach server. Is the FlintTrade backend running?",
+      "network",
+    );
+  }
+
+  const payload = await parseJsonBody(response);
+  if (!response.ok) {
+    throw new AccountSetupError(
+      extractMessage(payload) ?? httpMessage(response),
+      "server",
+      response.status,
+    );
+  }
+
+  if (!isRecord(payload) || !isRecord(payload.data) || payload.data.opened !== true) {
+    throw new AccountSetupError(
+      "FlintTrade backend returned an unexpected vault response.",
+      "server",
+      response.status,
+    );
+  }
+
+  return {
+    opened: true,
+    alreadyPresent: payload.data.already_present === true,
+  };
 }
 
 /** Confirm optional authenticator enrolment with a live TOTP code. */

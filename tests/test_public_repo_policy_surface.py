@@ -138,10 +138,23 @@ def test_monday_003_ai_live_read_acceptance_lock() -> None:
     plan = _read(ROOT / "PLAN.md")
 
     for text in (guide, changelog, plan):
-        assert "FT-MONDAY-003" in text
         assert "native live-read feeds" in text
         assert "Suggest stays labelled illustrative" in text
         assert "profitable alphas are not a release criterion" in text
+
+    # Operator-facing docs use product language. Tracking IDs stay in maintainer docs.
+    operator_docs = (
+        ROOT / "docs" / "USER_GUIDE.md",
+        ROOT / "readme.md",
+        ROOT / "docs" / "product-modes.mdx",
+        ROOT / "docs" / "COMPATIBILITY.md",
+        ROOT / "docs" / "setup" / "QUICKSTART.md",
+        ROOT / "docs" / "setup" / "static-ip-setup.md",
+    )
+    for path in operator_docs:
+        assert "FT-MONDAY-" not in _read(path), path
+    assert "FT-MONDAY-003" in changelog
+    assert "FT-MONDAY-003" in plan
 
     assert "never shows green **Connected** without a real LLM" in guide
     assert "never shows green **Connected** without a real LLM" in changelog

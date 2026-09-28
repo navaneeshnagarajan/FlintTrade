@@ -39,6 +39,7 @@ import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillContent } from "@/hooks/useSkillContent";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { RouteBanner } from "@/components/help/RouteBanner";
+import { PracticeLaterSetup } from "@/routes/SetupAccountRoute";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
 import type { ToolId } from "@/types/widgets";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
@@ -763,6 +764,7 @@ export default function TerminalRoute() {
     <CinematicLayout mode="focused">
     <div className="relative h-full flex flex-col text-text-primary overflow-hidden select-none">
       <h1 className="sr-only">Trade Workspace</h1>
+      <PracticeLaterSetup />
       {layoutPersistenceError && (
         <p
           role="alert"

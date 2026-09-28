@@ -172,6 +172,7 @@ DHAN_CAPABILITIES = Capabilities(
     rate_limit_non_trading_per_sec=20,
     order_modifications_per_order=25,
     algo_tag_required=True,
+    algo_tag_supported=True,
     # Intraday history reaches ~5 years back (historical-data.md "for last 5
     # years"); the documented 90-day cap is the per-REQUEST date range, not the
     # lookback, so it is noted here, not encoded as the lookback. Dhan documents

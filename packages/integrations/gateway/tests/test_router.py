@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from flinttrade_core.exceptions import SafetyBypassError
+from flinttrade_core.exceptions import BrokerError, SafetyBypassError
 from flinttrade_engine.local_state_provider import (
     DISPATCH_OUTCOME_UNKNOWN,
     OrderLifecycleLedger,
@@ -106,6 +106,32 @@ class _CancellingAdapter(_FakeAdapter):
 
     async def modify_forever(self, session, order_id, changes, *, _router_token=None):
         await self._cancel("modify_forever", _router_token)
+
+
+class _EmergencyPreflightAdapter(_FakeAdapter):
+    def __init__(self, events: list[str], *, fail: bool = True) -> None:
+        super().__init__()
+        self.events = events
+        self.fail = fail
+        self.preflight_payloads: list[object] = []
+
+    async def preflight_emergency_write(self, session, *, verb, payload, _router_token=None):
+        if _router_token is not _ROUTER_TOKEN:
+            raise SafetyBypassError("adapter emergency preflight called outside BrokerRouter")
+        self.events.append(f"preflight:{verb}")
+        self.preflight_payloads.append(payload)
+        if self.fail:
+            raise BrokerError("snapshot changed")
+
+    async def cancel_order(self, session, order_id, *, _router_token=None):
+        self.events.append("adapter:cancel_order")
+        await super().cancel_order(session, order_id, _router_token=_router_token)
+
+    async def place_reducing_order(self, session, payload, *, _router_token=None):
+        if _router_token is not _ROUTER_TOKEN:
+            raise SafetyBypassError("adapter write method called outside BrokerRouter")
+        self.events.append("adapter:place_reducing_order")
+        return "EXIT-1"
 
 
 class _LifecycleStore:
@@ -734,6 +760,95 @@ async def test_cancel_order_dispatches_with_valid_context(*, backend_lease_facto
         safety_ctx=ctx,
     )
     assert adapter.cancelled == ["OID-9"]
+
+
+@pytest.mark.parametrize("path", ["cancel", "execute"])
+async def test_emergency_preflight_runs_on_detached_signed_payload_before_invocation_callback(
+    path: str,
+    backend_lease_factory,
+) -> None:
+    events: list[str] = []
+    lifecycle = _LifecycleStore(events)
+    adapter = _EmergencyPreflightAdapter(events)
+    router = _router(adapter, lifecycle_store=lifecycle, backend_lease_factory=backend_lease_factory)
+    request_ctx = _request_ctx(intent_source=EMERGENCY_INTENT_SOURCE)
+    invoked: list[bool] = []
+    if path == "cancel":
+        payload = {
+            "_op": "cancel_order",
+            "order_id": "OID-9",
+            "metadata": {"digest": "a" * 64},
+        }
+        context = _mint(
+            payload,
+            backend_lease_factory=backend_lease_factory,
+            intent_source=EMERGENCY_INTENT_SOURCE,
+        )
+        dispatch = router.cancel_order(
+            request_ctx,
+            adapter_id="dhan",
+            account_id="acct-1",
+            order=payload,
+            order_id="OID-9",
+            safety_ctx=context,
+            on_adapter_invoke=lambda: invoked.append(True),
+        )
+    else:
+        payload = {
+            "_op": "place_reducing_order",
+            "symbol": "NIFTY",
+            "quantity": "1",
+            "metadata": {"digest": "a" * 64},
+        }
+        context = _mint(
+            payload,
+            backend_lease_factory=backend_lease_factory,
+            intent_source=EMERGENCY_INTENT_SOURCE,
+        )
+        dispatch = router.execute_gated(
+            request_ctx,
+            verb="place_reducing_order",
+            payload=payload,
+            safety_ctx=context,
+            adapter_id="dhan",
+            account_id="acct-1",
+            on_adapter_invoke=lambda: invoked.append(True),
+        )
+
+    with pytest.raises(BrokerError, match="snapshot changed"):
+        await dispatch
+
+    assert invoked == []
+    assert len(adapter.preflight_payloads) == 1
+    seen = adapter.preflight_payloads[0]
+    assert seen == payload and seen is not payload and seen["metadata"] is not payload["metadata"]
+    assert not adapter.cancelled
+    assert not any(event.startswith("adapter:") for event in events)
+    assert events == [
+        f"prepare:{'cancel_order' if path == 'cancel' else 'place_reducing_order'}",
+        f"preflight:{'cancel_order' if path == 'cancel' else 'place_reducing_order'}",
+        "failed-before:BrokerError",
+    ]
+
+
+async def test_normal_cancel_does_not_run_emergency_preflight(*, backend_lease_factory) -> None:
+    events: list[str] = []
+    adapter = _EmergencyPreflightAdapter(events)
+    router = _router(adapter, backend_lease_factory=backend_lease_factory)
+    payload = {"_op": "cancel", "order_id": "OID-9"}
+
+    await router.cancel_order(
+        _request_ctx(),
+        adapter_id="dhan",
+        account_id="acct-1",
+        order=payload,
+        order_id="OID-9",
+        safety_ctx=_mint(payload, backend_lease_factory=backend_lease_factory),
+    )
+
+    assert adapter.preflight_payloads == []
+    assert adapter.cancelled == ["OID-9"]
+    assert events == ["adapter:cancel_order"]
 
 
 @pytest.mark.parametrize(

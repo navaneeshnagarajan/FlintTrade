@@ -7,9 +7,15 @@ vi.mock("../SetupBackendGate", () => ({
 }));
 
 vi.mock("../SetupAccountRoute", () => ({
-  default: ({ requestedMode, requestedStep }: { requestedMode?: string; requestedStep?: number }) => (
+  default: ({
+    requestedStep,
+    requestedOptional,
+  }: {
+    requestedStep?: number;
+    requestedOptional?: string;
+  }) => (
     <output aria-label="Canonical setup intent">
-      {JSON.stringify({ requestedMode, requestedStep })}
+      {JSON.stringify({ requestedStep, requestedOptional })}
     </output>
   ),
 }));
@@ -28,16 +34,26 @@ function renderCanonical(entry: string) {
 }
 
 describe("CanonicalSetupRoute deep links", () => {
-  it("passes a valid selected trading mode and named step to the authoritative wizard", () => {
-    expect(renderCanonical("/setup?mode=practice&step=mode#mode")).toHaveTextContent(
-      JSON.stringify({ requestedMode: "practice", requestedStep: 6 }),
+  it("passes the Practice desk as the last required step", () => {
+    expect(renderCanonical("/setup?step=practice#practice")).toHaveTextContent(
+      JSON.stringify({ requestedStep: 2 }),
     );
   });
 
-  it("uses a valid hash-only setup step deep link", () => {
-    expect(renderCanonical("/setup#connection")).toHaveTextContent(
-      JSON.stringify({ requestedStep: 3 }),
+  it("maps a legacy mode link onto the Practice desk step", () => {
+    expect(renderCanonical("/setup?step=mode#mode")).toHaveTextContent(
+      JSON.stringify({ requestedStep: 2 }),
     );
+  });
+
+  it("uses a broker hash as an optional panel, not a required step", () => {
+    expect(renderCanonical("/setup#connection")).toHaveTextContent(
+      JSON.stringify({ requestedOptional: "broker" }),
+    );
+  });
+
+  it("ignores a Live mode deep link", () => {
+    expect(renderCanonical("/setup?mode=live&step=6")).toHaveTextContent("{}");
   });
 
   it("ignores invalid mode and step values", () => {

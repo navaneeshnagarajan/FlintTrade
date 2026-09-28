@@ -40,7 +40,7 @@ describe("mondayReadChrome", () => {
       read_smoke_ok: true,
     });
     expect(neo).toContain(CONNECTED_READ_LABEL);
-    expect(neo).toContain(API_SMOKE_LABEL);
+    expect(neo).not.toContain(API_SMOKE_LABEL);
     expect(neo).toContain(NEO_OPERATOR_COPY);
     expect(neo.toLowerCase()).not.toContain("practice");
     expect(neo.toLowerCase()).not.toContain("placeable");

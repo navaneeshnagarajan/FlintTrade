@@ -195,7 +195,9 @@ def quarantine_native_candidate(candidate: NativeSessionCandidate) -> None:
 
 async def verify_native_session(adapter: Any, session: Any) -> str | None:
     """Probe an unpublished payload; this function never mutates a registry."""
-    reader = getattr(adapter, "funds", None)
+    reader = getattr(adapter, "liveness", None)
+    if not callable(reader):
+        reader = getattr(adapter, "funds", None)
     if not callable(reader):
         return None
     try:

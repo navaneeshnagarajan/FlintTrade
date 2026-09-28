@@ -301,6 +301,7 @@ INDMONEY_CAPABILITIES = Capabilities(
     order_modifications_per_order=25,
     # algo_id is a mandatory order field (99999 NSE / 9999999999999999 BSE).
     algo_tag_required=True,
+    algo_tag_supported=True,
     # API access is free; execution brokerage is a flat ₹5 per order.
     cost_paid=False,
     cost_inr_per_month=0,

@@ -128,8 +128,12 @@ zero provider calls until cutover onto the in-process `BrokerReadPort`;
 catalogue and vault-backed account-list GETs stay metadata only). The Brokers screen will
 fail rather than connect. Dhan, Upstox, and Kotak Neo remain evidence-gated as
 connectable in the catalogue; Kotak Neo is Connected (read) / API smoke only
-on FT-MONDAY-002 — Live place fail-closed; Neo has no sandbox. That is not a
-working native HTTP or UX path. INDmoney is read-verified and its fail-closed
+— Live place fail-closed; Neo has no sandbox. That is not a
+working native HTTP or UX path. Neo's v3 async feed lifecycle has local
+synthetic coverage, while its recorded broker-account evidence remains
+non-funded REST reads; live-account/market-hours feed, funded-order,
+Live-promotion, and
+cross-platform proof are still open. INDmoney is read-verified and its fail-closed
 emergency planner is locally verified, but it stays "coming soon" until
 restart-time regular/smart-parent cancellation can be resolved authoritatively,
 a broker-atomic reduce-only close primitive exists, and a funded/live-market

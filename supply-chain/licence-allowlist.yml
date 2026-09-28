@@ -24,31 +24,6 @@ allowlist:
   - "Unlicense"
   - "0BSD"
   - "Python-2.0"            # required for cpython stdlib bindings (e.g. decimal/distutils-fork wheels)
-  # Operator-cleared broker SDKs. FlintTrade is personal-use, self-hosted, single-
-  # operator software (operator == user == data principal == the one running the
-  # AGPL deployment). Broker API client SDKs are published by the brokers expressly
-  # for their own customers to access their own accounts; the operator has
-  # determined they are available for that use regardless of a missing or non-SPDX
-  # upstream licence declaration. This LicenseRef is ONLY for such broker SDKs
-  # pinned in brokers.lock (e.g. Kotak's neo-api-client, which ships no LICENSE
-  # file) — NOT a blanket allowance: every non-broker dependency still needs a real
-  # allowlisted SPDX licence above.
-  #
-  # 2026-07-06 maintainer reaffirmation: the Kotak Neo API is public and the broker
-  # actively encourages building on it, so the operator USE-clearance stands and the
-  # native adapter is fully legitimate when the operator installs the SDK locally.
-  # DISTINCT act — REDISTRIBUTION: bundling the SDK inside published desktop
-  # installers ships it to OTHER people, which a use-clearance does not authorise
-  # while the upstream repo carries no LICENSE file (all-rights-reserved by default,
-  # confirmed 2026-07-06: GitHub reports license=null, no LICENSE in the repo root).
-  # So neo_api_client stays EXCLUDED from published desktop shell installers.
-  # The operator-directed source bootstrap installs it locally from the exact
-  # brokers.lock-pinned upstream commit as part of the operator-owned checkout;
-  # FlintTrade does not embed or redistribute that SDK in an installer. This local
-  # install relies on the operator USE-clearance above. Revisit installer bundling
-  # only if Kotak adds a redistribution licence (MIT/Apache) or grants explicit
-  # bundling terms.
-  - "LicenseRef-operator-cleared-broker-sdk"
 
 # Explicit denylist for clarity. The gate is the positive allowlist check; this
 # denylist is documentation AND a hard fail if a dep declares one of these.
