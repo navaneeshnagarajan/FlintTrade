@@ -6,19 +6,21 @@
  * Mode store or from the unlock response.
  *
  *   practice → Unlock Practice desk
- *   explore  → Unlock Connected (read) desk
  *   live     → Unlock Live desk
+ *
+ * `explore` is the sample-data session. It has no desk name here, so the
+ * lock screen keeps the plain Locked heading and Unlock button. Connected
+ * (read) is a broker status, not a session mode claim, so it is not named.
  */
 
 const UNLOCK_DESK_LABEL = {
   practice: "Unlock Practice desk",
-  explore: "Unlock Connected (read) desk",
   live: "Unlock Live desk",
 } as const;
 
-type SessionMode = keyof typeof UNLOCK_DESK_LABEL;
+type NamedSessionMode = keyof typeof UNLOCK_DESK_LABEL;
 
-function sessionModeClaim(token: string | null | undefined): SessionMode | null {
+function sessionModeClaim(token: string | null | undefined): string | null {
   if (!token) return null;
   const segment = token.split(".")[1];
   if (!segment) return null;
@@ -28,16 +30,23 @@ function sessionModeClaim(token: string | null | undefined): SessionMode | null 
       .replace(/_/g, "/")
       .padEnd(Math.ceil(segment.length / 4) * 4, "=");
     const payload = JSON.parse(atob(padded)) as { mode?: unknown };
-    const mode = payload.mode;
-    if (mode === "practice" || mode === "explore" || mode === "live") return mode;
-    return null;
+    return typeof payload.mode === "string" ? payload.mode : null;
   } catch {
     return null;
   }
 }
 
-/** Operator label for the locked session, or null when the claim cannot be read. */
+/**
+ * Operator label for a Practice or Live session.
+ *
+ * Returns null for a sample-data (`explore`) session, and when the claim
+ * cannot be read. Callers then keep the plain Locked heading and Unlock button.
+ */
 export function unlockDeskLabel(token: string | null | undefined): string | null {
   const mode = sessionModeClaim(token);
-  return mode ? UNLOCK_DESK_LABEL[mode] : null;
+  if (mode === "practice" || mode === "live") {
+    const named: NamedSessionMode = mode;
+    return UNLOCK_DESK_LABEL[named];
+  }
+  return null;
 }

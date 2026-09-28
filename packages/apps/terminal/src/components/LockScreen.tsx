@@ -188,11 +188,9 @@ export function LockScreen() {
           <div className="p-3 rounded-full bg-surface-card border border-border-default">
             <Lock className="size-5 text-text-muted" />
           </div>
-          {deskLabel ? (
-            <h1 className="text-sm font-medium text-text-primary">{deskLabel}</h1>
-          ) : (
-            <p className="text-sm text-text-secondary">Locked</p>
-          )}
+          <h1 className="text-sm font-medium text-text-primary">
+            {deskLabel ?? "Locked"}
+          </h1>
           <p className="text-sm text-text-secondary">
             <span className="text-text-primary font-medium">{displayName}</span>
           </p>

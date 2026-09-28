@@ -416,13 +416,12 @@ describe("LoginRoute", () => {
 
   it("names the unlock button from the session Mode", () => {
     modeState.mode = "practice";
-    const cases = [
+    const named = [
       ["practice", "Unlock Practice desk"],
-      ["explore", "Unlock Connected (read) desk"],
       ["live", "Unlock Live desk"],
     ] as const;
 
-    for (const [mode, label] of cases) {
+    for (const [mode, label] of named) {
       Object.assign(authState, {
         status: "pin-required",
         token: null,
@@ -433,6 +432,19 @@ describe("LoginRoute", () => {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
       view.unmount();
     }
+
+    // explore is sample data. Connected (read) is not a session mode.
+    Object.assign(authState, {
+      status: "pin-required",
+      token: null,
+      reauthToken: sessionJwt("explore"),
+      username: "testuser",
+    });
+    const view = render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+    expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /connected \(read\)/i })).not.toBeInTheDocument();
+    view.unmount();
+
     expect(mockSetMode).not.toHaveBeenCalled();
     expect(modeState.mode).toBe("practice");
   });

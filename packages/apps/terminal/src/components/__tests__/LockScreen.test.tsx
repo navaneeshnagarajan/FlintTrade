@@ -112,18 +112,25 @@ describe("LockScreen", () => {
   it("names the desk it will reopen from the session Mode", () => {
     // The Mode store says Live. The label must follow the session claim.
     currentMode = "live";
-    const cases = [
+    const named = [
       ["practice", "Unlock Practice desk"],
-      ["explore", "Unlock Connected (read) desk"],
       ["live", "Unlock Live desk"],
     ] as const;
 
-    for (const [mode, label] of cases) {
+    for (const [mode, label] of named) {
       Object.assign(authState, { token: null, reauthToken: sessionJwt(mode) });
       const view = render(<LockScreen />);
       expect(screen.getByRole("heading", { name: label })).toBeInTheDocument();
       view.unmount();
     }
+
+    // explore is sample data. Connected (read) is not a session mode.
+    Object.assign(authState, { token: null, reauthToken: sessionJwt("explore") });
+    const view = render(<LockScreen />);
+    expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
+    expect(screen.queryByText(/connected \(read\)/i)).not.toBeInTheDocument();
+    view.unmount();
+
     expect(setMode).not.toHaveBeenCalled();
     expect(currentMode).toBe("live");
   });
