@@ -454,14 +454,20 @@ a Live feed.
 Compact on a desk Trade viewport (~1280 and wider) keeps chart, order pad,
 and positions primary; the ticker strip, full tool ribbon, and watchlist /
 indices / advanced tools start collapsed behind **Watchlist & tools** /
-**Desk tools**. Selecting Compact again re-collapses that disclosure.
+**Desk tools**. **Quick Settings** stays on the TopBar so density and theme
+remain reachable. Selecting Compact again re-collapses that disclosure.
 Phone layouts are unchanged.
 
 **Desk chrome (FT-UX-002).** The desk uses one TopBar and one scrolling
 ticker strip. TopBar keeps Mode, session/status, and overflow —
 it is not a second quote rail, so dual index slots in TopBar are gone.
-Settings and Tools collapse to one Tools overflow menu plus at most one
-primary Settings entry (no triple chrome). The flex shell is TopBar,
+**Tools → Quick Settings** opens density, theme, and similar controls
+without leaving the desk. **Tools → Settings** opens the full
+`/settings` route for deep pages (Monitoring, brokers, auth). There is
+no separate Settings gear. When Compact Trade collapses the tool
+ribbon, Quick Settings stays on the TopBar; expanding desk tools puts
+it back in the Tools menu. A desk that offers only full Settings, with
+Quick Settings removed, fails this bar. The flex shell is TopBar,
 then the operator status strip when one is showing, then the Mode
 honesty line, then the ticker strip, then the route body. Trade uses
 that shell first; the same shell then rolls to Invest, Automate, Learn,
