@@ -106,16 +106,40 @@ available." An uncertain answer, including an empty note, clamps in
 Practice and denies in Live. It is not a hard reject. The Practice server
 reason is "Laya is uncertain. Quantity stays inside the tighter limit."
 The Live server reason is "Laya is uncertain. Live stays closed." The desk
-does not auto-place. Order Pad and Quick Trade show "Not placed. Laya
-allows up to N." with Place N and Cancel. A
-decision that omits `revision` or `sha256` is Down with `identity_absent`
-("Decision has no revision") unless install or start already verified the
-weight file. A health document that omits the digest is Ready after that
-check. If the check is missing, the chip reason is `unverified`
-("Can't verify the model"). `wrong_revision` ("Wrong model revision") is
-only a real mismatch. Stopping the sidecar records Down
+does not auto-place. A clamp is only when the requested quantity is
+greater than the allowed one. Order Pad and Quick Trade show "Not placed.
+Laya allows up to N." with Place N and Cancel. Place 1 on "Not placed.
+Laya allows up to 1." places, because that request is already at the
+allowed quantity.
+
+Chip reason codes are `not_started` (Not started), `stopped` (Stopped),
+`port_in_use` (`Port <n> in use`), `still_loading` (Still loading),
+`unreachable` (Unreachable), `unverified` (Can't verify the model),
+`wrong_revision` (Wrong model version), and `key_rejected` (Can't reach
+Laya). `<n>` is the sidecar port. For the first five, the tooltip is the
+label followed by `. Next: python -m flinttrade_core.laya_runtime start`.
+The `unverified` tooltip is "The installed model couldn't be checked
+against the pinned version. Restart Laya. If it keeps happening, reinstall
+it." The `wrong_revision` tooltip is "Laya is running a different model
+than FlintTrade expects." That code is only a real mismatch. The
+`key_rejected` tooltip is "Laya restarted with a new key. Reconnecting…"
+The chip stays Down and orders are refused. Every chip-Down refusal reads
+"Laya is Down. Orders are paused until it's Ready."
+
+`identity_absent` is not a chip code. When the chip is Ready and a single
+decision carries no proof, the refusal code is `laya_unverified` and the
+refusal reads "Not placed. Laya's decision couldn't be verified. Try again."
+
+On each sidecar start the verified record is hashed from `model.safetensors`
+and stamped with that run's pid and a fresh start token. It is deleted on
+stop and on a failed start. A record from an earlier run is rejected. A
+decision without `revision` or `sha256` is checked against that record for
+both admitted and clamped orders. The decision log stores `proof=decision`
+or `proof=runtime`. A health document that omits the digest is Ready when
+that record matches the pin. If the record cannot be checked, the chip
+reason is `unverified`. Stopping the sidecar records Down
 before an in-flight probe can publish Ready. Desk place surfaces go through
-this admission.
+this admission. Laya is not Ready by default.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down — Live orders paused."). That class closes Live place and Position

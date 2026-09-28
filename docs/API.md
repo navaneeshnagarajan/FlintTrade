@@ -514,8 +514,28 @@ response is JSON
 Practice chip shows. `laya_live_qualified` is true only when a qualification
 record covers the pin. `laya_reason` is one of `not_started`, `stopped`,
 `port_in_use`, `still_loading`, `unreachable`, `wrong_revision`,
-`unverified`, `identity_absent`, or `key_rejected`, or
-`null` when Ready or Degraded has cleared it. `laya_port` is the sidecar
+`unverified`, or `key_rejected`, or
+`null` when Ready or Degraded has cleared it. `identity_absent` is not a
+`laya_reason`. Chip labels are Not started, Stopped, `Port <n> in use`,
+Still loading, Unreachable, Can't verify the model, Wrong model version,
+and Can't reach Laya. `<n>` is `laya_port`. Tooltips for `not_started`,
+`stopped`, `port_in_use`, `still_loading`, and `unreachable` are the label
+followed by `. Next: python -m flinttrade_core.laya_runtime start`. The
+`unverified` tooltip is "The installed model couldn't be checked against
+the pinned version. Restart Laya. If it keeps happening, reinstall it."
+The `wrong_revision` tooltip is "Laya is running a different model than
+FlintTrade expects." That code is only a real mismatch. The `key_rejected`
+tooltip is "Laya restarted with a new key. Reconnecting…" The chip stays
+Down and orders are refused. Every chip-Down refusal reads "Laya is Down.
+Orders are paused until it's Ready." When the chip is Ready and a single
+decision carries no proof, place returns `laya_unverified` and "Not placed.
+Laya's decision couldn't be verified. Try again." On each sidecar start
+the verified record is hashed from `model.safetensors` and stamped with
+that run's pid and a fresh start token. It is deleted on stop and on a
+failed start. A record from an earlier run is rejected. A decision without
+`revision` or `sha256` is checked against that record for both admitted
+and clamped orders. The decision log stores `proof=decision` or
+`proof=runtime`. `laya_port` is the sidecar
 port (`LAYA_PORT`, default 8000). Laya starts Down. A ping does not invent Ready.
 `GET /health` records Ready, Degraded, or Down from the opt-in sidecar when
 one is registered. With no sidecar, that probe leaves the stored status alone.
@@ -744,10 +764,13 @@ are paused until it's Ready." and the sandbox is not called. That sentence
 is the same in Live. A Live place while Laya is Ready or Degraded, with no
 matching qualification record, returns "Laya isn't qualified for Live yet.
 Practice orders are available." A Practice refusal never says Live. A quantity
-above the active ceiling returns HTTP 409 `laya_clamp` and places neither
-size. The clamp message is "Not placed. Laya allows up to N." Nothing is
-placed until that quantity is sent through admit again. An empty note is
-not a hard reject: Practice returns that clamp, and Live returns HTTP 403
+greater than the allowed quantity returns HTTP 409 `laya_clamp` and places
+neither size. The clamp message is "Not placed. Laya allows up to N."
+Place 1 on "Not placed. Laya allows up to 1." places, because that request
+is already at the allowed quantity. A request that is already at the
+allowed quantity is an allow. An empty note is
+not a hard reject: Practice returns that clamp when the requested quantity
+is greater than the tighter ceiling, and Live returns HTTP 403
 `laya_denied` with "Laya is uncertain. Live stays closed." The sandbox body below is the response when admission allows the
 requested quantity. The call does not send an order to OpenAlgo or any broker.
 Do not use the OpenAlgo passthrough endpoint as an example for live broker
@@ -945,7 +968,9 @@ Core operator place, after the mode guard, admits before SafetySystem
 and before the Practice sandbox. A client `source` field is ignored, so
 the request cannot present itself as chat or as automate. A refusal is
 HTTP 403 `laya_denied`. A quantity clamp is HTTP 409 `laya_clamp` and
-places neither size.
+places neither size. It applies only when the requested quantity is
+greater than the allowed one. A decision with no proof, while the chip
+can stay Ready, is HTTP 409 `laya_unverified`.
 `http_status` is not part of the JSON body. A Live JWT without PIN unlock
 on that same proxy is still message-only: HTTP 403 with "Live mode not unlocked —
 verify PIN first". A `code` field is also emitted on
@@ -960,7 +985,8 @@ Not every endpoint emits `code`:
 |---|---|
 | `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` Explore refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` Explore refusals (same header/claim gate). Explore place stays on this code. |
 | `laya_denied` | Operator place was refused by `Laya.admit` before SafetySystem or the Practice sandbox — HTTP 403. Body: `status: "error"`, `code: "laya_denied"`, `message` and `reason` (the same server text). Down is "Laya is Down. Orders are paused until it's Ready." and omits `limits`. Unqualified Live, while Ready or Degraded, is "Laya isn't qualified for Live yet. Practice orders are available." An empty Live note is "Laya is uncertain. Live stays closed." Other denials include `limits.max_quantity`. There is no `applied_quantity`. |
-| `laya_clamp` | Operator place was not placed — HTTP 409. The quantity is outside the active ceiling, or a Practice note is uncertain (including an empty note). Body: `status: "error"`, `code: "laya_clamp"`, `message` (`Not placed. Laya allows up to <applied_quantity>.`), `reason`, `limits.max_quantity`, and `applied_quantity`. An empty Practice note sets `reason` to "Laya is uncertain. Quantity stays inside the tighter limit." A ceiling clamp can leave `reason` empty. Nothing is placed until the desk sends that quantity through admit again. An allow then continues into SafetySystem and gate_order. Live uncertain, including an empty note, is `laya_denied`, not this code. |
+| `laya_unverified` | One decision carried no proof. The chip can stay Ready. This is not a chip reason — HTTP 409. Body: `status: "error"`, `code: "laya_unverified"`, `message` and `reason` both "Not placed. Laya's decision couldn't be verified. Try again." The decision log records `identity_absent` and does not store `proof`. There is no `limits` field. |
+| `laya_clamp` | Operator place was not placed — HTTP 409. The requested quantity is greater than the allowed quantity. Body: `status: "error"`, `code: "laya_clamp"`, `message` (`Not placed. Laya allows up to <applied_quantity>.`), `reason`, `limits.max_quantity`, and `applied_quantity`. An empty Practice note that reduces the quantity sets `reason` to "Laya is uncertain. Quantity stays inside the tighter limit." A ceiling clamp can leave `reason` empty. Nothing is placed until the desk sends that quantity through admit again. Place 1 on "Not placed. Laya allows up to 1." is admitted, because that request is already at the allowed quantity. An allow then continues into SafetySystem and gate_order. A request already at the allowed quantity is an allow, including when an uncertain note tightened the ceiling without shrinking the number. Live uncertain, including an empty note, is `laya_denied`, not this code. |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
 | `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true` (PIN unlock). |
 | HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |

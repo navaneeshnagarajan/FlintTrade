@@ -431,13 +431,15 @@ During the first load the label is **Still loading** and does not read
 **Down**. Orders are still refused with **Laya is Down. Orders are paused
 until it's Ready.**
 
-The chip tooltip carries the next step when a reason code is set:
-the plain words, then `Next: python -m flinttrade_core.laya_runtime start`.
-When the sidecar is **Ready** or **Degraded** and Live is not qualified,
-the tooltip is **Not qualified for Live**. That line is not painted as
-**Down** on the Practice chip.
+The chip tooltip is the hover text. For `not_started`, `stopped`,
+`port_in_use`, `still_loading`, and `unreachable` it is the chip label
+followed by `. Next: python -m flinttrade_core.laya_runtime start`.
+`unverified`, `wrong_revision`, and `key_rejected` keep the sentences in
+the table. When the sidecar is **Ready** or **Degraded** and Live is not
+qualified, the tooltip is **Not qualified for Live**. That line is not
+painted as **Down** on the Practice chip.
 
-Clicking the chip opens a popover. It shows the plain-words reason, the
+Clicking the chip opens a popover. It shows the chip label, the
 link **How to start Laya** (this section), and an operator-only **Start
 Laya** button. The button is there for a signed-in operator while the
 sidecar is not **Ready** or **Degraded**. A signed-out desk does not
@@ -447,24 +449,43 @@ If the start fails, the popover says **Laya could not be started.**
 stays on **Still loading** until Laya is **Ready** or **Degraded**, or
 the probe reports a reason other than `not_started`.
 
-The popover prints the plain words, not the raw code. These are the
-codes the desk can show:
+The popover prints the chip label, not the raw code. For `unverified`,
+`wrong_revision`, and `key_rejected` it also prints the tooltip, because
+that sentence does not start with the label. The status word on the chip
+is **Down**, except during the first load, when the chip says **Still
+loading**. `<n>` in the port label is the sidecar port.
 
-| Code | Plain words | Meaning |
+| Code | Chip label | Tooltip |
 |---|---|---|
-| `not_started` | Not started | No sidecar is running. This is also the fallback line when the chip is **Down** and no reason code is set. `stop` records this code. |
-| `stopped` | Stopped | A sidecar this desk started has exited. The health probe reaps that child and records **Down**. |
-| `port_in_use` | Port N in use | Something else is listening on the Laya port. The chip stays **Down**. N is that port. |
-| `still_loading` | Still loading | The first load, before health is usable. The chip says **Still loading**. Admission stays **Down**. |
-| `unreachable` | Unreachable | A later miss, after one successful load. |
-| `wrong_revision` | Wrong model revision | The revision or weight digest on disk, in health, or in a decision is present and is not the pin. A missing digest is not this code. |
-| `unverified` | Can't verify the model | The weight file could not be checked, or that check was never recorded. Health from the unpatched package has no digest, so Ready waits for this check. |
-| `identity_absent` | Decision has no revision | A decision omitted `revision` or `sha256`, and no recorded file check can stand in. |
-| `key_rejected` | API key rejected | The API key was re-read and still rejected. The chip stays **Down** while orders are refused. |
+| `not_started` | Not started | `Not started. Next: python -m flinttrade_core.laya_runtime start` |
+| `stopped` | Stopped | `Stopped. Next: python -m flinttrade_core.laya_runtime start` |
+| `port_in_use` | `Port <n> in use` | `Port <n> in use. Next: python -m flinttrade_core.laya_runtime start` |
+| `still_loading` | Still loading | `Still loading. Next: python -m flinttrade_core.laya_runtime start` |
+| `unreachable` | Unreachable | `Unreachable. Next: python -m flinttrade_core.laya_runtime start` |
+| `unverified` | Can't verify the model | `The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.` |
+| `wrong_revision` | Wrong model version | `Laya is running a different model than FlintTrade expects.` |
+| `key_rejected` | Can't reach Laya | `Laya restarted with a new key. Reconnecting…` |
 
-A recorded check of the pinned revision and `model.safetensors` digest lets
-unpatched health and decisions reach **Ready**. The package does not have to
-echo the digest. A real mismatch stays `wrong_revision`.
+`wrong_revision` is only a real mismatch: the revision or the weight
+digest is present and is not the pin. A missing digest is not this code.
+`key_rejected` keeps the chip **Down**. Orders are refused.
+
+Every chip-Down refusal reads `Laya is Down. Orders are paused until it's Ready.`
+That sentence is the same in Practice and in Live. It carries no quantity
+ceiling.
+
+`identity_absent` is not a chip code. When the chip is **Ready** and a
+single decision carries no proof, the refusal code is `laya_unverified`
+and the refusal reads `Not placed. Laya's decision couldn't be verified. Try again.`
+
+On each sidecar start the verified record is hashed from `model.safetensors`
+and stamped with that run's pid and a fresh start token. It is deleted on
+stop and on a failed start. A record from an earlier run is rejected. A
+decision without `revision` or `sha256` is checked against that record for
+both admitted and clamped orders. The decision log stores `proof=decision`
+when the decision carried the pin, or `proof=runtime` when this run's
+record stood in. A health document that omits the digest is **Ready** when
+that record matches the pin. Laya is not **Ready** by default.
 
 **Command line.** From the FlintTrade environment (the project `.venv`
 after setup, or `uv run python`):
@@ -487,7 +508,7 @@ then `laya[serve]==0.3.21`. The constraints file pins `laya==0.3.21`
 with no extras (`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`,
 `torch==2.14.0+cpu` and `laya==0.3.21`). The `serve` extra stays on the
 install requirement, because a constraints file cannot name extras. Torch is installed
-first. `install --accelerator cuda` and `install --accelerator rocm` are
+first. The install size is roughly 1.2 GB. `install --accelerator cuda` and `install --accelerator rocm` are
 opt-in. `start` still uses CPU (`LAYA_DEVICE=cpu`).
 
 `start` listens on `127.0.0.1` only. The port comes from `LAYA_PORT` and
@@ -533,7 +554,8 @@ and Option Chain keep an optional note. A place with no note still gets
 Laya's policy decision. Practice clamps. Live denies. It is not a hard
 reject. The server reason for that Practice clamp is **Laya is uncertain.
 Quantity stays inside the tighter limit.** The server reason for that
-Live denial is **Laya is uncertain. Live stays closed.** The Order Pad
+Live denial is **Laya is uncertain. Live stays closed.** When the
+requested quantity is greater than the allowed one, the Order Pad
 clamp notice shows the clamp sentence below, not the Practice reason line.
 
 **Deny.** Order Pad and Quick Trade show **Laya denied**, then the server
@@ -541,18 +563,21 @@ reason. When the server sent a quantity ceiling, the next line is
 **Max quantity N.** A Down refusal does not show that line. The reason
 is **Laya is Down. Orders are paused until it's Ready.** Place controls
 stay off until Laya or the mode changes; you can then retry. Kill All
-stays reachable.
+stays reachable. A single decision with no proof, while the chip is
+**Ready**, is not that Down refusal. The notice reads **Not placed. Laya's decision couldn't be verified. Try again.**
+The code is `laya_unverified`.
 A denial is not a Chat outage: the LLM label stays **Not configured** or
 **Connected (suggest only)**, and the Chat strip stays Info.
 
-**Clamp.** Nothing is placed until you click. Laya never auto-places the
-reduced quantity. Order Pad and Quick Trade show **Not placed. Laya allows
-up to N.** with **Place N** and **Cancel**. **Place N** sends that
-quantity through the same place path: admit again, then SafetySystem and
-gate_order when the new quantity is allowed. Practice still reaches the
-sandbox only after that admit. **Cancel** places nothing. The same
-sentence covers a quantity above the ceiling and an uncertain note that
-holds the quantity inside the tighter limit.
+**Clamp.** A clamp is only when the requested quantity is greater than
+the allowed one. Nothing is placed until you click. Laya never
+auto-places the reduced quantity. Order Pad and Quick Trade show
+**Not placed. Laya allows up to N.** with **Place N** and **Cancel**.
+**Place N** sends that quantity through the same place path. When the
+request is already at the allowed quantity, that place is admitted.
+Place 1 on **Not placed. Laya allows up to 1.** places. Practice still
+reaches the sandbox only after that admit. On Live, an admitted quantity
+continues to SafetySystem and gate_order. **Cancel** places nothing.
 
 **Degraded.** Live-facing Degraded leaves Live open. The desk says
 **Laya Degraded — tighter limits** on the status cluster and under those
@@ -1631,10 +1656,12 @@ as a toast.
    Practice orders are available.** A base checkpoint leaves Live
    unqualified. Laya starts **Down** and does not invent Ready. Start it
    from [Start Laya](#start-laya). Chat cannot place instead.
-2. **Not placed. Laya allows up to N.** Nothing was placed. Laya does not
-   auto-place. **Place N** sends that quantity through admit again, then
-   SafetySystem and gate_order when it is allowed. **Cancel** places
-   nothing. The model does not raise quantity. A Down refusal does not
+2. **Not placed. Laya allows up to N.** Nothing was placed. A clamp is
+   only when the requested quantity is greater than the allowed one.
+   Laya does not auto-place. **Place N** sends that quantity through
+   admit again. Place 1 on **Not placed. Laya allows up to 1.** places.
+   SafetySystem and gate_order run when that quantity is allowed.
+   **Cancel** places nothing. The model does not raise quantity. A Down refusal does not
    show **Max quantity** and does not say to start the model. **Laya
    Degraded — tighter limits** means Live-facing Degraded: Live is open
    with a tighter ceiling. It is not a Blocked strip.

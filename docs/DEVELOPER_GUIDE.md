@@ -528,7 +528,8 @@ the CUDA wheels stay out. The constraints file pins `torch==2.14.0+cpu`
 and `laya==0.3.21` with no extras
 (`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`).
 The `serve` extra stays on the install requirement. The CPU install applies
-that file to both pip commands, and installs torch first. CUDA and ROCm
+that file to both pip commands, and installs torch first. The install size
+is roughly 1.2 GB. CUDA and ROCm
 installs do not use the CPU pin. `install --accelerator cuda` opts into the
 PyPI torch build. `install --accelerator rocm` needs `LAYA_TORCH_INDEX`
 set to an https PyTorch ROCm wheel index. `start` still uses CPU
@@ -546,22 +547,34 @@ pinned revision and `model.safetensors` digest live in `laya_policy.toml`.
 A backend that was started with `LAYA_HOST=127.0.0.1`, `LAYA_PORT` (or
 the default 8000), and `LAYA_API_KEY_FILE` pointing at that `api.key`
 attaches on its health probe. The host must stay loopback. The attached
-client uses the same revision and digest checks. A health document
-without the weight digest is Ready after install or start has verified
-the pinned revision and `model.safetensors` digest on disk. If that check
-cannot run, the reason is `unverified` ("Can't verify the model").
+client uses the same revision and digest checks. On each sidecar start
+the verified record is hashed from `model.safetensors` and stamped with
+that run's pid and a fresh start token. It is deleted on stop and on a
+failed start. A record from an earlier run is rejected. A health document
+without the weight digest is Ready when that record matches the pin. If
+the record cannot be checked, the reason is `unverified` ("Can't verify
+the model"). The tooltip is "The installed model couldn't be checked
+against the pinned version. Restart Laya. If it keeps happening, reinstall
+it."
 
 `status` carries a reason code: `not_started`, `stopped`, `port_in_use`,
-`still_loading`, `unreachable`, `wrong_revision`, `unverified`,
-`identity_absent`, or `key_rejected`. The desk shows those as Not started,
-Stopped, Port &lt;n&gt; in use, Still loading, Unreachable, Wrong model revision,
-Can't verify the model, Decision has no revision, and API key rejected,
-then `python -m flinttrade_core.laya_runtime start`. A
+`still_loading`, `unreachable`, `wrong_revision`, `unverified`, or
+`key_rejected`. `identity_absent` is not a status code. The desk shows
+Not started, Stopped, `Port <n> in use`, Still loading, Unreachable,
+Wrong model version, Can't verify the model, and Can't reach Laya.
+`<n>` is the sidecar port. Tooltips for `not_started`, `stopped`,
+`port_in_use`, `still_loading`, and `unreachable` are the label followed
+by `. Next: python -m flinttrade_core.laya_runtime start`. The
+`wrong_revision` tooltip is "Laya is running a different model than
+FlintTrade expects." That code is only a real mismatch. The `key_rejected`
+tooltip is "Laya restarted with a new key. Reconnecting…" The chip stays
+Down and orders are refused. Every chip-Down refusal reads "Laya is Down.
+Orders are paused until it's Ready." A
 dead child is reaped on the health probe and on interpreter exit, and
 the probe records Down with Stopped. `POST /api/v1/laya/start` starts or
 restarts the managed sidecar for a signed-in operator session. A
 port that another process holds, including one that is not Laya, is Down
-with Port &lt;n&gt; in use. The first load, before health is usable, is Still
+with `Port <n> in use`. The first load, before health is usable, is Still
 loading. Orders stay refused with the Down sentence while that load
 runs. After a successful load, a later miss is Unreachable.
 
@@ -570,14 +583,20 @@ Live stays Down until a `LayaQualification` record uses
 `EvidenceUseScope.LIVE_DECISION` for that exact revision, digest, and
 policy version. A base checkpoint is not that record. An unreachable
 host, a timeout, a malformed response, or a revision or digest mismatch
-is Down, and Practice refuses too. The decision response must include
-`revision` and `sha256`. A health document without the weight digest is
-Down. Stopping the sidecar records Down before an in-flight probe can
+is Down, and Practice refuses too. A decision without `revision` or
+`sha256` is checked against this run's verified record for both admitted
+and clamped orders. The decision log stores `proof=decision` or
+`proof=runtime`. When the chip is Ready and that decision carries no
+proof, the refusal code is `laya_unverified` and the decision log records
+`identity_absent`. The refusal reads "Not placed. Laya's decision couldn't
+be verified. Try again." Stopping the sidecar records Down before an in-flight probe can
 publish Ready. An empty note is uncertain and is not a hard reject:
 Practice clamps and Live denies. The Practice server reason is "Laya is
 uncertain. Quantity stays inside the tighter limit." The Live server
-reason is "Laya is uncertain. Live stays closed." The desk clamp sentence
-is "Not placed. Laya allows up to N." and nothing is placed until Place N.
+reason is "Laya is uncertain. Live stays closed." A clamp is only when
+the requested quantity is greater than the allowed one. The desk clamp
+sentence is "Not placed. Laya allows up to N." Place 1 on "Not placed.
+Laya allows up to 1." places. Nothing is placed until Place N.
 Order Pad sends that note as `rationale`, including when the field is
 empty. The collapsed control is "Add a reason (optional)".
 
