@@ -69,9 +69,11 @@ def test_catalogue_composition_preserves_contributor_order_and_static_payload(mo
 
     catalogue = app.config["SERVICE_PROVIDER_CATALOGUE"]
     ids = tuple(provider.provider_id for provider in catalogue.list())
-    assert len(ids) == 64
-    assert ids[:23] == tuple(provider.provider_id for provider in ai_service_descriptors())
-    assert ids[23:26] == (
+    ai_ids = tuple(provider.provider_id for provider in ai_service_descriptors())
+    assert len(ai_ids) == 25
+    assert len(ids) == 66
+    assert ids[: len(ai_ids)] == ai_ids
+    assert ids[len(ai_ids) : len(ai_ids) + 3] == (
         "market-data:openalgo-history",
         "market-data:openchart",
         "market-data:yfinance",
@@ -132,7 +134,7 @@ def test_ai_contribution_reads_static_profiles_without_runtime_io() -> None:
     ):
         descriptors = ai_service_descriptors()
 
-    assert len(descriptors) == 23
+    assert len(descriptors) == 25
 
 
 def test_historical_contribution_reads_static_profiles_without_runtime_io() -> None:

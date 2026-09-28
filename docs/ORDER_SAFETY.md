@@ -87,17 +87,36 @@ a dispatcher error and does not place the reduced quantity on its own.
 Chat is not an admission source. Modify, cancel, smart, multi, forever,
 and the other write verbs are not admitted.
 
+Admission order is fixed. Down is checked first. The existing hard rules
+then run unchanged (source, mode, symbol, side, quantity, price, trigger).
+Only after those rules pass does Laya ask typed A/B questions about free
+text: whether a note states a reason, whether it shows tilt or revenge, and
+whether the stated plan contradicts the order side. Expiry, quantity, price,
+and symbol are not sent to the model. Thresholds sit on option probabilities
+in the versioned `laya_policy.toml`. There is no confidence field in the
+gate. The model can deny or clamp. It cannot raise a quantity or overturn a
+rule refusal. An unreachable host, a timeout, a malformed response, or a
+revision or digest mismatch is Down. Down refuses Practice as well as Live.
+Practice copy is "Laya is Down. Practice orders are blocked. Start the Laya
+model." Live copy is "Laya is Down. Live orders are blocked." An uncertain
+answer clamps in Practice and denies in Live.
+
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down — Live orders paused."). That class closes Live place and Position
 Mirror start on the shared client place path. Kill All stays reachable.
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
-Ready and Degraded are recorded only by `Laya.set_status`; the desk ping
-and `note_heartbeat` publish the stored status and do not invent Ready.
-Degraded does not open that class and does not mute Live. Degraded enforces
-the tighter quantity ceiling and the desk says so. Down does not add a second
-deny under a Live control that is already muted. Other Live write verbs
-still reach SafetySystem without this admission. Other Practice verbs go
-straight to the sandbox.
+`GET /health` records Ready, Degraded, or Down from the opt-in sidecar when
+one is registered. The desk ping and `note_heartbeat` publish the stored
+Live-facing status and do not invent Ready. A base checkpoint is not
+qualified for Live, so Live stays Down until a qualification record exists
+for the exact model revision, weight digest, and policy version
+(`EvidenceUseScope.LIVE_DECISION`). Practice can be Ready or Degraded from
+the same probe. Degraded does not open that class and does not mute Live.
+Degraded enforces the tighter quantity ceiling and the desk says so. Down
+does not add a second deny under a Live control that is already muted.
+Other Live write verbs still reach SafetySystem without this admission.
+Other Practice verbs go straight to the sandbox. The sidecar install is in
+[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#laya-decision-sidecar).
 
 | Concern | Automate risk note | SafetySystem | Ticket guards | Laya |
 | --- | --- | --- | --- | --- |

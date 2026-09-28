@@ -109,8 +109,9 @@ def test_down_refuses_live_and_practice_with_no_model_fallback() -> None:
     assert live.allow is False
     assert practice.allow is False
     assert live.applied_quantity == 0
-    assert "Down" in live.reason
-    assert "Live" in live.reason
+    assert live.reason == "Laya is Down. Live orders are blocked."
+    assert practice.reason == "Laya is Down. Practice orders are blocked. Start the Laya model."
+    assert "Live orders are blocked" not in practice.reason
 
 
 @pytest.mark.unit

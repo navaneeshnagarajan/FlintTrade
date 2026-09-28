@@ -1,0 +1,28 @@
+# Admission policy for typed free-text questions.
+# Thresholds compare option probabilities. The entropy confidence field is not a gate.
+# A base checkpoint is not qualified for Live. Live stays Down until a qualification
+# record exists for this revision, digest, and policy version.
+
+version = "1"
+
+[checkpoint]
+repo = "convaiinnovations/laya"
+revision = "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851"
+checkpoint = "english"
+file = "model.safetensors"
+sha256 = "891102d372688fc2a094dac56a384bc537b87c63f21f9f3dac0be2b7cbc8d86c"
+
+[question.rationale]
+deny_option = "B"
+deny_at = 0.80
+abstain_at = 0.55
+
+[question.tilt]
+deny_option = "A"
+deny_at = 0.80
+abstain_at = 0.55
+
+[question.side]
+deny_option = "A"
+deny_at = 0.80
+abstain_at = 0.55

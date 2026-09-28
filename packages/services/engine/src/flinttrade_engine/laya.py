@@ -26,6 +26,12 @@ Degraded), and the mode rule: Explore is refused, and a Down engine refuses
 Live and Practice proposals. Chat is suggest and explain only, so a chat
 source is refused here. Lot size, price band, margin, Greeks, daily loss,
 and the kill switch stay outside this module.
+
+When a decision host is configured, free-text questions run after the floor.
+The host may deny or clamp. It cannot raise a quantity or overturn a floor
+refusal. Unreachable, timeout, malformed, and revision or digest mismatch
+are Down for Practice and Live. Live stays Down until a qualification
+record matches the pinned revision, weight digest, and policy version.
 """
 
 from __future__ import annotations
@@ -69,6 +75,8 @@ class Proposal:
         price: Limit price when the order type needs one.
         trigger_price: Trigger price when the order type needs one.
         source: ``operator`` or ``automate``. Chat is not an admission source.
+        rationale: Free text supplied with the place. Empty when the caller
+            sent none. The host is not asked for facts the floor already knows.
     """
 
     symbol: str
@@ -81,6 +89,7 @@ class Proposal:
     price: float | None = None
     trigger_price: float | None = None
     source: str = "operator"
+    rationale: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,12 +110,17 @@ class Verdict:
         applied_quantity: Quantity this verdict will accept. ``0`` on a refusal.
             Smaller than the request on a clamp. The caller must not place a
             clamp until the operator has seen the reduced quantity.
+        tightened: True when an uncertain host answer holds the quantity even
+            if the number did not shrink. Ceiling clamps leave this false.
+        evidence: Log tokens from the host step. Empty when that step did not run.
     """
 
     allow: bool
     reason: str
     limits: VerdictLimits
     applied_quantity: int
+    tightened: bool = False
+    evidence: tuple[tuple[str, str], ...] = ()
 
 
 class Laya:
@@ -132,59 +146,164 @@ class Laya:
         self._status = status
         self._max_quantity = max_quantity
         self._degraded_max_quantity = degraded_max_quantity
+        self._live_qualified = status is not DecisionStatus.DOWN
+        self._decision_client: Any = None
+        self._qualification: Any = None
+        self._lock = threading.Lock()
 
     @property
     def status(self) -> DecisionStatus:
-        """Current decision status."""
-        return self._status
+        """Current runtime status, before the Live qualification rule."""
+        with self._lock:
+            return self._status
+
+    @property
+    def qualification(self) -> Any:
+        """Qualification record used by the health probe, if one was recorded."""
+        with self._lock:
+            return self._qualification
 
     def set_status(self, status: DecisionStatus) -> None:
-        """Record Ready, Degraded, or Down. This is authoritative."""
-        self._status = status
+        """Record Ready, Degraded, or Down.
+
+        An explicit Ready or Degraded opens Live as well as Practice. The
+        health probe uses :meth:`apply_runtime_status`, which keeps Live
+        Down until a qualification record exists.
+        """
+        with self._lock:
+            self._status = status
+            self._live_qualified = status is not DecisionStatus.DOWN
+
+    def apply_runtime_status(self, status: DecisionStatus, *, live_qualified: bool) -> None:
+        """Record a probe result. Live opens only when ``live_qualified`` is set."""
+        with self._lock:
+            self._status = status
+            self._live_qualified = bool(live_qualified) and status is not DecisionStatus.DOWN
+
+    def set_decision_client(self, client: Any) -> None:
+        """Attach the host used for free-text questions. ``None`` skips that step."""
+        with self._lock:
+            self._decision_client = client
+
+    def set_qualification(self, record: Any) -> None:
+        """Record the Live qualification evidence, or clear it with ``None``."""
+        if record is not None:
+            from .laya_decision import LayaQualification  # noqa: PLC0415
+
+            if type(record) is not LayaQualification:
+                raise TypeError("qualification record is not recognised")
+        with self._lock:
+            self._qualification = record
+
+    def effective_status(self, mode: str) -> DecisionStatus:
+        """Status that applies to ``mode``. Unqualified Live stays Down."""
+        with self._lock:
+            if self._status is DecisionStatus.DOWN:
+                return DecisionStatus.DOWN
+            if mode.strip().lower() == "live" and not self._live_qualified:
+                return DecisionStatus.DOWN
+            return self._status
 
     def note_heartbeat(self) -> DecisionStatus:
-        """Return the status a desk heartbeat should publish.
+        """Return the Live-facing status a desk heartbeat should publish.
 
-        A heartbeat does not invent Ready. Down stays Down until
-        :meth:`set_status` says otherwise.
+        A heartbeat does not invent Ready. Unqualified Live stays Down.
         """
-        return self._status
+        return self.effective_status("live")
 
     def admit(self, proposal: Proposal) -> Verdict:
         """Return a verdict for ``proposal``.
 
-        Down refuses before any other rule, so a chat model cannot fill in
-        for a missing decision. Other refusals are schema, source, or mode.
-        A quantity above the ceiling is a clamp, not a place.
+        Order: Down, then the deterministic floor, then free-text questions
+        when a host is configured. Down refuses before any other rule. A
+        floor refusal is final. The host cannot raise a quantity.
         """
-        limits = VerdictLimits(max_quantity=self._active_ceiling())
-        if self._status is DecisionStatus.DOWN:
-            return Verdict(
-                allow=False,
-                reason="Laya is Down. Live orders are blocked.",
-                limits=limits,
-                applied_quantity=0,
-            )
+        status = self.effective_status(proposal.mode)
+        with self._lock:
+            client = self._decision_client
+            ceiling = self._ceiling_for(status)
+        limits = VerdictLimits(max_quantity=ceiling)
+        if status is DecisionStatus.DOWN:
+            return self._down_verdict(proposal.mode, limits)
 
         reason = self._schema_reason(proposal)
         if reason:
             return Verdict(allow=False, reason=reason, limits=limits, applied_quantity=0)
+        if client is None:
+            return self._ceiling_verdict(proposal, limits)
+        from .laya_decision import evaluate_free_text  # noqa: PLC0415
+
+        decision = evaluate_free_text(
+            mode=proposal.mode,
+            action=proposal.action,
+            rationale=proposal.rationale,
+            requested_quantity=proposal.quantity,
+            degraded_ceiling=self._degraded_max_quantity,
+            client=client,
+        )
+        if decision.effect == "down":
+            self.set_status(DecisionStatus.DOWN)
+            verdict = self._down_verdict(proposal.mode, VerdictLimits(max_quantity=self._ceiling_for(DecisionStatus.DOWN)))
+            return Verdict(
+                allow=verdict.allow,
+                reason=verdict.reason,
+                limits=verdict.limits,
+                applied_quantity=0,
+                evidence=decision.evidence,
+            )
+        if decision.effect == "deny":
+            return Verdict(
+                allow=False,
+                reason=decision.reason,
+                limits=limits,
+                applied_quantity=0,
+                evidence=decision.evidence,
+            )
+        if decision.effect == "clamp":
+            applied = min(decision.applied_quantity, limits.max_quantity, proposal.quantity)
+            return Verdict(
+                allow=True,
+                reason=decision.reason,
+                limits=limits,
+                applied_quantity=applied,
+                tightened=True,
+                evidence=decision.evidence,
+            )
+        return self._ceiling_verdict(proposal, limits, evidence=decision.evidence)
+
+    def _down_verdict(self, mode: str, limits: VerdictLimits) -> Verdict:
+        return Verdict(
+            allow=False,
+            reason=_down_reason(mode),
+            limits=limits,
+            applied_quantity=0,
+        )
+
+    def _ceiling_verdict(
+        self,
+        proposal: Proposal,
+        limits: VerdictLimits,
+        *,
+        evidence: tuple[tuple[str, str], ...] = (),
+    ) -> Verdict:
         if proposal.quantity > limits.max_quantity:
             return Verdict(
                 allow=True,
                 reason="",
                 limits=limits,
                 applied_quantity=limits.max_quantity,
+                evidence=evidence,
             )
         return Verdict(
             allow=True,
             reason="",
             limits=limits,
             applied_quantity=proposal.quantity,
+            evidence=evidence,
         )
 
-    def _active_ceiling(self) -> int:
-        if self._status is DecisionStatus.DEGRADED:
+    def _ceiling_for(self, status: DecisionStatus) -> int:
+        if status is DecisionStatus.DEGRADED:
             return self._degraded_max_quantity
         return self._max_quantity
 
@@ -220,6 +339,15 @@ class Laya:
         return ""
 
 
+def _down_reason(mode: str) -> str:
+    """Operator copy for a Down engine. Practice and Live name themselves."""
+    if mode.strip().lower() == "practice":
+        return "Laya is Down. Practice orders are blocked. Start the Laya model."
+    if mode.strip().lower() == "live":
+        return "Laya is Down. Live orders are blocked."
+    return "Laya is Down. Orders are blocked."
+
+
 def proposal_from_place_fields(
     fields: Mapping[str, Any],
     *,
@@ -244,6 +372,7 @@ def proposal_from_place_fields(
         price=_positive_price(fields.get("price")),
         trigger_price=_positive_price(fields.get("trigger_price")),
         source=source,
+        rationale=str(fields.get("rationale") or fields.get("note") or ""),
     )
 
 
@@ -257,7 +386,7 @@ def admission_kind(verdict: Verdict, requested_quantity: int) -> str:
     """
     if not verdict.allow:
         return "deny"
-    if verdict.applied_quantity != requested_quantity:
+    if verdict.applied_quantity != requested_quantity or verdict.tightened:
         return "clamp"
     return "allow"
 
@@ -273,11 +402,15 @@ def place_block(verdict: Verdict, requested_quantity: int) -> dict[str, Any] | N
         return None
     limits = {"max_quantity": verdict.limits.max_quantity}
     if kind == "clamp":
+        if verdict.applied_quantity < requested_quantity:
+            message = f"Qty reduced to {verdict.applied_quantity} (Laya limit)"
+        else:
+            message = f"Qty held at {verdict.applied_quantity} (Laya limit)"
         return {
             "status": "error",
             "code": "laya_clamp",
-            "message": f"Qty reduced to {verdict.applied_quantity} (Laya limit)",
-            "reason": "",
+            "message": message,
+            "reason": verdict.reason,
             "limits": limits,
             "applied_quantity": verdict.applied_quantity,
             "http_status": 409,
@@ -336,7 +469,7 @@ _process_laya: Laya | None = None
 
 
 def process_laya() -> Laya:
-    """Process-wide Laya. Down until :meth:`Laya.set_status` says otherwise."""
+    """Process-wide Laya. Down until a probe or :meth:`Laya.set_status` says otherwise."""
     global _process_laya
     with _process_lock:
         if _process_laya is None:
@@ -349,3 +482,6 @@ def reset_process_laya_for_tests() -> None:
     global _process_laya
     with _process_lock:
         _process_laya = None
+    from flinttrade_core.laya_runtime import reset_process_runtime_for_tests  # noqa: PLC0415
+
+    reset_process_runtime_for_tests()

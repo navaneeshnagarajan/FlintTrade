@@ -507,10 +507,13 @@ passthrough `ping` (POST). It is exempt from the API-key check. The
 response is JSON
 `{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down"}`.
 `status` is `"ok"`, `timestamp` is ISO8601 IST, and `laya` is `"ready"`,
-`"degraded"`, or `"down"`. Laya starts Down. A ping publishes that process
-status and does not invent Ready. Ready and Degraded are recorded by
-`Laya.set_status`, not by ping. Clients must not treat a missing or
-omitted `laya` as Ready; the desk uses `laya ?? "down"`.
+`"degraded"`, or `"down"`. Laya starts Down. A ping publishes the stored
+Live-facing status and does not invent Ready. `GET /health` records Ready,
+Degraded, or Down from the opt-in sidecar when one is registered. With no
+sidecar, that probe leaves the stored status alone. Live stays Down until a
+qualification record matches the pinned revision and policy, so a Practice
+Ready probe still publishes `down` on this Live-facing field. Clients must
+not treat a missing or omitted `laya` as Ready; the desk uses `laya ?? "down"`.
 
 ### Errors (`/ft-api/v1/errors`, `/ft-api/v1/changelog`)
 
@@ -722,8 +725,10 @@ continuation, and environment variables are read as `$env:NAME`).
 ### 7.1 Exercise the practice order path
 
 This example is for a locally issued **Practice-mode** FlintTrade session JWT.
-Place is admitted before the sandbox. Laya starts **Down**, so a place while
-Down returns HTTP 403 `laya_denied` and the sandbox is not called. A quantity
+Place is admitted before the sandbox. Laya starts **Down**, so a Practice
+place while Down returns HTTP 403 `laya_denied` with "Laya is Down. Practice
+orders are blocked. Start the Laya model." and the sandbox is not called.
+Live Down copy names Live instead. A quantity
 above the active ceiling returns HTTP 409 `laya_clamp` and places neither
 size. The sandbox body below is the response when admission allows the
 requested quantity. The call does not send an order to OpenAlgo or any broker.

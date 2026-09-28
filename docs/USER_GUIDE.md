@@ -431,6 +431,10 @@ Mirror start.
 strip and mutes Live place and Position Mirror start. While that mute
 is up, the place control does not also show **Laya denied**. Kill All
 stays reachable. Broker may stay **Connected** or **Connected (read)**.
+Practice is not muted by that strip. A Practice place while Down is
+still refused, and the reason names Practice. Start the opt-in Laya
+model before either mode can admit a place. A base checkpoint does not
+open Live; Live stays Down until that revision is qualified.
 
 **Chat.** Chat never shows **Admit** or **Approved by Laya**. Chat being
 offline does not close Live.
@@ -502,7 +506,8 @@ may stay; it must not hide venue honesty.
    P&L is recorded in the **P&L Monitor** widget.
 
 A Practice place is admitted before the sandbox. While Laya is Down
-that place is refused and nothing is filled. When admission allows the
+that place is refused with **Laya is Down. Practice orders are blocked.
+Start the Laya model.** and nothing is filled. When admission allows the
 quantity, the path is front-end → JWT guard → mode guard → Laya.admit →
 FlintTrade sandbox → simulated fill → REST refresh of Positions and
 Orders. No real money moved. A refusal or a quantity clamp stops before

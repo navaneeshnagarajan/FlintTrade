@@ -107,6 +107,22 @@ def init_health_aggregator(health_agg: HealthAggregator) -> None:
         _health_agg = health_agg
 
 
+def _refresh_laya_status() -> None:
+    """Record sidecar health. A missing sidecar leaves the stored status alone."""
+    try:
+        from flinttrade_core.laya_runtime import refresh_process_laya_status  # noqa: PLC0415
+
+        refresh_process_laya_status()
+    except Exception:
+        logger.warning("Laya status probe failed", exc_info=True)
+        try:
+            from flinttrade_engine.laya import DecisionStatus, process_laya  # noqa: PLC0415
+
+            process_laya().apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+        except Exception:
+            logger.warning("Laya status could not be recorded", exc_info=True)
+
+
 def reset_health_singletons_for_tests() -> None:
     """Drop both cached singletons so the next call rebuilds them.
 
@@ -130,7 +146,12 @@ def health_simple() -> tuple[Any, int]:
     Returns:
         JSON ``{"status": "healthy"|"degraded"|"unhealthy",
         "timestamp": "<ISO8601>"}``.
+
+    When a Laya sidecar is registered, this probe records Ready, Degraded,
+    or Down from that sidecar before the process report is returned. Ping
+    publishes the stored Live-facing status and does not invent Ready.
     """
+    _refresh_laya_status()
     report = get_health_monitor().check_all()
     http_status = 200 if report.overall_status == "healthy" else 503
     return (

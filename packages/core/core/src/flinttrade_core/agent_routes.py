@@ -465,6 +465,9 @@ def dispatch_action_center_approval(approval: Any) -> Any:
         )
     order_params["broker"] = adapter_id
     order_params["account_id"] = account_id
+    note = str(getattr(approval, "reason", "") or "").strip()
+    if note and "rationale" not in order_params:
+        order_params["rationale"] = note
 
     context = dict(getattr(approval, "intent_context", {}) or {})
     try:

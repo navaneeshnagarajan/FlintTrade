@@ -498,6 +498,39 @@ Do not bypass Laya or SafetySystem on those place paths. If you need a
 fast-path for high-frequency orders, add the path inside the layers, not
 around them.
 
+### Laya decision sidecar
+
+Place admission asks the Laya model only after Down and the hard rules.
+The host is opt-in. Install it in its own virtual environment so torch
+does not enter the FlintTrade environment. The runtime binds
+`127.0.0.1` (the upstream default binds every interface with no
+authentication), mints a fresh API key on each boot, and pins
+`laya[serve]==0.3.21` plus the `convaiinnovations/laya` revision and
+`model.safetensors` digest in `laya_policy.toml`. The first boot may
+download that checkpoint. Later boots stay offline. CPU is the device
+this runtime starts. An accelerator path is not started here.
+
+```python
+from flinttrade_core.laya_runtime import LayaRuntime
+from flinttrade_core.workspace import workspace_dir
+
+runtime = LayaRuntime(workspace_dir())
+runtime.install()
+runtime.start()
+```
+
+`GET /health` then records Practice Ready or Degraded from the sidecar.
+Live stays Down until a `LayaQualification` record uses
+`EvidenceUseScope.LIVE_DECISION` for that exact revision, digest, and
+policy version. A base checkpoint is not that record. An unreachable
+host, a timeout, a malformed response, or a revision or digest mismatch
+is Down, and Practice refuses too.
+
+The same client speaks `POST /v1/systemone`. An operator may point it at
+another loopback host, including one on port 8888, without adding that
+host's software as a dependency. Do not vendor Unsloth Studio. Chat
+profiles stay separate from the `decision` service kind.
+
 ### Vite dev proxy paths
 
 In `packages/apps/terminal/`, the dev server proxies:

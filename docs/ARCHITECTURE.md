@@ -408,14 +408,18 @@ the earliest of:
 Laya admits operator and automate place before SafetySystem (Live) or the
 sandbox (Practice). It does not place an order and does not mint
 `gate_order`, and it does not replace L1–L5. A refusal or a quantity
-clamp stops before those next steps. Only Down mutes Live place and
+clamp stops before those next steps. Admit checks Down, then the hard
+rules, then typed free-text questions on the opt-in decision sidecar.
+The model can deny or clamp only. Only Down mutes Live place and
 Position Mirror start. Degraded leaves Live open and enforces a tighter
 quantity ceiling. Chat is not an admission source. Modify, cancel,
 smart, multi, forever, and the other write verbs still reach
 SafetySystem without this place admission. Laya starts Down; the three
-statuses are Ready, Degraded, and Down. The desk ping publishes the
-stored status and does not invent Ready. Ready and Degraded are recorded
-by `Laya.set_status`. See [ORDER_SAFETY.md](ORDER_SAFETY.md).
+statuses are Ready, Degraded, and Down. `GET /health` records them from
+the sidecar when one is registered. The desk ping publishes the stored
+Live-facing status and does not invent Ready. A base checkpoint is not
+qualified for Live, so Live stays Down until a qualification record
+matches the pinned revision and policy. See [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 ### Broker reads versus gated writes
 
