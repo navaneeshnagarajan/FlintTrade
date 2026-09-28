@@ -1,4 +1,15 @@
-import { get, getV1, isDemoAuthSession, post, postV1 } from "./ftApi.helpers";
+import { noteObservedFailure } from "@/stores/operatorSignalStore";
+
+import {
+  FtApiError,
+  buildHeaders,
+  get,
+  getBase,
+  getV1,
+  isDemoAuthSession,
+  post,
+  postV1,
+} from "./ftApi.helpers";
 
 export interface AuditLog {
   timestamp: string;
@@ -42,18 +53,73 @@ export interface SecuritySettings {
   ban_duration: number;
 }
 
+export type ResourceScope = "host" | "process" | "unavailable" | "sample";
+
 export interface HealthSubsystem {
-  status: "ok" | "degraded" | "error";
+  status: "ok" | "degraded" | "error" | "unavailable";
   note?: string;
+  scope?: ResourceScope;
   [key: string]: unknown;
+}
+
+/** This process only — never install-host RAM. */
+export interface ProcessMemory {
+  scope?: "process";
+  rss_mb?: number;
+  vms_mb?: number;
+  percent?: number;
+}
+
+export interface HostCpu {
+  status?: HealthSubsystem["status"];
+  scope?: ResourceScope;
+  used_pct?: number;
+  cores?: number;
+  note?: string;
+}
+
+export interface HostGpu {
+  status?: HealthSubsystem["status"];
+  scope?: ResourceScope;
+  used_pct?: number;
+  used_mb?: number;
+  total_mb?: number;
+  name?: string;
+  count?: number;
+  note?: string;
+}
+
+export interface HostNetwork {
+  status?: HealthSubsystem["status"];
+  scope?: ResourceScope;
+  bytes_sent?: number;
+  bytes_recv?: number;
+  note?: string;
 }
 
 export interface SystemHealth {
   status: "ok" | "degraded" | "error";
   broker: HealthSubsystem;
   duckdb: HealthSubsystem;
-  disk: HealthSubsystem & { free_gb?: number; total_gb?: number; used_pct?: number };
-  memory: HealthSubsystem & { used_mb?: number; total_mb?: number; used_pct?: number };
+  disk: HealthSubsystem & {
+    free_gb?: number;
+    total_gb?: number;
+    used_gb?: number;
+    used_pct?: number;
+    percent_used?: number;
+  };
+  memory: HealthSubsystem & {
+    used_mb?: number;
+    total_mb?: number;
+    used_pct?: number;
+    rss_mb?: number;
+    vms_mb?: number;
+    percent?: number;
+    process?: ProcessMemory;
+  };
+  cpu?: HostCpu;
+  gpu?: HostGpu;
+  network?: HostNetwork;
 }
 
 export interface PathStat {
@@ -146,13 +212,138 @@ const DEMO_SECURITY_SETTINGS: SecuritySettings = {
   ban_duration: 24,
 };
 
-const DEMO_HEALTH: SystemHealth = {
+/**
+ * Explore fallback when the install host cannot be read.
+ *
+ * Service rows may say Explore. Host disk, RAM, CPU, GPU, and network are
+ * unavailable — sample gigabytes must not be painted as this machine.
+ */
+const EXPLORE_HEALTH: SystemHealth = {
   status: "degraded",
-  broker: { status: "degraded", note: "Explore mode" },
-  duckdb: { status: "ok" },
-  disk: { status: "ok", free_gb: 128, total_gb: 256, used_pct: 50 },
-  memory: { status: "ok", used_mb: 2048, total_mb: 8192, used_pct: 25 },
+  broker: { status: "degraded", note: "Explore", scope: "unavailable" },
+  duckdb: { status: "degraded", note: "Explore", scope: "unavailable" },
+  disk: { status: "unavailable", scope: "unavailable", note: "Unavailable" },
+  memory: { status: "unavailable", scope: "unavailable", note: "Unavailable" },
 };
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function isSystemHealthBody(value: unknown): value is SystemHealth {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.status === "string"
+    && record.disk !== null && typeof record.disk === "object"
+    && record.memory !== null && typeof record.memory === "object"
+  );
+}
+
+/**
+ * Tag a live health document so the panel can tell host totals from process RSS.
+ *
+ * Disk ``percent_used`` is copied to ``used_pct``. Process RSS is nested and
+ * is not written into host ``used_mb`` / ``total_mb``. Zero host totals are
+ * dropped so the panel shows Unavailable rather than 0/0.
+ */
+export function normaliseLiveHealth(raw: SystemHealth): SystemHealth {
+  const disk: SystemHealth["disk"] = raw.disk.scope === "sample"
+    ? { status: "unavailable", scope: "unavailable", note: "Unavailable" }
+    : { ...raw.disk };
+  if (disk.scope !== "unavailable") {
+    const total = finiteNumber(disk.total_gb);
+    const free = finiteNumber(disk.free_gb);
+    if (total !== undefined && total > 0 && free !== undefined) {
+      disk.scope = "host";
+      const pct = finiteNumber(disk.used_pct) ?? finiteNumber(disk.percent_used);
+      if (pct !== undefined) disk.used_pct = pct;
+    }
+  }
+
+  const memory: SystemHealth["memory"] = raw.memory.scope === "sample"
+    ? { status: "unavailable", scope: "unavailable", note: "Unavailable" }
+    : { ...raw.memory };
+  const totalMb = finiteNumber(memory.total_mb);
+  const usedMb = finiteNumber(memory.used_mb);
+  const hostMemory = (
+    memory.scope !== "sample"
+    && memory.scope !== "unavailable"
+    && memory.scope !== "process"
+    && totalMb !== undefined
+    && totalMb > 0
+    && usedMb !== undefined
+  );
+  const rss = finiteNumber(memory.rss_mb) ?? finiteNumber(memory.process?.rss_mb);
+  const vms = finiteNumber(memory.vms_mb) ?? finiteNumber(memory.process?.vms_mb);
+  const processPercent = finiteNumber(memory.percent) ?? finiteNumber(memory.process?.percent);
+  if (rss !== undefined || vms !== undefined) {
+    memory.process = {
+      scope: "process",
+      ...(rss !== undefined ? { rss_mb: rss } : {}),
+      ...(vms !== undefined ? { vms_mb: vms } : {}),
+      ...(processPercent !== undefined ? { percent: processPercent } : {}),
+    };
+  }
+  if (hostMemory) {
+    memory.scope = "host";
+  } else if (memory.scope !== "unavailable" && memory.process) {
+    memory.scope = "process";
+    delete memory.used_mb;
+    delete memory.total_mb;
+    delete memory.used_pct;
+  } else {
+    memory.scope = "unavailable";
+    delete memory.used_mb;
+    delete memory.total_mb;
+    delete memory.used_pct;
+  }
+
+  return {
+    ...raw,
+    disk,
+    memory,
+    cpu: normaliseCpu(raw.cpu),
+    gpu: normaliseGpu(raw.gpu),
+    network: normaliseNetwork(raw.network),
+  };
+}
+
+function normaliseCpu(cpu: HostCpu | undefined): HostCpu | undefined {
+  if (!cpu) return undefined;
+  if (cpu.scope === "sample" || cpu.scope === "unavailable") {
+    return { status: "unavailable", scope: "unavailable", note: "Unavailable" };
+  }
+  const used = finiteNumber(cpu.used_pct);
+  if (used === undefined || used < 0) return { status: "unavailable", scope: "unavailable", note: "Unavailable" };
+  return { ...cpu, scope: "host", used_pct: used };
+}
+
+function normaliseGpu(gpu: HostGpu | undefined): HostGpu | undefined {
+  if (!gpu) return undefined;
+  if (gpu.scope === "sample" || gpu.scope === "unavailable") {
+    return { status: "unavailable", scope: "unavailable", note: "Unavailable" };
+  }
+  const total = finiteNumber(gpu.total_mb);
+  const usedPct = finiteNumber(gpu.used_pct);
+  if ((total === undefined || total <= 0) && usedPct === undefined) {
+    return { status: "unavailable", scope: "unavailable", note: "Unavailable" };
+  }
+  return { ...gpu, scope: "host" };
+}
+
+function normaliseNetwork(network: HostNetwork | undefined): HostNetwork | undefined {
+  if (!network) return undefined;
+  if (network.scope === "sample" || network.scope === "unavailable") {
+    return { status: "unavailable", scope: "unavailable", note: "Unavailable" };
+  }
+  const sent = finiteNumber(network.bytes_sent);
+  const received = finiteNumber(network.bytes_recv);
+  if (sent === undefined || received === undefined || sent < 0 || received < 0) {
+    return { status: "unavailable", scope: "unavailable", note: "Unavailable" };
+  }
+  return { ...network, scope: "host", bytes_sent: sent, bytes_recv: received };
+}
 
 export const getSecurityStats = () =>
   isDemoAuthSession()
@@ -208,10 +399,32 @@ export const updateSecuritySettings = (settings: Partial<SecuritySettings>) =>
     ? Promise.resolve({ status: "demo" })
     : post<{ status: string }>("security/settings", settings);
 
-export const getHealth = () =>
-  isDemoAuthSession()
-    ? Promise.resolve(DEMO_HEALTH)
-    : get<SystemHealth>("health");
+/**
+ * Install-host health for Settings → Monitoring.
+ *
+ * Live and Explore both prefer ``GET /api/v1/health`` when the backend
+ * answers, including a degraded (HTTP 503) body that still carries host
+ * totals. Explore falls back to service rows plus unavailable host
+ * resources — never sample disk or RAM figures.
+ */
+export async function getHealth(): Promise<SystemHealth> {
+  try {
+    const resp = await fetch(`${getBase()}/api/v1/health`, {
+      headers: buildHeaders(false),
+    });
+    const body: unknown = await resp.json().catch(() => undefined);
+    if (isSystemHealthBody(body)) return normaliseLiveHealth(body);
+    if (resp.ok) return body as SystemHealth;
+    if (isDemoAuthSession()) return EXPLORE_HEALTH;
+    const message = `FT API health: HTTP ${resp.status}`;
+    noteObservedFailure({ message, httpStatus: resp.status, provenance: "general" });
+    throw new FtApiError(message, resp.status, body);
+  } catch (err) {
+    if (err instanceof FtApiError) throw err;
+    if (isDemoAuthSession()) return EXPLORE_HEALTH;
+    throw err;
+  }
+}
 export const getTrafficStats = () =>
   isDemoAuthSession()
     ? Promise.resolve({
