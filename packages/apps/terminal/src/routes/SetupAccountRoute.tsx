@@ -256,6 +256,7 @@ function clearProgress(): void {
 }
 
 function isSetupSessionError(error: unknown): boolean {
+  if (error instanceof AccountSetupError && error.status === 401) return true;
   return error instanceof Error && /setup session/i.test(error.message);
 }
 
@@ -1068,11 +1069,13 @@ function VaultStep({ onOpened, onSessionRequired }: VaultStepProps) {
         }
         setPhase("form");
       } catch (error) {
-        if (cancelled) return;
+        // A 401 still counts after cleanup. Leaving it unreported keeps the
+        // vault step mounted, and the next mount probes again.
         if (isSetupSessionError(error)) {
           onSessionRequiredRef.current();
           return;
         }
+        if (cancelled) return;
         setPhase("form");
       }
     })();
@@ -1920,8 +1923,10 @@ export default function SetupAccountRoute({
   // The server is authoritative for a fresh browser. A reload that only has
   // local progress (the status mock, or a status read that has not yet said
   // the operator exists) still has to sign in before the vault form.
+  // A 401 from the vault step is the same screen, even if this render has
+  // not yet reconciled local progress with the server.
   const localResume = accountCreated && currentStep > 0;
-  const needsResume = !hasSetupSession && (operatorExists || localResume);
+  const needsResume = !hasSetupSession && (sessionRejected || operatorExists || localResume);
   const gateOpen = sessionRestored && (statusError !== null || planReady);
 
   useEffect(() => {

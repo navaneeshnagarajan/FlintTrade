@@ -769,6 +769,39 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(screen.queryByText("Your vault is set up and secured on this machine.")).not.toBeInTheDocument();
   });
 
+  it("shows Continue setup when the vault step reloads into a setup-session 401", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      vaultOpened: false,
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "operator",
+      currentStep: 1,
+    }));
+    mocks.openFlintTradeVault.mockRejectedValue(
+      new AccountSetupError("A setup session is required.", "server", 401),
+    );
+
+    await renderSetup();
+
+    expect(await screen.findByRole("heading", { name: "Continue setup" })).toBeInTheDocument();
+    expect(screen.getByText("This machine already has an operator. Sign in to finish setup.")).toBeInTheDocument();
+    expect(screen.queryByText("A setup session is required.")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
+    expect(mocks.openFlintTradeVault).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.openFlintTradeVault).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("heading", { name: "Continue setup" })).toBeInTheDocument();
+    expect(screen.queryByText("A setup session is required.")).not.toBeInTheDocument();
+  });
+
   it("sends one vault open when the form is submitted twice", async () => {
     localStorage.setItem(PROGRESS_KEY, JSON.stringify({
       accountCreated: true,
