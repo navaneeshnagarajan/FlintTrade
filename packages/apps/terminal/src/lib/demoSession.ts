@@ -75,9 +75,9 @@ export function markDemoSessionActive(): void {
   const storage = safeLocalStorage();
   if (!storage) return;
   storage.setItem(DEMO_SESSION_KEY, ACTIVE_VALUE);
-  // setMode("explore") is a no-op when the in-memory default is already
-  // Explore, so Zustand persist may never write flinttrade:mode. Write it
-  // here so a hard refresh can restore the sample-data session.
+  // The signed-in default is Practice, so a sample session must write
+  // Explore itself. Zustand persist only stores setMode, and a hard refresh
+  // restores whatever flinttrade:mode holds.
   persistExploreMode(storage);
 }
 

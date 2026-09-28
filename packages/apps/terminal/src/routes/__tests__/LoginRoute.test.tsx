@@ -265,6 +265,12 @@ describe("LoginRoute", () => {
             data: { token: "explore-session", username: "alice", expires_at: "" },
           });
         }
+        if (url.includes("/v1/auth/mode")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "practice-session", mode: "practice", live_mode_unlocked: false },
+          });
+        }
         return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
       },
     });
@@ -299,6 +305,12 @@ describe("LoginRoute", () => {
             data: { token: "explore-session", username: "testuser", expires_at: "2026-07-02T08:00:00+05:30" },
           });
         }
+        if (url.includes("/v1/auth/mode")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "practice-session", mode: "practice", live_mode_unlocked: false },
+          });
+        }
         return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
       },
     });
@@ -311,12 +323,94 @@ describe("LoginRoute", () => {
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
     expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
-      "explore-session",
+      "practice-session",
       "testuser",
       "2026-07-02T08:00:00+05:30",
       { status: "logged-out", principal: null, generation: 7 },
     );
-    expect(mockSetMode).toHaveBeenCalledWith("explore");
+    expect(mockUpdateToken).not.toHaveBeenCalled();
+    expect(mockSetMode).toHaveBeenCalledWith("practice");
+    expect(mockSetMode).not.toHaveBeenCalledWith("explore");
+    expect(screen.queryByText(/Explore/)).not.toBeInTheDocument();
+  });
+
+  it("opens a fresh-browser sign-in in Practice even when Explore is stored", async () => {
+    modeState.mode = "explore";
+    localStorage.removeItem("flinttrade:mode");
+    const onSuccess = vi.fn();
+    const fetchSpy = mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "explore-session", username: "testuser", expires_at: "" },
+          });
+        }
+        if (url.includes("/v1/auth/mode")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "practice-session", mode: "practice", live_mode_unlocked: false },
+          });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={onSuccess} mode="full" />);
+
+    await waitFor(() => expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    fireEvent.change(screen.getByLabelText("Enter your 2FA code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/ft-api/v1/auth/mode",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "practice" }) }),
+    );
+    expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+      "practice-session",
+      "testuser",
+      "",
+      { status: "logged-out", principal: null, generation: 7 },
+    );
+    expect(mockUpdateToken).not.toHaveBeenCalled();
+    expect(mockSetMode).toHaveBeenCalledWith("practice");
+    expect(modeState.mode).toBe("practice");
+    expect(mockSetMode).not.toHaveBeenCalledWith("explore");
+    expect(screen.queryByText(/Explore/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Explore — sample data only/)).not.toBeInTheDocument();
+  });
+
+  it("stays on Sign In when Practice cannot be opened for this session", async () => {
+    modeState.mode = "explore";
+    const onSuccess = vi.fn();
+    mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "explore-session", username: "testuser", expires_at: "" },
+          });
+        }
+        if (url.includes("/v1/auth/mode")) {
+          return jsonResponse({ status: "error", message: "mode unavailable" }, 503);
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={onSuccess} mode="full" />);
+
+    await waitFor(() => expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    fireEvent.change(screen.getByLabelText("Enter your 2FA code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not open Practice. Try again."));
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Explore/)).not.toBeInTheDocument();
   });
 
   it("upgrades the explore login JWT to practice when the UI was in Practice", async () => {
@@ -356,8 +450,14 @@ describe("LoginRoute", () => {
       "/ft-api/v1/auth/mode",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "practice" }) }),
     );
-    expect(mockUpdateToken).toHaveBeenCalledWith("practice-session", 8);
-    // Mode stays practice — it must NOT have been dropped to explore.
+    expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+      "practice-session",
+      "testuser",
+      "",
+      { status: "logged-out", principal: null, generation: 7 },
+    );
+    expect(mockUpdateToken).not.toHaveBeenCalled();
+    expect(mockSetMode).toHaveBeenCalledWith("practice");
     expect(mockSetMode).not.toHaveBeenCalledWith("explore");
   });
 
@@ -369,6 +469,12 @@ describe("LoginRoute", () => {
         if (url.includes("/v1/auth/login")) {
           return new Promise<Response>((resolve) => {
             finishLogin = resolve;
+          });
+        }
+        if (url.includes("/v1/auth/mode")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "practice-session", mode: "practice", live_mode_unlocked: false },
           });
         }
         return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
@@ -394,9 +500,14 @@ describe("LoginRoute", () => {
         status: "success",
         data: { token: "late-token", username: "alice", expires_at: "" },
       }), { status: 200, headers: { "Content-Type": "application/json" } }));
-      await Promise.resolve();
     });
 
+    await waitFor(() => expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+      "practice-session",
+      "alice",
+      "",
+      { status: "logged-out", principal: null, generation: 7 },
+    ));
     expect(mockSetLoggedInIfCurrent).toHaveReturnedWith(false);
     expect(authState).toMatchObject({ token: "newer-token", username: "bob", sessionGeneration: 8 });
     expect(mockSetMode).not.toHaveBeenCalled();

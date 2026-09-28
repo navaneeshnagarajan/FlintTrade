@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useModeStore } from "../modeStore";
+import { INITIAL_MODE, useModeStore } from "../modeStore";
 import type { AppMode } from "../modeStore";
 
 // ---------------------------------------------------------------------------
@@ -7,7 +7,9 @@ import type { AppMode } from "../modeStore";
 // ---------------------------------------------------------------------------
 
 function resetStore() {
-  useModeStore.setState({ mode: "explore" });
+  localStorage.removeItem("flinttrade:mode");
+  sessionStorage.removeItem("flinttrade:mode");
+  useModeStore.setState({ mode: INITIAL_MODE });
 }
 
 // ---------------------------------------------------------------------------
@@ -22,8 +24,9 @@ describe("modeStore", () => {
   // --- Default state --------------------------------------------------------
 
   describe("default state", () => {
-    it("mode defaults to explore", () => {
-      expect(useModeStore.getState().mode).toBe("explore");
+    it("mode defaults to Practice when localStorage is empty", () => {
+      expect(INITIAL_MODE).toBe("practice");
+      expect(useModeStore.getState().mode).toBe("practice");
     });
   });
 

@@ -40,6 +40,20 @@ export interface UnlockResult {
 export type DowngradeMode = "explore" | "practice";
 
 /**
+ * Desk mode after a password sign-in on a machine where Setup is finished.
+ *
+ * Password login mints an explore JWT. That claim is not an operator Mode.
+ * Practice is the desk, including when the browser still has Explore stored.
+ * An explicit practice report is kept. Live is not armed by a password sign-in.
+ */
+export function modeAfterPasswordSignIn(reported: unknown): "practice" {
+  // An explicit practice report, a missing claim, the explore JWT default,
+  // and a Live claim all open Practice. Password sign-in does not arm Live.
+  void reported;
+  return "practice";
+}
+
+/**
  * Downgrade the current session to `target` (explore or practice), returning
  * the freshly minted token. Throws on any non-2xx or missing token so callers
  * can keep the UI in its current (higher) mode — never flip the UI to a safer

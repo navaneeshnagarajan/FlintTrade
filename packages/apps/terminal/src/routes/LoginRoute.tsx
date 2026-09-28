@@ -32,7 +32,7 @@ import {
   useAuthStore,
 } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
-import { downgradeMode } from "@/lib/modeAuth";
+import { downgradeMode, modeAfterPasswordSignIn } from "@/lib/modeAuth";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 
 interface LoginRouteProps {
@@ -119,33 +119,26 @@ export default function LoginRoute({
       });
       const data = await resp.json();
       if (resp.ok && data.data?.token) {
+        // A finished Setup opens in Practice. Password login mints an
+        // explore JWT, and a stored Explore or Live value must not win.
+        // Mint the Practice session before logging in, so the desk never
+        // opens on the explore claim. Live stays behind the PIN.
+        const deskMode = modeAfterPasswordSignIn(data.data.mode);
+        let practiceToken: string;
+        try {
+          practiceToken = await downgradeMode(deskMode, data.data.token);
+        } catch {
+          if (!isAuthSessionFenceCurrent(requestFence)) return;
+          setError("Could not open Practice. Try again.");
+          return;
+        }
         if (!useAuthStore.getState().setLoggedInIfCurrent(
-          data.data.token,
+          practiceToken,
           data.data.username,
           data.data.expires_at,
           requestFence,
         )) return;
-        const loginFence = captureAuthSessionFence();
-        // Reconcile the persisted UI mode with the freshly-minted JWT.
-        // Password login always mints an `explore` JWT. If the UI was last
-        // in Live, drop to Explore (never silently re-arm real money — Live
-        // requires the explicit PIN dialog). If the UI was in Practice,
-        // upgrade the JWT to practice so sandbox orders aren't rejected 403
-        // `mode_blocked` (Phase 1 G1: the login-time half of the divergence).
-        const uiMode = useModeStore.getState().mode;
-        if (uiMode === "live") {
-          useModeStore.getState().setMode("explore");
-        } else if (uiMode === "practice") {
-          try {
-            const practiceToken = await downgradeMode("practice", data.data.token);
-            if (!useAuthStore.getState().updateToken(practiceToken, loginFence.generation)) return;
-          } catch {
-            if (!isAuthSessionFenceCurrent(loginFence)) return;
-            // Couldn't sync — fall back to Explore rather than leave the UI
-            // in a Practice state the JWT doesn't back.
-            useModeStore.getState().setMode("explore");
-          }
-        }
+        useModeStore.getState().setMode(deskMode);
         onSuccess();
       } else if (isAuthSessionFenceCurrent(requestFence)) {
         setError(data.message || "Invalid credentials.");
