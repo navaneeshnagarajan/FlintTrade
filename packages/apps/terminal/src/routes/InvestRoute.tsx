@@ -12,7 +12,7 @@
  * All data fetching lives in routes/invest/InvestContext.tsx
  */
 
-import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillStore } from "@/stores/skillStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
@@ -45,12 +45,19 @@ import {
   EyeOff,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { ProvenanceBadge } from "@/components/data/ProvenanceBadge";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { useValueVisibilityStore } from "@/stores/valueVisibilityStore";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import TabTransition from "@/components/motion/TabTransition";
 import { cn } from "@/lib/utils";
 import { InvestProvider, useInvest } from "./invest/InvestContext";
+import {
+  INVEST_GROUPS,
+  groupForTab,
+  resolveInvestLocation,
+  visibleInvestTabs,
+  type InvestTabId,
+} from "./invest/investTabs";
 
 // Lazy-load each tab individually — only the active tab is loaded.
 // Previously all 14 tabs were eagerly imported via barrel export (~142KB).
@@ -78,28 +85,7 @@ const CorrelationTab = lazy(() => import("./invest/tabs/CorrelationTab").then(m 
 
 // ─── Tab registry ─────────────────────────────────────────────────────────────
 
-type TabId =
-  | "dashboard"
-  | "holdings"
-  | "sip"
-  | "networth"
-  | "social"
-  | "sector"
-  | "overlap"
-  | "etf"
-  | "stocks"
-  | "ipo"
-  | "tax"
-  | "mf-optimizer"
-  | "mutual-funds"
-  | "benchmark"
-  | "basket"
-  | "goals"
-  | "etf-screener"
-  | "shareholding"
-  | "sector-rotation"
-  | "risk-return"
-  | "correlation";
+type TabId = InvestTabId;
 
 interface TabDef {
   id: TabId;
@@ -131,20 +117,25 @@ const TABS: TabDef[] = [
   { id: "correlation", label: "Correlation", icon: Grid2X2 },
 ];
 
-const TAB_IDS = new Set<string>(TABS.map((tab) => tab.id));
-
 /** Holdings tab owns its scroll — all others use the shared ScrollArea. */
 const FULL_HEIGHT_TABS: TabId[] = ["holdings"];
 
+const GROUP_ICONS: Record<(typeof INVEST_GROUPS)[number]["id"], typeof TrendingUp> = {
+  overview: LayoutDashboard,
+  holdings: BarChart3,
+  analyse: PieChart,
+  discover: Search,
+  tax: Receipt,
+};
+
 /**
- * Resolve an Invest URL hash to a tab id.
+ * Resolve an Invest URL hash to a leaf tab.
  *
- * Deep links such as `/invest#holdings` must select Holdings on the first
- * paint. Unknown or empty hashes fall back to Dashboard.
+ * Deep links such as `/invest#holdings` and group links such as `/invest#overview`
+ * select the matching group and sub-view on the first paint.
  */
 function tabFromHash(): TabId {
-  const hash = window.location.hash.replace(/^#/, "");
-  return TAB_IDS.has(hash) ? (hash as TabId) : "dashboard";
+  return resolveInvestLocation(window.location.hash).tabId;
 }
 
 // ─── Active tab renderer ──────────────────────────────────────────────────────
@@ -203,7 +194,6 @@ function InvestShell() {
   const [activeTab, setActiveTab] = useState<TabId>(tabFromHash);
   const level = useSkillLevel("invest");
   const { holdings, isLoading, isSampleData } = useInvest();
-  const tablistRef = useRef<HTMLDivElement>(null);
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);
   const toggleValues = useValueVisibilityStore((s) => s.toggle);
 
@@ -214,38 +204,51 @@ function InvestShell() {
   }, []);
 
   useEffect(() => {
-    window.history.replaceState(null, "", `#${activeTab}`);
+    const nextHash = `#${activeTab}`;
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(null, "", nextHash);
+    }
   }, [activeTab]);
 
-  // Density adaptation: fewer tabs for lower skill levels
-  const visibleTabIds: TabId[] = (() => {
-    if (level === "beginner") return ["dashboard", "holdings", "sip", "networth", "goals", "mf-optimizer", "mutual-funds"];
-    if (level === "intermediate") return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "goals", "tax", "mf-optimizer", "mutual-funds", "benchmark", "basket", "etf-screener", "shareholding", "sector-rotation"];
-    return ["dashboard", "holdings", "sip", "networth", "social", "sector", "overlap", "etf", "stocks", "ipo", "tax", "mf-optimizer", "mutual-funds", "benchmark", "basket", "goals", "etf-screener", "shareholding", "sector-rotation", "risk-return", "correlation"];
-  })();
+  const allowedTabIds = visibleInvestTabs(level, activeTab);
+  const groups = INVEST_GROUPS
+    .map((group) => ({
+      ...group,
+      tabs: group.tabs.filter((id) => allowedTabIds.includes(id)),
+    }))
+    .filter((group) => group.tabs.length > 0);
+  const activeGroup = groups.find((group) => group.tabs.includes(activeTab)) ?? groups[0];
+  const subTabs = (activeGroup?.tabs ?? [])
+    .map((id) => TABS.find((tab) => tab.id === id))
+    .filter((tab): tab is TabDef => tab != null);
 
-  const visibleTabs = TABS.filter((t) => visibleTabIds.includes(t.id));
+  const selectGroup = (groupId: (typeof INVEST_GROUPS)[number]["id"]) => {
+    const group = groups.find((candidate) => candidate.id === groupId);
+    if (!group || group.tabs.includes(activeTab)) return;
+    setActiveTab(group.tabs[0]);
+  };
 
-  // Roving tabindex: arrow key navigation on the horizontal tablist
-  const handleTablistKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-      e.preventDefault();
-      const tabs = tablistRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']");
-      if (!tabs || tabs.length === 0) return;
-      const idx = Array.from(tabs).indexOf(document.activeElement as HTMLButtonElement);
-      const next =
-        e.key === "ArrowRight"
-          ? (idx + 1) % tabs.length
-          : (idx - 1 + tabs.length) % tabs.length;
-      const nextTab = tabs[next];
-      nextTab?.focus();
-      // Activate the focused tab (follows ARIA Tabs pattern)
-      const tabId = visibleTabs[next]?.id;
-      if (tabId) setActiveTab(tabId);
-    },
-    [visibleTabs],
-  );
+  const moveTab = useCallback((
+    e: React.KeyboardEvent<HTMLDivElement>,
+    ids: readonly TabId[],
+    onSelect: (id: TabId) => void,
+  ) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const buttons = e.currentTarget.querySelectorAll<HTMLButtonElement>("[role='tab']");
+    if (buttons.length === 0) return;
+    const idx = Array.from(buttons).indexOf(document.activeElement as HTMLButtonElement);
+    const next = e.key === "ArrowRight"
+      ? (idx + 1) % buttons.length
+      : (idx - 1 + buttons.length) % buttons.length;
+    buttons[next]?.focus();
+    const tabId = ids[next];
+    if (tabId) onSelect(tabId);
+  }, []);
+
+  const panelLabelledBy = subTabs.length > 1
+    ? `invest-tab-${activeTab}`
+    : `invest-group-${activeGroup?.id ?? groupForTab(activeTab).id}`;
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -281,7 +284,7 @@ function InvestShell() {
                   >
                     {holdings.length} holdings
                   </Badge>
-                  {isSampleData && <ProvenanceBadge label="Sample" placement="inline" />}
+                  {isSampleData && <ExampleLabel testId="invest-header-example" />}
                 </>
               )}
               <button
@@ -297,26 +300,31 @@ function InvestShell() {
             </div>
           </div>
 
-          {/* Horizontal tab bar — filtered by skill level */}
           <div
-            ref={tablistRef}
             role="tablist"
             aria-label="Invest sections"
             className="flex items-end gap-1 px-6 overflow-x-auto scrollbar-none"
-            onKeyDown={handleTablistKeyDown}
+            onKeyDown={(event) => moveTab(
+              event,
+              groups.map((group) => group.tabs[0]),
+              (firstTab) => {
+                const group = groups.find((candidate) => candidate.tabs[0] === firstTab);
+                if (group) selectGroup(group.id);
+              },
+            )}
           >
-            {visibleTabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
+            {groups.map((group) => {
+              const Icon = GROUP_ICONS[group.id];
+              const isActive = group.id === activeGroup?.id;
               return (
                 <button
-                  key={tab.id}
+                  key={group.id}
                   role="tab"
                   aria-selected={isActive}
-                  aria-controls={`invest-tabpanel-${tab.id}`}
-                  id={`invest-tab-${tab.id}`}
+                  aria-controls={`invest-tabpanel-${activeTab}`}
+                  id={`invest-group-${group.id}`}
                   tabIndex={isActive ? 0 : -1}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => selectGroup(group.id)}
                   className={cn(
                     "flex items-center gap-1.5 px-3 py-2 text-xs font-sans font-medium transition-colors border-b-2 whitespace-nowrap shrink-0",
                     isActive
@@ -325,11 +333,44 @@ function InvestShell() {
                   )}
                 >
                   <Icon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                  {tab.label}
+                  {group.label}
                 </button>
               );
             })}
           </div>
+          {subTabs.length > 1 && (
+            <div
+              role="tablist"
+              aria-label={`${activeGroup?.label ?? "Invest"} views`}
+              className="flex items-end gap-1 px-6 overflow-x-auto scrollbar-none"
+              onKeyDown={(event) => moveTab(event, subTabs.map((tab) => tab.id), setActiveTab)}
+            >
+              {subTabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    role="tab"
+                    aria-selected={isActive}
+                    aria-controls={`invest-tabpanel-${tab.id}`}
+                    id={`invest-tab-${tab.id}`}
+                    tabIndex={isActive ? 0 : -1}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 text-xs font-sans font-medium transition-colors border-b-2 whitespace-nowrap shrink-0",
+                      isActive
+                        ? "text-text-primary border-text-primary"
+                        : "text-text-muted hover:text-text-secondary border-transparent",
+                    )}
+                  >
+                    <Icon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
       </div>
 
       {/* Content */}
@@ -337,7 +378,7 @@ function InvestShell() {
         <div
           role="tabpanel"
           id={`invest-tabpanel-${activeTab}`}
-          aria-labelledby={`invest-tab-${activeTab}`}
+          aria-labelledby={panelLabelledBy}
           className="flex-1 flex flex-col overflow-hidden"
         >
           <TabTransition tabKey={activeTab} className="flex-1 flex flex-col overflow-hidden">
@@ -348,7 +389,7 @@ function InvestShell() {
         <div
           role="tabpanel"
           id={`invest-tabpanel-${activeTab}`}
-          aria-labelledby={`invest-tab-${activeTab}`}
+          aria-labelledby={panelLabelledBy}
           className="flex-1"
         >
           <ScrollArea className="h-full">

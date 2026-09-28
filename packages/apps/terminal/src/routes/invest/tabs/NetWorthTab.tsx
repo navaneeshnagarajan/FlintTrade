@@ -23,8 +23,10 @@ import { Badge } from "@/components/ui/badge";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { StaggeredList } from "@/components/motion/StaggeredList";
 import { cn } from "@/lib/utils";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { useInvest } from "../InvestContext";
 import { DisabledActionButton } from "../DisabledActionButton";
+import { formatAccountNetWorth } from "@/lib/accountNetWorth";
 import { formatINRCompact, formatPercent } from "../formatters";
 import { maskValue } from "@/lib/formatters";
 import { useValueVisibilityStore } from "@/stores/valueVisibilityStore";
@@ -61,11 +63,11 @@ function buildComparison(totalInvested: number, currentValue: number): Compariso
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function NetWorthTab() {
-  const { summary, isLoading } = useInvest();
+  const { summary, isLoading, isSampleData } = useInvest();
   const { currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash } = summary;
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);
 
-  const knownTotal = currentValue + availableCash;
+  const knownTotal = typeof summary.netWorth === "number" ? summary.netWorth : currentValue + availableCash;
   const comparison = useMemo(
     () => buildComparison(totalInvested, currentValue),
     [totalInvested, currentValue],
@@ -75,7 +77,7 @@ export function NetWorthTab() {
     {
       label: "Equity Holdings",
       value: isLoading ? null : currentValue,
-      note: "Live from broker",
+      note: isSampleData ? "Example book" : "Live from broker",
       hexColor: "#3b82f6",
       tailwindBg: "bg-blue-500",
       tailwindText: "text-blue-400",
@@ -86,7 +88,7 @@ export function NetWorthTab() {
     {
       label: "Available Cash",
       value: isLoading ? null : availableCash,
-      note: "Live from broker",
+      note: isSampleData ? "Example cash" : "Live from broker",
       hexColor: "#22c55e",
       tailwindBg: "bg-emerald-500",
       tailwindText: "text-emerald-400",
@@ -148,8 +150,9 @@ export function NetWorthTab() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {/* Known total card */}
         <GlassCard className="p-5 flex flex-col justify-between gap-3">
-          <div className="text-xxs text-text-muted uppercase tracking-wider">
+          <div className="text-xxs text-text-muted uppercase tracking-wider flex items-center gap-1.5">
             Known Total (Equity + Cash)
+            {isSampleData && <ExampleLabel testId="net-worth-tab-example" />}
           </div>
           <div
             className={cn(
@@ -157,7 +160,7 @@ export function NetWorthTab() {
               isLoading ? "text-text-muted" : "text-text-primary",
             )}
           >
-            {isLoading ? "—" : maskValue(formatINRCompact(knownTotal), valuesHidden)}
+            {isLoading ? "—" : maskValue(formatAccountNetWorth(knownTotal), valuesHidden)}
           </div>
           {!isLoading && (
             <div
@@ -213,7 +216,7 @@ export function NetWorthTab() {
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                   <span className="text-xxs text-text-muted">tracked</span>
                   <span className="font-mono text-xs font-bold text-text-primary tabular-nums">
-                    {isLoading ? "—" : maskValue(formatINRCompact(knownTotal), valuesHidden)}
+                    {isLoading ? "—" : maskValue(formatAccountNetWorth(knownTotal), valuesHidden)}
                   </span>
                 </div>
               </div>

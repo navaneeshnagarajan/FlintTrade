@@ -19,6 +19,7 @@ import { useFunds } from "@/hooks/useFunds";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
+import { accountNetWorth } from "@/lib/accountNetWorth";
 import { classifySector } from "@/lib/sectors";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import type { Holding } from "@/types/api";
@@ -31,6 +32,8 @@ export interface PortfolioSummary {
   totalPnl: number;
   totalPnlPercent: number;
   availableCash: number;
+  /** Book market value plus available cash. Home uses the same helper. */
+  netWorth: number;
   sectorCount: number;
   holdingCount: number;
 }
@@ -54,8 +57,11 @@ export interface InvestContextValue {
  * Resolve the Invest-route holdings book.
  *
  * Explore always uses the labelled sample feed (`getDemoHoldings`). Practice
- * with no broker uses the same sample only after the sandbox holdings query
- * has settled empty — a cold load must not flash sample over a pending book.
+ * with no broker uses the same sample only after holdings and funds have
+ * settled empty — a cold load must not flash sample over a pending book.
+ * A Practice or Live account snapshot (funds returned, even with an empty
+ * holdings book) keeps that book. The sample portfolio must not supply a
+ * second net-worth figure next to Practice cash (FT-UX-HOME-INVEST-001).
  * A connected broker keeps the live query result — an empty funded book
  * stays at 0 (FT-TRADE-010).
  */
@@ -64,9 +70,13 @@ export function resolveInvestHoldings(
   liveHoldings: Holding[],
   brokerConnected = false,
   holdingsQuerySettled = true,
+  hasAccountSnapshot = false,
 ): { holdings: Holding[]; isSampleData: boolean } {
   if (mode === "explore") {
     return { holdings: getDemoHoldings(), isSampleData: true };
+  }
+  if (hasAccountSnapshot) {
+    return { holdings: liveHoldings, isSampleData: false };
   }
   if (
     mode === "practice"
@@ -101,13 +111,18 @@ export function InvestProvider({ children }: { children: ReactNode }) {
   // Practice sandbox reads are enabled with no broker. Do not treat the
   // default empty array as sample while the query is still pending or has
   // errored — that flash would overlay a real Practice book (or hide a
-  // failure) behind the labelled sample feed.
+  // failure) behind the labelled sample feed. A settled funds snapshot is
+  // the Practice account: keep it, even when holdings are empty.
   const holdingsQuerySettled = !holdingsLoading && !holdingsError;
+  const fundsQuerySettled = !fundsLoading;
+  const hasAccountSnapshot = mode !== "explore" && funds != null;
+  const readyForSampleFallback = holdingsQuerySettled && (mode !== "practice" || fundsQuerySettled);
   const { holdings, isSampleData } = resolveInvestHoldings(
     mode,
     liveHoldings,
     brokerConnected,
-    holdingsQuerySettled,
+    readyForSampleFallback,
+    hasAccountSnapshot,
   );
   const isLoading = mode === "explore" || isSampleData ? false : holdingsLoading || fundsLoading;
   const availableCash = mode === "explore" ? getDemoFunds().availableCash : (funds?.availableCash ?? 0);
@@ -135,6 +150,8 @@ export function InvestProvider({ children }: { children: ReactNode }) {
     [holdings],
   );
 
+  const netWorth = accountNetWorth(holdings, availableCash);
+
   const summary: PortfolioSummary = useMemo(
     () => ({
       currentValue,
@@ -142,10 +159,11 @@ export function InvestProvider({ children }: { children: ReactNode }) {
       totalPnl,
       totalPnlPercent,
       availableCash,
+      netWorth,
       sectorCount,
       holdingCount: holdings.length,
     }),
-    [currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash, sectorCount, holdings.length],
+    [currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash, netWorth, sectorCount, holdings.length],
   );
 
   const value: InvestContextValue = useMemo(

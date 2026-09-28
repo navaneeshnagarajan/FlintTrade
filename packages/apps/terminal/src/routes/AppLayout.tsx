@@ -525,7 +525,7 @@ export default function AppLayout() {
           </div>
         </main>
       </div>
-      {showWelcome && mode !== "explore" && (
+      {showWelcome && mode !== "explore" && location.pathname !== "/trade" && (
         <DailyWelcome onDismiss={handleDismissWelcome} />
       )}
       <NoConnectionOverlay suppress={primaryBannerKind === "live_risk"} />

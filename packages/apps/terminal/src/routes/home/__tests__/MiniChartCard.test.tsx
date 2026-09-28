@@ -18,9 +18,10 @@ describe("MiniChartCard", () => {
     expect(sparkline.querySelectorAll("path").length).toBeGreaterThan(0);
   });
 
-  it("badges the sparkline as SAMPLE (illustrative shape, not live data)", () => {
+  it("marks the sparkline as Example (illustrative shape, not live data)", () => {
     render(<MiniChartCard />);
     expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.getByTestId("mini-chart-example-label")).toHaveTextContent("Example");
   });
 
   it("shows a dash, never a fabricated price, when there is no live NIFTY tick", () => {

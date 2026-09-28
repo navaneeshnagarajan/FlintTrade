@@ -10,6 +10,7 @@ import { getDemoPositions } from "@/hooks/useModeData";
 import { useModeStore } from "@/stores/modeStore";
 import { BentoCard } from "@/components/bento/BentoCard";
 import { DemoBadge } from "./DemoBadge";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { getIstGreeting } from "./getIstGreeting";
 
 export function WelcomeCard() {
@@ -74,8 +75,9 @@ export function WelcomeCard() {
 
           {/* Regime badge */}
           <div className="text-right">
-            <p className="text-[10px] uppercase tracking-wider text-text-muted mb-0.5">
+            <p className="text-[10px] uppercase tracking-wider text-text-muted mb-0.5 flex items-center justify-end gap-1.5">
               Regime
+              <ExampleLabel testId="welcome-regime-example" />
             </p>
             <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-medium bg-neutral-bg text-text-primary border border-neutral-border">
               Neutral

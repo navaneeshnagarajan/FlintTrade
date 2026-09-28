@@ -13,6 +13,7 @@ import {
 import { useModeStore } from "@/stores/modeStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import { DemoBadge } from "./DemoBadge";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { Loader2 } from "lucide-react";
 
 export function PositionsCard() {
@@ -50,8 +51,9 @@ export function PositionsCard() {
         {/* In Explore the absolute DemoBadge occupies the top-right corner, so
             clear it — this is the only home card with header content there. */}
         <div className={`flex items-center justify-between ${isExplore ? "pr-12" : ""}`}>
-          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
+          <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted inline-flex items-center gap-1.5">
             Positions
+            {isExplore && <ExampleLabel testId="positions-example-label" />}
           </p>
           <span
             className="font-mono text-sm font-semibold"

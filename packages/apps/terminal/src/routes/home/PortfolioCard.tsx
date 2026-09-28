@@ -7,9 +7,10 @@ import { useFunds } from "@/hooks/useFunds";
 import { useHoldings } from "@/hooks/useHoldings";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
+import { accountNetWorth, formatAccountNetWorth } from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import { DemoBadge } from "./DemoBadge";
-import { ProvenanceBadge } from "@/components/data/ProvenanceBadge";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 
 interface AllocationSlice {
   label: string;
@@ -33,12 +34,8 @@ export function PortfolioCard() {
   const funds = isExplore ? getDemoFunds() : fundsQuery.data;
   const holdings = isExplore ? getDemoHoldings() : holdingsQuery.data;
 
-  const holdingsValue = holdings?.reduce(
-    (sum, h) => sum + h.ltp * Math.abs(h.quantity),
-    0
-  ) ?? 0;
-
-  const netWorth = holdingsValue + (funds?.availableCash ?? 0);
+  const netWorth = accountNetWorth(holdings ?? [], funds?.availableCash ?? 0);
+  const netWorthIsExample = isExplore && netWorth > 0;
 
   return (
     <BentoCard size="default" label="Portfolio" data-testid="portfolio-card">
@@ -49,14 +46,17 @@ export function PortfolioCard() {
         </p>
 
         <div>
-          <p className="text-[10px] text-text-muted mb-0.5">Net Worth</p>
-          <p className="font-mono text-xl font-semibold text-text-primary">
+          <p className="text-[10px] text-text-muted mb-0.5 flex items-center gap-1.5">
+            Net Worth
+            {netWorthIsExample && <ExampleLabel testId="portfolio-net-worth-example" />}
+          </p>
+          <p
+            className="font-mono text-xl font-semibold text-text-primary"
+            data-testid="portfolio-net-worth"
+            data-value={netWorth}
+          >
             {netWorth > 0
-              ? netWorth.toLocaleString("en-IN", {
-                  style: "currency",
-                  currency: "INR",
-                  maximumFractionDigits: 0,
-                })
+              ? formatAccountNetWorth(netWorth)
               : isExplore || accountReadsEnabled ? "—" : "Connect broker"}
           </p>
         </div>
@@ -65,7 +65,7 @@ export function PortfolioCard() {
         <div>
           <p className="text-[10px] text-text-muted mb-1.5 flex items-center gap-1.5">
             Allocation
-            <ProvenanceBadge label="Sample" placement="inline" />
+            <ExampleLabel testId="allocation-example-label" />
           </p>
           <div
             className="flex h-2 rounded-full overflow-hidden"

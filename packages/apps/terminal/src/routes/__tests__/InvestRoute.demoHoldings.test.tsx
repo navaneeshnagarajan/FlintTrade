@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
@@ -20,6 +20,7 @@ vi.mock("framer-motion", () => ({
       <div {...props}>{children as React.ReactNode}</div>
     ),
   },
+  useInView: () => true,
 }));
 
 vi.mock("@/lib/motion", () => ({
@@ -45,6 +46,16 @@ vi.mock("@/components/help/SpotlightTour", () => ({
 
 vi.mock("@/lib/tourDefinitions", () => ({
   TOUR_DEFINITIONS: {},
+}));
+
+vi.mock("@/components/magicui/animated-counter", () => ({
+  AnimatedCounter: ({
+    value,
+    formatter,
+  }: {
+    value: number;
+    formatter?: (v: number) => string;
+  }) => <span>{formatter ? formatter(value) : value}</span>,
 }));
 
 vi.mock("@/hooks/useHoldings", () => ({
@@ -88,7 +99,13 @@ function renderInvest() {
 afterEach(() => {
   brokerConnected.current = false;
   useModeStore.setState({ mode: "explore" });
+  window.history.replaceState(null, "", "/invest");
 });
+
+function clickHoldingsGroup() {
+  const groups = screen.getByRole("tablist", { name: "Invest sections" });
+  return within(groups).getByRole("tab", { name: "Holdings" });
+}
 
 describe("InvestRoute header holdings badge (FT-DEMO-001 / FT-TRADE-010)", () => {
   it("shows the demo holdings count and a Sample chip in explore mode", () => {
@@ -110,7 +127,7 @@ describe("InvestRoute header holdings badge (FT-DEMO-001 / FT-TRADE-010)", () =>
     expect(screen.getByText(`${expected.length} holdings`)).toBeInTheDocument();
     expect(screen.queryByText("Sample")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: /Holdings/i }));
+    await user.click(clickHoldingsGroup());
 
     await waitFor(() => {
       expect(screen.getByText(`${expected.length} stocks`)).toBeInTheDocument();
@@ -133,7 +150,7 @@ describe("InvestRoute header holdings badge (FT-DEMO-001 / FT-TRADE-010)", () =>
     const user = userEvent.setup();
     renderInvest();
 
-    await user.click(screen.getByRole("tab", { name: /Holdings/i }));
+    await user.click(clickHoldingsGroup());
 
     await waitFor(() => {
       expect(screen.getByText("No holdings")).toBeInTheDocument();

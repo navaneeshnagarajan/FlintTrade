@@ -29,6 +29,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 import type { Holding } from "@/types/api";
 import { cn } from "@/lib/utils";
 import { useInvest } from "../InvestContext";
@@ -188,8 +189,9 @@ export function HoldingsTab() {
 
       {/* Toolbar */}
       <div className="flex items-center justify-between px-2 py-2 border-b border-border-default shrink-0">
-        <span className="text-xs text-text-muted">
+        <span className="text-xs text-text-muted inline-flex items-center gap-1.5">
           {holdings.length} stock{holdings.length !== 1 ? "s" : ""}
+          {isDemo && <ExampleLabel testId="holdings-example" />}
         </span>
         <div className="flex items-center gap-1">
           <Button

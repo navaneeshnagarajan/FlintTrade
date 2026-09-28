@@ -21,12 +21,17 @@ const holdingsQuery = vi.hoisted(() => ({
   refetch: vi.fn(),
 }));
 
+const fundsQuery = vi.hoisted(() => ({
+  data: undefined as { availableCash: number; usedMargin: number; totalBalance: number } | undefined,
+  isLoading: false,
+}));
+
 vi.mock("@/hooks/useHoldings", () => ({
   useHoldings: () => holdingsQuery,
 }));
 
 vi.mock("@/hooks/useFunds", () => ({
-  useFunds: () => ({ data: undefined, isLoading: false }),
+  useFunds: () => fundsQuery,
 }));
 
 vi.mock("@/hooks/useAccountReadsEnabled", () => ({
@@ -49,6 +54,7 @@ function HoldingsCountProbe() {
       <span data-testid="summary-count">{summary.holdingCount}</span>
       <span data-testid="sample-flag">{String(isSampleData)}</span>
       <span data-testid="loading-flag">{String(isLoading)}</span>
+      <span data-testid="net-worth">{summary.netWorth}</span>
     </div>
   );
 }
@@ -71,6 +77,8 @@ afterEach(() => {
   holdingsQuery.data = undefined;
   holdingsQuery.isLoading = false;
   holdingsQuery.isError = false;
+  fundsQuery.data = undefined;
+  fundsQuery.isLoading = false;
   useModeStore.setState({ mode: "explore" });
 });
 
@@ -117,6 +125,32 @@ describe("InvestContext sample holdings count (FT-DEMO-001)", () => {
     );
     expect(screen.getByTestId("sample-flag")).toHaveTextContent("true");
     expect(expected.length).toBeGreaterThan(0);
+  });
+
+  it("keeps the practice cash balance when holdings are empty instead of the sample book", () => {
+    useModeStore.setState({ mode: "practice" });
+    brokerConnected.current = false;
+    fundsQuery.data = { availableCash: 999_200, usedMargin: 800, totalBalance: 1_000_000 };
+
+    renderProbe();
+
+    expect(screen.getByTestId("holding-count")).toHaveTextContent("0 holdings");
+    expect(screen.getByTestId("sample-flag")).toHaveTextContent("false");
+    expect(screen.getByTestId("net-worth")).toHaveTextContent("999200");
+    expect(getDemoHoldings().length).toBeGreaterThan(0);
+  });
+
+  it("does not flash the sample book while practice funds are still loading", () => {
+    useModeStore.setState({ mode: "practice" });
+    brokerConnected.current = false;
+    fundsQuery.isLoading = true;
+    fundsQuery.data = undefined;
+
+    renderProbe();
+
+    expect(screen.getByTestId("holding-count")).toHaveTextContent("0 holdings");
+    expect(screen.getByTestId("sample-flag")).toHaveTextContent("false");
+    expect(screen.getByTestId("loading-flag")).toHaveTextContent("true");
   });
 
   it("keeps an empty connected practice book at 0 with no sample flag", () => {
@@ -208,6 +242,15 @@ describe("resolveInvestHoldings", () => {
     expect(resolved.isSampleData).toBe(true);
     expect(resolved.holdings).toHaveLength(demo.length);
     expect(resolved.holdings.map((h) => h.symbol)).toEqual(demo.map((h) => h.symbol));
+  });
+
+  it("does not substitute sample when practice already has an account snapshot", async () => {
+    const { resolveInvestHoldings } = await import("../InvestContext");
+
+    expect(resolveInvestHoldings("practice", [], false, true, true)).toEqual({
+      holdings: [],
+      isSampleData: false,
+    });
   });
 
   it("does not substitute sample in practice until the holdings query has settled empty", async () => {

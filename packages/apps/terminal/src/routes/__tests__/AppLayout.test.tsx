@@ -329,6 +329,17 @@ describe("AppLayout", () => {
     expect(screen.getByTestId("ticker-strip")).toBeInTheDocument();
   });
 
+  it("drops the greeting toast on Trade and keeps it on Home", () => {
+    mockLocation.pathname = "/trade";
+    const { unmount } = renderApp();
+    expect(screen.queryByTestId("daily-welcome")).not.toBeInTheDocument();
+    unmount();
+
+    mockLocation.pathname = "/home";
+    renderApp();
+    expect(screen.getByTestId("daily-welcome")).toBeInTheDocument();
+  });
+
   it("does not show the daily welcome card in explore mode", () => {
     mockModeStore.mockImplementation((selector: (s: Record<string, unknown>) => unknown) =>
       selector({ mode: "explore" }),

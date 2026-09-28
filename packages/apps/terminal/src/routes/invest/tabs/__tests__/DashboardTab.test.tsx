@@ -3,9 +3,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
+import { accountNetWorth, formatAccountNetWorth } from "@/lib/accountNetWorth";
 import { formatCurrencyCompact } from "@/lib/formatters";
 import type { Holding } from "@/types/api";
 
@@ -81,6 +82,7 @@ const investState = vi.hoisted(() => ({
     totalPnl: 2750,
     totalPnlPercent: 1.64,
     availableCash: 50000,
+    netWorth: 220100,
     sectorCount: 2,
     holdingCount: 2,
   },
@@ -116,6 +118,7 @@ describe("DashboardTab", () => {
       totalPnl: 2750,
       totalPnlPercent: 1.64,
       availableCash: 50000,
+      netWorth: 220100,
       sectorCount: 2,
       holdingCount: LIVE_ROWS.length,
     };
@@ -156,14 +159,44 @@ describe("DashboardTab", () => {
       totalPnl,
       totalPnlPercent: totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0,
       availableCash,
+      netWorth: expectedNetWorth,
       sectorCount: 2,
       holdingCount: demo.length,
     };
 
     render(<DashboardTab />);
 
-    expect(screen.getByText(formatCurrencyCompact(expectedNetWorth))).toBeInTheDocument();
+    expect(screen.getByText(formatAccountNetWorth(expectedNetWorth))).toBeInTheDocument();
+    expect(screen.getByTestId("invest-net-worth-example")).toHaveTextContent("Example");
+    expect(screen.getByTestId("invest-net-worth")).toHaveAttribute("data-value", String(expectedNetWorth));
     expect(screen.queryByText(formatCurrencyCompact(845_000))).not.toBeInTheDocument();
     expect(expectedNetWorth).not.toBe(845_000);
+  });
+
+  it("shows one practice net worth and does not label that figure Example", () => {
+    const practiceCash = 999_200;
+    const demoNetWorth = accountNetWorth(getDemoHoldings(), getDemoFunds().availableCash);
+
+    investState.holdings = [];
+    investState.isSampleData = false;
+    investState.summary = {
+      currentValue: 0,
+      totalInvested: 0,
+      totalPnl: 0,
+      totalPnlPercent: 0,
+      availableCash: practiceCash,
+      netWorth: practiceCash,
+      sectorCount: 0,
+      holdingCount: 0,
+    };
+
+    render(<DashboardTab />);
+
+    expect(screen.getByTestId("invest-net-worth")).toHaveAttribute("data-value", String(practiceCash));
+    expect(within(screen.getByTestId("invest-net-worth")).getByText(formatAccountNetWorth(practiceCash))).toBeInTheDocument();
+    expect(screen.queryByTestId("invest-net-worth-example")).not.toBeInTheDocument();
+    expect(screen.queryByText(formatCurrencyCompact(demoNetWorth))).not.toBeInTheDocument();
+    expect(screen.queryByText(formatAccountNetWorth(demoNetWorth))).not.toBeInTheDocument();
+    expect(demoNetWorth).not.toBe(practiceCash);
   });
 });
