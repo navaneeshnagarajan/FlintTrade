@@ -53,16 +53,20 @@ Use FlintTrade's depth widget (50-level DOM from OpenAlgo) to monitor stacking.
 
 ## Spread Cost Analysis
 
-Spread cost must be factored into every scalp. For Nifty futures (lot = 75):
+Spread cost must be factored into every scalp. Lot sizes are revised by the exchange from time to time, so always take the current lot size from the broker's instrument master rather than this file.
+
+The worked example is indicative only. It uses one Nifty futures lot (indicative lot size 65) at an index level of about 25,000 (about ₹16.25 lakh notional per leg):
 
 ```
-Spread cost per round trip ≈ 1 point × 75 = ₹75
-Brokerage (flat ₹20 × 2) = ₹40
-STT + other charges ≈ ₹30
-Total cost per round trip ≈ ₹145
+Spread ≈ 1 point × 65 ≈ ₹65 (indicative)
+Brokerage depends on the broker (for example a flat fee per order)
+STT alone ≈ ₹800 on the sell leg (0.05% of sell-side notional for futures; indicative)
+Exchange transaction charges, stamp duty on the buy leg, the SEBI fee and GST come on top
 ```
 
-A 5-point target nets ≈ ₹375 − ₹145 = ₹230 per lot. Scalping requires disciplined sizing to keep costs below 30% of gross profit.
+Indicative figures; charge rates and lot sizes change. Check current exchange circulars and the broker instrument master.
+
+A 5-point move on one lot is about ₹325 gross (indicative). At these rates that does not cover STT alone, so a scalp target must clear the full round-trip cost (spread, brokerage, statutory charges) before it counts as positive expectancy. Scalping requires disciplined sizing to keep costs below 30% of gross profit.
 
 ## Execution Requirements
 
