@@ -234,19 +234,15 @@ def evaluate_free_text(
     client: Any,
     policy: LayaPolicy | None = None,
 ) -> TextDecision:
-    """Score free text. Empty text is refused without a host call.
+    """Score free text. An empty note is uncertain and does not call the host.
 
-    Uncertain answers clamp in Practice and deny in Live. A host failure is Down.
+    Uncertain answers, including an empty note, clamp in Practice and deny in
+    Live. A host failure is Down.
     """
     active = policy or load_policy()
     note = rationale.strip()
     if not note:
-        return TextDecision(
-            effect="deny",
-            reason="A concrete reason is required before this order can be admitted.",
-            applied_quantity=0,
-            evidence=(("policy_version", active.version), ("failure", "note_absent")),
-        )
+        return _uncertain_decision(active, mode, requested_quantity, degraded_ceiling, "note_absent")
     if len(note) > _MAX_NOTE_CHARS:
         return TextDecision(
             effect="deny",
@@ -274,18 +270,11 @@ def evaluate_free_text(
         )
     abstain = any(item[1] == "abstain" for item in effects if item[0].endswith(":effect"))
     if abstain:
-        if mode.strip().lower() == "live":
-            return TextDecision(
-                effect="deny",
-                reason="Laya is uncertain. Live orders are blocked.",
-                applied_quantity=0,
-                evidence=tuple(evidence),
-            )
-        applied = min(requested_quantity, degraded_ceiling)
+        decision = _uncertain_decision(active, mode, requested_quantity, degraded_ceiling, "abstain")
         return TextDecision(
-            effect="clamp",
-            reason="Laya is uncertain. Quantity stays inside the tighter limit.",
-            applied_quantity=applied,
+            effect=decision.effect,
+            reason=decision.reason,
+            applied_quantity=decision.applied_quantity,
             evidence=tuple(evidence),
         )
     return TextDecision(
@@ -304,7 +293,8 @@ def interpret_health(
 ) -> DecisionStatus:
     """Map a sidecar health document to Ready, Degraded, or Down.
 
-    A missing document, a revision mismatch, or a digest mismatch is Down.
+    A missing document, a missing digest, a revision mismatch, or a digest
+    mismatch is Down.
     CPU fallback when a non-CPU device was requested is Degraded.
     """
     active = policy or load_policy()
@@ -321,7 +311,7 @@ def interpret_health(
     if str(revisions.get(active.checkpoint) or "") != active.revision:
         return DecisionStatus.DOWN
     reported = _reported_digest(payload, active)
-    if reported is not None and reported != active.sha256:
+    if reported is None or reported != active.sha256:
         return DecisionStatus.DOWN
     device = str(payload.get("device") or "")
     fallback_count = _fallback_count(payload, active.checkpoint)
@@ -426,11 +416,14 @@ class SystemOneClient:
         return payload
 
     def _check_identity(self, payload: Mapping[str, Any]) -> None:
-        revision = payload.get("revision")
-        if isinstance(revision, str) and revision.strip() and revision.strip() != self._expected_revision:
+        """Reject a response whose revision or digest is not the pinned string.
+
+        Missing, blank, padded, and non-string values are not the pin. That
+        is Down.
+        """
+        if payload.get("revision") != self._expected_revision:
             raise DecisionCallError("revision_mismatch")
-        digest = payload.get("sha256")
-        if isinstance(digest, str) and digest.strip() and digest.strip().lower() != self._expected_sha256:
+        if payload.get("sha256") != self._expected_sha256:
             raise DecisionCallError("digest_mismatch")
 
 
@@ -504,6 +497,30 @@ def _probability(value: object) -> float:
     if not math.isfinite(number) or number < 0 or number > 1:
         raise DecisionCallError("malformed")
     return number
+
+
+def _uncertain_decision(
+    policy: LayaPolicy,
+    mode: str,
+    requested_quantity: int,
+    degraded_ceiling: int,
+    token: str,
+) -> TextDecision:
+    """Practice clamps. Live denies. The host is not required for this outcome."""
+    evidence = (("policy_version", policy.version), ("rationale:effect", "abstain"), ("failure", token))
+    if mode.strip().lower() == "live":
+        return TextDecision(
+            effect="deny",
+            reason="Laya is uncertain. Live orders are blocked.",
+            applied_quantity=0,
+            evidence=evidence,
+        )
+    return TextDecision(
+        effect="clamp",
+        reason="Laya is uncertain. Quantity stays inside the tighter limit.",
+        applied_quantity=min(requested_quantity, degraded_ceiling),
+        evidence=evidence,
+    )
 
 
 def _down_decision(policy: LayaPolicy, code: str) -> TextDecision:

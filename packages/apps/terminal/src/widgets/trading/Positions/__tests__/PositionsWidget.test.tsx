@@ -955,6 +955,7 @@ describe("PositionsWidget", () => {
         price: 0,
         triggerPrice: 0,
         strategy: "FlintPositions",
+        rationale: "",
       }, {
         mode: "live",
         scopeKey: "live:native:dhan:POSITIONS-A",
@@ -964,6 +965,28 @@ describe("PositionsWidget", () => {
       await waitFor(() => expect(mockRefetch).toHaveBeenCalledTimes(1));
       expect(mockEmitNotification).toHaveBeenCalledWith(
         expect.objectContaining({ category: "order", title: "Square-off submitted" }),
+      );
+    });
+
+    it("sends the square-off admission note with placeOrder", async () => {
+      mockPlaceOrder.mockResolvedValue({ orderId: "SQ-NOTE" });
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Square off RELIANCE" }));
+      fireEvent.change(screen.getByLabelText("Admission note"), {
+        target: { value: "Flatten the open risk" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm square off RELIANCE" }));
+
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          symbol: "RELIANCE",
+          action: "BUY",
+          rationale: "Flatten the open risk",
+        }),
+        expect.anything(),
       );
     });
 

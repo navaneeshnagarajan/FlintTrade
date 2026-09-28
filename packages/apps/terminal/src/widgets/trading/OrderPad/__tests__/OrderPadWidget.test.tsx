@@ -274,6 +274,22 @@ describe("OrderPadWidget", () => {
     expect(Number(qtyInput.value)).toBeGreaterThanOrEqual(1);
   });
 
+  it("sends the admission note with a practice place", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    fireEvent.change(screen.getByLabelText("Admission note"), {
+      target: { value: "Planned breakout" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    fireEvent.click(await screen.findByRole("button", {
+      name: /confirm (simulated practice|sample) order/i,
+    }));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ rationale: "Planned breakout" }),
+      expect.objectContaining({ mode: "practice" }),
+    );
+  });
+
   it("shows Laya denied under the confirm control and leaves it off", async () => {
     mockPlaceOrder.mockRejectedValue(new OrderApiError("Explore cannot place orders.", 403, {
       code: "laya_denied",
@@ -715,6 +731,7 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
         price: 250.5,
         triggerPrice: 0,
         strategy: "FlintOrderPad",
+        rationale: "",
       },
       { mode: "practice" },
     );

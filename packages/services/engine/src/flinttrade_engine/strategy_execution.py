@@ -156,7 +156,7 @@ def _laya_place_block(order: Order) -> dict[str, object] | None:
             "product": order.product,
             "price": order.price,
             "trigger_price": order.trigger_price,
-            "rationale": getattr(order, "admission_note", "") or "",
+            "rationale": order.admission_note,
         },
         mode="live",
         source="automate",

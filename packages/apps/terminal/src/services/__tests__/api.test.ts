@@ -3419,6 +3419,28 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(headers["Content-Type"]).toBe("application/json");
   });
 
+  it("placeOrder sends the operator admission note and an empty note", async () => {
+    fetchSpy.mockImplementation(() => Promise.resolve(
+      jsonResponse({ status: "success", data: { orderId: "ORD-NOTE" } }),
+    ));
+    const order = {
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY" as const,
+      quantity: 1,
+      product: "MIS" as const,
+      orderType: "MARKET" as const,
+    };
+
+    await placeOrder({ ...order, rationale: "Planned breakout" });
+    await placeOrder({ ...order, rationale: "" });
+
+    const noted = JSON.parse(String((fetchSpy.mock.calls[0]![1] as RequestInit).body));
+    const empty = JSON.parse(String((fetchSpy.mock.calls[1]![1] as RequestInit).body));
+    expect(noted.rationale).toBe("Planned breakout");
+    expect(empty.rationale).toBe("");
+  });
+
   it("placeOrder with a Practice authority pin keeps sandbox mode even if the store flips after the gate", async () => {
     mockModeState.mode = "practice";
     fetchSpy.mockImplementation(async (_url, init) => {

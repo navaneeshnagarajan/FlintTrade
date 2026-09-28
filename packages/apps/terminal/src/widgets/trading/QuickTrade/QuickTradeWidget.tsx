@@ -26,6 +26,7 @@ import { readOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { liveWritesMuted } from "@/lib/operatorIncident";
 import { placeOrder, getSymbol } from "@/services/api";
+import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { useModeStore } from "@/stores/modeStore";
@@ -212,6 +213,7 @@ function QuickTradeWidget(props: WidgetProps) {
   const [isPending, setIsPending] = useState(false);
   const [pendingAction, setPendingAction] = useState<"BUY" | "SELL" | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [note, setNote] = useState("");
 
   useEffect(() => {
     setAdmission(null);
@@ -289,6 +291,7 @@ function QuickTradeWidget(props: WidgetProps) {
           product,
           orderType: orderType,
           strategy: "quicktrade",
+          rationale: admissionRationale(note),
         });
         setAdmission(null);
         setStatus({
@@ -313,7 +316,7 @@ function QuickTradeWidget(props: WidgetProps) {
         setIsPending(false);
       }
     },
-    [symbol, exchange, lots, product, orderType, limitPrice, mode, track, resolveQuantity],
+    [symbol, exchange, lots, product, orderType, limitPrice, mode, track, resolveQuantity, note],
   );
 
   const handleAction = useCallback(
@@ -472,6 +475,8 @@ function QuickTradeWidget(props: WidgetProps) {
 
         {/* Status */}
         <StatusBanner status={status} />
+
+        <AdmissionNoteField id="quicktrade-admission-note" value={note} onChange={setNote} />
 
         <LayaDegradedLimitsNote status={decisionStatus} />
         <LayaAdmissionNotice notice={admission} />

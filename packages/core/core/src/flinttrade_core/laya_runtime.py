@@ -120,6 +120,7 @@ class LayaRuntime:
         self._health_reader = health_reader
         self._process: Any | None = None
         self._api_key = ""
+        self._generation = 0
         self._lock = threading.RLock()
 
     @property
@@ -195,32 +196,48 @@ class LayaRuntime:
         return self.base_url
 
     def stop(self) -> None:
-        """Stop the sidecar and record Down. The API key from this boot is dropped."""
+        """Stop the sidecar and record Down before any in-flight probe can publish.
+
+        The API key from this boot is dropped. A health read that started earlier
+        is ignored once this generation moves on.
+        """
         from flinttrade_engine.laya import DecisionStatus, process_laya  # noqa: PLC0415
 
         with self._lock, self._file_lock():
-            process = self._process
-            self._process = None
-            self._api_key = ""
-            if process is not None:
-                _terminate(process)
+            self._generation += 1
             engine = process_laya()
             engine.set_decision_client(None)
             engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+            process = self._process
+            self._process = None
+            self._api_key = ""
+        if process is not None:
+            _terminate(process)
 
     def publish_status(self) -> Any:
-        """Read ``/health`` and record Ready, Degraded, or Down."""
+        """Read ``/health`` and record Ready, Degraded, or Down.
+
+        A result from a generation that ``stop`` has already closed is discarded.
+        """
         from flinttrade_engine.laya import DecisionStatus, process_laya  # noqa: PLC0415
         from flinttrade_engine.laya_decision import publish_probe  # noqa: PLC0415
 
+        with self._lock:
+            generation = self._generation
+            running = self._process is not None
+        if not running:
+            return process_laya().status
         try:
             payload = self.read_health()
         except Exception:
             payload = None
-        status = publish_probe(process_laya(), payload, requested_device=self._device)
-        if status is not DecisionStatus.DOWN and isinstance(payload, Mapping):
-            self._mark_weights_cached()
-        return status
+        with self._lock:
+            if generation != self._generation or self._process is None:
+                return process_laya().status
+            status = publish_probe(process_laya(), payload, requested_device=self._device)
+            if status is not DecisionStatus.DOWN and isinstance(payload, Mapping):
+                self._mark_weights_cached()
+            return status
 
     def read_health(self) -> Mapping[str, Any] | None:
         """Return the sidecar health document, or ``None`` when it cannot be read."""

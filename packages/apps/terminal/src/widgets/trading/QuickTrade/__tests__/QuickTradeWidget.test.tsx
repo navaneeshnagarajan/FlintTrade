@@ -243,6 +243,20 @@ describe("QuickTradeWidget", () => {
     });
   });
 
+  it("sends the admission note with the place", async () => {
+    renderQuickTrade({ symbol: "RELIANCE", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.change(screen.getByLabelText("Admission note"), {
+      target: { value: "Planned breakout" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /sell 1 lots/i }));
+    await waitFor(() => {
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "SELL", quantity: 1, rationale: "Planned breakout" }),
+      );
+    });
+  });
+
   it("requires confirmation for a 10-lot order (threshold is reachable)", async () => {
     renderQuickTrade({ symbol: "RELIANCE", exchange: "NSE" });
     await screen.findByText(/Qty: 1 × 1 = 1/);

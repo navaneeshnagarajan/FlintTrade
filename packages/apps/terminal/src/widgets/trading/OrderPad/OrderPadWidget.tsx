@@ -67,6 +67,7 @@ import {
   orderSuccessToast,
 } from "@/lib/modeVocabulary";
 import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
+import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { readOperatorIncident, useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { liveWritesMuted } from "@/lib/operatorIncident";
@@ -117,6 +118,7 @@ const orderSchema = z.object({
   price: z.number().min(0).optional(),
   trigPrice: z.number().min(0).optional(),
   discQty: z.number().int().min(0).optional(),
+  note: z.string().max(4000).optional(),
 });
 
 type OrderFormValues = z.infer<typeof orderSchema>;
@@ -431,6 +433,7 @@ function OrderPadWidget(props: WidgetProps) {
       price: undefined,
       trigPrice: undefined,
       discQty: undefined,
+      note: "",
     },
   });
 
@@ -443,13 +446,14 @@ function OrderPadWidget(props: WidgetProps) {
   const price = watch("price");
   const trigPrice = watch("trigPrice");
   const discQty = watch("discQty");
+  const note = watch("note");
 
   useEffect(() => {
     setAdmission((current) => {
       if (current?.kind === "clamp" && current.appliedQuantity === qty) return current;
       return null;
     });
-  }, [symbol, exchange, action, orderType, product, qty, price, trigPrice, discQty]);
+  }, [symbol, exchange, action, orderType, product, qty, price, trigPrice, discQty, note]);
 
   const priceEnabled = PRICE_ENABLED.has(orderType);
   const triggerEnabled = TRIGGER_ENABLED.has(orderType);
@@ -849,6 +853,7 @@ function OrderPadWidget(props: WidgetProps) {
         ? { disclosedQuantity: values.discQty }
         : {}),
       strategy: "FlintOrderPad",
+      rationale: admissionRationale(values.note ?? ""),
     };
     if (isPracticeOrExplore) {
       // Practice and Explore open a dedicated review stage; no placement call
@@ -1339,6 +1344,18 @@ function OrderPadWidget(props: WidgetProps) {
             )}
           />
         </div>
+
+        <Controller
+          control={control}
+          name="note"
+          render={({ field }) => (
+            <AdmissionNoteField
+              id="orderpad-admission-note"
+              value={field.value ?? ""}
+              onChange={field.onChange}
+            />
+          )}
+        />
 
         {/* Order summary preview */}
         <div className="rounded border border-border-subtle bg-surface-card px-3 py-2 space-y-1">

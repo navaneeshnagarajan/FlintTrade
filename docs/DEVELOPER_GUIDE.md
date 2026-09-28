@@ -524,7 +524,11 @@ Live stays Down until a `LayaQualification` record uses
 `EvidenceUseScope.LIVE_DECISION` for that exact revision, digest, and
 policy version. A base checkpoint is not that record. An unreachable
 host, a timeout, a malformed response, or a revision or digest mismatch
-is Down, and Practice refuses too.
+is Down, and Practice refuses too. The decision response must include
+`revision` and `sha256`. A health document without the weight digest is
+Down. Stopping the sidecar records Down before an in-flight probe can
+publish Ready. An empty admission note is uncertain: Practice clamps and
+Live denies.
 
 The same client speaks `POST /v1/systemone`. An operator may point it at
 another loopback host, including one on port 8888, without adding that

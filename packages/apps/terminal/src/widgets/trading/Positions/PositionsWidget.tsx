@@ -81,6 +81,7 @@ import { FlintSegmentTracker } from "@flinttrade/design-system";
 import { downloadExcel } from "@/services/ftApi.data";
 import { postWithMode } from "@/services/ftApi.helpers";
 import { placeOrder } from "@/services/api";
+import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
@@ -352,6 +353,7 @@ function SquareOffDialog({
 }: SquareOffDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [note, setNote] = useState("");
 
   const exitAction: "BUY" | "SELL" = position.quantity > 0 ? "SELL" : "BUY";
   const exitQty = Math.abs(position.quantity);
@@ -384,6 +386,7 @@ function SquareOffDialog({
         price: 0,
         triggerPrice: 0,
         strategy: "FlintPositions",
+        rationale: admissionRationale(note),
       }, mutationIdentity);
       if (
         !isActionAllowed()
@@ -413,6 +416,7 @@ function SquareOffDialog({
     getCurrentIdentity,
     onClose,
     onSquaredOff,
+    note,
   ]);
 
   return (
@@ -450,6 +454,7 @@ function SquareOffDialog({
             Position data is unavailable or frozen. Close this dialog and reconnect before retrying.
           </p>
         )}
+        <AdmissionNoteField id="positions-admission-note" value={note} onChange={setNote} />
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
             Cancel

@@ -305,15 +305,71 @@ def test_floor_refusal_does_not_call_the_host(laya_host: FakeLayaHost) -> None:
 
 
 @pytest.mark.unit
-def test_empty_note_does_not_call_the_host(laya_host: FakeLayaHost) -> None:
+def test_empty_note_is_uncertain_and_does_not_call_the_host(laya_host: FakeLayaHost) -> None:
     laya_host.response_body = _body(_answers())
-    verdict = _engine(laya_host).admit(_proposal(rationale="  "))
-    assert verdict.allow is False
-    assert "concrete reason" in verdict.reason
+    practice = _engine(laya_host).admit(_proposal(rationale="  ", quantity=4))
+    assert practice.allow is True
+    assert practice.applied_quantity == 1
+    assert "uncertain" in practice.reason.lower()
+    assert laya_host.requests == []
+    live = _engine(laya_host).admit(_proposal(mode="live", rationale=""))
+    assert live.allow is False
+    assert live.reason == "Laya is uncertain. Live orders are blocked."
+    assert "concrete reason is required" not in live.reason
     assert laya_host.requests == []
     fresh = _engine(laya_host)
     fresh.admit(_proposal(rationale=""))
     assert fresh.status is DecisionStatus.READY
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "drop",
+    ["revision", "sha256"],
+)
+def test_missing_identity_on_the_decision_response_is_down(laya_host: FakeLayaHost, drop: str) -> None:
+    payload = json.loads(_body(_answers()))
+    payload.pop(drop)
+    laya_host.response_body = json.dumps(payload).encode()
+    engine = _engine(laya_host)
+    verdict = engine.admit(_proposal())
+    assert verdict.allow is False
+    assert engine.status is DecisionStatus.DOWN
+    assert any(item[0] == "failure" and item[1].endswith("mismatch") for item in verdict.evidence)
+
+
+@pytest.mark.unit
+def test_blank_identity_on_the_decision_response_is_down(laya_host: FakeLayaHost) -> None:
+    laya_host.response_body = _body(_answers(), revision="  ", sha256="")
+    engine = _engine(laya_host)
+    verdict = engine.admit(_proposal())
+    assert verdict.allow is False
+    assert engine.status is DecisionStatus.DOWN
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("field", ["revision", "sha256"])
+def test_non_string_identity_on_the_decision_response_is_down(laya_host: FakeLayaHost, field: str) -> None:
+    payload = json.loads(_body(_answers()))
+    payload[field] = 1
+    laya_host.response_body = json.dumps(payload).encode()
+    engine = _engine(laya_host)
+    verdict = engine.admit(_proposal())
+    assert verdict.allow is False
+    assert engine.status is DecisionStatus.DOWN
+
+
+@pytest.mark.unit
+def test_padded_identity_on_the_decision_response_is_down(laya_host: FakeLayaHost) -> None:
+    laya_host.response_body = _body(
+        _answers(),
+        revision=f" {_POLICY.revision} ",
+        sha256=f" {_POLICY.sha256} ",
+    )
+    engine = _engine(laya_host)
+    verdict = engine.admit(_proposal())
+    assert verdict.allow is False
+    assert engine.status is DecisionStatus.DOWN
 
 
 @pytest.mark.unit

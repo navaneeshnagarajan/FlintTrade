@@ -182,6 +182,11 @@ export interface PlaceOrderParams {
    * the backend as `disclosed_quantity`.
    */
   disclosedQuantity?: number;
+  /**
+   * Free-text plan for admission. Empty is a normal case: Practice clamps
+   * and Live denies. It is not a broker instruction.
+   */
+  rationale?: string;
 }
 
 export interface SmartOrderParams extends PlaceOrderParams {

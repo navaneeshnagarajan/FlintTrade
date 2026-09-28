@@ -275,8 +275,11 @@ def _allowing_answers() -> dict[str, object]:
 
 @pytest.mark.asyncio
 async def test_model_deny_never_reaches_safety() -> None:
+    seen: list[str] = []
+
     class _Host:
         def decide(self, state: str, questions: object) -> dict[str, object]:
+            seen.append(state)
             answers = _allowing_answers()
             answers["tilt"] = {"probabilities": {"A": 0.97, "B": 0.03}}
             return {"answers": answers}
@@ -284,11 +287,17 @@ async def test_model_deny_never_reaches_safety() -> None:
     process_laya().set_decision_client(_Host())
     safety = MagicMock()
     dispatcher = _automate_dispatcher(safety)
-    order = Order(symbol="RELIANCE", exchange="NSE", action="BUY", quantity="1")
-    object.__setattr__(order, "admission_note", "Chasing the loss from the last trade.")
+    order = Order(
+        symbol="RELIANCE",
+        exchange="NSE",
+        action="BUY",
+        quantity="1",
+        admission_note="Chasing the loss from the last trade.",
+    )
     with pytest.raises(RuntimeError, match="tilt or revenge"):
         await dispatcher.dispatch_order(order)
     safety.check_order.assert_not_called()
+    assert seen == ["Order side: BUY\nNote:\nChasing the loss from the last trade."]
 
 
 @pytest.mark.asyncio
@@ -310,8 +319,13 @@ async def test_admission_runs_off_the_event_loop() -> None:
     process_laya().set_decision_client(_Slow())
     safety = MagicMock()
     dispatcher = _automate_dispatcher(safety)
-    order = Order(symbol="RELIANCE", exchange="NSE", action="BUY", quantity="1")
-    object.__setattr__(order, "admission_note", "Buying the planned breakout.")
+    order = Order(
+        symbol="RELIANCE",
+        exchange="NSE",
+        action="BUY",
+        quantity="1",
+        admission_note="Buying the planned breakout.",
+    )
 
     async def _watch() -> None:
         await asyncio.sleep(0.05)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -170,6 +171,18 @@ def test_unreachable_probe_is_down() -> None:
 
 
 @pytest.mark.unit
+def test_missing_health_digest_is_down() -> None:
+    engine = process_laya()
+    payload = _healthy()
+    payload.pop("sha256")
+    publish_probe(engine, payload)
+    assert engine.status is DecisionStatus.DOWN
+    payload = _healthy(sha256="")
+    publish_probe(engine, payload)
+    assert engine.status is DecisionStatus.DOWN
+
+
+@pytest.mark.unit
 def test_digest_mismatch_on_the_probe_is_down() -> None:
     engine = process_laya()
     publish_probe(engine, _healthy(sha256="cd" * 32))
@@ -202,6 +215,29 @@ def test_live_qualification_requires_the_exact_pin() -> None:
     publish_probe(engine, _healthy())
     assert engine.effective_status("live") is DecisionStatus.READY
     assert engine.note_heartbeat() is DecisionStatus.READY
+
+
+@pytest.mark.unit
+def test_stop_discards_an_in_flight_health_probe(tmp_path: Path) -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    def reader(_url: str) -> dict[str, object]:
+        started.set()
+        assert release.wait(2)
+        return _healthy()
+
+    runtime = LayaRuntime(tmp_path, process_factory=lambda _argv, _env: _Process(), health_reader=reader)
+    runtime.start()
+    worker = threading.Thread(target=runtime.publish_status)
+    worker.start()
+    assert started.wait(2)
+    runtime.stop()
+    release.set()
+    worker.join(2)
+    assert not worker.is_alive()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().effective_status("practice") is DecisionStatus.DOWN
 
 
 @pytest.mark.unit

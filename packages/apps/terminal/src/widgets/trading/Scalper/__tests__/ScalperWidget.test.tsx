@@ -353,6 +353,20 @@ describe("ScalperWidget", () => {
     fireEvent.click(await screen.findByText("Confirm BUY"));
   }
 
+  it("sends the admission note with the confirmed place", async () => {
+    render(<ScalperWidget {...defaultProps} />);
+    await screen.findByText("×75");
+    fireEvent.change(screen.getByLabelText("Admission note"), {
+      target: { value: "Scalp the open" },
+    });
+    await buyCeWithConfirm();
+    await waitFor(() => {
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "BUY", rationale: "Scalp the open" }),
+      );
+    });
+  });
+
   it("renders the SL/Target points inputs (wired to the gated bracket route)", () => {
     render(<ScalperWidget {...defaultProps} />);
 
