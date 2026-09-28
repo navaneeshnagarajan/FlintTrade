@@ -733,12 +733,14 @@ The Home greeting card stays on the dashboard. Its line is `Good morning`,
 `Good afternoon`, or `Good evening` from the Asia/Kolkata hour, plus the
 operator name when one is set. There is no greeting toast.
 
-Home and Invest share one net-worth figure: cash + holdings + open
-positions. Buying shares moves value from cash into positions. With an
-unchanged price, the total stays the same. The Home portfolio card labels
-that figure `Net Worth`. Invest Dashboard labels it
+Home and Invest share one net-worth figure: cash + holdings + positions
+minus charges. Charges come from the account book and are 0 in Practice
+for now. Buying shares moves value from cash into positions. With an
+unchanged price and zero charges, the total stays the same. The Home
+portfolio card labels that figure `Net Worth`. Invest Dashboard labels it
 `Net Worth (Cash + Holdings + Positions)`. The Net Worth view labels it
-`Known Total (Cash + Holdings + Positions)`.
+`Known Total (Cash + Holdings + Positions)`. Those labels do not name
+charges; the figure still subtracts them.
 
 Home allocation shows a labelled Example split (Equity, MF, Gold, F&O)
 only until there is account data. After an account snapshot the bar is
@@ -769,23 +771,29 @@ it opens Holdings → Holdings. An unknown hash opens Overview → Dashboard.
 The selected view stays available from that hash when the skill level
 would otherwise hide it.
 
-**Overlap.** With fewer than two holdings, including a Practice book with
-none, Overlap shows
+**Overlap.** With zero or one fund or basket, Overlap shows
 `No holdings to compare yet. Overlap appears once you hold two or more funds or baskets.`
-The overlap view opens at two or more. The sample overlap book appears in
-the public web demo, labelled `Demo (example data)`, or before any account
-snapshot, labelled Example. Practice does not substitute that book.
+The view opens at two or more. The sample book appears only in the web
+demo, labelled `Demo (example data)`, or with the Example chip before any
+account snapshot exists. Practice with no holdings always shows the empty
+state.
 
 **Example views.** Sample figures on Baskets, Sector Rotation, Benchmark,
 Shareholding, ETF Screener, Social, ETFs, Risk-Return, and Correlation
-carry the Example chip. Benchmark keeps that chip on the index rows.
-With holdings, Your Portfolio shows the book return and does not carry
-the chip. Comparisons against the sample indices, including Benchmarks
-beaten and alpha, stay hidden. In their place:
+carry the Example chip. On Benchmark, index rows keep the Example chip.
+With real holdings, the portfolio row is labelled
+`Your Portfolio (since first buy)`, because it shows the book return
+(total P&L ÷ invested) while the index rows are 1Y figures, and it
+carries no chip. When the holdings are Example, that row keeps the
+Example chip. Benchmarks beaten, alpha, and the other
+outperformance figures are replaced by
 `Comparison needs real index data.`
-With no holdings, Benchmark still shows the index lines, a `—` on the
-Your Portfolio row, and `Add holdings to compare against benchmarks.`
-The comparison carries `Benchmark data is illustrative. Live index data requires a market data subscription.`
+That note is shown when there are holdings. With no holdings, the Your
+Portfolio row shows `—` and
+`Add holdings to compare against benchmarks.`
+The view also reads
+`Benchmark data is illustrative. Live index data requires a market data subscription.`
+and `Returns are absolute (not annualised) for periods under 1Y.`
 
 **Practice.** In Practice the source line says `Practice account`.
 Dashboard allocation reads
