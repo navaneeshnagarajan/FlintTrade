@@ -6,7 +6,8 @@ Public endpoints (no API key required):
   - GET  /v1/auth/status   — check if setup complete
   - POST /v1/auth/setup    — one-time account creation
   - POST /v1/auth/login    — daily password login (TOTP only once enrolled)
-  - POST /v1/auth/pin      — PIN quick-unlock (Live also requires TOTP enrolment)
+  - POST /v1/auth/pin      — PIN quick-unlock (restores the session Mode)
+  - POST /v1/auth/live     — explicit Live switch (PIN + authenticator enrolment)
   - POST /v1/auth/logout   — invalidate session
 Session-bound endpoints (valid session JWT required):
   - POST /v1/auth/pin/set  — set/change the quick-unlock PIN (password re-confirm)
@@ -826,32 +827,28 @@ def auth_login() -> tuple[Any, int]:
     }), 200
 
 
-@auth_bp.route("/pin", methods=["POST"])
-@_rate_limit("10 per minute")
-def auth_pin_verify() -> tuple[Any, int]:
-    """PIN quick-unlock — returns a new session token for the requested mode.
+_SESSION_MODES = frozenset({"explore", "practice", "live"})
 
-    Default behaviour (no ``mode`` in the body) is unchanged: the returned
-    JWT carries ``mode: "live"`` and ``live_mode_unlocked: true``, which is
-    checked server-side by ``order_routes`` before any live order is
-    forwarded to a broker. This is the explicit Live-arming gesture used by
-    the ModeIndicator upgrade dialog and the login screen's quick-unlock.
 
-    An optional ``mode`` field (``"explore"`` | ``"practice"`` | ``"live"``)
-    lets mode-preserving callers — the idle LockScreen — re-authenticate
-    WITHOUT silently escalating the session to Live (Phase 1 fix for the
-    A4 divergence: an idle Practice session unlocking with a PIN previously
-    received a live-unlocked JWT under a Practice UI; design D2,
-    ``.local/specs/auth-phase1/DESIGN_LOG.md``).  Non-live targets mint
-    ``live_mode_unlocked: false`` — strictly less privilege from the same
-    PIN verification.
+def _session_mode(payload: dict[str, Any]) -> str | None:
+    """Return the session JWT's mode, or ``None`` when it cannot be restored.
 
-    Session-bound (Phase 1 policy decision D6): the PIN is a RE-AUTH factor,
-    never a session-minting factor — the request must carry a valid,
-    unrevoked session JWT (any mode). Without it, a low-entropy PIN alone
-    would arm Live for anything that can reach 127.0.0.1, and a session
-    that expired overnight could sidestep the daily password+TOTP re-auth
-    (the JWT's next-08:00-IST expiry is exactly that freshness bound).
+    Unlock never invents a mode. A missing or unrecognised claim is not Live.
+    """
+    raw = payload.get("mode")
+    if not isinstance(raw, str):
+        return None
+    mode = raw.strip().lower()
+    if mode not in _SESSION_MODES:
+        return None
+    return mode
+
+
+def _pin_reauth_session() -> dict[str, Any] | tuple[Any, int]:
+    """Load the full-login session a PIN re-auth must already hold.
+
+    Returns:
+        The decoded session payload, or a ``(response, status)`` error.
     """
     svc = _get_auth_service()
     if svc is None:
@@ -873,67 +870,138 @@ def auth_pin_verify() -> tuple[Any, int]:
             "status": "error",
             "message": "Session expired — sign in with password and TOTP, then use the PIN.",
         }), 401
-    # A reset token proves only email possession (not password+TOTP) and is
-    # exempt from the password-change kill switch — it must never satisfy the
-    # D6 session requirement, or (reset token + PIN) would arm Live.
     if session_payload.get("type") != "session":
         return jsonify({
             "status": "error",
             "message": "PIN unlock requires a full login session — sign in with password and TOTP first.",
         }), 401
+    return session_payload
 
-    body = request.get_json(silent=True) or {}
-    pin = str(body.get("pin", ""))
-    target_mode = str(body.get("mode", "live")).strip().lower() or "live"
-    if target_mode not in ("explore", "practice", "live"):
+
+def _reject_pin(pin: str) -> tuple[Any, int] | None:
+    """Return a PIN error response, or ``None`` when the PIN matches."""
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    if svc.verify_pin(pin):
+        return None
+    # Distinguish "no PIN exists" from "wrong PIN" — with the optional PIN
+    # skipped at setup, verify_pin fails unconditionally and the old
+    # blanket "Invalid PIN." sent operators chasing a PIN they never set.
+    if not svc.has_pin():
         return jsonify({
             "status": "error",
-            "message": "mode must be one of 'explore', 'practice', 'live'.",
-        }), 400
-
-    if not svc.verify_pin(pin):
-        # Distinguish "no PIN exists" from "wrong PIN" — with the optional PIN
-        # skipped at setup, verify_pin fails unconditionally and the old
-        # blanket "Invalid PIN." sent operators chasing a PIN they never set,
-        # leaving Live mode unreachable with no hint of the actual fix.
-        if not svc.has_pin():
-            return jsonify({
-                "status": "error",
-                "code": "pin_not_set",
-                "message": (
-                    "No PIN is set for this account — the optional PIN was "
-                    "skipped at setup. Create one in Settings → Security "
-                    "(POST /v1/auth/pin/set), then retry."
-                ),
-            }), 409
-        return jsonify({"status": "error", "message": "Invalid PIN."}), 401
-
-    if target_mode == "live" and not svc.is_totp_enabled():
-        return jsonify({
-            "status": "error",
-            "code": "totp_required",
+            "code": "pin_not_set",
             "message": (
-                "Authenticator enrolment is required before Live. "
-                "Confirm a one-time code from your authenticator app, then retry."
+                "No PIN is set for this account — the optional PIN was "
+                "skipped at setup. Create one in Settings → Security "
+                "(POST /v1/auth/pin/set), then retry."
             ),
-        }), 403
+        }), 409
+    return jsonify({"status": "error", "message": "Invalid PIN."}), 401
 
-    live_unlocked = target_mode == "live"
+
+def _totp_required_for_live() -> tuple[Any, int]:
+    """The existing Live authenticator-enrolment refusal."""
+    return jsonify({
+        "status": "error",
+        "code": "totp_required",
+        "message": (
+            "Authenticator enrolment is required before Live. "
+            "Confirm a one-time code from your authenticator app, then retry."
+        ),
+    }), 403
+
+
+def _issue_pin_token(mode: str, *, live_mode_unlocked: bool) -> tuple[Any, int]:
+    """Mint a replacement session token and return the PIN success body."""
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
     profile = svc.get_profile()
     token = _create_token(
         profile.get("username", "user"),
-        live_mode_unlocked=live_unlocked,
-        mode=target_mode,
+        live_mode_unlocked=live_mode_unlocked,
+        mode=mode,
     )
-
     return jsonify({
         "status": "success",
         "data": {
             "token": token,
-            "mode": target_mode,
-            "live_mode_unlocked": live_unlocked,
+            "mode": mode,
+            "live_mode_unlocked": live_mode_unlocked,
         },
     }), 200
+
+
+@auth_bp.route("/pin", methods=["POST"])
+@_rate_limit("10 per minute")
+def auth_pin_verify() -> tuple[Any, int]:
+    """PIN quick-unlock. Restores the existing session and never changes Mode.
+
+    The mode is taken from the server-side session JWT. Any ``mode`` in the
+    request body is ignored, and a missing session mode does not default to
+    Live. Practice, Explore, and any other non-Live session — including a
+    Connected (read) desk — unlock with the PIN alone. A session that is
+    already Live keeps the authenticator enrolment check. Switching into
+    Live is ``POST /v1/auth/live``, not this route.
+
+    The PIN is a re-auth factor: the request must carry a valid, unrevoked
+    session JWT.
+    """
+    loaded = _pin_reauth_session()
+    if isinstance(loaded, tuple):
+        return loaded
+
+    body = request.get_json(silent=True) or {}
+    pin = str(body.get("pin", ""))
+    rejected = _reject_pin(pin)
+    if rejected is not None:
+        return rejected
+
+    session_mode = _session_mode(loaded)
+    if session_mode is None:
+        return jsonify({
+            "status": "error",
+            "message": "The current session has no mode to restore.",
+        }), 400
+
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    # Already Live: keep the authenticator enrolment check. Anything else,
+    # including Connected (read), unlocks without that Live check.
+    if session_mode == "live" and not svc.is_totp_enabled():
+        return _totp_required_for_live()
+
+    return _issue_pin_token(session_mode, live_mode_unlocked=session_mode == "live")
+
+
+@auth_bp.route("/live", methods=["POST"])
+@_rate_limit("10 per minute")
+def auth_live_confirm() -> tuple[Any, int]:
+    """Explicit Live switch. PIN plus the existing authenticator enrolment check.
+
+    This is the only PIN route that changes Mode to Live. Quick unlock
+    (``POST /v1/auth/pin``) restores the current session instead.
+    """
+    loaded = _pin_reauth_session()
+    if isinstance(loaded, tuple):
+        return loaded
+
+    body = request.get_json(silent=True) or {}
+    pin = str(body.get("pin", ""))
+    rejected = _reject_pin(pin)
+    if rejected is not None:
+        return rejected
+
+    svc = _get_auth_service()
+    if svc is None:
+        return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    if not svc.is_totp_enabled():
+        return _totp_required_for_live()
+
+    return _issue_pin_token("live", live_mode_unlocked=True)
 
 
 @auth_bp.route("/pin/set", methods=["POST"])
@@ -941,15 +1009,14 @@ def auth_pin_verify() -> tuple[Any, int]:
 def auth_pin_set() -> tuple[Any, int]:
     """Set or change the quick-unlock PIN over a live operator session.
 
-    The PIN is optional at account setup, but Live mode is armed exclusively
-    via ``POST /v1/auth/pin`` — without this route an operator who skipped
+    The PIN is optional at account setup. Reaching Live is the explicit
+    ``POST /v1/auth/live`` switch — without a PIN an operator who skipped
     the optional PIN could never reach Live except by wiping the account and
     re-running setup. Guarded like the broker-management writes (G9): the
     request must carry a valid, unrevoked full-login session JWT, plus the
-    account password as an explicit re-confirmation. The PIN stays a RE-AUTH
-    factor over that live session (policy D6) — this endpoint mints no token
-    and never changes the session's mode; arming Live still requires the
-    separate ``/v1/auth/pin`` verification with the new PIN.
+    account password as an explicit re-confirmation. The PIN stays a re-auth
+    factor over that session — this endpoint mints no token and never
+    changes Mode. Switching to Live still requires ``POST /v1/auth/live``.
 
     Request JSON:
         password (str): The account password (re-confirmation).
@@ -1075,11 +1142,11 @@ def auth_mode_switch() -> tuple[Any, int]:
     UI to Explore must not keep holding a higher-mode token (design D1,
     ``.local/specs/auth-phase1/DESIGN_LOG.md``).
 
-    Both accepted targets are privilege *reductions* (explore is the most
+    Both accepted targets are privilege reductions (explore is the most
     restrictive mode; practice routes to the broker-free sandbox), so any
-    valid session token may request them. Upgrading to Live ALWAYS goes
-    through ``/v1/auth/pin`` (re-authenticates with PIN) — no shortcut
-    exists from this endpoint, by design.
+    valid session token may request them. Switching to Live goes through
+    ``POST /v1/auth/live`` (PIN plus authenticator enrolment). This endpoint
+    does not change Mode to Live.
 
     Request JSON:
         mode (str): ``"practice"`` or ``"explore"``. Any other value is a 400.
@@ -1101,7 +1168,7 @@ def auth_mode_switch() -> tuple[Any, int]:
             "status": "error",
             "message": (
                 "Only downgrades to 'practice' or 'explore' are allowed here. "
-                "Upgrade to 'live' via POST /v1/auth/pin with PIN verification."
+                "Switch to Live via POST /v1/auth/live with PIN verification."
             ),
         }), 400
 

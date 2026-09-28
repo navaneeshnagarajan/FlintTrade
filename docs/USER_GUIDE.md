@@ -653,9 +653,9 @@ See [Laya on place](#laya-on-place).
    6-digit PIN**. Live unlock requires both — a confirmed authenticator
    enrolment plus the PIN. If you deferred 2FA with **Set up later** on
    the optional authenticator panel, enter a one-time authenticator code
-   in the dialog to enrol, then the PIN. `POST /v1/auth/pin` with
-   `mode: "live"` refuses 403 `totp_required` until the authenticator
-   is enabled. The PIN
+   in the dialog to enrol, then the PIN. `POST /v1/auth/live` refuses
+   403 `totp_required` until the authenticator is enabled. Quick unlock
+   restores the existing session and does not change Mode. The PIN
    alone is not enough. Set the PIN under Settings → Security
    (`/settings#security`) first if you have not already — see
    [Settings reference](#11-settings-reference).

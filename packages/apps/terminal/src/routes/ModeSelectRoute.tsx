@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AppMode } from "@/stores/modeStore";
 import { enableFlintTradeTotp } from "@/lib/setupAccountApi";
-import { unlockWithPin } from "@/lib/modeAuth";
+import { confirmLiveMode } from "@/lib/modeAuth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -103,7 +103,7 @@ export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: M
         if (totpCode.length === 6) {
           await enableFlintTradeTotp(totpCode);
         }
-        const { token: liveSessionToken } = await unlockWithPin(pin, "live");
+        const { token: liveSessionToken } = await confirmLiveMode(pin);
         setPinError("");
         onSelect(selected, liveSessionToken);
         return;

@@ -13,7 +13,6 @@ import {
   isAuthSessionFenceCurrent,
   useAuthStore,
 } from "@/stores/authStore";
-import { useModeStore } from "@/stores/modeStore";
 import { unlockWithPin } from "@/lib/modeAuth";
 
 // ---------------------------------------------------------------------------
@@ -70,7 +69,6 @@ export function LockScreen() {
   const username = useAuthStore((s) => s.username);
   const setLoggedOut = useAuthStore((s) => s.setLoggedOut);
   const setLoggedInIfCurrent = useAuthStore((s) => s.setLoggedInIfCurrent);
-  const mode = useModeStore((s) => s.mode);
 
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
@@ -89,12 +87,10 @@ export function LockScreen() {
     setIsSubmitting(true);
     setError("");
     try {
-      // Mode-PRESERVING idle unlock: pass the session's current UI mode so the
-      // backend does not silently escalate an idle Explore/Practice session to
-      // a Live-unlocked JWT (Phase 1 G2 — the LockScreen previously called
-      // /auth/pin with no mode and always received a live-unlocked token,
-      // leaving the next "practice" order to dispatch down the live path).
-      const result = await unlockWithPin(value, mode);
+      // Unlock restores the existing session and never changes Mode. The
+      // server reads Mode from the session; this screen does not send one
+      // and does not apply a mode from the response.
+      const result = await unlockWithPin(value);
       setLoggedInIfCurrent(result.token, requestFence.principal ?? "", "", requestFence);
     } catch (err) {
       if (!isAuthSessionFenceCurrent(requestFence)) return;
@@ -109,7 +105,7 @@ export function LockScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [setLoggedInIfCurrent, mode]);
+  }, [setLoggedInIfCurrent]);
 
   function handlePinChange(e: React.ChangeEvent<HTMLInputElement>) {
     const val = e.target.value.replace(/\D/g, "").slice(0, 6);

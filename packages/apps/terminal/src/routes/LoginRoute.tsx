@@ -32,7 +32,7 @@ import {
   useAuthStore,
 } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
-import { downgradeMode } from "@/lib/modeAuth";
+import { downgradeMode, unlockWithPin } from "@/lib/modeAuth";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 
 interface LoginRouteProps {
@@ -162,34 +162,24 @@ export default function LoginRoute({
     setIsLoading(true);
     setError("");
     try {
-      // Session-bound PIN unlock (policy D6): the backend requires the current
-      // session JWT alongside the PIN. With no (or an expired) token the 401's
-      // message tells the operator to do the full password+TOTP login — which
-      // is exactly the daily re-auth requirement.
-      const headers = buildHeaders(true);
-      const authState = useAuthStore.getState();
-      const sessionToken = authState.token ?? authState.reauthToken;
-      if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
-      const resp = await fetch(`${getBase()}/v1/auth/pin`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ pin }),
-      });
-      const data = await resp.json();
-      if (resp.ok && data.data?.token) {
-        if (!useAuthStore.getState().setLoggedInIfCurrent(
-          data.data.token,
-          requestFence.principal || "user",
-          "",
-          requestFence,
-        )) return;
-        useModeStore.getState().setMode("live");
-        onSuccess();
-      } else if (isAuthSessionFenceCurrent(requestFence)) {
-        setError(data.message || "Invalid PIN.");
+      // Unlock restores the existing session. Do not send a mode, and do not
+      // set Mode from the response — the Mode store stays as it was.
+      const { token } = await unlockWithPin(pin);
+      if (!useAuthStore.getState().setLoggedInIfCurrent(
+        token,
+        requestFence.principal || "user",
+        "",
+        requestFence,
+      )) return;
+      onSuccess();
+    } catch (err) {
+      if (!isAuthSessionFenceCurrent(requestFence)) return;
+      if (err instanceof TypeError) {
+        setError("Cannot reach server.");
+        return;
       }
-    } catch {
-      if (isAuthSessionFenceCurrent(requestFence)) setError("Cannot reach server.");
+      const message = err instanceof Error ? err.message.trim() : "";
+      setError(message || "Invalid PIN.");
     } finally {
       setIsLoading(false);
     }
