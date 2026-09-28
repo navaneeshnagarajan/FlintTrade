@@ -1,15 +1,19 @@
 # FT-SETUP-FLOW-001 — Simplify first-run Setup to the Practice desk
 
-The mandatory first-run path is create the operator, open the vault, affirm
-Practice, and land on the Practice desk. Later steps come after that.
+The mandatory first-run path creates the operator, affirms Practice, and
+lands on the Practice desk. The vault step is included when the vault is
+not yet secured, and skipped when the backend has already secured it.
+Later steps come after the affirm.
 
 ## Locked behaviour
 
-1. The mandatory first-run path is only **Create operator → vault →
-   Practice desk**. Nothing else blocks that path.
-2. After the vault, the operator affirms Practice and lands on the
-   Practice desk. That affirm happens **before** Trading Defaults, Risk,
-   and Broker.
+1. The mandatory first-run path ends on the Practice desk. When the
+   vault is not yet secured, that path is **Create operator → vault →
+   Practice desk**. When the vault is already secured, Setup skips the
+   vault step. Nothing else blocks the path.
+2. The operator affirms Practice and lands on the Practice desk. That
+   affirm happens **before** Trading Defaults, Risk, and Broker. When
+   the vault step is shown, the affirm comes after it.
 3. **Trading Defaults**, **Risk**, and **Broker** stay Later/Skip. They
    must never appear ahead of the Practice affirm.
 4. **Continue without a broker** is a primary Later path. It is not
@@ -21,7 +25,9 @@ Practice, and land on the Practice desk. Later steps come after that.
    A later Live unlock, outside this path, keeps the existing
    authenticator and PIN gate. Live place stays fail-closed.
 7. **Step N of M** labels cover required steps only. Later/Skip steps do
-   not increment N or M.
+   not increment N or M. M is 2 when the vault is already secured, and
+   3 when the vault step is required. The separator in the title is
+   ` - `.
 8. Weekday and pack names in operator copy are a separate finding,
    **FT-SETUP-COPY-001** ([#281](https://github.com/navaneeshnagarajan/FlintTrade/pull/281)).
    This finding does not edit those strings.
@@ -32,22 +38,47 @@ gate, and it is not part of the Step N of M count.
 ## First-run path
 
 The mounted wizard is `/setup` (`CanonicalSetupRoute` →
-`SetupAccountRoute`). Required steps, and the only Step N of M labels:
+`SetupAccountRoute`). Required steps:
 
 1. Create operator
-2. Vault
+2. Vault — only when this machine's vault is not yet secured
 3. Practice desk
+
+When the vault is already secured, the total is fixed before step 1.
+The titles are **Step 1 of 2 - Create operator** and **Step 2 of 2 -
+Practice desk**. That path never shows "of 3". On that Practice step
+only, **Your vault is set up and secured on this machine.** appears
+above **Open Practice desk**.
+
+When the vault is not yet secured, the titles are **Step 1 of 3 -
+Create operator**, **Step 2 of 3 - Vault**, and **Step 3 of 3 -
+Practice desk**. The vault step asks for a master password and **Open
+vault**.
 
 The Practice step is the affirm only. It offers **Open Practice desk**
 and does not render TOTP, broker connect, LLM, Monitoring, Trading
 Defaults, or Risk. Opening the desk mints a Practice session and leaves
 setup for `/trade`.
 
+Reloading `/setup` mid-flow resumes the unfinished setup. The same
+browser tab restores the setup session and continues the current step.
+If that session is gone, **Continue setup** asks for the password
+(**This machine already has an operator. Sign in to finish setup.**)
+and then continues. **Start over (deletes this unfinished operator)**
+deletes the unfinished operator and restarts at step 1. A workspace
+data wipe is not required.
+
+After Setup completes, opening `/setup` does not restart step 1. A
+signed-in operator is sent to `/trade`. A signed-out operator sees
+**Setup is complete. Sign in to open the desk.** **Sign in** is the
+primary button and opens `/welcome`.
+
 Those later panels open on the Practice desk after landing. Skip or
-Later stays on the desk and does not change Step N of 3. On the broker
-card, **Continue without a broker** is the primary control. Native,
-OpenAlgo, and MCP stay behind Set up, and inside that panel the same
-control remains above them. There is no Live unlock control on this path.
+Later stays on the desk and does not change the step total fixed
+above. On the broker card, **Continue without a broker** is the primary
+control. Native, OpenAlgo, and MCP stay behind Set up, and inside that
+panel the same control remains above them. There is no Live unlock
+control on this path.
 
 ## Out of scope
 
@@ -59,11 +90,12 @@ control remains above them. There is no Live unlock control on this path.
 
 ## Acceptance
 
-1. A new operator can finish first-run Setup only by creating the
-   operator, opening the vault, and landing on the Practice desk.
-2. Immediately after the vault, the operator affirms Practice and lands
-   on the Practice desk. Trading Defaults, Risk, and Broker are not on
-   screen yet.
+1. A new operator finishes first-run Setup by creating the operator and
+   landing on the Practice desk. The vault step is required only when
+   the vault is not yet secured.
+2. The operator affirms Practice and lands on the Practice desk before
+   Trading Defaults, Risk, and Broker appear. When the vault step is
+   shown, that affirm comes immediately after it.
 3. Trading Defaults, Risk, and Broker are Later/Skip, and none of them
    can appear ahead of that affirm.
 4. **Continue without a broker** is the primary control on the broker
@@ -71,7 +103,10 @@ control remains above them. There is no Live unlock control on this path.
 5. TOTP, broker connect, LLM, and Monitoring are Later/Skip. Skipping
    any of them still leaves the operator on the Practice desk.
 6. First run has no Live unlock control and cannot mint a Live session.
-7. Step N of M counts only Create operator, vault, and Practice desk.
+7. Step N of M counts only the required steps. When the vault is already
+   secured, M is 2 (**Step 1 of 2 - Create operator**, **Step 2 of 2 -
+   Practice desk**) and the path never shows "of 3". When the vault is
+   not yet secured, M is 3 and includes **Step 2 of 3 - Vault**.
    Later/Skip controls are absent from that fraction.
 8. Persona is not a required gate and is not part of M.
 9. British English. No personal details, hostnames, account names, or
@@ -80,6 +115,14 @@ control remains above them. There is no Live unlock control on this path.
 
 ## Status
 
-Implemented. Required progress is Step N of 3. The affirm lands on the
-Practice desk before later setup. Optional panels do not gate that desk,
-and first run does not unlock Live.
+Implemented. When the vault is already secured, required progress is
+Step N of 2 and the Practice step shows **Your vault is set up and
+secured on this machine.** above **Open Practice desk**. When the vault
+is not yet secured, required progress is Step N of 3 and includes the
+vault step. Reloading `/setup` resumes the unfinished setup. **Start
+over (deletes this unfinished operator)** deletes that unfinished
+operator and restarts at step 1. After Setup completes, a signed-in
+operator opening `/setup` is sent to `/trade`, and a signed-out
+operator sees **Setup is complete. Sign in to open the desk.** The
+affirm lands on the Practice desk before later setup. Optional panels
+do not gate that desk, and first run does not unlock Live.

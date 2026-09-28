@@ -58,8 +58,10 @@ changelog rebuilds itself from the first release cut after this baseline.
 ### Changed
 
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
-  The required path is Create operator, then Vault, then the Practice
-  desk (Step N of 3). Affirming Practice lands on `/trade`.
+  When the vault is not yet secured, the required path is Create
+  operator, then Vault, then the Practice desk (Step N of 3). When the
+  vault is already secured, that vault step is skipped (Step N of 2);
+  see the step-count note below. Affirming Practice lands on `/trade`.
   Authenticator, broker connect, LLM, Monitoring, trading defaults,
   and risk are Later or Skip on that desk. They do not change the
   step count and do not block Practice. On the broker Later path,
@@ -68,6 +70,23 @@ changelog rebuilds itself from the first release cut after this baseline.
   unlock. Live place stays fail-closed. Live still needs the
   authenticator and PIN later. Persona is not a required first-run
   gate. Refs #282.
+
+- **First-run Setup resume, Start over, and a fixed vault step count
+  (FT-SETUP-HARDEN-001).** Reloading `/setup` mid-flow resumes the
+  unfinished setup session. **Start over (deletes this unfinished
+  operator)** deletes that unfinished operator and restarts at step 1.
+  A workspace data wipe is not required for either path. When the vault
+  is already secured on this machine, the vault step is skipped and the
+  count is fixed from the start: **Step 1 of 2 - Create operator**, then
+  **Step 2 of 2 - Practice desk**. That path never shows "of 3". On that
+  Practice step only, **Your vault is set up and secured on this
+  machine.** appears above **Open Practice desk**. When the vault is not
+  yet secured, Setup still shows **Step 1 of 3 - Create operator**,
+  **Step 2 of 3 - Vault**, and **Step 3 of 3 - Practice desk**. After
+  Setup completes, `/setup` does not restart step 1. A signed-in
+  operator is sent to `/trade`. A signed-out operator sees **Setup is
+  complete. Sign in to open the desk.** with **Sign in** as the primary
+  button. Refs #297.
 
 - **Native Dhan + Kotak Neo Connected (read) smoke (FT-MONDAY-002).**
   The path is native Dhan + Neo on the MSI
@@ -686,20 +705,15 @@ changelog rebuilds itself from the first release cut after this baseline.
   freeze is excluded. MF Optimizer and AI suggestions + deploy
   are unchanged.
 
-- **Explore/Practice blocked until mandatory TOTP (FT-SETUP-001).**
-  Setup Step 2/7 now has an obvious **Explore first — continue without
-  2FA** path so sample-data Explore/Practice is reachable without
-  finishing authenticator setup. The hatch marks the durable demo
-  session (same as **Try with sample data**) so `/home` survives
-  refresh and a `/welcome` remount instead of bouncing to the
-  password+TOTP wall. Sign-in still requires TOTP. Daily login still
-  requires password + TOTP, and Live still requires the PIN, as
-  designed. **Start over** wipes the unfinished account via the
-  account-create setup JWT so a lost QR seed is recoverable without the
-  TOTP secret. Daily-login session tokens cannot wipe the account. A
-  hard refresh of `/home` after Explore first restores the sample-data
-  session even when `flinttrade:mode` was never persisted; unfinished
-  setup progress stays so Start over / Delete account remain reachable.
+- **Authenticator stays optional on first-run Setup (FT-SETUP-001).**
+  The authenticator is not a required Setup step. Welcome **Try with
+  sample data** marks the durable sample session so `/home` survives a
+  refresh and a `/welcome` remount. Daily login stays password-only
+  until the authenticator is enrolled. Live still needs the
+  authenticator and PIN. **Start over (deletes this unfinished
+  operator)** deletes the unfinished operator and returns to step 1. A
+  daily-login session cannot delete that operator. A hard refresh of
+  `/home` after **Try with sample data** restores that sample session.
 
 - **Strategy Lab stays empty after AI Deploy (FT-DEMO-002).**
   Deploying a suggestion from `/demo-app/ai` (for example “Trend EMA

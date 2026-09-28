@@ -691,7 +691,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 |---|---|
 | `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP, or PIN). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Explore stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
-| `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Later / Skip panels open on that desk after the affirm and do not change the step count. On the broker Later path, **Continue without a broker** is the first control, above FlintTrade Native and OpenAlgo Bridge. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
+| `/setup` | First-run Setup. When the vault is already secured, the count is fixed from the start: **Step 1 of 2 - Create operator**, then **Step 2 of 2 - Practice desk** (that path never shows "of 3"). When the vault is not yet secured: **Step 1 of 3 - Create operator**, **Step 2 of 3 - Vault**, **Step 3 of 3 - Practice desk**. **Open Practice desk** affirms Practice and lands on `/trade`. Reloading `/setup` mid-flow resumes the unfinished setup. **Start over (deletes this unfinished operator)** deletes that unfinished operator and returns to step 1. After Setup is complete, `/setup` does not restart step 1: a signed-in operator is sent to `/trade`; a signed-out operator sees **Setup is complete. Sign in to open the desk.** with **Sign in** as the primary button. Later / Skip panels open on that desk after the affirm and do not change the step count. On the broker Later path, **Continue without a broker** is the first control, above FlintTrade Native and OpenAlgo Bridge. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
@@ -703,16 +703,50 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
 
-First-run Setup finishes on the Practice desk. Step N of 3 counts only
-Create operator, Vault, and Practice desk. After the affirm, Later / Skip
-covers the authenticator (TOTP; the control may still say **Set up later**),
-broker connect, LLM, Monitoring, trading defaults, and risk. Those panels
-never appear before the affirm, never block Practice, and never change
-Step N of 3. On the broker Later path, **Continue without a broker** is
-the first control, above FlintTrade Native and OpenAlgo Bridge. Persona
-is not a required first-run gate and is not part of that count. First run
-has no Live unlock. Live place stays fail-closed. A later Live unlock,
-outside this path, still needs the authenticator and PIN.
+First-run Setup finishes on the Practice desk. The step total is fixed
+before step 1, from whether this machine's vault is already secured.
+
+When the backend has already secured the vault, Setup skips the vault
+step. The titles stay **Step 1 of 2 - Create operator**, then **Step 2 of
+2 - Practice desk**. That path never shows "of 3". On that Practice step
+only, **Your vault is set up and secured on this machine.** appears above
+**Open Practice desk**. The line under the title on that last step is
+**1 of 2 completed - last step**.
+
+When the vault is not yet secured, Setup keeps three steps: **Step 1 of
+3 - Create operator**, **Step 2 of 3 - Vault**, and **Step 3 of 3 -
+Practice desk**. The vault step asks for a master password and **Open
+vault**. The secured-vault line above **Open Practice desk** stays on
+the two-step path only. The last-step line is **2 of 3 completed - last
+step**.
+
+Reloading `/setup` mid-flow resumes the unfinished setup in this browser.
+The same tab restores the setup session and continues the current step.
+If that session is gone, Setup shows **Continue setup** with **This
+machine already has an operator. Sign in to finish setup.** Enter the
+password and choose **Continue setup** to carry on. **Start over (deletes
+this unfinished operator)** deletes the unfinished operator and restarts
+at step 1. The confirm reads **Start over from the beginning? This
+deletes the unfinished account on this machine so you can begin again.**
+If the setup session is gone, enter the password and choose **Delete
+operator and start again**. Neither path needs a workspace data wipe.
+
+After Setup completes, opening `/setup` does not restart step 1. A
+signed-in operator is sent to the desk at `/trade`. A signed-out operator
+sees **Setup is complete. Sign in to open the desk.** **Sign in** is the
+primary button and opens `/welcome`. **Open Settings** is the secondary
+button.
+
+**Open Practice desk** affirms Practice and lands on `/trade`. After the
+affirm, Later / Skip covers the authenticator (TOTP; the control may
+still say **Set up later**), broker connect, LLM, Monitoring, trading
+defaults, and risk. Those panels never appear before the affirm, never
+block Practice, and never change the step count fixed above. On the
+broker Later path, **Continue without a broker** is the first control,
+above FlintTrade Native and OpenAlgo Bridge. Persona is not a required
+first-run gate and is not part of that count. First run has no Live
+unlock. Live place stays fail-closed. A later Live unlock, outside this
+path, still needs the authenticator and PIN.
 
 `/home` is the canonical Home / Welcome dashboard. A signed-in
 operator who opens it (address bar, refresh, or same-tab bookmark)
