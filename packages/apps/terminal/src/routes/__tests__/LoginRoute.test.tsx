@@ -406,6 +406,37 @@ describe("LoginRoute", () => {
     expect(onSuccess).not.toHaveBeenCalled();
   });
 
+  function sessionJwt(mode: "practice" | "explore" | "live"): string {
+    const payload = btoa(JSON.stringify({ mode, type: "session" }))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+    return `header.${payload}.sig`;
+  }
+
+  it("names the unlock button from the session Mode", () => {
+    modeState.mode = "practice";
+    const cases = [
+      ["practice", "Unlock Practice desk"],
+      ["explore", "Unlock Connected (read) desk"],
+      ["live", "Unlock Live desk"],
+    ] as const;
+
+    for (const [mode, label] of cases) {
+      Object.assign(authState, {
+        status: "pin-required",
+        token: null,
+        reauthToken: sessionJwt(mode),
+        username: "testuser",
+      });
+      const view = render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+      view.unmount();
+    }
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(modeState.mode).toBe("practice");
+  });
+
   it("restores the session after Quick Unlock and leaves Mode unchanged", async () => {
     modeState.mode = "practice";
     Object.assign(authState, {

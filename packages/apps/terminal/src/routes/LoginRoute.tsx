@@ -33,6 +33,7 @@ import {
 } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 import { downgradeMode, unlockWithPin } from "@/lib/modeAuth";
+import { unlockDeskLabel } from "@/lib/unlockDeskLabel";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 
 interface LoginRouteProps {
@@ -78,6 +79,8 @@ export default function LoginRoute({
   // Welcome's fail-closed default — that is the Sign Out remount bug.
   const [totpEnabled, setTotpEnabled] = useState(false);
   const totpRequired = totpEnabled;
+  const sessionToken = useAuthStore.getState().reauthToken ?? useAuthStore.getState().token;
+  const deskLabel = mode === "pin" ? unlockDeskLabel(sessionToken) : null;
 
   useEffect(() => {
     if (mode !== "full") return;
@@ -267,7 +270,7 @@ export default function LoginRoute({
               className="w-full"
             >
               <KeyRound className="size-4" />
-              {isLoading ? "Verifying..." : "Unlock"}
+              {isLoading ? "Verifying..." : (deskLabel ?? "Unlock")}
             </Button>
             <button
               type="button"

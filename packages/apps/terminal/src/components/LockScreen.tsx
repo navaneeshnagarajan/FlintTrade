@@ -14,6 +14,7 @@ import {
   useAuthStore,
 } from "@/stores/authStore";
 import { unlockWithPin } from "@/lib/modeAuth";
+import { unlockDeskLabel } from "@/lib/unlockDeskLabel";
 
 // ---------------------------------------------------------------------------
 // IST clock hook
@@ -67,8 +68,10 @@ function PinDots({ filled }: { filled: number }) {
 
 export function LockScreen() {
   const username = useAuthStore((s) => s.username);
+  const sessionToken = useAuthStore((s) => s.reauthToken ?? s.token);
   const setLoggedOut = useAuthStore((s) => s.setLoggedOut);
   const setLoggedInIfCurrent = useAuthStore((s) => s.setLoggedInIfCurrent);
+  const deskLabel = unlockDeskLabel(sessionToken);
 
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
@@ -185,8 +188,13 @@ export function LockScreen() {
           <div className="p-3 rounded-full bg-surface-card border border-border-default">
             <Lock className="size-5 text-text-muted" />
           </div>
+          {deskLabel ? (
+            <h1 className="text-sm font-medium text-text-primary">{deskLabel}</h1>
+          ) : (
+            <p className="text-sm text-text-secondary">Locked</p>
+          )}
           <p className="text-sm text-text-secondary">
-            Locked — <span className="text-text-primary font-medium">{displayName}</span>
+            <span className="text-text-primary font-medium">{displayName}</span>
           </p>
         </div>
 

@@ -101,6 +101,33 @@ describe("LockScreen", () => {
     currentMode = "practice";
   });
 
+  function sessionJwt(mode: "practice" | "explore" | "live"): string {
+    const payload = btoa(JSON.stringify({ mode, type: "session" }))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+    return `header.${payload}.sig`;
+  }
+
+  it("names the desk it will reopen from the session Mode", () => {
+    // The Mode store says Live. The label must follow the session claim.
+    currentMode = "live";
+    const cases = [
+      ["practice", "Unlock Practice desk"],
+      ["explore", "Unlock Connected (read) desk"],
+      ["live", "Unlock Live desk"],
+    ] as const;
+
+    for (const [mode, label] of cases) {
+      Object.assign(authState, { token: null, reauthToken: sessionJwt(mode) });
+      const view = render(<LockScreen />);
+      expect(screen.getByRole("heading", { name: label })).toBeInTheDocument();
+      view.unmount();
+    }
+    expect(setMode).not.toHaveBeenCalled();
+    expect(currentMode).toBe("live");
+  });
+
   it("renders the lock screen dialog with user name", () => {
     render(<LockScreen />);
     expect(screen.getByRole("dialog", { name: /screen locked/i })).toBeInTheDocument();
