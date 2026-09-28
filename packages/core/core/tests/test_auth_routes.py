@@ -307,6 +307,116 @@ class TestStatusEndpoint:
         data = c.get("/v1/auth/status").get_json()["data"]
         assert data["totp_enabled"] is True
 
+    def test_status_reports_vault_and_unfinished_setup(self, client, tmp_path, monkeypatch):
+        c, _svc = client
+        vault = tmp_path / "vault-ws"
+        vault.mkdir()
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        before = c.get("/v1/auth/status").get_json()["data"]
+        assert before["is_setup"] is False
+        assert before["vault_open"] is False
+        assert before["setup_finished"] is False
+        assert "master_password" not in c.get("/v1/auth/status").get_data(as_text=True)
+
+        (vault / "master_password").write_text("already-open-secret", encoding="utf-8")
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "",
+        }, headers={"Content-Type": "application/json"})
+        mid = c.get("/v1/auth/status").get_json()["data"]
+        assert mid["is_setup"] is True
+        assert mid["vault_open"] is True
+        assert mid["setup_finished"] is False
+        assert "already-open-secret" not in c.get("/v1/auth/status").get_data(as_text=True)
+
+
+class TestSetupResumeAndComplete:
+    """Reload mid-setup and re-entry after Setup is finished."""
+
+    def _create_operator(self, c):
+        resp = c.post("/v1/auth/setup", json={
+            "username": "operator",
+            "email": "operator@example.com",
+            "password": "StrongP@ss123!",
+            "pin": "",
+        }, headers={"Content-Type": "application/json"})
+        assert resp.status_code == 201
+        return resp.get_json()["data"]["token"]
+
+    def test_resume_remints_a_setup_session_while_setup_is_unfinished(self, client, tmp_path, monkeypatch):
+        from flinttrade_core.auth_routes import decode_token
+
+        c, svc = client
+        vault = tmp_path / "vault-ws"
+        vault.mkdir()
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        self._create_operator(c)
+        denied = c.post("/v1/auth/setup/resume", json={"password": "wrong-password"},
+                        headers={"Content-Type": "application/json"})
+        assert denied.status_code == 401
+
+        resumed = c.post("/v1/auth/setup/resume", json={"password": "StrongP@ss123!"},
+                         headers={"Content-Type": "application/json"})
+        assert resumed.status_code == 200
+        body = resumed.get_json()["data"]
+        assert body["username"] == "operator"
+        assert "StrongP@ss123!" not in resumed.get_data(as_text=True)
+        payload = decode_token(body["token"])
+        assert payload["setup_session"] is True
+        assert payload["setup_bound"] == svc.get_created_at()
+        assert payload["sub"] == "operator"
+
+        missing = c.post("/v1/auth/setup/complete", json={},
+                         headers={"Authorization": f"Bearer {body['token']}",
+                                  "Content-Type": "application/json"})
+        assert missing.status_code == 409
+        assert svc.is_setup_finished() is False
+
+        (vault / "master_password").write_text("already-open-secret", encoding="utf-8")
+        done = c.post("/v1/auth/setup/complete", json={},
+                      headers={"Authorization": f"Bearer {body['token']}",
+                               "Content-Type": "application/json"})
+        assert done.status_code == 200
+        assert done.get_json()["data"]["setup_finished"] is True
+        assert svc.is_setup_finished() is True
+        status = c.get("/v1/auth/status").get_json()["data"]
+        assert status["setup_finished"] is True
+        assert "already-open-secret" not in done.get_data(as_text=True)
+
+        again = c.post("/v1/auth/setup/resume", json={"password": "StrongP@ss123!"},
+                       headers={"Content-Type": "application/json"})
+        assert again.status_code == 409
+
+    def test_resume_requires_authenticator_once_enrolled(self, client):
+        c, svc = client
+        self._create_operator(c)
+        _enable_totp(svc)
+        refused = c.post("/v1/auth/setup/resume", json={"password": "StrongP@ss123!"},
+                         headers={"Content-Type": "application/json"})
+        assert refused.status_code == 401
+        import pyotp
+        code = pyotp.TOTP(svc.get_totp_secret()).now()
+        resumed = c.post("/v1/auth/setup/resume", json={
+            "password": "StrongP@ss123!",
+            "totp_code": code,
+        }, headers={"Content-Type": "application/json"})
+        assert resumed.status_code == 200
+        from flinttrade_core.auth_routes import decode_token
+        assert decode_token(resumed.get_json()["data"]["token"])["setup_session"] is True
+
+    def test_daily_login_cannot_open_the_vault(self, client, tmp_path, monkeypatch):
+        c, _svc = client
+        vault = tmp_path / "vault-ws"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        self._create_operator(c)
+        denied = c.post(
+            "/v1/auth/setup/vault",
+            json={"master_password": "VaultKey123!"},
+            headers=_session_headers(),
+        )
+        assert denied.status_code == 401
+        assert not (vault / "master_password").exists()
+
 
 class TestPinEndpoint:
     def _setup_with_totp(self, c, svc):

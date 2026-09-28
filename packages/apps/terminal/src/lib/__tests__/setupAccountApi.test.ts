@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { enableFlintTradeTotp, openFlintTradeVault, setupFlintTradeAccount } from "../setupAccountApi";
+import {
+  completeFlintTradeSetup,
+  enableFlintTradeTotp,
+  fetchSetupServerState,
+  openFlintTradeVault,
+  resumeFlintTradeSetup,
+  setupFlintTradeAccount,
+} from "../setupAccountApi";
 
 describe("setupAccountApi", () => {
   beforeEach(() => {
@@ -145,6 +152,62 @@ describe("setupAccountApi", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ master_password: "VaultKey123!" }),
+    });
+  });
+
+  it("reads vault and finished flags without treating a missing flag as open", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "success",
+          data: { is_setup: true, is_locked: false, vault_open: true, setup_finished: false },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(fetchSetupServerState()).resolves.toEqual({
+      isSetup: true,
+      vaultOpen: true,
+      setupFinished: false,
+    });
+  });
+
+  it("resumes a setup session with the operator password", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "success",
+          data: { token: "resumed-setup-jwt", username: "operator" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(resumeFlintTradeSetup("Secret123!")).resolves.toEqual({
+      token: "resumed-setup-jwt",
+      username: "operator",
+    });
+    expect(fetch).toHaveBeenCalledWith("/ft-api/v1/auth/setup/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "Secret123!" }),
+    });
+  });
+
+  it("records that setup has finished", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ status: "success", data: { setup_finished: true } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(completeFlintTradeSetup()).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith("/ft-api/v1/auth/setup/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
     });
   });
 });

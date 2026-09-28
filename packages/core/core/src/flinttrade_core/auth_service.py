@@ -186,12 +186,47 @@ class AuthService:
             )
         except sqlite3.OperationalError:
             pass
+        # First-run finish is distinct from account creation. Older databases
+        # predate the column; the default keeps an in-progress install unfinished.
+        try:
+            self._db.execute(
+                "ALTER TABLE account ADD COLUMN setup_finished INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError:
+            pass
         self._db.commit()
 
     def is_setup(self) -> bool:
         """Check if the account has been created."""
         row = self._db.execute("SELECT 1 FROM account WHERE id = 1").fetchone()
         return row is not None
+
+    def is_setup_finished(self) -> bool:
+        """Return whether first-run setup has been finished.
+
+        Account creation alone is not finished setup. The operator still has
+        the vault and Practice affirm ahead of them until this flag is set.
+        """
+        row = self._db.execute(
+            "SELECT setup_finished FROM account WHERE id = 1"
+        ).fetchone()
+        if not row:
+            return False
+        return bool(row["setup_finished"])
+
+    def mark_setup_finished(self) -> None:
+        """Record that first-run setup has finished.
+
+        Raises:
+            RuntimeError: If the account does not exist yet.
+        """
+        if not self.is_setup():
+            raise RuntimeError("Account is not set up")
+        with self._write_lock:
+            self._db.execute(
+                "UPDATE account SET setup_finished = 1 WHERE id = 1"
+            )
+            self._db.commit()
 
     def wipe_account(self) -> None:
         """Delete the single-user account and related setup state.

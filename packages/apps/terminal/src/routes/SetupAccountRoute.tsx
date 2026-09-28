@@ -1,10 +1,13 @@
 /**
  * SetupAccountRoute — the authoritative /setup wizard.
  *
- * Required steps (Step N of 3 only):
+ * Required steps (Step N of M counts only these):
  *   0: Create operator — username, email, password, optional PIN
  *   1: Vault — open the credential vault with a master password
  *   2: Practice desk — affirm Practice and land on the desk
+ *
+ * When this machine already has a vault secret, step 1 is skipped and M is 2.
+ * The secret is the one the backend wrote at startup. Setup does not replace it.
  *
  * Later / Skip (never counted, never shown before the affirm, never
  * block Practice): authenticator, broker connect, LLM, Monitoring,
@@ -22,10 +25,11 @@
  *   (c) deleting the account from the vault or authenticator recovery
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { safeParse } from "@/lib/safeParse";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
+import { readPersistedAuthSession } from "@/lib/homeEntry";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -64,14 +68,17 @@ import {
 } from "@/stores/authStore";
 import {
   AccountSetupError,
+  completeFlintTradeSetup,
   enableFlintTradeTotp,
+  fetchSetupServerState,
   openFlintTradeVault,
+  resumeFlintTradeSetup,
   setupFlintTradeAccount,
+  type SetupServerState,
 } from "@/lib/setupAccountApi";
 import { persistSetupChoices } from "@/routes/setup/applySetupChoices";
+import { setupProgressCounts, setupStepDetail, setupStepTitle } from "@/routes/setup/setupProgress";
 import {
-  REQUIRED_SETUP_STEP_COUNT,
-  REQUIRED_SETUP_STEP_LABELS,
   type OptionalSetupPanel,
 } from "@/routes/setupRouting";
 
@@ -244,6 +251,23 @@ function clearProgress(): void {
   } catch {
     // Non-critical.
   }
+}
+
+function isSetupSessionError(error: unknown): boolean {
+  return error instanceof Error && /setup session/i.test(error.message);
+}
+
+/**
+ * A same-tab reload keeps the setup JWT in sessionStorage, but this route
+ * sits outside the auth guard that restores it. Put the token back before
+ * the vault probe runs, or the vault and Start over both refuse the operator.
+ */
+function restoreSetupSessionFromTab(): void {
+  const state = useAuthStore.getState();
+  if (state.token || state.status !== "unknown") return;
+  const persisted = readPersistedAuthSession();
+  if (!persisted) return;
+  useAuthStore.getState().setLoggedIn(persisted.token, persisted.username, persisted.expiresAt);
 }
 
 /** Set once the operator opens the Practice desk. Not a required step. */
@@ -1010,9 +1034,11 @@ type VaultFormValues = z.infer<typeof vaultSchema>;
 interface VaultStepProps {
   onOpened: () => void;
   onAccountDeleted: () => void;
+  /** The probe or submit was refused because the setup JWT is gone. */
+  onSessionRequired: () => void;
 }
 
-function VaultStep({ onOpened, onAccountDeleted }: VaultStepProps) {
+function VaultStep({ onOpened, onAccountDeleted, onSessionRequired }: VaultStepProps) {
   const [phase, setPhase] = useState<"checking" | "form" | "ready">("checking");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -1027,6 +1053,10 @@ function VaultStep({ onOpened, onAccountDeleted }: VaultStepProps) {
     handleSubmit,
     formState: { errors },
   } = useForm<VaultFormValues>({ resolver: zodResolver(vaultSchema) });
+  const onOpenedRef = useRef(onOpened);
+  const onSessionRequiredRef = useRef(onSessionRequired);
+  onOpenedRef.current = onOpened;
+  onSessionRequiredRef.current = onSessionRequired;
 
   useEffect(() => {
     let cancelled = false;
@@ -1034,9 +1064,18 @@ function VaultStep({ onOpened, onAccountDeleted }: VaultStepProps) {
       try {
         const result = await openFlintTradeVault("");
         if (cancelled) return;
-        setPhase(result.alreadyPresent ? "ready" : "form");
-      } catch {
-        if (!cancelled) setPhase("form");
+        if (result.alreadyPresent) {
+          onOpenedRef.current();
+          return;
+        }
+        setPhase("form");
+      } catch (error) {
+        if (cancelled) return;
+        if (isSetupSessionError(error)) {
+          onSessionRequiredRef.current();
+          return;
+        }
+        setPhase("form");
       }
     })();
     return () => {
@@ -1051,6 +1090,10 @@ function VaultStep({ onOpened, onAccountDeleted }: VaultStepProps) {
       await openFlintTradeVault(values.masterPassword);
       onOpened();
     } catch (error) {
+      if (isSetupSessionError(error)) {
+        onSessionRequired();
+        return;
+      }
       setServerError(
         error instanceof Error ? error.message : "The vault could not be opened.",
       );
@@ -1211,14 +1254,104 @@ function VaultStep({ onOpened, onAccountDeleted }: VaultStepProps) {
   );
 }
 
-function PracticeDeskStep() {
+function PracticeDeskStep({ vaultAlreadySecured }: { vaultAlreadySecured: boolean }) {
   return (
     <div className="space-y-2">
       <h3 className="text-sm font-semibold text-text-primary">Practice desk</h3>
+      {vaultAlreadySecured && (
+        <p className="text-xs text-text-secondary leading-relaxed">
+          The credential vault on this machine is already secured.
+        </p>
+      )}
       <p className="text-xs text-text-secondary leading-relaxed">
         Open the Practice desk. Orders stay simulated. Live is not part of
         setup and stays locked until you choose it later.
       </p>
+    </div>
+  );
+}
+
+function SetupResumeSignIn({
+  onResumed,
+}: {
+  onResumed: (token: string, username: string) => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!password || loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      const result = await resumeFlintTradeSetup(password);
+      onResumed(result.token, result.username);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign-in failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={(event) => void onSubmit(event)} className="space-y-4" noValidate>
+      <h3 className="text-sm font-semibold text-text-primary">Continue setup</h3>
+      <p className="text-xs text-text-secondary leading-relaxed">
+        This machine already has an operator. Sign in to finish setup.
+      </p>
+      {error && (
+        <div role="alert" className="flex items-start gap-3 p-3 rounded-lg border text-sm bg-loss/10 border-loss/30 text-loss">
+          <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+          <span>{error}</span>
+        </div>
+      )}
+      <div className="space-y-1.5">
+        <Label htmlFor="sa-resume-password" className="text-xs text-text-secondary uppercase tracking-wider">
+          Password
+        </Label>
+        <Input
+          id="sa-resume-password"
+          type="password"
+          autoComplete="current-password"
+          aria-label="Operator password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+        />
+      </div>
+      <div className="flex justify-end">
+        <Button type="submit" disabled={loading || !password}>
+          {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+          Continue setup
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function SetupComplete({ signedIn }: { signedIn: boolean }) {
+  return (
+    <div className="space-y-4">
+      <h3 className="text-sm font-semibold text-text-primary">Setup is complete</h3>
+      <p className="text-xs text-text-secondary leading-relaxed">
+        {signedIn
+          ? "Opening the desk. Optional items live in Settings."
+          : "Sign in to open the desk. Optional items live in Settings."}
+      </p>
+      <div className="flex flex-wrap justify-end gap-2">
+        {!signedIn && (
+          <Button asChild variant="outline">
+            <Link to="/welcome">Sign in</Link>
+          </Button>
+        )}
+        <Button asChild variant="outline">
+          <Link to="/settings">Open Settings</Link>
+        </Button>
+        <Button asChild>
+          <Link to="/trade">Open the desk</Link>
+        </Button>
+      </div>
     </div>
   );
 }
@@ -1496,6 +1629,14 @@ export default function SetupAccountRoute({
 }: SetupAccountRouteProps = {}) {
   const navigate = useNavigate();
   const setMode = useModeStore((s) => s.setMode);
+  // Restore before reading the store so a reload still has the setup JWT
+  // on the first render of the vault step.
+  useState(() => {
+    restoreSetupSessionFromTab();
+    return null;
+  });
+  const token = useAuthStore((s) => s.token);
+  const authStatus = useAuthStore((s) => s.status);
 
   // Load persisted progress. localStorage is the source of truth for where
   // the operator stopped. It is cleared only by opening the Practice desk,
@@ -1530,6 +1671,28 @@ export default function SetupAccountRoute({
   // Shown when the server refuses to mint a Practice session, so setup
   // never finishes on a badge the JWT does not back.
   const [modeSyncError, setModeSyncError] = useState("");
+  const [serverSetup, setServerSetup] = useState<SetupServerState | null>(null);
+  const [sessionRejected, setSessionRejected] = useState(false);
+  const [startOverNeedsPassword, setStartOverNeedsPassword] = useState(false);
+  const [startOverPassword, setStartOverPassword] = useState("");
+  const [startOverError, setStartOverError] = useState("");
+  const [startOverLoading, setStartOverLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSetupServerState()
+      .then((state) => {
+        if (!cancelled) setServerSetup(state);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setServerSetup({ isSetup: false, vaultOpen: false, setupFinished: false });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!accountCreated) return;
@@ -1548,28 +1711,7 @@ export default function SetupAccountRoute({
     });
   }, [currentStep, totpUri, backupCodes, persona, connection, trading, risk, displayName, accountCreated, vaultOpened]);
 
-  // No auto-wipe based on authStatus. Progress is cleared only by an explicit
-  // user action: "Finish setup" on the final step or the "Start over" button
-  // on the account form. The 409 branch in AccountSecurityStep also clears
-  // because at that point the user has confirmed the account already exists
-  // server-side and wants to sign in instead.
-  async function handleStartOver() {
-    try {
-      const resp = await fetch(`${getBase()}/v1/auth/setup/reset`, {
-        method: "POST",
-        headers: buildHeaders(true),
-        body: JSON.stringify({}),
-      });
-      if (!resp.ok) {
-        window.alert(
-          "Could not wipe the unfinished account. Use Delete account and start over and confirm your password.",
-        );
-        return;
-      }
-    } catch {
-      window.alert("Cannot reach the server to wipe the unfinished account.");
-      return;
-    }
+  function resetLocalSetup(): void {
     clearProgress();
     sessionRecoveryMaterial = null;
     setAccountCreated(false);
@@ -1583,7 +1725,58 @@ export default function SetupAccountRoute({
     setRisk(null);
     setLlm(null);
     setDisplayName("");
+    setSessionRejected(false);
+    setStartOverNeedsPassword(false);
+    setStartOverPassword("");
+    setStartOverError("");
     useAuthStore.getState().setSetupRequired();
+  }
+
+  // No auto-wipe based on authStatus. Progress is cleared only by an explicit
+  // user action: opening the Practice desk or the "Start over" button.
+  // A reload drops the setup JWT, so Start over then asks for the password
+  // instead of failing closed on an empty reset.
+  async function wipeUnfinishedAccount(password: string): Promise<boolean> {
+    setStartOverLoading(true);
+    setStartOverError("");
+    try {
+      const resp = await fetch(`${getBase()}/v1/auth/setup/reset`, {
+        method: "POST",
+        headers: buildHeaders(true),
+        body: JSON.stringify(password ? { password } : {}),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => null) as { message?: string } | null;
+        setStartOverNeedsPassword(true);
+        setStartOverError(
+          data?.message && !/setup session/i.test(data.message)
+            ? data.message
+            : "Enter your password to delete this operator and start again.",
+        );
+        return false;
+      }
+    } catch {
+      setStartOverError("Cannot reach the server to wipe the unfinished account.");
+      return false;
+    } finally {
+      setStartOverLoading(false);
+    }
+    resetLocalSetup();
+    return true;
+  }
+
+  async function handleStartOver() {
+    if (!useAuthStore.getState().token || sessionRejected) {
+      setStartOverNeedsPassword(true);
+      setStartOverError("Enter your password to delete this operator and start again.");
+      return;
+    }
+    await wipeUnfinishedAccount("");
+  }
+
+  async function submitStartOverPassword() {
+    if (!startOverPassword) return;
+    await wipeUnfinishedAccount(startOverPassword);
   }
 
   // ---------------------------------------------------------------------------
@@ -1671,6 +1864,12 @@ export default function SetupAccountRoute({
     setCurrentStep(2);
   }
 
+  const vaultAlreadyOpen = serverSetup?.vaultOpen === true;
+  if (vaultAlreadyOpen && accountCreated && !vaultOpened) {
+    setVaultOpened(true);
+    setCurrentStep(2);
+  }
+
   async function handleOpenPractice() {
     setModeSyncError("");
     // /auth/setup minted an EXPLORE-mode JWT. The server reads the mode from
@@ -1689,6 +1888,14 @@ export default function SetupAccountRoute({
     } catch {
       setModeSyncError(
         "Practice mode could not be enabled (the server did not issue a Practice session). Retry opening the Practice desk.",
+      );
+      return;
+    }
+    try {
+      await completeFlintTradeSetup();
+    } catch {
+      setModeSyncError(
+        "Setup could not be saved on this machine. Retry opening the Practice desk.",
       );
       return;
     }
@@ -1715,10 +1922,28 @@ export default function SetupAccountRoute({
     setCurrentStep(1);
   }
 
-  const label = REQUIRED_SETUP_STEP_LABELS[currentStep] ?? REQUIRED_SETUP_STEP_LABELS[0];
-  const progressLabel = `Step ${currentStep + 1} of ${REQUIRED_SETUP_STEP_COUNT} - ${label}`;
-  const completedCount = currentStep;
-  const remaining = REQUIRED_SETUP_STEP_COUNT - currentStep - 1;
+  const progressLabel = setupStepTitle(currentStep, vaultAlreadyOpen);
+  const progressDetail = setupStepDetail(currentStep, vaultAlreadyOpen);
+  const progressCounts = setupProgressCounts(currentStep, vaultAlreadyOpen);
+  const hasSetupSession = Boolean(token) && !sessionRejected;
+  const setupFinished = serverSetup?.setupFinished === true;
+
+  useEffect(() => {
+    if (!setupFinished || authStatus !== "logged-in") return;
+    navigate("/trade", { replace: true });
+  }, [setupFinished, authStatus, navigate]);
+
+  function handleResumed(nextToken: string, username: string) {
+    useAuthStore.getState().setLoggedIn(nextToken, username, "");
+    setSessionRejected(false);
+    if (serverSetup?.setupFinished) {
+      navigate("/trade", { replace: true });
+    }
+  }
+
+  function handleSessionRequired() {
+    setSessionRejected(true);
+  }
 
   return (
     <PublicRouteShell
@@ -1727,39 +1952,74 @@ export default function SetupAccountRoute({
       contentClassName="py-4 sm:py-5"
       eyebrow="Account Setup"
       title="Set up FlintTrade"
-      subtitle={progressLabel}
+      subtitle={setupFinished ? "Setup is complete" : progressLabel}
     >
       <div className="space-y-4">
+        {setupFinished ? (
+          <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
+            <SetupComplete signedIn={authStatus === "logged-in"} />
+          </div>
+        ) : (
+        <>
         {currentStep > 0 && (
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-border-default/70 bg-surface-card/60 px-4 py-2 shadow-xl shadow-black/10 backdrop-blur-xl">
-            <p className="text-xs text-text-muted">
-              {`${completedCount} of ${REQUIRED_SETUP_STEP_COUNT} completed${remaining > 0 ? ` - ${remaining} remaining` : " - last step"}`}
-            </p>
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              className="text-text-muted hover:text-text-primary"
-              onClick={() => {
-                if (
-                  window.confirm(
-                    "Start over from the beginning? This deletes the unfinished account on this machine so you can begin again.",
-                  )
-                ) {
-                  void handleStartOver();
-                }
-              }}
-            >
-              Start over
-            </Button>
+          <div className="flex flex-col gap-3 rounded-xl border border-border-default/70 bg-surface-card/60 px-4 py-2 shadow-xl shadow-black/10 backdrop-blur-xl">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-text-muted">
+                {progressDetail}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="text-text-muted hover:text-text-primary"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "Start over from the beginning? This deletes the unfinished account on this machine so you can begin again.",
+                    )
+                  ) {
+                    void handleStartOver();
+                  }
+                }}
+              >
+                Start over
+              </Button>
+            </div>
+            {startOverNeedsPassword && (
+              <div className="space-y-2">
+                <p className="text-xs text-text-secondary">
+                  Enter your password to delete this operator and start again.
+                </p>
+                <Input
+                  type="password"
+                  autoComplete="current-password"
+                  aria-label="Password to start over"
+                  value={startOverPassword}
+                  onChange={(event) => setStartOverPassword(event.target.value)}
+                />
+                {startOverError && (
+                  <p role="alert" className="text-xs text-loss">{startOverError}</p>
+                )}
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void submitStartOverPassword()}
+                    disabled={startOverLoading || !startOverPassword}
+                  >
+                    Delete operator and start again
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         <StepIndicator
-          total={REQUIRED_SETUP_STEP_COUNT}
-          current={currentStep}
+          total={progressCounts.total}
+          current={progressCounts.displayIndex}
           onStepClick={(index) => {
-            if (index === 1 && currentStep === 2 && vaultOpened) setCurrentStep(1);
+            if (!vaultAlreadyOpen && index === 1 && currentStep === 2 && vaultOpened) setCurrentStep(1);
           }}
         />
 
@@ -1782,16 +2042,31 @@ export default function SetupAccountRoute({
             />
           )}
 
-          {currentStep === 1 && (
+          {currentStep === 1 && !hasSetupSession && (
+            <SetupResumeSignIn onResumed={handleResumed} />
+          )}
+
+          {currentStep === 1 && hasSetupSession && !vaultAlreadyOpen && (
             <VaultStep
               onOpened={handleVaultOpened}
               onAccountDeleted={handleAccountDeleted}
+              onSessionRequired={handleSessionRequired}
             />
           )}
 
-          {currentStep === 2 && <PracticeDeskStep />}
+          {currentStep === 1 && hasSetupSession && vaultAlreadyOpen && (
+            <p className="text-xs text-text-muted">The vault is already secured. Continuing…</p>
+          )}
 
-          {currentStep === 2 && (
+          {currentStep === 2 && !hasSetupSession && (
+            <SetupResumeSignIn onResumed={handleResumed} />
+          )}
+
+          {currentStep === 2 && hasSetupSession && (
+            <PracticeDeskStep vaultAlreadySecured={vaultAlreadyOpen} />
+          )}
+
+          {currentStep === 2 && hasSetupSession && (
             <div className="flex justify-end mt-6">
               <Button type="button" onClick={() => void handleOpenPractice()}>
                 Open Practice desk
@@ -1799,6 +2074,8 @@ export default function SetupAccountRoute({
             </div>
           )}
         </div>
+        </>
+        )}
       </div>
     </PublicRouteShell>
   );

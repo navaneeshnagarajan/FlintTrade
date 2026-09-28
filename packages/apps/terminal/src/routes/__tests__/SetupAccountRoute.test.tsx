@@ -26,6 +26,9 @@ const mocks = vi.hoisted(() => ({
   setupFlintTradeAccount: vi.fn(),
   openFlintTradeVault: vi.fn(),
   enableFlintTradeTotp: vi.fn(),
+  fetchSetupServerState: vi.fn(),
+  resumeFlintTradeSetup: vi.fn(),
+  completeFlintTradeSetup: vi.fn(),
 }));
 
 vi.mock("react-router", () => ({
@@ -55,6 +58,9 @@ vi.mock("@/lib/setupAccountApi", () => ({
   setupFlintTradeAccount: mocks.setupFlintTradeAccount,
   openFlintTradeVault: mocks.openFlintTradeVault,
   enableFlintTradeTotp: mocks.enableFlintTradeTotp,
+  fetchSetupServerState: mocks.fetchSetupServerState,
+  resumeFlintTradeSetup: mocks.resumeFlintTradeSetup,
+  completeFlintTradeSetup: mocks.completeFlintTradeSetup,
 }));
 
 // Keep the shell light — Meteors/Particles animate on canvas.
@@ -73,6 +79,7 @@ import SetupAccountRoute, {
   PRACTICE_LATER_KEY,
   PracticeLaterSetup,
 } from "../SetupAccountRoute";
+import { writePersistedAuthSession } from "@/lib/homeEntry";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 
@@ -133,6 +140,13 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       }
       return { opened: true, alreadyPresent: false };
     });
+    mocks.fetchSetupServerState.mockResolvedValue({
+      isSetup: false,
+      vaultOpen: false,
+      setupFinished: false,
+    });
+    mocks.resumeFlintTradeSetup.mockReset();
+    mocks.completeFlintTradeSetup.mockResolvedValue(undefined);
     seedPracticeDesk();
     useModeStore.getState().setMode("explore");
     useAuthStore.getState().setLoggedIn("setup-explore-token", "operator", "");
@@ -198,6 +212,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       expect(mocks.navigate).toHaveBeenCalledWith("/trade", { replace: true }),
     );
     expect(useAuthStore.getState().token).toBe("practice-token");
+    expect(mocks.completeFlintTradeSetup).toHaveBeenCalledOnce();
     expect(useModeStore.getState().mode).toBe("practice");
     expect(localStorage.getItem(PROGRESS_KEY)).toBeNull();
     expect(localStorage.getItem(PRACTICE_LATER_KEY)).toBe("1");
@@ -458,5 +473,205 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       username: "bob",
     });
     expect(screen.getByLabelText("Choose a username")).toBeInTheDocument();
+  });
+
+  it("restores the setup session after a reload and counts two steps remaining", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      vaultOpened: false,
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "operator",
+      currentStep: 1,
+    }));
+    act(() => {
+      useAuthStore.setState({
+        status: "unknown",
+        token: null,
+        username: null,
+        expiresAt: null,
+        reauthToken: null,
+      });
+    });
+    writePersistedAuthSession({
+      token: "setup-token",
+      username: "operator",
+      expiresAt: "",
+    });
+
+    render(<SetupAccountRoute />);
+
+    expect(await screen.findByLabelText("Master password")).toBeInTheDocument();
+    expect(useAuthStore.getState().token).toBe("setup-token");
+    expect(screen.getByText("Step 2 of 3 - Vault")).toBeInTheDocument();
+    expect(screen.getByText("1 of 3 completed - 2 remaining")).toBeInTheDocument();
+    expect(screen.queryByText(/A setup session is required/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Operator password")).not.toBeInTheDocument();
+  });
+
+  it("asks the operator to sign in when a reload has no setup session, and Start over deletes the account", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      vaultOpened: false,
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "operator",
+      currentStep: 1,
+    }));
+    act(() => {
+      useAuthStore.setState({
+        status: "logged-out",
+        token: null,
+        username: null,
+        expiresAt: null,
+        reauthToken: null,
+      });
+    });
+    sessionStorage.clear();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ status: "success", data: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    render(<SetupAccountRoute />);
+
+    expect(await screen.findByLabelText("Operator password")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
+    expect(screen.queryByText(/A setup session is required/i)).not.toBeInTheDocument();
+    expect(screen.getByText("1 of 3 completed - 2 remaining")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start over" }));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Password to start over"), {
+      target: { value: "Strong1!" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Delete operator and start again" }));
+
+    expect(await screen.findByLabelText("Choose a username")).toBeInTheDocument();
+    const resetCall = fetchSpy.mock.calls.find(([url]) => String(url).includes("/auth/setup/reset"));
+    expect(resetCall?.[1]).toEqual(expect.objectContaining({
+      body: JSON.stringify({ password: "Strong1!" }),
+    }));
+    expect(localStorage.getItem(PROGRESS_KEY)).toBeNull();
+    expect(useAuthStore.getState().status).toBe("setup-required");
+    fetchSpy.mockRestore();
+  });
+
+  it("signs the operator back in and continues when the setup session was lost", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      vaultOpened: false,
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "operator",
+      currentStep: 1,
+    }));
+    act(() => {
+      useAuthStore.setState({
+        status: "logged-out",
+        token: null,
+        username: null,
+        expiresAt: null,
+        reauthToken: null,
+      });
+    });
+    mocks.resumeFlintTradeSetup.mockResolvedValue({
+      token: "resumed-setup-token",
+      username: "operator",
+    });
+
+    render(<SetupAccountRoute />);
+    fireEvent.change(await screen.findByLabelText("Operator password"), {
+      target: { value: "Strong1!" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue setup" }));
+
+    expect(await screen.findByLabelText("Master password")).toBeInTheDocument();
+    expect(mocks.resumeFlintTradeSetup).toHaveBeenCalledWith("Strong1!");
+    expect(useAuthStore.getState().token).toBe("resumed-setup-token");
+    expect(screen.queryByText(/A setup session is required/i)).not.toBeInTheDocument();
+  });
+
+  it("skips the vault step when the vault is already open", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      vaultOpened: false,
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "operator",
+      currentStep: 1,
+    }));
+    mocks.fetchSetupServerState.mockResolvedValue({
+      isSetup: true,
+      vaultOpen: true,
+      setupFinished: false,
+    });
+
+    render(<SetupAccountRoute />);
+
+    expect(await screen.findByText("Step 2 of 2 - Practice desk")).toBeInTheDocument();
+    expect(screen.getByText("The credential vault on this machine is already secured.")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2 completed - last step")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
+    expect(screen.queryByText("Step 2 of 3 - Vault")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Practice desk" })).toBeInTheDocument();
+  });
+
+  it("sends a signed-in operator to the desk after setup is complete", async () => {
+    localStorage.clear();
+    useAuthStore.getState().setLoggedIn("practice-token", "operator", "");
+    mocks.fetchSetupServerState.mockResolvedValue({
+      isSetup: true,
+      vaultOpen: true,
+      setupFinished: true,
+    });
+
+    render(<SetupAccountRoute />);
+
+    await waitFor(() =>
+      expect(mocks.navigate).toHaveBeenCalledWith("/trade", { replace: true }),
+    );
+    expect(screen.queryByText("Step 1 of 3 - Create operator")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
+  });
+
+  it("shows a completed state instead of step 1 when setup is finished and signed out", async () => {
+    localStorage.clear();
+    act(() => {
+      useAuthStore.setState({
+        status: "logged-out",
+        token: null,
+        username: null,
+        expiresAt: null,
+        reauthToken: null,
+      });
+    });
+    mocks.fetchSetupServerState.mockResolvedValue({
+      isSetup: true,
+      vaultOpen: true,
+      setupFinished: true,
+    });
+
+    render(<SetupAccountRoute />);
+
+    expect(await screen.findByRole("link", { name: "Open Settings" })).toHaveAttribute("href", "/settings");
+    expect(screen.getByRole("link", { name: "Open the desk" })).toHaveAttribute("href", "/trade");
+    expect(screen.queryByText("Step 1 of 3 - Create operator")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
   });
 });

@@ -20,6 +20,20 @@ export interface VaultOpenResult {
   alreadyPresent: boolean;
 }
 
+/** Public first-run facts from GET /v1/auth/status. No secrets. */
+export interface SetupServerState {
+  isSetup: boolean;
+  /** True when this machine already has a hardened vault secret. */
+  vaultOpen: boolean;
+  /** True only after the operator has finished Setup. */
+  setupFinished: boolean;
+}
+
+export interface SetupResumeResult {
+  token: string;
+  username: string;
+}
+
 export type AccountSetupErrorKind = "account-exists" | "network" | "server";
 
 export class AccountSetupError extends Error {
@@ -145,6 +159,115 @@ export async function openFlintTradeVault(masterPassword: string): Promise<Vault
     opened: true,
     alreadyPresent: payload.data.already_present === true,
   };
+}
+
+/** Read whether an operator exists, the vault is open, and Setup has finished. */
+export async function fetchSetupServerState(): Promise<SetupServerState> {
+  let response: Response;
+  try {
+    response = await fetch(`${getBase()}/v1/auth/status`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+  } catch {
+    throw new AccountSetupError(
+      "Cannot reach server. Is the FlintTrade backend running?",
+      "network",
+    );
+  }
+
+  const payload = await parseJsonBody(response);
+  if (
+    !response.ok
+    || !isRecord(payload)
+    || !isRecord(payload.data)
+    || typeof payload.data.is_setup !== "boolean"
+  ) {
+    throw new AccountSetupError(
+      extractMessage(payload) ?? httpMessage(response),
+      "server",
+      response.status,
+    );
+  }
+
+  return {
+    isSetup: payload.data.is_setup === true,
+    vaultOpen: payload.data.vault_open === true,
+    setupFinished: payload.data.setup_finished === true,
+  };
+}
+
+/**
+ * Re-mint the setup session after a reload. Password proof stands in for
+ * the account-create JWT that lived only in this browser tab.
+ */
+export async function resumeFlintTradeSetup(password: string): Promise<SetupResumeResult> {
+  let response: Response;
+  try {
+    response = await fetch(`${getBase()}/v1/auth/setup/resume`, {
+      method: "POST",
+      headers: buildHeaders(true),
+      body: JSON.stringify({ password }),
+    });
+  } catch {
+    throw new AccountSetupError(
+      "Cannot reach server. Is the FlintTrade backend running?",
+      "network",
+    );
+  }
+
+  const payload = await parseJsonBody(response);
+  if (!response.ok) {
+    throw new AccountSetupError(
+      extractMessage(payload) ?? httpMessage(response),
+      "server",
+      response.status,
+    );
+  }
+
+  if (
+    !isRecord(payload)
+    || !isRecord(payload.data)
+    || typeof payload.data.token !== "string"
+    || !payload.data.token
+    || typeof payload.data.username !== "string"
+    || !payload.data.username
+  ) {
+    throw new AccountSetupError(
+      "FlintTrade backend returned an unexpected setup response.",
+      "server",
+      response.status,
+    );
+  }
+
+  return { token: payload.data.token, username: payload.data.username };
+}
+
+/** Record that the operator has finished first-run setup. */
+export async function completeFlintTradeSetup(): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${getBase()}/v1/auth/setup/complete`, {
+      method: "POST",
+      headers: buildHeaders(true),
+      body: JSON.stringify({}),
+    });
+  } catch {
+    throw new AccountSetupError(
+      "Cannot reach server. Is the FlintTrade backend running?",
+      "network",
+    );
+  }
+
+  const payload = await parseJsonBody(response);
+  if (!response.ok) {
+    throw new AccountSetupError(
+      extractMessage(payload) ?? httpMessage(response),
+      "server",
+      response.status,
+    );
+  }
 }
 
 /** Confirm optional authenticator enrolment with a live TOTP code. */

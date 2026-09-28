@@ -60,6 +60,22 @@ class TestAccountSetup:
         )
         assert svc.is_setup() is True
 
+    def test_setup_finished_stays_false_until_marked_and_clears_on_wipe(self, tmp_path: Path):
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        assert svc.is_setup_finished() is False
+        svc.setup_account(
+            username="alice", email="alice@example.com",
+            password="StrongP@ss123!", pin="",
+        )
+        assert svc.is_setup_finished() is False
+        svc.mark_setup_finished()
+        assert svc.is_setup_finished() is True
+        reopened = AuthService(db_path=tmp_path / "auth.db")
+        assert reopened.is_setup_finished() is True
+        reopened.wipe_account()
+        assert reopened.is_setup() is False
+        assert reopened.is_setup_finished() is False
+
 
 class TestPasswordVerification:
     """Password login."""
