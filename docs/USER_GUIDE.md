@@ -691,7 +691,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 |---|---|
 | `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP, or PIN). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Explore stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
-| `/setup` | First-run Setup. When the vault is already secured, the count is fixed from the start: **Step 1 of 2 - Create operator**, then **Step 2 of 2 - Practice desk** (that path never shows "of 3"). When the vault is not yet secured: **Step 1 of 3 - Create operator**, **Step 2 of 3 - Vault**, **Step 3 of 3 - Practice desk**. **Open Practice desk** affirms Practice and lands on `/trade`. Reloading `/setup` mid-flow resumes the unfinished setup. **Start over (deletes this unfinished operator)** deletes that unfinished operator and returns to step 1. After Setup is complete, `/setup` does not restart step 1: a signed-in operator is sent to `/trade`; a signed-out operator sees **Setup is complete. Sign in to open the desk.** with **Sign in** as the primary button. Later / Skip panels open on that desk after the affirm and do not change the step count. On the broker Later path, **Continue without a broker** is the first control, above FlintTrade Native and OpenAlgo Bridge. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
+| `/setup` | First-run Setup. When the vault is already secured, the count is fixed from the start: **Step 1 of 2 - Create operator**, then **Step 2 of 2 - Practice desk** (that path never shows "of 3"). When the vault is not yet secured: **Step 1 of 3 - Create operator**, **Step 2 of 3 - Vault**, **Step 3 of 3 - Practice desk**. **Open Practice desk** affirms Practice and lands on `/trade`. Reloading `/setup` mid-flow resumes the unfinished setup and keeps the same step title (for example **Step 3 of 3 - Practice desk**). A fresh browser, or a reload on the vault step that needs a setup session, shows **Continue setup** and **This machine already has an operator. Sign in to finish setup.** **Start over (deletes this unfinished operator)** asks once (**Enter your password to delete this unfinished operator.**), then the red **Delete and start over** button or **Cancel**. A failed status check stays on **Retry** and does not open the fresh-install form: **FlintTrade is busy** on HTTP 429, **Can't check setup status** for any other HTTP error or an unreadable or incomplete response, and **FlintTrade backend unavailable** only when nothing answered. After Setup is complete, `/setup` does not restart step 1: a signed-in operator is sent to `/trade`; a signed-out operator sees **Setup is complete. Sign in to open the desk.** with **Sign in** as the primary button. Later / Skip panels open on that desk after the affirm and do not change the step count. On the broker Later path, **Continue without a broker** is the first control, above FlintTrade Native and OpenAlgo Bridge. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
@@ -720,15 +720,44 @@ vault**. The secured-vault line above **Open Practice desk** stays on
 the two-step path only. The last-step line is **2 of 3 completed - last
 step**.
 
-Reloading `/setup` mid-flow resumes the unfinished setup in this browser.
-The same tab restores the setup session and continues the current step.
-If that session is gone, Setup shows **Continue setup** with **This
-machine already has an operator. Sign in to finish setup.** Enter the
-password and choose **Continue setup** to carry on. **Start over (deletes
-this unfinished operator)** asks once: **Enter your password to delete
-this unfinished operator.** Confirm with the danger button **Delete and
-start over**, or choose **Cancel**. That deletes the unfinished operator
-and restarts at step 1. A workspace data wipe is not required.
+Before the create-operator form is shown, and again if a later status
+read fails, a failed setup-status check stays on that failure. **Retry**
+is the button. The fresh-install form does not open.
+
+- HTTP 429: **FlintTrade is busy**. **FlintTrade is busy right now. Wait a
+  moment, then retry.**
+- Any other HTTP error, or a response that cannot be read or is
+  incomplete: **Can't check setup status**. **FlintTrade answered, but
+  setup status couldn't be read. Retry in a moment.**
+- Only when nothing answered: **FlintTrade backend unavailable**, with
+  **Retry**. On the screen before Setup fields mount, the detail is
+  **Start or restart the local FlintTrade backend, then retry. Setup
+  has not advanced and no account, broker, or credential details were
+  submitted from this screen.** **Return to welcome** sits beside
+  **Retry**. If that same network failure is the later status read, the
+  detail is **The FlintTrade backend did not answer. Start or restart
+  the local FlintTrade backend, then retry.** and the only button is
+  **Retry**.
+
+Reloading `/setup` mid-flow resumes the unfinished setup in this browser
+and keeps the same step title. A run whose vault was not secured at the
+start still shows **Step 3 of 3 - Practice desk** and **2 of 3 completed
+- last step** after the vault opens and after a reload. That title does
+not become "of 2". The same tab restores the setup session and continues
+the current step.
+
+A fresh browser, or a reload on the vault step that needs a setup
+session, shows **Continue setup** and **This machine already has an
+operator. Sign in to finish setup.** Enter the password and choose
+**Continue setup** to carry on. That screen does not open the
+create-operator form. On a vault-step reload the step title stays put
+(for example **Step 2 of 3 - Vault**).
+
+**Start over (deletes this unfinished operator)** asks once: **Enter
+your password to delete this unfinished operator.** Confirm with the red
+**Delete and start over** button, or choose **Cancel**. That deletes the
+unfinished operator and restarts at step 1. That is the start-over
+control on the vault step. A workspace data wipe is not required.
 
 After Setup completes, opening `/setup` does not restart step 1. A
 signed-in operator is sent to the desk at `/trade`. A signed-out operator
