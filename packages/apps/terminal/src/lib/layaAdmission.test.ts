@@ -21,17 +21,17 @@ describe("layaNoticeFromOrderError", () => {
 
   it("uses the server clamp sentence and does not invent a denial", () => {
     const notice = layaNoticeFromOrderError(new OrderApiError(
-      "Not placed. Laya would allow up to 4. Review and resubmit with qty 4.",
+      "Not placed. Laya allows up to 4.",
       409,
       {
         code: "laya_clamp",
-        message: "Not placed. Laya would allow up to 4. Review and resubmit with qty 4.",
+        message: "Not placed. Laya allows up to 4.",
         applied_quantity: 4,
         limits: { max_quantity: 4 },
       },
     ));
     expect(notice?.kind).toBe("clamp");
-    expect(notice?.headline).toBe("Not placed. Laya would allow up to 4. Review and resubmit with qty 4.");
+    expect(notice?.headline).toBe("Not placed. Laya allows up to 4.");
     expect(notice?.appliedQuantity).toBe(4);
     expect(notice?.headline).not.toMatch(/denied/i);
   });

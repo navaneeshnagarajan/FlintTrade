@@ -81,7 +81,7 @@ def test_quantity_above_the_ceiling_is_a_clamp_and_does_not_place() -> None:
     blocked = place_block(verdict, 3)
     assert blocked is not None
     assert blocked["code"] == "laya_clamp"
-    assert blocked["message"] == "Not placed. Laya would allow up to 2. Review and resubmit with qty 2."
+    assert blocked["message"] == "Not placed. Laya allows up to 2."
     assert blocked["http_status"] == 409
 
 

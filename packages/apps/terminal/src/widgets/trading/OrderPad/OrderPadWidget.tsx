@@ -67,7 +67,7 @@ import {
   orderSuccessToast,
 } from "@/lib/modeVocabulary";
 import { LayaAdmissionNotice, LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
-import { AdmissionNoteField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
+import { OrderPadReasonField, admissionRationale } from "@/widgets/trading/AdmissionNoteField";
 import { readOperatorIncident, useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { liveWritesMuted } from "@/lib/operatorIncident";
@@ -698,18 +698,6 @@ function OrderPadWidget(props: WidgetProps) {
       });
       if (notice) {
         setAdmission(notice);
-        if (notice.kind === "clamp" && notice.appliedQuantity != null) {
-          const nextQty = notice.appliedQuantity;
-          setValue("qty", nextQty);
-          const review = practiceReviewRef.current;
-          if (review) {
-            const nextValues = { ...getValues(), qty: nextQty };
-            setPracticeReview(createPracticeOrderReviewSnapshot(nextValues, {
-              ...review.params,
-              quantity: nextQty,
-            }));
-          }
-        }
         return false;
       }
       setAdmission(null);
@@ -732,7 +720,7 @@ function OrderPadWidget(props: WidgetProps) {
     } finally {
       setLoading(false);
     }
-  }, [getValues, setValue, showToast]);
+  }, [showToast]);
 
   const appMode = useModeStore((s) => s.mode);
   const operatorIncident = useOperatorIncident();
@@ -866,6 +854,25 @@ function OrderPadWidget(props: WidgetProps) {
     lastSubmissionModeRef.current = "live";
     await submitOrder(params, { mode: "live" });
   };
+
+  const handlePlaceClamped = useCallback(async (quantity: number) => {
+    const review = practiceReviewRef.current;
+    const base = review?.params ?? lastParamsRef.current;
+    if (!base || quantity < 1) return;
+    const modeAtClick = useModeStore.getState().mode;
+    const mode = review
+      ? "practice"
+      : modeAtClick === "live"
+        ? "live"
+        : "practice";
+    const succeeded = await submitOrder({ ...base, quantity }, { mode });
+    if (succeeded) setPracticeReview(null);
+  }, [submitOrder]);
+
+  const handleCancelClamp = useCallback(() => {
+    setAdmission(null);
+    setPracticeReview(null);
+  }, []);
 
   const handlePracticeBack = useCallback(() => {
     if (practiceConfirmInFlightRef.current) return;
@@ -1314,6 +1321,18 @@ function OrderPadWidget(props: WidgetProps) {
           </div>
         )}
 
+        <Controller
+          control={control}
+          name="note"
+          render={({ field }) => (
+            <OrderPadReasonField
+              id="orderpad-admission-note"
+              value={field.value ?? ""}
+              onChange={field.onChange}
+            />
+          )}
+        />
+
         {/* Trigger + Disclosed row */}
         <div className="grid grid-cols-2 gap-3">
           <Controller
@@ -1344,18 +1363,6 @@ function OrderPadWidget(props: WidgetProps) {
             )}
           />
         </div>
-
-        <Controller
-          control={control}
-          name="note"
-          render={({ field }) => (
-            <AdmissionNoteField
-              id="orderpad-admission-note"
-              value={field.value ?? ""}
-              onChange={field.onChange}
-            />
-          )}
-        />
 
         {/* Order summary preview */}
         <div className="rounded border border-border-subtle bg-surface-card px-3 py-2 space-y-1">
@@ -1418,7 +1425,7 @@ function OrderPadWidget(props: WidgetProps) {
         {/* Submit button */}
         <Button
           type="submit"
-          disabled={loading || !symbol || !qty || liveMuted || admission?.kind === "deny"}
+          disabled={loading || !symbol || !qty || liveMuted || admission?.kind === "deny" || admission?.kind === "clamp"}
           className={`${btnBase} ${btnColor}`}
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : null}
@@ -1429,7 +1436,13 @@ function OrderPadWidget(props: WidgetProps) {
         ) : (
           <LayaDegradedLimitsNote status={decisionStatus} />
         )}
-        {liveMuted || practiceReview ? null : <LayaAdmissionNotice notice={admission} />}
+        {liveMuted || practiceReview ? null : (
+          <LayaAdmissionNotice
+            notice={admission}
+            onPlaceClamped={(quantity) => void handlePlaceClamped(quantity)}
+            onCancelClamp={handleCancelClamp}
+          />
+        )}
       </form>
 
       {/* Toast */}
@@ -1443,6 +1456,8 @@ function OrderPadWidget(props: WidgetProps) {
           admission={admission}
           onBack={handlePracticeBack}
           onConfirm={() => void handlePracticeConfirm()}
+          onPlaceClamped={(quantity) => void handlePlaceClamped(quantity)}
+          onCancelClamp={handleCancelClamp}
         />
       ) : null}
     </div>

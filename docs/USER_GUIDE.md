@@ -424,13 +424,13 @@ enter SafetySystem. Explore stays a mode refusal. Chat is not an
 admission source. The model can deny or clamp. It cannot raise a
 quantity or overturn a hard-rule refusal.
 
-**Admission note.** Order Pad, Quick Trade, Positions square-off, Order
-Ladder, Scalper, and Option Chain include an optional **Admission note**
-field (placeholder **Optional note for this order**). The note is sent
-with the place. An empty note does not block Place. An empty or uncertain
-note clamps in Practice and denies in Live. Practice shows **Laya is
-uncertain. Quantity stays inside the tighter limit.** Live shows **Laya
-is uncertain. Live stays closed.**
+**Admission note.** On the Order Pad the note is collapsed. **Add a reason
+(optional)** sits under Quantity and opens a single line. It is not a
+required step. Quick Trade, Positions square-off, Order Ladder, Scalper,
+and Option Chain keep an optional note field. An empty note does not
+block Place. An empty or uncertain note clamps in Practice and denies in
+Live. Practice shows **Laya is uncertain. Quantity stays inside the
+tighter limit.** Live shows **Laya is uncertain. Live stays closed.**
 
 **Deny.** Order Pad and Quick Trade show **Laya denied**, then the server
 reason. When the server sent a quantity ceiling, the next line is
@@ -441,12 +441,13 @@ stays reachable.
 A denial is not a Chat outage: the LLM label stays **Not configured** or
 **Connected (suggest only)**, and the Chat strip stays Info.
 
-**Clamp.** Nothing is placed. Order Pad and Quick Trade show **Not placed.
-Laya would allow up to N. Review and resubmit with qty N.** The same
-sentence covers a quantity above the ceiling and an uncertain note that
-holds the quantity inside the tighter limit. Order Pad's Practice review
-can resubmit that quantity in one click. The clamp stays until you change
-the ticket.
+**Clamp.** Nothing is placed until you click. Order Pad and Quick Trade
+show **Not placed. Laya allows up to N.** with **Place N** and **Cancel**.
+**Place N** sends that quantity through the same place path: admit again,
+then SafetySystem and gate_order when the new quantity is allowed.
+Practice still reaches the sandbox only after that admit. **Cancel**
+places nothing. The same sentence covers a quantity above the ceiling and
+an uncertain note that holds the quantity inside the tighter limit.
 
 **Degraded.** Live-facing Degraded leaves Live open. The desk says
 **Laya Degraded — tighter limits** on the status cluster and under those
@@ -495,12 +496,13 @@ a sidecar that was started separately.
 During the first load the chip says **Still loading** and does not read
 Down. Orders are still refused with **Laya is Down. Orders are paused
 until it's Ready.** A port clash, or another process on that port, is
-Down and the chip says which port is in use, with the start command as
-the next step. Click the chip to read that reason. When the sidecar is
-not up, the same panel offers **Start Laya**, which calls
-`POST /api/v1/laya/start` on the signed-in operator session, beside the
-command and this guide. A sidecar that has exited says **Stopped**. In
-Practice, a Ready sidecar never shows a red Down chip.
+Down and the chip says which port is in use. Click the chip for a short
+popover with that reason in plain words. The guide link is
+`#start-laya`. A signed-in operator also sees **Start Laya**, which
+calls `POST /api/v1/laya/start`. After that click the chip stays on
+**Still loading** until Laya is Ready or the probe reports a clear
+failure. A sidecar that has exited says **Stopped**. In Practice, a
+Ready sidecar never shows a red Down chip.
 
 A base checkpoint leaves Live Down. Live stays Down until that
 exact revision, weight digest, and policy version are qualified with
@@ -1487,10 +1489,11 @@ as a toast.
    Practice orders are available.** A base checkpoint leaves Live
    unqualified. Laya starts **Down** and does not invent Ready. Chat
    cannot place instead.
-2. **Not placed. Laya would allow up to N. Review and resubmit with qty N.**
-   Nothing was placed. On the Order Pad Practice review, **Resubmit qty N**
-   sends that quantity. The model does not raise quantity. A Down refusal
-   does not show **Max quantity**. **Laya Degraded — tighter limits** means Live-facing Degraded:
+2. **Not placed. Laya allows up to N.** Nothing was placed. **Place N**
+   sends that quantity through admit again, then SafetySystem and
+   gate_order when it is allowed. **Cancel** places nothing. The model does not raise
+   quantity. A Down refusal does not show **Max quantity** and does not say
+   to start the model. **Laya Degraded — tighter limits** means Live-facing Degraded:
    Live is open with a tighter ceiling. It is not a Blocked strip.
 3. Explore still refuses as a mode refusal. A safety-layer rejection names
    the layer and is a separate message.

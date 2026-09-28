@@ -469,10 +469,7 @@ def admission_kind(verdict: Verdict, requested_quantity: int) -> str:
 
 def clamp_place_message(applied_quantity: int) -> str:
     """Desk sentence for a clamp. Nothing has been placed."""
-    return (
-        f"Not placed. Laya would allow up to {applied_quantity}. "
-        f"Review and resubmit with qty {applied_quantity}."
-    )
+    return f"Not placed. Laya allows up to {applied_quantity}."
 
 
 def place_block(verdict: Verdict, requested_quantity: int) -> dict[str, Any] | None:

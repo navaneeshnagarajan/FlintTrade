@@ -564,7 +564,7 @@ def test_degraded_webhook_clamp_does_not_place(*, backend_lease_factory) -> None
     result = asyncio.run(dispatcher.place_order(payload))
 
     assert result["code"] == "laya_clamp"
-    assert result["message"] == "Not placed. Laya would allow up to 1. Review and resubmit with qty 1."
+    assert result["message"] == "Not placed. Laya allows up to 1."
     assert result["applied_quantity"] == 1
     app.config["SAFETY"].check_order.assert_not_called()
 

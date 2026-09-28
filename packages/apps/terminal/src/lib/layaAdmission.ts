@@ -68,7 +68,7 @@ export function layaNoticeFromOrderError(
       ? body.message
       : applied === null
         ? "Not placed. Review the quantity and resubmit."
-        : `Not placed. Laya would allow up to ${applied}. Review and resubmit with qty ${applied}.`;
+        : `Not placed. Laya allows up to ${applied}.`;
     return {
       kind: "clamp",
       headline,

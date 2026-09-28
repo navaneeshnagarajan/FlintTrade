@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { DeskStatusCluster } from "../DeskStatusCluster";
+import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useModeStore } from "@/stores/modeStore";
 import { resetOperatorSignals, useOperatorSignalStore } from "@/stores/operatorSignalStore";
@@ -11,6 +12,7 @@ describe("DeskStatusCluster", () => {
     resetOperatorSignals();
     useBrokerStore.setState({ accounts: [], activeAccountId: null });
     useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ status: "logged-out", token: null });
   });
 
   it("shows Laya Down beside a connected broker and suggest-only LLM", () => {
@@ -134,13 +136,11 @@ describe("DeskStatusCluster", () => {
     expect(chip).toHaveTextContent("Laya Still loading");
     expect(chip.textContent).not.toMatch(/Down/);
     expect(chip).toHaveAttribute("title", `Still loading. Next: ${LAYA_START_COMMAND}`);
-    expect(chip).toHaveAttribute(
-      "aria-label",
-      `Laya Still loading. Still loading. Next: ${LAYA_START_COMMAND}`,
-    );
+    expect(chip).toHaveAttribute("aria-label", "Laya Still loading. Still loading");
     expect(chip).toHaveAttribute("data-laya-live-reason", "");
+    useAuthStore.setState({ status: "logged-in", token: "session-jwt" });
     fireEvent.click(chip);
-    expect(screen.getByRole("dialog", { name: "Laya Still loading" })).toHaveTextContent("Still loading");
+    expect(screen.getByTestId("laya-reason")).toHaveTextContent("Still loading");
     expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
     expect(screen.getByRole("button", { name: "Start Laya" })).toBeInTheDocument();
   });
@@ -159,8 +159,10 @@ describe("DeskStatusCluster", () => {
     expect(chip).toHaveTextContent("Laya Down");
     expect(chip).toHaveAttribute("title", `Port 8123 in use. Next: ${LAYA_START_COMMAND}`);
     fireEvent.click(chip);
-    expect(screen.getByRole("dialog", { name: "Laya Down" })).toHaveTextContent("Port 8123 in use");
+    expect(screen.getByTestId("laya-reason")).toHaveTextContent("Port 8123 in use");
     expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
+    expect(screen.queryByRole("button", { name: "Start Laya" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Start the Laya model/)).not.toBeInTheDocument();
   });
 
   it("opens the Practice Ready reason and does not offer Start while the sidecar is up", () => {
@@ -175,15 +177,16 @@ describe("DeskStatusCluster", () => {
     expect(chip).toHaveTextContent("Laya Ready");
     expect(chip.className).not.toMatch(/text-loss/);
     fireEvent.click(chip);
-    expect(screen.getByRole("dialog", { name: "Laya Ready" })).toHaveTextContent(LAYA_NOT_QUALIFIED_FOR_LIVE);
+    expect(screen.getByTestId("laya-reason")).toHaveTextContent(LAYA_NOT_QUALIFIED_FOR_LIVE);
     expect(screen.queryByRole("button", { name: "Start Laya" })).not.toBeInTheDocument();
-    expect(screen.queryByTestId("laya-start-docs")).not.toBeInTheDocument();
+    expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
   });
 
-  it("starts the sidecar from the Down reason", async () => {
+  it("starts the sidecar from the popover and shows Still loading", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ status: "ok" }), { status: 200 }),
     );
+    useAuthStore.setState({ status: "logged-in", token: "session-jwt" });
     useModeStore.setState({ mode: "practice" });
     useOperatorSignalStore.setState({
       decisionStatus: "down",
@@ -194,13 +197,38 @@ describe("DeskStatusCluster", () => {
     });
     render(<DeskStatusCluster />);
     const chip = screen.getByTestId("laya-surface");
-    expect(chip).toHaveAttribute("title", `Stopped. Next: ${LAYA_START_COMMAND}`);
     fireEvent.click(chip);
+    expect(screen.getByTestId("laya-reason")).toHaveTextContent("Stopped");
+    expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
     fireEvent.click(screen.getByRole("button", { name: "Start Laya" }));
-    await screen.findByText("Start requested.");
+    await waitFor(() => expect(chip).toHaveTextContent("Laya Still loading"));
+    expect(chip.textContent).not.toMatch(/Down/);
     expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/api/v1/laya/start");
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit;
     expect(init.method).toBe("POST");
+    act(() => {
+      useOperatorSignalStore.setState({
+        layaPracticeStatus: "ready",
+        layaReason: null,
+      });
+    });
+    expect(chip).toHaveTextContent("Laya Ready");
     fetchSpy.mockRestore();
+  });
+
+  it("leaves Start Laya off the popover when the operator is signed out", () => {
+    useModeStore.setState({ mode: "practice" });
+    useOperatorSignalStore.setState({
+      decisionStatus: "down",
+      layaPracticeStatus: "down",
+      layaLiveQualified: false,
+      layaReason: "not_started",
+      layaPort: 8000,
+    });
+    render(<DeskStatusCluster />);
+    fireEvent.click(screen.getByTestId("laya-surface"));
+    expect(screen.getByTestId("laya-reason")).toHaveTextContent("Not started");
+    expect(screen.queryByRole("button", { name: "Start Laya" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
   });
 });

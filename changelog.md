@@ -83,13 +83,15 @@ changelog rebuilds itself from the first release cut after this baseline.
   refused with the Down sentence. A port clash says which port is in use.
   The Live Blocked strip follows Live-facing
   Down only. It mutes Live place and Position Mirror start. Practice
-  is not muted by that strip. Clicking the chip opens the Laya reason.
-  When the sidecar is down, that panel can start it
-  (`POST /api/v1/laya/start`, operator session) beside the command.
-  A dead sidecar is reaped and reported Stopped. A clamp says nothing
-  was placed and names the quantity that may be resubmitted. A Down
-  refusal does not show a quantity ceiling. An Order Pad place with no
-  note is an uncertain Practice clamp, not a hard reject.
+  is not muted by that strip. Clicking the chip opens a popover with the
+  plain-words reason. A signed-in operator can start the sidecar from
+  there (`POST /api/v1/laya/start`); the chip then says Still loading
+  until Laya is Ready or a failure reason arrives. The guide link is
+  `#start-laya`. A dead sidecar is reaped and reported Stopped. A clamp
+  says "Not placed. Laya allows up to N." and waits for Place N. A Down
+  refusal does not show a quantity ceiling. The Order Pad note is an
+  optional collapsed line under Quantity. An empty note is an uncertain
+  Practice clamp, not a hard reject.
 
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
   The required path is Create operator, then Vault, then the Practice

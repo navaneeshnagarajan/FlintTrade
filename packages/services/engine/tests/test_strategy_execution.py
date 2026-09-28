@@ -260,7 +260,7 @@ async def test_degraded_automate_clamp_does_not_shrink_and_place() -> None:
     process_laya().set_status(DecisionStatus.DEGRADED)
     safety = MagicMock()
     dispatcher = _automate_dispatcher(safety)
-    with pytest.raises(RuntimeError, match=r"Not placed\. Laya would allow up to 1\."):
+    with pytest.raises(RuntimeError, match=r"Not placed\. Laya allows up to 1\."):
         await dispatcher.dispatch_order(Order(symbol="RELIANCE", exchange="NSE", action="BUY", quantity="2"))
     safety.check_order.assert_not_called()
 

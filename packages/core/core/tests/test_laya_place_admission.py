@@ -105,7 +105,7 @@ def test_live_clamp_stops_before_safety_and_names_the_reduced_quantity(backend_l
     body = response.get_json()
     assert response.status_code == 409
     assert body["code"] == "laya_clamp"
-    assert body["message"] == "Not placed. Laya would allow up to 100. Review and resubmit with qty 100."
+    assert body["message"] == "Not placed. Laya allows up to 100."
     assert body["applied_quantity"] == 100
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
@@ -137,7 +137,7 @@ def test_degraded_live_stays_open_inside_the_tighter_ceiling(backend_lease_proof
     over_body = over.get_json()
     assert over.status_code == 409
     assert over_body["code"] == "laya_clamp"
-    assert over_body["message"] == "Not placed. Laya would allow up to 1. Review and resubmit with qty 1."
+    assert over_body["message"] == "Not placed. Laya allows up to 1."
     assert over_body["limits"]["max_quantity"] == 1
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
@@ -297,7 +297,7 @@ def test_practice_place_without_a_note_clamps_instead_of_demanding_a_reason() ->
     assert response.status_code == 409
     assert body["code"] == "laya_clamp"
     assert body["reason"] == "Laya is uncertain. Quantity stays inside the tighter limit."
-    assert body["message"] == "Not placed. Laya would allow up to 1. Review and resubmit with qty 1."
+    assert body["message"] == "Not placed. Laya allows up to 1."
     assert "concrete reason is required" not in json.dumps(body)
     assert "Live" not in body["reason"]
     sandbox.place_order.assert_not_called()
@@ -347,7 +347,7 @@ def test_practice_desk_order_pad_without_a_note_reaches_the_policy() -> None:
     assert response.status_code == 409
     assert body["code"] == "laya_clamp"
     assert body["reason"] == "Laya is uncertain. Quantity stays inside the tighter limit."
-    assert body["message"] == "Not placed. Laya would allow up to 1. Review and resubmit with qty 1."
+    assert body["message"] == "Not placed. Laya allows up to 1."
     assert "concrete reason is required" not in json.dumps(body)
     assert "Live" not in body["reason"]
     assert body["code"] != "laya_denied"

@@ -2,30 +2,24 @@
  * Broker, Laya, and LLM, each with its own label.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useModeStore } from "@/stores/modeStore";
+import { useAuthStore } from "@/stores/authStore";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { mondayReadChrome } from "@/lib/mondayReadChrome";
 import { LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { brokerSurfaceLabel, chatSurfaceLabel } from "@/lib/deskStatus";
-import { buildHeaders, getBase } from "@/services/ftApi.helpers";
+import { buildHeaders, getBase, isDemoAuthSession } from "@/services/ftApi.helpers";
 import {
-  LAYA_START_COMMAND,
   LAYA_START_DOCS_HREF,
   layaChipLabel,
   layaChipStatus,
   layaDisabledLiveReason,
+  layaReasonPlain,
   layaReasonTooltip,
 } from "@/lib/layaStatus";
 
@@ -49,28 +43,46 @@ export function DeskStatusCluster() {
     incident,
   });
   const chipStatus = layaChipStatus({ mode, practice: practiceStatus, live: liveStatus });
+  const authStatus = useAuthStore((state) => state.status);
+  const authToken = useAuthStore((state) => state.token);
+  const operator = authStatus === "logged-in" && Boolean(authToken) && !isDemoAuthSession();
+  const liveReason = layaDisabledLiveReason({ practice: practiceStatus, liveQualified });
+  const sidecarUp = practiceStatus === "ready" || practiceStatus === "degraded";
+  const [starting, setStarting] = useState(false);
+  const [awaitingLaya, setAwaitingLaya] = useState(false);
+  const [startNote, setStartNote] = useState<string | null>(null);
+  const startSnapshot = useRef<{ reason: string | null; practice: string | null } | null>(null);
+  const shownReason = awaitingLaya ? "still_loading" : layaReason;
   const decision = layaChipLabel({
     mode,
     practice: practiceStatus,
     live: liveStatus,
-    reason: layaReason,
+    reason: shownReason,
   });
-  const liveReason = layaDisabledLiveReason({ practice: practiceStatus, liveQualified });
-  const operational = layaReasonTooltip(layaReason, layaPort);
-  const sidecarUp = practiceStatus === "ready" || practiceStatus === "degraded";
-  const downFallback = decision === "Down" || decision === "Still loading"
-    ? layaReasonTooltip("not_started", layaPort)
-    : null;
-  const reasonText = operational ?? liveReason ?? downFallback;
-  const offerStart = !sidecarUp && (decision === "Down" || decision === "Still loading");
-  const [starting, setStarting] = useState(false);
-  const [startNote, setStartNote] = useState<string | null>(null);
+  const plainReason = layaReasonPlain(shownReason, layaPort)
+    ?? liveReason
+    ?? (decision === "Down" ? "Not started" : null);
+  const tooltip = layaReasonTooltip(shownReason, layaPort) ?? liveReason ?? undefined;
+  const offerStart = operator && !sidecarUp && !awaitingLaya;
   const chat = chatSurfaceLabel(llmChrome);
   const decisionTone = decision === "Down"
     ? "text-loss"
     : decision === "Degraded"
       ? "text-amber-400"
       : "text-text-secondary";
+
+  useEffect(() => {
+    if (!awaitingLaya || !startSnapshot.current) return;
+    const same = layaReason === startSnapshot.current.reason
+      && practiceStatus === startSnapshot.current.practice;
+    if (same) return;
+    if (practiceStatus === "ready" || practiceStatus === "degraded") {
+      setAwaitingLaya(false);
+      return;
+    }
+    if (layaReason === "still_loading") return;
+    if (layaReason && layaReason !== "not_started") setAwaitingLaya(false);
+  }, [awaitingLaya, practiceStatus, layaReason]);
 
   async function startLaya() {
     setStarting(true);
@@ -81,10 +93,13 @@ export function DeskStatusCluster() {
         headers: buildHeaders(true),
       });
       if (!response.ok) {
+        setAwaitingLaya(false);
         setStartNote("Laya could not be started.");
         return;
       }
-      setStartNote("Start requested.");
+      startSnapshot.current = { reason: layaReason, practice: practiceStatus };
+      setAwaitingLaya(true);
+      setStartNote(null);
     } catch {
       setStartNote("Laya could not be started.");
     } finally {
@@ -101,45 +116,39 @@ export function DeskStatusCluster() {
     >
       <span data-testid="broker-surface">Broker {broker}</span>
       <span aria-hidden="true">·</span>
-      <Dialog>
-        <DialogTrigger asChild>
+      <Popover>
+        <PopoverTrigger asChild>
           <button
             type="button"
             data-testid="laya-surface"
             className={`${decisionTone} underline-offset-2 hover:underline`}
-            title={reasonText ?? undefined}
-            aria-label={reasonText ? `Laya ${decision}. ${reasonText}` : `Laya ${decision}`}
-            data-laya-reason={layaReason ?? ""}
+            title={tooltip}
+            aria-label={plainReason ? `Laya ${decision}. ${plainReason}` : `Laya ${decision}`}
+            data-laya-reason={shownReason ?? ""}
             data-laya-live-reason={liveReason ?? ""}
           >
             Laya {decision}
           </button>
-        </DialogTrigger>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Laya {decision}</DialogTitle>
-            <DialogDescription>{reasonText ?? `Laya ${decision}`}</DialogDescription>
-          </DialogHeader>
+        </PopoverTrigger>
+        <PopoverContent aria-label="Laya status" className="w-64 space-y-2 p-3 text-xs">
+          <p data-testid="laya-reason">{plainReason ?? `Laya ${decision}`}</p>
+          <a
+            data-testid="laya-start-docs"
+            href={LAYA_START_DOCS_HREF}
+            className="underline"
+          >
+            How to start Laya
+          </a>
           {offerStart ? (
-            <div className="space-y-3 text-sm text-text-secondary">
-              <p className="font-mono text-xs">{LAYA_START_COMMAND}</p>
-              <a
-                data-testid="laya-start-docs"
-                href={LAYA_START_DOCS_HREF}
-                className="underline"
-              >
-                How to start Laya
-              </a>
-              <div>
-                <Button type="button" disabled={starting} onClick={() => void startLaya()}>
-                  {starting ? "Starting…" : "Start Laya"}
-                </Button>
-              </div>
-              {startNote ? <p role="status">{startNote}</p> : null}
+            <div>
+              <Button type="button" disabled={starting} onClick={() => void startLaya()}>
+                {starting ? "Starting…" : "Start Laya"}
+              </Button>
             </div>
           ) : null}
-        </DialogContent>
-      </Dialog>
+          {startNote ? <p role="status">{startNote}</p> : null}
+        </PopoverContent>
+      </Popover>
       <LayaDegradedLimitsNote status={chipStatus} />
       <span aria-hidden="true">·</span>
       <span data-testid="llm-surface">LLM {chat}</span>

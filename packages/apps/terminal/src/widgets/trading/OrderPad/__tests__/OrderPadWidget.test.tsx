@@ -274,9 +274,21 @@ describe("OrderPadWidget", () => {
     expect(Number(qtyInput.value)).toBeGreaterThanOrEqual(1);
   });
 
+  it("keeps the reason collapsed until the operator opens it", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    expect(screen.getByRole("button", { name: "Add a reason (optional)" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Admission note")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add a reason (optional)" }));
+    const note = screen.getByLabelText("Admission note");
+    expect(note.tagName).toBe("INPUT");
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeEnabled();
+  });
+
   it("sends the admission note with a practice place", async () => {
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot: 1");
+    fireEvent.click(screen.getByRole("button", { name: "Add a reason (optional)" }));
     fireEvent.change(screen.getByLabelText("Admission note"), {
       target: { value: "Planned breakout" },
     });
@@ -333,6 +345,7 @@ describe("OrderPadWidget", () => {
     );
     expect(screen.queryByTestId("laya-limits")).not.toBeInTheDocument();
     expect(screen.queryByText(/Max quantity/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Start the Laya model/)).not.toBeInTheDocument();
     expect(confirm).toBeDisabled();
 
     act(() => {
@@ -343,8 +356,8 @@ describe("OrderPadWidget", () => {
     expect(screen.getByRole("button", { name: /confirm (simulated practice|sample) order/i })).toBeEnabled();
   });
 
-  it("shows a quantity clamp before the place completes and resubmits that qty", async () => {
-    const clamp = "Not placed. Laya would allow up to 1. Review and resubmit with qty 1.";
+  it("shows a clamp and does not place until Place N is clicked", async () => {
+    const clamp = "Not placed. Laya allows up to 1.";
     mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(clamp, 409, {
       code: "laya_clamp",
       message: clamp,
@@ -362,9 +375,11 @@ describe("OrderPadWidget", () => {
     expect(await screen.findByTestId("laya-clamp")).toHaveTextContent(clamp);
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/TEST001/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/order details changed/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /confirm (simulated practice|sample) order/i })).toBeEnabled();
-    fireEvent.click(screen.getByTestId("laya-resubmit"));
+    expect(screen.getByRole("button", { name: "Place 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /confirm (simulated practice|sample) order/i })).toBeDisabled();
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Place 1" }));
     await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(2));
     expect(mockPlaceOrder).toHaveBeenLastCalledWith(
       expect.objectContaining({ quantity: 1, strategy: "FlintOrderPad" }),
@@ -372,10 +387,32 @@ describe("OrderPadWidget", () => {
     );
   });
 
+  it("cancels a clamp without placing", async () => {
+    const clamp = "Not placed. Laya allows up to 1.";
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(clamp, 409, {
+      code: "laya_clamp",
+      message: clamp,
+      applied_quantity: 1,
+      limits: { max_quantity: 1 },
+    }));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    fireEvent.click(await screen.findByRole("button", {
+      name: /confirm (simulated practice|sample) order/i,
+    }));
+    expect(await screen.findByTestId("laya-clamp")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/TEST001/)).not.toBeInTheDocument();
+  });
+
   it("submits the desk Order Pad request with no note", async () => {
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot: 1");
-    expect(screen.getByLabelText("Admission note")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Add a reason (optional)" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Admission note")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
     fireEvent.click(await screen.findByRole("button", {
       name: /confirm (simulated practice|sample) order/i,

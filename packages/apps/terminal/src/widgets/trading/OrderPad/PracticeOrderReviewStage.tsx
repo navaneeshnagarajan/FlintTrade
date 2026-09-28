@@ -7,7 +7,6 @@ import {
   orderReviewDetailsLabel,
   orderReviewTitle,
 } from "@/lib/modeVocabulary";
-import { Button } from "@/components/ui/button";
 import { LayaAdmissionNotice } from "@/components/orders/LayaAdmissionNotice";
 import type { LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import type { PracticeOrderReviewSnapshot } from "./practiceOrderReview";
@@ -19,6 +18,8 @@ interface PracticeOrderReviewStageProps {
   admission?: LayaNotice | null;
   onBack: () => void;
   onConfirm: () => void;
+  onPlaceClamped?: (quantity: number) => void;
+  onCancelClamp?: () => void;
 }
 
 const currency = new Intl.NumberFormat("en-IN", {
@@ -47,6 +48,8 @@ export function PracticeOrderReviewStage({
   admission = null,
   onBack,
   onConfirm,
+  onPlaceClamped,
+  onCancelClamp,
 }: PracticeOrderReviewStageProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -126,18 +129,11 @@ export function PracticeOrderReviewStage({
         </p>
 
         <div className="mt-3">
-          <LayaAdmissionNotice notice={admission} />
-          {admission?.kind === "clamp" && admission.appliedQuantity != null ? (
-            <Button
-              type="button"
-              className="mt-2 w-full"
-              data-testid="laya-resubmit"
-              disabled={confirming}
-              onClick={onConfirm}
-            >
-              {`Resubmit qty ${admission.appliedQuantity}`}
-            </Button>
-          ) : null}
+          <LayaAdmissionNotice
+            notice={admission}
+            onPlaceClamped={onPlaceClamped}
+            onCancelClamp={onCancelClamp}
+          />
         </div>
 
         <div className="mt-4 flex gap-2">
@@ -153,7 +149,7 @@ export function PracticeOrderReviewStage({
           <button
             ref={confirmRef}
             type="button"
-            disabled={confirming || admission?.kind === "deny"}
+            disabled={confirming || admission?.kind === "deny" || admission?.kind === "clamp"}
             aria-label={orderReviewConfirmAria(mode)}
             aria-busy={confirming}
             onClick={onConfirm}
