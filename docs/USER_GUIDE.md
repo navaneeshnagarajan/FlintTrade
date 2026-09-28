@@ -346,7 +346,7 @@ of the UI.
 Explore reads `Explore — sample data only. No broker session, no live orders.`
 Practice reads `Practice — SandboxEngine fills. Not your funded broker account.`
 Live reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.`
-Widgets stay quiet: they do not repeat a Sample chip. Mode is not provenance. A figure that stays fabricated in Practice and Live, such as benchmark returns, keeps its own sample banner. An incident strip,
+Widgets stay quiet: they do not repeat a Sample chip. Mode is not provenance. A figure that stays fabricated in Practice and Live, such as benchmark returns, keeps its own Example chip. An incident strip,
 when one is showing, sits between the TopBar and this line and does not
 replace it.
 
@@ -699,10 +699,10 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP, or PIN). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Explore stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
 | `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Later / Skip panels open on that desk after the affirm and do not change the step count. On the broker Later path, **Continue without a broker** is the first control, above FlintTrade Native and OpenAlgo Bridge. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
-| `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
+| `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. The greeting stays on the Home card. There is no greeting toast. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
-| `/invest` | Portfolio-record workspace — holdings, net worth, SIPs, mutual-fund tracker, and stock baskets. Deep-link hashes such as `#holdings`, `#sip`, `#networth`, `#mutual-funds`, `#mf-optimizer`, and `#basket` open the matching tab on load; an unknown hash falls back to Dashboard. |
+| `/invest` | Portfolio-record workspace. Sections are Overview, Holdings, Analyse, Discover, and Tax. A leaf hash opens that view inside its section; a section hash opens the section's first view; an unknown hash opens Overview → Dashboard. |
 | `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. Practice Trading links to Settings → Broker Gateway (`/settings#api`) for OpenAlgo Practice setup, not native Brokers. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise, Options Builder. |
 | `/automate` | Automation Hub — flows, cron, monitors, logs. Kill-switch activate/reset lives under Automate → Settings. |
@@ -727,42 +727,98 @@ sees the same Home as sidebar Home, Alt+H, or the TopBar logo —
 never the password Welcome Back gate. That gate stays on `/welcome`
 for unauthenticated visitors only (FT-HOME-003).
 
-On Explore `/invest#mutual-funds`, Mutual Fund Explorer labels the static
-fixture `Sample NAVs · as of 10-Sep-2026` (from `EXPLORE_SAMPLE_NAV_DATE`)
-and does not claim "Updated daily after market close." The as-of is the
-fixture date and does not auto-update. Practice and Live keep the live
-AMFI sentence ("Updated daily after market close") when the live feed is
-in use.
+### Home
 
-On Practice or Explore `/invest` → Holdings with no broker, the header
-badge matches the visible table (`N holdings`). The badge is never `0 holdings` over a populated
-sample table. There is no Sample chip on the Holdings table or header.
-When the sample book is shown — Explore always, and Practice after the
-holdings query has settled empty — Holdings and Dashboard keep the
-`DemoBanner` (`Showing sample data — connect a broker for live data`),
-in Explore as well as Practice. Explore also has the Mode honesty line
-(`Explore — sample data only. No broker session, no live orders.`).
-The Practice Mode line (`Practice — SandboxEngine fills. Not your funded
-broker account.`) does not call that book sample; `DemoBanner` is the
-required Practice disclosure for it. Dashboard and "N stocks"
-use that same N. Practice waits
-until the holdings query has settled empty before the sample fallback,
-so a cold load does not flash the sample N over a pending book.
-Dashboard `Net Worth (Equity + Cash)` uses that same shared demo book
-as Holdings. A broker read failure shows muted `Failed to load holdings`
-plus `Refresh` — never `0 holdings`, `No holdings`, or a sample table
-under a failed load. A connected broker with no positions shows
-`0 holdings` and an honest empty state (`No holdings`) — no sample
-table under a zero badge. Connected positions use the live count only
-(FT-TRADE-010).
+The Home greeting card stays on the dashboard. Its line is `Good morning`,
+`Good afternoon`, or `Good evening` from the Asia/Kolkata hour, plus the
+operator name when one is set. There is no greeting toast.
 
-On Explore `/invest#basket` (Stock Baskets), the Mode honesty line owns
-disclosure — seeded cards do **not** carry a card-level Sample chip. Bare ₹ / P&L
-under that banner is acceptable once **Edit** and **Delete** cannot look
-live. Seeded Explore baskets disable **Edit** and **Delete**, with title
-helper `Sample basket — editing unavailable in Explore`. User-created
-Practice or Live baskets keep full Edit/Delete. Empty Explore is an
-honest empty state or a clearly labelled sample set (FT-INVEST-002).
+Home and Invest share one net-worth figure: cash + holdings + open
+positions. Buying shares moves value from cash into positions. With an
+unchanged price, the total stays the same. The Home portfolio card labels
+that figure `Net Worth`. Invest Dashboard labels it
+`Net Worth (Cash + Holdings + Positions)`. The Net Worth view labels it
+`Known Total (Cash + Holdings + Positions)`.
+
+Home allocation shows a labelled Example split (Equity, MF, Gold, F&O)
+only until there is account data. After an account snapshot the bar is
+the account split: Cash, Positions, and Equity, including cash and
+positions after a fill. The Example chip sits on that split only while it
+is the example mix.
+
+### Invest
+
+Invest sections are Overview, Holdings, Analyse, Discover, and Tax.
+
+| Section | Views |
+|---|---|
+| Overview | Dashboard, Net Worth, Goals |
+| Holdings | Holdings, Mutual Funds, SIPs, Baskets |
+| Analyse | Sector, Sector Rotation, Overlap, Benchmark, Shareholding, Risk-Return, Correlation |
+| Discover | ETF Screener, MF Optimizer, Social, ETFs, Stocks, IPO |
+| Tax | Tax |
+
+A leaf hash opens that view inside its section. `#sip` opens Holdings →
+SIPs. `#networth` opens Overview → Net Worth. `#mutual-funds` opens
+Holdings → Mutual Funds. `#mf-optimizer` opens Discover → MF Optimizer.
+`#basket` opens Holdings → Baskets. `#sector-rotation` opens Analyse →
+Sector Rotation. A section hash opens that section's first view:
+`#overview` opens Dashboard, `#analyse` opens Sector, `#discover` opens
+ETF Screener, and `#tax` opens Tax. `#holdings` is the Holdings view, so
+it opens Holdings → Holdings. An unknown hash opens Overview → Dashboard.
+The selected view stays available from that hash when the skill level
+would otherwise hide it.
+
+**Overlap.** With an account book and no holdings, Overlap shows
+`No holdings to compare yet. Overlap appears once you hold two or more funds or baskets.`
+The sample overlap book appears only before any account snapshot, and it
+is labelled Example.
+
+**Example views.** Sample figures on Baskets, Sector Rotation, Benchmark,
+Shareholding, ETF Screener, Social, ETFs, Risk-Return, and Correlation
+carry the Example chip. Benchmark keeps that chip on the comparison.
+With no holdings, Benchmark still shows the index lines, a `—` on the
+Your Portfolio row, and `Add holdings to compare against benchmarks.`
+The comparison carries `Benchmark data is illustrative. Live index data requires a market data subscription.`
+
+**Practice.** In Practice the source line says `Practice account`.
+Dashboard allocation reads
+`Practice account. Debt / MF requires NAV data source.`
+The Net Worth view reads
+`Practice account. Other asset classes require additional data sources.`
+On that view, Equity Holdings and Available Cash read `Practice account`
+once the figures are the account book. While those figures are the sample
+feed they read `Example book` and `Example cash`. The connect banner
+`Connect a broker in Settings → Brokers to see your real holdings, SIPs, and portfolio value here.`
+is hidden in Practice.
+
+**XIRR.** With no holdings, Portfolio XIRR shows `—` and the net-worth
+subline shows `XIRR —`. That figure has no Example chip.
+
+**Cash.** Available Funds on Dashboard and Available Cash on the Net Worth
+view show full rupees, in Indian grouping, with no paise. They use the
+same format as the net-worth headline.
+
+**Holdings and funds.** While the sample book is showing, the Invest
+header badge is `N holdings` and matches the table, with an Example chip.
+Holdings and Dashboard also show
+`Showing sample data — connect a broker for live data`.
+An account snapshot replaces that book, including a Practice snapshot
+with cash and an empty holdings list. A cold load waits until the
+holdings query has settled before that sample fallback, so a pending
+book is not covered by the sample count. A failed holdings read shows
+`Failed to load holdings` and `Refresh`. An empty holdings book shows
+`0 holdings` and `No holdings`.
+
+Mutual Funds on the sample feed reads `Sample NAVs · as of` the fixture
+date, and does not say `Updated daily after market close.` Practice and
+Live use
+`Search Indian mutual funds with live NAV data from AMFI. Updated daily after market close.`
+when the live feed is in use.
+
+Baskets shows the Example chip when quotes have not arrived. Seeded
+sample baskets disable **Edit** and **Delete**. Baskets you create in
+Practice or Live keep **Edit** and **Delete**.
 
 ### The widgets (71)
 
