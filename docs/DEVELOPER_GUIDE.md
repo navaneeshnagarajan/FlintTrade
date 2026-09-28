@@ -517,11 +517,16 @@ python -m flinttrade_core.laya_runtime stop
 workspace is `~/.flinttrade`. `FLINTTRADE_WORKSPACE_DIR` overrides it.
 The default install puts CPU torch in that environment from
 `https://download.pytorch.org/whl/cpu`, then `laya[serve]==0.3.21`, so
-the CUDA wheels stay out. That environment is about 1.2 GB. The
+the CUDA wheels stay out. Those two pins live together in
+`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`
+(`torch==2.14.0+cpu` and `laya[serve]==0.3.21`). The CPU install applies
+that file to both pip commands, and installs torch first. CUDA and ROCm
+installs do not use the CPU pin. That environment is about 1.2 GB. The
 default-index torch build, which pulls CUDA wheels, was about 5.6 GB. `install --accelerator cuda` opts into the
 PyPI torch build. `install --accelerator rocm` needs `LAYA_TORCH_INDEX`
 set to an https PyTorch ROCm wheel index. `start` still uses CPU
-(`LAYA_DEVICE=cpu`) and listens on `127.0.0.1:8000`. A fresh API key is
+(`LAYA_DEVICE=cpu`). The host stays `127.0.0.1`. `LAYA_PORT` chooses the
+port and defaults to 8000. A fresh API key is
 written to `<workspace>/runtime/laya/api.key` and removed on `stop`, and
 on a start that fails after the key was written.
 
@@ -531,11 +536,20 @@ than the runtime directory. A snapshot that also includes the
 multilingual weights is about 1.5 GB. Later boots stay offline. The
 pinned revision and `model.safetensors` digest live in `laya_policy.toml`.
 
-A backend that was started with `LAYA_HOST=127.0.0.1`, `LAYA_PORT=8000`,
-and `LAYA_API_KEY_FILE` pointing at that `api.key` attaches on its
-health probe. The host must stay loopback. The attached client uses the
-same revision and digest checks. A health document without the weight
-digest stays Down.
+A backend that was started with `LAYA_HOST=127.0.0.1`, `LAYA_PORT` (or
+the default 8000), and `LAYA_API_KEY_FILE` pointing at that `api.key`
+attaches on its health probe. The host must stay loopback. The attached
+client uses the same revision and digest checks. A health document
+without the weight digest stays Down.
+
+`status` carries a reason code: `not_started`, `port_in_use`,
+`still_loading`, `unreachable`, or `wrong_revision`. The desk shows those
+as Not started, Port &lt;n&gt; in use, Still loading, Unreachable, and Wrong
+model revision, then `python -m flinttrade_core.laya_runtime start`. A
+port that another process holds, including one that is not Laya, is Down
+with Port &lt;n&gt; in use. The first load, before health is usable, is Still
+loading. Orders stay refused with the Down sentence while that load
+runs. After a successful load, a later miss is Unreachable.
 
 `GET /health` then records Practice Ready or Degraded from the sidecar.
 Live stays Down until a `LayaQualification` record uses

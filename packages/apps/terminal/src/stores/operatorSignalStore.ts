@@ -28,6 +28,10 @@ export interface OperatorSignalSnapshot {
   layaPracticeStatus: "ready" | "degraded" | "down" | null;
   /** True only when a qualification record covers the pin. */
   layaLiveQualified: boolean;
+  /** Sidecar reason code. Null when Ready or Degraded has cleared it. */
+  layaReason: string | null;
+  /** Loopback port the reason refers to. The host stays 127.0.0.1. */
+  layaPort: number;
 }
 
 const INITIAL: OperatorSignalSnapshot = {
@@ -45,6 +49,8 @@ const INITIAL: OperatorSignalSnapshot = {
   decisionStatus: "down",
   layaPracticeStatus: "down",
   layaLiveQualified: false,
+  layaReason: null,
+  layaPort: 8000,
 };
 
 interface OperatorSignalStore extends OperatorSignalSnapshot {
@@ -56,6 +62,8 @@ interface OperatorSignalStore extends OperatorSignalSnapshot {
   setDecisionStatus: (decisionStatus: OperatorSignalSnapshot["decisionStatus"]) => void;
   setLayaPracticeStatus: (layaPracticeStatus: OperatorSignalSnapshot["layaPracticeStatus"]) => void;
   setLayaLiveQualified: (layaLiveQualified: boolean) => void;
+  setLayaReason: (layaReason: string | null) => void;
+  setLayaPort: (layaPort: number) => void;
   clearBrokerRateLimit: () => void;
   clearBrokerFault: () => void;
   applyObserved: (
@@ -79,6 +87,8 @@ export const useOperatorSignalStore = create<OperatorSignalStore>((set, get) => 
   setDecisionStatus: (decisionStatus) => set({ decisionStatus }),
   setLayaPracticeStatus: (layaPracticeStatus) => set({ layaPracticeStatus }),
   setLayaLiveQualified: (layaLiveQualified) => set({ layaLiveQualified }),
+  setLayaReason: (layaReason) => set({ layaReason }),
+  setLayaPort: (layaPort) => set({ layaPort }),
   clearBrokerRateLimit: () => set((state) => ({
     brokerRateLimited: false,
     brokerReject: state.brokerReject

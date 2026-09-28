@@ -43,7 +43,19 @@ export interface PingProbe {
   layaPractice: LayaHeartbeat | null;
   /** True only when the heartbeat says Live is qualified. */
   layaLiveQualified: boolean;
+  /** Machine-readable sidecar reason. Null when the heartbeat omitted a known code. */
+  layaReason: string | null;
+  /** Sidecar port from the heartbeat. 8000 when the field is absent. */
+  layaPort: number;
 }
+
+const LAYA_REASON_CODES = new Set([
+  "not_started",
+  "port_in_use",
+  "still_loading",
+  "unreachable",
+  "wrong_revision",
+]);
 
 function layaStatusValue(value: unknown): LayaHeartbeat | null {
   if (value === "ready" || value === "degraded" || value === "down") return value;
@@ -65,11 +77,33 @@ export function layaLiveQualifiedFromBody(body: unknown): boolean {
   return (body as { laya_live_qualified?: unknown }).laya_live_qualified === true;
 }
 
+export function layaReasonFromBody(body: unknown): string | null {
+  if (body === null || typeof body !== "object") return null;
+  const value = (body as { laya_reason?: unknown }).laya_reason;
+  if (typeof value !== "string" || !LAYA_REASON_CODES.has(value)) return null;
+  return value;
+}
+
+export function layaPortFromBody(body: unknown): number {
+  if (body === null || typeof body !== "object") return 8000;
+  const value = (body as { laya_port?: unknown }).laya_port;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65535) return value;
+  return 8000;
+}
+
 export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<PingProbe> {
   try {
     const resp = await fetchImpl(`${getBase()}/api/v1/ping`, { method: "GET", cache: "no-store" });
     if (!resp.ok) {
-      return { localPing: "http_error", transportReason: null, laya: null, layaPractice: null, layaLiveQualified: false };
+      return {
+        localPing: "http_error",
+        transportReason: null,
+        laya: null,
+        layaPractice: null,
+        layaLiveQualified: false,
+        layaReason: null,
+        layaPort: 8000,
+      };
     }
     const body: unknown = await resp.json().catch(() => null);
     return {
@@ -78,6 +112,8 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
       laya: layaHeartbeatFromBody(body),
       layaPractice: layaPracticeFromBody(body),
       layaLiveQualified: layaLiveQualifiedFromBody(body),
+      layaReason: layaReasonFromBody(body),
+      layaPort: layaPortFromBody(body),
     };
   } catch (err) {
     return {
@@ -86,6 +122,8 @@ export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<P
       laya: null,
       layaPractice: null,
       layaLiveQualified: false,
+      layaReason: null,
+      layaPort: 8000,
     };
   }
 }

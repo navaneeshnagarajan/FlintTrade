@@ -4,7 +4,7 @@ import { DeskStatusCluster } from "../DeskStatusCluster";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useModeStore } from "@/stores/modeStore";
 import { resetOperatorSignals, useOperatorSignalStore } from "@/stores/operatorSignalStore";
-import { LAYA_NOT_QUALIFIED_FOR_LIVE } from "@/lib/layaStatus";
+import { LAYA_NOT_QUALIFIED_FOR_LIVE, LAYA_START_COMMAND, LAYA_START_DOCS_HREF } from "@/lib/layaStatus";
 
 describe("DeskStatusCluster", () => {
   beforeEach(() => {
@@ -118,5 +118,39 @@ describe("DeskStatusCluster", () => {
     render(<DeskStatusCluster />);
     expect(screen.getByTestId("laya-surface")).toHaveTextContent("Laya Down");
     expect(screen.getByTestId("laya-surface")).toHaveAttribute("data-laya-live-reason", "");
+  });
+
+  it("shows Still loading during the first load and does not flash Down", () => {
+    useModeStore.setState({ mode: "practice" });
+    useOperatorSignalStore.setState({
+      decisionStatus: "down",
+      layaPracticeStatus: "down",
+      layaLiveQualified: false,
+      layaReason: "still_loading",
+      layaPort: 8000,
+    });
+    render(<DeskStatusCluster />);
+    const chip = screen.getByTestId("laya-surface");
+    expect(chip).toHaveTextContent("Laya Still loading");
+    expect(chip.textContent).not.toMatch(/Down/);
+    expect(chip).toHaveAttribute("title", `Still loading. Next: ${LAYA_START_COMMAND}`);
+    expect(chip).toHaveAttribute("data-laya-live-reason", "");
+    expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
+  });
+
+  it("names a port clash in the tooltip", () => {
+    useModeStore.setState({ mode: "practice" });
+    useOperatorSignalStore.setState({
+      decisionStatus: "down",
+      layaPracticeStatus: "down",
+      layaLiveQualified: false,
+      layaReason: "port_in_use",
+      layaPort: 8123,
+    });
+    render(<DeskStatusCluster />);
+    const chip = screen.getByTestId("laya-surface");
+    expect(chip).toHaveTextContent("Laya Down");
+    expect(chip).toHaveAttribute("title", `Port 8123 in use. Next: ${LAYA_START_COMMAND}`);
+    expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
   });
 });

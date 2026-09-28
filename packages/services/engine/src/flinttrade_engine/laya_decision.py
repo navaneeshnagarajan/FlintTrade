@@ -328,6 +328,41 @@ def interpret_health(
     return DecisionStatus.DOWN
 
 
+def health_identity_failure(
+    payload: Mapping[str, Any] | None,
+    *,
+    policy: LayaPolicy | None = None,
+    requested_device: str = "cpu",
+) -> bool:
+    """True when a Laya-shaped health document disagrees with the pin.
+
+    A missing document, or one that has not finished loading, is not this
+    failure. A loaded checkpoint with the wrong revision, a missing digest,
+    or the wrong digest is. A device mismatch is Down without this flag.
+    """
+    if not isinstance(payload, Mapping):
+        return False
+    if str(payload.get("status") or "") != "ok":
+        return False
+    active = policy or load_policy()
+    loaded = payload.get("loaded")
+    revisions = payload.get("revisions")
+    claims_model = (
+        (isinstance(loaded, (list, tuple)) and active.checkpoint in loaded)
+        or isinstance(revisions, Mapping)
+        or "sha256" in payload
+        or "digests" in payload
+    )
+    if not claims_model:
+        return False
+    if interpret_health(payload, policy=active, requested_device=requested_device) is not DecisionStatus.DOWN:
+        return False
+    if not isinstance(revisions, Mapping) or str(revisions.get(active.checkpoint) or "") != active.revision:
+        return True
+    reported = _reported_digest(payload, active)
+    return reported is None or reported != active.sha256
+
+
 def publish_probe(
     engine: Any,
     payload: Mapping[str, Any] | None,

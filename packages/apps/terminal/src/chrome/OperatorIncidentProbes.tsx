@@ -48,6 +48,8 @@ export function OperatorIncidentProbes() {
     store.setDecisionStatus(ping.data.laya ?? "down");
     store.setLayaPracticeStatus(ping.data.layaPractice ?? "down");
     store.setLayaLiveQualified(ping.data.layaLiveQualified);
+    store.setLayaReason(ping.data.layaReason);
+    store.setLayaPort(ping.data.layaPort);
   }, [ping.data]);
 
   useEffect(() => {

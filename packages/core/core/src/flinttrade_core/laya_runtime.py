@@ -20,6 +20,7 @@ import json
 import os
 import secrets
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -61,9 +62,14 @@ def serve_executable(venv_dir: Path) -> Path:
     return venv_dir / "bin" / "laya-serve"
 
 
-def install_command(venv_dir: Path) -> list[str]:
+def sidecar_constraints_path() -> Path:
+    """Constraints file that pins CPU torch and ``laya[serve]`` together."""
+    return Path(__file__).resolve().with_name("laya_sidecar_constraints.txt")
+
+
+def install_command(venv_dir: Path, *, constraints: Path | None = None) -> list[str]:
     """Pip command that pins ``laya[serve]`` inside the sidecar environment."""
-    return [
+    command = [
         str(venv_python(venv_dir)),
         "-m",
         "pip",
@@ -71,8 +77,11 @@ def install_command(venv_dir: Path) -> list[str]:
         "--disable-pip-version-check",
         "--upgrade-strategy",
         "only-if-needed",
-        LAYA_SERVE_REQUIREMENT,
     ]
+    if constraints is not None:
+        command.extend(["-c", str(constraints)])
+    command.append(LAYA_SERVE_REQUIREMENT)
+    return command
 
 
 def cpu_torch_command(venv_dir: Path) -> list[str]:
@@ -85,6 +94,8 @@ def cpu_torch_command(venv_dir: Path) -> list[str]:
         "--disable-pip-version-check",
         "--index-url",
         CPU_TORCH_INDEX,
+        "-c",
+        str(sidecar_constraints_path()),
         "torch",
     ]
 
@@ -99,15 +110,31 @@ def install_commands(venv_dir: Path, *, accelerator: str = "cpu") -> list[list[s
     """
     if accelerator not in _ACCELERATORS:
         raise LayaRuntimeError("Laya accelerator must be cpu, cuda, or rocm")
-    pinned = install_command(venv_dir)
     if accelerator == "cpu":
-        return [cpu_torch_command(venv_dir), pinned]
+        constraints = sidecar_constraints_path()
+        return [cpu_torch_command(venv_dir), install_command(venv_dir, constraints=constraints)]
+    pinned = install_command(venv_dir)
     if accelerator == "cuda":
         return [_accelerator_torch_command(venv_dir, None), pinned]
     index = os.environ.get("LAYA_TORCH_INDEX", "").strip()
     if not index.startswith("https://"):
         raise LayaRuntimeError("ROCm install needs LAYA_TORCH_INDEX set to an https PyTorch ROCm wheel index")
     return [_accelerator_torch_command(venv_dir, index), pinned]
+
+
+def resolve_laya_port(port: int | None = None) -> int:
+    """Return ``port``, or ``LAYA_PORT`` when ``port`` is omitted. Default 8000."""
+    if port is None:
+        text = os.environ.get("LAYA_PORT", "").strip()
+        if not text:
+            return _DEFAULT_PORT
+        try:
+            port = int(text)
+        except ValueError as exc:
+            raise LayaRuntimeError("Laya sidecar port is invalid") from exc
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise LayaRuntimeError("Laya sidecar port is invalid")
+    return port
 
 
 def venv_prefix(python: Path) -> Path:
@@ -182,7 +209,7 @@ def attach_from_environment(workspace: Path | None = None) -> LayaRuntime | None
     runtime = LayaRuntime(root, host=host, port=port)
     key_path = Path(key_file).expanduser()
     if not key_path.is_file():
-        _record_attach_down()
+        _record_attach_down(port)
         return None
     runtime.attach(key_path)
     return runtime
@@ -196,30 +223,32 @@ class LayaRuntime:
         workspace_dir: Path,
         *,
         host: str = LAYA_BIND_HOST,
-        port: int = _DEFAULT_PORT,
+        port: int | None = None,
         device: str = "cpu",
         process_factory: Callable[[list[str], dict[str, str]], Any] | None = None,
         installer: Callable[[Path, list[str]], None] | None = None,
         health_reader: Callable[[str], Mapping[str, Any] | None] | None = None,
+        port_probe: Callable[[int], bool] | None = None,
     ) -> None:
         if host != LAYA_BIND_HOST:
             raise LayaRuntimeError("Laya sidecar must bind 127.0.0.1")
         if device != "cpu":
             raise LayaRuntimeError("Laya runs on CPU until an accelerator runtime is qualified")
-        if not 1 <= port <= 65535:
-            raise LayaRuntimeError("Laya sidecar port is invalid")
         self.workspace_dir = workspace_dir.expanduser().resolve()
         self.runtime_root = self.workspace_dir / "runtime" / "laya"
         self.venv_dir = self.runtime_root / "venv"
-        self._port = port
+        self._port = resolve_laya_port(port)
         self._device = device
         self._process_factory = process_factory or self._spawn
         self._installer = installer
         self._health_reader = health_reader
+        self._port_probe = port_probe
         self._process: Any | None = None
         self._attached = False
         self._api_key = ""
         self._generation = 0
+        self._loaded_once = False
+        self._last_health: Mapping[str, Any] | None = None
         self._lock = threading.RLock()
 
     @property
@@ -261,6 +290,7 @@ class LayaRuntime:
         self._ensure_dirs()
         spawned: Any | None = None
         with self._lock, self._file_lock():
+            self._loaded_once = False
             if self._process is not None:
                 _terminate(self._process)
                 self._process = None
@@ -334,7 +364,7 @@ class LayaRuntime:
         except OSError as exc:
             raise LayaRuntimeError("Laya API key file cannot be read") from exc
         if not api_key:
-            _record_attach_down()
+            _record_attach_down(self._port)
             raise LayaRuntimeError("Laya API key file is empty")
         policy = load_policy()
         client = SystemOneClient(
@@ -364,6 +394,8 @@ class LayaRuntime:
             engine = process_laya()
             engine.set_decision_client(None)
             engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+            engine.set_runtime_reason("not_started", self._port)
+            self._loaded_once = False
             process = self._process
             pid = _read_pid_file(self._pid_path)
             self._process = None
@@ -380,40 +412,61 @@ class LayaRuntime:
         """Read ``/health`` and record Ready, Degraded, or Down.
 
         A result from a generation that ``stop`` has already closed is discarded.
+        The first load stays Down for admission and records ``still_loading``.
+        A port held by something else records ``port_in_use``.
         """
         from flinttrade_engine.laya import DecisionStatus, process_laya  # noqa: PLC0415
-        from flinttrade_engine.laya_decision import publish_probe  # noqa: PLC0415
+        from flinttrade_engine.laya_decision import health_identity_failure, publish_probe  # noqa: PLC0415
 
         with self._lock:
             generation = self._generation
-            running = self._process is not None or self._attached
-        if not running:
-            return process_laya().status
-        try:
-            payload = self.read_health()
-        except Exception:
-            payload = None
+            managed = self._managed_locked()
+        port_open = True if managed else self._port_is_open()
+        payload = self._safe_health() if managed or port_open else None
+        self._last_health = payload if isinstance(payload, Mapping) else None
         with self._lock:
-            if generation != self._generation or not (self._process is not None or self._attached):
+            if generation != self._generation:
                 return process_laya().status
-            status = publish_probe(process_laya(), payload, requested_device=self._device)
-            if status is not DecisionStatus.DOWN and isinstance(payload, Mapping):
-                self._mark_weights_cached()
-            return status
+            managed_now = self._managed_locked()
+            if managed and not managed_now:
+                return process_laya().status
+            reason = self._reason_code(
+                payload,
+                managed=managed_now,
+                port_open=port_open or managed_now,
+                identity_failure=health_identity_failure,
+            )
+            engine = process_laya()
+            if reason is None:
+                status = publish_probe(engine, payload, requested_device=self._device)
+                if status is not DecisionStatus.DOWN:
+                    self._loaded_once = True
+                    engine.set_runtime_reason(None, self._port)
+                    if isinstance(payload, Mapping):
+                        self._mark_weights_cached()
+                return status
+            engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+            engine.set_runtime_reason(reason, self._port)
+            return engine.status
 
     def status(self) -> dict[str, Any]:
-        """Report whether a sidecar process is up. Does not include the API key."""
+        """Report the sidecar. Does not include the API key.
+
+        ``reason`` is a machine-readable code. ``detail`` is the plain words
+        the desk shows. A clash or a non-Laya listener is Down with
+        ``port_in_use``.
+        """
+        from flinttrade_engine.laya import laya_reason_detail, process_laya  # noqa: PLC0415
+
+        self.publish_status()
         with self._lock:
             attached = self._attached
-            in_process = self._process is not None
+            process = self._process
+            in_process = process is not None and _process_alive(process)
         pid = _read_pid_file(self._pid_path)
         running = in_process or attached or _pid_alive(pid)
-        health: Mapping[str, Any] | None = None
-        if running:
-            try:
-                health = self.read_health()
-            except Exception:
-                health = None
+        reason, port = process_laya().runtime_reason()
+        health = self._last_health
         return {
             "running": running,
             "host": LAYA_BIND_HOST,
@@ -422,7 +475,61 @@ class LayaRuntime:
             "venv": str(self.venv_dir),
             "pid": pid,
             "health": dict(health) if isinstance(health, Mapping) else None,
+            "reason": reason,
+            "detail": laya_reason_detail(reason, port),
         }
+
+    def _managed_locked(self) -> bool:
+        """True when this runtime owns the sidecar. Caller holds ``_lock``."""
+        if self._attached:
+            return True
+        if self._process is not None and _process_alive(self._process):
+            return True
+        return _pid_alive(_read_pid_file(self._pid_path))
+
+    def _port_is_open(self) -> bool:
+        if self._port_probe is not None:
+            return self._port_probe(self._port)
+        return _tcp_open(self._port)
+
+    def _safe_health(self) -> Mapping[str, Any] | None:
+        try:
+            payload = self.read_health()
+        except Exception:
+            return None
+        return payload if isinstance(payload, Mapping) else None
+
+    def _reason_code(
+        self,
+        payload: Mapping[str, Any] | None,
+        *,
+        managed: bool,
+        port_open: bool,
+        identity_failure: Callable[..., bool],
+    ) -> str | None:
+        """Return a Down reason, or ``None`` when a managed sidecar is up."""
+        from flinttrade_engine.laya import (  # noqa: PLC0415
+            LAYA_REASON_NOT_STARTED,
+            LAYA_REASON_PORT_IN_USE,
+            LAYA_REASON_STILL_LOADING,
+            LAYA_REASON_UNREACHABLE,
+            LAYA_REASON_WRONG_REVISION,
+            DecisionStatus,
+        )
+        from flinttrade_engine.laya_decision import interpret_health  # noqa: PLC0415
+
+        if identity_failure(payload, requested_device=self._device):
+            return LAYA_REASON_WRONG_REVISION
+        if not managed:
+            if port_open:
+                return LAYA_REASON_PORT_IN_USE
+            return LAYA_REASON_NOT_STARTED
+        status = interpret_health(payload, requested_device=self._device)
+        if status is not DecisionStatus.DOWN:
+            return None
+        if self._loaded_once:
+            return LAYA_REASON_UNREACHABLE
+        return LAYA_REASON_STILL_LOADING
 
     def read_health(self) -> Mapping[str, Any] | None:
         """Return the sidecar health document, or ``None`` when it cannot be read."""
@@ -516,11 +623,13 @@ def _accelerator_torch_command(venv_dir: Path, index_url: str | None) -> list[st
     return command
 
 
-def _record_attach_down() -> None:
-    from flinttrade_engine.laya import DecisionStatus, process_laya  # noqa: PLC0415
+def _record_attach_down(port: int = _DEFAULT_PORT) -> None:
+    from flinttrade_engine.laya import LAYA_REASON_NOT_STARTED, DecisionStatus, process_laya  # noqa: PLC0415
 
-    process_laya().set_decision_client(None)
-    process_laya().apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+    engine = process_laya()
+    engine.set_decision_client(None)
+    engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+    engine.set_runtime_reason(LAYA_REASON_NOT_STARTED, port)
 
 
 def _clear_decision_client() -> None:
@@ -548,6 +657,23 @@ def _read_pid_file(path: Path) -> int | None:
         return None
     pid = int(text)
     return pid if pid > 0 else None
+
+
+def _process_alive(process: Any) -> bool:
+    poll = getattr(process, "poll", None)
+    if not callable(poll):
+        return False
+    return poll() is None
+
+
+def _tcp_open(port: int) -> bool:
+    """True when something accepts TCP on the loopback sidecar port."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.2)
+            return sock.connect_ex((LAYA_BIND_HOST, port)) == 0
+    except OSError:
+        return False
 
 
 def _pid_alive(pid: int | None) -> bool:

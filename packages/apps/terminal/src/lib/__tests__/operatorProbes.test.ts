@@ -3,7 +3,9 @@ import {
   INSTALL_PROBE_URL,
   layaHeartbeatFromBody,
   layaLiveQualifiedFromBody,
+  layaPortFromBody,
   layaPracticeFromBody,
+  layaReasonFromBody,
   probeDeskHealth,
   probeLocalPing,
   probePublicInternet,
@@ -37,6 +39,12 @@ describe("Laya heartbeat on desk ping", () => {
     expect(layaLiveQualifiedFromBody({ laya_live_qualified: true })).toBe(true);
     expect(layaLiveQualifiedFromBody({ laya_live_qualified: false })).toBe(false);
     expect(layaLiveQualifiedFromBody({ status: "ok" })).toBe(false);
+    expect(layaReasonFromBody({ laya_reason: "still_loading" })).toBe("still_loading");
+    expect(layaReasonFromBody({ laya_reason: "port_in_use" })).toBe("port_in_use");
+    expect(layaReasonFromBody({ laya_reason: "booting" })).toBeNull();
+    expect(layaReasonFromBody({ status: "ok" })).toBeNull();
+    expect(layaPortFromBody({ laya_port: 8123 })).toBe(8123);
+    expect(layaPortFromBody({ status: "ok" })).toBe(8000);
   });
 
   it("does not present Ready when ping fails or omits Laya", async () => {

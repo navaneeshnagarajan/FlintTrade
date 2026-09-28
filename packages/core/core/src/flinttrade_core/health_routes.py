@@ -223,12 +223,15 @@ def ping() -> tuple[Any, int]:
     and responding.  Exempt from API key authentication.
 
     Returns:
-        JSON with ``laya`` (Live-facing), ``laya_practice`` (sidecar), and
-        ``laya_live_qualified``. ``laya`` starts Down. A ping does not invent Ready.
+        JSON with ``laya`` (Live-facing), ``laya_practice`` (sidecar),
+        ``laya_live_qualified``, ``laya_reason``, and ``laya_port``. ``laya``
+        starts Down. A ping does not invent Ready and does not probe the port.
     """
     from flinttrade_engine.laya import process_laya  # noqa: PLC0415
 
-    practice, live, qualified = process_laya().desk_heartbeat()
+    engine = process_laya()
+    practice, live, qualified = engine.desk_heartbeat()
+    reason, port = engine.runtime_reason()
     return (
         jsonify(
             {
@@ -237,6 +240,8 @@ def ping() -> tuple[Any, int]:
                 "laya": live.value,
                 "laya_practice": practice.value,
                 "laya_live_qualified": qualified,
+                "laya_reason": reason,
+                "laya_port": port,
             }
         ),
         200,

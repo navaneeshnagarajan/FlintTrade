@@ -31,6 +31,9 @@ changelog rebuilds itself from the first release cut after this baseline.
   while Ready or Degraded, says "Laya isn't qualified for Live yet.
   Practice orders are available." Opt in with
   `python -m flinttrade_core.laya_runtime install` or `start`.
+  The CPU install pins `torch==2.14.0+cpu` and `laya[serve]==0.3.21`
+  in one constraints file, and installs torch first from the CPU index.
+  `LAYA_PORT` defaults to 8000. The host stays `127.0.0.1`.
 
 - **Mode honesty bar.** One line under the TopBar for Explore, Practice,
   and Live. Widgets no longer repeat a Sample chip. An incident, when
@@ -75,7 +78,10 @@ changelog rebuilds itself from the first release cut after this baseline.
   shows Live-facing status. "Not qualified for Live" is the tooltip
   and the disabled-Live reason when Live lacks qualification. Ping
   publishes Live-facing `laya`, sidecar `laya_practice`, and
-  `laya_live_qualified`. The Live Blocked strip follows Live-facing
+  `laya_live_qualified`, plus a reason code and port. During the first
+  load the chip says Still loading and does not read Down. Orders stay
+  refused with the Down sentence. A port clash says which port is in use.
+  The Live Blocked strip follows Live-facing
   Down only. It mutes Live place and Position Mirror start. Practice
   is not muted by that strip.
 

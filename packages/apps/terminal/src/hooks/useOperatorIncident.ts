@@ -95,6 +95,8 @@ export function useOperatorIncident(): OperatorIncident | null {
   const decisionStatus = useOperatorSignalStore((s) => s.decisionStatus);
   const layaPracticeStatus = useOperatorSignalStore((s) => s.layaPracticeStatus);
   const layaLiveQualified = useOperatorSignalStore((s) => s.layaLiveQualified);
+  const layaReason = useOperatorSignalStore((s) => s.layaReason);
+  const layaPort = useOperatorSignalStore((s) => s.layaPort);
   const sessionClockClosed = cashSessionClockClosed();
 
   return useMemo(() => incidentFromSnapshot({
@@ -118,6 +120,8 @@ export function useOperatorIncident(): OperatorIncident | null {
       decisionStatus,
       layaPracticeStatus,
       layaLiveQualified,
+      layaReason,
+      layaPort,
     },
     sessionClockClosed,
   }), [
@@ -127,7 +131,9 @@ export function useOperatorIncident(): OperatorIncident | null {
     brokerReject,
     decisionStatus,
     layaLiveQualified,
+    layaPort,
     layaPracticeStatus,
+    layaReason,
     health,
     legacyStatus,
     llmChrome,

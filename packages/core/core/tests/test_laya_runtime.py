@@ -15,6 +15,7 @@ from flask import Flask
 from flinttrade_core.health_routes import health_bp
 from flinttrade_core.laya_runtime import (
     CPU_TORCH_INDEX,
+    LAYA_BIND_HOST,
     LAYA_SERVE_REQUIREMENT,
     LayaRuntime,
     LayaRuntimeError,
@@ -24,10 +25,11 @@ from flinttrade_core.laya_runtime import (
     install_commands,
     main,
     set_process_runtime,
+    sidecar_constraints_path,
     venv_python,
 )
 from flinttrade_core.service_providers import EvidenceUseScope
-from flinttrade_engine.laya import DecisionStatus, process_laya, reset_process_laya_for_tests
+from flinttrade_engine.laya import DecisionStatus, Proposal, process_laya, reset_process_laya_for_tests
 from flinttrade_engine.laya_decision import LayaQualification, load_policy, publish_probe
 
 
@@ -103,13 +105,20 @@ def test_install_command_pins_the_sidecar_venv_not_the_main_interpreter(tmp_path
     assert command[0] == str(venv_python(venv))
     assert torch[0] == str(venv_python(venv))
     assert CPU_TORCH_INDEX in torch
-    assert torch[-1] == "torch"
     assert Path(command[0]) != Path(sys.executable)
+    constraints = sidecar_constraints_path()
+    pinned = constraints.read_text(encoding="utf-8")
+    assert "torch==2.14.0+cpu" in pinned
+    assert "laya[serve]==0.3.21" in pinned
+    assert CPU_TORCH_INDEX in pinned
+    assert str(constraints) in torch
+    assert torch[-1] == "torch"
     cpu = install_commands(venv, accelerator="cpu")
     assert cpu[0] == torch
     assert cpu[1][-1] == LAYA_SERVE_REQUIREMENT
+    assert str(constraints) in cpu[1]
     cuda = install_commands(venv, accelerator="cuda")
-    assert all(CPU_TORCH_INDEX not in part for part in cuda)
+    assert all(CPU_TORCH_INDEX not in part and str(constraints) not in part for command in cuda for part in command)
     assert cuda[0][-1] == "torch"
     root = Path(__file__).resolve().parents[4]
     assert "laya" not in (root / "packages/core/core/pyproject.toml").read_text(encoding="utf-8")
@@ -291,6 +300,7 @@ def test_health_route_records_sidecar_status(runtime: LayaRuntime) -> None:
     assert ping["laya"] == "down"
     assert ping["laya_practice"] == "ready"
     assert ping["laya_live_qualified"] is False
+    assert ping["laya_reason"] is None
 
 
 @pytest.mark.unit
@@ -350,6 +360,7 @@ def test_rocm_install_needs_an_https_index(tmp_path: Path, monkeypatch: pytest.M
     commands = install_commands(tmp_path / "venv", accelerator="rocm")
     assert "https://download.pytorch.org/whl/rocm6.3" in commands[0]
     assert CPU_TORCH_INDEX not in commands[0]
+    assert all(str(sidecar_constraints_path()) not in part for command in commands for part in command)
 
 
 @pytest.mark.unit
@@ -390,11 +401,13 @@ def test_attach_uses_the_policy_pin_and_fails_closed_without_a_digest(
     runtime._health_reader = lambda _url: _healthy()  # type: ignore[method-assign]
     runtime.publish_status()
     assert process_laya().effective_status("practice") is DecisionStatus.READY
+    assert process_laya().runtime_reason()[0] is None
     missing = _healthy()
     missing.pop("sha256")
     runtime._health_reader = lambda _url: missing  # type: ignore[method-assign]
     runtime.publish_status()
     assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "wrong_revision"
     reset_process_laya_for_tests()
 
 
@@ -409,4 +422,91 @@ def test_attach_refuses_a_public_host_and_a_missing_key(tmp_path: Path, monkeypa
     assert attach_from_environment(tmp_path) is None
     assert process_laya().status is DecisionStatus.DOWN
     assert process_laya()._decision_client is None  # noqa: SLF001
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_laya_port_selects_the_loopback_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LAYA_PORT", raising=False)
+    assert LayaRuntime(tmp_path).base_url == "http://127.0.0.1:8000"
+    monkeypatch.setenv("LAYA_PORT", "8123")
+    envs: list[dict[str, str]] = []
+
+    def factory(_argv: list[str], env: dict[str, str]) -> _Process:
+        envs.append(dict(env))
+        return _Process()
+
+    runtime = LayaRuntime(tmp_path, process_factory=factory)
+    assert runtime.base_url == "http://127.0.0.1:8123"
+    runtime.start()
+    assert envs[-1]["LAYA_HOST"] == LAYA_BIND_HOST
+    assert envs[-1]["LAYA_PORT"] == "8123"
+    explicit = LayaRuntime(tmp_path, port=9000)
+    assert explicit.base_url == "http://127.0.0.1:9000"
+    monkeypatch.setenv("LAYA_PORT", "nope")
+    with pytest.raises(LayaRuntimeError, match="invalid"):
+        LayaRuntime(tmp_path)
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_status_reports_a_port_clash_as_down(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind((LAYA_BIND_HOST, 0))
+    sock.listen(1)
+    port = int(sock.getsockname()[1])
+    monkeypatch.setenv("LAYA_PORT", str(port))
+    try:
+        runtime = LayaRuntime(tmp_path, health_reader=lambda _url: None)
+        report = runtime.status()
+    finally:
+        sock.close()
+    assert report["running"] is False
+    assert report["host"] == LAYA_BIND_HOST
+    assert report["port"] == port
+    assert report["reason"] == "port_in_use"
+    assert report["detail"] == f"Port {port} in use"
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason() == ("port_in_use", port)
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_first_load_stays_down_for_admission_and_reports_still_loading(tmp_path: Path) -> None:
+    payload: dict[str, object] | None = None
+
+    def reader(_url: str) -> dict[str, object] | None:
+        return payload
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _Process(),
+        health_reader=reader,
+        port_probe=lambda _port: False,
+    )
+    runtime.start()
+    runtime.publish_status()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "still_loading"
+    verdict = process_laya().admit(
+        Proposal(symbol="RELIANCE", exchange="NSE", action="BUY", quantity=1, mode="practice", rationale="because")
+    )
+    assert verdict.allow is False
+    assert verdict.reason == "Laya is Down. Orders are paused until it's Ready."
+    assert "Live" not in verdict.reason
+    payload = _healthy()
+    runtime.publish_status()
+    assert process_laya().effective_status("practice") is DecisionStatus.READY
+    assert process_laya().runtime_reason()[0] is None
+    payload = None
+    runtime.publish_status()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "unreachable"
+    later = process_laya().admit(
+        Proposal(symbol="RELIANCE", exchange="NSE", action="BUY", quantity=1, mode="practice", rationale="because")
+    )
+    assert later.allow is False
+    assert later.reason == "Laya is Down. Orders are paused until it's Ready."
     reset_process_laya_for_tests()

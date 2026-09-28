@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { LAYA_NOT_QUALIFIED_FOR_LIVE, layaChipStatus, layaDisabledLiveReason } from "./layaStatus";
+import {
+  LAYA_NOT_QUALIFIED_FOR_LIVE,
+  LAYA_START_COMMAND,
+  LAYA_START_DOCS_HREF,
+  layaChipLabel,
+  layaChipStatus,
+  layaDisabledLiveReason,
+  layaReasonPlain,
+  layaReasonTooltip,
+} from "./layaStatus";
 
 describe("Laya chip status", () => {
   it("follows Practice from the sidecar and never reads Down while Practice can admit", () => {
@@ -24,5 +33,20 @@ describe("Laya chip status", () => {
     );
     expect(layaDisabledLiveReason({ practice: "down", liveQualified: false })).toBeNull();
     expect(layaDisabledLiveReason({ practice: "ready", liveQualified: true })).toBeNull();
+  });
+
+  it("names each sidecar reason in plain words and keeps the first load off Down", () => {
+    expect(layaReasonPlain("not_started", 8000)).toBe("Not started");
+    expect(layaReasonPlain("port_in_use", 8123)).toBe("Port 8123 in use");
+    expect(layaReasonPlain("still_loading", 8000)).toBe("Still loading");
+    expect(layaReasonPlain("unreachable", 8000)).toBe("Unreachable");
+    expect(layaReasonPlain("wrong_revision", 8000)).toBe("Wrong model revision");
+    expect(layaReasonPlain(null, 8000)).toBeNull();
+    const loading = layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "still_loading" });
+    expect(loading).toBe("Still loading");
+    expect(loading).not.toMatch(/Down/);
+    expect(layaReasonTooltip("still_loading", 8000)).toBe(`Still loading. Next: ${LAYA_START_COMMAND}`);
+    expect(LAYA_START_DOCS_HREF).toContain("#laya-decision-sidecar");
+    expect(layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "not_started" })).toBe("Down");
   });
 });

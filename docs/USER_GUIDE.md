@@ -479,15 +479,23 @@ python -m flinttrade_core.laya_runtime start
 `install` creates the sidecar environment at
 `<workspace>/runtime/laya/venv` (on Linux, `~/.flinttrade/runtime/laya/venv`,
 unless `FLINTTRADE_WORKSPACE_DIR` is set). It installs a CPU build of
-torch, then the pinned model package. That environment is about 1.2 GB.
+torch, then the pinned model package, from one constraints file in the
+repository. That environment is about 1.2 GB.
 A CUDA or ROCm build is opt-in and is not what `start` runs. `start`
-listens on `127.0.0.1:8000`. The first download of the english
+listens on `127.0.0.1`. The port comes from `LAYA_PORT` and defaults to
+8000. The first download of the english
 checkpoint is about 843 MB, in the
 Hugging Face cache. `stop` removes the API key from that runtime
 directory. Start the backend with `LAYA_HOST=127.0.0.1`,
-`LAYA_PORT=8000`, and `LAYA_API_KEY_FILE` set to
+`LAYA_PORT` set to that same port, and `LAYA_API_KEY_FILE` set to
 `<workspace>/runtime/laya/api.key`. Its next health probe attaches to
 a sidecar that was started separately.
+
+During the first load the chip says **Still loading** and does not read
+Down. Orders are still refused with **Laya is Down. Orders are paused
+until it's Ready.** A port clash, or another process on that port, is
+Down and the chip says which port is in use, with the start command as
+the next step.
 
 A base checkpoint leaves Live Down. Live stays Down until that
 exact revision, weight digest, and policy version are qualified with

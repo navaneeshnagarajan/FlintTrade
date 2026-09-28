@@ -62,6 +62,37 @@ class DecisionStatus(StrEnum):
     DOWN = "down"
 
 
+LAYA_REASON_NOT_STARTED = "not_started"
+LAYA_REASON_PORT_IN_USE = "port_in_use"
+LAYA_REASON_STILL_LOADING = "still_loading"
+LAYA_REASON_UNREACHABLE = "unreachable"
+LAYA_REASON_WRONG_REVISION = "wrong_revision"
+LAYA_REASON_CODES = frozenset(
+    {
+        LAYA_REASON_NOT_STARTED,
+        LAYA_REASON_PORT_IN_USE,
+        LAYA_REASON_STILL_LOADING,
+        LAYA_REASON_UNREACHABLE,
+        LAYA_REASON_WRONG_REVISION,
+    }
+)
+
+
+def laya_reason_detail(reason: str | None, port: int) -> str | None:
+    """Plain words for a sidecar reason code. ``None`` when the sidecar is up."""
+    if reason == LAYA_REASON_PORT_IN_USE:
+        return f"Port {port} in use"
+    labels = {
+        LAYA_REASON_NOT_STARTED: "Not started",
+        LAYA_REASON_STILL_LOADING: "Still loading",
+        LAYA_REASON_UNREACHABLE: "Unreachable",
+        LAYA_REASON_WRONG_REVISION: "Wrong model revision",
+    }
+    if reason is None:
+        return None
+    return labels.get(reason)
+
+
 @dataclass(frozen=True, slots=True)
 class Proposal:
     """One order the operator or an automate flow wants admitted.
@@ -149,6 +180,8 @@ class Laya:
         self._max_quantity = max_quantity
         self._degraded_max_quantity = degraded_max_quantity
         self._live_qualified = status is not DecisionStatus.DOWN
+        self._reason: str | None = LAYA_REASON_NOT_STARTED if status is DecisionStatus.DOWN else None
+        self._reason_port = 8000
         self._decision_client: Any = None
         self._qualification: Any = None
         self._lock = threading.Lock()
@@ -175,12 +208,35 @@ class Laya:
         with self._lock:
             self._status = status
             self._live_qualified = status is not DecisionStatus.DOWN
+            if status is not DecisionStatus.DOWN:
+                self._reason = None
 
     def apply_runtime_status(self, status: DecisionStatus, *, live_qualified: bool) -> None:
-        """Record a probe result. Live opens only when ``live_qualified`` is set."""
+        """Record a probe result. Live opens only when ``live_qualified`` is set.
+
+        Down does not invent an operational reason. The sidecar probe sets
+        that separately. Ready and Degraded clear it.
+        """
         with self._lock:
             self._status = status
             self._live_qualified = bool(live_qualified) and status is not DecisionStatus.DOWN
+            if status is not DecisionStatus.DOWN:
+                self._reason = None
+
+    def set_runtime_reason(self, reason: str | None, port: int) -> None:
+        """Record why the sidecar is Down, and the port that status checked."""
+        if reason is not None and reason not in LAYA_REASON_CODES:
+            raise ValueError("Laya reason is not recognised")
+        if not 1 <= port <= 65535:
+            raise ValueError("Laya sidecar port is invalid")
+        with self._lock:
+            self._reason = reason
+            self._reason_port = port
+
+    def runtime_reason(self) -> tuple[str | None, int]:
+        """Reason code and port. ``None`` when Ready or Degraded has cleared it."""
+        with self._lock:
+            return self._reason, self._reason_port
 
     def set_decision_client(self, client: Any) -> None:
         """Attach the host used for free-text questions. ``None`` skips that step."""
