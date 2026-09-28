@@ -46,7 +46,7 @@ describe("Laya chip status", () => {
     expect(loading).toBe("Still loading");
     expect(loading).not.toMatch(/Down/);
     expect(layaReasonTooltip("still_loading", 8000)).toBe(`Still loading. Next: ${LAYA_START_COMMAND}`);
-    expect(LAYA_START_DOCS_HREF).toContain("#laya-decision-sidecar");
+    expect(LAYA_START_DOCS_HREF).toContain("USER_GUIDE.md#start-laya");
     expect(layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "not_started" })).toBe("Down");
   });
 });

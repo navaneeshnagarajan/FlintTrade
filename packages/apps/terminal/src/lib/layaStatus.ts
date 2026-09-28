@@ -28,9 +28,9 @@ export type LayaReasonCode = (typeof LAYA_REASON_CODES)[number];
 /** Next step shown with an operational reason. */
 export const LAYA_START_COMMAND = "python -m flinttrade_core.laya_runtime start";
 
-/** Developer guide section that documents that command. */
+/** User guide section "Start Laya". The heading is written in the docs. */
 export const LAYA_START_DOCS_HREF =
-  "https://github.com/navaneeshnagarajan/FlintTrade/blob/main/docs/DEVELOPER_GUIDE.md#laya-decision-sidecar";
+  "https://github.com/navaneeshnagarajan/FlintTrade/blob/main/docs/USER_GUIDE.md#start-laya";
 
 export function layaChipStatus(input: {
   mode: string;
