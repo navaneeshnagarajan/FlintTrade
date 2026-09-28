@@ -29,7 +29,7 @@ export function orderReviewTitle(mode: AppMode): string {
 
 export function orderReviewDescription(mode: AppMode): string {
   if (mode === "explore") {
-    return "Example only. No broker or native trading API is contacted.";
+    return "Example only. No broker or native trading API is contacted. Example records an example fill.";
   }
   return "Confirm places this simulated order.";
 }

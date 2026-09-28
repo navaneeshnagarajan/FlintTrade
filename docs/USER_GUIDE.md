@@ -304,7 +304,7 @@ Before enabling any order-capable integration, exercise the order path in
 
 | Mode | Order behaviour | Best for |
 |---|---|---|
-| **Explore** | Demo/sample data; no Live broker order authority. On `/trade`, Order Pad **Sample Buy** opens a sample review and records a local sample fill (no broker) | First-time visitors, screenshots, docs |
+| **Explore** | Example data; no Live broker order authority. On `/trade`, Order Pad **Example Buy** opens an example review. Example records an example fill (no broker) | First-time visitors, screenshots, docs |
 | **Practice** | Simulated fills, no real money (primary paper path) | Strategy tests, Practice fills, AI analysis |
 | **Live** | Real orders sent through the configured broker path | Gated broker integration, only after user review |
 
@@ -326,7 +326,7 @@ sandbox. Operator copy is `Live read only until funded unlock.`
 **Mode vs session vs sample (FT-UX-001).** The Explore / Practice / Live chips
 mean execution mode only. TopBar session chips (Continuous · CAS · Matching ·
 Post-close · Closed) are session status, never Live mode. Explore Order Pad
-uses **Sample Buy** / **Sample Sell** (a local sample fill after review).
+uses **Example Buy** / **Example Sell** (an example fill after review).
 Practice keeps **Practice Buy** / **Practice Sell**. Live uses **Place BUY
 Order**. Connected / green is never shown for an unconfigured subsystem.
 
@@ -494,7 +494,7 @@ may stay; it must not hide venue honesty.
 1. Open `/trade` (http://127.0.0.1:5100/trade on the installed web app;
    http://localhost:5173/trade on the Vite dev server).
 2. If the badge shows **EXPLORE**, you can stay there and try Order Pad
-   **Sample Buy** — sample review, then a local sample fill (no broker).
+   **Example Buy** — example review, then an example fill (no broker).
    For the full native-sandbox path this walkthrough uses, click the
    badge once to switch to Practice. There is no confirmation dialog.
    The UI calls `POST /v1/auth/mode` so the JWT matches.
@@ -508,8 +508,8 @@ may stay; it must not hide venue honesty.
    figures separately. Choose **MARKET**. Side = **BUY**.
 6. Click **Practice Buy** and confirm the review. The sandbox order
    appears in the **Positions** widget immediately; the **Orders**
-   widget shows it as filled (simulated). **Sample Buy** on Explore is
-   only the local sample fill from step 2 — it does not appear as a new
+   widget shows it as filled (simulated). **Example Buy** on Explore is
+   only the example fill from step 2 — it does not appear as a new
    Positions or Orders row, and it never calls the order API.
 7. Close the position from the Positions widget. Confirm your simulated
    P&L is recorded in the **P&L Monitor** widget.
@@ -1470,8 +1470,8 @@ as a toast.
 
 1. Check the mode badge in the top bar. **Explore** has no Live broker
    order authority — Live-intent submits are blocked. Order Pad
-   **Sample Buy** on `/trade` records a local sample fill after sample
-   review (no broker). Switch to **Practice** for the native sandbox
+   **Example Buy** on `/trade` records an example fill after example
+   review (no broker). Switch to **Practice** for simulated fills
    path, or unlock **Live** for a real broker order.
 2. Open the **Orders** widget and look at the rejection reason column.
    A Laya denial or clamp stops before the safety layers. Order Pad and

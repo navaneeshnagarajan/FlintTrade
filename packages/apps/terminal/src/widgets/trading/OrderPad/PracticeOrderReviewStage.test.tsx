@@ -110,7 +110,10 @@ describe("PracticeOrderReviewStage", () => {
 
     expect(screen.getByRole("dialog", { name: "Review Example order" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Confirm Example order" })).toBeInTheDocument();
-    expect(screen.getByText(/example only/i)).toBeInTheDocument();
+    expect(screen.getByText(
+      "Example only. No broker or native trading API is contacted. Example records an example fill.",
+    )).toBeInTheDocument();
+    expect(screen.queryByText(/Explore records a sample fill/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: /practice/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/Live/i)).not.toBeInTheDocument();
   });

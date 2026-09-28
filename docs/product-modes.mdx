@@ -9,7 +9,7 @@ FlintTrade distinguishes operating modes from data provenance. Provenance is ind
 
 ## Operating Modes
 
-- **Explore**: sample-only discovery; no Live broker order authority. On `/trade`, Order Pad **Sample Buy** opens a sample review and records a local sample fill (no broker, order-proxy, or SafetySystem). Live-intent submits remain blocked.
+- **Explore**: example data; no Live broker order authority. On `/trade`, Order Pad **Example Buy** opens an example review. Example records an example fill (no broker, order-proxy, or SafetySystem). Live-intent submits remain blocked.
 - **Practice**: simulated fills, no real money (primary paper path); no real broker order or capital movement. Kotak Neo has no sandbox — never offer “Neo Practice”.
 - **Live**: fail-closed until native Dhan + Neo Connected (read) is trusted and funded unlock is explicit. Non-funded live reads show **Connected (read)** — never placeable Live orders. Broker-connect helper copy may describe that read check as API smoke. Copy for Neo is `Live read only until funded unlock.`
 
