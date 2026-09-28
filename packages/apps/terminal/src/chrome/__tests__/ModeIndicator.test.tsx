@@ -91,6 +91,7 @@ describe("ModeIndicator", () => {
       expect(screen.getByRole("menuitem", { name: /Live/ })).toHaveTextContent(
         "Enrol 2FA and connect a broker",
       );
+      expect(screen.queryByText("Not qualified for Live")).not.toBeInTheDocument();
       expect(screen.queryByText("Switch to Live Trading?")).not.toBeInTheDocument();
       expect(screen.queryByLabelText(/authenticator/i)).not.toBeInTheDocument();
     });
@@ -124,6 +125,42 @@ describe("ModeIndicator", () => {
       expect(screen.getByTestId("execution-mode")).toHaveTextContent("Connected (read)");
       expect(screen.queryByText("Switch to Live Trading?")).not.toBeInTheDocument();
       expect(useModeStore.getState().mode).toBe("practice");
+    });
+
+    it("lists Not qualified for Live beside the 2FA and broker reason", async () => {
+      resetStore("practice");
+      render(<ModeIndicator layaQualifiedForLive={false} />);
+      await openMenu();
+
+      const reasons = screen.getByTestId("live-lock-reasons");
+      expect(reasons).toHaveTextContent("Enrol 2FA and connect a broker");
+      expect(reasons).toHaveTextContent("Not qualified for Live");
+      fireEvent.click(screen.getByRole("menuitem", { name: /Not qualified for Live/ }));
+
+      expect(screen.queryByText("Switch to Live Trading?")).not.toBeInTheDocument();
+      expect(screen.queryByPlaceholderText("6-digit PIN")).not.toBeInTheDocument();
+    });
+
+    it("keeps Live locked on qualification alone, with no PIN dialog", async () => {
+      resetStore("practice");
+      connectBroker();
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => statusResponse(true));
+      render(<ModeIndicator layaQualifiedForLive={false} />);
+      await openMenu();
+
+      await waitFor(() => {
+        expect(screen.getByTestId("live-lock-reasons")).toHaveTextContent("Not qualified for Live");
+      });
+      expect(screen.getByTestId("live-lock-reasons")).not.toHaveTextContent(
+        "Enrol 2FA and connect a broker",
+      );
+      expect(screen.getByRole("menuitem", { name: /Not qualified for Live/ })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
+      fireEvent.click(screen.getByRole("menuitem", { name: /Not qualified for Live/ }));
+
+      expect(screen.queryByText("Switch to Live Trading?")).not.toBeInTheDocument();
     });
   });
 

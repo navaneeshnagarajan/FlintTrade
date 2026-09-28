@@ -3,7 +3,8 @@
  *
  * The chip opens a menu of Practice, Connected (read), and Live.
  * Connected (read) stays disabled until a broker is connected.
- * Live stays disabled until 2FA is enrolled and a broker is connected.
+ * Live stays disabled while any lock reason applies: missing 2FA or broker,
+ * and, when the place gate reports it, Laya qualification.
  * Opening the menu never opens the Live dialog. The PIN unlock runs only
  * after the operator chooses an eligible Live item.
  */
@@ -33,9 +34,22 @@ import { useAuthStore } from "@/stores/authStore";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTotpEnrolled } from "@/hooks/useTotpEnrolled";
 import { downgradeMode, unlockWithPin } from "@/lib/modeAuth";
+import {
+  ENROL_2FA_AND_CONNECT_BROKER,
+  liveMenuLockReasons,
+} from "@/chrome/liveLockReasons";
 
 export const CONNECT_BROKER_FIRST = "Connect a broker first";
-export const LIVE_LOCKED_REASON = "Enrol 2FA and connect a broker";
+export const LIVE_LOCKED_REASON = ENROL_2FA_AND_CONNECT_BROKER;
+
+export interface ModeIndicatorProps {
+  /**
+   * Laya Live qualification, when the place gate reports it.
+   * Omit this while that status does not exist. `false` adds
+   * "Not qualified for Live" to the disabled Live reasons.
+   */
+  layaQualifiedForLive?: boolean;
+}
 
 const CHIP_CLASS = {
   practice:
@@ -46,14 +60,19 @@ const CHIP_CLASS = {
     "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-profit/20 text-profit border border-profit/40 hover:bg-profit/30 hover:text-profit",
 } as const;
 
-export default function ModeIndicator() {
+export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorProps = {}) {
   const mode = useModeStore((s) => s.mode);
   const setMode = useModeStore((s) => s.setMode);
   const token = useAuthStore((s) => s.token);
   const updateToken = useAuthStore((s) => s.updateToken);
   const brokerConnected = useBrokerConnected();
   const totpEnrolled = useTotpEnrolled();
-  const liveEligible = brokerConnected && totpEnrolled;
+  const liveReasons = liveMenuLockReasons({
+    brokerConnected,
+    totpEnrolled,
+    layaQualifiedForLive,
+  });
+  const liveEligible = liveReasons.length === 0;
 
   const [readPosture, setReadPosture] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -176,8 +195,15 @@ export default function ModeIndicator() {
           >
             <span className="flex flex-col items-start gap-0.5">
               <span>Live</span>
-              {!liveEligible ? (
-                <span className="text-xxs text-text-muted">{LIVE_LOCKED_REASON}</span>
+              {liveReasons.length > 0 ? (
+                <span
+                  data-testid="live-lock-reasons"
+                  className="flex flex-col items-start gap-0.5 text-xxs text-text-muted"
+                >
+                  {liveReasons.map((reason) => (
+                    <span key={reason}>{reason}</span>
+                  ))}
+                </span>
               ) : null}
             </span>
           </DropdownMenuItem>
