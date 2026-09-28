@@ -1732,9 +1732,8 @@ export default function SetupAccountRoute({
   }
 
   // No auto-wipe based on authStatus. Progress is cleared only by an explicit
-  // user action: opening the Practice desk or the "Start over" button.
-  // A reload drops the setup JWT, so Start over then asks for the password
-  // instead of failing closed on an empty reset.
+  // user action: opening the Practice desk, or confirming Start over with
+  // the account password. The confirmation is that password panel, once.
   async function wipeUnfinishedAccount(password: string): Promise<boolean> {
     setStartOverLoading(true);
     setStartOverError("");
@@ -1765,13 +1764,17 @@ export default function SetupAccountRoute({
     return true;
   }
 
-  async function handleStartOver() {
-    if (!useAuthStore.getState().token || sessionRejected) {
-      setStartOverNeedsPassword(true);
-      setStartOverError("");
-      return;
-    }
-    await wipeUnfinishedAccount("");
+  function handleStartOver() {
+    setStartOverNeedsPassword(true);
+    setStartOverPassword("");
+    setStartOverError("");
+  }
+
+  function cancelStartOver() {
+    if (startOverLoading) return;
+    setStartOverNeedsPassword(false);
+    setStartOverPassword("");
+    setStartOverError("");
   }
 
   async function submitStartOverPassword() {
@@ -2001,15 +2004,7 @@ export default function SetupAccountRoute({
                 variant="ghost"
                 size="xs"
                 className="text-text-muted hover:text-text-primary"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      "Start over from the beginning? This deletes the unfinished account on this machine so you can begin again.",
-                    )
-                  ) {
-                    void handleStartOver();
-                  }
-                }}
+                onClick={handleStartOver}
               >
                 Start over (deletes this unfinished operator)
               </Button>
@@ -2017,7 +2012,7 @@ export default function SetupAccountRoute({
             {startOverNeedsPassword && (
               <div className="space-y-2">
                 <p className="text-xs text-text-secondary">
-                  Enter your password to delete this operator and start again.
+                  Enter your password to delete this unfinished operator.
                 </p>
                 <Input
                   type="password"
@@ -2029,14 +2024,24 @@ export default function SetupAccountRoute({
                 {startOverError && (
                   <p role="alert" className="text-xs text-loss">{startOverError}</p>
                 )}
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-2">
                   <Button
                     type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={cancelStartOver}
+                    disabled={startOverLoading}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
                     size="sm"
                     onClick={() => void submitStartOverPassword()}
                     disabled={startOverLoading || !startOverPassword}
                   >
-                    Delete operator and start again
+                    Delete and start over
                   </Button>
                 </div>
               </div>

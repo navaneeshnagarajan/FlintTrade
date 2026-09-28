@@ -310,7 +310,6 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       displayName: "operator",
       currentStep: 1,
     }));
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ status: "success", data: {} }), {
         status: 200,
@@ -320,6 +319,11 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
 
     await renderSetup();
     fireEvent.click(screen.getByRole("button", { name: "Start over (deletes this unfinished operator)" }));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Password to start over"), {
+      target: { value: "Strong1!" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Delete and start over" }));
 
     await waitFor(() =>
       expect(screen.getByLabelText("Choose a username")).toBeInTheDocument(),
@@ -550,7 +554,6 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       });
     });
     sessionStorage.clear();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ status: "success", data: {} }), {
         status: 200,
@@ -567,10 +570,11 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Start over (deletes this unfinished operator)" }));
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(screen.getAllByText("Enter your password to delete this unfinished operator.")).toHaveLength(1);
     fireEvent.change(screen.getByLabelText("Password to start over"), {
       target: { value: "Strong1!" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Delete operator and start again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete and start over" }));
 
     expect(await screen.findByLabelText("Choose a username")).toBeInTheDocument();
     const resetCall = fetchSpy.mock.calls.find(([url]) => String(url).includes("/auth/setup/reset"));
@@ -755,8 +759,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       displayName: "operator",
       currentStep: 1,
     }));
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ status: "error", message: "A setup session is required." }), {
         status: 401,
         headers: { "Content-Type": "application/json" },
@@ -767,13 +770,25 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
 
     expect(await screen.findByLabelText("Master password")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Delete account/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Delete account & start over")).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Start over (deletes this unfinished operator)" })).toHaveLength(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Start over (deletes this unfinished operator)" }));
 
-    expect(await screen.findAllByText("Enter your password to delete this operator and start again.")).toHaveLength(1);
+    expect(screen.getAllByText("Enter your password to delete this unfinished operator.")).toHaveLength(1);
     expect(screen.getAllByLabelText("Password to start over")).toHaveLength(1);
+    expect(screen.queryByText("Enter your password to delete this operator and start again.")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Confirm password to delete the account")).not.toBeInTheDocument();
+    const deleteButton = screen.getByRole("button", { name: "Delete and start over" });
+    expect(deleteButton.className).toMatch(/destructive/);
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    expect(cancelButton.compareDocumentPosition(deleteButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(cancelButton);
+    expect(screen.queryByText("Enter your password to delete this unfinished operator.")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Password to start over")).not.toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("does not update AITutorPill while rendering setup", async () => {

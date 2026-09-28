@@ -725,11 +725,10 @@ The same tab restores the setup session and continues the current step.
 If that session is gone, Setup shows **Continue setup** with **This
 machine already has an operator. Sign in to finish setup.** Enter the
 password and choose **Continue setup** to carry on. **Start over (deletes
-this unfinished operator)** deletes the unfinished operator and restarts
-at step 1. The confirm reads **Start over from the beginning? This
-deletes the unfinished account on this machine so you can begin again.**
-If the setup session is gone, enter the password and choose **Delete
-operator and start again**. Neither path needs a workspace data wipe.
+this unfinished operator)** asks once: **Enter your password to delete
+this unfinished operator.** Confirm with the danger button **Delete and
+start over**, or choose **Cancel**. That deletes the unfinished operator
+and restarts at step 1. A workspace data wipe is not required.
 
 After Setup completes, opening `/setup` does not restart step 1. A
 signed-in operator is sent to the desk at `/trade`. A signed-out operator

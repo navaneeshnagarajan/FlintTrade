@@ -65,8 +65,9 @@ browser tab restores the setup session and continues the current step.
 If that session is gone, **Continue setup** asks for the password
 (**This machine already has an operator. Sign in to finish setup.**)
 and then continues. **Start over (deletes this unfinished operator)**
-deletes the unfinished operator and restarts at step 1. A workspace
-data wipe is not required.
+asks once: **Enter your password to delete this unfinished operator.**
+**Delete and start over** confirms it and restarts at step 1. **Cancel**
+dismisses that confirmation. A workspace data wipe is not required.
 
 After Setup completes, opening `/setup` does not restart step 1. A
 signed-in operator is sent to `/trade`. A signed-out operator sees
@@ -120,8 +121,9 @@ Step N of 2 and the Practice step shows **Your vault is set up and
 secured on this machine.** above **Open Practice desk**. When the vault
 is not yet secured, required progress is Step N of 3 and includes the
 vault step. Reloading `/setup` resumes the unfinished setup. **Start
-over (deletes this unfinished operator)** deletes that unfinished
-operator and restarts at step 1. After Setup completes, a signed-in
+over (deletes this unfinished operator)** asks once for the password
+(**Enter your password to delete this unfinished operator.**) and
+**Delete and start over** restarts at step 1. After Setup completes, a signed-in
 operator opening `/setup` is sent to `/trade`, and a signed-out
 operator sees **Setup is complete. Sign in to open the desk.** The
 affirm lands on the Practice desk before later setup. Optional panels
