@@ -3,8 +3,9 @@ import { REQUIRED_SETUP_STEP_LABELS } from "@/routes/setupRouting";
 /**
  * Required Setup steps.
  *
- * When the credential vault is already open on this machine, that step is
- * not required. The progress line uses the same indexes as "Step N of M".
+ * The vault decision is fixed before step 1. When the credential vault is
+ * already secured on this machine, that step is not required and the total
+ * stays 2 for the whole flow. Completed and remaining use that same total.
  */
 export interface SetupProgressCounts {
   stepNumber: number;

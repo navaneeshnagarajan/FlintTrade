@@ -108,6 +108,16 @@ function seedPracticeDesk(): void {
   );
 }
 
+async function renderSetup(
+  ui: React.ReactElement = <SetupAccountRoute />,
+): Promise<ReturnType<typeof render>> {
+  const view = render(ui);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  return view;
+}
+
 function submitAccountCreation(): void {
   fireEvent.change(screen.getByLabelText("Choose a username"), {
     target: { value: "alice" },
@@ -152,11 +162,12 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     useAuthStore.getState().setLoggedIn("setup-explore-token", "operator", "");
   });
 
-  it("shows Step 3 of 3 on the Practice desk and does not offer a Live unlock", () => {
-    render(<SetupAccountRoute />);
+  it("shows Step 3 of 3 on the Practice desk and does not offer a Live unlock", async () => {
+    await renderSetup();
 
     expect(screen.getByText("Step 3 of 3 - Practice desk")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open Practice desk" })).toBeInTheDocument();
+    expect(screen.queryByText("Your vault is set up and secured on this machine.")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /live/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /explore/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Set up / })).not.toBeInTheDocument();
@@ -165,7 +176,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(screen.queryByLabelText("Position lot reference")).not.toBeInTheDocument();
   });
 
-  it("does not let an optional deep link skip the vault", () => {
+  it("does not let an optional deep link skip the vault", async () => {
     localStorage.setItem(
       PROGRESS_KEY,
       JSON.stringify({
@@ -181,18 +192,20 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       }),
     );
 
-    render(<SetupAccountRoute requestedStep={2} requestedOptional={"broker" satisfies OptionalSetupPanel} />);
+    await renderSetup(
+      <SetupAccountRoute requestedStep={2} requestedOptional={"broker" satisfies OptionalSetupPanel} />,
+    );
 
     expect(screen.getByRole("heading", { name: "Vault" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open Practice desk" })).not.toBeInTheDocument();
     expect(screen.queryByText(/Step \d+ of [4-9]/)).not.toBeInTheDocument();
   });
 
-  it("does not let a deep link skip account creation", () => {
+  it("does not let a deep link skip account creation", async () => {
     localStorage.clear();
     useAuthStore.getState().setSetupRequired();
 
-    render(<SetupAccountRoute requestedStep={2} requestedOptional="broker" />);
+    await renderSetup(<SetupAccountRoute requestedStep={2} requestedOptional="broker" />);
 
     expect(screen.getByText("Step 1 of 3 - Create operator")).toBeInTheDocument();
     expect(screen.getByLabelText("Choose a username")).toBeInTheDocument();
@@ -202,7 +215,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
   it("upgrades the JWT to practice and opens the Practice desk", async () => {
     mocks.downgradeMode.mockResolvedValue("practice-token");
 
-    render(<SetupAccountRoute />);
+    await renderSetup();
     fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
 
     await waitFor(() =>
@@ -227,7 +240,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       }),
     );
 
-    render(<SetupAccountRoute />);
+    await renderSetup();
     fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
     await waitFor(() => expect(mocks.downgradeMode).toHaveBeenCalledOnce());
 
@@ -247,7 +260,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
   });
 
   it("removes recovery material and broker credentials from persisted progress", async () => {
-    render(<SetupAccountRoute />);
+    await renderSetup();
 
     await waitFor(() => {
       const progress = JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? "{}");
@@ -264,8 +277,8 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     });
   });
 
-  it("does not open an optional deep link before the Practice affirm", () => {
-    render(<SetupAccountRoute requestedOptional="totp" />);
+  it("does not open an optional deep link before the Practice affirm", async () => {
+    await renderSetup(<SetupAccountRoute requestedOptional="totp" />);
 
     expect(screen.getByText("Step 3 of 3 - Practice desk")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open Practice desk" })).toBeInTheDocument();
@@ -274,10 +287,10 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(screen.queryByText("Trading defaults")).not.toBeInTheDocument();
   });
 
-  it("keeps Start over on the Practice affirm", () => {
-    render(<SetupAccountRoute />);
+  it("keeps Start over on the Practice affirm", async () => {
+    await renderSetup();
 
-    expect(screen.getByRole("button", { name: "Start over" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start over (deletes this unfinished operator)" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /set up later/i })).not.toBeInTheDocument();
   });
 
@@ -302,8 +315,8 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       }),
     );
 
-    render(<SetupAccountRoute />);
-    fireEvent.click(screen.getByRole("button", { name: "Start over" }));
+    await renderSetup();
+    fireEvent.click(screen.getByRole("button", { name: "Start over (deletes this unfinished operator)" }));
 
     await waitFor(() =>
       expect(screen.getByLabelText("Choose a username")).toBeInTheDocument(),
@@ -316,7 +329,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
 
   it("leaves optional setup for the Practice desk", async () => {
     mocks.downgradeMode.mockResolvedValue("practice-token");
-    render(<SetupAccountRoute />);
+    await renderSetup();
 
     expect(screen.queryByRole("button", { name: "Skip Two-factor authentication" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Skip Broker connect" })).not.toBeInTheDocument();
@@ -331,7 +344,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
   it("does not finish setup under a Practice badge when the transition fails", async () => {
     mocks.downgradeMode.mockRejectedValue(new Error("mode downgrade to practice failed (503)"));
 
-    render(<SetupAccountRoute />);
+    await renderSetup();
     fireEvent.click(screen.getByRole("button", { name: "Open Practice desk" }));
 
     await waitFor(() =>
@@ -345,16 +358,16 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(localStorage.getItem(PROGRESS_KEY)).not.toBeNull();
   });
 
-  it("does not offer Explore or Live as a first-run finish", () => {
-    render(<SetupAccountRoute />);
+  it("does not offer Explore or Live as a first-run finish", async () => {
+    await renderSetup();
 
     expect(screen.queryByRole("button", { name: /explore/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /unlock live|choose live|^live$/i })).not.toBeInTheDocument();
     expect(screen.getByText(/Live is not part of setup/i)).toBeInTheDocument();
   });
 
-  it("does not count later setup in the required-step fraction", () => {
-    render(<SetupAccountRoute />);
+  it("does not count later setup in the required-step fraction", async () => {
+    await renderSetup();
 
     expect(screen.getByText("Step 3 of 3 - Practice desk")).toBeInTheDocument();
     expect(screen.queryByText("Optional")).not.toBeInTheDocument();
@@ -369,7 +382,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       totpUri: "otpauth://totp/FlintTrade:alice?secret=FRESHSEED",
       backupCodes: ["FRESH001", "FRESH002"],
     });
-    const first = render(<SetupAccountRoute />);
+    const first = await renderSetup();
     submitAccountCreation();
     await waitFor(() =>
       expect(screen.getByLabelText("Master password")).toBeInTheDocument(),
@@ -377,7 +390,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(screen.getByText("Step 2 of 3 - Vault")).toBeInTheDocument();
 
     first.unmount();
-    const second = render(<SetupAccountRoute />);
+    const second = await renderSetup();
     await waitFor(() =>
       expect(screen.getByLabelText("Master password")).toBeInTheDocument(),
     );
@@ -422,7 +435,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
         finishSetup = resolve;
       }),
     );
-    render(<SetupAccountRoute />);
+    await renderSetup();
     submitAccountCreation();
     await waitFor(() => expect(mocks.setupFlintTradeAccount).toHaveBeenCalledOnce());
     act(() => useAuthStore.getState().setLoggedOut());
@@ -457,7 +470,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
         finishSetup = resolve;
       }),
     );
-    render(<SetupAccountRoute />);
+    await renderSetup();
     submitAccountCreation();
     await waitFor(() => expect(mocks.setupFlintTradeAccount).toHaveBeenCalledOnce());
     act(() => useAuthStore.getState().setLoggedIn("newer-token", "bob", ""));
@@ -502,7 +515,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       expiresAt: "",
     });
 
-    render(<SetupAccountRoute />);
+    await renderSetup();
 
     expect(await screen.findByLabelText("Master password")).toBeInTheDocument();
     expect(useAuthStore.getState().token).toBe("setup-token");
@@ -542,14 +555,14 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       }),
     );
 
-    render(<SetupAccountRoute />);
+    await renderSetup();
 
     expect(await screen.findByLabelText("Operator password")).toBeInTheDocument();
     expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
     expect(screen.queryByText(/A setup session is required/i)).not.toBeInTheDocument();
     expect(screen.getByText("1 of 3 completed - 2 remaining")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Start over" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start over (deletes this unfinished operator)" }));
     expect(fetchSpy).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText("Password to start over"), {
       target: { value: "Strong1!" },
@@ -592,7 +605,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       username: "operator",
     });
 
-    render(<SetupAccountRoute />);
+    await renderSetup();
     fireEvent.change(await screen.findByLabelText("Operator password"), {
       target: { value: "Strong1!" },
     });
@@ -622,14 +635,62 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       setupFinished: false,
     });
 
-    render(<SetupAccountRoute />);
+    await renderSetup();
 
     expect(await screen.findByText("Step 2 of 2 - Practice desk")).toBeInTheDocument();
-    expect(screen.getByText("The credential vault on this machine is already secured.")).toBeInTheDocument();
     expect(screen.getByText("1 of 2 completed - last step")).toBeInTheDocument();
+    expect(screen.queryByText(/of 3/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
     expect(screen.queryByText("Step 2 of 3 - Vault")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open Practice desk" })).toBeInTheDocument();
+    const quietLine = screen.getByText("Your vault is set up and secured on this machine.");
+    const openPractice = screen.getByRole("button", { name: "Open Practice desk" });
+    expect(
+      quietLine.compareDocumentPosition(openPractice) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByText("The credential vault on this machine is already secured.")).not.toBeInTheDocument();
+  });
+
+  it("keeps the two-step total stable from Create operator through Practice", async () => {
+    localStorage.clear();
+    useAuthStore.getState().setSetupRequired();
+    let resolveState: (state: { isSetup: boolean; vaultOpen: boolean; setupFinished: boolean }) => void =
+      () => {};
+    mocks.fetchSetupServerState.mockReturnValue(
+      new Promise((resolve) => {
+        resolveState = resolve;
+      }),
+    );
+    mocks.setupFlintTradeAccount.mockResolvedValue({
+      token: "fresh-setup-token",
+      totpUri: "otpauth://totp/FlintTrade:alice?secret=FRESHSEED",
+      backupCodes: ["FRESH001"],
+    });
+
+    await renderSetup();
+
+    expect(screen.queryByText(/of 3/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/of 2/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveState({ isSetup: false, vaultOpen: true, setupFinished: false });
+    });
+
+    expect(await screen.findByText("Step 1 of 2 - Create operator")).toBeInTheDocument();
+    expect(screen.queryByText(/of 3/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Your vault is set up and secured on this machine.")).not.toBeInTheDocument();
+
+    submitAccountCreation();
+
+    expect(await screen.findByText("Step 2 of 2 - Practice desk")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2 completed - last step")).toBeInTheDocument();
+    expect(screen.queryByText(/of 3/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Step 2 of 3 - Vault")).not.toBeInTheDocument();
+    const quietLine = screen.getByText("Your vault is set up and secured on this machine.");
+    const openPractice = screen.getByRole("button", { name: "Open Practice desk" });
+    expect(
+      quietLine.compareDocumentPosition(openPractice) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("sends a signed-in operator to the desk after setup is complete", async () => {
@@ -641,7 +702,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       setupFinished: true,
     });
 
-    render(<SetupAccountRoute />);
+    await renderSetup();
 
     await waitFor(() =>
       expect(mocks.navigate).toHaveBeenCalledWith("/trade", { replace: true }),
@@ -667,10 +728,16 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       setupFinished: true,
     });
 
-    render(<SetupAccountRoute />);
+    await renderSetup();
 
-    expect(await screen.findByRole("link", { name: "Open Settings" })).toHaveAttribute("href", "/settings");
-    expect(screen.getByRole("link", { name: "Open the desk" })).toHaveAttribute("href", "/trade");
+    expect(await screen.findByText("Setup is complete. Sign in to open the desk.")).toBeInTheDocument();
+    const signIn = screen.getByRole("link", { name: "Sign in" });
+    expect(signIn).toHaveAttribute("href", "/welcome");
+    expect(signIn.className).toContain("bg-primary");
+    const settings = screen.getByRole("link", { name: "Open Settings" });
+    expect(settings).toHaveAttribute("href", "/settings");
+    expect(settings.className).toContain("border-border-default");
+    expect(screen.queryByRole("link", { name: "Open the desk" })).not.toBeInTheDocument();
     expect(screen.queryByText("Step 1 of 3 - Create operator")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
   });

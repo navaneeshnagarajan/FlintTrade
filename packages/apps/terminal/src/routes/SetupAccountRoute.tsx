@@ -6,7 +6,9 @@
  *   1: Vault — open the credential vault with a master password
  *   2: Practice desk — affirm Practice and land on the desk
  *
- * When this machine already has a vault secret, step 1 is skipped and M is 2.
+ * When this machine already has a vault secret, that fact is fixed before
+ * step 1. The flow is then "Step 1 of 2 - Create operator" and
+ * "Step 2 of 2 - Practice desk". It does not start at 3 and drop to 2.
  * The secret is the one the backend wrote at startup. Setup does not replace it.
  *
  * Later / Skip (never counted, never shown before the affirm, never
@@ -1254,15 +1256,10 @@ function VaultStep({ onOpened, onAccountDeleted, onSessionRequired }: VaultStepP
   );
 }
 
-function PracticeDeskStep({ vaultAlreadySecured }: { vaultAlreadySecured: boolean }) {
+function PracticeDeskStep() {
   return (
     <div className="space-y-2">
       <h3 className="text-sm font-semibold text-text-primary">Practice desk</h3>
-      {vaultAlreadySecured && (
-        <p className="text-xs text-text-secondary leading-relaxed">
-          The credential vault on this machine is already secured.
-        </p>
-      )}
       <p className="text-xs text-text-secondary leading-relaxed">
         Open the Practice desk. Orders stay simulated. Live is not part of
         setup and stays locked until you choose it later.
@@ -1331,20 +1328,31 @@ function SetupResumeSignIn({
 }
 
 function SetupComplete({ signedIn }: { signedIn: boolean }) {
+  if (!signedIn) {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-text-primary">
+          Setup is complete. Sign in to open the desk.
+        </p>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button asChild variant="outline">
+            <Link to="/settings">Open Settings</Link>
+          </Button>
+          <Button asChild>
+            <Link to="/welcome">Sign in</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-semibold text-text-primary">Setup is complete</h3>
       <p className="text-xs text-text-secondary leading-relaxed">
-        {signedIn
-          ? "Opening the desk. Optional items live in Settings."
-          : "Sign in to open the desk. Optional items live in Settings."}
+        Opening the desk. Optional items live in Settings.
       </p>
       <div className="flex flex-wrap justify-end gap-2">
-        {!signedIn && (
-          <Button asChild variant="outline">
-            <Link to="/welcome">Sign in</Link>
-          </Button>
-        )}
         <Button asChild variant="outline">
           <Link to="/settings">Open Settings</Link>
         </Button>
@@ -1672,6 +1680,9 @@ export default function SetupAccountRoute({
   // never finishes on a badge the JWT does not back.
   const [modeSyncError, setModeSyncError] = useState("");
   const [serverSetup, setServerSetup] = useState<SetupServerState | null>(null);
+  // Fixed once the vault probe returns, before step 1 is shown. A later
+  // change must not rewrite "of 2" into "of 3", or the reverse.
+  const [vaultAlreadySecured, setVaultAlreadySecured] = useState<boolean | null>(null);
   const [sessionRejected, setSessionRejected] = useState(false);
   const [startOverNeedsPassword, setStartOverNeedsPassword] = useState(false);
   const [startOverPassword, setStartOverPassword] = useState("");
@@ -1682,12 +1693,14 @@ export default function SetupAccountRoute({
     let cancelled = false;
     void fetchSetupServerState()
       .then((state) => {
-        if (!cancelled) setServerSetup(state);
+        if (cancelled) return;
+        setServerSetup(state);
+        setVaultAlreadySecured((current) => current ?? state.vaultOpen === true);
       })
       .catch(() => {
-        if (!cancelled) {
-          setServerSetup({ isSetup: false, vaultOpen: false, setupFinished: false });
-        }
+        if (cancelled) return;
+        setServerSetup({ isSetup: false, vaultOpen: false, setupFinished: false });
+        setVaultAlreadySecured((current) => current ?? false);
       });
     return () => {
       cancelled = true;
@@ -1864,7 +1877,8 @@ export default function SetupAccountRoute({
     setCurrentStep(2);
   }
 
-  const vaultAlreadyOpen = serverSetup?.vaultOpen === true;
+  const planReady = vaultAlreadySecured !== null;
+  const vaultAlreadyOpen = vaultAlreadySecured === true;
   if (vaultAlreadyOpen && accountCreated && !vaultOpened) {
     setVaultOpened(true);
     setCurrentStep(2);
@@ -1952,10 +1966,10 @@ export default function SetupAccountRoute({
       contentClassName="py-4 sm:py-5"
       eyebrow="Account Setup"
       title="Set up FlintTrade"
-      subtitle={setupFinished ? "Setup is complete" : progressLabel}
+      subtitle={!planReady ? undefined : setupFinished ? "Setup is complete" : progressLabel}
     >
       <div className="space-y-4">
-        {setupFinished ? (
+        {!planReady ? null : setupFinished ? (
           <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
             <SetupComplete signedIn={authStatus === "logged-in"} />
           </div>
@@ -1982,7 +1996,7 @@ export default function SetupAccountRoute({
                   }
                 }}
               >
-                Start over
+                Start over (deletes this unfinished operator)
               </Button>
             </div>
             {startOverNeedsPassword && (
@@ -2063,11 +2077,16 @@ export default function SetupAccountRoute({
           )}
 
           {currentStep === 2 && hasSetupSession && (
-            <PracticeDeskStep vaultAlreadySecured={vaultAlreadyOpen} />
+            <PracticeDeskStep />
           )}
 
           {currentStep === 2 && hasSetupSession && (
-            <div className="flex justify-end mt-6">
+            <div className="mt-6 flex flex-col items-end gap-2">
+              {vaultAlreadyOpen && (
+                <p className="text-xs text-text-muted">
+                  Your vault is set up and secured on this machine.
+                </p>
+              )}
               <Button type="button" onClick={() => void handleOpenPractice()}>
                 Open Practice desk
               </Button>
