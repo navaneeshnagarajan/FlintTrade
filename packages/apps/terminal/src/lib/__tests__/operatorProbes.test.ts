@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   INSTALL_PROBE_URL,
   layaHeartbeatFromBody,
+  layaLiveQualifiedFromBody,
+  layaPracticeFromBody,
   probeDeskHealth,
   probeLocalPing,
   probePublicInternet,
@@ -30,6 +32,11 @@ describe("Laya heartbeat on desk ping", () => {
     expect(layaHeartbeatFromBody({ status: "ok" })).toBeNull();
     expect(layaHeartbeatFromBody({ laya: "connected" })).toBeNull();
     expect(layaHeartbeatFromBody(null)).toBeNull();
+    expect(layaPracticeFromBody({ laya_practice: "ready" })).toBe("ready");
+    expect(layaPracticeFromBody({ laya: "down" })).toBeNull();
+    expect(layaLiveQualifiedFromBody({ laya_live_qualified: true })).toBe(true);
+    expect(layaLiveQualifiedFromBody({ laya_live_qualified: false })).toBe(false);
+    expect(layaLiveQualifiedFromBody({ status: "ok" })).toBe(false);
   });
 
   it("does not present Ready when ping fails or omits Laya", async () => {

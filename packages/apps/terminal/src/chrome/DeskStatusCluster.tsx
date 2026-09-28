@@ -3,16 +3,21 @@
  */
 
 import { useBrokerStore } from "@/stores/brokerStore";
+import { useModeStore } from "@/stores/modeStore";
 import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { mondayReadChrome } from "@/lib/mondayReadChrome";
 import { LayaDegradedLimitsNote } from "@/components/orders/LayaAdmissionNotice";
 import { brokerSurfaceLabel, chatSurfaceLabel, decisionSurfaceLabel } from "@/lib/deskStatus";
+import { layaChipStatus, layaDisabledLiveReason } from "@/lib/layaStatus";
 
 export function DeskStatusCluster() {
   const accounts = useBrokerStore((state) => state.accounts);
   const incident = useOperatorIncident();
-  const decisionStatus = useOperatorSignalStore((state) => state.decisionStatus);
+  const mode = useModeStore((state) => state.mode);
+  const liveStatus = useOperatorSignalStore((state) => state.decisionStatus);
+  const practiceStatus = useOperatorSignalStore((state) => state.layaPracticeStatus);
+  const liveQualified = useOperatorSignalStore((state) => state.layaLiveQualified);
   const llmChrome = useOperatorSignalStore((state) => state.llmChrome);
   const readOnly = accounts.some((account) => mondayReadChrome(account) !== null);
   const placeable = accounts.some(
@@ -23,7 +28,9 @@ export function DeskStatusCluster() {
     connectedRead: !placeable && readOnly,
     incident,
   });
-  const decision = decisionSurfaceLabel(decisionStatus);
+  const chipStatus = layaChipStatus({ mode, practice: practiceStatus, live: liveStatus });
+  const decision = decisionSurfaceLabel(chipStatus);
+  const liveReason = layaDisabledLiveReason({ practice: practiceStatus, liveQualified });
   const chat = chatSurfaceLabel(llmChrome);
   const decisionTone = decision === "Down"
     ? "text-loss"
@@ -40,10 +47,15 @@ export function DeskStatusCluster() {
     >
       <span data-testid="broker-surface">Broker {broker}</span>
       <span aria-hidden="true">·</span>
-      <span data-testid="laya-surface" className={decisionTone}>
+      <span
+        data-testid="laya-surface"
+        className={decisionTone}
+        title={liveReason ?? undefined}
+        data-laya-live-reason={liveReason ?? ""}
+      >
         Laya {decision}
       </span>
-      <LayaDegradedLimitsNote status={decisionStatus} />
+      <LayaDegradedLimitsNote status={chipStatus} />
       <span aria-hidden="true">·</span>
       <span data-testid="llm-surface">LLM {chat}</span>
     </div>

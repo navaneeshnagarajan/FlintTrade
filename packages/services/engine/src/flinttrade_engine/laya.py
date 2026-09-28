@@ -213,6 +213,18 @@ class Laya:
         """
         return self.effective_status("live")
 
+    def desk_heartbeat(self) -> tuple[DecisionStatus, DecisionStatus, bool]:
+        """Practice status, Live-facing status, and whether Live is qualified.
+
+        Practice follows the sidecar. Live is Down when the sidecar is Down
+        or when no qualification record covers the pin.
+        """
+        with self._lock:
+            runtime = self._status
+            qualified = bool(self._live_qualified) and runtime is not DecisionStatus.DOWN
+        live = runtime if qualified else DecisionStatus.DOWN
+        return runtime, live, qualified
+
     def admit(self, proposal: Proposal) -> Verdict:
         """Return a verdict for ``proposal``.
 
@@ -279,7 +291,7 @@ class Laya:
         if runtime is DecisionStatus.DOWN:
             reason = _DOWN_PAUSE
         else:
-            reason = _qualification_reason(runtime)
+            reason = _UNQUALIFIED_LIVE
         return Verdict(
             allow=False,
             reason=reason,
@@ -350,13 +362,7 @@ class Laya:
 _DOWN_PAUSE = "Laya is Down. Orders are paused until it's Ready."
 
 
-def _qualification_reason(status: DecisionStatus) -> str:
-    """Live refusal when the engine is up and no qualification record covers the pin."""
-    shown = "Degraded" if status is DecisionStatus.DEGRADED else "Ready"
-    return (
-        f"Laya is {shown}. Live stays closed until a qualification record "
-        "covers this revision, weight digest, and policy version."
-    )
+_UNQUALIFIED_LIVE = "Laya isn't qualified for Live yet. Practice orders are available."
 
 
 def proposal_from_place_fields(

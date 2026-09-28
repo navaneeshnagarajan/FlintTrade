@@ -223,18 +223,20 @@ def ping() -> tuple[Any, int]:
     and responding.  Exempt from API key authentication.
 
     Returns:
-        JSON ``{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down"}``.
-        ``laya`` starts Down. A ping publishes that status and does not invent Ready.
+        JSON with ``laya`` (Live-facing), ``laya_practice`` (sidecar), and
+        ``laya_live_qualified``. ``laya`` starts Down. A ping does not invent Ready.
     """
     from flinttrade_engine.laya import process_laya  # noqa: PLC0415
 
-    laya = process_laya().note_heartbeat()
+    practice, live, qualified = process_laya().desk_heartbeat()
     return (
         jsonify(
             {
                 "status": "ok",
                 "timestamp": datetime.now(_IST).isoformat(),
-                "laya": laya.value,
+                "laya": live.value,
+                "laya_practice": practice.value,
+                "laya_live_qualified": qualified,
             }
         ),
         200,

@@ -37,25 +37,56 @@ export type LayaHeartbeat = "ready" | "degraded" | "down";
 export interface PingProbe {
   localPing: "ok" | "transport" | "http_error";
   transportReason: TransportReason | null;
-  /** Null when the heartbeat did not name Laya. Never implied Ready. */
+  /** Live-facing status. Null when the heartbeat did not name Laya. Never implied Ready. */
   laya: LayaHeartbeat | null;
+  /** Sidecar status for Practice. Null when the heartbeat omitted it. */
+  layaPractice: LayaHeartbeat | null;
+  /** True only when the heartbeat says Live is qualified. */
+  layaLiveQualified: boolean;
+}
+
+function layaStatusValue(value: unknown): LayaHeartbeat | null {
+  if (value === "ready" || value === "degraded" || value === "down") return value;
+  return null;
 }
 
 export function layaHeartbeatFromBody(body: unknown): LayaHeartbeat | null {
   if (body === null || typeof body !== "object") return null;
-  const value = (body as { laya?: unknown }).laya;
-  if (value === "ready" || value === "degraded" || value === "down") return value;
-  return null;
+  return layaStatusValue((body as { laya?: unknown }).laya);
+}
+
+export function layaPracticeFromBody(body: unknown): LayaHeartbeat | null {
+  if (body === null || typeof body !== "object") return null;
+  return layaStatusValue((body as { laya_practice?: unknown }).laya_practice);
+}
+
+export function layaLiveQualifiedFromBody(body: unknown): boolean {
+  if (body === null || typeof body !== "object") return false;
+  return (body as { laya_live_qualified?: unknown }).laya_live_qualified === true;
 }
 
 export async function probeLocalPing(fetchImpl: typeof fetch = fetch): Promise<PingProbe> {
   try {
     const resp = await fetchImpl(`${getBase()}/api/v1/ping`, { method: "GET", cache: "no-store" });
-    if (!resp.ok) return { localPing: "http_error", transportReason: null, laya: null };
+    if (!resp.ok) {
+      return { localPing: "http_error", transportReason: null, laya: null, layaPractice: null, layaLiveQualified: false };
+    }
     const body: unknown = await resp.json().catch(() => null);
-    return { localPing: "ok", transportReason: null, laya: layaHeartbeatFromBody(body) };
+    return {
+      localPing: "ok",
+      transportReason: null,
+      laya: layaHeartbeatFromBody(body),
+      layaPractice: layaPracticeFromBody(body),
+      layaLiveQualified: layaLiveQualifiedFromBody(body),
+    };
   } catch (err) {
-    return { localPing: "transport", transportReason: transportReasonFromError(err), laya: null };
+    return {
+      localPing: "transport",
+      transportReason: transportReasonFromError(err),
+      laya: null,
+      layaPractice: null,
+      layaLiveQualified: false,
+    };
   }
 }
 

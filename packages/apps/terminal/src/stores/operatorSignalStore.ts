@@ -22,8 +22,12 @@ export interface OperatorSignalSnapshot {
   observedHostDown: boolean;
   observedBackendUnreachable: boolean;
   llmChrome: string | null;
-  /** Down until a heartbeat reports Ready or Degraded. Null is not Ready. */
+  /** Live-facing status. Down until a heartbeat reports Ready or Degraded. Null is not Ready. */
   decisionStatus: "ready" | "degraded" | "down" | null;
+  /** Sidecar status for Practice and Explore. Null is not Ready. */
+  layaPracticeStatus: "ready" | "degraded" | "down" | null;
+  /** True only when a qualification record covers the pin. */
+  layaLiveQualified: boolean;
 }
 
 const INITIAL: OperatorSignalSnapshot = {
@@ -39,6 +43,8 @@ const INITIAL: OperatorSignalSnapshot = {
   observedBackendUnreachable: false,
   llmChrome: null,
   decisionStatus: "down",
+  layaPracticeStatus: "down",
+  layaLiveQualified: false,
 };
 
 interface OperatorSignalStore extends OperatorSignalSnapshot {
@@ -48,6 +54,8 @@ interface OperatorSignalStore extends OperatorSignalSnapshot {
   setPublicInternet: (publicInternet: OperatorSignalSnapshot["publicInternet"]) => void;
   setLlmChrome: (llmChrome: string | null) => void;
   setDecisionStatus: (decisionStatus: OperatorSignalSnapshot["decisionStatus"]) => void;
+  setLayaPracticeStatus: (layaPracticeStatus: OperatorSignalSnapshot["layaPracticeStatus"]) => void;
+  setLayaLiveQualified: (layaLiveQualified: boolean) => void;
   clearBrokerRateLimit: () => void;
   clearBrokerFault: () => void;
   applyObserved: (
@@ -69,6 +77,8 @@ export const useOperatorSignalStore = create<OperatorSignalStore>((set, get) => 
   setPublicInternet: (publicInternet) => set({ publicInternet }),
   setLlmChrome: (llmChrome) => set({ llmChrome }),
   setDecisionStatus: (decisionStatus) => set({ decisionStatus }),
+  setLayaPracticeStatus: (layaPracticeStatus) => set({ layaPracticeStatus }),
+  setLayaLiveQualified: (layaLiveQualified) => set({ layaLiveQualified }),
   clearBrokerRateLimit: () => set((state) => ({
     brokerRateLimited: false,
     brokerReject: state.brokerReject

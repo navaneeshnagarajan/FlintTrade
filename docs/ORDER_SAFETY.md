@@ -97,10 +97,11 @@ in the versioned `laya_policy.toml`. There is no confidence field in the
 gate. The model can deny or clamp. It cannot raise a quantity or overturn a
 rule refusal. An unreachable host, a timeout, a malformed response, or a
 revision or digest mismatch is Down. Down refuses Practice as well as Live.
-Down copy is the same in Practice and Live: "Laya is Down. Orders are
-paused until it's Ready." When Laya is Ready or Degraded and Live is
-refused only because no qualification record covers the pin, the reason
-names that requirement instead of saying Laya is Down. An uncertain
+Down copy is the same in every mode: "Laya is Down. Orders are paused
+until it's Ready." A Practice refusal never says Live. When Laya is Ready
+or Degraded and a Live place is refused only because Live is not qualified,
+the reason is "Laya isn't qualified for Live yet. Practice orders are
+available." An uncertain
 answer clamps in Practice and denies in Live. Live uncertain copy is
 "Laya is uncertain. Live stays closed." An empty note is a normal
 case of that same uncertain outcome. It is not a blanket refusal. A
@@ -113,8 +114,11 @@ Down — Live orders paused."). That class closes Live place and Position
 Mirror start on the shared client place path. Kill All stays reachable.
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
 `GET /health` records Ready, Degraded, or Down from the opt-in sidecar when
-one is registered. The desk ping and `note_heartbeat` publish the stored
-Live-facing status and do not invent Ready. A base checkpoint is not
+one is registered. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`, and
+`laya_live_qualified`. It does not invent Ready. The Laya chip label follows
+the current mode, so Practice shows the sidecar and does not read Down while
+Practice orders are being admitted. "Not qualified for Live" is the chip
+tooltip and the disabled-Live reason. A base checkpoint is not
 qualified for Live, so Live stays Down until a qualification record exists
 for the exact model revision, weight digest, and policy version
 (`EvidenceUseScope.LIVE_DECISION`). Practice can be Ready or Degraded from

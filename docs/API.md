@@ -500,7 +500,7 @@ The terminal has two development proxy namespaces:
 | `/api/v1/reconciliation/outcomes` | Unresolved broker-write outcomes, including the exact selector, business date, non-secret persisted intent, fresh-snapshot evidence and any retryable `PENDING_AUDIT` or `PENDING_ROUTER_CLEAR` decision. Requires an authenticated session with `admin.observability.read`; results and remaining-outcome counts are filtered through the current router's account ACL. |
 | `/api/v1/reconciliation/outcomes/<attempt_id>/resolve` (**POST**) | Record `confirmed_applied`, `confirmed_not_applied`, or basket-only `confirmed_partial` after broker verification. Requires an authenticated, PIN-unlocked Live JWT, session scope `admin.observability.run`, current-router selector ACL, exact `CONFIRM <APPLIED\|NOT_APPLIED\|PARTIAL> <broker>:<account>:<attempt>` confirmation, a newly adopted exact-selector reconciliation generation, and a durable hash-chained audit receipt. Snapshots are monotonic; same-time conflicts and malformed reports fail closed, and historical observations remain evidence. Applied placement IDs must be first observed after invocation and match every persisted material identity field; basket requests map applied IDs to `broker_order_item_indexes` and partition all remaining children in `not_applied_item_indexes`. Modify and cancel recovery require operation-specific evidence. A `PENDING_AUDIT` retry requires newer evidence, archives the prior revision and receives a new resolution ID; a `PENDING_ROUTER_CLEAR` retry resumes the committed decision without another broker read. Success and structured-error responses carry the exact attempt and canonical decision; the terminal runtime-validates identity, status and primitive types before updating state. Ambiguous and unsupported cases remain blocked; this route performs no broker write. |
 | `/health`, `/health/detail`, `/healthz`, `/readyz` | Process health and compatibility probes. |
-| `GET /api/v1/ping` | Process liveness. The body includes `laya` (`ready`, `degraded`, or `down`). |
+| `GET /api/v1/ping` | Process liveness. The body includes Live-facing `laya`, sidecar `laya_practice`, and `laya_live_qualified`. |
 | `/v1/admin/system` | CPU, memory, disk, network, uptime, and process metrics for the Admin system panel. |
 | `/v1/audit/*` | Scoped audit trail (`admin.audit.read` where required). |
 | `/api/v1/admin/activity` | Operator activity feed. |
@@ -509,15 +509,18 @@ The terminal has two development proxy namespaces:
 `GET /api/v1/ping` is the FlintTrade process probe, not the OpenAlgo
 passthrough `ping` (POST). It is exempt from the API-key check. The
 response is JSON
-`{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down"}`.
-`status` is `"ok"`, `timestamp` is ISO8601 IST, and `laya` is `"ready"`,
-`"degraded"`, or `"down"`. Laya starts Down. A ping publishes the stored
-Live-facing status and does not invent Ready. `GET /health` records Ready,
-Degraded, or Down from the opt-in sidecar when one is registered. With no
-sidecar, that probe leaves the stored status alone. Live stays Down until a
-qualification record matches the pinned revision and policy, so a Practice
-Ready probe still publishes `down` on this Live-facing field. Clients must
-not treat a missing or omitted `laya` as Ready; the desk uses `laya ?? "down"`.
+`{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down", "laya_practice": "ready"|"degraded"|"down", "laya_live_qualified": true|false}`.
+`laya` is the Live-facing status. `laya_practice` is the sidecar status the
+Practice chip shows. `laya_live_qualified` is true only when a qualification
+record covers the pin. Laya starts Down. A ping does not invent Ready.
+`GET /health` records Ready, Degraded, or Down from the opt-in sidecar when
+one is registered. With no sidecar, that probe leaves the stored status alone.
+Live stays unqualified until a qualification record matches the pinned
+revision and policy, so a Practice Ready probe still publishes `down` on
+`laya` and `ready` on `laya_practice`. Clients must not treat a missing or
+omitted `laya` as Ready; the desk uses `laya ?? "down"`. The chip tooltip
+and the Mode menu's disabled-Live reason are "Not qualified for Live" when
+the sidecar is Ready or Degraded and Live is not qualified.
 
 ### Errors (`/ft-api/v1/errors`, `/ft-api/v1/changelog`)
 
@@ -732,9 +735,9 @@ This example is for a locally issued **Practice-mode** FlintTrade session JWT.
 Place is admitted before the sandbox. Laya starts **Down**, so a Practice
 place while Down returns HTTP 403 `laya_denied` with "Laya is Down. Orders
 are paused until it's Ready." and the sandbox is not called. That sentence
-is the same in Live. A Live refusal while Laya is Ready, with no
-qualification record for the pin, names the qualification requirement
-instead. A quantity
+is the same in Live. A Live place while Laya is Ready or Degraded, with no
+matching qualification record, returns "Laya isn't qualified for Live yet.
+Practice orders are available." A Practice refusal never says Live. A quantity
 above the active ceiling returns HTTP 409 `laya_clamp` and places neither
 size. The sandbox body below is the response when admission allows the
 requested quantity. The call does not send an order to OpenAlgo or any broker.

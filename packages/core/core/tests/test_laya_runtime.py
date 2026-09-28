@@ -264,3 +264,5 @@ def test_health_route_records_sidecar_status(runtime: LayaRuntime) -> None:
     ping = app.test_client().get("/api/v1/ping").get_json()
     assert ping is not None
     assert ping["laya"] == "down"
+    assert ping["laya_practice"] == "ready"
+    assert ping["laya_live_qualified"] is False

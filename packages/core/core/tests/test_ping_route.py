@@ -71,12 +71,18 @@ class TestPingRoute:
         first = client.get("/api/v1/ping").get_json()
         assert first is not None
         assert first["laya"] == "down"
+        assert first["laya_practice"] == "down"
+        assert first["laya_live_qualified"] is False
         process_laya().set_status(DecisionStatus.READY)
         second = client.get("/api/v1/ping").get_json()
         assert second is not None
         assert second["laya"] == "ready"
-        process_laya().set_status(DecisionStatus.DEGRADED)
+        assert second["laya_practice"] == "ready"
+        assert second["laya_live_qualified"] is True
+        process_laya().apply_runtime_status(DecisionStatus.DEGRADED, live_qualified=False)
         third = client.get("/api/v1/ping").get_json()
         assert third is not None
-        assert third["laya"] == "degraded"
+        assert third["laya"] == "down"
+        assert third["laya_practice"] == "degraded"
+        assert third["laya_live_qualified"] is False
         reset_process_laya_for_tests()
