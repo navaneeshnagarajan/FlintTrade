@@ -260,7 +260,11 @@ a connection does not resolve, probe, authenticate to, or start that provider.
 The catalogue is composed at app startup from the AI, historical, and gateway
 contributor descriptors. Catalogue `service_kinds` values include
 `broker_execution`, `market_data_live`, `market_data_historical`, `news`,
-`llm`, `forecast`, `agent_runtime`, and `embedding`.
+`llm`, `forecast`, `agent_runtime`, `embedding`, and `decision`.
+
+`decision` entries are catalogue providers for place admission, not LLM chat
+profiles. Their default evidence scope is offline qualification until a Live
+qualification record exists. Listing them does not probe or start the host.
 
 | Endpoint | Purpose |
 |---|---|

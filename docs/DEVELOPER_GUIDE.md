@@ -529,7 +529,11 @@ is Down, and Practice refuses too.
 The same client speaks `POST /v1/systemone`. An operator may point it at
 another loopback host, including one on port 8888, without adding that
 host's software as a dependency. Do not vendor Unsloth Studio. Chat
-profiles stay separate from the `decision` service kind.
+profiles stay separate from the `decision` service kind. Catalogue ids
+under that kind are `decision:laya-managed` and
+`decision:systemone-endpoint`; they are not chat profiles, their default
+evidence scope is offline qualification until a Live qualification record
+exists, and listing them does not start the host.
 
 ### Vite dev proxy paths
 
