@@ -143,9 +143,9 @@ describe('docs.page pilot publication guards', () => {
     expect(allContent).toContain('Sample');
     expect(allContent).toContain('Home');
     expect(allContent).toContain('Trade');
-    // Practice fills use the engine name SandboxEngine — that is honest, not a
-    // retired mode. Ban Demo/Sandbox/Paper only as a current mode label.
-    expect(allContent).toContain('SandboxEngine');
+    // Practice is the Mode. The engine class name is not operator copy.
+    // Ban Demo/Sandbox/Paper only as a current mode label.
+    expect(allContent).not.toContain('SandboxEngine');
     expect(allContent).not.toMatch(/\*\*(?:Demo|Sandbox|Paper)\*\*/);
     expect(allContent).not.toMatch(/\b(?:Demo|Sandbox|Paper)\s+mode\b/i);
     expect(allContent).not.toMatch(/^#{1,6}\s+(?:Demo|Sandbox|Paper)\b/im);

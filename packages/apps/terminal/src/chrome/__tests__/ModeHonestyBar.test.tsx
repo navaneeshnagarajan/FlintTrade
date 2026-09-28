@@ -17,9 +17,11 @@ describe("ModeHonestyBar", () => {
 
   it("renders the Practice line", () => {
     render(<ModeHonestyBar mode="practice" />);
-    expect(screen.getByTestId("mode-honesty-bar")).toHaveTextContent(
+    const bar = screen.getByTestId("mode-honesty-bar");
+    expect(bar).toHaveTextContent(
       "Practice — simulated fills, no real money.",
     );
+    expect(bar).not.toHaveTextContent(/SandboxEngine/i);
   });
 
   it("renders the Live line", () => {

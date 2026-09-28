@@ -305,16 +305,16 @@ Before enabling any order-capable integration, exercise the order path in
 | Mode | Order behaviour | Best for |
 |---|---|---|
 | **Explore** | Demo/sample data; no Live broker order authority. On `/trade`, Order Pad **Sample Buy** opens a sample review and records a local sample fill (no broker) | First-time visitors, screenshots, docs |
-| **Practice** | Orders simulated by FlintTrade's native `SandboxEngine` (primary paper path) | Strategy tests, Practice SandboxEngine fills, AI analysis |
+| **Practice** | Simulated fills, no real money (primary paper path) | Strategy tests, Practice fills, AI analysis |
 | **Live** | Real orders sent through the configured broker path | Gated broker integration, only after user review |
 
 The current mode is shown in the top bar and is server-enforced via the JWT
 claim — switching to Live requires a deliberate confirmation step.
 
-**Practice SandboxEngine fills.** This is the
-shipped Practice path. Explore is sample-only. Practice is the
-primary paper path: orders place and record fills on FlintTrade's
-native `SandboxEngine`. AI and terminal surfaces read that Practice
+**Practice fills.** This is the
+shipped Practice path. Explore shows example data. Practice is the
+primary paper path: orders place and record simulated fills.
+AI and terminal surfaces read that Practice
 book. Practice never leaks a live broker order. Live stays
 fail-closed until MSI native read smoke is trusted and funded unlock.
 OpenAlgo is a Settings fallback only — not the primary
@@ -343,8 +343,8 @@ last 30 min" closing-price copy. The September 2026 consultation stays out
 of the UI.
 
 **Mode honesty.** One line under the TopBar, always, owned by Mode.
-Explore reads `Explore — sample data only. No broker session, no live orders.`
-Practice reads `Practice — SandboxEngine fills. Not your funded broker account.`
+Example data reads `Example. No broker session, no live orders.`
+Practice reads `Practice — simulated fills, no real money.`
 Live reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.`
 Widgets stay quiet: they do not repeat a Sample chip. Mode is not provenance. A figure that stays fabricated in Practice and Live, such as benchmark returns, keeps its own sample banner. An incident strip,
 when one is showing, sits between the TopBar and this line and does not
@@ -578,8 +578,8 @@ backend rejects Explore orders if the UI slips (FT-TRADE-009).
 ### Learn → Practice Trading (OpenAlgo fallback)
 
 This is a fallback path, not the primary Practice fills path. The
-primary paper path is Practice mode on `/trade` through the native
-`SandboxEngine`. Explore `/learn` → **Practice
+primary paper path is Practice mode on `/trade`, with simulated fills
+and no real money. Explore `/learn` → **Practice
 Trading** still walks through optional OpenAlgo broker Practice /
 sandbox setup when you need that fallback. **Dhan Sandbox** remains
 optional OpenAlgo paper. Kotak Neo has **no sandbox** — never offer
@@ -590,7 +590,7 @@ text "Configure OpenAlgo in Settings → Broker Gateway.", and an
 `/settings#api`. The CTA does not send operators to Settings →
 Brokers (`/settings#brokers`). Point the Broker Gateway at that
 OpenAlgo Practice instance only as fallback paper, then return to
-native Practice `SandboxEngine` fills for Practice and AI analysis.
+native Practice simulated fills for Practice and AI analysis.
 
 On Explore `/learn` → Glossary → Lot Size, the glossary teaches dated
 Jan 2026 NSE-cycle index lots (`NIFTY 65 · BANKNIFTY 30 · FINNIFTY 60 ·
@@ -739,11 +739,11 @@ badge matches the visible table (`N holdings`). The badge is never `0 holdings` 
 sample table. There is no Sample chip on the Holdings table or header.
 When the sample book is shown — Explore always, and Practice after the
 holdings query has settled empty — Holdings and Dashboard keep the
-`DemoBanner` (`Showing sample data — connect a broker for live data`),
-in Explore as well as Practice. Explore also has the Mode honesty line
-(`Explore — sample data only. No broker session, no live orders.`).
-The Practice Mode line (`Practice — SandboxEngine fills. Not your funded
-broker account.`) does not call that book sample; `DemoBanner` is the
+`DemoBanner` (`Showing Example — connect a broker for live data`),
+in Explore as well as Practice. Example data also has the Mode honesty line
+(`Example. No broker session, no live orders.`).
+The Practice Mode line (`Practice — simulated fills, no real money.`)
+does not call that book Example; `DemoBanner` is the
 required Practice disclosure for it. Dashboard and "N stocks"
 use that same N. Practice waits
 until the holdings query has settled empty before the sample fallback,
@@ -1118,7 +1118,7 @@ Connected sample advisor. Any later demo replies must be labelled
 LLM readiness.
 
 AI Chat live-read context: when an LLM is configured, Chat may
-use Practice SandboxEngine fills and native live-read feeds for
+use Practice simulated fills and native live-read feeds for
 analysis. That is analysis context, not a guarantee of profitable
 alphas, and profitable alphas are not a release criterion. Chat
 does not place Live orders — Live place stays fail-closed. Chat never
