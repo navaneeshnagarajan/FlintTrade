@@ -6,8 +6,9 @@
  *   - Concentration risk: "Top 10 stocks = X% of your portfolio"
  *   - Sector concentration warnings (>30% in one sector flagged)
  *
- * Uses holdings from InvestContext. Seeded with sample data when no
- * broker is connected (20 holdings with deliberate overlaps).
+ * Uses holdings from InvestContext. The sample overlap book is the public
+ * web demo, or a non-Practice view before an account snapshot. Practice
+ * stays empty until two holdings exist.
  */
 
 import { useMemo } from "react";
@@ -29,6 +30,8 @@ import {
 import { cn } from "@/lib/utils";
 import { classifySector } from "@/lib/sectors";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
+import { isPublicDemoBuild } from "@/lib/demoSession";
+import { useModeStore, type AppMode } from "@/stores/modeStore";
 import { useInvest } from "../InvestContext";
 import { formatINR, formatPercent } from "../formatters";
 import type { Holding } from "@/types/api";
@@ -62,6 +65,47 @@ const SAMPLE_HOLDINGS: Holding[] = [
   { symbol: "MARUTI", exchange: "NSE", quantity: 10, averagePrice: 10200.00, ltp: 11450.00, pnl: 12500, pnlPercent: 12.3 },
   { symbol: "ADANIENT", exchange: "NSE", quantity: 35, averagePrice: 2600.00, ltp: 2840.00, pnl: 8400, pnlPercent: 9.2 },
 ];
+
+const EMPTY_OVERLAP =
+  "No holdings to compare yet. Overlap appears once you hold two or more funds or baskets.";
+
+const EMPTY_HOLDINGS: Holding[] = [];
+
+export type OverlapPresentation =
+  | { kind: "empty" }
+  | { kind: "sample"; label: "demo" | "example"; holdings: Holding[] }
+  | { kind: "book"; holdings: Holding[] };
+
+/**
+ * Sample overlap is the public web demo, or any non-Practice book that has
+ * not received an account snapshot. Practice never substitutes that book:
+ * fewer than two holdings stays on the empty state.
+ */
+export function resolveOverlapPresentation(input: {
+  mode: AppMode;
+  isPublicDemo: boolean;
+  isSampleData: boolean;
+  hasAccountSnapshot: boolean;
+  holdings: Holding[];
+}): OverlapPresentation {
+  const { mode, isPublicDemo, isSampleData, hasAccountSnapshot, holdings } = input;
+
+  if (mode === "practice") {
+    if (isSampleData || holdings.length < 2) return { kind: "empty" };
+    return { kind: "book", holdings };
+  }
+
+  if (isPublicDemo) {
+    return { kind: "sample", label: "demo", holdings: SAMPLE_HOLDINGS };
+  }
+
+  if (!hasAccountSnapshot || isSampleData) {
+    return { kind: "sample", label: "example", holdings: SAMPLE_HOLDINGS };
+  }
+
+  if (holdings.length < 2) return { kind: "empty" };
+  return { kind: "book", holdings };
+}
 
 // ─── Analysis functions (exported for testing) ──────────────────────────────────
 
@@ -209,19 +253,22 @@ function StatCard({
 // ─── Main Component ─────────────────────────────────────────────────────────────
 
 export function OverlapTab() {
-  const { holdings: liveHoldings, isSampleData } = useInvest();
-  const showSample = Boolean(isSampleData);
-  // A Practice account with an empty book stays empty. The overlapping
-  // sample book is only for Explore, or Practice before any account data.
-  const holdings = showSample
-    ? (liveHoldings.length > 0 ? liveHoldings : SAMPLE_HOLDINGS)
-    : liveHoldings;
+  const { holdings: liveHoldings, isSampleData, hasAccountSnapshot } = useInvest();
+  const mode = useModeStore((s) => s.mode);
+  const presentation = resolveOverlapPresentation({
+    mode,
+    isPublicDemo: isPublicDemoBuild(),
+    isSampleData,
+    hasAccountSnapshot: Boolean(hasAccountSnapshot),
+    holdings: liveHoldings,
+  });
+  const holdings = presentation.kind === "empty" ? EMPTY_HOLDINGS : presentation.holdings;
 
   const overlaps = useMemo(() => computeOverlaps(holdings), [holdings]);
   const sectors = useMemo(() => computeSectorConcentration(holdings), [holdings]);
   const stats = useMemo(() => computeConcentrationStats(holdings), [holdings]);
 
-  if (!showSample && holdings.length === 0) {
+  if (presentation.kind === "empty") {
     return (
       <div
         className="flex flex-col items-center justify-center py-16 gap-2 text-text-muted"
@@ -229,7 +276,7 @@ export function OverlapTab() {
       >
         <PieChart className="size-6 text-text-muted" />
         <p className="text-sm text-center max-w-md text-text-secondary">
-          No holdings to compare yet. Overlap appears once you hold two or more funds or baskets.
+          {EMPTY_OVERLAP}
         </p>
       </div>
     );
@@ -239,10 +286,23 @@ export function OverlapTab() {
 
   return (
     <div className="space-y-6">
-      {showSample && (
+      {presentation.kind === "sample" && (
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-heading font-semibold text-text-primary">Overlap</h2>
-          <ExampleLabel testId="overlap-example" />
+          {presentation.label === "demo" ? (
+            <span
+              data-testid="overlap-demo-label"
+              className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium tracking-wide"
+              style={{
+                background: "var(--color-surface-active)",
+                color: "var(--color-text-muted)",
+              }}
+            >
+              Demo (example data)
+            </span>
+          ) : (
+            <ExampleLabel testId="overlap-example" />
+          )}
         </div>
       )}
       {/* Summary stats */}

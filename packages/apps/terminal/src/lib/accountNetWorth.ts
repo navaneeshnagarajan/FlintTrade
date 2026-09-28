@@ -1,9 +1,20 @@
 /**
  * One net-worth figure for Home and Invest.
  *
- * Cash plus the mark of holdings and open positions. A fill that only moves
- * cash into a position must not change this total when the price is unchanged.
+ * Cash plus the mark of holdings and open positions, minus charges. A fill
+ * that only moves cash into a position must not change this total when the
+ * price is unchanged and charges are zero.
  */
+
+/**
+ * Charges on the account book. Practice funds have no charges field today,
+ * so this is 0 until a later book exposes a finite `charges` value.
+ */
+export function accountCharges(source: object | null | undefined): number {
+  if (source == null || !("charges" in source)) return 0;
+  const charges = source.charges;
+  return typeof charges === "number" && Number.isFinite(charges) ? charges : 0;
+}
 
 export interface MarkedLine {
   ltp: number;
@@ -33,7 +44,9 @@ export function accountNetWorth(
   holdings: readonly MarkedLine[],
   availableCash: number,
   positions: readonly MarkedLine[] = [],
+  charges = 0,
 ): number {
   const cash = Number.isFinite(availableCash) ? availableCash : 0;
-  return markedValue(holdings) + markedValue(positions) + cash;
+  const deducted = Number.isFinite(charges) ? charges : 0;
+  return markedValue(holdings) + markedValue(positions) + cash - deducted;
 }

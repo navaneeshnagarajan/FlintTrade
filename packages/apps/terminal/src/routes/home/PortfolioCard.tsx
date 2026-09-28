@@ -8,7 +8,7 @@ import { useHoldings } from "@/hooks/useHoldings";
 import { usePositions } from "@/hooks/usePositions";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
-import { accountNetWorth, formatAccountNetWorth, markedValue } from "@/lib/accountNetWorth";
+import { accountCharges, accountNetWorth, formatAccountNetWorth, markedValue } from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import { DemoBadge } from "./DemoBadge";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
@@ -63,7 +63,12 @@ export function PortfolioCard() {
   );
   const positionValue = markedValue(positions);
   const cash = funds?.availableCash ?? 0;
-  const netWorth = accountNetWorth(holdings ?? [], cash, positions);
+  const netWorth = accountNetWorth(
+    holdings ?? [],
+    cash,
+    positions,
+    accountCharges(isExplore ? getDemoFunds() : funds),
+  );
   const netWorthIsExample = isExplore && netWorth > 0;
   const allocation = hasAccountData
     ? realAllocation(equityValue, positionValue, cash)

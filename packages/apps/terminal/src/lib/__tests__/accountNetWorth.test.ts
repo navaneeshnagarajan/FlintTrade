@@ -1,21 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { accountNetWorth, formatAccountNetWorth } from "../accountNetWorth";
+import {
+  accountCharges,
+  accountNetWorth,
+  markedValue,
+  type MarkedLine,
+} from "../accountNetWorth";
 
 describe("accountNetWorth", () => {
-  it("keeps ₹10,00,000 after buying 1 SBIN at ₹800 when the price is unchanged", () => {
-    const worth = accountNetWorth([], 999_200, [{ ltp: 800, quantity: 1 }]);
+  it("is cash + holdings + positions − charges", () => {
+    const holdings: MarkedLine[] = [{ ltp: 100, quantity: 2 }];
+    const positions: MarkedLine[] = [{ ltp: 10, quantity: 3 }];
+    const cash = 50;
+    const charges = 4;
 
-    expect(worth).toBe(1_000_000);
-    expect(formatAccountNetWorth(worth)).toBe(formatAccountNetWorth(1_000_000));
+    expect(accountNetWorth(holdings, cash, positions, charges)).toBe(
+      markedValue(holdings) + markedValue(positions) + cash - charges,
+    );
   });
 
-  it("sums cash, holdings, and positions", () => {
-    expect(
-      accountNetWorth(
-        [{ ltp: 100, quantity: 2 }],
-        50,
-        [{ ltp: 10, quantity: 3 }],
-      ),
-    ).toBe(280);
+  it("uses the practice charges source, which is 0 today", () => {
+    const practiceBook = {
+      availableCash: 999_200,
+      usedMargin: 800,
+      totalBalance: 1_000_000,
+    };
+    const holdings: MarkedLine[] = [];
+    const positions: MarkedLine[] = [{ ltp: 800, quantity: 1 }];
+    const charges = accountCharges(practiceBook);
+
+    expect(accountNetWorth(holdings, practiceBook.availableCash, positions, charges)).toBe(
+      markedValue(holdings) + markedValue(positions) + practiceBook.availableCash - charges,
+    );
   });
 });

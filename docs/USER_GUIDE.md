@@ -769,10 +769,12 @@ it opens Holdings → Holdings. An unknown hash opens Overview → Dashboard.
 The selected view stays available from that hash when the skill level
 would otherwise hide it.
 
-**Overlap.** With an account book and no holdings, Overlap shows
+**Overlap.** With fewer than two holdings, including a Practice book with
+none, Overlap shows
 `No holdings to compare yet. Overlap appears once you hold two or more funds or baskets.`
-The sample overlap book appears only before any account snapshot, and it
-is labelled Example.
+The overlap view opens at two or more. The sample overlap book appears in
+the public web demo, labelled `Demo (example data)`, or before any account
+snapshot, labelled Example. Practice does not substitute that book.
 
 **Example views.** Sample figures on Baskets, Sector Rotation, Benchmark,
 Shareholding, ETF Screener, Social, ETFs, Risk-Return, and Correlation

@@ -11,6 +11,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { getDemoHoldings } from "@/hooks/useModeData";
+import { accountCharges, accountNetWorth, markedValue } from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import type { Holding } from "@/types/api";
 
@@ -158,11 +159,11 @@ describe("InvestContext sample holdings count (FT-DEMO-001)", () => {
     expect(getDemoHoldings().length).toBeGreaterThan(0);
   });
 
-  it("adds an open position mark so a ₹800 fill restores ₹10,00,000", () => {
+  it("is cash + holdings + positions − the practice charges source", () => {
     useModeStore.setState({ mode: "practice" });
     brokerConnected.current = false;
-    fundsQuery.data = { availableCash: 999_200, usedMargin: 800, totalBalance: 1_000_000 };
-    positionsQuery.data = [{
+    const funds = { availableCash: 999_200, usedMargin: 800, totalBalance: 1_000_000 };
+    const positions = [{
       symbol: "SBIN",
       exchange: "NSE",
       product: "CNC",
@@ -172,11 +173,18 @@ describe("InvestContext sample holdings count (FT-DEMO-001)", () => {
       pnl: 0,
       pnlPercent: 0,
     }];
+    fundsQuery.data = funds;
+    positionsQuery.data = positions;
+    const charges = accountCharges(funds);
+    const expected = accountNetWorth([], funds.availableCash, positions, charges);
 
     renderProbe();
 
+    expect(expected).toBe(
+      markedValue([]) + markedValue(positions) + funds.availableCash - charges,
+    );
     expect(screen.getByTestId("holding-count")).toHaveTextContent("0 holdings");
-    expect(screen.getByTestId("net-worth")).toHaveTextContent("1000000");
+    expect(screen.getByTestId("net-worth")).toHaveTextContent(String(expected));
   });
 
   it("does not flash the sample book while practice funds are still loading", () => {

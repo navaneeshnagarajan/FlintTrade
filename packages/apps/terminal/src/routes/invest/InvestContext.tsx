@@ -20,7 +20,7 @@ import { usePositions } from "@/hooks/usePositions";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
-import { accountNetWorth, markedValue } from "@/lib/accountNetWorth";
+import { accountCharges, accountNetWorth, markedValue } from "@/lib/accountNetWorth";
 import { classifySector } from "@/lib/sectors";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import type { Holding } from "@/types/api";
@@ -52,6 +52,8 @@ export interface InvestContextValue {
   isError: boolean;
   /** True when the exposed book is the labelled sample feed. */
   isSampleData: boolean;
+  /** True once Practice or Live has returned an account snapshot. */
+  hasAccountSnapshot: boolean;
   /** Force-refetch holdings from the active broker data source. */
   refetchHoldings: () => void;
 }
@@ -130,6 +132,7 @@ export function InvestProvider({ children }: { children: ReactNode }) {
   );
   const isLoading = mode === "explore" || isSampleData ? false : holdingsLoading || fundsLoading;
   const availableCash = mode === "explore" ? getDemoFunds().availableCash : (funds?.availableCash ?? 0);
+  const charges = accountCharges(mode === "explore" ? getDemoFunds() : funds);
   // A sample book must not pick up a live position, and a Practice snapshot
   // must count the position the cash just bought.
   const positions = isSampleData ? [] : livePositions;
@@ -158,7 +161,7 @@ export function InvestProvider({ children }: { children: ReactNode }) {
     [holdings],
   );
 
-  const netWorth = accountNetWorth(holdings, availableCash, positions);
+  const netWorth = accountNetWorth(holdings, availableCash, positions, charges);
 
   const summary: PortfolioSummary = useMemo(
     () => ({
@@ -192,9 +195,10 @@ export function InvestProvider({ children }: { children: ReactNode }) {
       isLoading,
       isError: holdingsError,
       isSampleData,
+      hasAccountSnapshot,
       refetchHoldings,
     }),
-    [holdings, summary, isLoading, holdingsError, isSampleData, refetchHoldings],
+    [holdings, summary, isLoading, holdingsError, isSampleData, hasAccountSnapshot, refetchHoldings],
   );
 
   return <InvestContext.Provider value={value}>{children}</InvestContext.Provider>;

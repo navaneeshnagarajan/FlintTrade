@@ -10,7 +10,9 @@ import {
   computeOverlaps,
   computeSectorConcentration,
   computeConcentrationStats,
+  resolveOverlapPresentation,
 } from "../OverlapTab";
+import { useModeStore } from "@/stores/modeStore";
 
 // ─── Pure calculation tests ─────────────────────────────────────────────────────
 
@@ -113,7 +115,14 @@ describe("computeConcentrationStats", () => {
 
 const investState = vi.hoisted(() => ({
   holdings: [] as Holding[],
-  isSampleData: true,
+  isSampleData: false,
+  hasAccountSnapshot: false,
+}));
+
+const publicDemo = vi.hoisted(() => ({ current: false }));
+
+vi.mock("@/lib/demoSession", () => ({
+  isPublicDemoBuild: () => publicDemo.current,
 }));
 
 vi.mock("../../InvestContext", () => ({
@@ -156,10 +165,107 @@ vi.mock("@/lib/cinematicThemes", () => ({
 
 import { OverlapTab } from "../OverlapTab";
 
+function row(symbol: string): Holding {
+  return {
+    symbol,
+    exchange: "NSE",
+    quantity: 1,
+    averagePrice: 10,
+    ltp: 10,
+    pnl: 0,
+    pnlPercent: 0,
+  };
+}
+
+const EMPTY_COPY =
+  "No holdings to compare yet. Overlap appears once you hold two or more funds or baskets.";
+
+describe("resolveOverlapPresentation", () => {
+  it("keeps Practice on the empty state with zero holdings even when the sample feed is on", () => {
+    const presentation = resolveOverlapPresentation({
+      mode: "practice",
+      isPublicDemo: false,
+      isSampleData: true,
+      hasAccountSnapshot: false,
+      holdings: [],
+    });
+    expect(presentation.kind).toBe("empty");
+  });
+
+  it("keeps Practice empty with one holding and opens the book at two", () => {
+    expect(resolveOverlapPresentation({
+      mode: "practice",
+      isPublicDemo: false,
+      isSampleData: false,
+      hasAccountSnapshot: true,
+      holdings: [row("SBIN")],
+    }).kind).toBe("empty");
+
+    const opened = resolveOverlapPresentation({
+      mode: "practice",
+      isPublicDemo: false,
+      isSampleData: false,
+      hasAccountSnapshot: true,
+      holdings: [row("SBIN"), row("TCS")],
+    });
+    expect(opened.kind).toBe("book");
+    if (opened.kind === "book") expect(opened.holdings).toHaveLength(2);
+  });
+
+  it("shows the sample book in the web demo and before an account snapshot", () => {
+    const demo = resolveOverlapPresentation({
+      mode: "live",
+      isPublicDemo: true,
+      isSampleData: false,
+      hasAccountSnapshot: false,
+      holdings: [],
+    });
+    expect(demo).toMatchObject({ kind: "sample", label: "demo" });
+
+    const pending = resolveOverlapPresentation({
+      mode: "live",
+      isPublicDemo: false,
+      isSampleData: true,
+      hasAccountSnapshot: false,
+      holdings: [],
+    });
+    expect(pending).toMatchObject({ kind: "sample", label: "example" });
+  });
+
+  it("does not key the sample book on Explore", () => {
+    expect(resolveOverlapPresentation({
+      mode: "explore",
+      isPublicDemo: true,
+      isSampleData: true,
+      hasAccountSnapshot: false,
+      holdings: [],
+    })).toMatchObject({ kind: "sample", label: "demo" });
+
+    expect(resolveOverlapPresentation({
+      mode: "explore",
+      isPublicDemo: false,
+      isSampleData: true,
+      hasAccountSnapshot: false,
+      holdings: [],
+    })).toMatchObject({ kind: "sample", label: "example" });
+
+    expect(resolveOverlapPresentation({
+      mode: "practice",
+      isPublicDemo: true,
+      isSampleData: true,
+      hasAccountSnapshot: false,
+      holdings: [],
+    }).kind).toBe("empty");
+  });
+});
+
 describe("OverlapTab rendering", () => {
   beforeEach(() => {
     investState.holdings = [];
-    investState.isSampleData = true;
+    investState.isSampleData = false;
+    investState.hasAccountSnapshot = false;
+    publicDemo.current = false;
+    useModeStore.setState({ mode: "live" });
   });
 
   it("renders with sample data when no live holdings", () => {
@@ -195,16 +301,48 @@ describe("OverlapTab rendering", () => {
   });
 
   it("shows the empty state instead of the sample book when the account has no holdings", () => {
-    investState.isSampleData = false;
+    investState.hasAccountSnapshot = true;
     investState.holdings = [];
     render(<OverlapTab />);
 
-    expect(screen.getByTestId("overlap-empty")).toHaveTextContent(
-      "No holdings to compare yet. Overlap appears once you hold two or more funds or baskets.",
-    );
+    expect(screen.getByTestId("overlap-empty")).toHaveTextContent(EMPTY_COPY);
     expect(screen.queryByText("HDFCBANK")).not.toBeInTheDocument();
-    expect(screen.queryByText("UNIQUE STOCKS")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unique Stocks")).not.toBeInTheDocument();
     expect(screen.queryByText(/₹18,62,044/)).not.toBeInTheDocument();
     expect(screen.queryByTestId("overlap-example")).not.toBeInTheDocument();
+  });
+
+  it("stays empty with one holding and opens at two", () => {
+    investState.hasAccountSnapshot = true;
+    investState.holdings = [row("SBIN")];
+    const { unmount } = render(<OverlapTab />);
+    expect(screen.getByTestId("overlap-empty")).toHaveTextContent(EMPTY_COPY);
+    unmount();
+
+    investState.holdings = [row("SBIN"), row("TCS")];
+    render(<OverlapTab />);
+    expect(screen.queryByTestId("overlap-empty")).not.toBeInTheDocument();
+    expect(screen.getByText("2 total holdings")).toBeInTheDocument();
+    expect(screen.queryByText("HDFCBANK")).not.toBeInTheDocument();
+  });
+
+  it("labels the web demo sample book and keeps Practice empty", () => {
+    publicDemo.current = true;
+    render(<OverlapTab />);
+    expect(screen.getByTestId("overlap-demo-label")).toHaveTextContent("Demo (example data)");
+    expect(screen.getByText("HDFCBANK")).toBeInTheDocument();
+    expect(screen.queryByTestId("overlap-example")).not.toBeInTheDocument();
+  });
+
+  it("does not show the sample book in Practice when holdings are absent", () => {
+    useModeStore.setState({ mode: "practice" });
+    investState.isSampleData = true;
+    investState.holdings = [row("ZZZ"), row("YYY"), row("XXX")];
+    render(<OverlapTab />);
+
+    expect(screen.getByTestId("overlap-empty")).toHaveTextContent(EMPTY_COPY);
+    expect(screen.queryByText("ZZZ")).not.toBeInTheDocument();
+    expect(screen.queryByText("HDFCBANK")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("overlap-demo-label")).not.toBeInTheDocument();
   });
 });
