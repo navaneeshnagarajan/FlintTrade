@@ -524,9 +524,10 @@ compared at install time is the environment directory, not that symlink.
 The install refuses a command whose prefix is the FlintTrade environment.
 The default install puts CPU torch in the sidecar environment from
 `https://download.pytorch.org/whl/cpu`, then `laya[serve]==0.3.21`, so
-the CUDA wheels stay out. Those two pins live together in
-`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`
-(`torch==2.14.0+cpu` and `laya[serve]==0.3.21`). The CPU install applies
+the CUDA wheels stay out. The constraints file pins `torch==2.14.0+cpu`
+and `laya==0.3.21` with no extras
+(`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`).
+The `serve` extra stays on the install requirement. The CPU install applies
 that file to both pip commands, and installs torch first. CUDA and ROCm
 installs do not use the CPU pin. `install --accelerator cuda` opts into the
 PyPI torch build. `install --accelerator rocm` needs `LAYA_TORCH_INDEX`
@@ -546,12 +547,16 @@ A backend that was started with `LAYA_HOST=127.0.0.1`, `LAYA_PORT` (or
 the default 8000), and `LAYA_API_KEY_FILE` pointing at that `api.key`
 attaches on its health probe. The host must stay loopback. The attached
 client uses the same revision and digest checks. A health document
-without the weight digest stays Down.
+without the weight digest is Ready after install or start has verified
+the pinned revision and `model.safetensors` digest on disk. If that check
+cannot run, the reason is `unverified` ("Can't verify the model").
 
 `status` carries a reason code: `not_started`, `stopped`, `port_in_use`,
-`still_loading`, `unreachable`, or `wrong_revision`. The desk shows those
-as Not started, Stopped, Port &lt;n&gt; in use, Still loading, Unreachable, and Wrong
-model revision, then `python -m flinttrade_core.laya_runtime start`. A
+`still_loading`, `unreachable`, `wrong_revision`, `unverified`,
+`identity_absent`, or `key_rejected`. The desk shows those as Not started,
+Stopped, Port &lt;n&gt; in use, Still loading, Unreachable, Wrong model revision,
+Can't verify the model, Decision has no revision, and API key rejected,
+then `python -m flinttrade_core.laya_runtime start`. A
 dead child is reaped on the health probe and on interpreter exit, and
 the probe records Down with Stopped. `POST /api/v1/laya/start` starts or
 restarts the managed sidecar for a signed-in operator session. A

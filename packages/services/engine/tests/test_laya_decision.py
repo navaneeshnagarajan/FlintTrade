@@ -10,6 +10,7 @@ import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -32,6 +33,7 @@ class FakeLayaHost:
         self.requests: list[bytes] = []
         self.headers: list[dict[str, str]] = []
         self.response_code = 200
+        self.response_codes: list[int] = []
         self.response_body = b"{}"
         self.delay = 0.0
         self._httpd: ThreadingHTTPServer | None = None
@@ -48,7 +50,8 @@ class FakeLayaHost:
                 if host.delay:
                     time.sleep(host.delay)
                 body = host.response_body
-                self.send_response(host.response_code)
+                code = host.response_codes.pop(0) if host.response_codes else host.response_code
+                self.send_response(code)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -125,17 +128,29 @@ def _body(answers: dict[str, object], **extra: object) -> bytes:
     return json.dumps(payload).encode("utf-8")
 
 
-def _engine(host: FakeLayaHost, *, timeout: float = 1.0, status: DecisionStatus = DecisionStatus.READY) -> Laya:
+def _engine(
+    host: FakeLayaHost,
+    *,
+    timeout: float = 1.0,
+    status: DecisionStatus = DecisionStatus.READY,
+    verified: bool = False,
+    api_key: str = "test-key",
+    key_loader: Any = None,
+    on_key_rejected: Any = None,
+) -> Laya:
     engine = Laya(status=status, max_quantity=100, degraded_max_quantity=1)
-    engine.set_decision_client(
-        SystemOneClient(
-            host.url,
-            api_key="test-key",
-            timeout=timeout,
-            expected_revision=_POLICY.revision,
-            expected_sha256=_POLICY.sha256,
-        )
+    client = SystemOneClient(
+        host.url,
+        api_key=api_key,
+        timeout=timeout,
+        expected_revision=_POLICY.revision,
+        expected_sha256=_POLICY.sha256,
+        key_loader=key_loader,
+        on_key_rejected=on_key_rejected,
     )
+    if verified:
+        client.note_verification(_POLICY.revision, _POLICY.sha256)
+    engine.set_decision_client(client)
     return engine
 
 
@@ -335,7 +350,21 @@ def test_missing_identity_on_the_decision_response_is_down(laya_host: FakeLayaHo
     verdict = engine.admit(_proposal())
     assert verdict.allow is False
     assert engine.status is DecisionStatus.DOWN
-    assert any(item[0] == "failure" and item[1].endswith("mismatch") for item in verdict.evidence)
+    assert ("failure", "identity_absent") in verdict.evidence
+    assert engine.runtime_reason()[0] == "identity_absent"
+
+
+@pytest.mark.unit
+def test_unpatched_decision_is_ready_after_verification(laya_host: FakeLayaHost) -> None:
+    payload = json.loads(_body(_answers()))
+    payload.pop("revision")
+    payload.pop("sha256")
+    laya_host.response_body = json.dumps(payload).encode()
+    engine = _engine(laya_host, verified=True)
+    verdict = engine.admit(_proposal())
+    assert verdict.allow is True
+    assert engine.status is DecisionStatus.READY
+    assert engine.runtime_reason()[0] is None
 
 
 @pytest.mark.unit
@@ -403,6 +432,52 @@ def test_client_rejects_an_unusable_origin() -> None:
         expected_sha256=_POLICY.sha256,
     )
     assert client.base_url == "http://127.0.0.1:8888"
+
+
+@pytest.mark.unit
+def test_unauthorized_rereads_the_key_and_retries_once(laya_host: FakeLayaHost, tmp_path: Path) -> None:
+    key = tmp_path / "api.key"
+    key.write_text("stale\n", encoding="utf-8")
+    laya_host.response_codes = [401, 200]
+    laya_host.response_body = _body(_answers())
+    rejected: list[str] = []
+
+    def loader() -> str:
+        return key.read_text(encoding="utf-8")
+
+    engine = _engine(
+        laya_host,
+        api_key="stale",
+        key_loader=loader,
+        on_key_rejected=lambda: rejected.append("rejected"),
+    )
+    key.write_text("fresh\n", encoding="utf-8")
+    verdict = engine.admit(_proposal())
+    assert verdict.allow is True
+    assert engine.status is DecisionStatus.READY
+    assert rejected == []
+    assert laya_host.headers[-1]["Authorization"] == "Bearer fresh"
+    assert len(laya_host.requests) == 2
+
+
+@pytest.mark.unit
+def test_a_key_that_still_fails_is_rejected(laya_host: FakeLayaHost, tmp_path: Path) -> None:
+    key = tmp_path / "api.key"
+    key.write_text("stale\n", encoding="utf-8")
+    laya_host.response_code = 401
+    rejected: list[str] = []
+    engine = _engine(
+        laya_host,
+        api_key="stale",
+        key_loader=lambda: key.read_text(encoding="utf-8"),
+        on_key_rejected=lambda: rejected.append("rejected"),
+    )
+    verdict = engine.admit(_proposal())
+    assert verdict.allow is False
+    assert engine.status is DecisionStatus.DOWN
+    assert engine.runtime_reason()[0] == "key_rejected"
+    assert rejected == ["rejected"]
+    assert len(laya_host.requests) == 2
 
 
 @pytest.mark.unit

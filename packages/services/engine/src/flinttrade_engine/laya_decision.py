@@ -17,7 +17,7 @@ import math
 import tomllib
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
@@ -290,14 +290,17 @@ def interpret_health(
     *,
     policy: LayaPolicy | None = None,
     requested_device: str = "cpu",
+    verified: tuple[str, str] | None = None,
 ) -> DecisionStatus:
     """Map a sidecar health document to Ready, Degraded, or Down.
 
-    A missing document, a missing digest, a revision mismatch, or a digest
-    mismatch is Down.
-    CPU fallback when a non-CPU device was requested is Degraded.
+    A missing document, a revision mismatch, or a digest that disagrees with
+    the pin is Down. A health document that omits the digest is Ready when
+    ``verified`` is the pinned revision and weight digest recorded from the
+    files on disk. CPU fallback when a non-CPU device was requested is Degraded.
     """
     active = policy or load_policy()
+    verified_ok = verified is not None and verified == (active.revision, active.sha256)
     if not isinstance(payload, Mapping):
         return DecisionStatus.DOWN
     if str(payload.get("status") or "") != "ok":
@@ -306,12 +309,16 @@ def interpret_health(
     if not isinstance(loaded, (list, tuple)) or active.checkpoint not in loaded:
         return DecisionStatus.DOWN
     revisions = payload.get("revisions")
-    if not isinstance(revisions, Mapping):
-        return DecisionStatus.DOWN
-    if str(revisions.get(active.checkpoint) or "") != active.revision:
+    if isinstance(revisions, Mapping):
+        if str(revisions.get(active.checkpoint) or "") != active.revision:
+            return DecisionStatus.DOWN
+    elif not verified_ok:
         return DecisionStatus.DOWN
     reported = _reported_digest(payload, active)
-    if reported is None or reported != active.sha256:
+    if reported is None:
+        if not verified_ok:
+            return DecisionStatus.DOWN
+    elif reported != active.sha256:
         return DecisionStatus.DOWN
     device = str(payload.get("device") or "")
     fallback_count = _fallback_count(payload, active.checkpoint)
@@ -334,33 +341,50 @@ def health_identity_failure(
     policy: LayaPolicy | None = None,
     requested_device: str = "cpu",
 ) -> bool:
-    """True when a Laya-shaped health document disagrees with the pin.
+    """True when health claims a revision or digest that is not the pin.
 
-    A missing document, or one that has not finished loading, is not this
-    failure. A loaded checkpoint with the wrong revision, a missing digest,
-    or the wrong digest is. A device mismatch is Down without this flag.
+    A missing document, a model that has not finished loading, or a digest
+    the package simply does not send is not this failure. Wrong model
+    revision is only a real mismatch. ``requested_device`` is unused: a
+    device mismatch is Down without this flag.
     """
+    del requested_device
     if not isinstance(payload, Mapping):
         return False
     if str(payload.get("status") or "") != "ok":
         return False
     active = policy or load_policy()
-    loaded = payload.get("loaded")
     revisions = payload.get("revisions")
-    claims_model = (
-        (isinstance(loaded, (list, tuple)) and active.checkpoint in loaded)
-        or isinstance(revisions, Mapping)
-        or "sha256" in payload
-        or "digests" in payload
-    )
-    if not claims_model:
-        return False
-    if interpret_health(payload, policy=active, requested_device=requested_device) is not DecisionStatus.DOWN:
-        return False
-    if not isinstance(revisions, Mapping) or str(revisions.get(active.checkpoint) or "") != active.revision:
-        return True
+    if isinstance(revisions, Mapping):
+        claimed = str(revisions.get(active.checkpoint) or "")
+        if claimed and claimed != active.revision:
+            return True
     reported = _reported_digest(payload, active)
-    return reported is None or reported != active.sha256
+    return reported is not None and reported != active.sha256
+
+
+def health_needs_recorded_verification(
+    payload: Mapping[str, Any] | None,
+    *,
+    policy: LayaPolicy | None = None,
+) -> bool:
+    """True when health says the checkpoint is loaded and sends no digest.
+
+    That is the unpatched package. Ready then depends on the file hash
+    recorded at install or start. A contradictory revision is not this case.
+    """
+    if not isinstance(payload, Mapping) or str(payload.get("status") or "") != "ok":
+        return False
+    active = policy or load_policy()
+    loaded = payload.get("loaded")
+    if not isinstance(loaded, (list, tuple)) or active.checkpoint not in loaded:
+        return False
+    revisions = payload.get("revisions")
+    if isinstance(revisions, Mapping):
+        claimed = str(revisions.get(active.checkpoint) or "")
+        if claimed and claimed != active.revision:
+            return False
+    return _reported_digest(payload, active) is None
 
 
 def publish_probe(
@@ -369,10 +393,16 @@ def publish_probe(
     *,
     requested_device: str = "cpu",
     policy: LayaPolicy | None = None,
+    verified: tuple[str, str] | None = None,
 ) -> DecisionStatus:
     """Record probe status. Live stays Down without a matching qualification record."""
     active = policy or load_policy()
-    status = interpret_health(payload, policy=active, requested_device=requested_device)
+    status = interpret_health(
+        payload,
+        policy=active,
+        requested_device=requested_device,
+        verified=verified,
+    )
     record = getattr(engine, "qualification", None)
     live = status is not DecisionStatus.DOWN and qualification_covers_live(record, active)
     engine.apply_runtime_status(status, live_qualified=live)
@@ -394,6 +424,9 @@ class SystemOneClient:
         timeout: float = 3.0,
         expected_revision: str,
         expected_sha256: str,
+        key_loader: Callable[[], str] | None = None,
+        on_key_refreshed: Callable[[str], None] | None = None,
+        on_key_rejected: Callable[[], None] | None = None,
     ) -> None:
         self._base_url = _validate_base_url(base_url)
         self._api_key = api_key.strip()
@@ -404,18 +437,63 @@ class SystemOneClient:
         self._expected_sha256 = expected_sha256.strip().lower()
         if not self._expected_revision or not self._expected_sha256:
             raise ValueError("decision client requires a revision and digest pin")
+        self._key_loader = key_loader
+        self._on_key_refreshed = on_key_refreshed
+        self._on_key_rejected = on_key_rejected
+        self._verified: tuple[str, str] | None = None
 
     @property
     def base_url(self) -> str:
         """Normalised host, without a trailing secret."""
         return self._base_url
 
+    def note_verification(self, revision: str, sha256: str) -> None:
+        """Trust a digest recorded from the files on disk when it is the pin."""
+        if revision == self._expected_revision and sha256 == self._expected_sha256:
+            self._verified = (revision, sha256)
+            return
+        self._verified = None
+
+    def replace_api_key(self, api_key: str) -> None:
+        """Use a key re-read from the sidecar key file."""
+        self._api_key = api_key.strip()
+
     def decide(self, state: str, questions: Mapping[str, Mapping[str, object]]) -> Mapping[str, Any]:
         """Post one decision and return the decoded object.
+
+        A 401 re-reads the key file when a loader is set, then retries once.
+        A second 401 is the key rejection.
 
         Raises:
             DecisionCallError: The host was unreachable, slow, or not usable.
         """
+        try:
+            return self._post(state, questions)
+        except DecisionCallError as exc:
+            if exc.code != "http_401":
+                raise
+        self._refresh_key()
+        try:
+            return self._post(state, questions)
+        except DecisionCallError as exc:
+            if exc.code == "http_401" and self._on_key_rejected is not None:
+                self._on_key_rejected()
+            raise
+
+    def _refresh_key(self) -> None:
+        if self._key_loader is None:
+            return
+        try:
+            loaded = self._key_loader().strip()
+        except OSError:
+            return
+        if not loaded or loaded == self._api_key:
+            return
+        self._api_key = loaded
+        if self._on_key_refreshed is not None:
+            self._on_key_refreshed(loaded)
+
+    def _post(self, state: str, questions: Mapping[str, Mapping[str, object]]) -> Mapping[str, Any]:
         url = f"{self._base_url}/v1/systemone"
         body = json.dumps({"state": state, "questions": questions, "model": "english"}).encode("utf-8")
         request = urllib.request.Request(url, data=body, method="POST")
@@ -450,16 +528,38 @@ class SystemOneClient:
         self._check_identity(payload)
         return payload
 
-    def _check_identity(self, payload: Mapping[str, Any]) -> None:
-        """Reject a response whose revision or digest is not the pinned string.
+    def _claimed_identity(self, payload: Mapping[str, Any], field: str) -> str | None:
+        """Return a claimed pin, or ``None`` when the field was not sent.
 
-        Missing, blank, padded, and non-string values are not the pin. That
-        is Down.
+        A blank value is absent. Padding and a non-string are claims that
+        are not the pin.
         """
-        if payload.get("revision") != self._expected_revision:
+        if field not in payload or payload.get(field) is None:
+            return None
+        value = payload[field]
+        if not isinstance(value, str):
+            return "\0"
+        if value.strip() == "":
+            return None
+        return value
+
+    def _check_identity(self, payload: Mapping[str, Any]) -> None:
+        """Check revision and digest against the pin, or the recorded file hash.
+
+        A value that is present and is not the pin is a mismatch. A decision
+        that omits revision or sha256 is accepted only after the weight file
+        was verified. Otherwise it is ``identity_absent``, not a revision mismatch.
+        """
+        revision = self._claimed_identity(payload, "revision")
+        digest = self._claimed_identity(payload, "sha256")
+        if revision is not None and revision != self._expected_revision:
             raise DecisionCallError("revision_mismatch")
-        if payload.get("sha256") != self._expected_sha256:
+        if digest is not None and digest != self._expected_sha256:
             raise DecisionCallError("digest_mismatch")
+        if revision is None or digest is None:
+            if self._verified == (self._expected_revision, self._expected_sha256):
+                return
+            raise DecisionCallError("identity_absent")
 
 
 def _validate_base_url(base_url: str) -> str:

@@ -56,6 +56,9 @@ const LAYA_REASON_CODES = new Set([
   "still_loading",
   "unreachable",
   "wrong_revision",
+  "unverified",
+  "identity_absent",
+  "key_rejected",
 ]);
 
 function layaStatusValue(value: unknown): LayaHeartbeat | null {

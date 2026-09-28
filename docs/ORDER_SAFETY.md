@@ -108,9 +108,12 @@ reason is "Laya is uncertain. Quantity stays inside the tighter limit."
 The Live server reason is "Laya is uncertain. Live stays closed." The desk
 does not auto-place. Order Pad and Quick Trade show "Not placed. Laya
 allows up to N." with Place N and Cancel. A
-decision response that omits `revision` or `sha256`, and a health document
-that omits the weight digest, are Down. The health case is chip reason
-`wrong_revision` ("Wrong model revision"). Stopping the sidecar records Down
+decision that omits `revision` or `sha256` is Down with `identity_absent`
+("Decision has no revision") unless install or start already verified the
+weight file. A health document that omits the digest is Ready after that
+check. If the check is missing, the chip reason is `unverified`
+("Can't verify the model"). `wrong_revision` ("Wrong model revision") is
+only a real mismatch. Stopping the sidecar records Down
 before an in-flight probe can publish Ready. Desk place surfaces go through
 this admission.
 

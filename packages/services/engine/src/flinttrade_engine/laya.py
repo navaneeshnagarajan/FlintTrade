@@ -68,6 +68,9 @@ LAYA_REASON_PORT_IN_USE = "port_in_use"
 LAYA_REASON_STILL_LOADING = "still_loading"
 LAYA_REASON_UNREACHABLE = "unreachable"
 LAYA_REASON_WRONG_REVISION = "wrong_revision"
+LAYA_REASON_UNVERIFIED = "unverified"
+LAYA_REASON_IDENTITY_ABSENT = "identity_absent"
+LAYA_REASON_KEY_REJECTED = "key_rejected"
 LAYA_REASON_CODES = frozenset(
     {
         LAYA_REASON_NOT_STARTED,
@@ -76,6 +79,9 @@ LAYA_REASON_CODES = frozenset(
         LAYA_REASON_STILL_LOADING,
         LAYA_REASON_UNREACHABLE,
         LAYA_REASON_WRONG_REVISION,
+        LAYA_REASON_UNVERIFIED,
+        LAYA_REASON_IDENTITY_ABSENT,
+        LAYA_REASON_KEY_REJECTED,
     }
 )
 
@@ -90,6 +96,9 @@ def laya_reason_detail(reason: str | None, port: int) -> str | None:
         LAYA_REASON_STILL_LOADING: "Still loading",
         LAYA_REASON_UNREACHABLE: "Unreachable",
         LAYA_REASON_WRONG_REVISION: "Wrong model revision",
+        LAYA_REASON_UNVERIFIED: "Can't verify the model",
+        LAYA_REASON_IDENTITY_ABSENT: "Decision has no revision",
+        LAYA_REASON_KEY_REJECTED: "API key rejected",
     }
     if reason is None:
         return None
@@ -316,6 +325,10 @@ class Laya:
         )
         if decision.effect == "down":
             self.set_status(DecisionStatus.DOWN)
+            failure = next((item[1] for item in decision.evidence if item[0] == "failure"), "")
+            chip_reason = _reason_for_decision_failure(failure)
+            if chip_reason is not None:
+                self.set_runtime_reason(chip_reason, self.runtime_reason()[1])
             verdict = self._down_verdict(VerdictLimits(max_quantity=self._ceiling_for(DecisionStatus.DOWN)))
             return Verdict(
                 allow=verdict.allow,
@@ -457,14 +470,27 @@ def admission_kind(verdict: Verdict, requested_quantity: int) -> str:
 
     Returns:
         ``allow`` when that quantity may continue to SafetySystem.
-        ``clamp`` when only a smaller quantity is acceptable. Nothing is placed.
+        ``clamp`` when the requested quantity is above the allowed quantity.
+        Nothing is placed. A request that is already at that quantity is an allow,
+        including when an uncertain note tightened the ceiling.
         ``deny`` when nothing may continue.
     """
     if not verdict.allow:
         return "deny"
-    if verdict.applied_quantity != requested_quantity or verdict.tightened:
+    if requested_quantity > verdict.applied_quantity:
         return "clamp"
     return "allow"
+
+
+def _reason_for_decision_failure(code: str) -> str | None:
+    """Map a host failure onto a chip reason. Other failures stay with the probe."""
+    if code in {"revision_mismatch", "digest_mismatch"}:
+        return LAYA_REASON_WRONG_REVISION
+    if code == "identity_absent":
+        return LAYA_REASON_IDENTITY_ABSENT
+    if code == "http_401":
+        return LAYA_REASON_KEY_REJECTED
+    return None
 
 
 def clamp_place_message(applied_quantity: int) -> str:

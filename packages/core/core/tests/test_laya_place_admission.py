@@ -290,7 +290,7 @@ def test_practice_place_without_a_note_clamps_instead_of_demanding_a_reason() ->
     app, sandbox = _practice_app()
     response = app.test_client().post(
         "/api/v1/orders/place",
-        json=_BODY,
+        json={**_BODY, "quantity": 4},
         headers=_headers("practice"),
     )
     body = response.get_json()
@@ -305,7 +305,7 @@ def test_practice_place_without_a_note_clamps_instead_of_demanding_a_reason() ->
 
     blank = app.test_client().post(
         "/api/v1/orders/place",
-        json={**_BODY, "note": "   ", "rationale": ""},
+        json={**_BODY, "quantity": 4, "note": "   ", "rationale": ""},
         headers=_headers("practice"),
     )
     assert blank.status_code == 409
@@ -331,7 +331,7 @@ _DESK_ORDER_PAD = {
 
 @pytest.mark.unit
 def test_practice_desk_order_pad_without_a_note_reaches_the_policy() -> None:
-    """The desk Order Pad body has no rationale. Practice still clamps."""
+    """The desk Order Pad body has no rationale. Quantity 1 is already allowed."""
     host = _ScriptedHost(_allow_answers())
     process_laya().set_status(DecisionStatus.READY)
     process_laya().set_decision_client(host)
@@ -341,18 +341,63 @@ def test_practice_desk_order_pad_without_a_note_reaches_the_policy() -> None:
         json=_DESK_ORDER_PAD,
         headers=_headers("practice"),
     )
-    body = response.get_json()
     assert "rationale" not in _DESK_ORDER_PAD
     assert "note" not in _DESK_ORDER_PAD
-    assert response.status_code == 409
-    assert body["code"] == "laya_clamp"
-    assert body["reason"] == "Laya is uncertain. Quantity stays inside the tighter limit."
-    assert body["message"] == "Not placed. Laya allows up to 1."
-    assert "concrete reason is required" not in json.dumps(body)
-    assert "Live" not in body["reason"]
-    assert body["code"] != "laya_denied"
-    sandbox.place_order.assert_not_called()
+    assert response.status_code == 200
+    assert "concrete reason is required" not in response.get_data(as_text=True)
+    assert "Live" not in response.get_data(as_text=True)
+    sandbox.place_order.assert_called_once()
     assert host.calls == []
+
+
+@pytest.mark.unit
+def test_place_one_on_allows_up_to_one_places() -> None:
+    """A no-note clamp to 1 must not refuse the follow-up place at quantity 1."""
+    host = _ScriptedHost(_allow_answers())
+    process_laya().set_status(DecisionStatus.READY)
+    process_laya().set_decision_client(host)
+    app, sandbox = _practice_app()
+    first = app.test_client().post(
+        "/api/v1/orders/place",
+        json={**_BODY, "quantity": 4},
+        headers=_headers("practice"),
+    )
+    body = first.get_json()
+    assert first.status_code == 409
+    assert body["code"] == "laya_clamp"
+    assert body["message"] == "Not placed. Laya allows up to 1."
+    sandbox.place_order.assert_not_called()
+    second = app.test_client().post(
+        "/api/v1/orders/place",
+        json={**_BODY, "quantity": 1},
+        headers=_headers("practice"),
+    )
+    assert second.status_code == 200
+    sandbox.place_order.assert_called_once()
+
+
+@pytest.mark.unit
+def test_place_100_after_a_150_cap_passes_admission(backend_lease_proof) -> None:
+    process_laya().set_status(DecisionStatus.READY)
+    app, router, safety = _live_app(backend_lease_proof)
+    first = app.test_client().post(
+        "/api/v1/orders/openalgo/place",
+        json={**_BODY, "quantity": 150},
+        headers=_headers("live", unlocked=True),
+    )
+    body = first.get_json()
+    assert first.status_code == 409
+    assert body["message"] == "Not placed. Laya allows up to 100."
+    safety.check_order.assert_not_called()
+    router.place_order.assert_not_called()
+    second = app.test_client().post(
+        "/api/v1/orders/openalgo/place",
+        json={**_BODY, "quantity": 100},
+        headers=_headers("live", unlocked=True),
+    )
+    assert second.status_code == 503
+    assert second.get_json().get("code") not in {"laya_denied", "laya_clamp"}
+    router.place_order.assert_not_called()
 
 
 @pytest.mark.unit

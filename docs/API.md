@@ -513,7 +513,8 @@ response is JSON
 `laya` is the Live-facing status. `laya_practice` is the sidecar status the
 Practice chip shows. `laya_live_qualified` is true only when a qualification
 record covers the pin. `laya_reason` is one of `not_started`, `stopped`,
-`port_in_use`, `still_loading`, `unreachable`, or `wrong_revision`, or
+`port_in_use`, `still_loading`, `unreachable`, `wrong_revision`,
+`unverified`, `identity_absent`, or `key_rejected`, or
 `null` when Ready or Degraded has cleared it. `laya_port` is the sidecar
 port (`LAYA_PORT`, default 8000). Laya starts Down. A ping does not invent Ready.
 `GET /health` records Ready, Degraded, or Down from the opt-in sidecar when

@@ -18,19 +18,28 @@ from flinttrade_core.laya_runtime import (
     CPU_TORCH_INDEX,
     LAYA_BIND_HOST,
     LAYA_SERVE_REQUIREMENT,
+    ArtifactCheck,
     LayaRuntime,
     LayaRuntimeError,
     attach_from_environment,
+    constraint_lines_with_extras,
     cpu_torch_command,
     install_command,
     install_commands,
     main,
     set_process_runtime,
     sidecar_constraints_path,
+    verify_weight_file,
     venv_python,
 )
 from flinttrade_core.service_providers import EvidenceUseScope
-from flinttrade_engine.laya import DecisionStatus, Proposal, process_laya, reset_process_laya_for_tests
+from flinttrade_engine.laya import (
+    DecisionStatus,
+    Proposal,
+    laya_reason_detail,
+    process_laya,
+    reset_process_laya_for_tests,
+)
 from flinttrade_engine.laya_decision import LayaQualification, load_policy, publish_probe
 
 
@@ -110,7 +119,9 @@ def test_install_command_pins_the_sidecar_venv_not_the_main_interpreter(tmp_path
     constraints = sidecar_constraints_path()
     pinned = constraints.read_text(encoding="utf-8")
     assert "torch==2.14.0+cpu" in pinned
-    assert "laya[serve]==0.3.21" in pinned
+    assert "laya==0.3.21" in pinned
+    assert constraint_lines_with_extras(pinned) == []
+    assert LAYA_SERVE_REQUIREMENT == "laya[serve]==0.3.21"
     assert CPU_TORCH_INDEX in pinned
     assert str(constraints) in torch
     assert torch[-1] == "torch"
@@ -387,6 +398,7 @@ def test_status_command_reports_the_loopback_sidecar(
 def test_attach_uses_the_policy_pin_and_fails_closed_without_a_digest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "empty-hub"))
     key_path = tmp_path / "runtime" / "laya" / "api.key"
     key_path.parent.mkdir(parents=True)
     key_path.write_text("sidecar-key\n", encoding="utf-8")
@@ -406,9 +418,17 @@ def test_attach_uses_the_policy_pin_and_fails_closed_without_a_digest(
     missing = _healthy()
     missing.pop("sha256")
     runtime._health_reader = lambda _url: missing  # type: ignore[method-assign]
+    runtime._artifact_checker = lambda: ArtifactCheck(  # type: ignore[method-assign]
+        ok=False,
+        reason="unverified",
+        revision=load_policy().revision,
+        sha256="",
+    )
+    runtime._artifact_check = None  # type: ignore[attr-defined]
     runtime.publish_status()
     assert process_laya().status is DecisionStatus.DOWN
-    assert process_laya().runtime_reason()[0] == "wrong_revision"
+    assert process_laya().runtime_reason()[0] == "unverified"
+    assert laya_reason_detail("unverified", 8000) == "Can't verify the model"
     reset_process_laya_for_tests()
 
 
@@ -657,3 +677,99 @@ def test_laya_start_is_operator_only_and_does_not_spawn(monkeypatch: pytest.Monk
     assert ok.status_code == 200
     assert ok.get_json()["status"] == "ok"
     assert calls == ["start"]
+
+
+def _attached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, checker: ArtifactCheck) -> LayaRuntime:
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "empty-hub"))
+    key_path = tmp_path / "api.key"
+    key_path.write_text("old-key\n", encoding="utf-8")
+    monkeypatch.setenv("LAYA_API_KEY_FILE", str(key_path))
+    monkeypatch.setenv("LAYA_HOST", "127.0.0.1")
+    runtime = LayaRuntime(tmp_path, artifact_checker=lambda: checker)
+    runtime.attach(key_path)
+    return runtime
+
+
+@pytest.mark.unit
+def test_constraints_parser_rejects_an_extra() -> None:
+    assert constraint_lines_with_extras("laya[serve]==0.3.21\n") == ["laya[serve]==0.3.21"]
+    assert constraint_lines_with_extras("# laya[serve]==0.3.21\nlaya==0.3.21\n") == []
+
+
+@pytest.mark.unit
+def test_unpatched_health_is_ready_after_the_weight_file_is_verified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = load_policy()
+    payload = _healthy()
+    payload.pop("sha256")
+    runtime = _attached(
+        tmp_path,
+        monkeypatch,
+        ArtifactCheck(ok=True, reason=None, revision=policy.revision, sha256=policy.sha256),
+    )
+    runtime._health_reader = lambda _url: payload  # type: ignore[method-assign]
+    runtime.publish_status()
+    assert process_laya().effective_status("practice") is DecisionStatus.READY
+    assert process_laya().runtime_reason()[0] is None
+    client = process_laya()._decision_client  # noqa: SLF001
+    assert client is not None
+    assert client._verified == (policy.revision, policy.sha256)  # noqa: SLF001
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_weight_digest_mismatch_is_wrong_revision(tmp_path: Path) -> None:
+    policy = load_policy()
+    path = tmp_path / "model.safetensors"
+    path.write_bytes(b"not-the-pinned-weights")
+    check = verify_weight_file(
+        path,
+        revision=policy.revision,
+        expected_revision=policy.revision,
+        expected_sha256=policy.sha256,
+    )
+    assert check.ok is False
+    assert check.reason == "wrong_revision"
+    runtime = LayaRuntime(tmp_path, artifact_checker=lambda: check, health_reader=lambda _url: _healthy())
+    key_path = tmp_path / "api.key"
+    key_path.write_text("sidecar-key\n", encoding="utf-8")
+    runtime.attach(key_path)
+    runtime.publish_status()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "wrong_revision"
+    assert laya_reason_detail("wrong_revision", 8000) == "Wrong model revision"
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_stale_api_key_is_reread_and_a_rejected_key_stays_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = load_policy()
+    runtime = _attached(
+        tmp_path,
+        monkeypatch,
+        ArtifactCheck(ok=True, reason=None, revision=policy.revision, sha256=policy.sha256),
+    )
+    runtime._health_reader = lambda _url: _healthy()  # type: ignore[method-assign]
+    key_path = tmp_path / "api.key"
+    key_path.write_text("fresh-key\n", encoding="utf-8")
+    runtime.publish_status()
+    client = process_laya()._decision_client  # noqa: SLF001
+    assert client is not None
+    assert client._api_key == "fresh-key"  # noqa: SLF001
+    assert process_laya().effective_status("practice") is DecisionStatus.READY
+
+    runtime._mark_key_rejected()
+    runtime.publish_status()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "key_rejected"
+    assert laya_reason_detail("key_rejected", runtime._port) == "API key rejected"  # noqa: SLF001
+    assert process_laya().effective_status("practice") is not DecisionStatus.READY
+
+    key_path.write_text("rotated-key\n", encoding="utf-8")
+    runtime.publish_status()
+    assert client._api_key == "rotated-key"  # noqa: SLF001
+    assert process_laya().effective_status("practice") is DecisionStatus.READY
+    reset_process_laya_for_tests()

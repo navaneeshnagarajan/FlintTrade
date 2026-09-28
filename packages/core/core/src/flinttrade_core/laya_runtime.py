@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import hashlib
 import json
 import os
 import secrets
@@ -28,6 +29,7 @@ import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -64,8 +66,37 @@ def serve_executable(venv_dir: Path) -> Path:
 
 
 def sidecar_constraints_path() -> Path:
-    """Constraints file that pins CPU torch and ``laya[serve]`` together."""
+    """Constraints file that pins CPU torch and ``laya`` together.
+
+    The install requirement still asks for the ``serve`` extra. The
+    constraints line does not: pip rejects extras in a constraints file.
+    """
     return Path(__file__).resolve().with_name("laya_sidecar_constraints.txt")
+
+
+def constraint_lines_with_extras(text: str) -> list[str]:
+    """Return constraint lines that name an extra.
+
+    Comments and blank lines are ignored. A requirement marker such as
+    ``name[extra]==1`` is an extra. Environment markers after ``;`` are not.
+    """
+    found: list[str] = []
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        requirement = line.split(";", 1)[0]
+        if "[" in requirement:
+            found.append(line)
+    return found
+
+
+def assert_constraints_have_no_extras(path: Path | None = None) -> None:
+    """Refuse a constraints file pip cannot apply."""
+    target = path or sidecar_constraints_path()
+    extras = constraint_lines_with_extras(target.read_text(encoding="utf-8"))
+    if extras:
+        raise LayaRuntimeError("Constraints cannot have extras")
 
 
 def install_command(venv_dir: Path, *, constraints: Path | None = None) -> list[str]:
@@ -113,6 +144,7 @@ def install_commands(venv_dir: Path, *, accelerator: str = "cpu") -> list[list[s
         raise LayaRuntimeError("Laya accelerator must be cpu, cuda, or rocm")
     if accelerator == "cpu":
         constraints = sidecar_constraints_path()
+        assert_constraints_have_no_extras(constraints)
         return [cpu_torch_command(venv_dir), install_command(venv_dir, constraints=constraints)]
     pinned = install_command(venv_dir)
     if accelerator == "cuda":
@@ -232,6 +264,108 @@ def attach_from_environment(workspace: Path | None = None) -> LayaRuntime | None
     return runtime
 
 
+@dataclass(frozen=True, slots=True)
+class ArtifactCheck:
+    """Result of hashing the pinned weight file."""
+
+    ok: bool
+    reason: str | None
+    revision: str
+    sha256: str
+
+
+def huggingface_cache_roots() -> list[Path]:
+    """Cache directories the sidecar and this process share.
+
+    An explicit ``HUGGINGFACE_HUB_CACHE`` or ``HF_HOME`` replaces the
+    default user cache so a test can point at an empty directory.
+    """
+    hub = os.environ.get("HUGGINGFACE_HUB_CACHE", "").strip()
+    if hub:
+        return [Path(hub).expanduser()]
+    home = os.environ.get("HF_HOME", "").strip()
+    if home:
+        return [Path(home).expanduser() / "hub"]
+    return [Path.home() / ".cache" / "huggingface" / "hub"]
+
+
+def snapshot_weight_path(root: Path, *, repo: str, revision: str, filename: str) -> Path:
+    """Hugging Face snapshot path for one pinned revision."""
+    folder = "models--" + repo.replace("/", "--")
+    return root / folder / "snapshots" / revision / filename
+
+
+def sha256_file(path: Path) -> str:
+    """Hex digest of a file. Symlinks are followed."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def verify_weight_file(
+    path: Path,
+    *,
+    revision: str,
+    expected_revision: str,
+    expected_sha256: str,
+) -> ArtifactCheck:
+    """Hash ``path`` and compare it with the pin."""
+    if revision != expected_revision:
+        return ArtifactCheck(ok=False, reason="wrong_revision", revision=revision, sha256="")
+    try:
+        actual = sha256_file(path)
+    except OSError:
+        return ArtifactCheck(ok=False, reason="unverified", revision=revision, sha256="")
+    if actual != expected_sha256:
+        return ArtifactCheck(ok=False, reason="wrong_revision", revision=revision, sha256=actual)
+    return ArtifactCheck(ok=True, reason=None, revision=revision, sha256=actual)
+
+
+def find_pinned_weight(
+    *,
+    repo: str,
+    revision: str,
+    filename: str,
+    cache_roots: list[Path] | None = None,
+) -> Path | None:
+    """Return the pinned snapshot file, when it is already on disk."""
+    roots = huggingface_cache_roots() if cache_roots is None else cache_roots
+    for root in roots:
+        candidate = snapshot_weight_path(root, repo=repo, revision=revision, filename=filename)
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def verify_installed_model(
+    *,
+    repo: str,
+    revision: str,
+    filename: str,
+    expected_sha256: str,
+    cache_roots: list[Path] | None = None,
+) -> ArtifactCheck:
+    """Verify the pinned revision and the weight file on disk.
+
+    A missing file, or a file that cannot be read, is unverified. A file
+    whose digest is not the pin is a real mismatch.
+    """
+    path = find_pinned_weight(repo=repo, revision=revision, filename=filename, cache_roots=cache_roots)
+    if path is None:
+        return ArtifactCheck(ok=False, reason="unverified", revision=revision, sha256="")
+    return verify_weight_file(
+        path,
+        revision=revision,
+        expected_revision=revision,
+        expected_sha256=expected_sha256,
+    )
+
+
 class LayaRuntime:
     """Install and supervise one loopback ``laya-serve`` process."""
 
@@ -246,6 +380,7 @@ class LayaRuntime:
         installer: Callable[[Path, list[str]], None] | None = None,
         health_reader: Callable[[str], Mapping[str, Any] | None] | None = None,
         port_probe: Callable[[int], bool] | None = None,
+        artifact_checker: Callable[[], ArtifactCheck] | None = None,
     ) -> None:
         if host != LAYA_BIND_HOST:
             raise LayaRuntimeError("Laya sidecar must bind 127.0.0.1")
@@ -260,9 +395,13 @@ class LayaRuntime:
         self._installer = installer
         self._health_reader = health_reader
         self._port_probe = port_probe
+        self._artifact_checker = artifact_checker
         self._process: Any | None = None
         self._attached = False
         self._api_key = ""
+        self._watched_key: Path | None = None
+        self._key_rejected = False
+        self._artifact_check: ArtifactCheck | None = None
         self._generation = 0
         self._loaded_once = False
         self._child_stopped = False
@@ -297,12 +436,13 @@ class LayaRuntime:
                 self.runtime_root / "install.json",
                 {"requirement": LAYA_SERVE_REQUIREMENT, "accelerator": accelerator},
             )
+            self._remember_artifact(self.ensure_artifact_check(force=True))
         return self.venv_dir
 
     def start(self) -> str:
         """Start ``laya-serve`` with a new API key. Returns the loopback origin."""
         from flinttrade_engine.laya import process_laya  # noqa: PLC0415
-        from flinttrade_engine.laya_decision import SystemOneClient, load_policy  # noqa: PLC0415
+        from flinttrade_engine.laya_decision import load_policy  # noqa: PLC0415
 
         policy = load_policy()
         self._ensure_dirs()
@@ -349,14 +489,12 @@ class LayaRuntime:
                 if isinstance(pid, int) and pid > 0:
                     _write_private(self._pid_path, str(pid))
                 self._api_key = api_key
-                process_laya().set_decision_client(
-                    SystemOneClient(
-                        self.base_url,
-                        api_key=api_key,
-                        expected_revision=policy.revision,
-                        expected_sha256=policy.sha256,
-                    )
-                )
+                self._watched_key = self._key_path
+                self._key_rejected = False
+                client = self._decision_client(api_key, policy)
+                self._remember_artifact(self.ensure_artifact_check(force=True))
+                self._note_client_verification(client)
+                process_laya().set_decision_client(client)
                 set_process_runtime(self)
             except Exception:
                 self._process = None
@@ -374,11 +512,12 @@ class LayaRuntime:
     def attach(self, key_path: Path) -> str:
         """Use an existing loopback sidecar. Does not spawn a process.
 
-        The client is pinned to the policy revision and weight digest. A later
-        health document that omits or mismatches that digest stays Down.
+        The client is pinned to the policy revision and weight digest. A health
+        document that omits the digest is Ready only after the weight file on
+        disk matches the pin. A real mismatch stays Down.
         """
         from flinttrade_engine.laya import process_laya  # noqa: PLC0415
-        from flinttrade_engine.laya_decision import SystemOneClient, load_policy  # noqa: PLC0415
+        from flinttrade_engine.laya_decision import load_policy  # noqa: PLC0415
 
         try:
             api_key = key_path.expanduser().read_text(encoding="utf-8").strip()
@@ -388,12 +527,11 @@ class LayaRuntime:
             _record_attach_down(self._port)
             raise LayaRuntimeError("Laya API key file is empty")
         policy = load_policy()
-        client = SystemOneClient(
-            self.base_url,
-            api_key=api_key,
-            expected_revision=policy.revision,
-            expected_sha256=policy.sha256,
-        )
+        self._watched_key = key_path.expanduser()
+        self._key_rejected = False
+        client = self._decision_client(api_key, policy)
+        self._remember_artifact(self.ensure_artifact_check(force=True))
+        self._note_client_verification(client)
         with self._lock:
             self._attached = True
             self._api_key = api_key
@@ -418,6 +556,7 @@ class LayaRuntime:
             engine.set_runtime_reason("not_started", self._port)
             self._loaded_once = False
             self._child_stopped = False
+            self._key_rejected = False
             process = self._process
             pid = _read_pid_file(self._pid_path)
             self._process = None
@@ -439,9 +578,22 @@ class LayaRuntime:
         The first load stays Down for admission and records ``still_loading``.
         A port held by something else records ``port_in_use``.
         """
-        from flinttrade_engine.laya import DecisionStatus, process_laya  # noqa: PLC0415
+        from flinttrade_engine.laya import (  # noqa: PLC0415
+            LAYA_REASON_KEY_REJECTED,
+            DecisionStatus,
+            process_laya,
+        )
         from flinttrade_engine.laya_decision import health_identity_failure, publish_probe  # noqa: PLC0415
 
+        self._sync_watched_key()
+        if self._key_rejected:
+            engine = process_laya()
+            engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+            engine.set_runtime_reason(LAYA_REASON_KEY_REJECTED, self._port)
+            return engine.status
+        artifact = self.ensure_artifact_check()
+        verified = (artifact.revision, artifact.sha256) if artifact.ok else None
+        self._note_client_verification(process_laya()._decision_client)  # noqa: SLF001
         with self._lock:
             generation = self._generation
             managed = self._managed_locked()
@@ -459,10 +611,17 @@ class LayaRuntime:
                 managed=managed_now,
                 port_open=port_open or managed_now,
                 identity_failure=health_identity_failure,
+                verified=verified,
+                artifact_reason=None if artifact.ok else artifact.reason,
             )
             engine = process_laya()
             if reason is None:
-                status = publish_probe(engine, payload, requested_device=self._device)
+                status = publish_probe(
+                    engine,
+                    payload,
+                    requested_device=self._device,
+                    verified=verified,
+                )
                 if status is not DecisionStatus.DOWN:
                     self._loaded_once = True
                     engine.set_runtime_reason(None, self._port)
@@ -550,6 +709,8 @@ class LayaRuntime:
         managed: bool,
         port_open: bool,
         identity_failure: Callable[..., bool],
+        verified: tuple[str, str] | None,
+        artifact_reason: str | None,
     ) -> str | None:
         """Return a Down reason, or ``None`` when a managed sidecar is up."""
         from flinttrade_engine.laya import (  # noqa: PLC0415
@@ -558,11 +719,17 @@ class LayaRuntime:
             LAYA_REASON_STILL_LOADING,
             LAYA_REASON_STOPPED,
             LAYA_REASON_UNREACHABLE,
+            LAYA_REASON_UNVERIFIED,
             LAYA_REASON_WRONG_REVISION,
             DecisionStatus,
         )
-        from flinttrade_engine.laya_decision import interpret_health  # noqa: PLC0415
+        from flinttrade_engine.laya_decision import (  # noqa: PLC0415
+            health_needs_recorded_verification,
+            interpret_health,
+        )
 
+        if artifact_reason == LAYA_REASON_WRONG_REVISION:
+            return LAYA_REASON_WRONG_REVISION
         if identity_failure(payload, requested_device=self._device):
             return LAYA_REASON_WRONG_REVISION
         if not managed:
@@ -571,12 +738,143 @@ class LayaRuntime:
             if self._child_stopped:
                 return LAYA_REASON_STOPPED
             return LAYA_REASON_NOT_STARTED
-        status = interpret_health(payload, requested_device=self._device)
+        status = interpret_health(payload, requested_device=self._device, verified=verified)
         if status is not DecisionStatus.DOWN:
             return None
+        if verified is None and health_needs_recorded_verification(payload):
+            return LAYA_REASON_UNVERIFIED
         if self._loaded_once:
             return LAYA_REASON_UNREACHABLE
         return LAYA_REASON_STILL_LOADING
+
+    def ensure_artifact_check(self, *, force: bool = False) -> ArtifactCheck:
+        """Hash the pinned weight file, or reuse a recorded match.
+
+        A missing file is checked again on the next call. A match or a real
+        digest mismatch is remembered so a health probe does not re-hash.
+        """
+        from flinttrade_engine.laya_decision import load_policy  # noqa: PLC0415
+
+        cached = self._artifact_check
+        if not force and cached is not None and cached.reason != "unverified":
+            return cached
+        policy = load_policy()
+        if self._artifact_checker is not None:
+            check = self._artifact_checker()
+        else:
+            recorded = self._read_recorded_verification(policy.revision, policy.sha256)
+            if not force and recorded is not None and recorded.ok:
+                check = recorded
+            else:
+                check = verify_installed_model(
+                    repo=policy.repo,
+                    revision=policy.revision,
+                    filename=policy.weight_file,
+                    expected_sha256=policy.sha256,
+                )
+                if check.ok or check.reason == "wrong_revision":
+                    self._write_recorded_verification(check)
+        self._remember_artifact(check)
+        return check
+
+    def _remember_artifact(self, check: ArtifactCheck) -> None:
+        self._artifact_check = check
+
+    def _note_client_verification(self, client: Any) -> None:
+        check = self._artifact_check
+        if client is None or check is None or not check.ok:
+            return
+        note = getattr(client, "note_verification", None)
+        if callable(note):
+            note(check.revision, check.sha256)
+
+    def _decision_client(self, api_key: str, policy: Any) -> Any:
+        from flinttrade_engine.laya_decision import SystemOneClient  # noqa: PLC0415
+
+        return SystemOneClient(
+            self.base_url,
+            api_key=api_key,
+            expected_revision=policy.revision,
+            expected_sha256=policy.sha256,
+            key_loader=self._load_watched_key,
+            on_key_refreshed=self._remember_key,
+            on_key_rejected=self._mark_key_rejected,
+        )
+
+    def _load_watched_key(self) -> str:
+        path = self._watched_key
+        if path is None:
+            return self._api_key
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return self._api_key
+
+    def _remember_key(self, key: str) -> None:
+        self._api_key = key
+        self._key_rejected = False
+
+    def _mark_key_rejected(self) -> None:
+        from flinttrade_engine.laya import LAYA_REASON_KEY_REJECTED, DecisionStatus, process_laya  # noqa: PLC0415
+
+        self._key_rejected = True
+        engine = process_laya()
+        engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+        engine.set_runtime_reason(LAYA_REASON_KEY_REJECTED, self._port)
+
+    def _sync_watched_key(self) -> bool:
+        """Re-read the key file when its contents change. True when they did."""
+        path = self._watched_key
+        if path is None:
+            return False
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return False
+        if not text or text == self._api_key:
+            return False
+        self._api_key = text
+        self._key_rejected = False
+        from flinttrade_engine.laya import process_laya  # noqa: PLC0415
+
+        client = process_laya()._decision_client  # noqa: SLF001
+        replace = getattr(client, "replace_api_key", None)
+        if callable(replace):
+            replace(text)
+        return True
+
+    def _verification_path(self) -> Path:
+        return self.runtime_root / "verification.json"
+
+    def _read_recorded_verification(self, revision: str, digest: str) -> ArtifactCheck | None:
+        try:
+            payload = json.loads(self._verification_path().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("ok") is True and payload.get("revision") == revision and payload.get("sha256") == digest:
+            return ArtifactCheck(ok=True, reason=None, revision=revision, sha256=digest)
+        if payload.get("reason") == "wrong_revision":
+            return ArtifactCheck(
+                ok=False,
+                reason="wrong_revision",
+                revision=str(payload.get("revision") or revision),
+                sha256=str(payload.get("sha256") or ""),
+            )
+        return None
+
+    def _write_recorded_verification(self, check: ArtifactCheck) -> None:
+        self._ensure_dirs()
+        _write_json(
+            self._verification_path(),
+            {
+                "ok": check.ok,
+                "reason": check.reason,
+                "revision": check.revision,
+                "sha256": check.sha256,
+            },
+        )
 
     def read_health(self) -> Mapping[str, Any] | None:
         """Return the sidecar health document, or ``None`` when it cannot be read."""

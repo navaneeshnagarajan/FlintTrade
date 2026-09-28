@@ -22,6 +22,9 @@ export const LAYA_REASON_CODES = [
   "still_loading",
   "unreachable",
   "wrong_revision",
+  "unverified",
+  "identity_absent",
+  "key_rejected",
 ] as const;
 
 export type LayaReasonCode = (typeof LAYA_REASON_CODES)[number];
@@ -49,6 +52,9 @@ export function layaReasonPlain(reason: string | null | undefined, port: number)
   if (reason === "still_loading") return "Still loading";
   if (reason === "unreachable") return "Unreachable";
   if (reason === "wrong_revision") return "Wrong model revision";
+  if (reason === "unverified") return "Can't verify the model";
+  if (reason === "identity_absent") return "Decision has no revision";
+  if (reason === "key_rejected") return "API key rejected";
   return null;
 }
 

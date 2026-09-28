@@ -1,4 +1,5 @@
 # CPU wheels are installed first from https://download.pytorch.org/whl/cpu.
 # The index stays on that pip command. This file pins the two packages together.
+# Extras are not allowed here. The install requirement is laya[serve]==0.3.21.
 torch==2.14.0+cpu
-laya[serve]==0.3.21
+laya==0.3.21

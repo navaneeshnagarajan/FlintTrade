@@ -31,8 +31,9 @@ changelog rebuilds itself from the first release cut after this baseline.
   while Ready or Degraded, says "Laya isn't qualified for Live yet.
   Practice orders are available." Opt in with
   `python -m flinttrade_core.laya_runtime install` or `start`.
-  The CPU install pins `torch==2.14.0+cpu` and `laya[serve]==0.3.21`
-  in `laya_sidecar_constraints.txt`, installs torch first from the CPU
+  The CPU install pins `torch==2.14.0+cpu` and `laya==0.3.21`
+  in `laya_sidecar_constraints.txt` (no extras; the install requirement
+  is still `laya[serve]==0.3.21`), installs torch first from the CPU
   index, and can share the base interpreter with FlintTrade.
   `LAYA_PORT` defaults to 8000. The host stays `127.0.0.1`.
   It is not Ready by default.

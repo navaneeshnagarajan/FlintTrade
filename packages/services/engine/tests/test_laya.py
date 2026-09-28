@@ -102,6 +102,22 @@ def test_degraded_uses_the_tighter_ceiling_and_still_admits_inside_it() -> None:
 
 
 @pytest.mark.unit
+def test_tightened_quantity_places_when_the_request_is_already_allowed() -> None:
+    from flinttrade_engine.laya import Verdict, VerdictLimits, admission_kind, place_block
+
+    verdict = Verdict(
+        allow=True,
+        reason="Laya is uncertain. Quantity stays inside the tighter limit.",
+        limits=VerdictLimits(max_quantity=1),
+        applied_quantity=1,
+        tightened=True,
+    )
+    assert admission_kind(verdict, 1) == "allow"
+    assert place_block(verdict, 1) is None
+    assert admission_kind(verdict, 4) == "clamp"
+
+
+@pytest.mark.unit
 def test_down_refuses_live_and_practice_with_no_model_fallback() -> None:
     engine = Laya(status=DecisionStatus.DOWN, max_quantity=10)
     live = engine.admit(_proposal(mode="live", source="automate"))

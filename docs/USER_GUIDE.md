@@ -457,10 +457,14 @@ codes the desk can show:
 | `port_in_use` | Port N in use | Something else is listening on the Laya port. The chip stays **Down**. N is that port. |
 | `still_loading` | Still loading | The first load, before health is usable. The chip says **Still loading**. Admission stays **Down**. |
 | `unreachable` | Unreachable | A later miss, after one successful load. |
-| `wrong_revision` | Wrong model revision | A health document claims a loaded checkpoint whose revision or weight digest (`sha256`) is missing or does not match the pin. |
+| `wrong_revision` | Wrong model revision | The revision or weight digest on disk, in health, or in a decision is present and is not the pin. A missing digest is not this code. |
+| `unverified` | Can't verify the model | The weight file could not be checked, or that check was never recorded. Health from the unpatched package has no digest, so Ready waits for this check. |
+| `identity_absent` | Decision has no revision | A decision omitted `revision` or `sha256`, and no recorded file check can stand in. |
+| `key_rejected` | API key rejected | The API key was re-read and still rejected. The chip stays **Down** while orders are refused. |
 
-A decision response that omits `revision` or `sha256` is also **Down** for
-that place. It uses the Down sentence below. It is not a seventh chip code.
+A recorded check of the pinned revision and `model.safetensors` digest lets
+unpatched health and decisions reach **Ready**. The package does not have to
+echo the digest. A real mismatch stays `wrong_revision`.
 
 **Command line.** From the FlintTrade environment (the project `.venv`
 after setup, or `uv run python`):
@@ -479,9 +483,10 @@ base interpreter with FlintTrade: its `python` is often a symlink to the
 same executable, and the packages stay in the sidecar environment. The
 install refuses to put them in the FlintTrade environment. The default
 install is CPU-only torch from `https://download.pytorch.org/whl/cpu`,
-then `laya[serve]==0.3.21`. Both pins live in one constraints file,
-`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`
-(`torch==2.14.0+cpu` and `laya[serve]==0.3.21`). Torch is installed
+then `laya[serve]==0.3.21`. The constraints file pins `laya==0.3.21`
+with no extras (`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`,
+`torch==2.14.0+cpu` and `laya==0.3.21`). The `serve` extra stays on the
+install requirement, because a constraints file cannot name extras. Torch is installed
 first. `install --accelerator cuda` and `install --accelerator rocm` are
 opt-in. `start` still uses CPU (`LAYA_DEVICE=cpu`).
 

@@ -42,6 +42,9 @@ describe("Laya chip status", () => {
     expect(layaReasonPlain("still_loading", 8000)).toBe("Still loading");
     expect(layaReasonPlain("unreachable", 8000)).toBe("Unreachable");
     expect(layaReasonPlain("wrong_revision", 8000)).toBe("Wrong model revision");
+    expect(layaReasonPlain("unverified", 8000)).toBe("Can't verify the model");
+    expect(layaReasonPlain("identity_absent", 8000)).toBe("Decision has no revision");
+    expect(layaReasonPlain("key_rejected", 8000)).toBe("API key rejected");
     expect(layaReasonPlain(null, 8000)).toBeNull();
     const loading = layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "still_loading" });
     expect(loading).toBe("Still loading");
