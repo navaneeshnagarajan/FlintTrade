@@ -57,7 +57,6 @@ const LAYA_REASON_CODES = new Set([
   "unreachable",
   "wrong_revision",
   "unverified",
-  "identity_absent",
   "key_rejected",
 ]);
 

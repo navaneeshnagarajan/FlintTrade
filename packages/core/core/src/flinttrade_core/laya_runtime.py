@@ -266,12 +266,18 @@ def attach_from_environment(workspace: Path | None = None) -> LayaRuntime | None
 
 @dataclass(frozen=True, slots=True)
 class ArtifactCheck:
-    """Result of hashing the pinned weight file."""
+    """Result of hashing the pinned weight file for one sidecar run.
+
+    ``pid`` and ``token`` bind the result to the process that was started.
+    A record without them, or from an earlier run, is not accepted.
+    """
 
     ok: bool
     reason: str | None
     revision: str
     sha256: str
+    pid: int = 0
+    token: str = ""
 
 
 def huggingface_cache_roots() -> list[Path]:
@@ -402,6 +408,7 @@ class LayaRuntime:
         self._watched_key: Path | None = None
         self._key_rejected = False
         self._artifact_check: ArtifactCheck | None = None
+        self._start_token = ""
         self._generation = 0
         self._loaded_once = False
         self._child_stopped = False
@@ -436,7 +443,6 @@ class LayaRuntime:
                 self.runtime_root / "install.json",
                 {"requirement": LAYA_SERVE_REQUIREMENT, "accelerator": accelerator},
             )
-            self._remember_artifact(self.ensure_artifact_check(force=True))
         return self.venv_dir
 
     def start(self) -> str:
@@ -457,7 +463,9 @@ class LayaRuntime:
             self._attached = False
             _unlink_quiet(self._key_path)
             _unlink_quiet(self._pid_path)
+            self._clear_run_record()
             api_key = secrets.token_urlsafe(32)
+            token = secrets.token_urlsafe(32)
             try:
                 _write_private(self._key_path, api_key)
                 cached = self._weights_cached()
@@ -491,6 +499,7 @@ class LayaRuntime:
                 self._api_key = api_key
                 self._watched_key = self._key_path
                 self._key_rejected = False
+                self._start_token = token
                 client = self._decision_client(api_key, policy)
                 self._remember_artifact(self.ensure_artifact_check(force=True))
                 self._note_client_verification(client)
@@ -503,6 +512,7 @@ class LayaRuntime:
                 _reap_runtimes.discard(self)
                 _unlink_quiet(self._key_path)
                 _unlink_quiet(self._pid_path)
+                self._clear_run_record()
                 _clear_decision_client()
                 if spawned is not None:
                     _terminate(spawned)
@@ -529,8 +539,9 @@ class LayaRuntime:
         policy = load_policy()
         self._watched_key = key_path.expanduser()
         self._key_rejected = False
+        self._start_token = ""
         client = self._decision_client(api_key, policy)
-        self._remember_artifact(self.ensure_artifact_check(force=True))
+        self._remember_artifact(self.ensure_artifact_check())
         self._note_client_verification(client)
         with self._lock:
             self._attached = True
@@ -564,6 +575,7 @@ class LayaRuntime:
             self._api_key = ""
             _unlink_quiet(self._key_path)
             _unlink_quiet(self._pid_path)
+            self._clear_run_record()
             _reap_runtimes.discard(self)
         if process is not None:
             _terminate(process)
@@ -639,7 +651,7 @@ class LayaRuntime:
         the desk shows. A clash or a non-Laya listener is Down with
         ``port_in_use``.
         """
-        from flinttrade_engine.laya import laya_reason_detail, process_laya  # noqa: PLC0415
+        from flinttrade_engine.laya import laya_reason_detail, laya_reason_tooltip, process_laya  # noqa: PLC0415
 
         self.publish_status()
         with self._lock:
@@ -660,6 +672,7 @@ class LayaRuntime:
             "health": dict(health) if isinstance(health, Mapping) else None,
             "reason": reason,
             "detail": laya_reason_detail(reason, port),
+            "tooltip": laya_reason_tooltip(reason, port),
         }
 
     def reap_children(self) -> None:
@@ -748,45 +761,102 @@ class LayaRuntime:
         return LAYA_REASON_STILL_LOADING
 
     def ensure_artifact_check(self, *, force: bool = False) -> ArtifactCheck:
-        """Hash the pinned weight file, or reuse a recorded match.
+        """Return this run's weight check.
 
-        A missing file is checked again on the next call. A match or a real
-        digest mismatch is remembered so a health probe does not re-hash.
+        ``force`` hashes the files again and stamps the result with this
+        start's pid and token. A probe does not hash. It accepts a record
+        only when that token matches the running sidecar. Anything else,
+        including a leftover from an earlier run, is unverified.
         """
         from flinttrade_engine.laya_decision import load_policy  # noqa: PLC0415
 
-        cached = self._artifact_check
-        if not force and cached is not None and cached.reason != "unverified":
-            return cached
         policy = load_policy()
+        if force:
+            token = self._start_token or secrets.token_urlsafe(32)
+            self._start_token = token
+            check = self._recompute_artifact(policy, token)
+            self._write_run_record(token, check.pid)
+            self._write_recorded_verification(check)
+            self._remember_artifact(check)
+            return check
+        cached = self._artifact_check
+        if cached is not None and self._record_belongs_to_running_sidecar(cached, policy):
+            return cached
+        recorded = self._read_recorded_verification()
+        if recorded is not None and self._record_belongs_to_running_sidecar(recorded, policy):
+            self._remember_artifact(recorded)
+            return recorded
+        return ArtifactCheck(ok=False, reason="unverified", revision=policy.revision, sha256="")
+
+    def _recompute_artifact(self, policy: Any, token: str) -> ArtifactCheck:
+        """Hash the pinned weight file and stamp it for this start."""
         if self._artifact_checker is not None:
-            check = self._artifact_checker()
+            raw = self._artifact_checker()
         else:
-            recorded = self._read_recorded_verification(policy.revision, policy.sha256)
-            if not force and recorded is not None and recorded.ok:
-                check = recorded
-            else:
-                check = verify_installed_model(
-                    repo=policy.repo,
-                    revision=policy.revision,
-                    filename=policy.weight_file,
-                    expected_sha256=policy.sha256,
-                )
-                if check.ok or check.reason == "wrong_revision":
-                    self._write_recorded_verification(check)
-        self._remember_artifact(check)
-        return check
+            raw = verify_installed_model(
+                repo=policy.repo,
+                revision=policy.revision,
+                filename=policy.weight_file,
+                expected_sha256=policy.sha256,
+            )
+        return ArtifactCheck(
+            ok=raw.ok,
+            reason=raw.reason,
+            revision=raw.revision,
+            sha256=raw.sha256,
+            pid=self._sidecar_pid(),
+            token=token,
+        )
+
+    def _sidecar_pid(self) -> int:
+        """Pid of the process this runtime started, or the pid file."""
+        process = self._process
+        if process is not None:
+            pid = getattr(process, "pid", None)
+            if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
+                return pid
+        recorded = _read_pid_file(self._pid_path)
+        return recorded if recorded is not None else 0
+
+    def _record_belongs_to_running_sidecar(self, check: ArtifactCheck, policy: Any) -> bool:
+        """True when ``check`` was stamped for the sidecar that is alive now."""
+        if not check.token or check.pid <= 0 or not _pid_alive(check.pid):
+            return False
+        if self._sidecar_pid() != check.pid:
+            return False
+        if check.ok:
+            if check.revision != policy.revision or check.sha256 != policy.sha256:
+                return False
+        elif check.reason != "wrong_revision":
+            return False
+        run = self._read_run_record()
+        if run != (check.token, check.pid):
+            return False
+        if self._start_token and self._start_token != check.token:
+            return False
+        return True
 
     def _remember_artifact(self, check: ArtifactCheck) -> None:
         self._artifact_check = check
 
     def _note_client_verification(self, client: Any) -> None:
-        check = self._artifact_check
-        if client is None or check is None or not check.ok:
-            return
+        from flinttrade_engine.laya_decision import load_policy  # noqa: PLC0415
+
         note = getattr(client, "note_verification", None)
-        if callable(note):
-            note(check.revision, check.sha256)
+        clear = getattr(client, "clear_verification", None)
+        check = self._artifact_check
+        if client is None:
+            return
+        if (
+            check is not None
+            and check.ok
+            and self._record_belongs_to_running_sidecar(check, load_policy())
+            and callable(note)
+        ):
+            note(check.revision, check.sha256, token=check.token)
+            return
+        if callable(clear):
+            clear()
 
     def _decision_client(self, api_key: str, policy: Any) -> Any:
         from flinttrade_engine.laya_decision import SystemOneClient  # noqa: PLC0415
@@ -846,21 +916,62 @@ class LayaRuntime:
     def _verification_path(self) -> Path:
         return self.runtime_root / "verification.json"
 
-    def _read_recorded_verification(self, revision: str, digest: str) -> ArtifactCheck | None:
+    def _run_path(self) -> Path:
+        return self.runtime_root / "run.json"
+
+    def _clear_run_record(self) -> None:
+        """Drop the verification that belonged to a sidecar run."""
+        _unlink_quiet(self._verification_path())
+        _unlink_quiet(self._run_path())
+        self._artifact_check = None
+        self._start_token = ""
+
+    def _read_run_record(self) -> tuple[str, int] | None:
+        try:
+            payload = json.loads(self._run_path().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        token = payload.get("token")
+        pid = payload.get("pid")
+        if not isinstance(token, str) or not token:
+            return None
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+            return None
+        return token, pid
+
+    def _write_run_record(self, token: str, pid: int) -> None:
+        self._ensure_dirs()
+        _write_json(self._run_path(), {"token": token, "pid": pid})
+
+    def _read_recorded_verification(self) -> ArtifactCheck | None:
         try:
             payload = json.loads(self._verification_path().read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
         if not isinstance(payload, dict):
             return None
-        if payload.get("ok") is True and payload.get("revision") == revision and payload.get("sha256") == digest:
-            return ArtifactCheck(ok=True, reason=None, revision=revision, sha256=digest)
+        pid = payload.get("pid")
+        token = payload.get("token")
+        revision = payload.get("revision")
+        digest = payload.get("sha256")
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+            return None
+        if not isinstance(token, str) or not token:
+            return None
+        if not isinstance(revision, str) or not isinstance(digest, str):
+            return None
+        if payload.get("ok") is True:
+            return ArtifactCheck(ok=True, reason=None, revision=revision, sha256=digest, pid=pid, token=token)
         if payload.get("reason") == "wrong_revision":
             return ArtifactCheck(
                 ok=False,
                 reason="wrong_revision",
-                revision=str(payload.get("revision") or revision),
-                sha256=str(payload.get("sha256") or ""),
+                revision=revision,
+                sha256=digest,
+                pid=pid,
+                token=token,
             )
         return None
 
@@ -873,6 +984,8 @@ class LayaRuntime:
                 "reason": check.reason,
                 "revision": check.revision,
                 "sha256": check.sha256,
+                "pid": check.pid,
+                "token": check.token,
             },
         )
 

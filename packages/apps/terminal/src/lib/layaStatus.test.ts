@@ -41,15 +41,22 @@ describe("Laya chip status", () => {
     expect(layaReasonPlain("port_in_use", 8123)).toBe("Port 8123 in use");
     expect(layaReasonPlain("still_loading", 8000)).toBe("Still loading");
     expect(layaReasonPlain("unreachable", 8000)).toBe("Unreachable");
-    expect(layaReasonPlain("wrong_revision", 8000)).toBe("Wrong model revision");
+    expect(layaReasonPlain("wrong_revision", 8000)).toBe("Wrong model version");
     expect(layaReasonPlain("unverified", 8000)).toBe("Can't verify the model");
-    expect(layaReasonPlain("identity_absent", 8000)).toBe("Decision has no revision");
-    expect(layaReasonPlain("key_rejected", 8000)).toBe("API key rejected");
+    expect(layaReasonPlain("identity_absent", 8000)).toBeNull();
+    expect(layaReasonPlain("key_rejected", 8000)).toBe("Can't reach Laya");
     expect(layaReasonPlain(null, 8000)).toBeNull();
     const loading = layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "still_loading" });
     expect(loading).toBe("Still loading");
     expect(loading).not.toMatch(/Down/);
     expect(layaReasonTooltip("still_loading", 8000)).toBe(`Still loading. Next: ${LAYA_START_COMMAND}`);
+    expect(layaReasonTooltip("unverified", 8000)).toBe(
+      "The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.",
+    );
+    expect(layaReasonTooltip("wrong_revision", 8000)).toBe(
+      "Laya is running a different model than FlintTrade expects.",
+    );
+    expect(layaReasonTooltip("key_rejected", 8000)).toBe("Laya restarted with a new key. Reconnecting…");
     expect(LAYA_START_DOCS_HREF).toContain("USER_GUIDE.md#start-laya");
     expect(layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "not_started" })).toBe("Down");
   });

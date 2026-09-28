@@ -27,6 +27,8 @@ function readMaxQuantity(body: Record<string, unknown>): number | null {
 
 const LAYA_DOWN_PAUSE = "Laya is Down. Orders are paused until it's Ready.";
 
+const LAYA_DECISION_UNVERIFIED = "Not placed. Laya's decision couldn't be verified. Try again.";
+
 function readAppliedQuantity(body: Record<string, unknown>): number | null {
   const applied = body.applied_quantity;
   return typeof applied === "number" && Number.isInteger(applied) && applied >= 1 ? applied : null;
@@ -59,6 +61,18 @@ export function layaNoticeFromOrderError(
       headline: "Laya denied",
       reason,
       limitsLine: max === null ? null : `Max quantity ${max}.`,
+      appliedQuantity: null,
+    };
+  }
+  if (body.code === "laya_unverified") {
+    const message = typeof body.message === "string" && body.message
+      ? body.message
+      : LAYA_DECISION_UNVERIFIED;
+    return {
+      kind: "deny",
+      headline: message,
+      reason: "",
+      limitsLine: null,
       appliedQuantity: null,
     };
   }

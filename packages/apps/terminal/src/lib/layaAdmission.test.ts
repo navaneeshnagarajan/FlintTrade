@@ -36,6 +36,26 @@ describe("layaNoticeFromOrderError", () => {
     expect(notice?.headline).not.toMatch(/denied/i);
   });
 
+  it("refuses one unverified decision without saying Down or offering a quantity", () => {
+    const sentence = "Not placed. Laya's decision couldn't be verified. Try again.";
+    const notice = layaNoticeFromOrderError(new OrderApiError(sentence, 409, {
+      code: "laya_unverified",
+      message: sentence,
+      reason: sentence,
+      limits: { max_quantity: 4 },
+      applied_quantity: 4,
+    }));
+    expect(notice).toEqual({
+      kind: "deny",
+      headline: sentence,
+      reason: "",
+      limitsLine: null,
+      appliedQuantity: null,
+    });
+    expect(notice?.headline).not.toMatch(/Down/);
+    expect(notice?.headline).not.toMatch(/allows up to/);
+  });
+
   it("hides a quantity ceiling when Laya is Down", () => {
     const notice = layaNoticeFromOrderError(new OrderApiError(
       "Laya is Down. Orders are paused until it's Ready.",

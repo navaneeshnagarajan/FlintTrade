@@ -149,7 +149,7 @@ def _engine(
         on_key_rejected=on_key_rejected,
     )
     if verified:
-        client.note_verification(_POLICY.revision, _POLICY.sha256)
+        client.note_verification(_POLICY.revision, _POLICY.sha256, token="run-token")
     engine.set_decision_client(client)
     return engine
 
@@ -176,6 +176,7 @@ def test_probability_at_the_deny_threshold_denies(laya_host: FakeLayaHost) -> No
     verdict = _engine(laya_host).admit(_proposal())
     assert verdict.allow is False
     assert "tilt or revenge" in verdict.reason
+    assert ("proof", "decision") in verdict.evidence
 
 
 @pytest.mark.unit
@@ -191,10 +192,11 @@ def test_probability_just_below_deny_clamps_in_practice(laya_host: FakeLayaHost)
 @pytest.mark.unit
 def test_probability_just_below_abstain_allows(laya_host: FakeLayaHost) -> None:
     laya_host.response_body = _body(_answers(rationale_b=0.54, tilt_a=0.54, side_a=0.54))
-    verdict = _engine(laya_host).admit(_proposal(quantity=4))
+    verdict = _engine(laya_host, verified=True).admit(_proposal(quantity=4))
     assert verdict.allow is True
     assert verdict.tightened is False
     assert verdict.applied_quantity == 4
+    assert ("proof", "decision") in verdict.evidence
 
 
 @pytest.mark.unit
@@ -342,38 +344,88 @@ def test_empty_note_is_uncertain_and_does_not_call_the_host(laya_host: FakeLayaH
     "drop",
     ["revision", "sha256"],
 )
-def test_missing_identity_on_the_decision_response_is_down(laya_host: FakeLayaHost, drop: str) -> None:
+def test_missing_identity_without_a_runtime_record_refuses_that_order(laya_host: FakeLayaHost, drop: str) -> None:
+    from flinttrade_engine.laya import LAYA_DECISION_UNVERIFIED, place_block
+
     payload = json.loads(_body(_answers()))
     payload.pop(drop)
     laya_host.response_body = json.dumps(payload).encode()
     engine = _engine(laya_host)
     verdict = engine.admit(_proposal())
     assert verdict.allow is False
-    assert engine.status is DecisionStatus.DOWN
+    assert verdict.reason == LAYA_DECISION_UNVERIFIED
+    assert engine.status is DecisionStatus.READY
+    assert engine.runtime_reason()[0] is None
     assert ("failure", "identity_absent") in verdict.evidence
-    assert engine.runtime_reason()[0] == "identity_absent"
+    assert not any(item[0] == "proof" for item in verdict.evidence)
+    blocked = place_block(verdict, 4)
+    assert blocked is not None
+    assert blocked["code"] == "laya_unverified"
+    assert blocked["message"] == LAYA_DECISION_UNVERIFIED
+    assert "limits" not in blocked
+    assert "applied_quantity" not in blocked
+    assert "Down" not in blocked["message"]
 
 
 @pytest.mark.unit
-def test_unpatched_decision_is_ready_after_verification(laya_host: FakeLayaHost) -> None:
+@pytest.mark.parametrize("drop", ["revision", "sha256", "both"])
+def test_unpatched_decision_uses_the_runtime_record_for_an_admitted_order(
+    laya_host: FakeLayaHost, drop: str
+) -> None:
+    from flinttrade_engine.laya import place_block
+
     payload = json.loads(_body(_answers()))
+    if drop == "both":
+        payload.pop("revision")
+        payload.pop("sha256")
+    else:
+        payload.pop(drop)
+    laya_host.response_body = json.dumps(payload).encode()
+    engine = _engine(laya_host, verified=True)
+    verdict = engine.admit(_proposal(quantity=4))
+    assert verdict.allow is True
+    assert verdict.applied_quantity == 4
+    assert verdict.tightened is False
+    assert ("proof", "runtime") in verdict.evidence
+    assert engine.status is DecisionStatus.READY
+    assert engine.runtime_reason()[0] is None
+    assert place_block(verdict, 4) is None
+
+
+@pytest.mark.unit
+def test_unpatched_decision_uses_the_runtime_record_for_a_clamped_order(laya_host: FakeLayaHost) -> None:
+    from flinttrade_engine.laya import clamp_place_message, place_block
+
+    payload = json.loads(_body(_answers(tilt_a=0.79)))
     payload.pop("revision")
     payload.pop("sha256")
     laya_host.response_body = json.dumps(payload).encode()
     engine = _engine(laya_host, verified=True)
-    verdict = engine.admit(_proposal())
+    verdict = engine.admit(_proposal(quantity=4))
     assert verdict.allow is True
+    assert verdict.tightened is True
+    assert verdict.applied_quantity == 1
+    assert ("proof", "runtime") in verdict.evidence
     assert engine.status is DecisionStatus.READY
     assert engine.runtime_reason()[0] is None
+    blocked = place_block(verdict, 4)
+    assert blocked is not None
+    assert blocked["code"] == "laya_clamp"
+    assert blocked["message"] == clamp_place_message(1)
+    assert place_block(verdict, 1) is None
 
 
 @pytest.mark.unit
-def test_blank_identity_on_the_decision_response_is_down(laya_host: FakeLayaHost) -> None:
+def test_blank_identity_without_a_runtime_record_refuses_that_order(laya_host: FakeLayaHost) -> None:
+    from flinttrade_engine.laya import LAYA_DECISION_UNVERIFIED
+
     laya_host.response_body = _body(_answers(), revision="  ", sha256="")
     engine = _engine(laya_host)
     verdict = engine.admit(_proposal())
     assert verdict.allow is False
-    assert engine.status is DecisionStatus.DOWN
+    assert verdict.reason == LAYA_DECISION_UNVERIFIED
+    assert engine.status is DecisionStatus.READY
+    assert ("failure", "identity_absent") in verdict.evidence
 
 
 @pytest.mark.unit

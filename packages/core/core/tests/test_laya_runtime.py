@@ -37,6 +37,7 @@ from flinttrade_engine.laya import (
     DecisionStatus,
     Proposal,
     laya_reason_detail,
+    laya_reason_tooltip,
     process_laya,
     reset_process_laya_for_tests,
 )
@@ -321,9 +322,15 @@ def test_failed_start_deletes_the_api_key(tmp_path: Path) -> None:
         raise OSError("sidecar failed")
 
     runtime = LayaRuntime(tmp_path, process_factory=factory)
+    root = runtime.runtime_root
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "verification.json").write_text('{"ok": true}', encoding="utf-8")
+    (root / "run.json").write_text('{"token": "earlier", "pid": 1}', encoding="utf-8")
     with pytest.raises(OSError, match="sidecar failed"):
         runtime.start()
-    assert not (runtime.runtime_root / "api.key").exists()
+    assert not (root / "api.key").exists()
+    assert not (root / "verification.json").exists()
+    assert not (root / "run.json").exists()
     assert process_laya()._decision_client is None  # noqa: SLF001
     reset_process_laya_for_tests()
 
@@ -679,6 +686,31 @@ def test_laya_start_is_operator_only_and_does_not_spawn(monkeypatch: pytest.Monk
     assert calls == ["start"]
 
 
+def _accept_only(monkeypatch: pytest.MonkeyPatch, pid: int) -> None:
+    monkeypatch.setattr("flinttrade_core.laya_runtime._pid_alive", lambda candidate: candidate == pid)
+
+
+def _write_run(runtime: LayaRuntime, *, pid: int, token: str) -> None:
+    policy = load_policy()
+    root = runtime.runtime_root
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "sidecar.pid").write_text(str(pid), encoding="utf-8")
+    (root / "run.json").write_text(json.dumps({"token": token, "pid": pid}), encoding="utf-8")
+    (root / "verification.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "reason": None,
+                "revision": policy.revision,
+                "sha256": policy.sha256,
+                "pid": pid,
+                "token": token,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _attached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, checker: ArtifactCheck) -> LayaRuntime:
     monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "empty-hub"))
     key_path = tmp_path / "api.key"
@@ -701,6 +733,8 @@ def test_unpatched_health_is_ready_after_the_weight_file_is_verified(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     policy = load_policy()
+    live = 424242
+    _accept_only(monkeypatch, live)
     payload = _healthy()
     payload.pop("sha256")
     runtime = _attached(
@@ -708,6 +742,8 @@ def test_unpatched_health_is_ready_after_the_weight_file_is_verified(
         monkeypatch,
         ArtifactCheck(ok=True, reason=None, revision=policy.revision, sha256=policy.sha256),
     )
+    _write_run(runtime, pid=live, token="this-run")
+    runtime._artifact_check = None  # noqa: SLF001
     runtime._health_reader = lambda _url: payload  # type: ignore[method-assign]
     runtime.publish_status()
     assert process_laya().effective_status("practice") is DecisionStatus.READY
@@ -719,7 +755,92 @@ def test_unpatched_health_is_ready_after_the_weight_file_is_verified(
 
 
 @pytest.mark.unit
-def test_weight_digest_mismatch_is_wrong_revision(tmp_path: Path) -> None:
+def test_leftover_verification_from_an_earlier_run_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    live = 424242
+    _accept_only(monkeypatch, live)
+    policy = load_policy()
+    runtime = _attached(
+        tmp_path,
+        monkeypatch,
+        ArtifactCheck(ok=True, reason=None, revision=policy.revision, sha256=policy.sha256),
+    )
+    _write_run(runtime, pid=111111, token="earlier-run")
+    (runtime.runtime_root / "sidecar.pid").write_text(str(live), encoding="utf-8")
+    runtime._artifact_check = None  # noqa: SLF001
+    payload = _healthy()
+    payload.pop("sha256")
+    runtime._health_reader = lambda _url: payload  # type: ignore[method-assign]
+    runtime.publish_status()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "unverified"
+    assert laya_reason_detail("unverified", 8000) == "Can't verify the model"
+    assert laya_reason_tooltip("unverified", 8000) == (
+        "The installed model couldn't be checked against the pinned version. "
+        "Restart Laya. If it keeps happening, reinstall it."
+    )
+    client = process_laya()._decision_client  # noqa: SLF001
+    assert client is not None
+    assert client._verified is None  # noqa: SLF001
+    _write_run(runtime, pid=live, token="this-run")
+    recorded = json.loads((runtime.runtime_root / "verification.json").read_text(encoding="utf-8"))
+    recorded["token"] = "earlier-run"
+    (runtime.runtime_root / "verification.json").write_text(json.dumps(recorded), encoding="utf-8")
+    runtime._artifact_check = None  # noqa: SLF001
+    runtime.publish_status()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "unverified"
+    assert client._verified is None  # noqa: SLF001
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_start_recomputes_the_weight_file_and_drops_it_on_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    live = 424242
+    _accept_only(monkeypatch, live)
+    policy = load_policy()
+    calls = {"n": 0}
+
+    def checker() -> ArtifactCheck:
+        calls["n"] += 1
+        return ArtifactCheck(ok=True, reason=None, revision=policy.revision, sha256=policy.sha256)
+
+    class _LiveProcess(_Process):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pid = live
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _LiveProcess(),
+        artifact_checker=checker,
+        health_reader=lambda _url: _healthy(),
+    )
+    _write_run(runtime, pid=111111, token="earlier-run")
+    runtime.start()
+    assert calls["n"] == 1
+    recorded = json.loads((runtime.runtime_root / "verification.json").read_text(encoding="utf-8"))
+    run = json.loads((runtime.runtime_root / "run.json").read_text(encoding="utf-8"))
+    assert recorded["token"] == run["token"]
+    assert recorded["token"] != "earlier-run"
+    assert recorded["pid"] == live
+    assert recorded["sha256"] == policy.sha256
+    payload = _healthy()
+    payload.pop("sha256")
+    runtime._health_reader = lambda _url: payload  # type: ignore[method-assign]
+    runtime.publish_status()
+    assert process_laya().effective_status("practice") is DecisionStatus.READY
+    runtime.stop()
+    assert not (runtime.runtime_root / "verification.json").exists()
+    assert not (runtime.runtime_root / "run.json").exists()
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_weight_digest_mismatch_is_wrong_revision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     policy = load_policy()
     path = tmp_path / "model.safetensors"
     path.write_bytes(b"not-the-pinned-weights")
@@ -731,14 +852,28 @@ def test_weight_digest_mismatch_is_wrong_revision(tmp_path: Path) -> None:
     )
     assert check.ok is False
     assert check.reason == "wrong_revision"
-    runtime = LayaRuntime(tmp_path, artifact_checker=lambda: check, health_reader=lambda _url: _healthy())
-    key_path = tmp_path / "api.key"
-    key_path.write_text("sidecar-key\n", encoding="utf-8")
-    runtime.attach(key_path)
+    live = 424242
+    _accept_only(monkeypatch, live)
+
+    class _LiveProcess(_Process):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pid = live
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _LiveProcess(),
+        artifact_checker=lambda: check,
+        health_reader=lambda _url: _healthy(),
+    )
+    runtime.start()
     runtime.publish_status()
     assert process_laya().status is DecisionStatus.DOWN
     assert process_laya().runtime_reason()[0] == "wrong_revision"
-    assert laya_reason_detail("wrong_revision", 8000) == "Wrong model revision"
+    assert laya_reason_detail("wrong_revision", 8000) == "Wrong model version"
+    assert laya_reason_tooltip("wrong_revision", 8000) == (
+        "Laya is running a different model than FlintTrade expects."
+    )
     reset_process_laya_for_tests()
 
 
@@ -765,7 +900,10 @@ def test_stale_api_key_is_reread_and_a_rejected_key_stays_down(
     runtime.publish_status()
     assert process_laya().status is DecisionStatus.DOWN
     assert process_laya().runtime_reason()[0] == "key_rejected"
-    assert laya_reason_detail("key_rejected", runtime._port) == "API key rejected"  # noqa: SLF001
+    assert laya_reason_detail("key_rejected", runtime._port) == "Can't reach Laya"  # noqa: SLF001
+    assert laya_reason_tooltip("key_rejected", runtime._port) == (  # noqa: SLF001
+        "Laya restarted with a new key. Reconnecting…"
+    )
     assert process_laya().effective_status("practice") is not DecisionStatus.READY
 
     key_path.write_text("rotated-key\n", encoding="utf-8")

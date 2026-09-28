@@ -165,6 +165,31 @@ describe("DeskStatusCluster", () => {
     expect(screen.queryByText(/Start the Laya model/)).not.toBeInTheDocument();
   });
 
+  it("shows the model-check tooltip and the start-laya guide when the model cannot be verified", () => {
+    useModeStore.setState({ mode: "practice" });
+    useOperatorSignalStore.setState({
+      decisionStatus: "down",
+      layaPracticeStatus: "down",
+      layaLiveQualified: false,
+      layaReason: "unverified",
+      layaPort: 8000,
+    });
+    render(<DeskStatusCluster />);
+    const chip = screen.getByTestId("laya-surface");
+    expect(chip).toHaveTextContent("Laya Down");
+    expect(chip).toHaveAttribute(
+      "title",
+      "The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.",
+    );
+    fireEvent.click(chip);
+    expect(screen.getByTestId("laya-reason")).toHaveTextContent("Can't verify the model");
+    expect(screen.getByTestId("laya-reason-tooltip")).toHaveTextContent(
+      "The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.",
+    );
+    expect(screen.getByTestId("laya-start-docs")).toHaveAttribute("href", LAYA_START_DOCS_HREF);
+    expect(screen.getByTestId("laya-start-docs").getAttribute("href")).toContain("#start-laya");
+  });
+
   it("opens the Practice Ready reason and does not offer Start while the sidecar is up", () => {
     useModeStore.setState({ mode: "practice" });
     useOperatorSignalStore.setState({

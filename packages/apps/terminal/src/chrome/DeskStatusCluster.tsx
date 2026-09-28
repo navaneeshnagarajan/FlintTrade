@@ -132,6 +132,9 @@ export function DeskStatusCluster() {
         </PopoverTrigger>
         <PopoverContent aria-label="Laya status" className="w-64 space-y-2 p-3 text-xs">
           <p data-testid="laya-reason">{plainReason ?? `Laya ${decision}`}</p>
+          {tooltip && plainReason && !tooltip.startsWith(plainReason) ? (
+            <p data-testid="laya-reason-tooltip">{tooltip}</p>
+          ) : null}
           <a
             data-testid="laya-start-docs"
             href={LAYA_START_DOCS_HREF}

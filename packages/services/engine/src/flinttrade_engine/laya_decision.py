@@ -7,7 +7,9 @@ price, and symbol stay outside the question set.
 
 Thresholds read option probabilities. A verdict can deny or clamp. It cannot
 raise a quantity or overturn a floor refusal. An unreachable host, a timeout,
-a bad response, or a revision or digest mismatch is Down.
+a bad response, or a revision or digest mismatch is Down. A decision that
+omits revision and digest is checked against the running sidecar's record.
+When neither exists, that order is refused and the sidecar stays up.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from urllib.parse import urlsplit
 
 from flinttrade_core.service_providers import EvidenceUseScope
 
-from .laya import DecisionStatus
+from .laya import LAYA_DECISION_UNVERIFIED, DecisionStatus
 
 _QUESTION_ORDER = ("rationale", "tilt", "side")
 _MAX_NOTE_CHARS = 4_000
@@ -237,7 +239,8 @@ def evaluate_free_text(
     """Score free text. An empty note is uncertain and does not call the host.
 
     Uncertain answers, including an empty note, clamp in Practice and deny in
-    Live. A host failure is Down.
+    Live. A host failure is Down, except a decision with no identity and no
+    runtime record, which refuses that order only.
     """
     active = policy or load_policy()
     note = rationale.strip()
@@ -254,11 +257,21 @@ def evaluate_free_text(
         payload = client.decide(state_for_note(action=action, rationale=note), questions_for_note())
         effects = _effects_from_payload(payload, active)
     except DecisionCallError as exc:
+        if exc.code == "identity_absent":
+            return TextDecision(
+                effect="unverified",
+                reason=LAYA_DECISION_UNVERIFIED,
+                applied_quantity=0,
+                evidence=(("policy_version", active.version), ("failure", "identity_absent")),
+            )
         return _down_decision(active, exc.code)
     except Exception:
         return _down_decision(active, "malformed")
     evidence: list[tuple[str, str]] = [("policy_version", active.version), ("revision", active.revision)]
     evidence.extend(effects)
+    proof = getattr(client, "last_proof", "")
+    if proof in {"decision", "runtime"}:
+        evidence.append(("proof", proof))
     deny = next((item for item in effects if item[0].endswith(":effect") and item[1] == "deny"), None)
     if deny is not None:
         question_id = deny[0].split(":", 1)[0]
@@ -441,18 +454,37 @@ class SystemOneClient:
         self._on_key_refreshed = on_key_refreshed
         self._on_key_rejected = on_key_rejected
         self._verified: tuple[str, str] | None = None
+        self._verification_token = ""
+        self._last_proof = ""
+
+    @property
+    def last_proof(self) -> str:
+        """``decision`` when the response carried the pin, else ``runtime``."""
+        return self._last_proof
 
     @property
     def base_url(self) -> str:
         """Normalised host, without a trailing secret."""
         return self._base_url
 
-    def note_verification(self, revision: str, sha256: str) -> None:
-        """Trust a digest recorded from the files on disk when it is the pin."""
-        if revision == self._expected_revision and sha256 == self._expected_sha256:
+    def note_verification(self, revision: str, sha256: str, *, token: str = "") -> None:
+        """Trust a digest from this sidecar run when it is the pin.
+
+        ``token`` is the start token stamped on that run's record. An empty
+        token, or a digest that is not the pin, clears the record.
+        """
+        if token and revision == self._expected_revision and sha256 == self._expected_sha256:
             self._verified = (revision, sha256)
+            self._verification_token = token
             return
         self._verified = None
+        self._verification_token = ""
+
+    def clear_verification(self) -> None:
+        """Drop a recorded digest. The next decision cannot use it."""
+        self._verified = None
+        self._verification_token = ""
+        self._last_proof = ""
 
     def replace_api_key(self, api_key: str) -> None:
         """Use a key re-read from the sidecar key file."""
@@ -544,22 +576,28 @@ class SystemOneClient:
         return value
 
     def _check_identity(self, payload: Mapping[str, Any]) -> None:
-        """Check revision and digest against the pin, or the recorded file hash.
+        """Check revision and digest against the pin, or this run's record.
 
         A value that is present and is not the pin is a mismatch. A decision
-        that omits revision or sha256 is accepted only after the weight file
-        was verified. Otherwise it is ``identity_absent``, not a revision mismatch.
+        that omits revision or sha256 uses the runtime record when that
+        record belongs to the running sidecar. ``identity_absent`` fires only
+        when neither the decision nor that record can prove the pin.
         """
+        self._last_proof = ""
         revision = self._claimed_identity(payload, "revision")
         digest = self._claimed_identity(payload, "sha256")
         if revision is not None and revision != self._expected_revision:
             raise DecisionCallError("revision_mismatch")
         if digest is not None and digest != self._expected_sha256:
             raise DecisionCallError("digest_mismatch")
-        if revision is None or digest is None:
-            if self._verified == (self._expected_revision, self._expected_sha256):
-                return
-            raise DecisionCallError("identity_absent")
+        if revision is not None and digest is not None:
+            self._last_proof = "decision"
+            return
+        verified = self._verified == (self._expected_revision, self._expected_sha256)
+        if verified and self._verification_token:
+            self._last_proof = "runtime"
+            return
+        raise DecisionCallError("identity_absent")
 
 
 def _validate_base_url(base_url: str) -> str:

@@ -23,7 +23,6 @@ export const LAYA_REASON_CODES = [
   "unreachable",
   "wrong_revision",
   "unverified",
-  "identity_absent",
   "key_rejected",
 ] as const;
 
@@ -51,15 +50,22 @@ export function layaReasonPlain(reason: string | null | undefined, port: number)
   if (reason === "stopped") return "Stopped";
   if (reason === "still_loading") return "Still loading";
   if (reason === "unreachable") return "Unreachable";
-  if (reason === "wrong_revision") return "Wrong model revision";
+  if (reason === "wrong_revision") return "Wrong model version";
   if (reason === "unverified") return "Can't verify the model";
-  if (reason === "identity_absent") return "Decision has no revision";
-  if (reason === "key_rejected") return "API key rejected";
+  if (reason === "key_rejected") return "Can't reach Laya";
   return null;
 }
 
-/** Plain words plus the start command. The docs link sits beside the chip. */
+const LAYA_REASON_TOOLTIPS: Record<string, string> = {
+  unverified:
+    "The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.",
+  wrong_revision: "Laya is running a different model than FlintTrade expects.",
+  key_rejected: "Laya restarted with a new key. Reconnecting…",
+};
+
+/** Hover text. The three model and key failures keep their own sentence. */
 export function layaReasonTooltip(reason: string | null | undefined, port: number): string | null {
+  if (reason && reason in LAYA_REASON_TOOLTIPS) return LAYA_REASON_TOOLTIPS[reason];
   const plain = layaReasonPlain(reason, port);
   if (!plain) return null;
   return `${plain}. Next: ${LAYA_START_COMMAND}`;

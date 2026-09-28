@@ -29,11 +29,13 @@ and the kill switch stay outside this module.
 
 When a decision host is configured, free-text questions run after the floor.
 The host may deny or clamp. It cannot raise a quantity or overturn a floor
-refusal. Unreachable, timeout, malformed, and revision or digest mismatch
-are Down for Practice and Live. That refusal uses one sentence in both
-modes. Live can also stay closed while Laya is Ready or Degraded, until a
-qualification record matches the pinned revision, weight digest, and
-policy version. That refusal names the qualification requirement.
+refusal. Unreachable, timeout, malformed, and a real revision or digest
+mismatch are Down for Practice and Live. That refusal uses one sentence in
+both modes. A decision that carries no revision or digest, and no record
+from the running sidecar, refuses that order only. Live can also stay
+closed while Laya is Ready or Degraded, until a qualification record matches
+the pinned revision, weight digest, and policy version. That refusal names
+the qualification requirement.
 """
 
 from __future__ import annotations
@@ -69,7 +71,6 @@ LAYA_REASON_STILL_LOADING = "still_loading"
 LAYA_REASON_UNREACHABLE = "unreachable"
 LAYA_REASON_WRONG_REVISION = "wrong_revision"
 LAYA_REASON_UNVERIFIED = "unverified"
-LAYA_REASON_IDENTITY_ABSENT = "identity_absent"
 LAYA_REASON_KEY_REJECTED = "key_rejected"
 LAYA_REASON_CODES = frozenset(
     {
@@ -80,10 +81,20 @@ LAYA_REASON_CODES = frozenset(
         LAYA_REASON_UNREACHABLE,
         LAYA_REASON_WRONG_REVISION,
         LAYA_REASON_UNVERIFIED,
-        LAYA_REASON_IDENTITY_ABSENT,
         LAYA_REASON_KEY_REJECTED,
     }
 )
+
+LAYA_START_COMMAND = "python -m flinttrade_core.laya_runtime start"
+
+_REASON_TOOLTIPS = {
+    LAYA_REASON_UNVERIFIED: (
+        "The installed model couldn't be checked against the pinned version. "
+        "Restart Laya. If it keeps happening, reinstall it."
+    ),
+    LAYA_REASON_WRONG_REVISION: "Laya is running a different model than FlintTrade expects.",
+    LAYA_REASON_KEY_REJECTED: "Laya restarted with a new key. Reconnecting…",
+}
 
 
 def laya_reason_detail(reason: str | None, port: int) -> str | None:
@@ -95,14 +106,23 @@ def laya_reason_detail(reason: str | None, port: int) -> str | None:
         LAYA_REASON_STOPPED: "Stopped",
         LAYA_REASON_STILL_LOADING: "Still loading",
         LAYA_REASON_UNREACHABLE: "Unreachable",
-        LAYA_REASON_WRONG_REVISION: "Wrong model revision",
+        LAYA_REASON_WRONG_REVISION: "Wrong model version",
         LAYA_REASON_UNVERIFIED: "Can't verify the model",
-        LAYA_REASON_IDENTITY_ABSENT: "Decision has no revision",
-        LAYA_REASON_KEY_REJECTED: "API key rejected",
+        LAYA_REASON_KEY_REJECTED: "Can't reach Laya",
     }
     if reason is None:
         return None
     return labels.get(reason)
+
+
+def laya_reason_tooltip(reason: str | None, port: int) -> str | None:
+    """Hover text for a sidecar reason. ``None`` when the sidecar is up."""
+    if reason in _REASON_TOOLTIPS:
+        return _REASON_TOOLTIPS[reason]
+    detail = laya_reason_detail(reason, port)
+    if detail is None:
+        return None
+    return f"{detail}. Next: {LAYA_START_COMMAND}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,6 +343,14 @@ class Laya:
             degraded_ceiling=self._degraded_max_quantity,
             client=client,
         )
+        if decision.effect == "unverified":
+            return Verdict(
+                allow=False,
+                reason=decision.reason,
+                limits=limits,
+                applied_quantity=0,
+                evidence=decision.evidence,
+            )
         if decision.effect == "down":
             self.set_status(DecisionStatus.DOWN)
             failure = next((item[1] for item in decision.evidence if item[0] == "failure"), "")
@@ -433,6 +461,8 @@ class Laya:
 
 _DOWN_PAUSE = "Laya is Down. Orders are paused until it's Ready."
 
+LAYA_DECISION_UNVERIFIED = "Not placed. Laya's decision couldn't be verified. Try again."
+
 
 _UNQUALIFIED_LIVE = "Laya isn't qualified for Live yet. Practice orders are available."
 
@@ -486,8 +516,6 @@ def _reason_for_decision_failure(code: str) -> str | None:
     """Map a host failure onto a chip reason. Other failures stay with the probe."""
     if code in {"revision_mismatch", "digest_mismatch"}:
         return LAYA_REASON_WRONG_REVISION
-    if code == "identity_absent":
-        return LAYA_REASON_IDENTITY_ABSENT
     if code == "http_401":
         return LAYA_REASON_KEY_REJECTED
     return None
@@ -517,6 +545,14 @@ def place_block(verdict: Verdict, requested_quantity: int) -> dict[str, Any] | N
             "reason": verdict.reason,
             "limits": limits,
             "applied_quantity": verdict.applied_quantity,
+            "http_status": 409,
+        }
+    if verdict.reason == LAYA_DECISION_UNVERIFIED:
+        return {
+            "status": "error",
+            "code": "laya_unverified",
+            "message": LAYA_DECISION_UNVERIFIED,
+            "reason": LAYA_DECISION_UNVERIFIED,
             "http_status": 409,
         }
     body: dict[str, Any] = {
