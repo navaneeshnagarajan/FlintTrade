@@ -554,7 +554,8 @@ class TestPracticeMode:
         )
         recorder.request_reconnect.assert_called_once_with()
 
-    def test_practice_place_smart_order(self, flask_app, client):
+    def test_practice_place_smart_order_does_not_place(self, flask_app, client):
+        """Smart placement is not a second Practice writer. Use /place."""
         mock_sandbox = MagicMock()
         mock_sandbox.place_order.return_value = {
             "order_id": "SB-002",
@@ -563,12 +564,21 @@ class TestPracticeMode:
         }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
-        resp = client.post(
+        refused = client.post(
             "/api/v1/orders/place-smart",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="practice"),
         )
-        assert resp.status_code == 200
+        assert refused.status_code == 400
+        assert refused.get_json()["status"] == "error"
+        mock_sandbox.place_order.assert_not_called()
+
+        placed = client.post(
+            "/api/v1/orders/place",
+            json=_SAMPLE_ORDER_BODY,
+            headers=_auth_headers(mode="practice"),
+        )
+        assert placed.status_code == 200
         mock_sandbox.place_order.assert_called_once()
 
     def test_practice_cancel_order_reaches_pending_order(self, flask_app, client):
@@ -646,11 +656,9 @@ class TestPracticeMode:
         )
         recorder.add_symbols.assert_not_called()
 
-    def test_practice_close_position(self, flask_app, client):
+    def test_practice_close_position_uses_place(self, flask_app, client):
+        """Closing a Practice position is a SELL placed through /place."""
         mock_sandbox = MagicMock()
-        mock_sandbox.get_positions.return_value = [
-            {"symbol": "NIFTY", "exchange": "NSE", "product": "MIS", "net_qty": 50},
-        ]
         mock_sandbox.place_order.return_value = {
             "order_id": "SB-003",
             "status": "COMPLETE",
@@ -658,15 +666,29 @@ class TestPracticeMode:
         }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
-        resp = client.post(
+        refused = client.post(
             "/api/v1/orders/close-position",
-            json={"symbol": "NIFTY", "exchange": "NSE", "product": "MIS"},
+            json={"symbol": "NIFTY", "exchange": "NSE", "product": "MIS", "action": "SELL", "quantity": 50},
             headers=_auth_headers(mode="practice"),
         )
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["status"] == "COMPLETE"
-        # Should sell to close long position
+        assert refused.status_code == 400
+        mock_sandbox.place_order.assert_not_called()
+
+        placed = client.post(
+            "/api/v1/orders/place",
+            json={
+                "symbol": "NIFTY",
+                "exchange": "NSE",
+                "action": "SELL",
+                "quantity": 50,
+                "price": 0,
+                "product": "MIS",
+                "order_type": "MARKET",
+            },
+            headers=_auth_headers(mode="practice"),
+        )
+        assert placed.status_code == 200
+        assert placed.get_json()["status"] == "COMPLETE"
         mock_sandbox.place_order.assert_called_once_with(
             symbol="NIFTY",
             exchange="NSE",
@@ -680,7 +702,7 @@ class TestPracticeMode:
         )
 
     def test_practice_close_position_no_matching(self, flask_app, client):
-        """Closing a position that does not exist returns REJECTED."""
+        """The legacy close route does not write the sandbox book."""
         mock_sandbox = MagicMock()
         mock_sandbox.get_positions.return_value = []
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
@@ -693,8 +715,9 @@ class TestPracticeMode:
         assert resp.status_code == 400
         data = resp.get_json()
         assert data["status"] == "error"
+        mock_sandbox.place_order.assert_not_called()
 
-    def test_practice_open_position(self, flask_app, client):
+    def test_practice_open_position_uses_place(self, flask_app, client):
         mock_sandbox = MagicMock()
         mock_sandbox.place_order.return_value = {
             "order_id": "SB-004",
@@ -703,12 +726,20 @@ class TestPracticeMode:
         }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
-        resp = client.post(
+        refused = client.post(
             "/api/v1/orders/open-position",
             json=_SAMPLE_ORDER_BODY,
             headers=_auth_headers(mode="practice"),
         )
-        assert resp.status_code == 200
+        assert refused.status_code == 400
+        mock_sandbox.place_order.assert_not_called()
+
+        placed = client.post(
+            "/api/v1/orders/place",
+            json=_SAMPLE_ORDER_BODY,
+            headers=_auth_headers(mode="practice"),
+        )
+        assert placed.status_code == 200
         mock_sandbox.place_order.assert_called_once()
 
     def test_practice_sandbox_not_configured_returns_500(self, flask_app, client):

@@ -11,13 +11,11 @@ Endpoint summary::
     GET  /v1/sandbox/config           — leverage and square-off policy
     POST /v1/sandbox/config           — update sandbox policy
     POST /v1/sandbox/capital/adjust   — add or remove capital {amount}
-    POST /v1/sandbox/order            — place a paper order
     GET  /v1/sandbox/positions        — open positions
     GET  /v1/sandbox/orders           — today's orders
     GET  /v1/sandbox/trades           — executed trades
     GET  /v1/sandbox/pnl              — aggregate P&L
     GET  /v1/sandbox/pnl/history      — daily P&L history
-    POST /v1/sandbox/square-off       — close all positions at supplied LTPs
     POST /v1/sandbox/reset            — clear all data (returns backup)
     GET  /v1/sandbox/export           — export as JSON string
     POST /v1/sandbox/import           — import from JSON
@@ -200,87 +198,8 @@ def adjust_capital() -> Response:
 
 
 # ---------------------------------------------------------------------------
-# Orders
+# Orders — cancel and modify only. Placement goes through /api/v1/orders/place.
 # ---------------------------------------------------------------------------
-
-
-@data_sandbox_bp.route("/order", methods=["POST"])
-def place_order() -> Response:
-    """Place a paper order.
-
-    Request body::
-
-        {
-          "symbol":   "NIFTY",
-          "exchange": "NSE_INDEX",
-          "action":   "BUY",
-          "quantity": 50,
-          "price":    24000.0,
-          "product":  "MIS"   // optional, default "MIS"
-        }
-
-    Returns:
-        JSON ``{status, order}`` where ``order`` contains order_id, status, message.
-    """
-    engine, err = _engine_required()
-    if err:
-        return err
-
-    body: dict[str, Any] = request.get_json(silent=True) or {}
-
-    symbol = body.get("symbol", "")
-    exchange = body.get("exchange", "")
-    action = body.get("action", "")
-    quantity = body.get("quantity")
-    price = body.get("price")
-    product = body.get("product", "MIS")
-    order_type = body.get("order_type", body.get("pricetype", "MARKET"))
-    trigger_price = body.get("trigger_price", 0.0)
-    strategy = body.get("strategy", "")
-
-    # Basic presence validation before calling engine
-    missing = [f for f, v in [("symbol", symbol), ("exchange", exchange),
-                               ("action", action), ("quantity", quantity),
-                               ("price", price)] if not v and v != 0]
-    if missing:
-        return (
-            jsonify({
-                "status": "error",
-                "message": f"Missing required fields: {', '.join(missing)}",
-            }),
-            400,
-        )
-
-    try:
-        quantity = int(quantity)
-        price = float(price)
-        trigger_price = float(trigger_price)
-    except (TypeError, ValueError):
-        return (
-            jsonify({
-                "status": "error",
-                "message": "'quantity' must be int and prices must be numbers",
-            }),
-            400,
-        )
-
-    result = engine.place_order(
-        symbol=symbol,
-        exchange=exchange,
-        action=action,
-        quantity=quantity,
-        price=price,
-        product=product,
-        order_type=order_type,
-        trigger_price=trigger_price,
-        strategy=strategy,
-    )
-
-    accepted = result["status"] in {"COMPLETE", "PENDING"}
-    return jsonify({
-        "status": "success" if accepted else "error",
-        "data": {"order": result},
-    }), (200 if accepted else 400)
 
 
 @data_sandbox_bp.route("/order/<order_id>", methods=["DELETE"])
@@ -411,26 +330,6 @@ def get_pnl_history() -> Response:
     return jsonify({
         "status": "success",
         "data": {"pnl_history": engine.get_pnl_history()},
-    })
-
-
-@data_sandbox_bp.route("/square-off", methods=["POST"])
-def square_off_all() -> Response:
-    """Close every open Practice position at supplied current LTPs."""
-    engine, err = _engine_required()
-    if err:
-        return err
-    body: dict[str, Any] = request.get_json(silent=True) or {}
-    latest_ticks = body.get("latest_ticks")
-    if not isinstance(latest_ticks, dict):
-        return jsonify({"status": "error", "message": "'latest_ticks' must be an object"}), 400
-    try:
-        closed = engine.square_off_all(latest_ticks)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
-    return jsonify({
-        "status": "success",
-        "data": {"closed_positions": closed},
     })
 
 

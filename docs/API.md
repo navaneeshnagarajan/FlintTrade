@@ -362,8 +362,7 @@ Native virtual-capital paper trading. Source: `packages/core/data/src/flinttrade
 | `sandbox/status` (**GET**) | Combined status: current + initial capital, P&L, trade count. |
 | `sandbox/capital` (**GET**) | Full capital state (initial / current / available / used margin). |
 | `sandbox/capital/adjust` (**POST**) | Add or remove virtual capital (`{amount}`). |
-| `sandbox/order` (**POST**) | Place a paper order. |
-| `sandbox/positions` · `sandbox/orders` · `sandbox/pnl` (**GET**) | Book and P&L reads. |
+| `sandbox/positions` · `sandbox/orders` · `sandbox/pnl` (**GET**) | Book and P&L reads. Orders are placed through `POST /api/v1/orders/place`. |
 | `sandbox/reset` (**POST**) | Clear all paper data (returns a backup). |
 | `sandbox/export` (**GET**) · `sandbox/import` (**POST**) | Export / import sandbox state. |
 

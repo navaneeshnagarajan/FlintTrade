@@ -6,7 +6,7 @@ reads the ``mode`` claim from the *server-issued JWT* (not from any
 client-controlled header) and routes accordingly:
 
 - ``explore``  → 403 — no orders permitted in demo mode
-- ``practice`` → SandboxEngine (paper trading, no broker write)
+- ``practice`` → ``POST /api/v1/orders/place`` admits through Laya, then SandboxEngine
 - ``live``     → gated BrokerRouter execution for supported writes; fail closed otherwise
 
 The ``mode`` claim is set at login/PIN-verify time and cannot be forged
@@ -21,7 +21,7 @@ Architecture::
     Frontend → POST /v1/orders/<action>
              → order_routes.py (reads JWT ``mode`` claim)
              → explore  → 403
-             → practice → SandboxEngine.place_order(...)
+             → practice place → Laya, then SandboxEngine.place_order(...)
              → live     → SafetySystem/gate_order → BrokerRouter
 
 Blueprint prefix: ``/v1/orders``
@@ -1810,7 +1810,7 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
             body.get("order_type") or body.get("pricetype") or "MARKET"
         ).strip().upper()
         if (
-            ft_action in {"place", "place-smart", "open-position", "close-position", "modify"}
+            ft_action == "modify"
             and practice_order_type != "MARKET"
             and current_app.config.get("TICK_RECORDER") is None
         ):
@@ -1821,23 +1821,10 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
                 ),
             }), 503
 
-        # Only placeorder-style actions are meaningful in sandbox;
-        # modify/cancel/close/open are also supported for UI parity.
+        # Placement is handled only by ``_dispatch_practice_place``. Cancel and
+        # modify still reach the sandbox book; other actions do not create orders.
         try:
             result = _sandbox_dispatch(sandbox, ft_action, body)
-            if (
-                ft_action in {"place", "place-smart", "open-position", "close-position"}
-                and not _subscribe_pending_practice_order(result, body)
-            ):
-                order_id = str(result.get("order_id") or "")
-                if order_id:
-                    sandbox.cancel_order(order_id)
-                return jsonify({
-                    "status": "error",
-                    "message": (
-                        "Practice order was cancelled because its tick subscription failed"
-                    ),
-                }), 503
         except Exception as exc:
             logger.exception(
                 "SandboxEngine error for action=%s symbol=%s: %s",
@@ -1952,27 +1939,28 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
 
 
 def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Route a practice order to the appropriate SandboxEngine method.
+    """Route a practice cancel or modify to the sandbox engine.
 
-    The SandboxEngine's primary method is ``place_order`` which handles both
-    BUY and SELL. Pending LIMIT/SL orders use the engine's real modify and
-    cancel lifecycle rather than simulated acknowledgements.
+    Creating or filling an order is not done here. ``POST /api/v1/orders/place``
+    admits through Laya and then calls the sandbox engine.
 
     Args:
         sandbox: SandboxEngine instance from ``app.config["DATA_SANDBOX_ENGINE"]``.
-        ft_action: FlintTrade action key (``"place"``, ``"cancel"``, etc.).
+        ft_action: FlintTrade action key (``"cancel"``, ``"modify"``, etc.).
         body: Decoded JSON request body.
 
     Returns:
         Dict response in OpenAlgo-compatible format.
     """
-    symbol: str = str(body.get("symbol", "")).strip().upper()
-    exchange: str = str(body.get("exchange", "")).strip().upper()
-    action: str = str(body.get("action", "BUY")).strip().upper()
-    product: str = str(body.get("product", "MIS")).strip().upper()
+    if ft_action in {"place", "place-smart", "open-position", "close-position"}:
+        return {
+            "order_id": "",
+            "status": "REJECTED",
+            "message": "Practice orders are placed through /api/v1/orders/place.",
+        }
+
     order_type = str(body.get("order_type") or body.get("pricetype") or "MARKET").strip().upper()
     trigger_price_raw = body.get("trigger_price", 0.0)
-    strategy = str(body.get("strategy") or "").strip()
 
     try:
         quantity = int(body.get("quantity", 0))
@@ -1987,50 +1975,6 @@ def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dic
         trigger_price = float(trigger_price_raw)
     except (TypeError, ValueError):
         trigger_price = 0.0
-
-    if ft_action in ("place", "place-smart", "open-position"):
-        return sandbox.place_order(
-            symbol=symbol,
-            exchange=exchange,
-            action=action,
-            quantity=quantity,
-            price=price,
-            product=product,
-            order_type=order_type,
-            trigger_price=trigger_price,
-            strategy=strategy,
-        )
-
-    if ft_action == "close-position":
-        # Close by selling the full open net position
-        positions = sandbox.get_positions()
-        matching = [
-            p for p in positions
-            if p["symbol"] == symbol
-            and p["exchange"] == exchange
-            and p["product"] == product
-            and p["net_qty"] != 0
-        ]
-        if not matching:
-            return {
-                "order_id": "",
-                "status": "REJECTED",
-                "message": f"No open sandbox position for {symbol} on {exchange} ({product})",
-            }
-        pos = matching[0]
-        net_qty = pos["net_qty"]
-        close_action = "SELL" if net_qty > 0 else "BUY"
-        return sandbox.place_order(
-            symbol=symbol,
-            exchange=exchange,
-            action=close_action,
-            quantity=abs(net_qty),
-            price=price,
-            product=product,
-            order_type=order_type,
-            trigger_price=trigger_price,
-            strategy=strategy,
-        )
 
     order_id = str(body.get("order_id") or body.get("orderid") or "").strip()
     if ft_action == "cancel":
@@ -2107,10 +2051,98 @@ def _subscribe_pending_practice_order(
 # ---------------------------------------------------------------------------
 
 
+def _dispatch_practice_place(body: dict[str, Any]) -> tuple[Any, int]:
+    """Admit one Practice order through Laya, then fill or rest it in the sandbox.
+
+    Only ``POST /api/v1/orders/place`` calls this helper.
+    """
+    laya_block = _laya_place_response(body, mode=_MODE_PRACTICE, source="operator")
+    if laya_block is not None:
+        return laya_block
+
+    sandbox = current_app.config.get("DATA_SANDBOX_ENGINE")
+    if sandbox is None:
+        logger.error(
+            "SandboxEngine not configured in app.config — cannot process practice order"
+        )
+        return jsonify({
+            "status": "error",
+            "message": "Practice trading engine not available",
+        }), 500
+
+    order_type = str(body.get("order_type") or body.get("pricetype") or "MARKET").strip().upper()
+    if order_type != "MARKET" and current_app.config.get("TICK_RECORDER") is None:
+        return jsonify({
+            "status": "error",
+            "message": "Practice LIMIT and stop orders require tick capture to be running",
+        }), 503
+
+    try:
+        quantity = int(body.get("quantity", 0))
+    except (TypeError, ValueError):
+        quantity = 0
+    try:
+        price = float(body.get("price", 0.0))
+    except (TypeError, ValueError):
+        price = 0.0
+    try:
+        trigger_price = float(body.get("trigger_price", 0.0))
+    except (TypeError, ValueError):
+        trigger_price = 0.0
+
+    try:
+        result = sandbox.place_order(
+            symbol=str(body.get("symbol", "")).strip().upper(),
+            exchange=str(body.get("exchange", "")).strip().upper(),
+            action=str(body.get("action", "BUY")).strip().upper(),
+            quantity=quantity,
+            price=price,
+            product=str(body.get("product", "MIS")).strip().upper(),
+            order_type=order_type,
+            trigger_price=trigger_price,
+            strategy=str(body.get("strategy") or "").strip(),
+        )
+        if not _subscribe_pending_practice_order(result, body):
+            order_id = str(result.get("order_id") or "")
+            if order_id:
+                sandbox.cancel_order(order_id)
+            return jsonify({
+                "status": "error",
+                "message": "Practice order was cancelled because its tick subscription failed",
+            }), 503
+    except Exception as exc:
+        logger.exception(
+            "SandboxEngine error for action=place symbol=%s: %s",
+            body.get("symbol", "?"),
+            exc,
+        )
+        return jsonify({
+            "status": "error",
+            "message": "Practice trading engine encountered an error",
+        }), 500
+
+    logger.info(
+        "Practice order | action=place symbol=%s exchange=%s qty=%s → %s",
+        body.get("symbol", "?"),
+        body.get("exchange", "?"),
+        body.get("quantity", "?"),
+        result.get("status", "?"),
+    )
+    if str(result.get("status", "")).upper() == "REJECTED":
+        return jsonify({
+            "status": "error",
+            "message": str(result.get("message") or "Practice order rejected"),
+        }), 400
+    return jsonify(result), 200
+
+
 @orders_bp.route("/place", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_order() -> tuple[Any, int]:
     """Place a regular order — maps to OpenAlgo ``placeorder``.
+
+    Practice orders are admitted through Laya before the sandbox engine.
+    Live orders run SafetySystem L1–L5 and the one-shot gate.
 
     Request headers:
         X-FlintTrade-Mode (str): ``explore`` | ``practice`` | ``live``
@@ -2128,6 +2160,13 @@ def place_order() -> tuple[Any, int]:
         JSON with ``status``, ``order_id``, and ``message``.
         HTTP 200 on success, 400/403/500/502 on error.
     """
+    mode = _get_mode_from_jwt()
+    mismatch = _mode_header_mismatch_response(mode, route_label="Order request to /place")
+    if mismatch is not None:
+        return mismatch
+    if mode == _MODE_PRACTICE:
+        body = request.get_json(silent=True) or {}
+        return _dispatch_practice_place(body)
     return _dispatch_order("place")
 
 
