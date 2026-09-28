@@ -501,23 +501,41 @@ around them.
 ### Laya decision sidecar
 
 Place admission asks the Laya model only after Down and the hard rules.
-The host is opt-in. Install it in its own virtual environment so torch
-does not enter the FlintTrade environment. The runtime binds
-`127.0.0.1` (the upstream default binds every interface with no
-authentication), mints a fresh API key on each boot, and pins
-`laya[serve]==0.3.21` plus the `convaiinnovations/laya` revision and
-`model.safetensors` digest in `laya_policy.toml`. The first boot may
-download that checkpoint. Later boots stay offline. CPU is the device
-this runtime starts. An accelerator path is not started here.
+The host is opt-in. Install and supervise it with the FlintTrade
+environment (the project `.venv` after `uv sync`, or `uv run python`),
+so `flinttrade_core` and `flinttrade_engine` import. Do not run these
+commands with the sidecar interpreter.
 
-```python
-from flinttrade_core.laya_runtime import LayaRuntime
-from flinttrade_core.workspace import workspace_dir
-
-runtime = LayaRuntime(workspace_dir())
-runtime.install()
-runtime.start()
+```text
+python -m flinttrade_core.laya_runtime install
+python -m flinttrade_core.laya_runtime start
+python -m flinttrade_core.laya_runtime status
+python -m flinttrade_core.laya_runtime stop
 ```
+
+`install` creates `<workspace>/runtime/laya/venv`. On Linux the default
+workspace is `~/.flinttrade`. `FLINTTRADE_WORKSPACE_DIR` overrides it.
+The default install puts CPU torch in that environment from
+`https://download.pytorch.org/whl/cpu`, then `laya[serve]==0.3.21`, so
+the CUDA wheels stay out. That environment is about 1.2 GB. The
+default-index torch build, which pulls CUDA wheels, was about 5.6 GB. `install --accelerator cuda` opts into the
+PyPI torch build. `install --accelerator rocm` needs `LAYA_TORCH_INDEX`
+set to an https PyTorch ROCm wheel index. `start` still uses CPU
+(`LAYA_DEVICE=cpu`) and listens on `127.0.0.1:8000`. A fresh API key is
+written to `<workspace>/runtime/laya/api.key` and removed on `stop`, and
+on a start that fails after the key was written.
+
+The first successful load downloads the english `model.safetensors`
+checkpoint, about 843 MB, into the default Hugging Face cache rather
+than the runtime directory. A snapshot that also includes the
+multilingual weights is about 1.5 GB. Later boots stay offline. The
+pinned revision and `model.safetensors` digest live in `laya_policy.toml`.
+
+A backend that was started with `LAYA_HOST=127.0.0.1`, `LAYA_PORT=8000`,
+and `LAYA_API_KEY_FILE` pointing at that `api.key` attaches on its
+health probe. The host must stay loopback. The attached client uses the
+same revision and digest checks. A health document without the weight
+digest stays Down.
 
 `GET /health` then records Practice Ready or Degraded from the sidecar.
 Live stays Down until a `LayaQualification` record uses
@@ -528,7 +546,8 @@ is Down, and Practice refuses too. The decision response must include
 `revision` and `sha256`. A health document without the weight digest is
 Down. Stopping the sidecar records Down before an in-flight probe can
 publish Ready. An empty admission note is uncertain: Practice clamps and
-Live denies.
+Live denies. Order Pad sends that note as `rationale`, including when
+the field is empty.
 
 The same client speaks `POST /v1/systemone`. An operator may point it at
 another loopback host, including one on port 8888, without adding that

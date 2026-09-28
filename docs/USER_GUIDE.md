@@ -456,7 +456,30 @@ Down. The server reason, in every mode, is **Laya is Down. Orders are
 paused until it's Ready.** A Practice refusal never says Live. A Live
 place while Laya is Ready or Degraded, without a matching qualification
 record, says **Laya isn't qualified for Live yet. Practice orders are
-available.** Start the opt-in model before a Down engine can admit. A base checkpoint leaves Live Down. Live stays Down until that
+available.** Start the opt-in model before a Down engine can admit.
+
+From the FlintTrade environment (the project `.venv` after setup, or
+`uv run python`):
+
+```text
+python -m flinttrade_core.laya_runtime install
+python -m flinttrade_core.laya_runtime start
+```
+
+`install` creates the sidecar environment at
+`<workspace>/runtime/laya/venv` (on Linux, `~/.flinttrade/runtime/laya/venv`,
+unless `FLINTTRADE_WORKSPACE_DIR` is set). It installs a CPU build of
+torch, then the pinned model package. That environment is about 1.2 GB.
+A CUDA or ROCm build is opt-in and is not what `start` runs. `start`
+listens on `127.0.0.1:8000`. The first download of the english
+checkpoint is about 843 MB, in the
+Hugging Face cache. `stop` removes the API key from that runtime
+directory. Start the backend with `LAYA_HOST=127.0.0.1`,
+`LAYA_PORT=8000`, and `LAYA_API_KEY_FILE` set to
+`<workspace>/runtime/laya/api.key`. Its next health probe attaches to
+a sidecar that was started separately.
+
+A base checkpoint leaves Live Down. Live stays Down until that
 exact revision, weight digest, and policy version are qualified with
 LIVE_DECISION evidence.
 

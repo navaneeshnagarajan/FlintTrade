@@ -5,6 +5,7 @@ Open-place cases in this file seed Ready themselves. The process default stays D
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -275,6 +276,59 @@ def _allow_answers() -> dict[str, object]:
 
 def _deny_answers() -> dict[str, object]:
     return {**_allow_answers(), "tilt": _choice("A", 0.95)}
+
+
+@pytest.mark.unit
+def test_practice_place_without_a_note_clamps_instead_of_demanding_a_reason() -> None:
+    host = _ScriptedHost(_allow_answers())
+    process_laya().set_status(DecisionStatus.READY)
+    process_laya().set_decision_client(host)
+    app, sandbox = _practice_app()
+    response = app.test_client().post(
+        "/api/v1/orders/place",
+        json=_BODY,
+        headers=_headers("practice"),
+    )
+    body = response.get_json()
+    assert response.status_code == 409
+    assert body["code"] == "laya_clamp"
+    assert body["reason"] == "Laya is uncertain. Quantity stays inside the tighter limit."
+    assert body["message"] == "Qty held at 1 (Laya limit)"
+    assert "concrete reason is required" not in json.dumps(body)
+    assert "Live" not in body["reason"]
+    sandbox.place_order.assert_not_called()
+    assert host.calls == []
+
+    blank = app.test_client().post(
+        "/api/v1/orders/place",
+        json={**_BODY, "note": "   ", "rationale": ""},
+        headers=_headers("practice"),
+    )
+    assert blank.status_code == 409
+    assert blank.get_json()["reason"] == "Laya is uncertain. Quantity stays inside the tighter limit."
+    assert host.calls == []
+    sandbox.place_order.assert_not_called()
+
+
+@pytest.mark.unit
+def test_live_place_without_a_note_denies_as_uncertain(backend_lease_proof) -> None:
+    host = _ScriptedHost(_allow_answers())
+    process_laya().set_status(DecisionStatus.READY)
+    process_laya().set_decision_client(host)
+    app, router, safety = _live_app(backend_lease_proof)
+    response = app.test_client().post(
+        "/api/v1/orders/openalgo/place",
+        json=_BODY,
+        headers=_headers("live", unlocked=True),
+    )
+    body = response.get_json()
+    assert response.status_code == 403
+    assert body["code"] == "laya_denied"
+    assert body["reason"] == "Laya is uncertain. Live stays closed."
+    assert "concrete reason is required" not in json.dumps(body)
+    safety.check_order.assert_not_called()
+    router.place_order.assert_not_called()
+    assert host.calls == []
 
 
 @pytest.mark.unit

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -12,10 +14,15 @@ from flask import Flask
 
 from flinttrade_core.health_routes import health_bp
 from flinttrade_core.laya_runtime import (
+    CPU_TORCH_INDEX,
     LAYA_SERVE_REQUIREMENT,
     LayaRuntime,
     LayaRuntimeError,
+    attach_from_environment,
+    cpu_torch_command,
     install_command,
+    install_commands,
+    main,
     set_process_runtime,
     venv_python,
 )
@@ -91,11 +98,22 @@ def runtime(tmp_path: Path) -> Any:
 def test_install_command_pins_the_sidecar_venv_not_the_main_interpreter(tmp_path: Path) -> None:
     venv = tmp_path / "venv"
     command = install_command(venv)
+    torch = cpu_torch_command(venv)
     assert LAYA_SERVE_REQUIREMENT in command
     assert command[0] == str(venv_python(venv))
+    assert torch[0] == str(venv_python(venv))
+    assert CPU_TORCH_INDEX in torch
+    assert torch[-1] == "torch"
     assert Path(command[0]) != Path(sys.executable)
+    cpu = install_commands(venv, accelerator="cpu")
+    assert cpu[0] == torch
+    assert cpu[1][-1] == LAYA_SERVE_REQUIREMENT
+    cuda = install_commands(venv, accelerator="cuda")
+    assert all(CPU_TORCH_INDEX not in part for part in cuda)
+    assert cuda[0][-1] == "torch"
     root = Path(__file__).resolve().parents[4]
     assert "laya" not in (root / "packages/core/core/pyproject.toml").read_text(encoding="utf-8")
+    assert "torch" not in (root / "packages/core/core/pyproject.toml").read_text(encoding="utf-8")
     assert "unsloth" not in (root / "packages/core/core/src/flinttrade_core/laya_runtime.py").read_text(
         encoding="utf-8"
     )
@@ -106,7 +124,10 @@ def test_start_binds_loopback_mints_a_key_and_pins_the_checkpoint(runtime: LayaR
     runtime.install()
     runtime.start()
     env = runtime.envs[-1]  # type: ignore[attr-defined]
-    assert runtime.commands[-1][-1] == LAYA_SERVE_REQUIREMENT  # type: ignore[attr-defined]
+    commands = runtime.commands  # type: ignore[attr-defined]
+    assert CPU_TORCH_INDEX in commands[0]
+    assert commands[0][-1] == "torch"
+    assert commands[-1][-1] == LAYA_SERVE_REQUIREMENT
     assert env["LAYA_HOST"] == "127.0.0.1"
     assert env["LAYA_DEVICE"] == "cpu"
     assert env["LAYA_REVISION"] == load_policy().revision
@@ -136,9 +157,13 @@ def test_runtime_rejects_a_public_bind_and_an_unqualified_device(tmp_path: Path)
 def test_stop_terminates_the_sidecar_and_records_down(runtime: LayaRuntime) -> None:
     runtime.install()
     runtime.start()
+    key_path = runtime.runtime_root / "api.key"
+    assert key_path.is_file()
+    assert key_path.read_text(encoding="utf-8")
     process = runtime.created[-1]  # type: ignore[attr-defined]
     runtime.stop()
     assert process.terminated is True
+    assert not key_path.exists()
     assert process_laya().status is DecisionStatus.DOWN
     assert process_laya().note_heartbeat() is DecisionStatus.DOWN
 
@@ -266,3 +291,122 @@ def test_health_route_records_sidecar_status(runtime: LayaRuntime) -> None:
     assert ping["laya"] == "down"
     assert ping["laya_practice"] == "ready"
     assert ping["laya_live_qualified"] is False
+
+
+@pytest.mark.unit
+def test_failed_start_deletes_the_api_key(tmp_path: Path) -> None:
+    def factory(_argv: list[str], _env: dict[str, str]) -> _Process:
+        raise OSError("sidecar failed")
+
+    runtime = LayaRuntime(tmp_path, process_factory=factory)
+    with pytest.raises(OSError, match="sidecar failed"):
+        runtime.start()
+    assert not (runtime.runtime_root / "api.key").exists()
+    assert process_laya()._decision_client is None  # noqa: SLF001
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_two_venvs_sharing_one_base_interpreter_can_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    flint = tmp_path / "flint"
+    sidecar = tmp_path / "sidecar"
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(flint)], check=True)
+    flint_python = venv_python(flint)
+    side_python = venv_python(sidecar)
+    pip_calls: list[list[str]] = []
+    real_run = subprocess.run
+
+    def fake_run(argv: list[str], check: bool = False, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        args = [str(part) for part in argv]
+        if "pip" in args:
+            pip_calls.append(args)
+            return subprocess.CompletedProcess(args, 0)
+        if args[1:3] == ["-m", "venv"]:
+            # This image has no ensurepip. A prefix-only environment still
+            # shares the base interpreter symlink the guard used to follow.
+            without = [args[0], "-m", "venv", "--without-pip", args[-1]]
+            return real_run(without, check=check)  # type: ignore[arg-type]
+        return real_run(argv, check=check, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("flinttrade_core.laya_runtime.subprocess.run", fake_run)
+    monkeypatch.setattr(sys, "prefix", str(flint.resolve()))
+    from flinttrade_core import laya_runtime as runtime_module
+
+    runtime_module._default_install(sidecar, install_commands(sidecar))  # noqa: SLF001
+    assert side_python.resolve() == flint_python.resolve()
+    assert CPU_TORCH_INDEX in pip_calls[0]
+    assert pip_calls[0][-1] == "torch"
+    assert pip_calls[1][-1] == LAYA_SERVE_REQUIREMENT
+    with pytest.raises(LayaRuntimeError, match="FlintTrade interpreter"):
+        runtime_module._default_install(sidecar, [[str(flint_python), "-m", "pip", "install", "torch"]])  # noqa: SLF001
+
+
+@pytest.mark.unit
+def test_rocm_install_needs_an_https_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LAYA_TORCH_INDEX", raising=False)
+    with pytest.raises(LayaRuntimeError, match="LAYA_TORCH_INDEX"):
+        install_commands(tmp_path / "venv", accelerator="rocm")
+    monkeypatch.setenv("LAYA_TORCH_INDEX", "https://download.pytorch.org/whl/rocm6.3")
+    commands = install_commands(tmp_path / "venv", accelerator="rocm")
+    assert "https://download.pytorch.org/whl/rocm6.3" in commands[0]
+    assert CPU_TORCH_INDEX not in commands[0]
+
+
+@pytest.mark.unit
+def test_status_command_reports_the_loopback_sidecar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    assert main(["status"]) == 0
+    captured = capsys.readouterr().out
+    payload = json.loads(captured)
+    assert payload["running"] is False
+    assert payload["host"] == "127.0.0.1"
+    assert payload["port"] == 8000
+    assert payload["base_url"] == "http://127.0.0.1:8000"
+    assert payload["venv"].endswith("runtime/laya/venv")
+    assert "api.key" not in captured
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_attach_uses_the_policy_pin_and_fails_closed_without_a_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / "runtime" / "laya" / "api.key"
+    key_path.parent.mkdir(parents=True)
+    key_path.write_text("sidecar-key\n", encoding="utf-8")
+    monkeypatch.setenv("LAYA_API_KEY_FILE", str(key_path))
+    monkeypatch.setenv("LAYA_HOST", "127.0.0.1")
+    monkeypatch.setenv("LAYA_PORT", "8000")
+    runtime = attach_from_environment(tmp_path)
+    assert runtime is not None
+    client = process_laya()._decision_client  # noqa: SLF001
+    assert client is not None
+    assert client._expected_revision == load_policy().revision  # noqa: SLF001
+    assert client._expected_sha256 == load_policy().sha256  # noqa: SLF001
+    runtime._health_reader = lambda _url: _healthy()  # type: ignore[method-assign]
+    runtime.publish_status()
+    assert process_laya().effective_status("practice") is DecisionStatus.READY
+    missing = _healthy()
+    missing.pop("sha256")
+    runtime._health_reader = lambda _url: missing  # type: ignore[method-assign]
+    runtime.publish_status()
+    assert process_laya().status is DecisionStatus.DOWN
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_attach_refuses_a_public_host_and_a_missing_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LAYA_API_KEY_FILE", str(tmp_path / "missing.key"))
+    monkeypatch.setenv("LAYA_HOST", "0.0.0.0")
+    with pytest.raises(LayaRuntimeError, match="127.0.0.1"):
+        attach_from_environment(tmp_path)
+    monkeypatch.setenv("LAYA_HOST", "127.0.0.1")
+    process_laya().set_status(DecisionStatus.READY)
+    assert attach_from_environment(tmp_path) is None
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya()._decision_client is None  # noqa: SLF001
+    reset_process_laya_for_tests()
