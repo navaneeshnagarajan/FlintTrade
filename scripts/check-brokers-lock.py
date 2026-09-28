@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import pathlib
 import re
 import sys
 import tomllib
+from importlib import metadata
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 BROKERS_LOCK = REPO / "brokers.lock"
@@ -18,6 +20,11 @@ YANKED_VERSIONS = {"dhanhq": {"2.1.0"}}
 PIN_RE = re.compile(r"^([a-zA-Z0-9_.-]+)==([^\s;]+)")
 HASH_RE = re.compile(r"--hash=sha256:([a-f0-9]{64})")
 STALE_PLACEHOLDER_RE = re.compile(r"PLACEHOLDER|hash pending|pending hash", re.IGNORECASE)
+KOTAK_GIT = "https://github.com/Kotak-Neo/kotak-neo-python.git"
+KOTAK_FIELDS = (
+    "source_commit", "source_tree", "release_tag", "release_commit", "release_tree",
+    "release_wheel_sha256", "release_sdist_sha256", "licence_sha256",
+)
 
 
 def _parse_requirements(text: str) -> dict[str, tuple[str, set[str]]]:
@@ -64,6 +71,37 @@ def main() -> int:
     failures: list[str] = []
     for entry in data.get("broker", []):
         name = entry["name"].lower()
+        if name == "kotakneoapi":
+            for field in KOTAK_FIELDS:
+                value = str(entry.get(field, ""))
+                if not value or STALE_PLACEHOLDER_RE.search(value):
+                    failures.append(f"{name}: missing {field}")
+                elif field.endswith("_sha256") and not re.fullmatch(r"[a-f0-9]{64}", value):
+                    failures.append(f"{name}: invalid {field}")
+                elif field.endswith(("_commit", "_tree")) and not re.fullmatch(r"[a-f0-9]{40}", value):
+                    failures.append(f"{name}: invalid {field}")
+            if entry.get("release_tag") != f"v{entry.get('version')}":
+                failures.append(f"{name}: release_tag does not match version")
+            if entry.get("sha256") != entry.get("release_wheel_sha256"):
+                failures.append(f"{name}: sha256 differs from release_wheel_sha256")
+            if entry.get("licence_source") != "kotakneoapi-3.0.7.dist-info/licenses/LICENSE":
+                failures.append(f"{name}: invalid licence_source")
+            try:
+                distribution = metadata.distribution(name)
+            except metadata.PackageNotFoundError:
+                distribution = None
+            if distribution is not None:
+                licence_file = distribution.locate_file(str(entry.get("licence_source", "")))
+                if not licence_file.is_file():
+                    failures.append(f"{name}: installed licence file is missing")
+                elif hashlib.sha256(licence_file.read_bytes()).hexdigest() != entry.get("licence_sha256"):
+                    failures.append(f"{name}: installed licence_sha256 does not match brokers.lock")
+            if name in pins:
+                failures.append(f"{name}: Git distribution must be omitted from requirements.lock")
+            source = git_sources.get(name, ("", ""))[1]
+            expected = f"{KOTAK_GIT}?rev={entry.get('source_commit')}#{entry.get('source_commit')}"
+            if source != expected:
+                failures.append(f"{name}: uv.lock does not pin the official Git source and full commit")
         if entry.get("version") in YANKED_VERSIONS.get(name, set()):
             failures.append(f"{name}: version {entry['version']} is yanked")
         activated = name in ACTIVATED_WAVES
@@ -75,7 +113,7 @@ def main() -> int:
             for field, raw in entry.items():
                 if isinstance(raw, str) and STALE_PLACEHOLDER_RE.search(raw):
                     failures.append(f"{name}: activated wave has stale placeholder text in {field}")
-        if name in pins:
+        if name in pins and name != "kotakneoapi":
             version, hashes = pins[name]
             if entry["version"] != version:
                 failures.append(f"{name}: brokers.lock {entry['version']} != requirements.lock {version}")

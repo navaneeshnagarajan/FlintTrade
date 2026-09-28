@@ -1,11 +1,14 @@
 # FlintTrade — gateway
 
-> Direct broker connections (32 brokers), adapter pattern, encrypted credentials, WebSocket bridge
+> Native broker adapters and the optional OpenAlgo bridge, gated routing, encrypted credentials and market-data streams
 
 ## Key Modules
-- `adapter.py` — Base broker adapter interface
+- `adapter.py` — Broker adapter protocol, catalogue and optional OpenAlgo compatibility adapters
+- `brokers/` — Native broker implementations, with activation and capability gates
+- `router.py` — `BrokerRouter`, including safety-context validation for live writes
+- `native_login.py` — Vault-backed native login and registry session activation
 - `auth.py` — Authentication flows (OAuth, TOTP, OTP, API key)
-- `registry.py` — Broker registry (32 brokers)
+- `registry.py` — Broker registry and active adapter/session lifecycle; catalogue counts are pinned in `tests/test_adapter.py`
 - `contracts.py` — Instrument contract normalization
 - `credentials.py` — Encrypted credential storage
 - `session.py` — Session management and reconnection
@@ -15,12 +18,14 @@
 - `exceptions.py` — Gateway-specific exceptions
 - `shims/` — Compatibility shims (auth_db, config, logging, token_db)
 
-## Depends on: core
+## Dependencies
+
+See `packages/integrations/gateway/pyproject.toml` for declared dependencies and optional extras.
 
 ## Rules
 - Read root CLAUDE.md for project-wide rules
-- Use packages/core/core/src/openalgo_client.py for ALL OpenAlgo API calls
-- Never reference specific brokers
+- Use `flinttrade_core.openalgo_client` (`packages/core/core/src/flinttrade_core/openalgo_client.py`) for the optional OpenAlgo REST bridge. Live writes must obtain a `SafetyContext` through `gate_order`/`gate_broker_write` and flow through `BrokerRouter`; never call broker writes directly.
+- Keep shared routing broker-neutral; broker selection happens through `BrokerRegistry`, while broker-specific behaviour belongs in the appropriate native or compatibility adapter.
 - Tests are in the `tests/` directory. Add new test files as needed.
-- Update root CHANGELOG.md
+- Update root `changelog.md` only for shipped user-visible or API changes, including adapter-surface changes (new broker, auth-flow change, contract-normalisation change); do not add entries for tests, behaviour-preserving refactors or in-flight design.
 - Branch: follow root AGENTS.md; verify live main before opening or merging a PR.

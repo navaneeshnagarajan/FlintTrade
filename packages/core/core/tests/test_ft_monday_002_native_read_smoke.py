@@ -10,6 +10,7 @@ Acceptance lock (2026-09-20):
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -34,17 +35,40 @@ from flinttrade_gateway.monday_read_smoke import (
 
 
 class _SmokeAdapter:
-    def __init__(self, *, fail_quotes: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_login: bool = False,
+        fail_quotes: bool = False,
+        unsupported_quotes: bool = False,
+        fail_logout: bool = False,
+        unsupported_logout: bool = False,
+    ) -> None:
         self.calls: list[str] = []
+        self.fail_login = fail_login
         self.fail_quotes = fail_quotes
+        self.unsupported_quotes = unsupported_quotes
+        self.fail_logout = fail_logout
+        self.unsupported_logout = unsupported_logout
+        self.read_started = asyncio.Event()
+        self.read_release: asyncio.Event | None = None
+        self.last_session: object | None = None
 
     async def login(self, credentials: dict) -> object:
         self.calls.append("login")
+        if self.fail_login:
+            raise RuntimeError("login failed")
         assert credentials.get("token") == "non-funded"
-        return object()
+        self.last_session = type("SmokeSession", (), {"extra": {}})()
+        return self.last_session
 
     async def quotes(self, _session: object, symbols: list[str]) -> list[dict]:
         self.calls.append("quotes")
+        self.read_started.set()
+        if self.read_release is not None:
+            await self.read_release.wait()
+        if self.unsupported_quotes:
+            raise NotImplementedError("quotes unavailable")
         if self.fail_quotes:
             raise RuntimeError("quote probe failed")
         return [{"symbol": symbols[0], "ltp": 1.0}]
@@ -64,6 +88,13 @@ class _SmokeAdapter:
     async def place_order(self, *_a: object, **_k: object) -> None:
         self.calls.append("place_order")
         raise AssertionError("Monday read-smoke must not place")
+
+    async def logout(self, _session: object) -> None:
+        self.calls.append("logout")
+        if self.unsupported_logout:
+            raise NotImplementedError("logout unavailable")
+        if self.fail_logout:
+            raise RuntimeError("logout failed")
 
 
 class _LivePathSentinel:
@@ -119,6 +150,9 @@ async def test_monday_read_smoke_connects_without_writes(broker_id: str) -> None
     assert {step.name for step in result.steps if step.ok} >= {"login", "quotes", "depth"}
     assert "place_order" not in adapter.calls
     assert not any(verb in adapter.calls for verb in WRITE_VERBS)
+    assert adapter.calls.count("logout") == 1
+    assert adapter.last_session is not None
+    assert monday_read_smoke_ok(adapter.last_session) is False
     if broker_id == "kotakneo":
         assert result.operator_copy == NEO_OPERATOR_COPY
         assert "history" in adapter.calls
@@ -136,6 +170,59 @@ async def test_failed_read_never_paints_connected() -> None:
     assert result.chrome == ""
     assert monday_read_chrome("dhan", connected=True, reads_ok=False) is None
     assert "place_order" not in adapter.calls
+    assert adapter.calls.count("logout") == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cleanup_failure_is_recorded_and_never_reports_connected() -> None:
+    adapter = _SmokeAdapter(fail_logout=True)
+
+    result = await run_monday_read_smoke("kotakneo", adapter, {"token": "non-funded"})
+
+    assert result.ok is False
+    assert result.chrome == ""
+    assert adapter.calls.count("logout") == 1
+    logout = [step for step in result.steps if step.name == "logout"]
+    assert len(logout) == 1 and logout[0].ok is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_unsupported_logout_is_mandatory_and_login_failure_never_logs_out() -> None:
+    unsupported = _SmokeAdapter(unsupported_logout=True)
+    result = await run_monday_read_smoke("kotakneo", unsupported, {"token": "non-funded"})
+    assert result.ok is False
+    assert result.chrome == ""
+    assert unsupported.calls.count("logout") == 1
+
+    failed_login = _SmokeAdapter(fail_login=True)
+    failed = await run_monday_read_smoke("kotakneo", failed_login, {"token": "non-funded"})
+    assert failed.ok is False
+    assert failed_login.calls == ["login"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_unsupported_mandatory_quotes_never_paint_connected() -> None:
+    adapter = _SmokeAdapter(unsupported_quotes=True)
+    result = await run_monday_read_smoke("kotakneo", adapter, {"token": "non-funded"})
+    assert result.ok is False
+    assert result.chrome == ""
+    assert adapter.calls.count("logout") == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cancelled_smoke_logs_out_once_and_does_not_leave_session_stamped_connected() -> None:
+    adapter = _SmokeAdapter()
+    adapter.read_release = asyncio.Event()
+    running = asyncio.create_task(run_monday_read_smoke("kotakneo", adapter, {"token": "non-funded"}))
+    await adapter.read_started.wait()
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    assert adapter.calls.count("logout") == 1
 
 
 @pytest.mark.unit

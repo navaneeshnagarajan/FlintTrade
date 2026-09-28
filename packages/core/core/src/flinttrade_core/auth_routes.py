@@ -11,6 +11,7 @@ Public endpoints (no API key required):
 Session-bound endpoints (valid session JWT required):
   - POST /v1/auth/pin/set  — set/change the quick-unlock PIN (password re-confirm)
   - POST /v1/auth/totp/enable — confirm optional authenticator enrolment
+  - POST /v1/auth/setup/vault — open the credential vault during first-run setup
 """
 
 from __future__ import annotations
@@ -665,6 +666,95 @@ def auth_setup_regenerate_2fa() -> tuple[Any, int]:
     return jsonify({
         "status": "success",
         "data": {"totp_uri": totp_uri, "backup_codes": backup_codes},
+    }), 200
+
+
+_VAULT_PASSWORD_MIN_CHARS = 8
+_VAULT_PASSWORD_MAX_BYTES = 4 * 1024
+
+
+def _read_existing_vault_secret(path: Any) -> str | None:
+    """Return the hardened master password, or None when the file is absent.
+
+    An empty file is treated as missing so first-run can still open the vault.
+    Permission and link errors propagate; the caller fails closed and does not
+    write. The secret is never logged or returned to the client.
+    """
+    from .secure_file import read_owner_owned_text  # noqa: PLC0415
+
+    try:
+        existing = read_owner_owned_text(path, max_bytes=_VAULT_PASSWORD_MAX_BYTES)
+    except FileNotFoundError:
+        return None
+    text = existing.strip()
+    return text or None
+
+
+@auth_bp.route("/setup/vault", methods=["POST"])
+@_rate_limit("5 per minute")
+def auth_setup_vault() -> tuple[Any, int]:
+    """Open the credential vault on the first-run setup session.
+
+    When the hardened master-password file is missing, persist the operator's
+    passphrase. An existing secret is left untouched. The response never
+    includes the secret. A daily-login token cannot call this route.
+    """
+    from flinttrade_core.app import set_master_password  # noqa: PLC0415
+
+    from .secure_file import read_hardened_owner_owned_text, write_secret_text  # noqa: PLC0415
+    from .workspace import workspace_dir  # noqa: PLC0415
+
+    token = _session_token_from_request()
+    if not token:
+        return jsonify({"status": "error", "message": "A setup session is required."}), 401
+    verified = _verify_setup_session_token(token)
+    if not isinstance(verified, dict):
+        return verified
+
+    password_file = workspace_dir() / "master_password"
+    try:
+        existing = _read_existing_vault_secret(password_file)
+    except OSError:
+        logger.warning("Could not read the credential vault")
+        return jsonify({"status": "error", "message": "The vault could not be opened."}), 500
+    if existing is not None:
+        set_master_password(existing)
+        return jsonify({
+            "status": "success",
+            "data": {"opened": True, "already_present": True},
+        }), 200
+
+    body = request.get_json(silent=True) or {}
+    password = body.get("master_password", "")
+    if not isinstance(password, str):
+        password = ""
+    if (
+        not password
+        or password != password.strip()
+        or len(password) < _VAULT_PASSWORD_MIN_CHARS
+        or len(password.encode("utf-8")) > _VAULT_PASSWORD_MAX_BYTES
+    ):
+        return jsonify({
+            "status": "error",
+            "message": "Enter a master password of at least 8 characters.",
+        }), 400
+
+    try:
+        write_secret_text(password_file, password)
+        verified_secret = read_hardened_owner_owned_text(
+            password_file,
+            max_bytes=_VAULT_PASSWORD_MAX_BYTES,
+        )
+        if not secrets.compare_digest(password, verified_secret):
+            raise OSError("vault postcondition failed")
+    except OSError:
+        logger.warning("Could not open the credential vault")
+        return jsonify({"status": "error", "message": "The vault could not be opened."}), 500
+
+    set_master_password(password)
+    return jsonify({
+        "status": "success",
+        "data": {"opened": True, "already_present": False},
     }), 200
 
 

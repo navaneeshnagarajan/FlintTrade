@@ -77,8 +77,10 @@ if [ "$MODE" = "native" ]; then
     VENV_DIR="$REPO_ROOT/.venv"
     if [ -d "$VENV_DIR" ]; then
         PIP="$VENV_DIR/bin/pip"
+        PYTHON="$VENV_DIR/bin/python"
     else
         PIP="pip3"
+        PYTHON="python3"
     fi
 
     # SC-07: hash-verified install only (requirements.lock is fully pinned)
@@ -93,8 +95,10 @@ if [ "$MODE" = "native" ]; then
         (cd "$REPO_ROOT" && uv sync --frozen --all-packages --no-dev)
         ok "Repo .venv synced with broker SDK pins"
     else
-        warn "uv not found; run 'uv sync --frozen --all-packages --no-dev' to install repo-local broker SDK pins such as Kotak Neo."
+        warn "uv not found; using the target interpreter's pip for exact broker SDK pins."
     fi
+    "$PYTHON" "$REPO_ROOT/scripts/broker_sdk_environment.py" repair
+    ok "Pinned broker SDKs installed and attested"
 
     # ── Step 3: Build React terminal ───────────────────────────────────
     log "Building React terminal..."

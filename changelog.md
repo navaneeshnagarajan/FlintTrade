@@ -57,12 +57,26 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
+- **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
+  The required path is Create operator, then Vault, then the Practice
+  desk (Step N of 3). Affirming Practice lands on `/trade`.
+  Authenticator, broker connect, LLM, Monitoring, trading defaults,
+  and risk are Later or Skip on that desk. They do not change the
+  step count and do not block Practice. On the broker Later path,
+  **Continue without a broker** is the primary control above
+  FlintTrade Native and OpenAlgo Bridge. First run has no Live
+  unlock. Live place stays fail-closed. Live still needs the
+  authenticator and PIN later. Persona is not a required first-run
+  gate. Refs #282.
+
 - **Native Dhan + Kotak Neo Connected (read) smoke (FT-MONDAY-002).**
   The path is native Dhan + Neo on the MSI
   static-IP host with non-funded live REST API smoke
   (quotes / depth / hist / chain where the SDK
-  allows). Live SFeed / `create_websocket` is not
-  wired for Neo in this tip. Chrome is **Connected
+  allows). That historical evidence covers REST reads only.
+  Neo's v3 async SFeed and order-feed lifecycle is now
+  wired and locally synthetic-tested, without claiming
+  live-account or market-hours stream proof. Chrome is **Connected
   (read)** / **API smoke** only after persisted REST
   smoke evidence — never login-only, never placeable
   Live orders. Neo has no sandbox: never offer Neo
@@ -70,8 +84,14 @@ changelog rebuilds itself from the first release cut after this baseline.
   unlock.` Live place stays fail-closed. Prefer
   native; OpenAlgo is Settings / fallback only.
   `dhanhq` stays on latest stable 2.2.0 (not RC).
-  Neo migrates to PyPI `kotakneoapi` 3.0.7 (HS feed
-  retired; SFeed deferred). Native HTTP freeze
+  Neo runs `kotakneoapi` 3.0.7 from exact upstream
+  `main` `5bb34fae39c4a52a0e6b59d7e2d17090cafc340c`, with
+  `v3.0.7` peeled to `53cccc45fe56a193b30ffce3c03c71c5c0378538`
+  as the release baseline. The `neo_api_client` import namespace stays;
+  the old `neo-api-client` distribution is prohibited. Sandbox proof is
+  unavailable because Neo offers no sandbox; live-account/market-hours feed,
+  funded-order, Live-promotion, and cross-platform proof remain outstanding.
+  Native HTTP freeze
   (Task 9D / Task 7C.2) is not lifted. Refs #253.
 
 - **AI Chat Practice + native live-read context (FT-MONDAY-003).**

@@ -222,14 +222,15 @@ reads as a working operator path.
 3. **Optional: generate an OpenAlgo API key.** From the OpenAlgo dashboard,
    copy the generated API key. This is the key FlintTrade uses for the
    OpenAlgo-compatible bridge only (not your broker's key).
-4. **Set the OpenAlgo key in FlintTrade.** Open Setup → OpenAlgo Bridge, or
-   Settings → Broker Gateway, then paste the OpenAlgo URL and API key. The app
-   stores these settings in the OS workspace and hot-reloads the backend client.
-   If the URL does not include a port, set REST Port (default `5000`); the
-   WebSocket Port defaults to `8765`.
-5. **Verify the bridge.** Use the Test Connection button in the same UI. Source
-   contributors can open `http://localhost:5173/setup`; desktop users use the
-   in-app setup window.
+4. **Set the OpenAlgo key in FlintTrade.** Broker connect is not a required
+   first-run step. After the Practice desk is open, use the optional broker
+   panel (**OpenAlgo Bridge**) or Settings → Broker Gateway, then paste the
+   OpenAlgo URL and API key. The app stores these settings in the OS workspace
+   and hot-reloads the backend client. If the URL does not include a port, set
+   REST Port (default `5000`); the WebSocket Port defaults to `8765`.
+5. **Verify the bridge.** Use the Test Connection button in the same UI.
+   Source contributors open that optional broker panel, or Settings → Broker
+   Gateway; desktop users use the in-app window.
 
 **Native HTTP freeze.** Broker-account mutations (`/v1` account and auth
 writes, native connect / login / set-primary / delete, and OAuth start /
@@ -242,9 +243,11 @@ control plane only.
 
 When native connect returns, Dhan, Upstox, and Kotak Neo are evidence-gated
 as enabled in the catalogue. Kotak Neo is Connected (read) / API smoke only
-after persisted REST smoke evidence (FT-MONDAY-002) — never placeable Live;
-Neo has no sandbox (`Live read only until funded unlock.`). Kotak Neo
-Connected (read) / API smoke is REST-only; live SFeed is not wired. Upstox Developer Apps analytics tokens
+after persisted REST smoke evidence — never placeable Live;
+Neo has no sandbox (`Live read only until funded unlock.`). Kotak Neo's v3
+async market and order feeds are wired and locally tested with synthetic SDK
+clients, but no live-account or market-hours stream proof has been recorded.
+The previous non-funded Connected (read) evidence covers REST reads only. Upstox Developer Apps analytics tokens
 would connect as read-only sessions. INDmoney uses a dashboard-generated token that resets
 at the daily 06:00 IST dashboard cycle, but remains disabled until its
 smart-parent, atomic reduce-only, and live order-safety blockers clear. Groww
@@ -269,10 +272,11 @@ FlintTrade keeps its own backend, native sandbox, analytics, automation, and a
 first-party broker gateway whose HTTP connect and read surfaces are frozen
 until Task 9D and Task 7C.2.
 
-**Native Dhan + Kotak Neo Connected (read) / API smoke (FT-MONDAY-002).**
+**Native Dhan + Kotak Neo Connected (read) / API smoke.**
 The path is native Dhan + Kotak Neo on the MSI static-IP host, non-funded
 live REST API smoke (quotes / depth / hist / chain where the SDK allows).
-Kotak Neo is REST-only; live SFeed / `create_websocket` is not wired.
+That historical smoke does not cover the now-wired v3 async SFeed or order
+feed; those lifecycles have local synthetic coverage only.
 Prefer native; OpenAlgo is Settings / fallback only — not the primary
 connect CTA. Native HTTP remains frozen on this unreleased
 line until Task 9D and Task 7C.2 — Setup → Brokers HTTP still fails;
@@ -283,8 +287,13 @@ login/read never fakes Connected. Native Setup Continue ignores
 gateway/OpenAlgo Dhan/Neo rows; it requires a native source plus
 successful `read_smoke_ok`. Neo has no sandbox: never offer “Neo
 Practice”; copy is `Live read only until funded unlock.` `dhanhq` stays
-on latest stable 2.2.0; Neo is PyPI `kotakneoapi` 3.0.7. Live place stays
-fail-closed. See [FT-MONDAY-002](acceptance/FT-MONDAY-002.md).
+on latest stable 2.2.0. Neo runs exact upstream `main`
+`5bb34fae39c4a52a0e6b59d7e2d17090cafc340c`, with `v3.0.7` at
+`53cccc45fe56a193b30ffce3c03c71c5c0378538` as the release baseline. Install
+`kotakneoapi`, never the old `neo-api-client` distribution; Python imports
+still use `neo_api_client`. Live place stays fail-closed. Sandbox proof is
+unavailable because Neo offers no sandbox; live-account/market-hours feed,
+funded-order, Live-promotion, and cross-platform proof remain open.
 
 ---
 
@@ -302,7 +311,7 @@ Before enabling any order-capable integration, exercise the order path in
 The current mode is shown in the top bar and is server-enforced via the JWT
 claim — switching to Live requires a deliberate confirmation step.
 
-**Practice SandboxEngine fills (FT-MONDAY-001).** This is the
+**Practice SandboxEngine fills.** This is the
 shipped Practice path. Explore is sample-only. Practice is the
 primary paper path: orders place and record fills on FlintTrade's
 native `SandboxEngine`. AI and terminal surfaces read that Practice
@@ -379,7 +388,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | edge/CDN | Public site/CDN unreachable. The install/update or public-site fetch failed and the local desk ping (`/api/v1/ping`) still succeeded. | Install from the repository. [Cloudflare status](https://www.cloudflarestatus.com/) and [Vercel status](https://www.vercel-status.com/). A site outage does not cancel broker orders. |
 | Broker sign-in (`broker_auth`) | The broker session or token failed. Connected (read) only after a read smoke succeeds. | Sign in again under Settings → Brokers. Retry once. No automatic re-smoke. |
 | Broker connection (`broker_rest`) | The broker API failed. | Check the broker status page, then retry once. |
-| Broker stream (`broker_stream`) | Dhan's market stream dropped. Kotak Neo has no stream class until SFeed. | Wait for the stream. Do not treat quotes as live. |
+| Broker stream (`broker_stream`) | A Dhan or Kotak Neo market/order stream dropped. Kotak Neo's local v3 lifecycle coverage is not live-account proof. | Wait for the stream. Do not treat stale REST quotes or a reconnecting socket as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
 | Laya (`laya`) | Blocked — Laya is Down ("Laya is Down — Live orders paused."). Live place and Position Mirror start stay closed. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. Kill All stays available. Laya starts Down. Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. | While the strip is open, Live place stays muted on that strip. Ready and Degraded allow a place attempt. Do not treat Chat as a substitute. |
@@ -562,12 +571,12 @@ backend rejects Explore orders if the UI slips (FT-TRADE-009).
 
 This is a fallback path, not the primary Practice fills path. The
 primary paper path is Practice mode on `/trade` through the native
-`SandboxEngine` (FT-MONDAY-001). Explore `/learn` → **Practice
+`SandboxEngine`. Explore `/learn` → **Practice
 Trading** still walks through optional OpenAlgo broker Practice /
 sandbox setup when you need that fallback. **Dhan Sandbox** remains
 optional OpenAlgo paper. Kotak Neo has **no sandbox** — never offer
 “Neo Practice”. Operator copy is `Live read only until funded unlock.`
-(FT-MONDAY-002). The tab shows "How to start Practice Trading", helper
+The tab shows "How to start Practice Trading", helper
 text "Configure OpenAlgo in Settings → Broker Gateway.", and an
 **Open Settings → Broker Gateway** button that navigates to
 `/settings#api`. The CTA does not send operators to Settings →
@@ -609,8 +618,8 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] Your FlintTrade JWT is fresh — it expires daily at 8 AM IST.
 - [ ] The authenticator is enrolled, or you will confirm a one-time
       authenticator code in the Live switch dialog (if you chose **Set up
-      later** during setup). Explore and Practice stay password-only until
-      enrolment.
+      later** on the optional authenticator panel). Explore and Practice stay
+      password-only until enrolment. First-run Setup does not unlock Live.
 - [ ] An **exactly 6-digit** Security PIN is set under Settings → Security
       (`/settings#security`). Live cannot be armed until this PIN exists.
 - [ ] The 5-layer safety system is active (see
@@ -634,10 +643,11 @@ See [Laya on place](#laya-on-place).
    the welcome mode picker. The dialog warns that real orders will be
    placed and asks for an **authenticator code** and your **exactly
    6-digit PIN**. Live unlock requires both — a confirmed authenticator
-   enrolment plus the PIN. If you deferred 2FA with **Set up later**,
-   enter a one-time authenticator code in the dialog to enrol, then the
-   PIN. `POST /v1/auth/pin` with `mode: "live"` refuses 403
-   `totp_required` until the authenticator is enabled. The PIN
+   enrolment plus the PIN. If you deferred 2FA with **Set up later** on
+   the optional authenticator panel, enter a one-time authenticator code
+   in the dialog to enrol, then the PIN. `POST /v1/auth/pin` with
+   `mode: "live"` refuses 403 `totp_required` until the authenticator
+   is enabled. The PIN
    alone is not enough. Set the PIN under Settings → Security
    (`/settings#security`) first if you have not already — see
    [Settings reference](#11-settings-reference).
@@ -680,7 +690,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 |---|---|
 | `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP, or PIN). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Explore stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
-| `/setup` | First-time 7-step linear wizard (Account → optional authenticator → Persona → Broker → Trading → Risk → Choose Mode). After account create, **Set up later** continues Explore/Practice without enrolling 2FA. Daily login stays password-only until enrolment; Live still requires the authenticator and PIN. `/setup-account` is a compatibility alias. |
+| `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Later / Skip panels open on that desk after the affirm and do not change the step count. On the broker Later path, **Continue without a broker** is the first control, above FlintTrade Native and OpenAlgo Bridge. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
 | `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets (Alt+T). `/terminal` redirects here. |
@@ -691,6 +701,17 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 | `/ai` | AI Centre — chat, Suggest, signals, sentiment, RAG. |
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. `/admin/observability` is the same gate. |
+
+First-run Setup finishes on the Practice desk. Step N of 3 counts only
+Create operator, Vault, and Practice desk. After the affirm, Later / Skip
+covers the authenticator (TOTP; the control may still say **Set up later**),
+broker connect, LLM, Monitoring, trading defaults, and risk. Those panels
+never appear before the affirm, never block Practice, and never change
+Step N of 3. On the broker Later path, **Continue without a broker** is
+the first control, above FlintTrade Native and OpenAlgo Bridge. Persona
+is not a required first-run gate and is not part of that count. First run
+has no Live unlock. Live place stays fail-closed. A later Live unlock,
+outside this path, still needs the authenticator and PIN.
 
 `/home` is the canonical Home / Welcome dashboard. A signed-in
 operator who opens it (address bar, refresh, or same-tab bookmark)
@@ -1026,7 +1047,7 @@ flashes the outage copy.
 Open `/ai`. Chat, Signals, Sentiment, and RAG are backed by
 `packages/services/ai`. Suggest is a local filter UI over an
 illustrative strategy list — not a live AI fetch. Suggest stays
-labelled illustrative (FT-MONDAY-003).
+labelled illustrative.
 
 ### Chat
 
@@ -1088,7 +1109,7 @@ Connected sample advisor. Any later demo replies must be labelled
 **Sample replies**. Signals **Live** / **Polling** stay separate from Chat
 LLM readiness.
 
-AI Chat live-read context (FT-MONDAY-003): when an LLM is configured, Chat may
+AI Chat live-read context: when an LLM is configured, Chat may
 use Practice SandboxEngine fills and native live-read feeds for
 analysis. That is analysis context, not a guarantee of profitable
 alphas, and profitable alphas are not a release criterion. Chat
@@ -1112,8 +1133,8 @@ Practice on this machine; see
 **AI Strategy Suggestions** filters a local illustrative recommendation
 list by Market Mood chips (**Volatile**, **Trending**, **Sideways**) and
 your risk profile from persona and experience. Mood is a filter, not a
-draft and not a live AI fetch. Cards stay labelled illustrative
-(FT-MONDAY-003). Suggest is not the Chat live-read path and is not a
+draft and not a live AI fetch. Cards stay labelled illustrative.
+Suggest is not the Chat live-read path and is not a
 profitable-alphas product.
 
 Changing mood — a chip or **Next mood** — immediately replaces the
@@ -1405,8 +1426,8 @@ visible, and the composer stays gated until the runtime is installed
 and configured. A provider string of ollama is not Connected while
 the managed runtime is absent. Chat never shows green **Connected (suggest only)**
 without a real LLM. When that LLM is configured, Chat may use
-Practice fills and native live-read feeds for analysis
-(FT-MONDAY-003); Suggest stays labelled illustrative, and profitable
+Practice fills and native live-read feeds for analysis;
+Suggest stays labelled illustrative, and profitable
 alphas are not a release criterion.
 A configured but broken probe shows **Error** or **Disconnected** with
 **Retry**. Returning to Chat after saving Settings → AI re-checks

@@ -2000,7 +2000,7 @@ def test_authorise_default_actor_trust_on_first_use(tmp_path, *, backend_lease_f
 
 def test_build_broker_router_builds_algo_tag_guard_from_config(*, backend_lease_factory) -> None:
     """workspace brokers.algo_tags builds an engine AlgoTagGuard on the router
-    (G10 — algo-id relay + per-exchange per-second ceiling for algo_tag_required
+    (G10 — algo-id relay + per-exchange per-second ceiling for tag-capable
     natives). Without the block the router stays untagged (retail defaults)."""
     from flinttrade_engine.algo_tag_guard import AlgoTagGuard
 
@@ -2015,6 +2015,30 @@ def test_build_broker_router_builds_algo_tag_guard_from_config(*, backend_lease_
 
     untagged = build_broker_router(BrokerRegistry(), default_workspace_config()["brokers"], backend_lease_proof=backend_lease_factory())
     assert untagged._algo_tag_guard is None
+
+
+def test_build_broker_router_accepts_configured_optional_kotak_tag(*, backend_lease_factory) -> None:
+    from flinttrade_engine.algo_tag_guard import AlgoTagGuard
+    from flinttrade_gateway.brokers.dhan import DHAN_CAPABILITIES
+    from flinttrade_gateway.brokers.kotakneo import KOTAKNEO_CAPABILITIES
+
+    brokers = {
+        **default_workspace_config()["brokers"],
+        "algo_tags": {"kotakneo": {"algo_id": "TRUSTED-KOTAK-TAG", "max_orders_per_sec": 8}},
+    }
+
+    router = build_broker_router(
+        BrokerRegistry(),
+        brokers,
+        adapters={
+            "dhan": SimpleNamespace(capabilities=DHAN_CAPABILITIES),
+            "kotakneo": SimpleNamespace(capabilities=KOTAKNEO_CAPABILITIES),
+        },
+        backend_lease_proof=backend_lease_factory(),
+    )
+
+    assert isinstance(router._algo_tag_guard, AlgoTagGuard)
+    assert router._algo_tag_guard.algo_id_for("kotakneo") == "TRUSTED-KOTAK-TAG"
 
 
 @pytest.mark.unit

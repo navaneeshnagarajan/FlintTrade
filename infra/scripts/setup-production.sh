@@ -68,13 +68,17 @@ fi
 echo "Installing Python dependencies into $VENV_DIR..."
 sudo "$VENV_DIR/bin/pip" install --require-hashes -r "$INSTALL_DIR/requirements.lock"
 
-# Optional broker-SDK pins when uv is already on PATH. Terminal install+build
-# is required — the backend serves Setup only when dist/index.html exists.
+# A frozen uv sync is useful when uv is already on PATH. The shared repair
+# helper below is unconditional, so the exact Git-pinned SDK is also installed
+# and attested on ordinary production hosts that only have pip. Terminal
+# install+build is required — the backend serves Setup only when dist/index.html exists.
 if command -v uv >/dev/null 2>&1; then
     UV_BIN="$(command -v uv)"
     echo "Syncing uv workspace (broker-SDK pins)..."
     (cd "$INSTALL_DIR" && sudo "$UV_BIN" sync --frozen --all-packages --no-dev)
 fi
+echo "Installing and attesting pinned broker SDKs..."
+sudo "$VENV_DIR/bin/python" "$INSTALL_DIR/scripts/broker_sdk_environment.py" repair
 echo "Installing node workspace and building the terminal..."
 flinttrade_build_terminal "$INSTALL_DIR"
 

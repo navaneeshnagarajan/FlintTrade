@@ -37,7 +37,7 @@ describe("ConnectionStep", () => {
     vi.unstubAllGlobals();
   });
 
-  it("does not present OpenAlgo as the primary Monday connect CTA", () => {
+  it("does not present OpenAlgo as the primary connect CTA", () => {
     const onComplete = vi.fn();
     render(<ConnectionStep onComplete={onComplete} />);
 
@@ -170,7 +170,9 @@ describe("ConnectionStep", () => {
     fireEvent.click(screen.getByRole("button", { name: /flinttrade native/i }));
 
     expect(screen.getByText("Native brokers section")).toBeInTheDocument();
-    expect(screen.getByText(/Monday primary broker connect/i)).toBeInTheDocument();
+    const nativeHelper = screen.getByText(/Native Dhan \+ Kotak Neo stays Connected \(read\)/i);
+    expect(nativeHelper).toBeInTheDocument();
+    expect(nativeHelper).not.toHaveTextContent(/API smoke/i);
     expect(screen.getAllByText(/Connected \(read\)/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Live read only until funded unlock/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Dhan, Upstox, INDmoney/i)).not.toBeInTheDocument();
@@ -347,6 +349,7 @@ describe("ConnectionStep", () => {
     const continueButton = screen.getByRole("button", { name: /^continue$/i });
     expect(continueButton).toBeEnabled();
     expect(screen.getByRole("note")).toHaveTextContent(/Connected \(read\)/i);
+    expect(screen.getByRole("note")).not.toHaveTextContent(/API smoke/i);
     expect(screen.getByRole("note")).toHaveTextContent(/Live read only until funded unlock/i);
     fireEvent.click(continueButton);
     expect(onComplete).toHaveBeenCalled();

@@ -10,8 +10,9 @@ cutover (Task 9D / Task 7C.2) is not lifted.
 Native Connected (read) path: native Dhan + Kotak Neo connected on the MSI
 static-IP host with **non-funded** accounts → live REST API responses
 (quotes / depth / historical / option chain where the SDK allows),
-latency, and honest errors. Live SFeed /
-`create_websocket` is not wired in this tip.
+latency, and honest errors. This historical acceptance predates the v3 async
+feed wiring and therefore proves REST reads only, not a live SFeed or order
+feed.
 
 ## Locked behaviour
 
@@ -21,11 +22,14 @@ latency, and honest errors. Live SFeed /
 - Prefer **native** Dhan + Neo. OpenAlgo is Settings / fallback only —
   not the primary connect CTA.
 - `dhanhq` stays on latest stable **2.2.0** (not RC).
-- Neo v3 is PyPI `kotakneoapi` **3.0.7**. The v2 `neo-api-client` git
-  pin is gone. HS feed is retired. The Kotak Neo path is **REST-only**
-  (quotes / depth / historical / option chain where the SDK allows).
-  Live SFeed / `create_websocket` is **not** wired in this tip (out of
-  scope / deferred).
+- Neo v3 installs the `kotakneoapi` **3.0.7** distribution from exact
+  upstream Git provenance. Runtime `main` is
+  `5bb34fae39c4a52a0e6b59d7e2d17090cafc340c`; release tag `v3.0.7` peels
+  to `53cccc45fe56a193b30ffce3c03c71c5c0378538`. The old
+  `neo-api-client` distribution is prohibited, while imports intentionally
+  remain `neo_api_client`. HS feed is retired. The async SFeed and order-feed
+  lifecycle is wired and locally synthetic-tested; this tip's historical
+  broker evidence covers REST reads only.
 
 ## Modes (UX lock)
 
@@ -64,14 +68,15 @@ illustrative. Never paint green Connected without a real LLM
   persisted REST smoke evidence — never login-only. A failed login or
   read never fakes Connected.
 - Live reads work or fail honestly (REST quotes / depth / historical /
-  option chain where the SDK allows). Kotak Neo smoke is REST-only;
-  live SFeed / `create_websocket` is not wired and is not required for
-  this acceptance.
+  option chain where the SDK allows). Kotak Neo's recorded smoke covers only
+  REST reads; a live SFeed / order-feed session was not required for this
+  acceptance.
 - No funded Live unlock required for this native read smoke.
 - Neo never offered as Practice; copy stays
   `Live read only until funded unlock.`
 - Prefer native; OpenAlgo remains fallback only.
-- `dhanhq==2.2.0` (latest stable). `kotakneoapi==3.0.7` from PyPI.
+- `dhanhq==2.2.0` (latest stable). `kotakneoapi==3.0.7` from the exact
+  runtime Git commit, checked separately against the peeled v3.0.7 release.
 - Live place stays fail-closed.
 
 ## Out of scope
@@ -79,4 +84,6 @@ illustrative. Never paint green Connected without a real LLM
 - Native HTTP cutover (Task 9D / Task 7C.2) — freeze stays.
 - Funded Live order placement.
 - AI Chat on live reads (FT-MONDAY-003 / #256) — shipped on that tip.
-- Live SFeed / `create_websocket` — not wired; deferred.
+- Live-account and market-hours SFeed/order-feed proof, Live catalogue
+  promotion, and cross-platform v3 lifecycle proof. Broker sandbox proof is
+  unavailable because Neo offers no sandbox.

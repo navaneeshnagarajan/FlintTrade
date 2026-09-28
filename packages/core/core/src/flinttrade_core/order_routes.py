@@ -329,14 +329,15 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
 
     Args:
         body: Decoded JSON request body.
-        variety: When set (e.g. ``"gtt"`` for the forever route), the built order
-            carries this variety plus the variety-specific pass-throughs from the
-            body (``validity``, the Dhan OCO second-leg trio ``price1`` /
+        variety: When set (e.g. ``"gtt"`` for the forever route), overrides the
+            request variety and carries the variety-specific pass-throughs from
+            the body (the Dhan OCO second-leg trio ``price1`` /
             ``trigger_price1`` / ``quantity1``, the Upstox protective
             ``target_price`` / ``stop_loss_price`` fields, and broker-specific
-            GTT ``*_trigger_type`` fields). ``None`` (the default) keeps the
-            legacy regular-order shape so the existing ``/place`` behaviour is
-            byte-identical.
+            GTT ``*_trigger_type`` fields). A normal place still preserves an
+            explicitly requested ``variety`` and ``validity`` so the signed
+            order reaching the adapter cannot silently become a regular DAY
+            order.
     """
     from flinttrade_core.models import (  # noqa: PLC0415
         Action,
@@ -357,13 +358,17 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
         raise ValueError(f"quantity must be a whole number of units, got {quantity!r}") from exc
 
     extra: dict[str, Any] = {}
+    requested_variety = variety if variety is not None else body.get("variety")
+    if requested_variety is not None:
+        extra["variety"] = str(requested_variety)
+    if body.get("validity") is not None:
+        extra["validity"] = str(body["validity"])
     if variety is not None:
-        extra["variety"] = variety
         # Variety-specific pass-throughs (Dhan forever OCO, Upstox GTT trigger
-        # conditions + validity). They live on the Order model, so the
-        # SafetyContext canonical hash covers them.
+        # conditions). They live on the Order model, so the SafetyContext
+        # canonical hash covers them.
         for key in (
-            "validity", "price1", "trigger_price1", "quantity1",
+            "price1", "trigger_price1", "quantity1",
             "target_price", "stop_loss_price",
             "entry_trigger_type", "stop_loss_trigger_type", "target_trigger_type",
         ):
@@ -577,7 +582,11 @@ def _admit_modify_intent(
     requested_fields: Collection[str] | None = None,
 ) -> tuple[tuple[Any, int] | None, Any | None, list[Any]]:
     """Prove no-increase intent or run complete admission for a live modify."""
-    from .l2_state import PortfolioSafetyStateError, classify_modify_intent  # noqa: PLC0415
+    from .l2_state import (  # noqa: PLC0415
+        ModifyCapabilityError,
+        PortfolioSafetyStateError,
+        classify_modify_intent,
+    )
 
     try:
         intent = _run_on_client_loop(
@@ -591,6 +600,14 @@ def _admit_modify_intent(
                 requested_fields=requested_fields,
             )
         )
+    except ModifyCapabilityError as refusal:
+        logger.warning(
+            "Modify capability refused | family=%s adapter=%s: %s",
+            family,
+            adapter_id,
+            refusal,
+        )
+        return (jsonify({"status": "error", "message": str(refusal)}), 501), None, []
     except PortfolioSafetyStateError as refusal:
         # Every PortfolioSafetyStateError message is a sentence authored in
         # l2_state (e.g. "An OPEN Upstox GTT order cannot change quantity",
@@ -1049,6 +1066,17 @@ def _dispatch_live_order(
             ),
         }), 503
 
+    if str(adapter_id).strip().lower() == "kotakneo":
+        for field in ("variety", "validity"):
+            if field in body and (
+                body[field] is None
+                or type(body[field]) is str and not body[field].strip()
+            ):
+                return jsonify({
+                    "status": "error",
+                    "message": f"Kotak Neo {field} must not be empty.",
+                }), 501
+
     request_ctx = RequestContext(
         jti=str(payload.get("jti") or ""),
         actor_type="human",
@@ -1411,11 +1439,10 @@ def _gated_write_dispatch(
 def _modify_changes(body: dict[str, Any]) -> dict[str, Any]:
     """Build the ``ModifyOrder`` field dict (minus orderid) from a request body.
 
-    Only the fields the OpenAlgo ``ModifyOrder`` model accepts — extra body keys
-    (apikey, account_id, …) are dropped so the typed-model construction in the
-    adapter cannot fail on an unexpected field.
+    Only canonical replacement fields and signed broker context are retained —
+    unrelated body keys (apikey, account_id, …) never reach an adapter.
     """
-    return {
+    changes: dict[str, Any] = {
         "symbol": str(body.get("symbol") or ""),
         "exchange": str(body.get("exchange", "NSE")).upper(),
         "action": str(body.get("action", "BUY")).upper(),
@@ -1425,8 +1452,12 @@ def _modify_changes(body: dict[str, Any]) -> dict[str, Any]:
         "price": str(body.get("price", "0")),
         "trigger_price": str(body.get("trigger_price", "0")),
         "disclosed_quantity": str(body.get("disclosed_quantity", "0")),
+        "validity": str(body.get("validity") or "DAY").upper(),
         "strategy": str(body.get("strategy") or "Flint"),
     }
+    if "amo" in body:
+        changes["amo"] = body["amo"]
+    return changes
 
 
 def _requested_modify_fields(body: Mapping[str, Any]) -> list[str]:
@@ -1441,6 +1472,8 @@ def _requested_modify_fields(body: Mapping[str, Any]) -> list[str]:
         "price_type": ("pricetype", "order_type"),
         "trigger_price": ("trigger_price",),
         "disclosed_quantity": ("disclosed_quantity",),
+        "validity": ("validity",),
+        "amo": ("amo",),
     }
     return sorted(
         field
@@ -1472,6 +1505,51 @@ def _dispatch_live_modify(
     if not order_id:
         return jsonify({"status": "error", "message": "Modify requires an 'orderid'"}), 400
     safe_order = log_ref(order_id, kind="order")
+
+    # Kotak Neo v3 removed the quick/legacy modify arguments below.  Reject an
+    # explicitly supplied field before the request is admitted and signed;
+    # silently dropping one would let the caller believe the broker consumed a
+    # change that can never be represented by the v3 SDK contract.
+    kotakneo_removed_fields = {
+        "dd",
+        "exchange_segment",
+        "filled_quantity",
+        "instrument_token",
+        "market_protection",
+        "trading_symbol",
+        "transaction_type",
+        "variety",
+    }
+    if str(adapter_id).strip().lower() == "kotakneo":
+        if kotakneo_removed_fields.intersection(body):
+            return jsonify({
+                "status": "error",
+                "message": "The requested Kotak Neo modify fields are not available in SDK v3.",
+            }), 501
+        replacement_keys = {
+            "symbol",
+            "exchange",
+            "action",
+            "product",
+            "quantity",
+            "price",
+            "pricetype",
+            "order_type",
+            "trigger_price",
+            "disclosed_quantity",
+            "validity",
+            "amo",
+        }
+        empty_fields = sorted(
+            field
+            for field in replacement_keys.intersection(body)
+            if body[field] is None or type(body[field]) is str and not body[field].strip()
+        )
+        if empty_fields:
+            return jsonify({
+                "status": "error",
+                "message": f"Kotak Neo modify fields must not be empty: {empty_fields}",
+            }), 501
 
     blocked, unavailable = _live_kill_switch_block()
     if unavailable is not None:
@@ -1558,12 +1636,13 @@ def _dispatch_live_cancel(
     policy instead; that path carries signed emergency intent through the same
     one-shot SafetyContext + per-account ACL.
 
-    Optional ``variety`` / ``amo`` / ``trading_symbol`` body fields (Kotak Neo
-    bracket/cover/AMO exits) and Groww-only ``segment`` (regular order cancel)
-    are forwarded as adapter-level cancel extras. They are written into the
-    canonical cancel fingerprint BEFORE the gate is minted, so the router's
-    field-by-field extras check passes only because the gate signed them — an
-    unhashed extra can never reach the broker.
+    Kotak Neo v3 binds ``variety`` and ``amo`` to the authoritative broker
+    order state; its removed ``trading_symbol`` cancel field is rejected before
+    the gate. Other adapters may forward their supported cancel extras, such as
+    Groww-only ``segment``. Every accepted extra is written into the canonical
+    cancel fingerprint BEFORE the gate is minted, so the router's field-by-field
+    extras check passes only because the gate signed it — an unhashed extra can
+    never reach the broker.
     """
     from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
@@ -1581,16 +1660,56 @@ def _dispatch_live_cancel(
         }), 403
 
     extras: dict[str, Any] = {}
-    if body.get("variety") is not None:
-        extras["variety"] = str(body["variety"])
-    if body.get("amo") is not None:
-        extras["amo"] = bool(body["amo"])
-    if body.get("trading_symbol") is not None:
-        extras["trading_symbol"] = str(body["trading_symbol"])
-    if adapter_id == "groww" and body.get("segment") is not None:
-        extras["segment"] = str(body["segment"])
+    authoritative_context: dict[str, Any] = {}
+    if str(adapter_id).strip().lower() == "kotakneo":
+        if "trading_symbol" in body:
+            return jsonify({
+                "status": "error",
+                "message": "Kotak Neo v3 cancel does not accept a trading symbol.",
+            }), 501
+        from .l2_state import (  # noqa: PLC0415
+            CancelCapabilityError,
+            PortfolioSafetyStateError,
+            bind_authoritative_cancel_context,
+        )
 
-    canonical = {"_op": "cancel", "order_id": order_id, **extras}
+        requested = {key: body[key] for key in ("variety", "amo") if key in body}
+        try:
+            authoritative_context = _run_on_client_loop(
+                bind_authoritative_cancel_context(
+                    current_app.config,
+                    adapter_id,
+                    order_id,
+                    requested,
+                    account_id=account_id,
+                )
+            )
+        except CancelCapabilityError as refusal:
+            return jsonify({"status": "error", "message": str(refusal)}), 501
+        except PortfolioSafetyStateError as refusal:
+            return jsonify({"status": "error", "message": str(refusal)}), 409
+        except Exception as exc:  # noqa: BLE001 - broker state must fail closed
+            logger.error(
+                "Cancel authoritative state unavailable | adapter=%s: %s",
+                adapter_id,
+                type(exc).__name__,
+            )
+            return _safety_state_unavailable_response()
+        extras = {
+            "variety": authoritative_context["variety"],
+            "amo": authoritative_context["amo"],
+        }
+    else:
+        if body.get("variety") is not None:
+            extras["variety"] = str(body["variety"])
+        if body.get("amo") is not None:
+            extras["amo"] = bool(body["amo"])
+        if body.get("trading_symbol") is not None:
+            extras["trading_symbol"] = str(body["trading_symbol"])
+        if adapter_id == "groww" and body.get("segment") is not None:
+            extras["segment"] = str(body["segment"])
+
+    canonical = {"_op": "cancel", "order_id": order_id, **authoritative_context, **extras}
     hint = RoutingHint(adapter_id=adapter_id, account_id=account_id)
     return _gated_write_dispatch(
         "cancel",

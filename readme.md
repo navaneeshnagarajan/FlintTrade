@@ -41,8 +41,8 @@ connecting a broker or enabling Live mode.
 FlintTrade supports the recommended OpenAlgo-compatible bridge plus a first-party
 native broker gateway that is **not usable on this unreleased line**. Native
 adapters remain catalogued and evidence-gated (Dhan, Upstox, and Kotak Neo
-are marked connectable; Kotak Neo is Connected (read) / API smoke only on
-FT-MONDAY-002 — Live place fail-closed; INDmoney and Groww stay disabled),
+are marked connectable; Kotak Neo is Connected (read) / API smoke only —
+Live place fail-closed; INDmoney and Groww stay disabled),
 but native HTTP mutations return `503`
 until Task 9D and native HTTP account and market-data reads return `409`
 until Task 7C.2. Catalogue and vault-backed account-list GETs stay

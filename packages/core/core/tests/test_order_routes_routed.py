@@ -21,7 +21,7 @@ import pytest
 from flask import Flask
 
 from flinttrade_core.auth_routes import _create_token
-from flinttrade_core.exceptions import SafetyBypassError
+from flinttrade_core.exceptions import BrokerInternal, SafetyBypassError, UnsupportedCapabilityError
 from flinttrade_core.order_routes import orders_bp
 from flinttrade_engine.safety import SafetyConfig, SafetySystem, set_safety_gate_secret
 from flinttrade_gateway.exceptions import BrokerNotFoundError
@@ -303,6 +303,29 @@ def test_legacy_place_uses_configured_execution_default_when_target_omitted(back
     assert kw["hint"].account_id == "U1"
 
 
+def test_legacy_place_preserves_explicit_variety_and_validity_in_signed_order(backend_lease_proof) -> None:
+    router = _router_with_execution_default("upstox:U1")
+    router.place_order = AsyncMock(return_value="UP-1")
+    app, _adapter, _registry = _app_with_native_state(
+        backend_lease_proof,
+        router,
+        _passing_safety(),
+        adapter_id="upstox",
+        account_id="U1",
+    )
+
+    response = app.test_client().post(
+        "/api/v1/orders/place",
+        json={**_LIVE_BODY, "variety": "amo", "validity": "IOC"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    signed_order = router.place_order.await_args.kwargs["order"]
+    assert signed_order.variety == "amo"
+    assert signed_order.validity == "IOC"
+
+
 # ---------------------------------------------------------------------------
 # L2 enforcement from LIVE portfolio state (cumulative-exposure brake)
 # ---------------------------------------------------------------------------
@@ -362,7 +385,12 @@ def _app_with_native_state(
                 "price": "100",
                 "pricetype": "LIMIT",
                 "product": "MIS",
+                "broker_product": "MIS",
+                "validity": "DAY",
+                "trigger_price": "0",
                 "disclosed_quantity": "0",
+                "variety": "regular",
+                "amo": False,
             }
         ]
     )
@@ -889,6 +917,184 @@ _MODIFY_BODY = {
 }
 
 
+def _real_kotak_route_stack(backend_lease_proof, *, order_row=None):
+    """Build the production route -> router -> Kotak adapter chain with a fake SDK."""
+    from flinttrade_engine.safety import SafetyGate
+    from flinttrade_gateway.brokers._base import Session
+    from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
+    from flinttrade_gateway.router import BrokerRouter
+
+    class ExactOrderClient:
+        def __init__(self) -> None:
+            self.place_calls: list[dict[str, str]] = []
+            self.modify_calls: list[dict[str, str]] = []
+            self.cancel_calls: list[tuple[str, str]] = []
+
+        def place_order(self, params):
+            self.place_calls.append(dict(params))
+            return {"stat": "Ok", "stCode": 200, "nOrdNo": "KO-PLACE-1"}
+
+        def modify_order(self, params):
+            self.modify_calls.append(dict(params))
+            return {"stat": "Ok", "stCode": 200, "nOrdNo": params["order_id"]}
+
+        def cancel_order(self, order_id, amo="NO", is_verify=False):
+            assert is_verify is False
+            self.cancel_calls.append((order_id, amo))
+            return {"stat": "Ok", "stCode": 200, "nOrdNo": order_id}
+
+        def order_book(self):
+            if order_row is None or "nOrdNo" not in order_row:
+                raise AssertionError("raw order_book was not configured")
+            return {"stat": "Ok", "stCode": 200, "data": [dict(order_row)]}
+
+    authoritative = {
+        "orderid": "OA-1",
+        "status": "OPEN",
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "action": "BUY",
+        "quantity": "1",
+        "filled_quantity": "0",
+        "price": "100",
+        "pricetype": "LIMIT",
+        "product": "MIS",
+        "broker_product": "MIS",
+        "validity": "DAY",
+        "trigger_price": "0",
+        "disclosed_quantity": "0",
+        "variety": "regular",
+        "amo": False,
+    }
+    if order_row is not None and "nOrdNo" not in order_row:
+        authoritative.update(order_row)
+    client = ExactOrderClient()
+    adapter = KotakNeoAdapter(
+        client_factory=lambda _session: client,
+        symbol_resolver=lambda symbol, _exchange: f"{symbol}-EQ",
+    )
+    adapter.positions = AsyncMock(return_value=[])
+    adapter.funds = AsyncMock(
+        return_value={
+            "used_margin": "0",
+            "total_balance": "100000",
+            "opening_risk_capital": "100000",
+        }
+    )
+    adapter.trade_book = AsyncMock(return_value=[])
+    adapter.holdings = AsyncMock(return_value=[])
+    if order_row is None or "nOrdNo" not in order_row:
+        adapter.order_book = AsyncMock(return_value=[authoritative])
+    adapter.margin_calculator = AsyncMock(return_value={"required_margin": "100"})
+    adapter.quotes = AsyncMock(return_value=[])
+    session = Session(
+        access_token="synthetic",
+        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).timestamp(),
+        account_id="default",
+        adapter_id="kotakneo",
+    )
+    router = BrokerRouter(
+        {"kotakneo": adapter},
+        lambda _ctx, _adapter_id, _account_id: session,
+        consume_gate=SafetyGate().consume,
+        backend_lease_proof=backend_lease_proof,
+    )
+    app = _app(backend_lease_proof, broker_router=None, safety=_passing_safety())
+    app.config["BROKER_ROUTER"] = router
+    registry = MagicMock()
+    registry.get_session_for.return_value = session
+    app.config["REGISTRY"] = registry
+    app.config["NATIVE_ADAPTERS"] = {"kotakneo": adapter}
+    app.config["TEST_BROKER_ROUTER"] = router
+    return app, adapter, client
+
+
+def _official_kotak_order(
+    *,
+    order_id: str = "OA-1",
+    product: str = "CNC",
+    generation: str = "AMO",
+) -> dict[str, object]:
+    """One complete order-report row shaped like the pinned Kotak v3 SDK."""
+    return {
+        "nOrdNo": order_id,
+        "ordSt": "open",
+        "trdSym": "RELIANCE-EQ",
+        "exSeg": "nse_cm",
+        "trnsTp": "B",
+        "prcTp": "L",
+        "prod": product,
+        "qty": "10",
+        "fldQty": "0",
+        "prc": "100",
+        "trgPrc": "0",
+        "dscQty": "0",
+        "vldt": "IOC",
+        "ordGenTp": generation,
+    }
+
+
+@pytest.mark.parametrize("variety", ["bo", "co"])
+def test_kotak_place_route_refuses_unsupported_variety_before_sdk(
+    backend_lease_proof,
+    variety,
+) -> None:
+    app, _adapter, client = _real_kotak_route_stack(backend_lease_proof)
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/place",
+        json={**_LIVE_BODY, "variety": variety},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 501
+    assert client.place_calls == []
+
+
+def test_kotak_place_route_preserves_amo_variety_to_exact_sdk_call(backend_lease_proof) -> None:
+    app, _adapter, client = _real_kotak_route_stack(backend_lease_proof)
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/place",
+        json={**_LIVE_BODY, "variety": "amo"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    assert client.place_calls[0]["amo"] == "YES"
+
+
+def test_kotak_place_route_preserves_mcx_ioc_and_refuses_before_sdk(backend_lease_proof) -> None:
+    app, _adapter, client = _real_kotak_route_stack(backend_lease_proof)
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/place",
+        json={**_LIVE_BODY, "exchange": "MCX", "validity": "IOC"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 501
+    assert client.place_calls == []
+
+
+@pytest.mark.parametrize("field", ["variety", "validity"])
+def test_kotak_place_route_refuses_explicit_null_order_identity_field(
+    backend_lease_proof,
+    field,
+) -> None:
+    app, _adapter, client = _real_kotak_route_stack(backend_lease_proof)
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/place",
+        json={**_LIVE_BODY, field: None},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 501
+    assert field in response.get_json()["message"].lower()
+    assert client.place_calls == []
+
+
 def test_modify_happy_path_returns_200(backend_lease_proof) -> None:
     router = MagicMock()
     router.modify_order = AsyncMock(return_value=None)
@@ -901,6 +1107,7 @@ def test_modify_happy_path_returns_200(backend_lease_proof) -> None:
     assert kw["order_id"] == "OA-1"
     assert kw["safety_ctx"].backend_incarnation == str(backend_lease_proof.incarnation)
     assert kw["changes"]["symbol"] == "RELIANCE"
+    assert kw["changes"]["validity"] == "DAY"
     # The gated fingerprint is the canonical modify dict (mint == verify object).
     assert kw["order"]["_op"] == "modify"
     assert kw["order"]["_requested_change_fields"] == [
@@ -913,6 +1120,47 @@ def test_modify_happy_path_returns_200(backend_lease_proof) -> None:
         "symbol",
     ]
     assert "_requested_change_fields" not in kw["changes"]
+
+
+@pytest.mark.parametrize("error", [UnsupportedCapabilityError("unsupported"), BrokerInternal("malformed")])
+def test_modify_maps_canonical_adapter_errors_to_stable_status(backend_lease_proof, error) -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(side_effect=error)
+    response = _app(backend_lease_proof, broker_router=router).test_client().post(
+        "/api/v1/orders/modify",
+        json=_MODIFY_BODY,
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == (501 if isinstance(error, UnsupportedCapabilityError) else 500)
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [
+        {"instrument_token": "14366"},
+        {"exchange_segment": "nse_cm"},
+        {"trading_symbol": "RELIANCE-EQ"},
+        {"transaction_type": "B"},
+        {"filled_quantity": "0"},
+        {"market_protection": "0"},
+        {"dd": "NA"},
+    ],
+)
+def test_kotak_modify_route_refuses_explicit_removed_fields_instead_of_dropping_them(
+    backend_lease_proof,
+    removed,
+) -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    response = _app(backend_lease_proof, broker_router=router).test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json={**_MODIFY_BODY, **removed},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 501
+    router.modify_order.assert_not_called()
 
 
 def test_modify_forwards_trigger_price_and_disclosed_quantity(backend_lease_proof) -> None:
@@ -934,6 +1182,24 @@ def test_modify_forwards_trigger_price_and_disclosed_quantity(backend_lease_proo
     assert kw["changes"]["disclosed_quantity"] == "25"
     assert "disclosed_quantity" in kw["order"]["_requested_change_fields"]
     assert "trigger_price" in kw["order"]["_requested_change_fields"]
+
+
+def test_modify_preserves_explicit_amo_in_changes_and_signed_requested_fields(backend_lease_proof) -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    client = _app(backend_lease_proof, broker_router=router).test_client()
+
+    response = client.post(
+        "/api/v1/orders/modify",
+        json={**_MODIFY_BODY, "amo": True},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    kwargs = router.modify_order.await_args.kwargs
+    assert kwargs["changes"]["amo"] is True
+    assert "amo" in kwargs["order"]["_requested_change_fields"]
+    assert kwargs["order"]["amo"] is True
 
 
 def test_routed_modify_happy_path_targets_named_broker_account(backend_lease_proof) -> None:
@@ -959,6 +1225,485 @@ def test_routed_modify_happy_path_targets_named_broker_account(backend_lease_pro
     assert request_ctx.selector == "upstox:U1"
     assert kw["hint"].adapter_id == "upstox"
     assert kw["hint"].account_id == "U1"
+
+
+def test_kotak_modify_full_route_router_adapter_path_emits_only_v3_kwargs(backend_lease_proof) -> None:
+    from flinttrade_engine.safety import SafetyGate
+    from flinttrade_gateway.brokers._base import Session
+    from flinttrade_gateway.brokers.kotakneo import KotakNeoAdapter
+    from flinttrade_gateway.router import BrokerRouter
+
+    class ExactModifyClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, str]] = []
+
+        def modify_order(self, params):
+            self.calls.append(dict(params))
+            return {"stat": "Ok", "stCode": 200, "nOrdNo": params["order_id"]}
+
+    client = ExactModifyClient()
+    adapter = KotakNeoAdapter(client_factory=lambda _session: client)
+    adapter.order_book = AsyncMock(
+        return_value=[
+            {
+                "orderid": "OA-1",
+                "status": "OPEN",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "action": "BUY",
+                "quantity": "1",
+                "filled_quantity": "0",
+                "price": "100",
+                "pricetype": "LIMIT",
+                "product": "MIS",
+                "broker_product": "MIS",
+                "validity": "DAY",
+                "trigger_price": "0",
+                "disclosed_quantity": "0",
+                "variety": "regular",
+                "amo": False,
+            }
+        ]
+    )
+    adapter.margin_calculator = AsyncMock(return_value={"required_margin": "100"})
+    session = Session(
+        access_token="synthetic",
+        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).timestamp(),
+        account_id="default",
+        adapter_id="kotakneo",
+    )
+    router = BrokerRouter(
+        {"kotakneo": adapter},
+        lambda _ctx, _adapter_id, _account_id: session,
+        consume_gate=SafetyGate().consume,
+        backend_lease_proof=backend_lease_proof,
+    )
+    app = _app(backend_lease_proof, broker_router=None, safety=_passing_safety())
+    app.config["BROKER_ROUTER"] = router
+    registry = MagicMock()
+    registry.get_session_for.return_value = session
+    app.config["REGISTRY"] = registry
+    app.config["NATIVE_ADAPTERS"] = {"kotakneo": adapter}
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json=_MODIFY_BODY,
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    assert client.calls == [
+        {
+            "order_id": "OA-1",
+            "order_type": "L",
+            "price": "100",
+            "quantity": "1",
+            "validity": "DAY",
+            "trigger_price": "0",
+            "disclosed_quantity": "0",
+            "amo": "NO",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field", "spoofed"),
+    [
+        ("symbol", "TCS"),
+        ("exchange", "BSE"),
+        ("action", "SELL"),
+        ("product", "CNC"),
+    ],
+)
+def test_kotak_modify_route_refuses_explicit_authoritative_identity_mismatch(
+    backend_lease_proof,
+    field,
+    spoofed,
+) -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    app, _adapter, _registry = _app_with_native_state(
+        backend_lease_proof,
+        router,
+        _passing_safety(),
+        adapter_id="kotakneo",
+        account_id="default",
+    )
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json={**_MODIFY_BODY, field: spoofed},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 409
+    assert field in response.get_json()["message"].lower()
+    router.modify_order.assert_not_called()
+
+
+def test_kotak_modify_route_refuses_buy_to_sell_quantity_increase_before_safety(
+    backend_lease_proof,
+) -> None:
+    safety = _passing_safety()
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    app, _adapter, _registry = _app_with_native_state(
+        backend_lease_proof,
+        router,
+        safety,
+        adapter_id="kotakneo",
+        account_id="default",
+    )
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json={**_MODIFY_BODY, "action": "SELL", "quantity": 2},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 409
+    safety.check_order.assert_not_called()
+    router.modify_order.assert_not_called()
+
+
+def test_kotak_modify_route_binds_omitted_identity_into_signed_dispatch(backend_lease_proof) -> None:
+    router = MagicMock()
+    router.modify_order = AsyncMock(return_value=None)
+    app, adapter, _registry = _app_with_native_state(
+        backend_lease_proof,
+        router,
+        _passing_safety(),
+        adapter_id="kotakneo",
+        account_id="default",
+    )
+    adapter.order_book = AsyncMock(
+        return_value=[
+            {
+                "orderid": "OA-1",
+                "status": "OPEN",
+                "symbol": "GOLDM",
+                "exchange": "MCX",
+                "action": "SELL",
+                "quantity": "1",
+                "filled_quantity": "0",
+                "price": "100",
+                "pricetype": "LIMIT",
+                "product": "NRML",
+                "broker_product": "NRML",
+                "validity": "DAY",
+                "trigger_price": "0",
+                "disclosed_quantity": "0",
+                "variety": "regular",
+                "amo": False,
+            }
+        ]
+    )
+    body = {
+        key: value
+        for key, value in _MODIFY_BODY.items()
+        if key not in {"symbol", "exchange", "action", "product"}
+    }
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json=body,
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    kwargs = router.modify_order.await_args.kwargs
+    assert {
+        key: kwargs["changes"][key]
+        for key in ("symbol", "exchange", "action", "product")
+    } == {
+        "symbol": "GOLDM",
+        "exchange": "MCX",
+        "action": "SELL",
+        "product": "NRML",
+    }
+    assert kwargs["order"] == {
+        "_op": "modify",
+        "order_id": "OA-1",
+        "_requested_change_fields": ["price", "price_type", "quantity"],
+        **kwargs["changes"],
+    }
+
+
+def test_kotak_modify_route_uses_authoritative_identity_for_exact_sdk_call(backend_lease_proof) -> None:
+    authoritative = {
+        "orderid": "OA-1",
+        "status": "OPEN",
+        "symbol": "GOLDM",
+        "exchange": "MCX",
+        "action": "SELL",
+        "quantity": "1",
+        "filled_quantity": "0",
+        "price": "100",
+        "pricetype": "LIMIT",
+        "product": "NRML",
+        "disclosed_quantity": "0",
+    }
+    app, _adapter, client = _real_kotak_route_stack(backend_lease_proof, order_row=authoritative)
+    body = {
+        key: value
+        for key, value in _MODIFY_BODY.items()
+        if key not in {"symbol", "exchange", "action", "product"}
+    }
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json=body,
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    assert client.modify_calls == [
+        {
+            "order_id": "OA-1",
+            "order_type": "L",
+            "price": "100",
+            "quantity": "1",
+            "validity": "DAY",
+            "trigger_price": "0",
+            "disclosed_quantity": "0",
+            "amo": "NO",
+        }
+    ]
+
+
+def test_kotak_modify_route_uses_authoritative_mcx_for_ioc_refusal(backend_lease_proof) -> None:
+    authoritative = {
+        **_MODIFY_BODY,
+        "status": "OPEN",
+        "filled_quantity": "0",
+        "pricetype": "LIMIT",
+        "disclosed_quantity": "0",
+        "exchange": "MCX",
+    }
+    app, adapter, client = _real_kotak_route_stack(backend_lease_proof, order_row=authoritative)
+    body = {key: value for key, value in _MODIFY_BODY.items() if key != "exchange"}
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json={**body, "validity": "IOC"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 501
+    adapter.margin_calculator.assert_not_awaited()
+    assert client.modify_calls == []
+
+
+def test_kotak_modify_route_cannot_spoof_mcx_as_nse_for_ioc(backend_lease_proof) -> None:
+    authoritative = {
+        **_MODIFY_BODY,
+        "status": "OPEN",
+        "filled_quantity": "0",
+        "pricetype": "LIMIT",
+        "disclosed_quantity": "0",
+        "exchange": "MCX",
+    }
+    app, adapter, client = _real_kotak_route_stack(backend_lease_proof, order_row=authoritative)
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json={**_MODIFY_BODY, "exchange": "NSE", "validity": "IOC"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 409
+    adapter.margin_calculator.assert_not_awaited()
+    assert client.modify_calls == []
+
+
+def test_kotak_modify_route_preserves_explicit_amo_to_signed_sdk_call(backend_lease_proof) -> None:
+    app, _adapter, client = _real_kotak_route_stack(
+        backend_lease_proof,
+        order_row={"variety": "amo", "amo": True},
+    )
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json={**_MODIFY_BODY, "amo": True},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    assert client.modify_calls == [
+        {
+            "order_id": "OA-1",
+            "order_type": "L",
+            "price": "100",
+            "quantity": "1",
+            "validity": "DAY",
+            "trigger_price": "0",
+            "disclosed_quantity": "0",
+            "amo": "YES",
+        }
+    ]
+
+
+def test_kotak_modify_route_rejects_explicit_null_amo_before_sdk(backend_lease_proof) -> None:
+    app, _adapter, client = _real_kotak_route_stack(backend_lease_proof)
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json={**_MODIFY_BODY, "amo": None},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 501
+    assert client.modify_calls == []
+
+
+def test_kotak_price_only_modify_recovers_every_sdk_replacement_field_from_raw_order_book(
+    backend_lease_proof,
+) -> None:
+    """Defaults must never overwrite authoritative IOC/AMO/full-replacement state."""
+    app, _adapter, client = _real_kotak_route_stack(
+        backend_lease_proof,
+        order_row=_official_kotak_order(),
+    )
+    router = app.config["TEST_BROKER_ROUTER"]
+    real_modify = router.modify_order
+    router.modify_order = AsyncMock(wraps=real_modify)
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json={"orderid": "OA-1", "price": "101"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    signed = router.modify_order.await_args.kwargs["order"]
+    assert signed == {
+        "_op": "modify",
+        "order_id": "OA-1",
+        "_requested_change_fields": ["price"],
+        "symbol": "RELIANCE-EQ",
+        "exchange": "NSE",
+        "action": "BUY",
+        "product": "CNC",
+        "quantity": "10",
+        "pricetype": "LIMIT",
+        "price": "101",
+        "trigger_price": "0",
+        "disclosed_quantity": "0",
+        "validity": "IOC",
+        "strategy": "Flint",
+        "broker_product": "CNC",
+        "variety": "amo",
+        "amo": True,
+    }
+    assert client.modify_calls == [
+        {
+            "order_id": "OA-1",
+            "order_type": "L",
+            "price": "101",
+            "quantity": "10",
+            "validity": "IOC",
+            "trigger_price": "0",
+            "disclosed_quantity": "0",
+            "amo": "YES",
+        }
+    ]
+
+
+def test_kotak_modify_refuses_explicit_amo_mismatch_before_gate_or_sdk(
+    backend_lease_proof,
+    monkeypatch,
+) -> None:
+    app, _adapter, client = _real_kotak_route_stack(
+        backend_lease_proof,
+        order_row=_official_kotak_order(),
+    )
+
+    def forbidden_gate(*_args, **_kwargs):
+        raise AssertionError("SafetyContext must not be minted for an AMO identity mismatch")
+
+    monkeypatch.setattr("flinttrade_engine.safety.gate_order", forbidden_gate)
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json={"orderid": "OA-1", "price": "101", "amo": False},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 409
+    assert "amo" in response.get_json()["message"].lower()
+    assert client.modify_calls == []
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_kotak_modify_refuses_explicit_empty_validity_before_read_gate_or_sdk(
+    backend_lease_proof,
+    value,
+) -> None:
+    app, adapter, client = _real_kotak_route_stack(
+        backend_lease_proof,
+        order_row=_official_kotak_order(),
+    )
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json={"orderid": "OA-1", "price": "101", "validity": value},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 501
+    assert "validity" in response.get_json()["message"].lower()
+    adapter.margin_calculator.assert_not_awaited()
+    assert client.modify_calls == []
+
+
+def test_kotak_modify_refuses_explicit_variety_instead_of_silently_ignoring_it(
+    backend_lease_proof,
+) -> None:
+    app, adapter, client = _real_kotak_route_stack(
+        backend_lease_proof,
+        order_row=_official_kotak_order(),
+    )
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/modify",
+        json={"orderid": "OA-1", "price": "101", "variety": "amo"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 501
+    adapter.margin_calculator.assert_not_awaited()
+    assert client.modify_calls == []
+
+
+@pytest.mark.parametrize(
+    ("product", "variety"),
+    [("BO", "bracket"), ("CO", "cover"), ("MTF", "mtf"), ("INTRADAY", "intraday")],
+)
+@pytest.mark.parametrize("operation", ["modify", "cancel"])
+def test_kotak_normal_write_refuses_authoritative_legacy_variety_before_transport(
+    backend_lease_proof,
+    product,
+    variety,
+    operation,
+) -> None:
+    app, adapter, client = _real_kotak_route_stack(
+        backend_lease_proof,
+        order_row=_official_kotak_order(product=product, generation="NA"),
+    )
+    body = {"orderid": "OA-1"}
+    if operation == "modify":
+        body["price"] = "101"
+
+    response = app.test_client().post(
+        f"/api/v1/orders/kotakneo/{operation}",
+        json=body,
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 501
+    assert variety in response.get_json()["message"].lower()
+    adapter.margin_calculator.assert_not_awaited()
+    assert client.modify_calls == []
+    assert client.cancel_calls == []
 
 
 def test_modify_quantity_increase_runs_full_safety_before_router(backend_lease_proof) -> None:
@@ -1257,6 +2002,131 @@ def test_cancel_happy_path_returns_200(backend_lease_proof) -> None:
     router.cancel_order.assert_awaited_once()
     assert router.cancel_order.await_args.kwargs["safety_ctx"].backend_incarnation == str(backend_lease_proof.incarnation)
     assert router.cancel_order.await_args.kwargs["order_id"] == "OA-7"
+
+
+@pytest.mark.parametrize("status", ["open pending", "OPEN PENDING"])
+def test_kotak_cancel_open_pending_reaches_adapter(backend_lease_proof, status: str) -> None:
+    """An acknowledged Kotak open-pending order stays cancellable.
+
+    Normalisation uppercases ``open pending`` to ``OPEN PENDING``. That status
+    is an active order state, so the authoritative bind must not answer 409
+    before the gated cancel reaches the adapter.
+    """
+    order = _official_kotak_order()
+    order["ordSt"] = status
+    app, _adapter, client = _real_kotak_route_stack(
+        backend_lease_proof,
+        order_row=order,
+    )
+    router = app.config["TEST_BROKER_ROUTER"]
+    real_cancel = router.cancel_order
+    router.cancel_order = AsyncMock(wraps=real_cancel)
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/cancel",
+        json={"orderid": "OA-1"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    assert "not active" not in response.get_json().get("message", "").lower()
+    kwargs = router.cancel_order.await_args.kwargs
+    assert kwargs["order"]["order_id"] == "OA-1"
+    assert kwargs["order"]["broker_product"] == "CNC"
+    assert client.cancel_calls == [("OA-1", "YES")]
+
+
+def test_kotak_cancel_refuses_terminal_status_before_adapter(backend_lease_proof) -> None:
+    """A completed Kotak order remains non-cancellable before the adapter."""
+    order = _official_kotak_order()
+    order["ordSt"] = "complete"
+    app, _adapter, client = _real_kotak_route_stack(
+        backend_lease_proof,
+        order_row=order,
+    )
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/cancel",
+        json={"orderid": "OA-1"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 409
+    assert "not active" in response.get_json()["message"].lower()
+    assert client.cancel_calls == []
+
+
+def test_kotak_cancel_binds_raw_order_book_amo_into_signed_exact_sdk_call(
+    backend_lease_proof,
+) -> None:
+    app, _adapter, client = _real_kotak_route_stack(
+        backend_lease_proof,
+        order_row=_official_kotak_order(),
+    )
+    router = app.config["TEST_BROKER_ROUTER"]
+    real_cancel = router.cancel_order
+    router.cancel_order = AsyncMock(wraps=real_cancel)
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/cancel",
+        json={"orderid": "OA-1"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    kwargs = router.cancel_order.await_args.kwargs
+    assert kwargs["order"] == {
+        "_op": "cancel",
+        "order_id": "OA-1",
+        "broker_product": "CNC",
+        "variety": "amo",
+        "amo": True,
+    }
+    assert kwargs["extras"] == {"variety": "amo", "amo": True}
+    assert client.cancel_calls == [("OA-1", "YES")]
+
+
+def test_kotak_cancel_refuses_explicit_amo_mismatch_before_gate_or_sdk(
+    backend_lease_proof,
+    monkeypatch,
+) -> None:
+    app, _adapter, client = _real_kotak_route_stack(
+        backend_lease_proof,
+        order_row=_official_kotak_order(),
+    )
+
+    def forbidden_gate(*_args, **_kwargs):
+        raise AssertionError("SafetyContext must not be minted for an AMO identity mismatch")
+
+    monkeypatch.setattr("flinttrade_engine.safety.gate_order", forbidden_gate)
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/cancel",
+        json={"orderid": "OA-1", "amo": False},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 409
+    assert "amo" in response.get_json()["message"].lower()
+    assert client.cancel_calls == []
+
+
+def test_kotak_cancel_refuses_client_variety_spoof_before_gate_or_sdk(
+    backend_lease_proof,
+) -> None:
+    app, _adapter, client = _real_kotak_route_stack(
+        backend_lease_proof,
+        order_row=_official_kotak_order(),
+    )
+
+    response = app.test_client().post(
+        "/api/v1/orders/kotakneo/cancel",
+        json={"orderid": "OA-1", "variety": "regular"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 409
+    assert "variety" in response.get_json()["message"].lower()
+    assert client.cancel_calls == []
 
 
 def test_routed_cancel_happy_path_targets_named_broker_account(backend_lease_proof) -> None:

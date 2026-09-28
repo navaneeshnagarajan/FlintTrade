@@ -80,7 +80,7 @@ restart-time discriminator for active regular MARKET/LIMIT rows versus smart par
 it also lacks a broker-atomic reduce-only close primitive, and a funded/live-market
 order-safety proof is pending. Kotak Neo's fail-closed emergency planner is
 locally verified and the catalogue marks Neo `connectable=True` for
-Connected (read) / API smoke (FT-MONDAY-002); funded Live place and
+Connected (read) / API smoke; funded Live place and
 market-hours order-safety proof remain pending. Groww remains disabled
 until its broker-specific blockers clear. Dhan and
 Upstox use native SDK/API clients, Groww has the official
@@ -97,22 +97,36 @@ package exists yet, so there is deliberately no SDK pin for it. Kotak Neo has
 adapter/mapping coverage plus a pinned-SDK-grounded emergency planner, but no
 promoted Live order proof yet. Neo has **no sandbox** —
 never offer Neo Practice; operator copy is `Live read only until
-funded unlock.` FT-MONDAY-002 ships native Dhan + Neo on the MSI
-static-IP host as the preferred native connect path (OpenAlgo is
-Settings / fallback only). Kotak Neo Connected (read) / API smoke is REST-only (quotes /
-depth / hist / chain where the SDK allows); live SFeed /
-`create_websocket` is not wired. `dhanhq` stays on latest stable 2.2.0;
-Neo is PyPI `kotakneoapi` 3.0.7 (the `neo-api-client` 2.0.0 git pin
-is gone). `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift` refreshes local SDK
+funded unlock.` Native Dhan + Neo Connected (read) / API smoke is the
+preferred native connect path (OpenAlgo is Settings / fallback only). The
+historical Kotak Neo broker-account evidence covers non-funded REST reads only.
+The v3 async SFeed and order-feed lifecycle is now wired and locally tested with
+synthetic SDK clients; it has not yet been proved against a live broker session
+or at market hours. `dhanhq` stays on latest stable 2.2.0. Neo's runtime is the
+exact upstream `main` commit `5bb34fae39c4a52a0e6b59d7e2d17090cafc340c`;
+the separate release baseline is tag `v3.0.7`, peeled to
+`53cccc45fe56a193b30ffce3c03c71c5c0378538`. Both report distribution version
+`kotakneoapi` 3.0.7. The obsolete `neo-api-client` distribution is prohibited,
+while the upstream Python import namespace intentionally remains
+`neo_api_client`. `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift` refreshes local SDK
 source mirrors and PyPI artifacts under the gitignored `.local/sdk-audit/` cache
 and fails if a locked SDK is behind upstream metadata; `uv.lock` and
 `brokers.lock` remain the only tracked install/attestation sources.
+`python scripts/check_kotakneo_sdk_contract.py` then builds disposable
+main/release environments, denies network during each probe, checks exclusive
+namespace/provenance/signature ownership, and runs the upstream migration
+scanner from that exact runtime commit. The daily/manual
+`broker-sdk-freshness.yml` workflow runs the drift check against official
+upstreams so a newer main commit or stable release tag cannot age silently.
 In-app credential capture and OAuth start/callback remain implemented
 behind the frozen HTTP surface (`503` until Task 9D). They are not a
 live operator path. Setup → Brokers and Settings → Brokers will fail
 rather than connect or refresh a native session. Closed-market/no-funds
 verification does not prove funded order execution; keep
-order-placement claims scoped to the evidence collected.
+order-placement claims scoped to the evidence collected. Kotak Neo sandbox
+proof is unavailable because the broker offers no sandbox. Funded and
+market-hours proof, Live catalogue promotion, and cross-platform v3 lifecycle
+evidence all remain outstanding.
 
 For the OpenAlgo path, whatever broker version OpenAlgo supports is the
 compatibility boundary. The broker list lives in [`flint.toml`](../flint.toml)

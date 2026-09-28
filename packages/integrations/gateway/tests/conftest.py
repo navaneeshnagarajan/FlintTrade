@@ -15,10 +15,17 @@ import style keeps working without edits to every test file.
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+
+# A few contract tests import the vendor's websocket model classes directly at
+# collection time. Mirror FlintTrade's production-safe default before those
+# imports so the SDK cannot create or append a CWD log during offline tests.
+os.environ.setdefault("NEO_LOG_FILE_ENABLED", "false")
 
 
 @pytest.fixture

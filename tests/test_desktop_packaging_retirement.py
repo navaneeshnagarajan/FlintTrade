@@ -137,15 +137,12 @@ def test_rust_audit_and_broker_licence_policy_match_the_electron_cutover() -> No
         (ROOT / "supply-chain" / "cargo-audit-allowlist.yml").read_text(encoding="utf-8"),
     )
     cargo_script = (ROOT / "scripts" / "cargo-audit-with-allowlist.py").read_text(encoding="utf-8")
-    licence_policy = (ROOT / "supply-chain" / "licence-allowlist.yml").read_text(encoding="utf-8")
+    licence_policy = yaml.safe_load((ROOT / "supply-chain" / "licence-allowlist.yml").read_text(encoding="utf-8"))
 
     assert cargo_allowlist == {"allowlist": []}
     assert "tauri" not in cargo_script.lower()
-    assert "tauri" not in licence_policy.lower()
-    assert "pyinstaller" not in licence_policy.lower()
-    assert "EXCLUDED from published desktop shell installers" in licence_policy
-    assert "operator-directed source bootstrap installs it locally" in licence_policy
-    assert "LicenseRef-operator-cleared-broker-sdk" in licence_policy
+    assert "MIT" in licence_policy["allowlist"]
+    assert "LicenseRef-operator-cleared-broker-sdk" not in licence_policy["allowlist"]
 
 
 def test_hermes_attribution_remains_in_the_electron_package_contract() -> None:

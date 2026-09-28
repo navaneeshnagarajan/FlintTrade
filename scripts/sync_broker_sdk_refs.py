@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import tomllib
@@ -58,7 +59,7 @@ SDK_SOURCES: dict[str, BrokerSdkSource] = {
         repo_name="kotak-neo-python",
         git_url="https://github.com/Kotak-Neo/kotak-neo-python.git",
         pypi_name="kotakneoapi",
-        notes="Kotak Neo v3 PyPI SDK (import still neo_api_client). HS feed is retired.",
+        notes="Kotak Neo v3: immutable Git main runtime with separate PyPI release evidence.",
     ),
     "growwapi": BrokerSdkSource(
         package="growwapi",
@@ -137,6 +138,14 @@ def active_sdk_entries(entries: list[dict[str, Any]]) -> list[dict[str, str]]:
             # against the brokers.lock pin (not only PyPI's self-advertised
             # digest) — PyPI may add files to an existing release.
             row["sha256"] = sha256
+        if name == "kotakneoapi":
+            for field in (
+                "source_tree", "release_tag", "release_commit", "release_tree",
+                "release_wheel_sha256", "release_sdist_sha256",
+            ):
+                value = str(entry.get(field, "")).strip()
+                if value:
+                    row[field] = value
         out.append(row)
     return out
 
@@ -150,7 +159,7 @@ def sync_git_mirror(source: BrokerSdkSource, audit_root: Path) -> dict[str, str]
     if repo.exists():
         if not (repo / ".git").exists():
             raise RuntimeError(f"{repo} exists but is not a git checkout")
-        _run(["git", "-C", str(repo), "fetch", "--tags", "--prune", "origin"])
+        _run(["git", "-C", str(repo), "fetch", "--tags", "--force", "--prune", "origin"])
     else:
         repo.parent.mkdir(parents=True, exist_ok=True)
         _run(["git", "clone", source.git_url, str(repo)])
@@ -161,12 +170,23 @@ def sync_git_mirror(source: BrokerSdkSource, audit_root: Path) -> dict[str, str]
     # only distribution channel is git (Renovate cannot watch git-pinned uv
     # sources either).
     remote_head = _run(["git", "-C", str(repo), "ls-remote", "origin", "HEAD"]).split()[0]
-    return {
+    result = {
         "path": str(repo.relative_to(REPO)),
         "remote": _run(["git", "-C", str(repo), "remote", "get-url", "origin"]),
         "head": remote_head,
         "describe": _run(["git", "-C", str(repo), "describe", "--tags", "--always", "--dirty"]),
     }
+    if source.package == "kotakneoapi":
+        result["head_tree"] = _run(["git", "-C", str(repo), "rev-parse", f"{remote_head}^{{tree}}"])
+        tags = _run(["git", "-C", str(repo), "tag", "--list", "v*.*.*"]).splitlines()
+        stable = [tag for tag in tags if re.fullmatch(r"v\d+\.\d+\.\d+", tag)]
+        if not stable:
+            raise RuntimeError("Kotak Neo upstream has no stable release tag")
+        latest = max(stable, key=lambda tag: tuple(map(int, tag[1:].split("."))))
+        result["latest_stable_tag"] = latest
+        result["release_commit"] = _run(["git", "-C", str(repo), "rev-parse", f"refs/tags/{latest}^{{commit}}"])
+        result["release_tree"] = _run(["git", "-C", str(repo), "rev-parse", f"refs/tags/{latest}^{{tree}}"])
+    return result
 
 
 def pypi_release_json(package: str, opener: UrlOpener = _open_url) -> dict[str, Any]:
@@ -364,6 +384,19 @@ def sync(
                             "upstream": str(git.get("head", "")),
                         }
                     )
+            if entry["name"] == "kotakneoapi":
+                for locked_field, observed_field, drift_source in (
+                    ("source_tree", "head_tree", "git-tree"),
+                    ("release_tag", "latest_stable_tag", "release-tag"),
+                    ("release_commit", "release_commit", "release-commit"),
+                    ("release_tree", "release_tree", "release-tree"),
+                ):
+                    locked = entry.get(locked_field, "")
+                    observed = git.get(observed_field, "")
+                    if locked and observed != locked:
+                        manifest["drift"].append(
+                            {"package": entry["name"], "source": drift_source, "locked": locked, "upstream": observed}
+                        )
         if source.pypi_name:
             latest = latest_pypi_version(source.pypi_name, opener)
             sdk_record["pypi_latest_version"] = latest
@@ -384,6 +417,20 @@ def sync(
                 opener,
                 pinned_sha=entry.get("sha256", ""),
             )
+            if entry["name"] == "kotakneoapi":
+                release = pypi_release_json(source.pypi_name, opener)
+                files = release.get("releases", {}).get(entry["version"], [])
+                for packagetype, field, drift_source in (
+                    ("bdist_wheel", "release_wheel_sha256", "release-wheel"),
+                    ("sdist", "release_sdist_sha256", "release-sdist"),
+                ):
+                    matches = [file for file in files if file.get("packagetype") == packagetype]
+                    observed = str((matches[0].get("digests") or {}).get("sha256", "")) if matches else ""
+                    locked = entry.get(field, "")
+                    if locked and observed != locked:
+                        manifest["drift"].append(
+                            {"package": entry["name"], "source": drift_source, "locked": locked, "upstream": observed}
+                        )
         manifest["sdks"].append(sdk_record)
 
     for sdkless in SDKLESS_BROKERS:

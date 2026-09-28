@@ -24,20 +24,21 @@ it directly in your broker's developer console.
 | Kotak Neo | Kotak developer console / Neo API onboarding | Follow the broker's current onboarding email or console instructions. Neo has no sandbox — live read / API smoke only until funded unlock. |
 | IndMoney | Broker/API onboarding channel | Confirm production access and IP rules directly with the broker. |
 
-## Native Dhan + Kotak Neo Connected (read) / API smoke (FT-MONDAY-002)
+## Native Dhan + Kotak Neo Connected (read) / API smoke
 
-The locked path is **native** Dhan + Kotak Neo on the MSI static-IP host
+The locked path is **native** Dhan + Kotak Neo on a static-IP host
 whose public IP is allow-listed at both brokers. Smoke uses **non-funded**
 accounts and live REST API reads (quotes / depth / hist / chain where the
-SDK allows). Live SFeed / `create_websocket` is not wired for Neo in this
-tip. That is REST API smoke, not funded Live unlock.
+SDK allows). That historical evidence is REST API smoke, not proof of the
+now-wired v3 async SFeed/order-feed lifecycle and not funded Live unlock. The
+stream lifecycle has local synthetic coverage only; live-account,
+market-hours, funded-order, Live-promotion, and cross-platform proof remain
+outstanding.
 
 When those reads succeed (not login-only), chrome is **Connected (read)**
 / **API smoke** — never imply placeable Live orders. Neo copy is
 `Live read only until funded unlock.` Prefer native; OpenAlgo is
 Settings / fallback only. Keep personal IPs out of this repository.
-
-See [FT-MONDAY-002](../acceptance/FT-MONDAY-002.md).
 
 ## FlintTrade Boundary
 
