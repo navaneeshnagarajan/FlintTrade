@@ -413,10 +413,49 @@ describe("LoginRoute", () => {
     expect(screen.queryByText(/Explore/)).not.toBeInTheDocument();
   });
 
-  it("upgrades the explore login JWT to practice when the UI was in Practice", async () => {
-    // Phase 1 G1 (login half): password login always mints an explore JWT.
-    // If the persisted UI mode is Practice, LoginRoute must call /auth/mode to
-    // sync the token to practice — otherwise sandbox orders 403 mode_blocked.
+  it("installs a practice login token without another mode request", async () => {
+    modeState.mode = "explore";
+    const onSuccess = vi.fn();
+    const fetchSpy = mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return jsonResponse({
+            status: "success",
+            data: {
+              token: "practice-session",
+              username: "testuser",
+              expires_at: "",
+              mode: "practice",
+            },
+          });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={onSuccess} mode="full" />);
+
+    await waitFor(() => expect(screen.getByLabelText("Enter your 2FA code")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    fireEvent.change(screen.getByLabelText("Enter your 2FA code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    const urls = fetchSpy.mock.calls.map((call) => String(call[0]));
+    expect(urls.some((url) => url.includes("/v1/auth/mode"))).toBe(false);
+    expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+      "practice-session",
+      "testuser",
+      "",
+      { status: "logged-out", principal: null, generation: 7 },
+    );
+    expect(mockSetMode).toHaveBeenCalledWith("practice");
+    expect(mockSetMode).not.toHaveBeenCalledWith("live");
+  });
+
+  it("upgrades a missing login mode to practice when the UI was in Practice", async () => {
+    // A login response with no mode claim is still upgraded to Practice
+    // before the desk opens. A stored Practice UI must not keep an explore token.
     modeState.mode = "practice";
     const onSuccess = vi.fn();
     const fetchSpy = mockAuthFetch({

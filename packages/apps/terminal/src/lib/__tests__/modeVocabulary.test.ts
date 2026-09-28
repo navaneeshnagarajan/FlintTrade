@@ -35,7 +35,7 @@ describe("FT-UX-001 mode vocabulary", () => {
     expect(orderReviewDetailsLabel("explore")).toBe("Example order details");
     expect(orderReviewConfirmAria("explore")).toBe("Confirm Example order");
     expect(orderReviewDescription("explore")).toBe(
-      "Example only. No broker or native trading API is contacted. Example records an example fill.",
+      "Example only. Nothing is sent to a broker and no order is placed.",
     );
     expect(orderReviewDescription("explore")).not.toMatch(/Explore records a sample fill/i);
     expect(orderReviewDescription("practice")).toBe("Confirm places this simulated order.");

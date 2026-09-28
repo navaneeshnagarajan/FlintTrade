@@ -216,7 +216,7 @@ class TestExploreModeBlocked:
         assert resp.status_code == 403
         data = resp.get_json()
         assert data["status"] == "error"
-        assert "Explore mode" in data["message"]
+        assert "Example" in data["message"]
 
     @pytest.mark.parametrize("endpoint", _ORDER_ENDPOINTS)
     def test_explore_mode_upper_case_jwt_normalised(self, client, endpoint):
@@ -263,7 +263,7 @@ class TestExploreModeBlocked:
         data = resp.get_json()
         assert data["status"] == "error"
         assert data["code"] == "mode_blocked"
-        assert "Explore mode" in data["message"]
+        assert "Example" in data["message"]
 
 
 # ---------------------------------------------------------------------------

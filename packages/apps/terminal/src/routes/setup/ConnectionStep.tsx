@@ -21,7 +21,7 @@ import {
   CONNECTED_READ_LABEL,
   NEO_OPERATOR_COPY,
   isMondayReadBroker,
-} from "@/lib/mondayReadChrome";
+} from "@/lib/connectedReadChrome";
 
 type ConnectionMode = "openalgo" | "direct";
 

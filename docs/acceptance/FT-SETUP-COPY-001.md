@@ -123,7 +123,8 @@ operator; the function names may stay.
 These are not operator chrome. Do not rename them as part of this
 finding:
 
-- Identifiers such as `isMondayReadBroker`, `mondayReadChrome`,
+- Identifiers such as `isMondayReadBroker` and `mondayReadChrome` in
+  `packages/apps/terminal/src/lib/connectedReadChrome.ts`,
   `nativeMonday`, `MONDAY_READ_BROKERS`, and `run_monday_read_smoke`.
 - Developer comments, including the file headers on `ConnectionStep.tsx`
   and `SetupAccountRoute.tsx`, the comment in

@@ -60,10 +60,6 @@ vi.mock("@/components/ui/GlossaryTooltip", () => ({
   GlossaryTooltip: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
 
-vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => <div data-testid="demo-banner">Demo mode</div>,
-}));
-
 vi.mock("@/components/motion/StaggeredList", () => ({
   StaggeredList: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));

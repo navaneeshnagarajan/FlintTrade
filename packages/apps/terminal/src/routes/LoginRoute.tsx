@@ -119,18 +119,21 @@ export default function LoginRoute({
       });
       const data = await resp.json();
       if (resp.ok && data.data?.token) {
-        // A finished Setup opens in Practice. Password login mints an
-        // explore JWT, and a stored Explore or Live value must not win.
-        // Mint the Practice session before logging in, so the desk never
-        // opens on the explore claim. Live stays behind the PIN.
-        const deskMode = modeAfterPasswordSignIn(data.data.mode);
-        let practiceToken: string;
-        try {
-          practiceToken = await downgradeMode(deskMode, data.data.token);
-        } catch {
-          if (!isAuthSessionFenceCurrent(requestFence)) return;
-          setError("Could not open Practice. Try again.");
-          return;
+        // A finished Setup opens in Practice. Password login mints a
+        // practice JWT. A missing claim, a legacy explore claim, or a Live
+        // claim is upgraded before the desk opens, so sign-in never stays
+        // on example data and never arms Live.
+        const reportedMode = data.data.mode;
+        const deskMode = modeAfterPasswordSignIn(reportedMode);
+        let practiceToken = data.data.token as string;
+        if (reportedMode !== "practice") {
+          try {
+            practiceToken = await downgradeMode(deskMode, data.data.token);
+          } catch {
+            if (!isAuthSessionFenceCurrent(requestFence)) return;
+            setError("Could not open Practice. Try again.");
+            return;
+          }
         }
         if (!useAuthStore.getState().setLoggedInIfCurrent(
           practiceToken,

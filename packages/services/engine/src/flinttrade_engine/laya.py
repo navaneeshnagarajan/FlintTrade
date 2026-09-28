@@ -197,7 +197,7 @@ class Laya:
         if mode not in _MODES:
             return "Mode is not recognised. Nothing was admitted."
         if mode == "explore":
-            return "Explore cannot place orders."
+            return "Example cannot place orders."
         if not proposal.symbol.strip() or not proposal.exchange.strip():
             return "Symbol and exchange are required."
         action = proposal.action.strip().upper()

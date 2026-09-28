@@ -4,7 +4,7 @@ import { MODE_HONESTY_COPY, modeHonestyCopy } from "../modeHonesty";
 describe("mode honesty copy", () => {
   it("gives Explore its sample-desk line", () => {
     expect(modeHonestyCopy("explore")).toBe(
-      "Example. No broker session, no live orders.",
+      "Example data. No broker is connected and no orders are sent.",
     );
   });
 

@@ -26,7 +26,7 @@ import { AnimatedCounter } from "@/components/magicui/animated-counter";
 import { classifySector } from "@/lib/sectors";
 import { cn } from "@/lib/utils";
 import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import { useInvest } from "../InvestContext";
 import { formatINR, formatINRCompact, formatPercent } from "../formatters";
 import { maskValue, VALUE_MASK } from "@/lib/formatters";
@@ -159,7 +159,7 @@ export function DashboardTab() {
       {/* Demo banner */}
       {isDemo && (
         <div className="lg:col-span-3">
-          <DemoBanner />
+          <ExampleChip />
         </div>
       )}
 

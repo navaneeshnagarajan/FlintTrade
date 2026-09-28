@@ -365,7 +365,7 @@ function AccountSecurityStep({ onComplete, onBack, onAccountAlreadyExists }: Acc
         password: values.password,
         pin: values.pin || "",
       });
-      // /auth/setup mints an explore-mode session so the rest of the wizard
+      // /auth/setup mints a practice session so the rest of the wizard
       // (broker connection behind the G9 write guard, mode selection behind the
       // D6 session-bound PIN) is authenticated. Without it those steps 401.
       // Fall back to logged-out only if an older backend returned no token.
@@ -1673,9 +1673,9 @@ export default function SetupAccountRoute({
 
   async function handleOpenPractice() {
     setModeSyncError("");
-    // /auth/setup minted an EXPLORE-mode JWT. The server reads the mode from
-    // the JWT claim, so the Practice desk needs a Practice session before
-    // the first sandbox order.
+    // /auth/setup mints a practice JWT. Confirm that claim before the desk
+    // opens, including when an older token is still example data. The server
+    // reads the mode from the JWT, so the first sandbox order needs Practice.
     try {
       const authState = useAuthStore.getState();
       const practiceToken = await downgradeMode(

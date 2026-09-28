@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useOperatorIncident } from "@/hooks/useOperatorIncident";
 import { honestBrokerStatus } from "@/lib/operatorIncident";
-import { isMondayReadBroker } from "@/lib/mondayReadChrome";
+import { isMondayReadBroker } from "@/lib/connectedReadChrome";
 import { brokerAccountKey, isBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
 import type { AccountStatus, BrokerAccount } from "@/types/broker";
 import type { OperatorIncident } from "@/lib/operatorIncident";

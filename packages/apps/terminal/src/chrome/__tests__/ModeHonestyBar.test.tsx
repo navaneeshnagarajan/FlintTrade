@@ -9,7 +9,7 @@ describe("ModeHonestyBar", () => {
     const bar = screen.getByTestId("mode-honesty-bar");
     expect(bar).toHaveAttribute("data-mode", "explore");
     expect(bar).toHaveTextContent(
-      "Example. No broker session, no live orders.",
+      "Example data. No broker is connected and no orders are sent.",
     );
     expect(bar.querySelector("p")).toHaveClass("whitespace-nowrap");
     expect(bar).not.toHaveAttribute("role", "alert");

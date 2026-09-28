@@ -275,10 +275,10 @@ describe("OrderPadWidget", () => {
   });
 
   it("shows Laya denied under the confirm control and leaves it off", async () => {
-    mockPlaceOrder.mockRejectedValue(new OrderApiError("Explore cannot place orders.", 403, {
+    mockPlaceOrder.mockRejectedValue(new OrderApiError("Example cannot place orders.", 403, {
       code: "laya_denied",
-      reason: "Explore cannot place orders.",
-      message: "Explore cannot place orders.",
+      reason: "Example cannot place orders.",
+      message: "Example cannot place orders.",
       limits: { max_quantity: 100 },
     }));
     render(<OrderPadWidget {...defaultProps} />);
@@ -290,7 +290,7 @@ describe("OrderPadWidget", () => {
     fireEvent.click(confirm);
     const denied = await screen.findByTestId("laya-denied");
     expect(denied).toHaveTextContent("Laya denied");
-    expect(denied).toHaveTextContent("Explore cannot place orders.");
+    expect(denied).toHaveTextContent("Example cannot place orders.");
     expect(denied).toHaveTextContent("Max quantity 100.");
     expect(confirm).toBeDisabled();
     expect(screen.queryByText(/Approved by Laya/)).not.toBeInTheDocument();

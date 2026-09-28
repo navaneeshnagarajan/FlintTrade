@@ -50,16 +50,12 @@ vi.mock("@/components/ui/GlossaryTooltip", () => ({
   GlossaryTooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-// Mock DemoBanner
-vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => <div data-testid="demo-banner">Demo Mode</div>,
-}));
-
 // ---------------------------------------------------------------------------
 // Import after mocks
 // ---------------------------------------------------------------------------
 
 import { BenchmarkTab } from "../BenchmarkTab";
+import { useModeStore } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -67,6 +63,7 @@ import { BenchmarkTab } from "../BenchmarkTab";
 
 describe("BenchmarkTab", () => {
   beforeEach(() => {
+    useModeStore.setState({ mode: "explore" });
     vi.clearAllMocks();
   });
 
@@ -77,7 +74,7 @@ describe("BenchmarkTab", () => {
 
   it("renders the demo banner", () => {
     render(<BenchmarkTab />);
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
   });
 
   it("shows the portfolio row", () => {

@@ -9,9 +9,10 @@
  * change therefore routes through one of these two calls so the server mints a
  * matching token.
  *
- *   - `downgradeMode` → POST /v1/auth/mode : drop to a SAFER mode (explore or
- *     practice). Revokes the old jti server-side, mints a fresh token with
- *     `live_mode_unlocked: false`. No PIN required (privilege reduction).
+ *   - `downgradeMode` → POST /v1/auth/mode : drop to Practice. Revokes the
+ *     old jti server-side, mints a fresh token with `live_mode_unlocked:
+ *     false`. No PIN required (privilege reduction). Example data is not a
+ *     desk downgrade.
  *   - `unlockWithPin` → POST /v1/auth/pin : PIN re-authentication. Defaults to
  *     Live (the explicit arm-real-money gesture); pass a non-live `mode` for a
  *     mode-preserving idle unlock that must NOT silently escalate to Live.
@@ -36,28 +37,27 @@ export interface UnlockResult {
   liveUnlocked: boolean;
 }
 
-/** Modes a session may drop to without re-authenticating. */
-export type DowngradeMode = "explore" | "practice";
+/** The desk session a password sign-in may open without re-authenticating. */
+export type DowngradeMode = "practice";
 
 /**
  * Desk mode after a password sign-in on a machine where Setup is finished.
  *
- * Password login mints an explore JWT. That claim is not an operator Mode.
- * Practice is the desk, including when the browser still has Explore stored.
- * An explicit practice report is kept. Live is not armed by a password sign-in.
+ * Password login mints a practice JWT. Practice is the desk, including when
+ * the browser still has example data stored. A missing claim, a legacy
+ * explore claim, and a Live claim all open Practice. Password sign-in does
+ * not arm Live.
  */
 export function modeAfterPasswordSignIn(reported: unknown): "practice" {
-  // An explicit practice report, a missing claim, the explore JWT default,
-  // and a Live claim all open Practice. Password sign-in does not arm Live.
   void reported;
   return "practice";
 }
 
 /**
- * Downgrade the current session to `target` (explore or practice), returning
- * the freshly minted token. Throws on any non-2xx or missing token so callers
- * can keep the UI in its current (higher) mode — never flip the UI to a safer
- * mode while the server still holds a higher-privilege token.
+ * Downgrade the current session to Practice, returning the freshly minted
+ * token. Throws on any non-2xx or missing token so callers can keep the UI
+ * in its current mode — never flip the UI to Practice while the server still
+ * holds a higher-privilege token.
  */
 export async function downgradeMode(
   target: DowngradeMode,

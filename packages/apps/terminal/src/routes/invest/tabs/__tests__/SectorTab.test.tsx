@@ -33,10 +33,6 @@ vi.mock("@/lib/cinematicThemes", () => ({
   }),
 }));
 
-vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => <div data-testid="demo-banner">Demo mode</div>,
-}));
-
 vi.mock("@/components/motion/StaggeredList", () => ({
   StaggeredList: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <div className={className}>{children}</div>

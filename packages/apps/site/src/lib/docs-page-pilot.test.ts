@@ -137,7 +137,8 @@ describe('docs.page pilot publication guards', () => {
 
   it('canonical mode/surface/provenance language is represented; retired labels not presented as current', () => {
     const allContent = PILOT_MDX_FILES.map((f) => readFileSync(join(DOCS_DIR, f), 'utf8')).join('\n');
-    expect(allContent).toContain('Explore');
+    expect(allContent).toContain('Example');
+    expect(allContent).toContain('Connected (read)');
     expect(allContent).toContain('Practice');
     expect(allContent).toContain('Live');
     expect(allContent).toContain('Sample');
@@ -250,7 +251,11 @@ describe('docs.page pilot publication guards', () => {
     expect(modesContent).toMatch(/provenance.*independent|independent.*provenance/i);
     // must not claim Practice implies Sample or Live implies Live data (target old conflating phrases only)
     expect(modesContent).not.toMatch(/Simulated trading with sample data|Real trading with live market data/i);
-    expect(modesContent).toContain('Explore');
+    expect(modesContent).not.toContain('Explore');
+    expect(modesContent).toContain('Example data. No broker is connected and no orders are sent.');
+    expect(modesContent).toContain('Example only. Nothing is sent to a broker and no order is placed.');
+    expect(modesContent).toContain('Example data. Connect a broker to see your own.');
+    expect(modesContent).toContain('Connected (read)');
     expect(modesContent).toContain('Practice');
     expect(modesContent).toContain('Live');
     // provenance labels separate

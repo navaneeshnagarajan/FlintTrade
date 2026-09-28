@@ -59,13 +59,6 @@ vi.mock("@/services/api", () => ({
   getMultiQuotes: vi.fn().mockResolvedValue([]),
 }));
 
-// Mock DemoBanner
-vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => (
-    <div data-testid="demo-banner">Demo mode</div>
-  ),
-}));
-
 // Mock localStorage
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
@@ -145,9 +138,17 @@ describe("BasketTab", () => {
     expect(badges.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("shows demo banner when no quotes loaded", () => {
+  it("shows one Example chip when no quotes are loaded", () => {
     render(<BasketTab />);
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("example-chip")).toBeInTheDocument();
+    expect(screen.queryByText("Example data. Connect a broker to see your own.")).not.toBeInTheDocument();
+  });
+
+  it("does not show the Example chip in Practice", () => {
+    useModeStore.setState({ mode: "practice" });
+    render(<BasketTab />);
+    expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
+    expect(screen.queryByText("Example data. Connect a broker to see your own.")).not.toBeInTheDocument();
   });
 
   it("renders saved baskets from localStorage", () => {

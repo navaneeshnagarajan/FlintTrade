@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleChip } from "@/components/ui/ExampleChip";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -148,7 +148,7 @@ export function BenchmarkTab() {
   return (
     <div className="space-y-6">
       {/* Demo banner */}
-      <DemoBanner />
+      <ExampleChip />
 
       {/* Header */}
       <div className="flex items-center gap-3">

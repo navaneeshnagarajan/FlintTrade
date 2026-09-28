@@ -10,7 +10,7 @@ export interface AccountSetupInput {
 export interface AccountSetupResult {
   totpUri: string;
   backupCodes: string[];
-  /** Explore-mode session token minted at account creation so the vault step
+  /** Practice session token minted at account creation so the vault step
    * and any optional setup the operator chooses are authenticated. */
   token: string;
 }
