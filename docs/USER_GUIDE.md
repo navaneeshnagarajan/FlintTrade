@@ -189,7 +189,7 @@ For step-by-step instructions tailored to each operating system, see:
 - [Quick start (cross-platform)](setup/QUICKSTART.md)
 
 ![Welcome screen](screenshots/01-welcome.png)
-*The /welcome route — first-time cinematic introduction with persona pickers.*
+*The /welcome route — first-time cinematic introduction. Get Started opens Setup. Try with sample data stays in Explore.*
 
 ---
 
@@ -464,7 +464,7 @@ remain reachable. Selecting Compact again re-collapses that disclosure.
 Phone layouts are unchanged.
 
 **Desk chrome (FT-UX-002).** The desk uses one TopBar and one scrolling
-ticker strip under it. TopBar keeps Mode, session/status, and overflow —
+ticker strip. TopBar keeps Mode, session/status, and overflow —
 it is not a second quote rail, so dual index slots in TopBar are gone.
 **Tools → Quick Settings** opens density, theme, and similar controls
 without leaving the desk. **Tools → Settings** opens the full
@@ -472,11 +472,13 @@ without leaving the desk. **Tools → Settings** opens the full
 no separate Settings gear. When Compact Trade collapses the tool
 ribbon, Quick Settings stays on the TopBar; expanding desk tools puts
 it back in the Tools menu. A desk that offers only full Settings, with
-Quick Settings removed, fails this bar. Trade uses the flex shell
-TopBar → TickerStrip → route body first; the same shell then rolls to
-Invest, Automate, Learn, and Ditto. This is not a silent widen of
-Compact-only-on-Trade (FT-UX-001). Mode and status stay reachable
-(desk-first; skinny-browser defensive collapse is fine).
+Quick Settings removed, fails this bar. The flex shell is TopBar,
+then the operator status strip when one is showing, then the Mode
+honesty line, then the ticker strip, then the route body. Trade uses
+that shell first; the same shell then rolls to Invest, Automate, Learn,
+and Ditto. This is not a silent widen of Compact-only-on-Trade
+(FT-UX-001). Mode and status stay reachable (desk-first; skinny-browser
+defensive collapse is fine).
 
 **Ticker venue badges (FT-CORE-TICKER-001).** Pinned badges match the
 venues that feed the marquee: NSE, BSE, and MCX on the default tape,
