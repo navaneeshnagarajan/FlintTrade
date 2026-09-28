@@ -29,6 +29,7 @@ import { DisabledActionButton } from "../DisabledActionButton";
 import { formatAccountNetWorth } from "@/lib/accountNetWorth";
 import { formatINRCompact, formatPercent } from "../formatters";
 import { maskValue } from "@/lib/formatters";
+import { useModeStore } from "@/stores/modeStore";
 import { useValueVisibilityStore } from "@/stores/valueVisibilityStore";
 
 // ─── Asset category definition ────────────────────────────────────────────────
@@ -64,10 +65,15 @@ function buildComparison(totalInvested: number, currentValue: number): Compariso
 
 export function NetWorthTab() {
   const { summary, isLoading, isSampleData } = useInvest();
+  const isPractice = useModeStore((s) => s.mode === "practice");
   const { currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash } = summary;
+  const positionValue = summary.positionValue ?? 0;
+  const sourceNote = isPractice ? "Practice account" : "Live from broker";
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);
 
-  const knownTotal = typeof summary.netWorth === "number" ? summary.netWorth : currentValue + availableCash;
+  const knownTotal = typeof summary.netWorth === "number"
+    ? summary.netWorth
+    : currentValue + availableCash + positionValue;
   const comparison = useMemo(
     () => buildComparison(totalInvested, currentValue),
     [totalInvested, currentValue],
@@ -77,7 +83,7 @@ export function NetWorthTab() {
     {
       label: "Equity Holdings",
       value: isLoading ? null : currentValue,
-      note: isSampleData ? "Example book" : "Live from broker",
+      note: isSampleData ? "Example book" : sourceNote,
       hexColor: "#3b82f6",
       tailwindBg: "bg-blue-500",
       tailwindText: "text-blue-400",
@@ -88,7 +94,7 @@ export function NetWorthTab() {
     {
       label: "Available Cash",
       value: isLoading ? null : availableCash,
-      note: isSampleData ? "Example cash" : "Live from broker",
+      note: isSampleData ? "Example cash" : sourceNote,
       hexColor: "#22c55e",
       tailwindBg: "bg-emerald-500",
       tailwindText: "text-emerald-400",
@@ -131,6 +137,20 @@ export function NetWorthTab() {
     },
   ];
 
+  if (positionValue > 0) {
+    categories.splice(1, 0, {
+      label: "Open Positions",
+      value: isLoading ? null : positionValue,
+      note: isSampleData ? "Example book" : sourceNote,
+      hexColor: "#22c55e",
+      tailwindBg: "bg-emerald-500",
+      tailwindText: "text-emerald-400",
+      icon: TrendingUp,
+      addLabel: "Add Position",
+      addTooltip: "Open positions are marked from the account book.",
+    });
+  }
+
   const knownCategories = categories.filter((c) => c.value !== null && c.value > 0);
   const donutTotal = knownCategories.reduce((acc, c) => acc + (c.value ?? 0), 0);
 
@@ -142,7 +162,9 @@ export function NetWorthTab() {
           Net Worth Breakdown
         </h3>
         <p className="text-xs text-text-muted mt-0.5">
-          Live equity and cash from your connected broker. Other asset classes require additional data sources.
+          {isPractice
+            ? "Practice account. Other asset classes require additional data sources."
+            : "Live equity and cash from your connected broker. Other asset classes require additional data sources."}
         </p>
       </div>
 
@@ -151,7 +173,7 @@ export function NetWorthTab() {
         {/* Known total card */}
         <GlassCard className="p-5 flex flex-col justify-between gap-3">
           <div className="text-xxs text-text-muted uppercase tracking-wider flex items-center gap-1.5">
-            Known Total (Equity + Cash)
+            Known Total (Cash + Holdings + Positions)
             {isSampleData && <ExampleLabel testId="net-worth-tab-example" />}
           </div>
           <div
@@ -239,7 +261,7 @@ export function NetWorthTab() {
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-xs text-text-muted text-center">
-              Connect a broker to see allocation chart.
+              {isPractice ? "No tracked assets in this account yet." : "Connect a broker to see allocation chart."}
             </div>
           )}
         </GlassCard>
@@ -270,8 +292,16 @@ export function NetWorthTab() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {cat.value !== null ? (
-                    <span className="font-mono tabular-nums text-xs text-text-primary">
-                      {maskValue(formatINRCompact(cat.value), valuesHidden)}
+                    <span
+                      className="font-mono tabular-nums text-xs text-text-primary"
+                      data-testid={cat.label === "Available Cash" ? "net-worth-available-cash" : undefined}
+                    >
+                      {maskValue(
+                        cat.label === "Available Cash" || cat.label === "Open Positions"
+                          ? formatAccountNetWorth(cat.value)
+                          : formatINRCompact(cat.value),
+                        valuesHidden,
+                      )}
                     </span>
                   ) : (
                     <Badge

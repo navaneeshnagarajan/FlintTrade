@@ -59,7 +59,7 @@ import { z } from "zod";
 import { safeParse } from "@/lib/safeParse";
 import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { useModeStore } from "@/stores/modeStore";
 import { formatINR, formatPercent } from "../formatters";
 
@@ -348,7 +348,7 @@ export function BasketTab() {
 
   return (
     <div className="space-y-6">
-      {isDemo && <DemoBanner />}
+      {isDemo && <ExampleLabel />}
 
       {/* Header */}
       <div className="flex items-center justify-between">

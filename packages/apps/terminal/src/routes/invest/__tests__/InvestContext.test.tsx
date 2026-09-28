@@ -26,12 +26,29 @@ const fundsQuery = vi.hoisted(() => ({
   isLoading: false,
 }));
 
+const positionsQuery = vi.hoisted(() => ({
+  data: undefined as {
+    symbol: string;
+    exchange: string;
+    product: string;
+    quantity: number;
+    averagePrice: number;
+    ltp: number;
+    pnl: number;
+    pnlPercent: number;
+  }[] | undefined,
+}));
+
 vi.mock("@/hooks/useHoldings", () => ({
   useHoldings: () => holdingsQuery,
 }));
 
 vi.mock("@/hooks/useFunds", () => ({
   useFunds: () => fundsQuery,
+}));
+
+vi.mock("@/hooks/usePositions", () => ({
+  usePositions: () => ({ data: positionsQuery.data, isLoading: false }),
 }));
 
 vi.mock("@/hooks/useAccountReadsEnabled", () => ({
@@ -79,6 +96,7 @@ afterEach(() => {
   holdingsQuery.isError = false;
   fundsQuery.data = undefined;
   fundsQuery.isLoading = false;
+  positionsQuery.data = undefined;
   useModeStore.setState({ mode: "explore" });
 });
 
@@ -138,6 +156,27 @@ describe("InvestContext sample holdings count (FT-DEMO-001)", () => {
     expect(screen.getByTestId("sample-flag")).toHaveTextContent("false");
     expect(screen.getByTestId("net-worth")).toHaveTextContent("999200");
     expect(getDemoHoldings().length).toBeGreaterThan(0);
+  });
+
+  it("adds an open position mark so a ₹800 fill restores ₹10,00,000", () => {
+    useModeStore.setState({ mode: "practice" });
+    brokerConnected.current = false;
+    fundsQuery.data = { availableCash: 999_200, usedMargin: 800, totalBalance: 1_000_000 };
+    positionsQuery.data = [{
+      symbol: "SBIN",
+      exchange: "NSE",
+      product: "CNC",
+      quantity: 1,
+      averagePrice: 800,
+      ltp: 800,
+      pnl: 0,
+      pnlPercent: 0,
+    }];
+
+    renderProbe();
+
+    expect(screen.getByTestId("holding-count")).toHaveTextContent("0 holdings");
+    expect(screen.getByTestId("net-worth")).toHaveTextContent("1000000");
   });
 
   it("does not flash the sample book while practice funds are still loading", () => {

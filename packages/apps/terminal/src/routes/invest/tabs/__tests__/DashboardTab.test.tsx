@@ -2,11 +2,12 @@
  * DashboardTab.test.tsx — Render tests for the Invest dashboard overview.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
 import { accountNetWorth, formatAccountNetWorth } from "@/lib/accountNetWorth";
+import { useModeStore } from "@/stores/modeStore";
 import { formatCurrencyCompact } from "@/lib/formatters";
 import type { Holding } from "@/types/api";
 
@@ -108,6 +109,7 @@ import { DashboardTab } from "../DashboardTab";
 
 describe("DashboardTab", () => {
   beforeEach(() => {
+    useModeStore.setState({ mode: "live" });
     investState.holdings = LIVE_ROWS;
     investState.isLoading = false;
     investState.isError = false;
@@ -198,5 +200,44 @@ describe("DashboardTab", () => {
     expect(screen.queryByText(formatCurrencyCompact(demoNetWorth))).not.toBeInTheDocument();
     expect(screen.queryByText(formatAccountNetWorth(demoNetWorth))).not.toBeInTheDocument();
     expect(demoNetWorth).not.toBe(practiceCash);
+    expect(screen.getByText(/Net Worth \(Cash \+ Holdings \+ Positions\)/)).toBeInTheDocument();
+    expect(screen.getByTestId("invest-available-funds")).toHaveTextContent(formatAccountNetWorth(practiceCash));
+    expect(screen.getByTestId("invest-xirr")).toHaveTextContent("—");
+    expect(screen.getByTestId("invest-xirr-subline")).toHaveTextContent("XIRR —");
+    expect(screen.queryByTestId("invest-xirr-example")).not.toBeInTheDocument();
+    expect(screen.queryByText(/XIRR -0\.00%/)).not.toBeInTheDocument();
   });
+
+  it("computes Portfolio XIRR without an Example chip when holdings exist", () => {
+    render(<DashboardTab />);
+
+    expect(screen.queryByTestId("invest-xirr-example")).not.toBeInTheDocument();
+    expect(screen.getByTestId("invest-xirr").textContent).not.toBe("—");
+    expect(screen.getByTestId("invest-xirr-subline").textContent).not.toContain("XIRR —");
+  });
+
+  it("uses Practice account wording instead of a connected broker", () => {
+    useModeStore.setState({ mode: "practice" });
+    investState.holdings = [];
+    investState.summary = {
+      ...investState.summary,
+      currentValue: 0,
+      totalInvested: 0,
+      totalPnl: 0,
+      totalPnlPercent: 0,
+      availableCash: 999_200,
+      netWorth: 999_200,
+      holdingCount: 0,
+    };
+
+    render(<DashboardTab />);
+
+    expect(screen.getByText(/Practice account/)).toBeInTheDocument();
+    expect(screen.queryByText(/from your connected broker/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Connect a broker to see movers/)).not.toBeInTheDocument();
+  });
+});
+
+afterEach(() => {
+  useModeStore.setState({ mode: "explore" });
 });

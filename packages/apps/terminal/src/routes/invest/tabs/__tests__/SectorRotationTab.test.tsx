@@ -38,7 +38,7 @@ vi.mock("@/lib/cinematicThemes", () => ({
 }));
 
 vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => <div data-testid="demo-banner">Demo mode</div>,
+  DemoBanner: () => <div data-testid="example-label">Demo mode</div>,
 }));
 
 // Mock TanStack Query — data=undefined, isError=false → isDemo path (uses DEMO_SECTORS)
@@ -93,13 +93,13 @@ describe("SectorRotationTab", () => {
     // Provenance fails closed — an absent flag is sample, never live.
     mockUseQuery.mockReturnValue({ ...NO_DATA, data: { sectors: [LIVE_SECTOR] } });
     render(<SectorRotationTab />);
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("example-label")).toBeInTheDocument();
   });
 
   it("drops the demo banner only on an explicit is_sample_data: false", () => {
     mockUseQuery.mockReturnValue({ ...NO_DATA, data: { is_sample_data: false, sectors: [LIVE_SECTOR] } });
     render(<SectorRotationTab />);
-    expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("example-label")).not.toBeInTheDocument();
   });
 
   it("renders the section heading", () => {
@@ -109,7 +109,7 @@ describe("SectorRotationTab", () => {
 
   it("shows demo banner when API is unavailable", () => {
     render(<SectorRotationTab />);
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("example-label")).toBeInTheDocument();
   });
 
   it("renders heatmap and momentum sub-tabs", () => {

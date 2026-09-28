@@ -35,7 +35,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { cn } from "@/lib/utils";
 import {
   getSectorRotation,
@@ -208,7 +208,7 @@ export function SectorRotationTab() {
 
   return (
     <div className="space-y-5">
-      {isDemo && <DemoBanner />}
+      {isDemo && <ExampleLabel />}
 
       {/* Header */}
       <div className="flex items-center justify-between gap-4">

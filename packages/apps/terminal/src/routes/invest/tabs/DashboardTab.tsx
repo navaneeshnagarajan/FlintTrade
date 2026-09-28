@@ -29,6 +29,7 @@ import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
 import { DemoBanner } from "@/components/ui/DemoBanner";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { accountNetWorth, formatAccountNetWorth } from "@/lib/accountNetWorth";
+import { useModeStore } from "@/stores/modeStore";
 import { useInvest } from "../InvestContext";
 import { formatINR, formatINRCompact, formatPercent } from "../formatters";
 import { maskValue, VALUE_MASK } from "@/lib/formatters";
@@ -67,6 +68,7 @@ interface TopMover {
 
 export function DashboardTab() {
   const { holdings, summary: liveSummary, isLoading, isSampleData } = useInvest();
+  const isPractice = useModeStore((s) => s.mode === "practice");
 
   // Count and rows come from InvestContext only — never a local sample
   // overlay that would disagree with the header badge (FT-TRADE-010).
@@ -88,6 +90,8 @@ export function DashboardTab() {
   const money = (v: number) => maskValue(formatINRCompact(v), valuesHidden);
   const netWorthLabel = (v: number) => maskValue(formatAccountNetWorth(v), valuesHidden);
 
+  const positionValue = liveSummary.positionValue ?? 0;
+
   const equityValue = useMemo(
     () =>
       holdings
@@ -106,6 +110,7 @@ export function DashboardTab() {
 
   const bands: AllocationBand[] = [
     { label: "Equity", value: equityValue, color: "text-neutral-text", bg: "bg-neutral-text", hex: "#60a5fa" },
+    { label: "Positions", value: positionValue, color: "text-profit", bg: "bg-profit", hex: "#22c55e" },
     { label: "Commodity", value: commodityValue, color: "text-warning", bg: "bg-warning", hex: "#fbbf24" },
     { label: "Cash", value: availableCash, color: "text-profit", bg: "bg-profit", hex: "#34d399" },
   ].filter((b) => b.value > 0);
@@ -136,11 +141,10 @@ export function DashboardTab() {
     [holdings],
   );
 
-  // XIRR calculation — uses demo cash flows for now; live would use trade history
+  // XIRR is computed from cash flows. An empty book has no return to show.
   const portfolioXirr = useMemo(() => {
+    if (holdings.length === 0) return null;
     if (!isDemo) {
-      // With live data we'd build cash flows from trade history
-      // For now, use demo flows but substitute current portfolio value
       const flows = DEMO_CASH_FLOWS.slice(0, -1).concat({
         date: new Date(),
         amount: currentValue + availableCash,
@@ -148,7 +152,7 @@ export function DashboardTab() {
       return xirr(flows);
     }
     return xirr(DEMO_CASH_FLOWS);
-  }, [isDemo, currentValue, availableCash]);
+  }, [holdings.length, isDemo, currentValue, availableCash]);
 
   if (isLoading) {
     return (
@@ -173,7 +177,7 @@ export function DashboardTab() {
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div className="space-y-1">
             <p className="text-xxs text-text-muted uppercase tracking-wider font-medium flex items-center gap-1.5">
-              Net Worth (Equity + Cash)
+              Net Worth (Cash + Holdings + Positions)
               {isDemo && <ExampleLabel testId="invest-net-worth-example" />}
             </p>
             <div className="flex items-baseline gap-3">
@@ -199,19 +203,18 @@ export function DashboardTab() {
             </div>
             <p className="text-xs text-text-muted">
               {holdings.length} holdings &middot; {money(totalInvested)} invested
-              {portfolioXirr !== null && (
-                <>
-                  {" "}&middot;{" "}
-                  <span
-                    className={cn(
-                      "font-mono font-semibold tabular-nums",
-                      portfolioXirr >= 0 ? "text-profit" : "text-loss",
-                    )}
-                  >
-                    XIRR {formatPercent(portfolioXirr * 100)}
-                  </span>
-                </>
-              )}
+              {" "}&middot;{" "}
+              <span
+                data-testid="invest-xirr-subline"
+                className={cn(
+                  "font-mono font-semibold tabular-nums",
+                  portfolioXirr === null
+                    ? "text-text-muted"
+                    : portfolioXirr >= 0 ? "text-profit" : "text-loss",
+                )}
+              >
+                {portfolioXirr === null ? "XIRR —" : `XIRR ${formatPercent(portfolioXirr * 100)}`}
+              </span>
             </p>
           </div>
 
@@ -246,8 +249,8 @@ export function DashboardTab() {
             {isDemo && <ExampleLabel testId="invest-funds-example" />}
           </span>
         </div>
-        <div className="text-2xl font-mono font-bold tabular-nums text-text-primary">
-          <AnimatedCounter value={availableCash} formatter={money} duration={1.0} />
+        <div className="text-2xl font-mono font-bold tabular-nums text-text-primary" data-testid="invest-available-funds">
+          <AnimatedCounter value={availableCash} formatter={netWorthLabel} duration={1.0} />
         </div>
         <p className="text-xs text-text-muted">Withdrawable cash</p>
       </GlassCard>
@@ -310,7 +313,9 @@ export function DashboardTab() {
             {isDemo && <ExampleLabel testId="invest-allocation-example" />}
           </h3>
           <p className="text-xs text-text-muted mt-0.5">
-            Equity + Cash from your connected broker. Debt / MF requires NAV data source.
+            {isPractice
+              ? "Practice account. Debt / MF requires NAV data source."
+              : "Equity + Cash from your connected broker. Debt / MF requires NAV data source."}
           </p>
         </div>
 
@@ -336,7 +341,9 @@ export function DashboardTab() {
           </div>
         ) : (
           <div className="text-center py-6 text-text-muted text-xs">
-            No holdings or cash data available. Connect a broker to see allocation.
+            {isPractice
+              ? "No holdings or cash in this account yet."
+              : "No holdings or cash data available. Connect a broker to see allocation."}
           </div>
         )}
       </GlassCard>
@@ -349,7 +356,7 @@ export function DashboardTab() {
 
         {holdings.length === 0 ? (
           <div className="flex-1 flex items-center justify-center text-xs text-text-muted text-center">
-            Connect a broker to see movers.
+            {isPractice ? "No movers in this account yet." : "Connect a broker to see movers."}
           </div>
         ) : (
           <div className="space-y-3">
@@ -432,41 +439,49 @@ export function DashboardTab() {
         <p className="text-xs text-text-muted">Sectors represented</p>
       </GlassCard>
 
-      {/* Row 5: XIRR card */}
-      {portfolioXirr !== null && (
-        <GlassCard className="lg:col-span-3 p-4 gap-2">
-          <div className="flex items-center gap-2">
-            <div
-              className={cn(
-                "size-7 rounded-lg flex items-center justify-center",
-                portfolioXirr >= 0 ? "bg-bullish-bg" : "bg-bearish-bg",
-              )}
-            >
-              <Percent className={cn("size-3.5", portfolioXirr >= 0 ? "text-profit" : "text-loss")} />
-            </div>
-            <span className="text-xxs text-text-muted uppercase tracking-wider inline-flex items-center gap-1.5">
-              Portfolio XIRR
-              <ExampleLabel testId="invest-xirr-example" />
-            </span>
+      <GlassCard className="lg:col-span-3 p-4 gap-2">
+        <div className="flex items-center gap-2">
+          <div
+            className={cn(
+              "size-7 rounded-lg flex items-center justify-center",
+              portfolioXirr === null
+                ? "bg-surface-elevated"
+                : portfolioXirr >= 0 ? "bg-bullish-bg" : "bg-bearish-bg",
+            )}
+          >
+            <Percent className={cn(
+              "size-3.5",
+              portfolioXirr === null
+                ? "text-text-muted"
+                : portfolioXirr >= 0 ? "text-profit" : "text-loss",
+            )} />
           </div>
-          <div className="flex items-baseline gap-3">
-            <span
-              className={cn(
-                "text-2xl font-mono font-bold tabular-nums",
-                portfolioXirr >= 0 ? "text-profit" : "text-loss",
-              )}
-            >
-              {formatPercent(portfolioXirr * 100)}
-            </span>
-            <span className="text-xs text-text-muted">
-              Annualised return on irregular cash flows (SIPs + lump sum)
-            </span>
-          </div>
-        </GlassCard>
-      )}
+          <span className="text-xxs text-text-muted uppercase tracking-wider">
+            Portfolio XIRR
+          </span>
+        </div>
+        <div className="flex items-baseline gap-3">
+          <span
+            data-testid="invest-xirr"
+            className={cn(
+              "text-2xl font-mono font-bold tabular-nums",
+              portfolioXirr === null
+                ? "text-text-muted"
+                : portfolioXirr >= 0 ? "text-profit" : "text-loss",
+            )}
+          >
+            {portfolioXirr === null ? "—" : formatPercent(portfolioXirr * 100)}
+          </span>
+          <span className="text-xs text-text-muted">
+            Annualised return on irregular cash flows (SIPs + lump sum)
+          </span>
+        </div>
+      </GlassCard>
 
       <p className="lg:col-span-3 text-xs text-text-muted">
-        Holdings refresh every 60s. Cash refreshes every 30s from your active broker data source.
+        {isPractice
+          ? "Holdings refresh every 60s. Cash refreshes every 30s."
+          : "Holdings refresh every 60s. Cash refreshes every 30s from your active broker data source."}
       </p>
     </div>
   );

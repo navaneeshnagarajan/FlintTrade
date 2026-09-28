@@ -16,10 +16,11 @@ import {
 } from "react";
 import { useHoldings } from "@/hooks/useHoldings";
 import { useFunds } from "@/hooks/useFunds";
+import { usePositions } from "@/hooks/usePositions";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
-import { accountNetWorth } from "@/lib/accountNetWorth";
+import { accountNetWorth, markedValue } from "@/lib/accountNetWorth";
 import { classifySector } from "@/lib/sectors";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
 import type { Holding } from "@/types/api";
@@ -32,7 +33,9 @@ export interface PortfolioSummary {
   totalPnl: number;
   totalPnlPercent: number;
   availableCash: number;
-  /** Book market value plus available cash. Home uses the same helper. */
+  /** Mark of open positions. Included in net worth, separate from holdings. */
+  positionValue: number;
+  /** Cash plus holdings and open positions. Home uses the same helper. */
   netWorth: number;
   sectorCount: number;
   holdingCount: number;
@@ -107,6 +110,7 @@ export function InvestProvider({ children }: { children: ReactNode }) {
   } = useHoldings({ enabled: accountReadsEnabled });
 
   const { data: funds, isLoading: fundsLoading } = useFunds({ enabled: accountReadsEnabled });
+  const { data: livePositions = [] } = usePositions({ enabled: accountReadsEnabled });
 
   // Practice sandbox reads are enabled with no broker. Do not treat the
   // default empty array as sample while the query is still pending or has
@@ -126,6 +130,10 @@ export function InvestProvider({ children }: { children: ReactNode }) {
   );
   const isLoading = mode === "explore" || isSampleData ? false : holdingsLoading || fundsLoading;
   const availableCash = mode === "explore" ? getDemoFunds().availableCash : (funds?.availableCash ?? 0);
+  // A sample book must not pick up a live position, and a Practice snapshot
+  // must count the position the cash just bought.
+  const positions = isSampleData ? [] : livePositions;
+  const positionValue = markedValue(positions);
 
   // Derive portfolio totals — memoised so tabs get stable references
   const totalInvested = useMemo(
@@ -150,7 +158,7 @@ export function InvestProvider({ children }: { children: ReactNode }) {
     [holdings],
   );
 
-  const netWorth = accountNetWorth(holdings, availableCash);
+  const netWorth = accountNetWorth(holdings, availableCash, positions);
 
   const summary: PortfolioSummary = useMemo(
     () => ({
@@ -159,11 +167,22 @@ export function InvestProvider({ children }: { children: ReactNode }) {
       totalPnl,
       totalPnlPercent,
       availableCash,
+      positionValue,
       netWorth,
       sectorCount,
       holdingCount: holdings.length,
     }),
-    [currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash, netWorth, sectorCount, holdings.length],
+    [
+      currentValue,
+      totalInvested,
+      totalPnl,
+      totalPnlPercent,
+      availableCash,
+      positionValue,
+      netWorth,
+      sectorCount,
+      holdings.length,
+    ],
   );
 
   const value: InvestContextValue = useMemo(

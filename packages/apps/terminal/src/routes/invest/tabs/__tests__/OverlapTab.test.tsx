@@ -2,7 +2,7 @@
  * OverlapTab.test.tsx — Tests for portfolio overlap detection calculations and rendering.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import type { Holding } from "@/types/api";
@@ -111,23 +111,13 @@ describe("computeConcentrationStats", () => {
 
 // ─── Render tests ───────────────────────────────────────────────────────────────
 
-// Mock InvestContext
+const investState = vi.hoisted(() => ({
+  holdings: [] as Holding[],
+  isSampleData: true,
+}));
+
 vi.mock("../../InvestContext", () => ({
-  useInvest: vi.fn().mockReturnValue({
-    holdings: [],
-    summary: {
-      currentValue: 0,
-      totalInvested: 0,
-      totalPnl: 0,
-      totalPnlPercent: 0,
-      availableCash: 0,
-      sectorCount: 0,
-      holdingCount: 0,
-    },
-    isLoading: false,
-    isError: false,
-    refetchHoldings: vi.fn(),
-  }),
+  useInvest: () => investState,
 }));
 
 // Mock themeStore for GlassCard
@@ -167,6 +157,11 @@ vi.mock("@/lib/cinematicThemes", () => ({
 import { OverlapTab } from "../OverlapTab";
 
 describe("OverlapTab rendering", () => {
+  beforeEach(() => {
+    investState.holdings = [];
+    investState.isSampleData = true;
+  });
+
   it("renders with sample data when no live holdings", () => {
     render(<OverlapTab />);
     expect(screen.queryByText(/sample portfolio/i)).not.toBeInTheDocument();
@@ -191,5 +186,25 @@ describe("OverlapTab rendering", () => {
     expect(screen.getByText("Top 10 Concentration")).toBeInTheDocument();
     expect(screen.getByText("Overlapping Stocks")).toBeInTheDocument();
     expect(screen.getByText("Sector Risk")).toBeInTheDocument();
+  });
+
+  it("labels the sample overlap book Example", () => {
+    render(<OverlapTab />);
+    expect(screen.getByTestId("overlap-example")).toHaveTextContent("Example");
+    expect(screen.getByText("HDFCBANK")).toBeInTheDocument();
+  });
+
+  it("shows the empty state instead of the sample book when the account has no holdings", () => {
+    investState.isSampleData = false;
+    investState.holdings = [];
+    render(<OverlapTab />);
+
+    expect(screen.getByTestId("overlap-empty")).toHaveTextContent(
+      "No holdings to compare yet. Overlap appears once you hold two or more funds or baskets.",
+    );
+    expect(screen.queryByText("HDFCBANK")).not.toBeInTheDocument();
+    expect(screen.queryByText("UNIQUE STOCKS")).not.toBeInTheDocument();
+    expect(screen.queryByText(/₹18,62,044/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("overlap-example")).not.toBeInTheDocument();
   });
 });

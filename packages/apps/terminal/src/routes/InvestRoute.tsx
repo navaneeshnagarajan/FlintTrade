@@ -47,6 +47,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { useValueVisibilityStore } from "@/stores/valueVisibilityStore";
+import { useModeStore } from "@/stores/modeStore";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import TabTransition from "@/components/motion/TabTransition";
 import { cn } from "@/lib/utils";
@@ -194,6 +195,7 @@ function InvestShell() {
   const [activeTab, setActiveTab] = useState<TabId>(tabFromHash);
   const level = useSkillLevel("invest");
   const { holdings, isLoading, isSampleData } = useInvest();
+  const isPractice = useModeStore((s) => s.mode === "practice");
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);
   const toggleValues = useValueVisibilityStore((s) => s.toggle);
 
@@ -253,10 +255,12 @@ function InvestShell() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Route-level hint banner — dismissible, respects helpPrefs.inlineHints */}
-      <RouteBanner
-        hintId="invest-broker-connect"
-        text="Connect a broker in Settings → Brokers to see your real holdings, SIPs, and portfolio value here."
-      />
+      {!isPractice && (
+        <RouteBanner
+          hintId="invest-broker-connect"
+          text="Connect a broker in Settings → Brokers to see your real holdings, SIPs, and portfolio value here."
+        />
+      )}
       {/* Header */}
       <div className="border-b border-border-default bg-surface-card/80 backdrop-blur-sm shrink-0">
           {/* Title row */}

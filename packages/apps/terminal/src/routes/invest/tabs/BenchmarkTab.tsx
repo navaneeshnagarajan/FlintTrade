@@ -17,8 +17,9 @@ import {
 } from "lucide-react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { cn } from "@/lib/utils";
+import { useInvest } from "../InvestContext";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -133,6 +134,8 @@ function formatReturn(value: number): string {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function BenchmarkTab() {
+  const { holdings } = useInvest();
+  const hasHoldings = holdings.length > 0;
   const alphaRows = useMemo(
     () =>
       BENCHMARKS.map((b) => {
@@ -147,17 +150,15 @@ export function BenchmarkTab() {
 
   return (
     <div className="space-y-6">
-      {/* Demo banner */}
-      <DemoBanner />
-
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="size-8 rounded-lg flex items-center justify-center bg-surface-elevated">
           <Activity className="size-4 text-accent" />
         </div>
         <div>
-          <h2 className="font-heading font-semibold text-base text-text-primary">
+          <h2 className="font-heading font-semibold text-base text-text-primary inline-flex items-center gap-2">
             Benchmark Comparison
+            <ExampleLabel testId="benchmark-example" />
           </h2>
           <p className="text-xs text-text-muted">
             Portfolio performance vs major Indian indices
@@ -194,6 +195,16 @@ export function BenchmarkTab() {
                   </div>
                 </td>
                 {PERIODS.map((p) => {
+                  if (!hasHoldings) {
+                    return (
+                      <td
+                        key={p}
+                        className="text-right px-3 py-3 font-mono tabular-nums text-text-muted"
+                      >
+                        —
+                      </td>
+                    );
+                  }
                   const val = PORTFOLIO_RETURNS[p];
                   return (
                     <td
@@ -239,6 +250,14 @@ export function BenchmarkTab() {
         </div>
       </GlassCard>
 
+      {!hasHoldings && (
+        <p className="text-xs text-text-muted" data-testid="benchmark-empty-note">
+          Add holdings to compare against benchmarks.
+        </p>
+      )}
+
+      {hasHoldings && (
+      <>
       {/* Alpha table */}
       <GlassCard className="p-0 gap-0 overflow-hidden">
         <div className="px-4 py-3 border-b border-border-default">
@@ -356,6 +375,8 @@ export function BenchmarkTab() {
           <p className="text-xs text-text-muted">indices outperformed</p>
         </GlassCard>
       </div>
+      </>
+      )}
 
       <p className="text-xs text-text-muted">
         Benchmark data is illustrative. Live index data requires a market data subscription.

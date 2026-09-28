@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { classifySector } from "@/lib/sectors";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { useInvest } from "../InvestContext";
 import { formatINR, formatPercent } from "../formatters";
 import type { Holding } from "@/types/api";
@@ -208,19 +209,42 @@ function StatCard({
 // ─── Main Component ─────────────────────────────────────────────────────────────
 
 export function OverlapTab() {
-  const { holdings: liveHoldings } = useInvest();
-
-  // Use sample data when no live holdings available
-  const holdings = liveHoldings.length > 0 ? liveHoldings : SAMPLE_HOLDINGS;
+  const { holdings: liveHoldings, isSampleData } = useInvest();
+  const showSample = Boolean(isSampleData);
+  // A Practice account with an empty book stays empty. The overlapping
+  // sample book is only for Explore, or Practice before any account data.
+  const holdings = showSample
+    ? (liveHoldings.length > 0 ? liveHoldings : SAMPLE_HOLDINGS)
+    : liveHoldings;
 
   const overlaps = useMemo(() => computeOverlaps(holdings), [holdings]);
   const sectors = useMemo(() => computeSectorConcentration(holdings), [holdings]);
   const stats = useMemo(() => computeConcentrationStats(holdings), [holdings]);
 
+  if (!showSample && holdings.length === 0) {
+    return (
+      <div
+        className="flex flex-col items-center justify-center py-16 gap-2 text-text-muted"
+        data-testid="overlap-empty"
+      >
+        <PieChart className="size-6 text-text-muted" />
+        <p className="text-sm text-center max-w-md text-text-secondary">
+          No holdings to compare yet. Overlap appears once you hold two or more funds or baskets.
+        </p>
+      </div>
+    );
+  }
+
   const riskySectors = sectors.filter((s) => s.isRisky);
 
   return (
     <div className="space-y-6">
+      {showSample && (
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-heading font-semibold text-text-primary">Overlap</h2>
+          <ExampleLabel testId="overlap-example" />
+        </div>
+      )}
       {/* Summary stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard

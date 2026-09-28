@@ -50,9 +50,12 @@ vi.mock("@/components/ui/GlossaryTooltip", () => ({
   GlossaryTooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-// Mock DemoBanner
-vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => <div data-testid="demo-banner">Demo Mode</div>,
+const investState = vi.hoisted(() => ({
+  holdings: [{ symbol: "SBIN" }] as { symbol: string }[],
+}));
+
+vi.mock("../../InvestContext", () => ({
+  useInvest: () => investState,
 }));
 
 // ---------------------------------------------------------------------------
@@ -67,6 +70,7 @@ import { BenchmarkTab } from "../BenchmarkTab";
 
 describe("BenchmarkTab", () => {
   beforeEach(() => {
+    investState.holdings = [{ symbol: "SBIN" }];
     vi.clearAllMocks();
   });
 
@@ -75,9 +79,10 @@ describe("BenchmarkTab", () => {
     expect(screen.getByText("Benchmark Comparison")).toBeInTheDocument();
   });
 
-  it("renders the demo banner", () => {
+  it("labels the sample comparison with the Example chip", () => {
     render(<BenchmarkTab />);
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("benchmark-example")).toHaveTextContent("Example");
+    expect(screen.queryByText(/Showing sample data/)).not.toBeInTheDocument();
   });
 
   it("shows the portfolio row", () => {
@@ -120,6 +125,20 @@ describe("BenchmarkTab", () => {
     // Portfolio 1Y = 18.45%, beats all 5 benchmarks
     expect(screen.getByText("Benchmarks Beaten (1Y)")).toBeInTheDocument();
     expect(screen.getByText("indices outperformed")).toBeInTheDocument();
+  });
+
+  it("shows benchmark lines only when the account has no holdings", () => {
+    investState.holdings = [];
+    render(<BenchmarkTab />);
+
+    expect(screen.getByText("NIFTY 50")).toBeInTheDocument();
+    expect(screen.getByText("Your Portfolio")).toBeInTheDocument();
+    expect(screen.getByTestId("benchmark-empty-note")).toHaveTextContent(
+      "Add holdings to compare against benchmarks.",
+    );
+    expect(screen.queryByText("+18.45%")).not.toBeInTheDocument();
+    expect(screen.queryByText("Benchmarks Beaten (1Y)")).not.toBeInTheDocument();
+    expect(screen.queryByText("4/5")).not.toBeInTheDocument();
   });
 
   it("renders the disclaimer", () => {

@@ -38,7 +38,7 @@ vi.mock("@/lib/cinematicThemes", () => ({
 }));
 
 vi.mock("@/components/ui/DemoBanner", () => ({
-  DemoBanner: () => <div data-testid="demo-banner">Demo mode</div>,
+  DemoBanner: () => <div data-testid="example-label">Demo mode</div>,
 }));
 
 vi.mock("@tanstack/react-query", async (importOriginal) => {
@@ -88,13 +88,13 @@ describe("CorrelationTab", () => {
     // Provenance fails closed — an absent flag is sample, never live.
     mockUseQuery.mockReturnValue({ ...NO_DATA, data: LIVE_MATRIX });
     render(<CorrelationTab />);
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("example-label")).toBeInTheDocument();
   });
 
   it("drops the demo banner only on an explicit is_sample_data: false", () => {
     mockUseQuery.mockReturnValue({ ...NO_DATA, data: { ...LIVE_MATRIX, is_sample_data: false } });
     render(<CorrelationTab />);
-    expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("example-label")).not.toBeInTheDocument();
   });
 
   it("renders the section heading", () => {
@@ -104,7 +104,7 @@ describe("CorrelationTab", () => {
 
   it("shows demo banner when API is unavailable", () => {
     render(<CorrelationTab />);
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("example-label")).toBeInTheDocument();
   });
 
   it("renders the regime banner with Risk-On status and VIX/DXY badges", () => {

@@ -71,6 +71,10 @@ vi.mock("@/hooks/useFunds", () => ({
   useFunds: () => ({ data: undefined, isLoading: false }),
 }));
 
+vi.mock("@/hooks/usePositions", () => ({
+  usePositions: () => ({ data: undefined, isLoading: false }),
+}));
+
 vi.mock("@/hooks/useAccountReadsEnabled", () => ({
   useAccountReadsEnabled: () => false,
 }));

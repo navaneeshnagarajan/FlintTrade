@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/table";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { StaggeredList } from "@/components/motion/StaggeredList";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { cn } from "@/lib/utils";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -328,7 +328,7 @@ function LeaderboardSection() {
       {/* Demo banner */}
       {isDemo && !isLoading && (
         <div className="px-4 pt-3">
-          <DemoBanner />
+          <ExampleLabel />
         </div>
       )}
 
@@ -568,7 +568,7 @@ function MarketplaceSection() {
       </div>
 
       {/* Demo banner */}
-      {isDemo && !isLoading && <DemoBanner />}
+      {isDemo && !isLoading && <ExampleLabel testId="social-library-example" />}
 
       {/* Category filter pills */}
       <div className="flex items-center gap-1.5">

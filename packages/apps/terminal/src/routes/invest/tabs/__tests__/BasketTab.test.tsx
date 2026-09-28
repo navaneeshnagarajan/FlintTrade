@@ -62,7 +62,7 @@ vi.mock("@/services/api", () => ({
 // Mock DemoBanner
 vi.mock("@/components/ui/DemoBanner", () => ({
   DemoBanner: () => (
-    <div data-testid="demo-banner">Demo mode</div>
+    <div data-testid="example-label">Demo mode</div>
   ),
 }));
 
@@ -147,7 +147,7 @@ describe("BasketTab", () => {
 
   it("shows demo banner when no quotes loaded", () => {
     render(<BasketTab />);
-    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("example-label")).toBeInTheDocument();
   });
 
   it("renders saved baskets from localStorage", () => {
