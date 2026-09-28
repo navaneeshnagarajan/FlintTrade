@@ -101,10 +101,11 @@ Down copy is the same in every mode: "Laya is Down. Orders are paused
 until it's Ready." A Practice refusal never says Live. When Laya is Ready
 or Degraded and a Live place is refused only because Live is not qualified,
 the reason is "Laya isn't qualified for Live yet. Practice orders are
-available." An uncertain
-answer clamps in Practice and denies in Live. Live uncertain copy is
-"Laya is uncertain. Live stays closed." An empty note is a normal
-case of that same uncertain outcome. It is not a blanket refusal. A
+available." An uncertain answer clamps in Practice and denies in Live.
+Practice uncertain copy is "Laya is uncertain. Quantity stays inside
+the tighter limit." Live uncertain copy is "Laya is uncertain. Live
+stays closed." An empty note is a normal case of that same uncertain
+outcome. It is not a blanket refusal. A
 decision response that omits `revision` or `sha256`, and a health document
 that omits the weight digest, are Down. Stopping the sidecar records Down
 before an in-flight probe can publish Ready.

@@ -424,6 +424,14 @@ enter SafetySystem. Explore stays a mode refusal. Chat is not an
 admission source. The model can deny or clamp. It cannot raise a
 quantity or overturn a hard-rule refusal.
 
+**Admission note.** Order Pad, Quick Trade, Positions square-off, Order
+Ladder, Scalper, and Option Chain include an optional **Admission note**
+field (placeholder **Optional note for this order**). The note is sent
+with the place. An empty note does not block Place. An empty or uncertain
+note clamps in Practice and denies in Live. Practice shows **Laya is
+uncertain. Quantity stays inside the tighter limit.** Live shows **Laya
+is uncertain. Live stays closed.**
+
 **Deny.** Order Pad and Quick Trade show **Laya denied**, then the server
 reason. When the server sent a quantity ceiling, the next line is
 **Max quantity N.** Place controls stay off until Laya or the mode
@@ -433,7 +441,9 @@ A denial is not a Chat outage: the LLM label stays **Not configured** or
 
 **Clamp.** When the quantity is above the Laya ceiling, Order Pad and
 Quick Trade show **Qty reduced to N (Laya limit)** (or the server
-message). Nothing is placed at the original size or the reduced size
+message). When an uncertain answer holds the quantity inside the tighter
+limit without shrinking it, the message is **Qty held at N (Laya
+limit)**. Nothing is placed at the original size or the reduced size
 until you place that reduced quantity. The clamp stays until you change
 the ticket.
 
