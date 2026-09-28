@@ -243,13 +243,11 @@ class TestBrokerCatalog:
         assert "read-only" in analytics.description
 
     def test_kotakneo_catalogue_matches_native_segment_map(self):
-        """Kotak Neo metadata must expose every segment the native mapper supports."""
-        from flinttrade_gateway.brokers.kotakneo_mapping import EXCHANGE_TO_KOTAK
-
+        """The catalogue advertises only v3 orderable segments plus index reads."""
         entry = BROKER_CATALOG["kotakneo"]
         assert entry.native is True
         assert entry.connectable is True
-        assert set(EXCHANGE_TO_KOTAK) <= set(entry.exchanges)
+        assert set(entry.exchanges) == {"NSE", "BSE", "NFO", "BFO", "MCX", "NSE_INDEX", "BSE_INDEX"}
 
     def test_native_sdk_pins_live_on_broker_catalogue(self):
         """SDK attestation metadata belongs to the single broker catalogue."""

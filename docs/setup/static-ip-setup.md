@@ -29,8 +29,11 @@ it directly in your broker's developer console.
 The locked path is **native** Dhan + Kotak Neo on a static-IP host
 whose public IP is allow-listed at both brokers. Smoke uses **non-funded**
 accounts and live REST API reads (quotes / depth / hist / chain where the
-SDK allows). Live SFeed / `create_websocket` is not wired for Neo.
-That is REST API smoke, not funded Live unlock.
+SDK allows). That historical evidence is REST API smoke, not proof of the
+now-wired v3 async SFeed/order-feed lifecycle and not funded Live unlock. The
+stream lifecycle has local synthetic coverage only; live-account,
+market-hours, funded-order, Live-promotion, and cross-platform proof remain
+outstanding.
 
 When those reads succeed (not login-only), chrome is **Connected (read)**
 / **API smoke** — never imply placeable Live orders. Neo copy is

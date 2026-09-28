@@ -244,8 +244,10 @@ control plane only.
 When native connect returns, Dhan, Upstox, and Kotak Neo are evidence-gated
 as enabled in the catalogue. Kotak Neo is Connected (read) / API smoke only
 after persisted REST smoke evidence — never placeable Live;
-Neo has no sandbox (`Live read only until funded unlock.`). Kotak Neo
-Connected (read) / API smoke is REST-only; live SFeed is not wired. Upstox Developer Apps analytics tokens
+Neo has no sandbox (`Live read only until funded unlock.`). Kotak Neo's v3
+async market and order feeds are wired and locally tested with synthetic SDK
+clients, but no live-account or market-hours stream proof has been recorded.
+The previous non-funded Connected (read) evidence covers REST reads only. Upstox Developer Apps analytics tokens
 would connect as read-only sessions. INDmoney uses a dashboard-generated token that resets
 at the daily 06:00 IST dashboard cycle, but remains disabled until its
 smart-parent, atomic reduce-only, and live order-safety blockers clear. Groww
@@ -273,7 +275,8 @@ until Task 9D and Task 7C.2.
 **Native Dhan + Kotak Neo Connected (read) / API smoke.**
 The path is native Dhan + Kotak Neo on the MSI static-IP host, non-funded
 live REST API smoke (quotes / depth / hist / chain where the SDK allows).
-Kotak Neo is REST-only; live SFeed / `create_websocket` is not wired.
+That historical smoke does not cover the now-wired v3 async SFeed or order
+feed; those lifecycles have local synthetic coverage only.
 Prefer native; OpenAlgo is Settings / fallback only — not the primary
 connect CTA. Native HTTP remains frozen on this unreleased
 line until Task 9D and Task 7C.2 — Setup → Brokers HTTP still fails;
@@ -284,8 +287,13 @@ login/read never fakes Connected. Native Setup Continue ignores
 gateway/OpenAlgo Dhan/Neo rows; it requires a native source plus
 successful `read_smoke_ok`. Neo has no sandbox: never offer “Neo
 Practice”; copy is `Live read only until funded unlock.` `dhanhq` stays
-on latest stable 2.2.0; Neo is PyPI `kotakneoapi` 3.0.7. Live place stays
-fail-closed.
+on latest stable 2.2.0. Neo runs exact upstream `main`
+`5bb34fae39c4a52a0e6b59d7e2d17090cafc340c`, with `v3.0.7` at
+`53cccc45fe56a193b30ffce3c03c71c5c0378538` as the release baseline. Install
+`kotakneoapi`, never the old `neo-api-client` distribution; Python imports
+still use `neo_api_client`. Live place stays fail-closed. Sandbox proof is
+unavailable because Neo offers no sandbox; live-account/market-hours feed,
+funded-order, Live-promotion, and cross-platform proof remain open.
 
 ---
 
@@ -375,7 +383,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | edge/CDN | Public site/CDN unreachable. The install/update or public-site fetch failed and the local desk ping (`/api/v1/ping`) still succeeded. | Install from the repository. [Cloudflare status](https://www.cloudflarestatus.com/) and [Vercel status](https://www.vercel-status.com/). A site outage does not cancel broker orders. |
 | Broker sign-in (`broker_auth`) | The broker session or token failed. Connected (read) only after a read smoke succeeds. | Sign in again under Settings → Brokers. Retry once. No automatic re-smoke. |
 | Broker connection (`broker_rest`) | The broker API failed. | Check the broker status page, then retry once. |
-| Broker stream (`broker_stream`) | Dhan's market stream dropped. Kotak Neo has no stream class until SFeed. | Wait for the stream. Do not treat quotes as live. |
+| Broker stream (`broker_stream`) | A Dhan or Kotak Neo market/order stream dropped. Kotak Neo's local v3 lifecycle coverage is not live-account proof. | Wait for the stream. Do not treat stale REST quotes or a reconnecting socket as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
 | Laya (`laya`) | Blocked — Laya is Down ("Laya is Down — Live orders paused."). Live place and Position Mirror start stay closed. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. Kill All stays available. Laya starts Down. Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. | While the strip is open, Live place stays muted on that strip. Ready and Degraded allow a place attempt. Do not treat Chat as a substitute. |

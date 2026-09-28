@@ -1,11 +1,11 @@
 """BrokerRouter algo-tag guard wiring (contract §8 / SEBI algo tagging, G10).
 
-For adapters advertising ``capabilities.algo_tag_required`` (Dhan/IndMoney),
-the router relays the operator's broker-registered ``algo_id`` onto the
-dispatch session and enforces the per-(broker, exchange) per-second algo-order
-ceiling BELOW the gate — it can only stamp or refuse a verified dispatch,
-never bypass safety. Without a guard (or without a config for the broker) the
-adapter/mapping retail defaults apply unchanged.
+For adapters advertising required or optional algo-tag support, the router
+relays the operator's trusted configured ``algo_id`` onto the dispatch session
+and enforces the per-(broker, exchange) per-second algo-order ceiling BELOW the
+gate — it can only stamp or refuse a verified dispatch, never bypass safety.
+Without a guard (or without a config for the broker) adapter/mapping retail
+defaults apply unchanged.
 """
 
 from __future__ import annotations
@@ -15,11 +15,13 @@ from datetime import datetime, timezone
 
 import pytest
 
+from flinttrade_core.models import Order
 from flinttrade_engine.algo_tag_guard import AlgoTagConfig, AlgoTagGuard, AlgoTagLimitError
 from flinttrade_engine.request_context import RequestContext
 from flinttrade_engine.safety import SafetyContext, gate_broker_write, set_safety_gate_secret
 from flinttrade_gateway.brokers._base import ROUTER_TOKEN as _ROUTER_TOKEN
 from flinttrade_gateway.brokers._base import Session
+from flinttrade_gateway.brokers.kotakneo import KOTAKNEO_CAPABILITIES, KotakNeoAdapter
 from flinttrade_gateway.router import BrokerRouter
 
 pytestmark = pytest.mark.unit
@@ -60,6 +62,15 @@ class _FakeAdapter:
         self.calls.append(("cancel_forever", order_id))
 
 
+class _KotakClient:
+    def __init__(self) -> None:
+        self.placed: list[dict[str, object]] = []
+
+    def place_order(self, params):
+        self.placed.append(params)
+        return {"stat": "Ok", "nOrdNo": "KOTAK-OID-1", "stCode": 200}
+
+
 def _session() -> Session:
     return Session(
         access_token="tok",
@@ -93,6 +104,59 @@ def _router(adapter: _FakeAdapter, session: Session, guard: AlgoTagGuard | None,
 
 def _guard(max_per_sec: int = 10) -> AlgoTagGuard:
     return AlgoTagGuard({"dhan": AlgoTagConfig(algo_id="ALGO-REG-1", max_orders_per_sec=max_per_sec)})
+
+
+def _kotak_session(*, algo_id: str = "") -> Session:
+    return Session(
+        access_token="tok",
+        expires_at=datetime.now(tz=timezone.utc).timestamp() + 3600,
+        account_id="acct-1",
+        adapter_id="kotakneo",
+        algo_id=algo_id,
+    )
+
+
+def _kotak_order(*, strategy: str = "Flint") -> Order:
+    return Order(
+        symbol="RELIANCE",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+        strategy=strategy,
+    )
+
+
+def _kotak_mint(order: Order, *, backend_lease_factory) -> SafetyContext:
+    return SafetyContext.mint(
+        order,
+        mode="live",
+        user_jti="jti-1",
+        adapter_id="kotakneo",
+        account_id="acct-1",
+        actor_type="human",
+        backend_lease_proof=backend_lease_factory(),
+    )
+
+
+def _kotak_router(
+    client: _KotakClient,
+    session: Session,
+    guard: AlgoTagGuard | None,
+    *,
+    backend_lease_factory,
+) -> BrokerRouter:
+    adapter = KotakNeoAdapter(
+        client_factory=lambda _session: client,
+        symbol_resolver=lambda _symbol, _exchange: "RELIANCE-EQ",
+    )
+    return BrokerRouter(
+        {"kotakneo": adapter},
+        lambda _ctx, _aid, _acct: session,
+        algo_tag_guard=guard,
+        backend_lease_proof=backend_lease_factory(),
+    )
 
 
 async def test_place_order_stamps_algo_id_and_counts(*, backend_lease_factory) -> None:
@@ -165,6 +229,68 @@ async def test_adapter_without_requirement_is_untouched(*, backend_lease_factory
     )
     assert session.algo_id == ""
     assert guard.usage("dhan", "NSE") == 0
+
+
+def test_kotak_declares_optional_algo_tag_support() -> None:
+    assert KOTAKNEO_CAPABILITIES.algo_tag_supported is True
+    assert KOTAKNEO_CAPABILITIES.algo_tag_required is False
+
+
+async def test_kotak_configured_algo_tag_reaches_payload_instead_of_order_strategy(
+    *, backend_lease_factory
+) -> None:
+    client = _KotakClient()
+    session = _kotak_session()
+    guard = AlgoTagGuard({"kotakneo": AlgoTagConfig(algo_id="TRUSTED-KOTAK-TAG", max_orders_per_sec=10)})
+    router = _kotak_router(client, session, guard, backend_lease_factory=backend_lease_factory)
+    order = _kotak_order(strategy="UNTRUSTED-FREE-FORM-STRATEGY")
+
+    await router.place_order(
+        _request_ctx(),
+        adapter_id="kotakneo",
+        account_id="acct-1",
+        order=order,
+        safety_ctx=_kotak_mint(order, backend_lease_factory=backend_lease_factory),
+    )
+
+    assert session.algo_id == "TRUSTED-KOTAK-TAG"
+    assert client.placed[0]["tag"] == "TRUSTED-KOTAK-TAG"
+
+
+async def test_kotak_order_strategy_never_becomes_broker_tag(*, backend_lease_factory) -> None:
+    client = _KotakClient()
+    session = _kotak_session()
+    router = _kotak_router(client, session, None, backend_lease_factory=backend_lease_factory)
+    order = _kotak_order(strategy="USER-CONTROLLED")
+
+    await router.place_order(
+        _request_ctx(),
+        adapter_id="kotakneo",
+        account_id="acct-1",
+        order=order,
+        safety_ctx=_kotak_mint(order, backend_lease_factory=backend_lease_factory),
+    )
+
+    assert session.algo_id == ""
+    assert "tag" not in client.placed[0]
+
+
+async def test_optional_tag_adapter_clears_stale_session_tag_without_config(*, backend_lease_factory) -> None:
+    client = _KotakClient()
+    session = _kotak_session(algo_id="STALE-ALGO-ID")
+    router = _kotak_router(client, session, AlgoTagGuard({}), backend_lease_factory=backend_lease_factory)
+    order = _kotak_order()
+
+    await router.place_order(
+        _request_ctx(),
+        adapter_id="kotakneo",
+        account_id="acct-1",
+        order=order,
+        safety_ctx=_kotak_mint(order, backend_lease_factory=backend_lease_factory),
+    )
+
+    assert session.algo_id == ""
+    assert "tag" not in client.placed[0]
 
 
 async def test_unconfigured_broker_keeps_retail_defaults(*, backend_lease_factory) -> None:

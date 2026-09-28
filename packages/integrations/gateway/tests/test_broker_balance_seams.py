@@ -478,7 +478,7 @@ def test_native_balance_methods_call_the_existing_endpoint_once() -> None:
     cases = (
         (DhanAdapter, "get_fund_limits", {"data": {"availabelBalance": "100"}}),
         (UpstoxAdapter, "funds", {"data": {"equity": {"available_margin": "100", "used_margin": "20"}}}),
-        (KotakNeoAdapter, "funds", {"Net": "100", "MarginUsed": "20"}),
+        (KotakNeoAdapter, "funds", {"stat": "Ok", "stCode": 200, "Net": "100", "MarginUsed": "20"}),
     )
     for adapter_type, method, payload in cases:
         client = Client(method, payload)
