@@ -406,7 +406,7 @@ describe("LoginRoute", () => {
     expect(onSuccess).not.toHaveBeenCalled();
   });
 
-  function sessionJwt(mode: "practice" | "explore" | "live"): string {
+  function sessionJwt(mode: string): string {
     const payload = btoa(JSON.stringify({ mode, type: "session" }))
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
@@ -433,20 +433,36 @@ describe("LoginRoute", () => {
       view.unmount();
     }
 
-    // explore is sample data. Connected (read) is not a session mode.
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(modeState.mode).toBe("practice");
+  });
+
+  it("keeps the plain Unlock button for an example-data session", () => {
+    modeState.mode = "live";
     Object.assign(authState, {
       status: "pin-required",
       token: null,
       reauthToken: sessionJwt("explore"),
       username: "testuser",
     });
-    const view = render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+    render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
     expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /connected \(read\)/i })).not.toBeInTheDocument();
-    view.unmount();
-
     expect(mockSetMode).not.toHaveBeenCalled();
-    expect(modeState.mode).toBe("practice");
+  });
+
+  it("keeps the plain Unlock button for an unknown session value", () => {
+    modeState.mode = "practice";
+    Object.assign(authState, {
+      status: "pin-required",
+      token: null,
+      reauthToken: sessionJwt("not-a-mode"),
+      username: "testuser",
+    });
+    render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+    expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /connected \(read\)/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /desk/i })).not.toBeInTheDocument();
   });
 
   it("restores the session after Quick Unlock and leaves Mode unchanged", async () => {

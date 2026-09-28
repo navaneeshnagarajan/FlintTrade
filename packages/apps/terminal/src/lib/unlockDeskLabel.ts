@@ -8,9 +8,11 @@
  *   practice → Unlock Practice desk
  *   live     → Unlock Live desk
  *
- * `explore` is the sample-data session. It has no desk name here, so the
- * lock screen keeps the plain Locked heading and Unlock button. Connected
- * (read) is a broker status, not a session mode claim, so it is not named.
+ * Those are the session `mode` claims that name a desk. Sample-data
+ * `explore`, a retired claim such as `demo` or `sandbox`, and any other
+ * value keep the plain Locked heading and Unlock button. Connected (read)
+ * is a broker status, not a session mode claim, so this screen does not
+ * name it.
  */
 
 const UNLOCK_DESK_LABEL = {
@@ -39,8 +41,9 @@ function sessionModeClaim(token: string | null | undefined): string | null {
 /**
  * Operator label for a Practice or Live session.
  *
- * Returns null for a sample-data (`explore`) session, and when the claim
- * cannot be read. Callers then keep the plain Locked heading and Unlock button.
+ * Returns null for a sample-data session, a retired or unknown claim, and
+ * when the token cannot be read. Callers then keep the plain Locked heading
+ * and Unlock button.
  */
 export function unlockDeskLabel(token: string | null | undefined): string | null {
   const mode = sessionModeClaim(token);

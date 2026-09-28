@@ -101,7 +101,7 @@ describe("LockScreen", () => {
     currentMode = "practice";
   });
 
-  function sessionJwt(mode: "practice" | "explore" | "live"): string {
+  function sessionJwt(mode: string): string {
     const payload = btoa(JSON.stringify({ mode, type: "session" }))
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
@@ -124,15 +124,26 @@ describe("LockScreen", () => {
       view.unmount();
     }
 
-    // explore is sample data. Connected (read) is not a session mode.
-    Object.assign(authState, { token: null, reauthToken: sessionJwt("explore") });
-    const view = render(<LockScreen />);
-    expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
-    expect(screen.queryByText(/connected \(read\)/i)).not.toBeInTheDocument();
-    view.unmount();
-
     expect(setMode).not.toHaveBeenCalled();
     expect(currentMode).toBe("live");
+  });
+
+  it("keeps the plain Locked heading for an example-data session", () => {
+    currentMode = "live";
+    Object.assign(authState, { token: null, reauthToken: sessionJwt("explore") });
+    render(<LockScreen />);
+    expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
+    expect(screen.queryByText(/connected \(read\)/i)).not.toBeInTheDocument();
+    expect(setMode).not.toHaveBeenCalled();
+  });
+
+  it("keeps the plain Locked heading for an unknown session value", () => {
+    currentMode = "practice";
+    Object.assign(authState, { token: null, reauthToken: sessionJwt("not-a-mode") });
+    render(<LockScreen />);
+    expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
+    expect(screen.queryByText(/connected \(read\)/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /unlock/i })).not.toBeInTheDocument();
   });
 
   it("renders the lock screen dialog with user name", () => {
