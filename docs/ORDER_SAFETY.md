@@ -141,6 +141,17 @@ reason is `unverified`. Stopping the sidecar records Down
 before an in-flight probe can publish Ready. Desk place surfaces go through
 this admission. Laya is not Ready by default.
 
+The model file is checked against the revision and sha256 pinned in
+`packages/services/engine/src/flinttrade_engine/laya_policy.toml`. The
+`[checkpoint]` table names repo, revision, file `model.safetensors`, and
+sha256. A tampered file or a revision mismatch shows Wrong model version
+(`wrong_revision`) and never reaches Ready. A missing or unreadable file
+shows Can't verify the model (`unverified`). A shard index
+(`model.safetensors.index.json`), or any weights file other than the
+pinned `model.safetensors` in the pinned snapshot, shows Can't verify the
+model (`unverified`) and never reaches Ready. The sidecar loads exactly
+the file that was hashed.
+
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down — Live orders paused."). That class closes Live place and Position
 Mirror start on the shared client place path. Kill All stays reachable.

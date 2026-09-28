@@ -487,6 +487,16 @@ when the decision carried the pin, or `proof=runtime` when this run's
 record stood in. A health document that omits the digest is **Ready** when
 that record matches the pin. Laya is not **Ready** by default.
 
+The model file is checked against the revision and sha256 pinned in
+`packages/services/engine/src/flinttrade_engine/laya_policy.toml`
+(`[checkpoint]`: repo, revision, file `model.safetensors`, sha256). A
+tampered file or a revision mismatch shows **Wrong model version** and
+never reaches **Ready**. A missing or unreadable file shows **Can't verify
+the model**. A shard index (`model.safetensors.index.json`), or any
+weights file other than the pinned `model.safetensors` in the pinned
+snapshot, shows **Can't verify the model** (`unverified`) and never
+reaches **Ready**. The sidecar loads exactly the file that was hashed.
+
 **Command line.** From the FlintTrade environment (the project `.venv`
 after setup, or `uv run python`):
 
