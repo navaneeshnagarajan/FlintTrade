@@ -69,7 +69,7 @@ describe("SetupBackendGate", () => {
     expect(onAdvance).not.toHaveBeenCalled();
   });
 
-  it("treats an HTTP or malformed status response as unavailable rather than false success", async () => {
+  it("treats an HTTP or malformed status response as a server error, not an unreachable backend", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response("service unavailable", { status: 503 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: {} }), {
@@ -78,11 +78,35 @@ describe("SetupBackendGate", () => {
       }));
     renderGate();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/backend unavailable/i);
-    fireEvent.click(screen.getByRole("button", { name: "Retry connection" }));
+    const first = await screen.findByRole("alert");
+    expect(first).toHaveTextContent(/could not check setup \(HTTP 503\)/i);
+    expect(first).not.toHaveTextContent(/FlintTrade backend unavailable/i);
+    expect(screen.queryByTestId("setup-flow")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/backend unavailable/i);
+    const second = await screen.findByRole("alert");
+    expect(second).toHaveTextContent(/could not check setup/i);
+    expect(second).not.toHaveTextContent(/FlintTrade backend unavailable/i);
     expect(screen.queryByTestId("setup-flow")).not.toBeInTheDocument();
+  });
+
+  it("says the server is busy on 429 and does not call the backend unavailable", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ status: "error", message: "rate limit" }), {
+        status: 429,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    renderGate();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveAccessibleName("Setup is busy");
+    expect(alert).toHaveTextContent(/busy/i);
+    expect(alert).toHaveTextContent(/retry/i);
+    expect(alert).not.toHaveTextContent(/FlintTrade backend unavailable/i);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+    expect(screen.queryByTestId("setup-flow")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Account password")).not.toBeInTheDocument();
   });
 });

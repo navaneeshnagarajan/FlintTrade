@@ -76,6 +76,18 @@ class TestAccountSetup:
         assert reopened.is_setup() is False
         assert reopened.is_setup_finished() is False
 
+    def test_vault_presecured_freezes_at_the_first_record(self, tmp_path: Path):
+        svc = AuthService(db_path=tmp_path / "auth.db")
+        assert svc.setup_vault_presecured() is None
+        svc.setup_account("alice", "alice@example.com", "StrongP@ss123!")
+        assert svc.setup_vault_presecured() is None
+        svc.record_setup_vault_presecured(False)
+        assert svc.setup_vault_presecured() is False
+        svc.record_setup_vault_presecured(True)
+        assert svc.setup_vault_presecured() is False
+        reopened = AuthService(db_path=tmp_path / "auth.db")
+        assert reopened.setup_vault_presecured() is False
+
 
 class TestPasswordVerification:
     """Password login."""

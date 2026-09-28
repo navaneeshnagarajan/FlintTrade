@@ -23,8 +23,13 @@ export interface VaultOpenResult {
 /** Public first-run facts from GET /v1/auth/status. No secrets. */
 export interface SetupServerState {
   isSetup: boolean;
-  /** True when this machine already has a hardened vault secret. */
+  /** True when this machine currently has a hardened vault secret. */
   vaultOpen: boolean;
+  /**
+   * Whether the vault was already secured when the operator was created.
+   * Null before that fact exists. A later vault open does not change it.
+   */
+  vaultPresecured: boolean | null;
   /** True only after the operator has finished Setup. */
   setupFinished: boolean;
 }
@@ -191,9 +196,11 @@ export async function fetchSetupServerState(): Promise<SetupServerState> {
     );
   }
 
+  const presecured = payload.data.vault_presecured;
   return {
     isSetup: payload.data.is_setup === true,
     vaultOpen: payload.data.vault_open === true,
+    vaultPresecured: typeof presecured === "boolean" ? presecured : null,
     setupFinished: payload.data.setup_finished === true,
   };
 }

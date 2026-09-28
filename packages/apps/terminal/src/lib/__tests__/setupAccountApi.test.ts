@@ -169,6 +169,7 @@ describe("setupAccountApi", () => {
     await expect(fetchSetupServerState()).resolves.toEqual({
       isSetup: true,
       vaultOpen: true,
+      vaultPresecured: null,
       setupFinished: false,
     });
   });

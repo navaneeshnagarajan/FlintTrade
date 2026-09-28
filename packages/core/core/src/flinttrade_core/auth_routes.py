@@ -513,6 +513,9 @@ def auth_status() -> tuple[Any, int]:
             # the account.
             "vault_open": _vault_is_open(),
             "setup_finished": svc.is_setup_finished(),
+            # Frozen at operator creation. Live ``vault_open`` can become
+            # true later without changing the step total.
+            "vault_presecured": svc.setup_vault_presecured(),
         },
     }), 200
 
@@ -540,6 +543,14 @@ def auth_setup() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Invalid request"}), 400
     except RuntimeError:
         return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
+
+    # Snapshot the vault before this request can open it. A missing or
+    # unreadable secret stays "not presecured" so Setup keeps three steps.
+    try:
+        presecured = _vault_is_open()
+    except OSError:
+        presecured = False
+    svc.record_setup_vault_presecured(presecured)
 
     # Mint an explore-mode session token so the REST of the setup wizard is
     # authenticated (broker connection + mode selection are behind the G9

@@ -194,6 +194,14 @@ class AuthService:
             )
         except sqlite3.OperationalError:
             pass
+        # Frozen when the operator is created. Later vault opens must not
+        # rewrite it, or a reload would change Step N of M.
+        try:
+            self._db.execute(
+                "ALTER TABLE account ADD COLUMN setup_vault_presecured INTEGER"
+            )
+        except sqlite3.OperationalError:
+            pass
         self._db.commit()
 
     def is_setup(self) -> bool:
@@ -225,6 +233,41 @@ class AuthService:
         with self._write_lock:
             self._db.execute(
                 "UPDATE account SET setup_finished = 1 WHERE id = 1"
+            )
+            self._db.commit()
+
+    def setup_vault_presecured(self) -> bool | None:
+        """Return whether the vault was already secured when the operator was created.
+
+        ``None`` before that fact is recorded. A later vault open does not
+        change the value.
+        """
+        if not self.is_setup():
+            return None
+        row = self._db.execute(
+            "SELECT setup_vault_presecured FROM account WHERE id = 1"
+        ).fetchone()
+        if not row or row["setup_vault_presecured"] is None:
+            return None
+        return bool(row["setup_vault_presecured"])
+
+    def record_setup_vault_presecured(self, presecured: bool) -> None:
+        """Freeze the start-of-setup vault fact. A second call does not overwrite it.
+
+        Raises:
+            RuntimeError: If the account does not exist yet.
+        """
+        if not self.is_setup():
+            raise RuntimeError("Account is not set up")
+        with self._write_lock:
+            row = self._db.execute(
+                "SELECT setup_vault_presecured FROM account WHERE id = 1"
+            ).fetchone()
+            if row and row["setup_vault_presecured"] is not None:
+                return
+            self._db.execute(
+                "UPDATE account SET setup_vault_presecured = ? WHERE id = 1",
+                (1 if presecured else 0,),
             )
             self._db.commit()
 

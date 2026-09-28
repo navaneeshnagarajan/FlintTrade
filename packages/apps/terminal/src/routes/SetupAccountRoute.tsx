@@ -1035,20 +1035,15 @@ type VaultFormValues = z.infer<typeof vaultSchema>;
 
 interface VaultStepProps {
   onOpened: () => void;
-  onAccountDeleted: () => void;
   /** The probe or submit was refused because the setup JWT is gone. */
   onSessionRequired: () => void;
 }
 
-function VaultStep({ onOpened, onAccountDeleted, onSessionRequired }: VaultStepProps) {
+function VaultStep({ onOpened, onSessionRequired }: VaultStepProps) {
   const [phase, setPhase] = useState<"checking" | "form" | "ready">("checking");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState("");
-  const [resetOpen, setResetOpen] = useState(false);
-  const [resetPassword, setResetPassword] = useState("");
-  const [resetError, setResetError] = useState("");
-  const [resetLoading, setResetLoading] = useState(false);
 
   const {
     register,
@@ -1101,29 +1096,6 @@ function VaultStep({ onOpened, onAccountDeleted, onSessionRequired }: VaultStepP
       );
     } finally {
       setIsLoading(false);
-    }
-  }
-
-  async function submitReset() {
-    if (!resetPassword) return;
-    setResetLoading(true);
-    setResetError("");
-    try {
-      const resp = await fetch(`${getBase()}/v1/auth/setup/reset`, {
-        method: "POST",
-        headers: buildHeaders(true),
-        body: JSON.stringify({ password: resetPassword }),
-      });
-      const data = await resp.json() as { message?: string };
-      if (!resp.ok) {
-        setResetError(data?.message ?? `Request failed (HTTP ${resp.status}).`);
-        return;
-      }
-      onAccountDeleted();
-    } catch {
-      setResetError("Cannot reach the server to delete the account.");
-    } finally {
-      setResetLoading(false);
     }
   }
 
@@ -1216,42 +1188,6 @@ function VaultStep({ onOpened, onAccountDeleted, onSessionRequired }: VaultStepP
         </form>
       )}
 
-      <div className="pt-3 border-t border-border-default">
-        {resetOpen ? (
-          <div className="space-y-2">
-            <Input
-              type="password"
-              value={resetPassword}
-              onChange={(event) => setResetPassword(event.target.value)}
-              aria-label="Confirm password to delete the account"
-            />
-            {resetError && <p role="alert" className="text-xs text-loss">{resetError}</p>}
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => setResetOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => void submitReset()}
-                disabled={resetLoading || !resetPassword}
-              >
-                Delete account
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setResetOpen(true)}
-            className="text-[11px] text-text-muted hover:text-loss"
-          >
-            Delete account &amp; start over
-          </Button>
-        )}
-      </div>
     </div>
   );
 }
@@ -1266,6 +1202,53 @@ function PracticeDeskStep() {
       </p>
     </div>
   );
+}
+
+type SetupStatusFailure =
+  | { reason: "network" }
+  | { reason: "busy" }
+  | { reason: "http"; status: number };
+
+function statusFailureFrom(error: unknown): SetupStatusFailure {
+  if (!(error instanceof AccountSetupError) || error.kind === "network") {
+    return { reason: "network" };
+  }
+  if (error.status === 429) return { reason: "busy" };
+  return { reason: "http", status: error.status ?? 0 };
+}
+
+function SetupStatusError({
+  failure,
+  onRetry,
+}: {
+  failure: SetupStatusFailure;
+  onRetry: () => void;
+}) {
+  const unavailable = failure.reason === "network";
+  const title = unavailable
+    ? "FlintTrade backend unavailable"
+    : failure.reason === "busy"
+      ? "Setup is busy"
+      : "Setup status could not be read";
+  const detail = unavailable
+    ? "The FlintTrade backend did not answer. Start or restart the local FlintTrade backend, then retry."
+    : failure.reason === "busy"
+      ? "The server is busy. Retry in a moment."
+      : `The server could not check setup (HTTP ${failure.status}). Retry.`;
+  return (
+    <div role="alert" aria-labelledby="setup-status-error-title" className="space-y-4">
+      <h3 id="setup-status-error-title" className="text-sm font-semibold text-text-primary">{title}</h3>
+      <p className="text-xs text-text-secondary leading-relaxed">{detail}</p>
+      <div className="flex justify-end">
+        <Button type="button" onClick={onRetry}>Retry</Button>
+      </div>
+    </div>
+  );
+}
+
+function securedBeforeSetup(state: SetupServerState): boolean {
+  if (state.isSetup) return state.vaultPresecured === true;
+  return state.vaultOpen === true;
 }
 
 function SetupResumeSignIn({
@@ -1637,12 +1620,6 @@ export default function SetupAccountRoute({
 }: SetupAccountRouteProps = {}) {
   const navigate = useNavigate();
   const setMode = useModeStore((s) => s.setMode);
-  // Restore before reading the store so a reload still has the setup JWT
-  // on the first render of the vault step.
-  useState(() => {
-    restoreSetupSessionFromTab();
-    return null;
-  });
   const token = useAuthStore((s) => s.token);
   const authStatus = useAuthStore((s) => s.status);
 
@@ -1680,9 +1657,13 @@ export default function SetupAccountRoute({
   // never finishes on a badge the JWT does not back.
   const [modeSyncError, setModeSyncError] = useState("");
   const [serverSetup, setServerSetup] = useState<SetupServerState | null>(null);
-  // Fixed once the vault probe returns, before step 1 is shown. A later
-  // change must not rewrite "of 2" into "of 3", or the reverse.
+  // Fixed from GET /v1/auth/status before step 1 is shown. For an existing
+  // operator this is vault_presecured, not the live vault file, so opening
+  // the vault cannot change "of 3" into "of 2".
   const [vaultAlreadySecured, setVaultAlreadySecured] = useState<boolean | null>(null);
+  const [statusError, setStatusError] = useState<SetupStatusFailure | null>(null);
+  const [statusAttempt, setStatusAttempt] = useState(0);
+  const [sessionRestored, setSessionRestored] = useState(false);
   const [sessionRejected, setSessionRejected] = useState(false);
   const [startOverNeedsPassword, setStartOverNeedsPassword] = useState(false);
   const [startOverPassword, setStartOverPassword] = useState("");
@@ -1690,22 +1671,27 @@ export default function SetupAccountRoute({
   const [startOverLoading, setStartOverLoading] = useState(false);
 
   useEffect(() => {
+    restoreSetupSessionFromTab();
+    setSessionRestored(true);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     void fetchSetupServerState()
       .then((state) => {
         if (cancelled) return;
+        setStatusError(null);
         setServerSetup(state);
-        setVaultAlreadySecured((current) => current ?? state.vaultOpen === true);
+        setVaultAlreadySecured((current) => current ?? securedBeforeSetup(state));
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) return;
-        setServerSetup({ isSetup: false, vaultOpen: false, setupFinished: false });
-        setVaultAlreadySecured((current) => current ?? false);
+        setStatusError(statusFailureFrom(error));
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [statusAttempt]);
 
   useEffect(() => {
     if (!accountCreated) return;
@@ -1760,11 +1746,12 @@ export default function SetupAccountRoute({
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => null) as { message?: string } | null;
+        const message = data?.message?.trim() ?? "";
         setStartOverNeedsPassword(true);
+        // The prompt under the button is the one copy of that sentence.
+        // A session-required reply is that prompt, not a second error.
         setStartOverError(
-          data?.message && !/setup session/i.test(data.message)
-            ? data.message
-            : "Enter your password to delete this operator and start again.",
+          message && !/setup session/i.test(message) ? message : "",
         );
         return false;
       }
@@ -1781,7 +1768,7 @@ export default function SetupAccountRoute({
   async function handleStartOver() {
     if (!useAuthStore.getState().token || sessionRejected) {
       setStartOverNeedsPassword(true);
-      setStartOverError("Enter your password to delete this operator and start again.");
+      setStartOverError("");
       return;
     }
     await wipeUnfinishedAccount("");
@@ -1838,27 +1825,6 @@ export default function SetupAccountRoute({
     setCurrentStep(1);
   }
 
-  function handleAccountDeleted() {
-    // Server wiped the account. Authoritatively reset everything: clear
-    // localStorage, flip the auth store back to setup-required, bounce to
-    // /welcome which will render the "Get Started" CTA again.
-    clearProgress();
-    sessionRecoveryMaterial = null;
-    setAccountCreated(false);
-    setVaultOpened(false);
-    setTotpUri("");
-    setBackupCodes([]);
-    setPersona(null);
-    setConnection(null);
-    setTrading(null);
-    setRisk(null);
-    setLlm(null);
-    setDisplayName("");
-    setCurrentStep(0);
-    useAuthStore.getState().setSetupRequired();
-    navigate("/welcome", { replace: true });
-  }
-
   function handleVaultOpened() {
     saveProgress({
       accountCreated: true,
@@ -1879,10 +1845,12 @@ export default function SetupAccountRoute({
 
   const planReady = vaultAlreadySecured !== null;
   const vaultAlreadyOpen = vaultAlreadySecured === true;
-  if (vaultAlreadyOpen && accountCreated && !vaultOpened) {
+
+  useEffect(() => {
+    if (!vaultAlreadyOpen || !accountCreated || vaultOpened) return;
     setVaultOpened(true);
     setCurrentStep(2);
-  }
+  }, [vaultAlreadyOpen, accountCreated, vaultOpened]);
 
   async function handleOpenPractice() {
     setModeSyncError("");
@@ -1941,6 +1909,33 @@ export default function SetupAccountRoute({
   const progressCounts = setupProgressCounts(currentStep, vaultAlreadyOpen);
   const hasSetupSession = Boolean(token) && !sessionRejected;
   const setupFinished = serverSetup?.setupFinished === true;
+  const operatorExists = serverSetup?.isSetup === true && !setupFinished;
+  // The server is authoritative for a fresh browser. A reload that only has
+  // local progress (the status mock, or a status read that has not yet said
+  // the operator exists) still has to sign in before the vault form.
+  const localResume = accountCreated && currentStep > 0;
+  const needsResume = !hasSetupSession && (operatorExists || localResume);
+  const gateOpen = sessionRestored && (statusError !== null || planReady);
+
+  useEffect(() => {
+    if (!serverSetup || !planReady || statusError) return;
+    if (!serverSetup.isSetup || serverSetup.setupFinished) return;
+    if (!token || sessionRejected) return;
+    if (accountCreated && currentStep > 0) return;
+    const opened = vaultAlreadyOpen || serverSetup.vaultOpen;
+    setAccountCreated(true);
+    setVaultOpened(opened);
+    setCurrentStep(opened ? 2 : 1);
+  }, [
+    serverSetup,
+    planReady,
+    statusError,
+    token,
+    sessionRejected,
+    accountCreated,
+    currentStep,
+    vaultAlreadyOpen,
+  ]);
 
   useEffect(() => {
     if (!setupFinished || authStatus !== "logged-in") return;
@@ -1966,21 +1961,41 @@ export default function SetupAccountRoute({
       contentClassName="py-4 sm:py-5"
       eyebrow="Account Setup"
       title="Set up FlintTrade"
-      subtitle={!planReady ? undefined : setupFinished ? "Setup is complete" : progressLabel}
+      subtitle={
+        !gateOpen || statusError
+          ? undefined
+          : setupFinished
+            ? "Setup is complete"
+            : needsResume && currentStep === 0
+              ? "Continue setup"
+              : progressLabel
+      }
     >
       <div className="space-y-4">
-        {!planReady ? null : setupFinished ? (
+        {!gateOpen ? null : statusError ? (
+          <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
+            <SetupStatusError
+              failure={statusError}
+              onRetry={() => {
+                setStatusError(null);
+                setStatusAttempt((attempt) => attempt + 1);
+              }}
+            />
+          </div>
+        ) : setupFinished ? (
           <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
             <SetupComplete signedIn={authStatus === "logged-in"} />
           </div>
         ) : (
         <>
-        {currentStep > 0 && (
+        {(currentStep > 0 || operatorExists) && (
           <div className="flex flex-col gap-3 rounded-xl border border-border-default/70 bg-surface-card/60 px-4 py-2 shadow-xl shadow-black/10 backdrop-blur-xl">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-text-muted">
-                {progressDetail}
-              </p>
+              {currentStep > 0 ? (
+                <p className="text-xs text-text-muted">
+                  {progressDetail}
+                </p>
+              ) : <span />}
               <Button
                 type="button"
                 variant="ghost"
@@ -2029,13 +2044,15 @@ export default function SetupAccountRoute({
           </div>
         )}
 
-        <StepIndicator
-          total={progressCounts.total}
-          current={progressCounts.displayIndex}
-          onStepClick={(index) => {
-            if (!vaultAlreadyOpen && index === 1 && currentStep === 2 && vaultOpened) setCurrentStep(1);
-          }}
-        />
+        {!needsResume && (
+          <StepIndicator
+            total={progressCounts.total}
+            current={progressCounts.displayIndex}
+            onStepClick={(index) => {
+              if (!vaultAlreadyOpen && index === 1 && currentStep === 2 && vaultOpened) setCurrentStep(1);
+            }}
+          />
+        )}
 
         <div className="rounded-xl border border-border-default/70 bg-surface-card/70 p-4 shadow-2xl shadow-black/20 backdrop-blur-xl">
           {modeSyncError && currentStep === 2 && (
@@ -2048,7 +2065,11 @@ export default function SetupAccountRoute({
             </div>
           )}
 
-          {currentStep === 0 && (
+          {needsResume && (
+            <SetupResumeSignIn onResumed={handleResumed} />
+          )}
+
+          {!needsResume && currentStep === 0 && !operatorExists && (
             <AccountSecurityStep
               onComplete={handleAccountComplete}
               onBack={handleBack}
@@ -2056,31 +2077,22 @@ export default function SetupAccountRoute({
             />
           )}
 
-          {currentStep === 1 && !hasSetupSession && (
-            <SetupResumeSignIn onResumed={handleResumed} />
-          )}
-
-          {currentStep === 1 && hasSetupSession && !vaultAlreadyOpen && (
+          {!needsResume && currentStep === 1 && hasSetupSession && !vaultAlreadyOpen && (
             <VaultStep
               onOpened={handleVaultOpened}
-              onAccountDeleted={handleAccountDeleted}
               onSessionRequired={handleSessionRequired}
             />
           )}
 
-          {currentStep === 1 && hasSetupSession && vaultAlreadyOpen && (
+          {!needsResume && currentStep === 1 && hasSetupSession && vaultAlreadyOpen && (
             <p className="text-xs text-text-muted">The vault is already secured. Continuing…</p>
           )}
 
-          {currentStep === 2 && !hasSetupSession && (
-            <SetupResumeSignIn onResumed={handleResumed} />
-          )}
-
-          {currentStep === 2 && hasSetupSession && (
+          {!needsResume && currentStep === 2 && hasSetupSession && (
             <PracticeDeskStep />
           )}
 
-          {currentStep === 2 && hasSetupSession && (
+          {!needsResume && currentStep === 2 && hasSetupSession && (
             <div className="mt-6 flex flex-col items-end gap-2">
               {vaultAlreadyOpen && (
                 <p className="text-xs text-text-muted">

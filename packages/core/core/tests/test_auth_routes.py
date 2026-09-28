@@ -327,7 +327,29 @@ class TestStatusEndpoint:
         assert mid["is_setup"] is True
         assert mid["vault_open"] is True
         assert mid["setup_finished"] is False
+        assert mid["vault_presecured"] is True
         assert "already-open-secret" not in c.get("/v1/auth/status").get_data(as_text=True)
+
+    def test_opening_the_vault_later_does_not_change_the_step_total(self, client, tmp_path, monkeypatch):
+        c, _svc = client
+        vault = tmp_path / "vault-ws"
+        vault.mkdir()
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(vault))
+        before = c.get("/v1/auth/status").get_json()["data"]
+        assert before["vault_presecured"] is None
+        c.post("/v1/auth/setup", json={
+            "username": "nav", "email": "nav@example.com",
+            "password": "StrongP@ss123!", "pin": "",
+        }, headers={"Content-Type": "application/json"})
+        created = c.get("/v1/auth/status").get_json()["data"]
+        assert created["is_setup"] is True
+        assert created["vault_open"] is False
+        assert created["vault_presecured"] is False
+        (vault / "master_password").write_text("opened-during-setup", encoding="utf-8")
+        after = c.get("/v1/auth/status").get_json()["data"]
+        assert after["vault_open"] is True
+        assert after["vault_presecured"] is False
+        assert "opened-during-setup" not in c.get("/v1/auth/status").get_data(as_text=True)
 
 
 class TestSetupResumeAndComplete:

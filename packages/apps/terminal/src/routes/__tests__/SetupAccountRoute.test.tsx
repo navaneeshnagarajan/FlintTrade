@@ -49,10 +49,12 @@ vi.mock("@/routes/setup/applySetupChoices", () => ({
 vi.mock("@/lib/setupAccountApi", () => ({
   AccountSetupError: class AccountSetupError extends Error {
     kind: string;
+    status?: number;
 
-    constructor(message: string, kind: string) {
+    constructor(message: string, kind: string, status?: number) {
       super(message);
       this.kind = kind;
+      this.status = status;
     }
   },
   setupFlintTradeAccount: mocks.setupFlintTradeAccount,
@@ -79,6 +81,7 @@ import SetupAccountRoute, {
   PRACTICE_LATER_KEY,
   PracticeLaterSetup,
 } from "../SetupAccountRoute";
+import { AccountSetupError } from "@/lib/setupAccountApi";
 import { writePersistedAuthSession } from "@/lib/homeEntry";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
@@ -632,6 +635,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     mocks.fetchSetupServerState.mockResolvedValue({
       isSetup: true,
       vaultOpen: true,
+      vaultPresecured: true,
       setupFinished: false,
     });
 
@@ -648,6 +652,169 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       quietLine.compareDocumentPosition(openPractice) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(screen.queryByText("The credential vault on this machine is already secured.")).not.toBeInTheDocument();
+  });
+
+  it("asks a fresh browser to continue when the server already has an operator", async () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    act(() => {
+      useAuthStore.setState({
+        status: "logged-out",
+        token: null,
+        username: null,
+        expiresAt: null,
+        reauthToken: null,
+      });
+    });
+    mocks.fetchSetupServerState.mockResolvedValue({
+      isSetup: true,
+      vaultOpen: false,
+      vaultPresecured: false,
+      setupFinished: false,
+    });
+
+    await renderSetup();
+
+    expect(await screen.findByRole("heading", { name: "Continue setup" })).toBeInTheDocument();
+    expect(screen.getByText("This machine already has an operator. Sign in to finish setup.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
+    expect(screen.queryByText("Step 1 of 3 - Create operator")).not.toBeInTheDocument();
+    expect(mocks.setupFlintTradeAccount).not.toHaveBeenCalled();
+  });
+
+  it("shows a busy error on status 429 and does not open Create operator", async () => {
+    localStorage.clear();
+    useAuthStore.getState().setSetupRequired();
+    mocks.fetchSetupServerState.mockRejectedValue(
+      new AccountSetupError("rate limit", "server", 429),
+    );
+
+    await renderSetup();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Setup is busy");
+    expect(alert).toHaveTextContent("The server is busy. Retry in a moment.");
+    expect(alert).not.toHaveTextContent("FlintTrade backend unavailable");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+    expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
+  });
+
+  it("says the backend is unavailable only when status does not answer", async () => {
+    localStorage.clear();
+    useAuthStore.getState().setSetupRequired();
+    mocks.fetchSetupServerState.mockRejectedValue(
+      new AccountSetupError("offline", "network"),
+    );
+
+    await renderSetup();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("FlintTrade backend unavailable");
+    expect(alert).toHaveTextContent(/did not answer/i);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+    expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
+    expect(screen.queryByText("Step 1 of 3 - Create operator")).not.toBeInTheDocument();
+  });
+
+  it("keeps Step 3 of 3 after the vault opens when it was not secured at the start", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      vaultOpened: true,
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "operator",
+      currentStep: 2,
+    }));
+    mocks.fetchSetupServerState.mockResolvedValue({
+      isSetup: true,
+      vaultOpen: true,
+      vaultPresecured: false,
+      setupFinished: false,
+    });
+
+    await renderSetup();
+
+    expect(await screen.findByText("Step 3 of 3 - Practice desk")).toBeInTheDocument();
+    expect(screen.getByText("2 of 3 completed - last step")).toBeInTheDocument();
+    expect(screen.queryByText(/of 2/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Your vault is set up and secured on this machine.")).not.toBeInTheDocument();
+  });
+
+  it("shows one Start over prompt on the vault step", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      vaultOpened: false,
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "operator",
+      currentStep: 1,
+    }));
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ status: "error", message: "A setup session is required." }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await renderSetup();
+
+    expect(await screen.findByLabelText("Master password")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Delete account/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Start over (deletes this unfinished operator)" })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Start over (deletes this unfinished operator)" }));
+
+    expect(await screen.findAllByText("Enter your password to delete this operator and start again.")).toHaveLength(1);
+    expect(screen.getAllByLabelText("Password to start over")).toHaveLength(1);
+    expect(screen.queryByLabelText("Confirm password to delete the account")).not.toBeInTheDocument();
+  });
+
+  it("does not update AITutorPill while rendering setup", async () => {
+    const errors: unknown[][] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args);
+    });
+    function AITutorPill() {
+      const status = useAuthStore((state) => state.status);
+      return <div>{status}</div>;
+    }
+    act(() => {
+      useAuthStore.setState({
+        status: "unknown",
+        token: null,
+        username: null,
+        expiresAt: null,
+        reauthToken: null,
+      });
+    });
+    writePersistedAuthSession({
+      token: "setup-token",
+      username: "operator",
+      expiresAt: "",
+    });
+
+    render(
+      <>
+        <AITutorPill />
+        <SetupAccountRoute />
+      </>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const warning = errors
+      .map((args) => args.map((part) => String(part)).join(" "))
+      .join("\n");
+    expect(warning).not.toMatch(/Cannot update a component/);
+    spy.mockRestore();
   });
 
   it("keeps the two-step total stable from Create operator through Practice", async () => {
