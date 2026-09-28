@@ -7,6 +7,7 @@ import {
   orderReviewDetailsLabel,
   orderReviewTitle,
 } from "@/lib/modeVocabulary";
+import { Button } from "@/components/ui/button";
 import { LayaAdmissionNotice } from "@/components/orders/LayaAdmissionNotice";
 import type { LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import type { PracticeOrderReviewSnapshot } from "./practiceOrderReview";
@@ -126,6 +127,17 @@ export function PracticeOrderReviewStage({
 
         <div className="mt-3">
           <LayaAdmissionNotice notice={admission} />
+          {admission?.kind === "clamp" && admission.appliedQuantity != null ? (
+            <Button
+              type="button"
+              className="mt-2 w-full"
+              data-testid="laya-resubmit"
+              disabled={confirming}
+              onClick={onConfirm}
+            >
+              {`Resubmit qty ${admission.appliedQuantity}`}
+            </Button>
+          ) : null}
         </div>
 
         <div className="mt-4 flex gap-2">

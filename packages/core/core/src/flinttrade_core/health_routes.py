@@ -1,13 +1,14 @@
 """Health check Flask endpoints.
 
 This is the single canonical health surface for the FlintTrade backend.
-Provides a Blueprint with six routes:
+Provides a Blueprint with these routes:
 
 - ``GET /health``         — simple status JSON (one-liner)
 - ``GET /health/detail``  — full :class:`HealthReport` JSON
 - ``GET /healthz``        — Kubernetes liveness probe
 - ``GET /readyz``         — Kubernetes readiness probe
 - ``GET /api/v1/ping``    — simple liveness check with IST timestamp
+- ``POST /api/v1/laya/start`` — start or restart the managed Laya sidecar
 - ``GET /api/v1/health``  — aggregated subsystem health (broker, DuckDB,
   disk, memory) via :class:`HealthAggregator`
 
@@ -246,6 +247,28 @@ def ping() -> tuple[Any, int]:
         ),
         200,
     )
+
+
+@health_bp.route("/api/v1/laya/start", methods=["POST"])
+def start_laya() -> tuple[Any, int]:
+    """Start or restart the managed Laya sidecar.
+
+    Operator session only. A missing sidecar environment is a generic 503.
+    The response does not include paths or the API key.
+    """
+    from flinttrade_core.auth_routes import require_operator_session  # noqa: PLC0415
+
+    denied = require_operator_session()
+    if denied is not None:
+        return denied
+    try:
+        from flinttrade_core.laya_runtime import start_managed_sidecar  # noqa: PLC0415
+
+        start_managed_sidecar()
+    except Exception:
+        logger.warning("Laya sidecar could not be started", exc_info=True)
+        return jsonify({"status": "error", "message": "Laya could not be started."}), 503
+    return jsonify({"status": "ok"}), 200
 
 
 @health_bp.route("/api/v1/health", methods=["GET"])

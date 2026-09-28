@@ -542,10 +542,13 @@ attaches on its health probe. The host must stay loopback. The attached
 client uses the same revision and digest checks. A health document
 without the weight digest stays Down.
 
-`status` carries a reason code: `not_started`, `port_in_use`,
+`status` carries a reason code: `not_started`, `stopped`, `port_in_use`,
 `still_loading`, `unreachable`, or `wrong_revision`. The desk shows those
-as Not started, Port &lt;n&gt; in use, Still loading, Unreachable, and Wrong
+as Not started, Stopped, Port &lt;n&gt; in use, Still loading, Unreachable, and Wrong
 model revision, then `python -m flinttrade_core.laya_runtime start`. A
+dead child is reaped on the health probe and on interpreter exit, and
+the probe records Down with Stopped. `POST /api/v1/laya/start` starts or
+restarts the managed sidecar for a signed-in operator session. A
 port that another process holds, including one that is not Laya, is Down
 with Port &lt;n&gt; in use. The first load, before health is usable, is Still
 loading. Orders stay refused with the Down sentence while that load

@@ -40,6 +40,7 @@ describe("Laya heartbeat on desk ping", () => {
     expect(layaLiveQualifiedFromBody({ laya_live_qualified: false })).toBe(false);
     expect(layaLiveQualifiedFromBody({ status: "ok" })).toBe(false);
     expect(layaReasonFromBody({ laya_reason: "still_loading" })).toBe("still_loading");
+    expect(layaReasonFromBody({ laya_reason: "stopped" })).toBe("stopped");
     expect(layaReasonFromBody({ laya_reason: "port_in_use" })).toBe("port_in_use");
     expect(layaReasonFromBody({ laya_reason: "booting" })).toBeNull();
     expect(layaReasonFromBody({ status: "ok" })).toBeNull();

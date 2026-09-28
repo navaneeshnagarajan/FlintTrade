@@ -328,7 +328,11 @@ describe("OrderPadWidget", () => {
       name: /confirm (simulated practice|sample) order/i,
     });
     fireEvent.click(confirm);
-    expect(await screen.findByTestId("laya-denied")).toHaveTextContent("Laya denied");
+    expect(await screen.findByTestId("laya-denied")).toHaveTextContent(
+      "Laya is Down. Orders are paused until it's Ready.",
+    );
+    expect(screen.queryByTestId("laya-limits")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Max quantity/)).not.toBeInTheDocument();
     expect(confirm).toBeDisabled();
 
     act(() => {
@@ -339,10 +343,11 @@ describe("OrderPadWidget", () => {
     expect(screen.getByRole("button", { name: /confirm (simulated practice|sample) order/i })).toBeEnabled();
   });
 
-  it("shows a quantity clamp before the place completes", async () => {
-    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError("Qty reduced to 1 (Laya limit)", 409, {
+  it("shows a quantity clamp before the place completes and resubmits that qty", async () => {
+    const clamp = "Not placed. Laya would allow up to 1. Review and resubmit with qty 1.";
+    mockPlaceOrder.mockRejectedValueOnce(new OrderApiError(clamp, 409, {
       code: "laya_clamp",
-      message: "Qty reduced to 1 (Laya limit)",
+      message: clamp,
       applied_quantity: 1,
       limits: { max_quantity: 1 },
     }));
@@ -354,11 +359,41 @@ describe("OrderPadWidget", () => {
     fireEvent.click(await screen.findByRole("button", {
       name: /confirm (simulated practice|sample) order/i,
     }));
-    expect(await screen.findByTestId("laya-clamp")).toHaveTextContent("Qty reduced to 1 (Laya limit)");
+    expect(await screen.findByTestId("laya-clamp")).toHaveTextContent(clamp);
     expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/TEST001/)).not.toBeInTheDocument();
     expect(screen.queryByText(/order details changed/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /confirm (simulated practice|sample) order/i })).toBeEnabled();
+    fireEvent.click(screen.getByTestId("laya-resubmit"));
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(2));
+    expect(mockPlaceOrder).toHaveBeenLastCalledWith(
+      expect.objectContaining({ quantity: 1, strategy: "FlintOrderPad" }),
+      expect.objectContaining({ mode: "practice" }),
+    );
+  });
+
+  it("submits the desk Order Pad request with no note", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    expect(screen.getByLabelText("Admission note")).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    fireEvent.click(await screen.findByRole("button", {
+      name: /confirm (simulated practice|sample) order/i,
+    }));
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        strategy: "FlintOrderPad",
+        orderType: "MARKET",
+        quantity: 1,
+        triggerPrice: 0,
+        rationale: "",
+      }),
+      expect.objectContaining({ mode: "practice" }),
+    );
+    const params = mockPlaceOrder.mock.calls[0]?.[0];
+    expect(params?.rationale).toBe("");
+    expect(params).not.toHaveProperty("note");
   });
 
   it("shows tighter Degraded limits without Blocked chrome", async () => {

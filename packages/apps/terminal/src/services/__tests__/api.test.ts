@@ -3668,6 +3668,44 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(body).not.toHaveProperty("apikey");
   });
 
+  it("posts the desk Order Pad body with no note", async () => {
+    mockModeState.mode = "practice";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "success", data: { orderId: "PAD-1" } }),
+    );
+
+    await placeOrder({
+      symbol: "SBIN",
+      exchange: "NSE",
+      action: "BUY",
+      product: "MIS",
+      orderType: "MARKET",
+      quantity: 1,
+      price: 0,
+      triggerPrice: 0,
+      strategy: "FlintOrderPad",
+    }, { mode: "practice" });
+
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0] as [string, RequestInit])[1].body as string,
+    );
+    expect(body).toEqual({
+      symbol: "SBIN",
+      exchange: "NSE",
+      action: "BUY",
+      product: "MIS",
+      orderType: "MARKET",
+      quantity: 1,
+      price: 0,
+      triggerPrice: 0,
+      strategy: "FlintOrderPad",
+      order_type: "MARKET",
+      trigger_price: 0,
+    });
+    expect(body).not.toHaveProperty("rationale");
+    expect(body).not.toHaveProperty("note");
+  });
+
   it("routes live placeOrder through the active connected native account when no OpenAlgo key is configured", async () => {
     mockConnectionState.apiKey = "";
     mockModeState.mode = "live";

@@ -326,7 +326,9 @@ describe("QuickTradeWidget", () => {
     renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
     await screen.findByText(/Qty: 1 × 1 = 1/);
     fireEvent.click(screen.getByRole("button", { name: /buy 1 lots/i }));
-    expect(await screen.findByTestId("laya-denied")).toHaveTextContent("Laya denied");
+    const denied = await screen.findByTestId("laya-denied");
+    expect(denied).toHaveTextContent("Laya denied");
+    expect(denied).not.toHaveTextContent("Max quantity");
     expect(screen.getByRole("button", { name: /buy 1 lots/i })).toBeDisabled();
 
     act(() => {

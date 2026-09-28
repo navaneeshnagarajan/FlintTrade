@@ -17,6 +17,7 @@ export const LAYA_NOT_QUALIFIED_FOR_LIVE = "Not qualified for Live";
 
 export const LAYA_REASON_CODES = [
   "not_started",
+  "stopped",
   "port_in_use",
   "still_loading",
   "unreachable",
@@ -44,6 +45,7 @@ export function layaChipStatus(input: {
 export function layaReasonPlain(reason: string | null | undefined, port: number): string | null {
   if (reason === "port_in_use") return `Port ${port} in use`;
   if (reason === "not_started") return "Not started";
+  if (reason === "stopped") return "Stopped";
   if (reason === "still_loading") return "Still loading";
   if (reason === "unreachable") return "Unreachable";
   if (reason === "wrong_revision") return "Wrong model revision";

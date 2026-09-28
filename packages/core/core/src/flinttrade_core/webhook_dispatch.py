@@ -118,7 +118,8 @@ class WebhookOrderDispatcher:
                 refused = _error("place_order", payload, str(laya_block["message"]))
                 refused["code"] = laya_block["code"]
                 refused["reason"] = laya_block["reason"]
-                refused["limits"] = laya_block["limits"]
+                if "limits" in laya_block:
+                    refused["limits"] = laya_block["limits"]
                 if "applied_quantity" in laya_block:
                     refused["applied_quantity"] = laya_block["applied_quantity"]
                 return refused

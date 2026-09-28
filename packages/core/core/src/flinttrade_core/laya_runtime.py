@@ -16,6 +16,7 @@ with the FlintTrade interpreter.
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import secrets
@@ -177,13 +178,29 @@ def refresh_process_laya_status() -> None:
 
     No sidecar leaves the stored status. When ``LAYA_API_KEY_FILE`` is set,
     an already-running backend attaches to that loopback sidecar first.
+    A dead child is reaped here and recorded Down.
     """
     runtime = process_runtime()
     if runtime is None:
         runtime = attach_from_environment()
     if runtime is None:
         return
+    runtime.reap_children()
     runtime.publish_status()
+
+
+def start_managed_sidecar() -> str:
+    """Start or restart the sidecar this process supervises.
+
+    Returns the loopback origin. An existing child is replaced. Raises
+    ``LayaRuntimeError`` when the sidecar cannot be spawned.
+    """
+    runtime = process_runtime()
+    if runtime is None:
+        from flinttrade_core.workspace import workspace_dir  # noqa: PLC0415
+
+        runtime = LayaRuntime(workspace_dir())
+    return runtime.start()
 
 
 def attach_from_environment(workspace: Path | None = None) -> LayaRuntime | None:
@@ -248,6 +265,7 @@ class LayaRuntime:
         self._api_key = ""
         self._generation = 0
         self._loaded_once = False
+        self._child_stopped = False
         self._last_health: Mapping[str, Any] | None = None
         self._lock = threading.RLock()
 
@@ -291,6 +309,8 @@ class LayaRuntime:
         spawned: Any | None = None
         with self._lock, self._file_lock():
             self._loaded_once = False
+            self._child_stopped = False
+            _reap_runtimes.add(self)
             if self._process is not None:
                 _terminate(self._process)
                 self._process = None
@@ -342,6 +362,7 @@ class LayaRuntime:
                 self._process = None
                 self._api_key = ""
                 self._attached = False
+                _reap_runtimes.discard(self)
                 _unlink_quiet(self._key_path)
                 _unlink_quiet(self._pid_path)
                 _clear_decision_client()
@@ -396,6 +417,7 @@ class LayaRuntime:
             engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
             engine.set_runtime_reason("not_started", self._port)
             self._loaded_once = False
+            self._child_stopped = False
             process = self._process
             pid = _read_pid_file(self._pid_path)
             self._process = None
@@ -403,10 +425,12 @@ class LayaRuntime:
             self._api_key = ""
             _unlink_quiet(self._key_path)
             _unlink_quiet(self._pid_path)
+            _reap_runtimes.discard(self)
         if process is not None:
             _terminate(process)
         elif pid is not None:
             _signal_recorded_pid(pid)
+            _reap_recorded_pid(pid)
 
     def publish_status(self) -> Any:
         """Read ``/health`` and record Ready, Degraded, or Down.
@@ -479,8 +503,28 @@ class LayaRuntime:
             "detail": laya_reason_detail(reason, port),
         }
 
+    def reap_children(self) -> None:
+        """Collect a dead child so it does not stay defunct.
+
+        A live sidecar is left running. ``stop`` is what terminates it.
+        """
+        with self._lock:
+            self._reap_locked()
+
+    def _reap_locked(self) -> None:
+        """Reap a zombie. Caller holds ``_lock``. A live child is not signalled."""
+        process = self._process
+        if process is not None:
+            if not _process_alive(process):
+                self._child_stopped = True
+            return
+        pid = _read_pid_file(self._pid_path)
+        if pid is not None and _reap_recorded_pid(pid):
+            self._child_stopped = True
+
     def _managed_locked(self) -> bool:
         """True when this runtime owns the sidecar. Caller holds ``_lock``."""
+        self._reap_locked()
         if self._attached:
             return True
         if self._process is not None and _process_alive(self._process):
@@ -512,6 +556,7 @@ class LayaRuntime:
             LAYA_REASON_NOT_STARTED,
             LAYA_REASON_PORT_IN_USE,
             LAYA_REASON_STILL_LOADING,
+            LAYA_REASON_STOPPED,
             LAYA_REASON_UNREACHABLE,
             LAYA_REASON_WRONG_REVISION,
             DecisionStatus,
@@ -523,6 +568,8 @@ class LayaRuntime:
         if not managed:
             if port_open:
                 return LAYA_REASON_PORT_IN_USE
+            if self._child_stopped:
+                return LAYA_REASON_STOPPED
             return LAYA_REASON_NOT_STARTED
         status = interpret_health(payload, requested_device=self._device)
         if status is not DecisionStatus.DOWN:
@@ -659,6 +706,21 @@ def _read_pid_file(path: Path) -> int | None:
     return pid if pid > 0 else None
 
 
+_reap_runtimes: set[LayaRuntime] = set()
+
+
+def reap_managed_children() -> None:
+    """Collect dead sidecar children. Does not stop a process that is still running."""
+    for runtime in list(_reap_runtimes):
+        try:
+            runtime.reap_children()
+        except Exception:
+            continue
+
+
+atexit.register(reap_managed_children)
+
+
 def _process_alive(process: Any) -> bool:
     poll = getattr(process, "poll", None)
     if not callable(poll):
@@ -674,6 +736,23 @@ def _tcp_open(port: int) -> bool:
             return sock.connect_ex((LAYA_BIND_HOST, port)) == 0
     except OSError:
         return False
+
+
+def _reap_recorded_pid(pid: int) -> bool:
+    """Reap ``pid`` when it is our zombie. True only when it was collected.
+
+    ``os.kill(pid, 0)`` still succeeds for a defunct child, so a probe that
+    only checks that signal treats a dead sidecar as alive and never waits.
+    """
+    if os.name != "posix":
+        return False
+    try:
+        waited, _status = os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        return False
+    except OSError:
+        return False
+    return waited == pid
 
 
 def _pid_alive(pid: int | None) -> bool:

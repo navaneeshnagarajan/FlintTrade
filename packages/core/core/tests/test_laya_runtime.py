@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -509,4 +510,150 @@ def test_first_load_stays_down_for_admission_and_reports_still_loading(tmp_path:
     )
     assert later.allow is False
     assert later.reason == "Laya is Down. Orders are paused until it's Ready."
+    runtime.stop()
     reset_process_laya_for_tests()
+
+
+class _CountingProcess(_Process):
+    def __init__(self) -> None:
+        super().__init__()
+        self.polls = 0
+
+    def poll(self) -> int | None:
+        self.polls += 1
+        return super().poll()
+
+
+@pytest.mark.unit
+def test_health_probe_reaps_a_dead_child_and_reports_stopped(tmp_path: Path) -> None:
+    process = _CountingProcess()
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: process,
+        health_reader=lambda _url: None,
+        port_probe=lambda _port: False,
+    )
+    runtime.start()
+    process.returncode = 9
+    set_process_runtime(runtime)
+    from flinttrade_core.laya_runtime import refresh_process_laya_status
+
+    refresh_process_laya_status()
+    assert process.polls >= 1
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "stopped"
+    reported = runtime.status()
+    assert reported["running"] is False
+    assert reported["detail"] == "Stopped"
+    assert reported["reason"] == "stopped"
+    runtime.stop()
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_health_probe_reaps_a_zombie_pid_that_kill_still_sees(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = LayaRuntime(
+        tmp_path,
+        port=8124,
+        health_reader=lambda _url: None,
+        port_probe=lambda _port: False,
+    )
+    runtime.runtime_root.mkdir(parents=True)
+    (runtime.runtime_root / "sidecar.pid").write_text("424242")
+    waited = {"n": 0}
+    real_kill = os.kill
+
+    def waitpid(pid: int, flags: int) -> tuple[int, int]:
+        assert pid == 424242
+        assert flags == os.WNOHANG
+        waited["n"] += 1
+        if waited["n"] == 1:
+            return pid, 0
+        raise ChildProcessError
+
+    def kill(pid: int, sig: int) -> None:
+        if pid == 424242:
+            if waited["n"] == 0:
+                return None
+            raise ProcessLookupError
+        real_kill(pid, sig)
+
+    monkeypatch.setattr(os, "waitpid", waitpid)
+    monkeypatch.setattr(os, "kill", kill)
+    set_process_runtime(runtime)
+    from flinttrade_core.laya_runtime import refresh_process_laya_status
+
+    refresh_process_laya_status()
+    assert waited["n"] >= 1
+    assert process_laya().status is DecisionStatus.DOWN
+    reason, port = process_laya().runtime_reason()
+    assert reason == "stopped"
+    assert port == 8124
+    assert runtime.status()["detail"] == "Stopped"
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_exit_reaper_collects_a_dead_child_and_leaves_a_live_one(tmp_path: Path) -> None:
+    dead = _CountingProcess()
+    live = _CountingProcess()
+    dead_runtime = LayaRuntime(
+        tmp_path / "dead",
+        process_factory=lambda _argv, _env: dead,
+        health_reader=lambda _url: None,
+        port_probe=lambda _port: False,
+    )
+    live_runtime = LayaRuntime(
+        tmp_path / "live",
+        port=8125,
+        process_factory=lambda _argv, _env: live,
+        health_reader=lambda _url: None,
+        port_probe=lambda _port: False,
+    )
+    dead_runtime.start()
+    live_runtime.start()
+    dead.returncode = 1
+    from flinttrade_core.laya_runtime import reap_managed_children
+
+    reap_managed_children()
+    assert dead.polls >= 1
+    assert live.terminated is False
+    assert live.returncode is None
+    dead_runtime.stop()
+    live_runtime.stop()
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_laya_start_is_operator_only_and_does_not_spawn(monkeypatch: pytest.MonkeyPatch) -> None:
+    from flinttrade_core.auth_routes import _create_token
+
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(health_bp)
+    client = app.test_client()
+    missing = client.post("/api/v1/laya/start")
+    assert missing.status_code == 401
+
+    def fail() -> str:
+        raise LayaRuntimeError("venv missing under a private path")
+
+    monkeypatch.setattr("flinttrade_core.laya_runtime.start_managed_sidecar", fail)
+    token = _create_token("operator", mode="practice")
+    headers = {"Authorization": f"Bearer {token}"}
+    failed = client.post("/api/v1/laya/start", headers=headers)
+    assert failed.status_code == 503
+    assert failed.get_json()["message"] == "Laya could not be started."
+    assert "private path" not in failed.get_data(as_text=True)
+
+    calls: list[str] = []
+
+    def started() -> str:
+        calls.append("start")
+        return "http://127.0.0.1:8000"
+
+    monkeypatch.setattr("flinttrade_core.laya_runtime.start_managed_sidecar", started)
+    ok = client.post("/api/v1/laya/start", headers=headers)
+    assert ok.status_code == 200
+    assert ok.get_json()["status"] == "ok"
+    assert calls == ["start"]

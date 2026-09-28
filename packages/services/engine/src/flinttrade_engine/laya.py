@@ -63,6 +63,7 @@ class DecisionStatus(StrEnum):
 
 
 LAYA_REASON_NOT_STARTED = "not_started"
+LAYA_REASON_STOPPED = "stopped"
 LAYA_REASON_PORT_IN_USE = "port_in_use"
 LAYA_REASON_STILL_LOADING = "still_loading"
 LAYA_REASON_UNREACHABLE = "unreachable"
@@ -70,6 +71,7 @@ LAYA_REASON_WRONG_REVISION = "wrong_revision"
 LAYA_REASON_CODES = frozenset(
     {
         LAYA_REASON_NOT_STARTED,
+        LAYA_REASON_STOPPED,
         LAYA_REASON_PORT_IN_USE,
         LAYA_REASON_STILL_LOADING,
         LAYA_REASON_UNREACHABLE,
@@ -84,6 +86,7 @@ def laya_reason_detail(reason: str | None, port: int) -> str | None:
         return f"Port {port} in use"
     labels = {
         LAYA_REASON_NOT_STARTED: "Not started",
+        LAYA_REASON_STOPPED: "Stopped",
         LAYA_REASON_STILL_LOADING: "Still loading",
         LAYA_REASON_UNREACHABLE: "Unreachable",
         LAYA_REASON_WRONG_REVISION: "Wrong model revision",
@@ -464,38 +467,45 @@ def admission_kind(verdict: Verdict, requested_quantity: int) -> str:
     return "allow"
 
 
+def clamp_place_message(applied_quantity: int) -> str:
+    """Desk sentence for a clamp. Nothing has been placed."""
+    return (
+        f"Not placed. Laya would allow up to {applied_quantity}. "
+        f"Review and resubmit with qty {applied_quantity}."
+    )
+
+
 def place_block(verdict: Verdict, requested_quantity: int) -> dict[str, Any] | None:
     """Return a desk refusal body, or ``None`` when the place may continue.
 
     Clamp and deny both stop before SafetySystem. The message is the server
-    text the desk shows. ``http_status`` is for the HTTP entry only.
+    text the desk shows. ``http_status`` is for the HTTP entry only. A Down
+    pause does not include a quantity ceiling: nothing is being sized.
     """
     kind = admission_kind(verdict, requested_quantity)
     if kind == "allow":
         return None
     limits = {"max_quantity": verdict.limits.max_quantity}
     if kind == "clamp":
-        if verdict.applied_quantity < requested_quantity:
-            message = f"Qty reduced to {verdict.applied_quantity} (Laya limit)"
-        else:
-            message = f"Qty held at {verdict.applied_quantity} (Laya limit)"
         return {
             "status": "error",
             "code": "laya_clamp",
-            "message": message,
+            "message": clamp_place_message(verdict.applied_quantity),
             "reason": verdict.reason,
             "limits": limits,
             "applied_quantity": verdict.applied_quantity,
             "http_status": 409,
         }
-    return {
+    body: dict[str, Any] = {
         "status": "error",
         "code": "laya_denied",
         "message": verdict.reason,
         "reason": verdict.reason,
-        "limits": limits,
         "http_status": 403,
     }
+    if verdict.reason != _DOWN_PAUSE:
+        body["limits"] = limits
+    return body
 
 
 def _whole_quantity(raw: object) -> int | None:

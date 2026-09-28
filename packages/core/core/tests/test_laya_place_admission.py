@@ -85,8 +85,10 @@ def test_live_down_denies_before_safety_and_the_gate(backend_lease_proof) -> Non
     assert body["code"] == "laya_denied"
     assert body["reason"] == body["message"]
     assert body["reason"] == "Laya is Down. Orders are paused until it's Ready."
+    assert "Practice orders are blocked" not in body["reason"]
     assert "Live" not in body["reason"]
-    assert body["limits"]["max_quantity"] == 100
+    assert "limits" not in body
+    assert "Max quantity" not in json.dumps(body)
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
 
@@ -103,7 +105,7 @@ def test_live_clamp_stops_before_safety_and_names_the_reduced_quantity(backend_l
     body = response.get_json()
     assert response.status_code == 409
     assert body["code"] == "laya_clamp"
-    assert body["message"] == "Qty reduced to 100 (Laya limit)"
+    assert body["message"] == "Not placed. Laya would allow up to 100. Review and resubmit with qty 100."
     assert body["applied_quantity"] == 100
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
@@ -135,7 +137,7 @@ def test_degraded_live_stays_open_inside_the_tighter_ceiling(backend_lease_proof
     over_body = over.get_json()
     assert over.status_code == 409
     assert over_body["code"] == "laya_clamp"
-    assert over_body["message"] == "Qty reduced to 1 (Laya limit)"
+    assert over_body["message"] == "Not placed. Laya would allow up to 1. Review and resubmit with qty 1."
     assert over_body["limits"]["max_quantity"] == 1
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
@@ -170,7 +172,9 @@ def test_practice_down_denies_before_the_sandbox() -> None:
     assert response.status_code == 403
     assert body["code"] == "laya_denied"
     assert body["reason"] == "Laya is Down. Orders are paused until it's Ready."
+    assert "Practice orders are blocked" not in json.dumps(body)
     assert "Live" not in body["reason"]
+    assert "limits" not in body
     sandbox.place_order.assert_not_called()
 
 
@@ -293,7 +297,7 @@ def test_practice_place_without_a_note_clamps_instead_of_demanding_a_reason() ->
     assert response.status_code == 409
     assert body["code"] == "laya_clamp"
     assert body["reason"] == "Laya is uncertain. Quantity stays inside the tighter limit."
-    assert body["message"] == "Qty held at 1 (Laya limit)"
+    assert body["message"] == "Not placed. Laya would allow up to 1. Review and resubmit with qty 1."
     assert "concrete reason is required" not in json.dumps(body)
     assert "Live" not in body["reason"]
     sandbox.place_order.assert_not_called()
@@ -308,6 +312,47 @@ def test_practice_place_without_a_note_clamps_instead_of_demanding_a_reason() ->
     assert blank.get_json()["reason"] == "Laya is uncertain. Quantity stays inside the tighter limit."
     assert host.calls == []
     sandbox.place_order.assert_not_called()
+
+
+_DESK_ORDER_PAD = {
+    "symbol": "SBIN",
+    "exchange": "NSE",
+    "action": "BUY",
+    "product": "MIS",
+    "orderType": "MARKET",
+    "quantity": 1,
+    "price": 0,
+    "triggerPrice": 0,
+    "strategy": "FlintOrderPad",
+    "order_type": "MARKET",
+    "trigger_price": 0,
+}
+
+
+@pytest.mark.unit
+def test_practice_desk_order_pad_without_a_note_reaches_the_policy() -> None:
+    """The desk Order Pad body has no rationale. Practice still clamps."""
+    host = _ScriptedHost(_allow_answers())
+    process_laya().set_status(DecisionStatus.READY)
+    process_laya().set_decision_client(host)
+    app, sandbox = _practice_app()
+    response = app.test_client().post(
+        "/api/v1/orders/place",
+        json=_DESK_ORDER_PAD,
+        headers=_headers("practice"),
+    )
+    body = response.get_json()
+    assert "rationale" not in _DESK_ORDER_PAD
+    assert "note" not in _DESK_ORDER_PAD
+    assert response.status_code == 409
+    assert body["code"] == "laya_clamp"
+    assert body["reason"] == "Laya is uncertain. Quantity stays inside the tighter limit."
+    assert body["message"] == "Not placed. Laya would allow up to 1. Review and resubmit with qty 1."
+    assert "concrete reason is required" not in json.dumps(body)
+    assert "Live" not in body["reason"]
+    assert body["code"] != "laya_denied"
+    sandbox.place_order.assert_not_called()
+    assert host.calls == []
 
 
 @pytest.mark.unit

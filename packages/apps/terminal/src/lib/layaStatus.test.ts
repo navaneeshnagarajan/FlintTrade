@@ -37,6 +37,7 @@ describe("Laya chip status", () => {
 
   it("names each sidecar reason in plain words and keeps the first load off Down", () => {
     expect(layaReasonPlain("not_started", 8000)).toBe("Not started");
+    expect(layaReasonPlain("stopped", 8000)).toBe("Stopped");
     expect(layaReasonPlain("port_in_use", 8123)).toBe("Port 8123 in use");
     expect(layaReasonPlain("still_loading", 8000)).toBe("Still loading");
     expect(layaReasonPlain("unreachable", 8000)).toBe("Unreachable");

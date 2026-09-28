@@ -51,6 +51,7 @@ export interface PingProbe {
 
 const LAYA_REASON_CODES = new Set([
   "not_started",
+  "stopped",
   "port_in_use",
   "still_loading",
   "unreachable",
