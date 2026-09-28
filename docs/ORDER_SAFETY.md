@@ -97,9 +97,12 @@ in the versioned `laya_policy.toml`. There is no confidence field in the
 gate. The model can deny or clamp. It cannot raise a quantity or overturn a
 rule refusal. An unreachable host, a timeout, a malformed response, or a
 revision or digest mismatch is Down. Down refuses Practice as well as Live.
-Practice copy is "Laya is Down. Practice orders are blocked. Start the Laya
-model." Live copy is "Laya is Down. Live orders are blocked." An uncertain
-answer clamps in Practice and denies in Live. An empty note is a normal
+Down copy is the same in Practice and Live: "Laya is Down. Orders are
+paused until it's Ready." When Laya is Ready or Degraded and Live is
+refused only because no qualification record covers the pin, the reason
+names that requirement instead of saying Laya is Down. An uncertain
+answer clamps in Practice and denies in Live. Live uncertain copy is
+"Laya is uncertain. Live stays closed." An empty note is a normal
 case of that same uncertain outcome. It is not a blanket refusal. A
 decision response that omits `revision` or `sha256`, and a health document
 that omits the weight digest, are Down. Stopping the sidecar records Down

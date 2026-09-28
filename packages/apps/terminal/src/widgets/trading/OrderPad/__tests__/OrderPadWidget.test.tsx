@@ -314,10 +314,10 @@ describe("OrderPadWidget", () => {
   });
 
   it("clears a Laya denial when decision status changes and leaves confirm retryable", async () => {
-    mockPlaceOrder.mockRejectedValue(new OrderApiError("Laya is Down. Live orders are blocked.", 403, {
+    mockPlaceOrder.mockRejectedValue(new OrderApiError("Laya is Down. Orders are paused until it's Ready.", 403, {
       code: "laya_denied",
-      reason: "Laya is Down. Live orders are blocked.",
-      message: "Laya is Down. Live orders are blocked.",
+      reason: "Laya is Down. Orders are paused until it's Ready.",
+      message: "Laya is Down. Orders are paused until it's Ready.",
       limits: { max_quantity: 100 },
     }));
     useOperatorSignalStore.setState({ decisionStatus: "down" });

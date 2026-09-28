@@ -391,7 +391,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Broker stream (`broker_stream`) | A Dhan or Kotak Neo market/order stream dropped. Kotak Neo's local v3 lifecycle coverage is not live-account proof. | Wait for the stream. Do not treat stale REST quotes or a reconnecting socket as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
-| Laya (`laya`) | Blocked — Live-facing Laya is Down ("Laya is Down — Live orders paused."). The chip and ping publish that Live-facing status and do not invent Ready. Live place and Position Mirror start stay closed. Practice is not muted by this strip. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. Kill All stays available. Laya starts Down. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. Practice can be Ready or Degraded from the sidecar probe while the chip stays Down, until LIVE_DECISION evidence covers that exact revision, weight digest, and policy version. A base checkpoint leaves Live Down. | While the strip is open, Live place stays muted on that strip. A Practice place is refused when Practice itself is Down; the server reason names Practice. Start the opt-in Laya model before Practice can admit. Live-facing Ready or Degraded allows a Live place attempt. Do not treat Chat as a substitute. |
+| Laya (`laya`) | Blocked — Live-facing Laya is Down ("Laya is Down — Live orders paused."). The chip and ping publish that Live-facing status and do not invent Ready. Live place and Position Mirror start stay closed. Practice is not muted by this strip. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. Kill All stays available. Laya starts Down. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. Practice can be Ready or Degraded from the sidecar probe while the chip stays Down, until LIVE_DECISION evidence covers that exact revision, weight digest, and policy version. A base checkpoint leaves Live Down. | While the strip is open, Live place stays muted on that strip. A Practice place is refused when Practice itself is Down, with "Laya is Down. Orders are paused until it's Ready." Start the opt-in Laya model before a Down engine can admit. Live-facing Ready or Degraded allows a Live place attempt. Do not treat Chat as a substitute. |
 | Chat provider (`llm_provider`) | Info — Chat is unavailable. Trading chrome stays as it was. A Laya denial is not this strip. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
@@ -446,9 +446,8 @@ reachable. Broker may stay **Connected** or **Connected (read)**.
 Practice can be Ready or Degraded from the same sidecar probe while the
 chip still shows Down, and a Practice place can then be admitted. A
 Practice place is refused when Practice itself is Down. The server
-reason names Practice: **Laya is Down. Practice orders are blocked.
-Start the Laya model.** Start the opt-in model before Practice can
-admit. A base checkpoint leaves Live Down. Live stays Down until that
+reason is the same in Live: **Laya is Down. Orders are paused until
+it's Ready.** Start the opt-in model before a Down engine can admit. A base checkpoint leaves Live Down. Live stays Down until that
 exact revision, weight digest, and policy version are qualified with
 LIVE_DECISION evidence.
 
@@ -522,8 +521,8 @@ may stay; it must not hide venue honesty.
    P&L is recorded in the **P&L Monitor** widget.
 
 A Practice place is admitted before the sandbox. When Practice itself is
-Down, that place is refused with **Laya is Down. Practice orders are
-blocked. Start the Laya model.** and nothing is filled. The desk chip
+Down, that place is refused with **Laya is Down. Orders are paused
+until it's Ready.** and nothing is filled. The desk chip
 can still show Down while Practice is Ready or Degraded, because the
 chip is Live-facing. A Practice place can be admitted in that case. When
 admission allows the quantity, the path is front-end → JWT guard → mode
@@ -1420,8 +1419,9 @@ as a toast.
    is the ceiling the server sent.
    The strip **Laya is Down — Live orders paused.** follows the Live-facing
    chip. It mutes Live place. Practice is not muted by that strip. A
-   Practice place is refused when Practice itself is Down, and the reason
-   names Practice. Start the opt-in model before Practice can admit.
+   Practice place is refused when Practice itself is Down, with **Laya is
+   Down. Orders are paused until it's Ready.** Start the opt-in model
+   before a Down engine can admit.
    Live-facing Ready or Degraded allows a Live place attempt. Practice can
    be Ready or Degraded from the sidecar probe while the chip still shows
    Down, until LIVE_DECISION evidence covers that exact revision, weight

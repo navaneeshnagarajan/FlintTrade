@@ -195,7 +195,7 @@ def test_uncertain_answer_denies_in_live(laya_host: FakeLayaHost) -> None:
     laya_host.response_body = _body(_answers(rationale_b=0.60))
     verdict = _engine(laya_host).admit(_proposal(mode="live", quantity=4))
     assert verdict.allow is False
-    assert verdict.reason == "Laya is uncertain. Live orders are blocked."
+    assert verdict.reason == "Laya is uncertain. Live stays closed."
 
 
 @pytest.mark.unit
@@ -229,7 +229,7 @@ def test_http_failures_are_down(laya_host: FakeLayaHost, code: int, body: bytes,
     engine = _engine(laya_host)
     verdict = engine.admit(_proposal(mode="practice"))
     assert verdict.allow is False
-    assert "Practice orders are blocked" in verdict.reason
+    assert verdict.reason == "Laya is Down. Orders are paused until it's Ready."
     assert engine.status is DecisionStatus.DOWN
     assert ("failure", failure) in verdict.evidence
 
@@ -269,7 +269,7 @@ def test_revision_mismatch_is_down(laya_host: FakeLayaHost) -> None:
     engine = _engine(laya_host)
     verdict = engine.admit(_proposal(mode="live"))
     assert verdict.allow is False
-    assert "Live orders are blocked" in verdict.reason
+    assert verdict.reason == "Laya is Down. Orders are paused until it's Ready."
     assert ("failure", "revision_mismatch") in verdict.evidence
 
 
@@ -314,7 +314,7 @@ def test_empty_note_is_uncertain_and_does_not_call_the_host(laya_host: FakeLayaH
     assert laya_host.requests == []
     live = _engine(laya_host).admit(_proposal(mode="live", rationale=""))
     assert live.allow is False
-    assert live.reason == "Laya is uncertain. Live orders are blocked."
+    assert live.reason == "Laya is uncertain. Live stays closed."
     assert "concrete reason is required" not in live.reason
     assert laya_host.requests == []
     fresh = _engine(laya_host)

@@ -511,7 +511,7 @@ def _uncertain_decision(
     if mode.strip().lower() == "live":
         return TextDecision(
             effect="deny",
-            reason="Laya is uncertain. Live orders are blocked.",
+            reason="Laya is uncertain. Live stays closed.",
             applied_quantity=0,
             evidence=evidence,
         )

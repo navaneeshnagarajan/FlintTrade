@@ -730,9 +730,11 @@ continuation, and environment variables are read as `$env:NAME`).
 
 This example is for a locally issued **Practice-mode** FlintTrade session JWT.
 Place is admitted before the sandbox. Laya starts **Down**, so a Practice
-place while Down returns HTTP 403 `laya_denied` with "Laya is Down. Practice
-orders are blocked. Start the Laya model." and the sandbox is not called.
-Live Down copy names Live instead. A quantity
+place while Down returns HTTP 403 `laya_denied` with "Laya is Down. Orders
+are paused until it's Ready." and the sandbox is not called. That sentence
+is the same in Live. A Live refusal while Laya is Ready, with no
+qualification record for the pin, names the qualification requirement
+instead. A quantity
 above the active ceiling returns HTTP 409 `laya_clamp` and places neither
 size. The sandbox body below is the response when admission allows the
 requested quantity. The call does not send an order to OpenAlgo or any broker.

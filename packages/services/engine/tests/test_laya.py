@@ -109,9 +109,24 @@ def test_down_refuses_live_and_practice_with_no_model_fallback() -> None:
     assert live.allow is False
     assert practice.allow is False
     assert live.applied_quantity == 0
-    assert live.reason == "Laya is Down. Live orders are blocked."
-    assert practice.reason == "Laya is Down. Practice orders are blocked. Start the Laya model."
+    assert live.reason == "Laya is Down. Orders are paused until it's Ready."
+    assert practice.reason == live.reason
+    assert "Live orders are blocked" not in live.reason
     assert "Live orders are blocked" not in practice.reason
+
+
+@pytest.mark.unit
+def test_unqualified_ready_live_names_the_qualification_requirement() -> None:
+    engine = Laya(status=DecisionStatus.READY, max_quantity=10)
+    engine.apply_runtime_status(DecisionStatus.READY, live_qualified=False)
+    live = engine.admit(_proposal(mode="live"))
+    practice = engine.admit(_proposal(mode="practice"))
+    assert live.allow is False
+    assert "qualification record" in live.reason
+    assert "revision, weight digest, and policy version" in live.reason
+    assert live.reason.startswith("Laya is Ready.")
+    assert "Orders are paused" not in live.reason
+    assert practice.allow is True
 
 
 @pytest.mark.unit

@@ -83,7 +83,8 @@ def test_live_down_denies_before_safety_and_the_gate(backend_lease_proof) -> Non
     assert response.status_code == 403
     assert body["code"] == "laya_denied"
     assert body["reason"] == body["message"]
-    assert "Down" in body["reason"]
+    assert body["reason"] == "Laya is Down. Orders are paused until it's Ready."
+    assert "Live orders are blocked" not in body["reason"]
     assert body["limits"]["max_quantity"] == 100
     safety.check_order.assert_not_called()
     router.place_order.assert_not_called()
@@ -167,9 +168,31 @@ def test_practice_down_denies_before_the_sandbox() -> None:
     body = response.get_json()
     assert response.status_code == 403
     assert body["code"] == "laya_denied"
-    assert body["reason"] == "Laya is Down. Practice orders are blocked. Start the Laya model."
+    assert body["reason"] == "Laya is Down. Orders are paused until it's Ready."
     assert "Live orders are blocked" not in body["reason"]
     sandbox.place_order.assert_not_called()
+
+
+@pytest.mark.unit
+def test_unqualified_ready_live_names_the_qualification_requirement(backend_lease_proof) -> None:
+    process_laya().apply_runtime_status(DecisionStatus.READY, live_qualified=False)
+    app, router, safety = _live_app(backend_lease_proof)
+    response = app.test_client().post(
+        "/api/v1/orders/openalgo/place",
+        json=_BODY,
+        headers=_headers("live", unlocked=True),
+    )
+    body = response.get_json()
+    assert response.status_code == 403
+    assert body["code"] == "laya_denied"
+    assert body["reason"] == (
+        "Laya is Ready. Live stays closed until a qualification record "
+        "covers this revision, weight digest, and policy version."
+    )
+    assert "Orders are paused" not in body["reason"]
+    assert "Live orders are blocked" not in body["reason"]
+    safety.check_order.assert_not_called()
+    router.place_order.assert_not_called()
 
 
 @pytest.mark.unit

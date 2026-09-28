@@ -30,8 +30,10 @@ and the kill switch stay outside this module.
 When a decision host is configured, free-text questions run after the floor.
 The host may deny or clamp. It cannot raise a quantity or overturn a floor
 refusal. Unreachable, timeout, malformed, and revision or digest mismatch
-are Down for Practice and Live. Live stays Down until a qualification
-record matches the pinned revision, weight digest, and policy version.
+are Down for Practice and Live. That refusal uses one sentence in both
+modes. Live can also stay closed while Laya is Ready or Degraded, until a
+qualification record matches the pinned revision, weight digest, and
+policy version. That refusal names the qualification requirement.
 """
 
 from __future__ import annotations
@@ -224,7 +226,7 @@ class Laya:
             ceiling = self._ceiling_for(status)
         limits = VerdictLimits(max_quantity=ceiling)
         if status is DecisionStatus.DOWN:
-            return self._down_verdict(proposal.mode, limits)
+            return self._down_verdict(limits)
 
         reason = self._schema_reason(proposal)
         if reason:
@@ -243,7 +245,7 @@ class Laya:
         )
         if decision.effect == "down":
             self.set_status(DecisionStatus.DOWN)
-            verdict = self._down_verdict(proposal.mode, VerdictLimits(max_quantity=self._ceiling_for(DecisionStatus.DOWN)))
+            verdict = self._down_verdict(VerdictLimits(max_quantity=self._ceiling_for(DecisionStatus.DOWN)))
             return Verdict(
                 allow=verdict.allow,
                 reason=verdict.reason,
@@ -271,10 +273,16 @@ class Laya:
             )
         return self._ceiling_verdict(proposal, limits, evidence=decision.evidence)
 
-    def _down_verdict(self, mode: str, limits: VerdictLimits) -> Verdict:
+    def _down_verdict(self, limits: VerdictLimits) -> Verdict:
+        with self._lock:
+            runtime = self._status
+        if runtime is DecisionStatus.DOWN:
+            reason = _DOWN_PAUSE
+        else:
+            reason = _qualification_reason(runtime)
         return Verdict(
             allow=False,
-            reason=_down_reason(mode),
+            reason=reason,
             limits=limits,
             applied_quantity=0,
         )
@@ -339,13 +347,16 @@ class Laya:
         return ""
 
 
-def _down_reason(mode: str) -> str:
-    """Operator copy for a Down engine. Practice and Live name themselves."""
-    if mode.strip().lower() == "practice":
-        return "Laya is Down. Practice orders are blocked. Start the Laya model."
-    if mode.strip().lower() == "live":
-        return "Laya is Down. Live orders are blocked."
-    return "Laya is Down. Orders are blocked."
+_DOWN_PAUSE = "Laya is Down. Orders are paused until it's Ready."
+
+
+def _qualification_reason(status: DecisionStatus) -> str:
+    """Live refusal when the engine is up and no qualification record covers the pin."""
+    shown = "Degraded" if status is DecisionStatus.DEGRADED else "Ready"
+    return (
+        f"Laya is {shown}. Live stays closed until a qualification record "
+        "covers this revision, weight digest, and policy version."
+    )
 
 
 def proposal_from_place_fields(
