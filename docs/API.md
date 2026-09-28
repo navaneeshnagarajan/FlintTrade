@@ -56,7 +56,7 @@ OpenAlgo service itself. FlintTrade does not propagate that 501 through
 
 FlintTrade still registers `/api/v1/orders/gtt-{place,modify,cancel}` so
 the mode gate runs, but those verbs are **not** gated like regular
-`/orders/place`. Explore returns 403 `mode_blocked`. Practice returns a
+`/orders/place`. A sample-data session (claim `explore`) returns 403 `mode_blocked`. Practice returns a
 rejected GTT — the sandbox does not simulate price triggers. Live requires
 the unlocked JWT, then `gtt-*` returns HTTP 501 (they do not call
 `gate_order` → `BrokerRouter`, and they do not forward an upstream
@@ -417,8 +417,8 @@ The operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
 | Endpoint | Purpose |
 |---|---|
 | `cron/jobs` (**GET**) | List registered cron jobs with status (`name`, `description`, `trigger_type`, `status`, `last_run`, `run_count`, `error_count`). |
-| `cron/jobs/<name>/pause` (**POST**) | Pause a job by name. Explore-mode writes (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Sample schedule — control unavailable in Explore`. Practice and Live are not blocked by this gate. CronManager missing → 503 (`CronManager not available`). Unknown name → 404 (`Job '<name>' not found`). |
-| `cron/jobs/<name>/resume` (**POST**) | Resume a paused job by name. Same Explore `mode_blocked` gate, 503, and 404 as pause. |
+| `cron/jobs/<name>/pause` (**POST**) | Pause a job by name. Sample-data writes (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"`. Operators see example data, not a Mode in the menu. Practice and Live are not blocked by this gate. CronManager missing → 503 (`CronManager not available`). Unknown name → 404 (`Job '<name>' not found`). |
+| `cron/jobs/<name>/resume` (**POST**) | Resume a paused job by name. Same sample-data `mode_blocked` gate, 503, and 404 as pause. |
 
 ### Telegram (`/api/v1/telegram`)
 
@@ -431,7 +431,7 @@ bot (terminal Automate → Settings **Send Test**), not OpenAlgo's
 
 | Endpoint | Purpose |
 |---|---|
-| `telegram` (**POST**) | Send a Telegram test message. Body requires `message`. Optional one-shot `bot_token` and `chat_id` are accepted together and are never persisted. Otherwise the route uses env/workspace bot config; disabled config → 400. Send failure → 502. Explore-mode sends (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Telegram tests are blocked in Explore (sample-only).`. |
+| `telegram` (**POST**) | Send a Telegram test message. Body requires `message`. Optional one-shot `bot_token` and `chat_id` are accepted together and are never persisted. Otherwise the route uses env/workspace bot config; disabled config → 400. Send failure → 502. Sample-data sends (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"`. The desk helper is `Telegram tests are blocked for Example. Switch to Practice or Live with Telegram configured to send a real test.` |
 
 ### Ditto (`/api/v1/ditto/*`)
 
@@ -442,8 +442,8 @@ The operations blueprint mounts at `/api/v1`, so the Vite/dev-proxy form is
 
 | Endpoint | Purpose |
 |---|---|
-| `ditto/mirror/start` (**POST**) | Start position mirroring (Live-only, PIN-unlocked). Incomplete body (missing `source_account` / `target_accounts`) → 400. Explore-mode starts (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Mirroring is blocked in Explore (sample-only).`. Practice (and any other non-Live session) is refused HTTP 403 after that gate: `Protected safety actions require an authenticated Live session` (no `mode_blocked`). A Live JWT without PIN unlock is 403 (`Live mode must be PIN-unlocked before changing protected safety state`). |
-| `ditto/kill-all` (**POST**) | Flatten/cancel all managed accounts (emergency Kill All). Optional body `reason` (string, truncated server-side). Explore-mode requests (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Risk runtime unavailable — Kill All disabled.` before Live-session auth. Practice (and any other non-Live session) is refused HTTP 403 after that gate: `Protected safety actions require an authenticated Live session` (no `mode_blocked`). A Live JWT is enough; PIN unlock is not required. Missing `DITTO_RUNTIME` → HTTP 503 (`Ditto runtime unavailable`). Complete flatten → 200 with `status: success`; incomplete → 207 with `status: partial`. |
+| `ditto/mirror/start` (**POST**) | Start position mirroring (Live-only, PIN-unlocked). Incomplete body (missing `source_account` / `target_accounts`) → 400. Sample-data starts (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"`. The desk helper is `Mirroring is blocked for Example. Switch to Practice or Live with broker accounts connected.` Practice (and any other non-Live session) is refused HTTP 403 after that gate: `Protected safety actions require an authenticated Live session` (no `mode_blocked`). A Live JWT without PIN unlock is 403 (`Live mode must be PIN-unlocked before changing protected safety state`). |
+| `ditto/kill-all` (**POST**) | Flatten/cancel all managed accounts (emergency Kill All). Optional body `reason` (string, truncated server-side). Sample-data requests (JWT `mode` claim or `X-FlintTrade-Mode: explore`) return HTTP 403 with `code: "mode_blocked"` and message `Risk runtime unavailable — Kill All disabled.` before Live-session auth. Practice (and any other non-Live session) is refused HTTP 403 after that gate: `Protected safety actions require an authenticated Live session` (no `mode_blocked`). A Live JWT is enough; PIN unlock is not required. Missing `DITTO_RUNTIME` → HTTP 503 (`Ditto runtime unavailable`). Complete flatten → 200 with `status: success`; incomplete → 207 with `status: partial`. |
 | `ditto/mirror/status` (**GET**) | Position-mirroring status across accounts. |
 | `ditto/mirror/stop` (**POST**) | Stop position mirroring. |
 
@@ -454,15 +454,15 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 | Endpoint | Purpose |
 |---|---|
 | `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. |
-| `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and an Explore setup-session JWT (`setup_session`). That token is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for Explore and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. |
+| `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and a setup-session JWT (`setup_session`). That token is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for example data and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. |
 | `POST auth/setup/vault` | Open the credential vault during first-run Setup. Requires the account-create setup-session JWT. Daily-login tokens are rejected. Body `{ "master_password" }` (at least 8 characters when the vault file is missing). Persists the secret when it is missing and leaves an existing secret untouched. Success is `{ "opened": true, "already_present": bool }` under `data`. The response never returns the secret. |
 | `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Body `{ "password" }`, or the account-create setup JWT (lost-QR start-over). Daily-login session JWTs are rejected. |
 | `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret (password re-confirm) and clear `totp_enabled` until a live code is confirmed again. |
 | `POST auth/login` | Sign in with password (argon2id-hashed). `totp_code` (or a backup code) is required only after authenticator enrolment (`totp_enabled`). Issues a JWT. |
 | `POST auth/totp/enable` | Confirm optional authenticator enrolment. Session-bound. Body `{ "totp_code" }`. Sets `totp_enabled`; later logins then require a TOTP or backup code. |
-| `POST auth/pin` | Re-authenticate with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin", "mode"? }`. `mode: "live"` (default) mints a Live JWT with `live_mode_unlocked=true`, and refuses 403 `totp_required` when the authenticator is not enabled. `mode: "practice"` / `"explore"` unlocks that mode without the Live claim and does not require TOTP. There is no `/auth/me`. |
+| `POST auth/pin` | Re-authenticate with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin", "mode"? }`. `mode: "live"` (default) mints a Live JWT with `live_mode_unlocked=true`, and refuses 403 `totp_required` when the authenticator is not enabled. `mode: "practice"` or the sample-data claim `"explore"` unlocks that session without the Live claim and does not require TOTP. Operators still see Example, not a menu Mode, for that claim. There is no `/auth/me`. |
 | `POST auth/pin/set` | Set or change the PIN (password re-confirm). Requires an existing session JWT. |
-| `POST auth/mode` | **Downgrade only** to `practice` or `explore`. Requires an existing session JWT. Issues a fresh JWT and revokes the old `jti`. Live upgrades must use `POST /v1/auth/pin`. |
+| `POST auth/mode` | **Downgrade only** to `practice` or the sample-data claim `explore`. Requires an existing session JWT. Issues a fresh JWT and revokes the old `jti`. Live upgrades must use `POST /v1/auth/pin`. |
 | `POST auth/logout` | Revoke the current JWT by `jti`. Requires an existing session JWT. |
 | `POST auth/forgot-password` | JWT-token email reset. Body `{ "email" }`. Reads Flask-Mail `MAIL` from the Flask app config. A normal backend start never assigns `MAIL` (only tests inject it), so this returns 503 (`Email service not configured.`) on a stock process. SMTP/SES env vars do not enable this pair. Missing email → 400. When `MAIL` is injected and `email` is present, always returns 200 (`If the email is registered, a reset link has been sent.`) so the address is not enumerated. Rate-limited to 3 requests per hour per client. |
 | `POST auth/reset-password` | Consume a reset JWT from `forgot-password`. Body `{ "token", "new_password" }`. The token lasts 1 hour. Password minimum 8 characters. Missing fields or an invalid / expired token → 400. Rate-limited to 5 requests per minute per client. A stock backend never issues these tokens because `forgot-password` stays 503. |
@@ -639,7 +639,7 @@ The JWT carries three claims you care about:
 |---|---|
 | `sub` | User identifier. |
 | `exp` | Expiry timestamp. **Every token expires at 8 AM IST the next day.** Refresh by signing in again. |
-| `mode` | One of `explore`, `practice`, `live`. Server-enforced on every order path. |
+| `mode` | One of `explore` (example data; not a menu Mode), `practice`, `live`. Server-enforced on every order path. |
 | `live_mode_unlocked` | `true` only after `POST /v1/auth/pin` with `mode: "live"`. Required for live order paths. |
 
 A `jti` (JWT ID) is included so the server can revoke individual tokens
@@ -650,7 +650,7 @@ in `packages/core/core/src/flinttrade_core/auth_state.py`.
 
 FlintTrade backend routes accept `X-API-Key` against `FLINTTRADE_API_KEY`
 when configured. `OPENALGO_API_KEY` is retained as a compatibility fallback,
-but it is no longer required for native FlintTrade practice/explore flows.
+but it is no longer required for native FlintTrade Practice or example-data flows.
 When neither key exists, loopback-only local requests are allowed so a fresh
 desktop/dev install can reach read-only setup and sandbox endpoints. Broker
 account-management **writes** (connect/remove/re-authenticate a broker,
@@ -687,26 +687,26 @@ window opens; you do not get a 429 from the broker.
 
 ## 6. Mode system
 
-`explore | practice | live` — server-side JWT-claim enforcement. The
+`explore | practice | live` — server-side JWT-claim enforcement. The claim `explore` is example data. Operators see **Example**, not a Mode in the menu. The
 guard lives at `packages/services/engine/src/flinttrade_engine/mode_guard.py`. Every order-path
 endpoint asks the guard whether the current JWT permits live orders;
 the guard returns one of three verdicts:
 
 | Verdict | Behaviour |
 |---|---|
-| `explore` | Reject order placement with HTTP 403 and `code: "mode_blocked"`. Explore is for reading, learning, and demo data only. |
-| `practice` | Route supported single-leg order flows to FlintTrade's native `SandboxEngine`; never touch OpenAlgo or a broker. Practice **place** is admitted by `Laya.admit` before that sandbox. A Down refusal or a quantity clamp returns before any fill. Advanced executor-direct routes that do not yet have sandbox parity fail closed with `practice_unsupported`. |
+| `explore` | Example data. Reject order placement with HTTP 403 and `code: "mode_blocked"`. No broker is contacted. |
+| `practice` | Route supported single-leg order flows to the Practice fill path; never touch OpenAlgo or a broker. Practice **place** is admitted by `Laya.admit` before that path. A Down refusal or a quantity clamp returns before any fill. Advanced executor-direct routes that do not yet have Practice parity fail closed with `practice_unsupported`. |
 | `live` | Require a JWT with `live_mode_unlocked=true`. Core operator **place** (`POST /api/v1/orders/place` and the routed live place that shares that dispatcher) and automate place run `Laya.admit` before SafetySystem, then the gated `BrokerRouter`. Modify, cancel, `cancel-all`, smart, multi, forever, and other write verbs still reach SafetySystem without this admission. The core modify, cancel, `cancel-all`, and `/orders/forever` paths go through the gated `BrokerRouter`. Other legacy write verbs (`gtt-*`, `open-position`, `close-position`, and similar) return HTTP 501 until they have a gated `BrokerRouter` verb — they do not forward ungated to OpenAlgo. |
 
 `POST /v1/auth/mode` issues a fresh JWT and revokes the previous `jti`,
-but it accepts **only** downgrades to `practice` or `explore`. Upgrading
+but it accepts **only** downgrades to `practice` or the sample-data claim `explore`. Upgrading
 to Live is `POST /v1/auth/pin` with the 6-digit PIN (`mode: "live"`), after
 the authenticator is enrolled (`totp_enabled`). Without enrolment that call
 refuses 403 with `code: "totp_required"`. There is no
 `/auth/mode {mode:live}` shortcut.
 
 Authoritative coverage: `packages/core/core/tests/test_order_routes.py` asserts
-Explore rejection, Practice sandbox routing, and Live gate / fail-closed
+Example-data rejection, Practice routing, and Live gate / fail-closed
 behaviour. Engine routes that bypass the core order proxy use
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.
 
@@ -734,7 +734,7 @@ admits that place through `Laya.admit` as source `operator`, then the
 safety gate, the account ACL check, and BrokerRouter. Automate place uses
 the same admit verdict before SafetySystem and `gate_order`, as source
 `automate` on strategy dispatch and webhook place. It does not use this
-HTTP place route. Explore place stays `mode_blocked` and is not an
+HTTP place route. Example-data place stays `mode_blocked` and is not an
 admission result.
 
 ```bash
@@ -914,10 +914,9 @@ Every endpoint returns one of two shapes.
 ```
 
 Most handlers return only `status` + `message`. The core
-`/api/v1/orders/*` proxy rejects Explore (`/orders/place`, modify,
+`/api/v1/orders/*` proxy rejects a sample-data session (`/orders/place`, modify,
 cancel, `cancel-all`, and the other verbs that share that mode gate)
-with HTTP 403, message "Orders are not available in Explore mode…", and
-`code: "mode_blocked"`. That mode refusal runs before `Laya.admit`.
+with HTTP 403 and `code: "mode_blocked"`. That refusal runs before `Laya.admit`.
 Core operator place, after the mode guard, admits before SafetySystem
 and before the Practice sandbox. A client `source` field is ignored, so
 the request cannot present itself as chat or as automate. A refusal is
@@ -927,15 +926,15 @@ places neither size.
 on that same proxy is still message-only: HTTP 403 with "Live mode not unlocked —
 verify PIN first". A `code` field is also emitted on
 `mode_guard`-decorated engine routes (brackets and other
-executor-direct paths), on `POST /api/v1/telegram` Explore refusals,
+executor-direct paths), on `POST /api/v1/telegram` sample-data refusals,
 on `POST /api/v1/ditto/mirror/start` and
-`POST /api/v1/ditto/kill-all` Explore refusals, and on
-`POST /api/v1/cron/jobs/<name>/pause` and `…/resume` Explore refusals.
+`POST /api/v1/ditto/kill-all` sample-data refusals, and on
+`POST /api/v1/cron/jobs/<name>/pause` and `…/resume` sample-data refusals.
 Not every endpoint emits `code`:
 
 | Code or status | Meaning |
 |---|---|
-| `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` Explore refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` Explore refusals (same header/claim gate). Explore place stays on this code. |
+| `mode_blocked` | A sample-data session (or another blocked session) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` sample-data refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` sample-data refusals (same header/claim gate). Example-data place stays on this code. |
 | `laya_denied` | Operator place was refused by `Laya.admit` before SafetySystem or the Practice sandbox — HTTP 403. Body: `status: "error"`, `code: "laya_denied"`, `message` and `reason` (the same server text), and `limits.max_quantity`. There is no `applied_quantity`. |
 | `laya_clamp` | Operator place asked for more than the active quantity ceiling — HTTP 409. Body: `status: "error"`, `code: "laya_clamp"`, `message` (`Qty reduced to <applied_quantity> (Laya limit)`), `reason` (empty string), `limits.max_quantity`, and `applied_quantity`. Neither quantity is placed. The caller places `applied_quantity` itself if it still wants that size. |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |

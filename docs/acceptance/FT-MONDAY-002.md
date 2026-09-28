@@ -35,8 +35,8 @@ feed.
 
 | Mode | Meaning |
 |---|---|
-| **Explore** | Sample-only. No Live broker order authority. |
-| **Practice** | FlintTrade `SandboxEngine` fills (primary paper). Not a broker sandbox. |
+| **Example** | Sample data, not a Mode. No broker session and no orders sent. |
+| **Practice** | Simulated fills, no real money. Not a broker sandbox. |
 | **Live** | Fail-closed until MSI native read smoke is trusted **and** funded unlock. |
 
 Dhan Sandbox remains optional paper via OpenAlgo only. It is not the

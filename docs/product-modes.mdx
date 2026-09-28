@@ -1,32 +1,57 @@
 ---
 title: Product Modes
-description: Separate Explore/Practice/Live operating modes from Sample/Unavailable/Live/Stale provenance. Home versus Trade ownership.
+description: Practice, Connected (read), and Live are Modes. Example is sample data. Provenance stays separate. Home versus Trade ownership.
 ---
 
 # Product Modes
 
-FlintTrade distinguishes operating modes from data provenance. Provenance is independent of operating mode.
+FlintTrade distinguishes Modes from sample data and from data provenance.
 
-## Operating Modes
+## Modes
 
-- **Explore**: example data; no Live broker order authority. On `/trade`, Order Pad **Example Buy** opens an example review. Example records an example fill (no broker, order-proxy, or SafetySystem). Live-intent submits remain blocked.
-- **Practice**: simulated fills, no real money (primary paper path); no real broker order or capital movement. Kotak Neo has no sandbox — never offer “Neo Practice”.
-- **Live**: fail-closed until native Dhan + Neo Connected (read) is trusted and funded unlock is explicit. Non-funded live reads show **Connected (read)** — never placeable Live orders. Broker-connect helper copy may describe that read check as API smoke. Copy for Neo is `Live read only until funded unlock.`
+A fresh browser with no saved Mode opens in Practice. Password sign-in on a finished Setup opens in Practice and does not arm Live. A PIN sign-in on an existing session can open Live.
 
-## Provenance Labels
+The Mode chip in the TopBar opens the Mode menu: **Practice**, **Connected (read)**, and **Live**.
 
-- **Sample**: Synthetic or historical sample data for illustration.
-- **Unavailable**: Data source temporarily unavailable.
-- **Live**: Real-time live data.
-- **Stale**: Data that has not been refreshed within expected freshness window. Stale requires a real freshness clock; this page describes the label, not a fake clock.
+- **Practice**: simulated fills, no real money. The Mode line reads `Practice — simulated fills, no real money.` Order review reads `Confirm places this simulated order.` Kotak Neo has no sandbox — never offer “Neo Practice”.
+- **Connected (read)**: a read-only posture on a Practice session after a broker is connected. The menu item stays disabled until then and shows `Connect a broker first`. Non-funded live reads use this label. Broker-connect helper copy may describe that read check as API smoke. Copy for Neo is `Live read only until funded unlock.`
+- **Live**: real-money capable when a broker is Connected. Orders place only on a live session. The Mode line reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.` Choosing an eligible Live item asks for the 6-digit PIN (**Switch to Live Trading?**). Opening the menu does not open that dialog.
 
-## Surface Ownership
+Live stays locked while any of these reasons apply, in this order:
 
-- **Home**: Concise, read-only overview and discovery surface.
-- **Trade**: Execution, charts, positions, orders, monitoring, and operational-risk controls.
+- `Enrol 2FA and connect a broker` — the authenticator is not enrolled, or no broker is connected. Either gap is enough.
+- `Not qualified for Live` — only when the place gate reports that this operator is not qualified. A missing report adds nothing. The desk starts **Down**. A missing heartbeat is not painted **Ready**.
 
-**71 widgets** in the current catalogue (historical context of 102→69 consolidation preserved in the repository).
+## Example data
+
+Example is sample data, not a Mode. The chip reads **Example**. The Mode line reads `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. The public web demo (`/demo-app`) is **Demo (example data)**.
+
+On `/trade`, Order Pad **Example Buy** opens an example review. The review reads `Example only. Nothing is sent to a broker and no order is placed.`
+
+The sample-data banner reads `Example data. Connect a broker to see your own.` It never shows in Practice. On Invest, an Example chip on each view replaces that banner, so each view has one example marker.
+
+## Status homes
+
+Each status has one home.
+
+- **Feed** — the chip at the start of the ticker. Example data reads **Example**. Practice and Live may read **Live**, **Delayed**, **Stale**, or **Unknown**. Practice with no feed reads `No live feed (Practice)`.
+- **Broker** — the desk-status broker chip (**Broker Connected**, **Broker Connected (read)**, or **Broker Unavailable**).
+- **Market** — the TopBar market-session chip. A closed or unavailable cash session reads `Market closed · opens 09:15`. That chip is not a Mode.
+
+## Provenance labels
+
+- **Sample**: synthetic or historical figures for illustration. Operator-facing sample figures are labelled **Example**.
+- **Unavailable**: data source temporarily unavailable.
+- **Live**: real-time live data. This label is not Live mode.
+- **Stale**: data that has not been refreshed within the expected freshness window. Stale requires a real freshness clock; this page describes the label, not a fake clock.
+
+## Surface ownership
+
+- **Home**: concise, read-only overview and discovery surface.
+- **Trade**: execution, charts, positions, orders, monitoring, and operational-risk controls.
+
+**71 widgets** in the current catalogue.
 
 Beta software. No financial advice. No promise of production readiness.
 
-Practice does not imply Sample data. Live mode does not guarantee Live provenance. Provenance remains independent of Explore/Practice/Live.
+Practice does not imply Example data. Live mode does not guarantee a Live feed. Provenance remains independent of Practice, Connected (read), and Live.

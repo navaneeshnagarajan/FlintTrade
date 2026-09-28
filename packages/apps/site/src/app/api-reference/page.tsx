@@ -19,7 +19,7 @@ const areas = [
   {
     icon: KeyRound,
     title: 'Mode and auth model',
-    copy: 'Explore, Practice, and Live behaviour is documented with server-side enforcement notes.',
+    copy: 'Practice, Connected (read), and Live behaviour is documented with server-side enforcement notes. Example data is not a Mode.',
   },
 ];
 

@@ -1,5 +1,8 @@
 # FlintTrade v0.4.0 — Security, Themes, Modes Design Spec
 
+> Superseded. Modes are Practice, Connected (read), and Live. Sample data is Example. The public web demo is Demo (example data). A fresh browser opens in Practice. Password sign-in on a finished Setup opens in Practice. The notes below are a retired design.
+
+
 > **Date:** 2026-04-01
 > **Author:** Navaneesh + Claude Code
 > **Status:** Approved
@@ -152,11 +155,11 @@ Persisted in themeStore: `{ activeThemeId, mode: "dark" | "light" | "system" }`
   - Any → Live: confirmation dialog + PIN re-entry required
   - Downgrading (Live → Sandbox/Demo): no PIN needed
 
-### 3.3 Demo Mode
+### 3.3 Example data
 
 **Entry choice (first time only):**
-> "How would you like to explore FlintTrade?"
-> - **Free Explore** — Jump in with simulated data, explore at your own pace
+> "How would you like to look around FlintTrade?"
+> - **Free example data** — Jump in with simulated data and look around at your own pace
 > - **Guided Tour** — Step-by-step walkthrough of every feature
 
 **Mock data engine:**
@@ -171,7 +174,7 @@ Persisted in themeStore: `{ activeThemeId, mode: "dark" | "light" | "system" }`
 **Guided tour:**
 - Overlay-based walkthrough using SpotlightTour component (already exists)
 - Covers: /trade workspace, /invest portfolio, /learn courses, /lab backtesting, /automate flows, /ai advisor
-- User can exit tour at any time → switches to free explore
+- User can exit tour at any time → switches to example data
 
 **Visual indicator:**
 - Persistent grey banner: "DEMO MODE — Simulated data, no real trades"
@@ -212,7 +215,7 @@ Persisted in themeStore: `{ activeThemeId, mode: "dark" | "light" | "system" }`
 - **Remove:** "Skip →" button (top-right)
 - **Remove:** 5 legacy theme icons (top-left)
 - **Remove:** /setup as a standalone route
-- **Remove:** /explore as a standalone route (replaced by Demo mode)
+- **Remove:** the old sample-data route as a standalone screen (replaced by Demo (example data))
 
 ### 4.2 New Flow
 
@@ -272,7 +275,7 @@ Persisted in themeStore: `{ activeThemeId, mode: "dark" | "light" | "system" }`
 All existing files are preserved unless explicitly confirmed by the user:
 - `packages/apps/terminal/src/themes/*.css` — migrate to v4 format, don't delete originals until confirmed
 - `packages/apps/terminal/src/routes/SetupRoute.tsx` — reuse components in new setup flow, keep file until confirmed
-- `packages/apps/terminal/src/routes/ExploreRoute.tsx` — keep alongside Demo mode until confirmed
+- `packages/apps/terminal/src/routes/ExploreRoute.tsx` — keep alongside Demo (example data) until confirmed
 - Any other existing file — ask before deleting or making breaking changes
 
 ---

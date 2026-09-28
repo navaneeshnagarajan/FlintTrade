@@ -17,12 +17,12 @@ F&O symbols feed). MCX-only while equity indices scroll is dishonest.
 - With `prefers-reduced-motion: reduce`, a freeze is OK if labelled
   (e.g. “Reduced motion”). Empty/unavailable venues → omit badge or
   Unavailable; never a fake venue strip.
-- The Sample/Explore freshness chip may stay. It must not hide venue
+- The Example feed chip may stay. It must not hide venue
   honesty.
 
 ## Observed strip
 
-On an Explore strip, the Sample freshness chip and an MCX-only pinned
+On an example-data strip, the Example feed chip and an MCX-only pinned
 badge were visible while NIFTY, SENSEX, and BANK NIFTY scrolled in the
 same marquee. Scroll was continuous when reduced motion was off.
 
@@ -34,11 +34,11 @@ same marquee. Scroll was continuous when reduced motion was off.
 3. With `prefers-reduced-motion: reduce`, a freeze is OK if labelled
    (e.g. “Reduced motion”). Empty/unavailable venues → omit badge or
    Unavailable; never a fake venue strip.
-4. The Sample/Explore freshness chip may stay. It must not hide venue
+4. The Example feed chip may stay. It must not hide venue
    honesty.
 5. British English in operator copy.
 
 ## Out of scope
 
-- Removing or replacing the Sample/Explore freshness chip.
+- Removing or replacing the Example feed chip.
 - Order placement, broker connect, or feed transport.
