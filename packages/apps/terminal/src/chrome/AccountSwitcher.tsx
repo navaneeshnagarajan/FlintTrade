@@ -102,15 +102,7 @@ export default function AccountSwitcher() {
   );
 
   if (accounts.length === 0) {
-    return (
-      <span
-        className="flex h-7 items-center gap-1 px-2 text-xs text-text-muted"
-        aria-label="Broker connectivity: No broker connected"
-      >
-        <User size={12} aria-hidden="true" />
-        No broker connected
-      </span>
-    );
+    return null;
   }
 
   const label = activeAccount

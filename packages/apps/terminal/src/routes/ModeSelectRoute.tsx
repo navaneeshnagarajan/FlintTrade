@@ -7,12 +7,15 @@
  */
 
 import { useState } from "react";
-import { Monitor, FlaskConical, Zap, AlertTriangle } from "lucide-react";
+import { Eye, FlaskConical, Zap, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AppMode } from "@/stores/modeStore";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { enableFlintTradeTotp } from "@/lib/setupAccountApi";
 import { unlockWithPin } from "@/lib/modeAuth";
+
+type ModeChoice = "practice" | "connected-read" | "live";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,7 +28,7 @@ interface ModeSelectRouteProps {
 }
 
 interface ModeCardConfig {
-  id: AppMode;
+  id: ModeChoice;
   label: string;
   description: string;
   brokerNote: string;
@@ -42,15 +45,15 @@ interface ModeCardConfig {
 
 const MODE_CARDS: ModeCardConfig[] = [
   {
-    id: "explore",
-    label: "Explore",
-    description: "Browse with sample data only",
-    brokerNote: "No broker needed",
-    icon: <Monitor size={22} aria-hidden="true" />,
-    pillClass: "bg-text-muted/20 text-text-secondary",
-    borderClass: "border-border-default/70 hover:border-text-muted/60",
-    selectedBorderClass: "border-text-secondary ring-1 ring-text-secondary/30 shadow-[0_0_30px_rgba(148,163,184,0.16)]",
-    iconBgClass: "bg-text-muted/10 text-text-secondary",
+    id: "connected-read",
+    label: "Connected (read)",
+    description: "Read a connected broker. Live orders stay off.",
+    brokerNote: "Broker connected",
+    icon: <Eye size={22} aria-hidden="true" />,
+    pillClass: "bg-sky-500/20 text-sky-300",
+    borderClass: "border-border-default/70 hover:border-sky-500/50",
+    selectedBorderClass: "border-sky-400 ring-1 ring-sky-400/30 shadow-[0_0_30px_rgba(56,189,248,0.16)]",
+    iconBgClass: "bg-sky-500/10 text-sky-300",
   },
   {
     id: "practice",
@@ -58,7 +61,7 @@ const MODE_CARDS: ModeCardConfig[] = [
     // "with live data" overpromised: without a broker or OpenAlgo connection
     // there is no market feed, so a fresh install sees honest dashes and the
     // sandbox refuses market fills (no LTP). Say what actually happens.
-    description: "Practice fills on FlintTrade's SandboxEngine",
+    description: "Simulated fills, no real money.",
     // Practice orders run against the native SandboxEngine, never a broker —
     // claiming "Broker required" here scared off broker-less users (item 2).
     brokerNote: "No broker needed · primary Practice path",
@@ -85,8 +88,13 @@ const MODE_CARDS: ModeCardConfig[] = [
 // Component
 // ---------------------------------------------------------------------------
 
+function initialChoice(initialMode: AppMode): ModeChoice {
+  return initialMode === "live" ? "live" : "practice";
+}
+
 export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: ModeSelectRouteProps) {
-  const [selected, setSelected] = useState<AppMode>(initialMode);
+  const brokerConnected = useBrokerConnected();
+  const [selected, setSelected] = useState<ModeChoice>(initialChoice(initialMode));
   const [pin, setPin] = useState("");
   const [totpCode, setTotpCode] = useState("");
   const [pinError, setPinError] = useState("");
@@ -105,7 +113,7 @@ export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: M
         }
         const { token: liveSessionToken } = await unlockWithPin(pin, "live");
         setPinError("");
-        onSelect(selected, liveSessionToken);
+        onSelect("live", liveSessionToken);
         return;
       } catch (e) {
         // Surface the backend's actual reason — a wrong PIN says "Invalid PIN",
@@ -117,11 +125,17 @@ export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: M
         setIsVerifyingPin(false);
       }
     }
-    onSelect(selected);
+    if (selected === "connected-read") {
+      if (!brokerConnected) return;
+      onSelect("practice");
+      return;
+    }
+    onSelect("practice");
   };
 
-  const handleCardSelect = (mode: AppMode) => {
-    setSelected(mode);
+  const handleCardSelect = (choice: ModeChoice) => {
+    if (choice === "connected-read" && !brokerConnected) return;
+    setSelected(choice);
     setPin("");
     setTotpCode("");
     setPinError("");
@@ -144,11 +158,16 @@ export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: M
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" role="radiogroup" aria-label="Select trading mode">
           {MODE_CARDS.map((card) => {
             const isSelected = selected === card.id;
+            const locked = card.id === "connected-read" && !brokerConnected;
+            const note = locked ? "Connect a broker first" : card.brokerNote;
             return (
               <button
                 key={card.id}
+                type="button"
                 role="radio"
                 aria-checked={isSelected}
+                aria-disabled={locked || undefined}
+                disabled={locked}
                 onClick={() => handleCardSelect(card.id)}
                 className={`
                   relative flex min-h-40 flex-col items-center justify-center gap-3 rounded-xl border p-4
@@ -175,7 +194,7 @@ export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: M
 
                 {/* Broker note pill */}
                 <span className={`text-xxs font-medium px-2 py-0.5 rounded-full ${card.pillClass}`}>
-                  {card.brokerNote}
+                  {note}
                 </span>
 
                 {/* Selected indicator dot */}

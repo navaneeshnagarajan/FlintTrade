@@ -692,8 +692,8 @@ describe("OrderPadWidget Practice review/confirm stage", () => {
     expect(reviewQueries.getByText("1")).toBeInTheDocument();
     expect(reviewQueries.getByText("₹250.50 (estimated fill)")).toBeInTheDocument();
     expect(reviewQueries.getByText("₹250.50")).toBeInTheDocument();
-    expect(reviewQueries.getByText(/simulation only/i)).toBeInTheDocument();
-    expect(reviewQueries.getByText(/no broker or native trading api is contacted/i)).toBeInTheDocument();
+    expect(reviewQueries.getByText("Confirm places this simulated order.")).toBeInTheDocument();
+    expect(reviewQueries.queryByText(/sandboxengine/i)).not.toBeInTheDocument();
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 

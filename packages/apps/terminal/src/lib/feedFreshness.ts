@@ -116,6 +116,17 @@ export function resolveFeedFreshness(input: FeedFreshnessInput): FeedFreshness {
     };
   }
 
+  if (input.mode === "practice") {
+    return {
+      state: "unknown",
+      label: "No live feed (Practice)",
+      ageMs,
+      ageLabel: null,
+      chipText: "No live feed (Practice)",
+      muted: true,
+    };
+  }
+
   return {
     state: "unknown",
     label: FEED_FRESHNESS_LABEL.unknown,

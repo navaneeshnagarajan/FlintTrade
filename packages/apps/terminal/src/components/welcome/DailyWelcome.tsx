@@ -22,8 +22,7 @@ interface TimeContext {
 
 const SESSION_KEY = "flinttrade:sessionActive";
 
-function getTimeContext(): TimeContext | null {
-  const now = new Date();
+export function getTimeContext(now = new Date()): TimeContext | null {
   const ist = new Date(
     now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
   );
@@ -35,17 +34,15 @@ function getTimeContext(): TimeContext | null {
   if (isWeekend) {
     return {
       greeting: "Happy weekend",
-      message: "Markets resume Monday 9:15 AM",
+      message: "",
       suggestion: "Try backtesting a strategy",
     };
   }
 
   if (mins < 555) {
-    // Before 9:15 AM IST
-    const minsToOpen = 555 - mins;
     return {
       greeting: hour < 12 ? "Good morning" : "Hello",
-      message: `Market opens in ${Math.floor(minsToOpen / 60)}h ${minsToOpen % 60}m`,
+      message: "",
       suggestion: "Review overnight global indices",
     };
   }
@@ -58,15 +55,15 @@ function getTimeContext(): TimeContext | null {
 
   if (hour < 20) {
     return {
-      greeting: "Markets closed",
-      message: "Review today's trades",
+      greeting: hour < 12 ? "Good morning" : "Good afternoon",
+      message: "",
       suggestion: "Open Trade Review?",
     };
   }
 
   return {
     greeting: "Good evening",
-    message: "Markets closed for the day",
+    message: "",
     suggestion: "Explore learning modules",
   };
 }
@@ -214,7 +211,7 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
 
   // If crash recovery, show the red card regardless of market hours
   // Dismiss via useEffect to avoid React "Cannot update component during render" error
-  const ctx = !isRecovery ? getTimeContext() : null;
+  const ctx = !isRecovery ? getTimeContext(new Date()) : null;
   const shouldDismiss = !isRecovery && !ctx;
 
   useEffect(() => {
@@ -229,17 +226,10 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
     const { todayHoliday, tomorrowHoliday, upcomingHoliday } =
       getHolidayContext(holidays);
 
-    // Override greeting when today is a holiday
-    const baseGreeting = todayHoliday
-      ? `Today is ${todayHoliday.description} — markets closed`
-      : displayName
-        ? `${ctx.greeting}, ${displayName}`
-        : ctx.greeting;
-
-    // Override message when tomorrow is a holiday
-    const baseMessage = tomorrowHoliday
-      ? `Tomorrow: ${tomorrowHoliday.description} — markets closed`
-      : ctx.message;
+    const baseGreeting = displayName
+      ? `${ctx.greeting}, ${displayName}`
+      : ctx.greeting;
+    const baseMessage = ctx.message;
 
     return (
       <div
@@ -257,7 +247,9 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
         <p className="font-heading font-semibold text-lg text-text-primary pr-6">
           {baseGreeting}
         </p>
-        <p className="text-sm text-text-secondary mt-1">{baseMessage}</p>
+        {baseMessage ? (
+          <p className="text-sm text-text-secondary mt-1">{baseMessage}</p>
+        ) : null}
         {upcomingHoliday && !tomorrowHoliday && (
           <p className="text-xs text-amber-400 mt-2">
             Upcoming: {upcomingHoliday.description} on{" "}

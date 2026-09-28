@@ -46,7 +46,7 @@ describe("PracticeOrderReviewStage", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Review Practice order" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(dialog).toHaveAccessibleDescription(/simulation only/i);
+    expect(dialog).toHaveAccessibleDescription("Confirm places this simulated order.");
 
     const back = screen.getByRole("button", { name: "Back to edit" });
     const confirm = screen.getByRole("button", { name: "Confirm simulated Practice order" });

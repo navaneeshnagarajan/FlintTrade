@@ -26,7 +26,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { InlineToast } from "./shared";
 
 export const EXPLORE_TELEGRAM_TEST_HELPER =
-  "Telegram tests are blocked in Explore (sample-only). Switch to Practice or Live with Telegram configured to send a real test.";
+  "Telegram tests are blocked for sample data. Switch to Practice or Live with Telegram configured to send a real test.";
 
 export const TELEGRAM_UNCONFIGURED_HELPER = "Configure Telegram first";
 

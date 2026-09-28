@@ -210,6 +210,18 @@ const MARKET_UNAVAILABLE: MarketSessionInfo = {
   isGreenOpen: false,
 };
 
+/** One operator label for a closed or unknown cash session. */
+export const MARKET_CLOSED_LABEL = "Market closed · opens 09:15";
+
+/**
+ * Operator-facing session label. Closed and unavailable share one sentence
+ * so the TopBar and the ticker cannot disagree.
+ */
+export function operatorMarketLabel(info: MarketSessionInfo): string {
+  if (info.status === "closed" || info.status === "unavailable") return MARKET_CLOSED_LABEL;
+  return info.label;
+}
+
 function cashSessionToInfo(session: NseCashSessionInfo): MarketSessionInfo {
   return {
     status: session.phase,

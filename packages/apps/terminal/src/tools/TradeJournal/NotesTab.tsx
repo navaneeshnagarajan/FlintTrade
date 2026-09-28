@@ -229,7 +229,7 @@ export function NotesTab() {
 
   let saveLabel = "";
   if (isExploreMode) {
-    saveLabel = "Explore mode — notes are not saved";
+    saveLabel = "Sample data — notes are not saved";
   } else if (saveState === "pending" || saveMutation.isPending) {
     saveLabel = "saving…";
   } else if (saveState === "error" || (saveState === "idle" && noteQuery.isError)) {

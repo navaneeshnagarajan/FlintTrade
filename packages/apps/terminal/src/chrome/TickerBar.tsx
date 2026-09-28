@@ -1,9 +1,8 @@
 import { useAtomValue } from "jotai";
-import { useNavigate } from "react-router";
 import { indicesSummaryAtom } from "@/atoms/marketAtoms";
 import FeedFreshnessChip from "@/components/FeedFreshnessChip";
-import { isMarketHours } from "@/lib/market";
-import type { WsTick } from "@/types/api";
+import { useOperatorMarketSession } from "@/hooks/useOperatorMarketSession";
+import { isMarketHours, MARKET_CLOSED_LABEL, operatorMarketLabel } from "@/lib/market";
 import TickerMarquee, { type TickerMode } from "./TickerMarquee";
 import { deriveTickerVenueStrip, type TickerVenueBadge } from "./tickerVenues";
 import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
@@ -24,10 +23,6 @@ function VenueBadge({ badge }: { badge: TickerVenueBadge }) {
   );
 }
 
-function hasAnyLiveData(indices: { data: WsTick | null }[]): boolean {
-  return indices.some((idx) => idx.data !== null && (idx.data.ltp ?? 0) !== 0);
-}
-
 export interface TickerBarProps {
   /** Display mode for the dedicated scrolling strip. Default: marquee. */
   mode?: TickerMode;
@@ -43,10 +38,15 @@ export interface TickerBarProps {
  */
 export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
   const indices = useAtomValue(indicesSummaryAtom);
-  const hasData = hasAnyLiveData(indices);
-  const navigate = useNavigate();
   const reducedMotion = usePrefersReducedMotion();
-  const venueStrip = deriveTickerVenueStrip(indices, (exchange) => isMarketHours(exchange));
+  const session = useOperatorMarketSession();
+  const marketLabel = operatorMarketLabel(session);
+  const sharedClosed = marketLabel === MARKET_CLOSED_LABEL;
+  const venueStrip = deriveTickerVenueStrip(
+    indices,
+    (exchange) => isMarketHours(exchange),
+    sharedClosed ? marketLabel : undefined,
+  );
 
   return (
     <div
@@ -101,15 +101,6 @@ export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
         labelled={false}
         announce={false}
       />
-
-      {!hasData && (
-        <button
-          onClick={() => navigate("/settings#brokers")}
-          className="text-xxs text-text-muted hover:text-accent px-3 select-none transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none rounded shrink-0"
-        >
-          Connect broker for live prices →
-        </button>
-      )}
 
       {/* Accessibility: one polite live region summarises all index prices for
           screen readers (Issue #50). The nested marquee stays silent so ticks

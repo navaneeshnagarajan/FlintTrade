@@ -35,10 +35,24 @@ vi.mock("@/components/ui/GlossaryTooltip", () => ({
   GlossaryTooltip: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
 
-// isMarketHours mock — controlled per test
+// isMarketHours mock — controlled per test. The shared session label stays real.
 const mockIsMarketHours = vi.fn().mockReturnValue(false);
-vi.mock("@/lib/market", () => ({
-  isMarketHours: (...args: unknown[]) => mockIsMarketHours(...args),
+vi.mock("@/lib/market", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/market")>();
+  return {
+    ...actual,
+    isMarketHours: (...args: unknown[]) => mockIsMarketHours(...args),
+  };
+});
+
+vi.mock("@/hooks/useOperatorMarketSession", () => ({
+  useOperatorMarketSession: () => ({
+    status: "unavailable",
+    label: "Market unavailable",
+    title: "Market unavailable",
+    foSecondary: null,
+    isGreenOpen: false,
+  }),
 }));
 
 import { useModeStore } from "@/stores/modeStore";
@@ -76,14 +90,15 @@ describe("TickerBar", () => {
     expect(container).toBeTruthy();
   });
 
-  it("shows broker connect prompt when no live data", () => {
+  it("does not repeat broker status on the ticker", () => {
     setIndices([
       { name: "NIFTY 50", data: null },
       { name: "SENSEX", data: null },
     ]);
     renderTickerBar();
 
-    expect(screen.getByText(/connect broker for live prices/i)).toBeInTheDocument();
+    expect(screen.queryByText(/connect broker for live prices/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no broker connected/i)).not.toBeInTheDocument();
   });
 
   it("shows index names when data is present", () => {
@@ -150,7 +165,7 @@ describe("TickerBar", () => {
       renderTickerBar();
 
       // The MCX label badge should be present
-      expect(screen.getByLabelText(/MCX (open|closed)/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^MCX/)).toBeInTheDocument();
     });
 
     it("does not render MCX separator when no MCX instruments are in the atom", () => {
@@ -160,7 +175,7 @@ describe("TickerBar", () => {
       ]);
       renderTickerBar();
 
-      expect(screen.queryByLabelText(/MCX (open|closed)/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^MCX/)).not.toBeInTheDocument();
     });
 
     it("renders MCX commodity chip names", () => {
@@ -199,9 +214,9 @@ describe("TickerBar", () => {
       ]);
       renderTickerBar();
 
-      const badge = screen.getByLabelText("MCX closed");
+      const badge = screen.getByLabelText("MCX: Market closed · opens 09:15");
       expect(badge).toBeInTheDocument();
-      expect(badge).toHaveAttribute("title", "MCX session is closed");
+      expect(badge).toHaveAttribute("title", "Market closed · opens 09:15");
     });
 
     it("MCX instruments display LTP values correctly", () => {
@@ -235,7 +250,7 @@ describe("TickerBar", () => {
 
       const badges = screen.getByLabelText("Venue badges");
       expect(badges).toHaveAttribute("data-venues", "MCX");
-      expect(screen.getByLabelText("MCX closed")).toBeInTheDocument();
+      expect(screen.getByLabelText("MCX: Market closed · opens 09:15")).toBeInTheDocument();
     });
   });
 
@@ -257,9 +272,9 @@ describe("TickerBar", () => {
 
       const badges = screen.getByTestId("ticker-venue-badges");
       expect(badges).toHaveAttribute("data-venues", "NSE,BSE,MCX");
-      expect(screen.getByLabelText("NSE closed")).toBeInTheDocument();
-      expect(screen.getByLabelText("BSE closed")).toBeInTheDocument();
-      expect(screen.getByLabelText("MCX closed")).toBeInTheDocument();
+      expect(screen.getByLabelText("NSE: Market closed · opens 09:15")).toBeInTheDocument();
+      expect(screen.getByLabelText("BSE: Market closed · opens 09:15")).toBeInTheDocument();
+      expect(screen.getByLabelText("MCX: Market closed · opens 09:15")).toBeInTheDocument();
       expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
       expect(screen.getAllByText("NIFTY 50").length).toBeGreaterThan(0);
       expect(screen.getAllByText("SENSEX").length).toBeGreaterThan(0);
@@ -272,11 +287,11 @@ describe("TickerBar", () => {
       setIndices(equityAndMcx);
       renderTickerBar();
 
-      expect(screen.getByLabelText("NSE closed")).toHaveAttribute(
+      expect(screen.getByLabelText("NSE: Market closed · opens 09:15")).toHaveAttribute(
         "title",
-        "NSE session is closed",
+        "Market closed · opens 09:15",
       );
-      expect(screen.getByLabelText("BSE closed")).toBeInTheDocument();
+      expect(screen.getByLabelText("BSE: Market closed · opens 09:15")).toBeInTheDocument();
       expect(screen.getByLabelText("MCX open")).toHaveAttribute(
         "title",
         "MCX session is open (09:00–23:30 IST)",
@@ -296,7 +311,7 @@ describe("TickerBar", () => {
         "data-venues",
         "NSE,BSE",
       );
-      expect(screen.queryByLabelText(/MCX (open|closed)/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^MCX/)).not.toBeInTheDocument();
     });
 
     it("adds NFO when an F&O symbol feeds the marquee", () => {
@@ -311,9 +326,9 @@ describe("TickerBar", () => {
         "data-venues",
         "NSE,NFO,MCX",
       );
-      expect(screen.getByLabelText("NFO closed")).toHaveAttribute(
+      expect(screen.getByLabelText("NFO: Market closed · opens 09:15")).toHaveAttribute(
         "title",
-        "NFO session is closed",
+        "Market closed · opens 09:15",
       );
     });
 
@@ -334,9 +349,9 @@ describe("TickerBar", () => {
         "unavailable",
       );
       expect(screen.getByLabelText("Venues unavailable")).toHaveTextContent("Unavailable");
-      expect(screen.queryByLabelText(/NSE (open|closed)/i)).not.toBeInTheDocument();
-      expect(screen.queryByLabelText(/BSE (open|closed)/i)).not.toBeInTheDocument();
-      expect(screen.queryByLabelText(/MCX (open|closed)/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^NSE/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^BSE/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^MCX/)).not.toBeInTheDocument();
     });
   });
 
@@ -347,6 +362,7 @@ describe("TickerBar", () => {
     renderTickerBar();
 
     expect(screen.getByTestId("ticker-strip")).toBeInTheDocument();
+    expect(screen.getByTestId("ticker-marquee-clone")).toHaveAttribute("aria-hidden", "true");
     const marquee = screen.getByTestId("ticker-marquee");
     expect(marquee).toHaveAttribute("data-motion", "marquee");
     expect(marquee.querySelector(".ticker-track")).not.toBeNull();

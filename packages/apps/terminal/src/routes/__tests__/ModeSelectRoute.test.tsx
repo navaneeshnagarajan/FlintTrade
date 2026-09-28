@@ -30,15 +30,18 @@ describe("ModeSelectRoute", () => {
     expect(practiceButton).not.toBeNull();
     expect(practiceButton).toHaveTextContent(/no broker needed/i);
     expect(practiceButton).toHaveTextContent(/primary Practice path/i);
-    expect(practiceButton).toHaveTextContent(/SandboxEngine/i);
+    expect(practiceButton).toHaveTextContent(/simulated fills, no real money/i);
+    expect(practiceButton).not.toHaveTextContent(/SandboxEngine/i);
     expect(practiceButton).not.toHaveTextContent(/broker required/i);
     expect(practiceButton).not.toHaveTextContent(/\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
     expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).not.toHaveTextContent(/API smoke/i);
     expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).toHaveTextContent("Practice");
     expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).toHaveTextContent("Live");
+    expect(screen.getByRole("radiogroup", { name: /select trading mode/i })).not.toHaveTextContent("Explore");
 
-    const exploreButton = screen.getByText("Explore").closest("button") as HTMLButtonElement;
-    expect(exploreButton).toHaveTextContent(/sample/i);
+    const connectedRead = screen.getByRole("radio", { name: /Connected \(read\)/i });
+    expect(connectedRead).toBeDisabled();
+    expect(connectedRead).toHaveTextContent("Connect a broker first");
 
     // Live stays fail-closed until funded unlock — never a Monday place CTA.
     const liveButton = screen.getByText("Live").closest("button") as HTMLButtonElement;
@@ -142,7 +145,7 @@ describe("ModeSelectRoute", () => {
     render(<ModeSelectRoute initialMode="practice" onSelect={onSelect} />);
 
     expect(screen.getByRole("radio", { name: /Practice/i })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("radio", { name: /Explore/i })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("radio", { name: /Connected \(read\)/i })).toHaveAttribute("aria-checked", "false");
     expect(onSelect).not.toHaveBeenCalled();
   });
 });

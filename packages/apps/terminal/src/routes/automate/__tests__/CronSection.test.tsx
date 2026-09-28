@@ -73,7 +73,7 @@ vi.mock("@/stores/modeStore", () => ({
 // ---------------------------------------------------------------------------
 
 const SAMPLE_SCHEDULE_PAUSE_UNAVAILABLE =
-  "Sample schedule — control unavailable in Explore";
+  "Sample schedule — control unavailable";
 
 const ACTIVE_JOB = {
   name: "health_check_job",

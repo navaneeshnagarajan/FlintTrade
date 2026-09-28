@@ -764,7 +764,7 @@ function TotpDisplay({
 
         <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
           <p className="text-xs text-text-secondary leading-relaxed">
-            An authenticator is optional for Explore and Practice. Enrol it now, or choose
+            An authenticator is optional for Practice. Enrol it now, or choose
             Set up later and use your password. Live unlock still requires the authenticator
             and your PIN.
           </p>

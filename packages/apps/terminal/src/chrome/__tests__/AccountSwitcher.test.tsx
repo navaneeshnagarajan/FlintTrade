@@ -98,10 +98,10 @@ describe("AccountSwitcher", () => {
     expect(screen.getByText("ZERODHA · Primary")).toBeInTheDocument();
   });
 
-  it("keeps zero broker connectivity visible when there are no accounts", () => {
+  it("does not add a second broker chip when there are no accounts", () => {
     storeState = { accounts: [], activeAccountId: null };
     renderWithProviders();
-    expect(screen.getByText("No broker connected")).toBeInTheDocument();
+    expect(screen.queryByText("No broker connected")).not.toBeInTheDocument();
   });
 
   it("uses broker-aware active keys when account ids collide", () => {

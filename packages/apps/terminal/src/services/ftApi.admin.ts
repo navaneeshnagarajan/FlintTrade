@@ -148,7 +148,7 @@ const DEMO_SECURITY_SETTINGS: SecuritySettings = {
 
 const DEMO_HEALTH: SystemHealth = {
   status: "degraded",
-  broker: { status: "degraded", note: "Explore mode" },
+  broker: { status: "degraded", note: "Sample data" },
   duckdb: { status: "ok" },
   disk: { status: "ok", free_gb: 128, total_gb: 256, used_pct: 50 },
   memory: { status: "ok", used_mb: 2048, total_mb: 8192, used_pct: 25 },

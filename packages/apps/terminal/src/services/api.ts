@@ -2764,7 +2764,7 @@ async function post<T>(
     if (fallback !== undefined) return fallback;
     const kind = NATIVE_READ_ENDPOINTS[endpoint];
     if (kind && NATIVE_ACCOUNT_SCOPED_KINDS.has(kind)) {
-      throw new Error(`${endpoint} is not available in Explore mode.`);
+      throw new Error(`${endpoint} is not available in this session.`);
     }
   }
 
@@ -3466,7 +3466,7 @@ export const getMaxPain = async (
 ) => {
   signal?.throwIfAborted();
   requireCurrentMarketDataScope(expectedDataScope);
-  if (isExploreMode()) throw new Error("Max Pain is not available in Explore mode.");
+  if (isExploreMode()) throw new Error("Max Pain is not available in this session.");
   const value = await awaitMarketDataAuthority(
     () => postFtApi<BackendMaxPainData>(
       "maxpain",

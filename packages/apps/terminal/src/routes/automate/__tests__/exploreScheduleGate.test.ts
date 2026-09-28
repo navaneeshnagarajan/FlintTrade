@@ -17,7 +17,7 @@ import {
 describe("exploreScheduleGate", () => {
   it("uses the locked Pause helper title", () => {
     expect(SAMPLE_SCHEDULE_PAUSE_UNAVAILABLE).toBe(
-      "Sample schedule — control unavailable in Explore",
+      "Sample schedule — control unavailable",
     );
   });
 

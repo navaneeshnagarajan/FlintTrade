@@ -120,10 +120,6 @@ export function PracticeOrderReviewStage({
           {detailRow("Estimated exposure", exposureText, true)}
         </dl>
 
-        <p className="mt-3 text-xxs leading-relaxed text-text-muted">
-          Back or any order edit invalidates this review. Confirm submits this exact immutable intent on the paper path.
-        </p>
-
         <div className="mt-3">
           <LayaAdmissionNotice notice={admission} />
         </div>

@@ -43,7 +43,8 @@ describe("ConnectionStep", () => {
 
     const skip = screen.getByRole("button", { name: /continue without a broker/i });
     expect(skip).toBeEnabled();
-    expect(screen.getByText(/SandboxEngine/i)).toBeInTheDocument();
+    expect(screen.getByText(/simulated fills, no real money/i)).toBeInTheDocument();
+    expect(screen.queryByText(/SandboxEngine/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Settings fallback/i)).toBeInTheDocument();
     expect(screen.queryByText(/Recommended/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/openalgo-compatible url/i)).not.toBeInTheDocument();

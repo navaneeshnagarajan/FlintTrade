@@ -309,7 +309,7 @@ describe("NotesTab", () => {
     expect(textarea).toHaveValue("explore scribbles");
 
     expect(
-      screen.getByText(/Explore mode — notes are not saved/),
+      screen.getByText(/Sample data — notes are not saved/),
     ).toBeInTheDocument();
 
     // Allow any (incorrect) query or import kick-off to surface.

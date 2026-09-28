@@ -541,7 +541,7 @@ function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
 const EXPLORE_TOUR_STEPS: TourStep[] = [
   {
     target: null,
-    title: "Welcome to Explore Mode",
+    title: "Welcome",
     description:
       "This is a fully interactive preview of FlintTrade using sample data. No broker connection is needed. Let us walk you through the key sections.",
     placement: "bottom",
@@ -615,7 +615,7 @@ export default function ExploreRoute() {
   return (
     <>
       <PublicRouteShell
-        mainLabel="Explore mode"
+        mainLabel="Sample data"
         eyebrow="Explore"
         title="Explore FlintTrade"
         subtitle="Open every module with simulated data, then connect OpenAlgo or a verified native broker when you are ready for live data."
@@ -654,7 +654,7 @@ export default function ExploreRoute() {
           <div className="mx-auto flex max-w-2xl items-start gap-2 rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-left shadow-xl shadow-black/10 backdrop-blur-xl">
             <Info className="mt-0.5 size-4 shrink-0 text-accent" />
             <p className="text-xs leading-relaxed text-accent">
-              <strong>Explore Mode</strong> - all data shown is sample only. Connect a broker in Settings to see live data.
+              <strong>Sample data</strong> only. Connect a broker in Settings to see live prices.
             </p>
           </div>
 

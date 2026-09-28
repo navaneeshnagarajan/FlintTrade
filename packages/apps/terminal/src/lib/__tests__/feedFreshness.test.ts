@@ -97,10 +97,11 @@ describe("FT-CORE-002 feed freshness", () => {
     expect(freshness.chipText).toBe("Unknown · 5s");
   });
 
-  it("unknown source with no timestamp is muted Unknown without inventing an age", () => {
+  it("Practice with no feed is labelled once, without an invented age", () => {
     const freshness = resolve({ mode: "practice" });
     expect(freshness.state).toBe("unknown");
-    expect(freshness.chipText).toBe("Unknown");
+    expect(freshness.chipText).toBe("No live feed (Practice)");
+    expect(freshness.label).toBe("No live feed (Practice)");
     expect(freshness.ageLabel).toBeNull();
     expect(freshness.muted).toBe(true);
   });

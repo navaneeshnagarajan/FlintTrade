@@ -138,7 +138,7 @@ const unconfiguredTelegram = {
 };
 
 const EXPLORE_TELEGRAM_HELPER =
-  "Telegram tests are blocked in Explore (sample-only). Switch to Practice or Live with Telegram configured to send a real test.";
+  "Telegram tests are blocked for sample data. Switch to Practice or Live with Telegram configured to send a real test.";
 
 const partialEmergencyResult = {
   policy: "l5_emergency_flatten",

@@ -29,9 +29,9 @@ export function orderReviewTitle(mode: AppMode): string {
 
 export function orderReviewDescription(mode: AppMode): string {
   if (mode === "explore") {
-    return "Sample only. No broker or native trading API is contacted. Explore records a local sample fill.";
+    return "Sample only. No broker or native trading API is contacted.";
   }
-  return "Simulation only. No broker or native trading API is contacted. Practice sends this to FlintTrade's sandbox; Explore records a sample fill.";
+  return "Confirm places this simulated order.";
 }
 
 export function orderReviewDetailsLabel(mode: AppMode): string {
@@ -60,7 +60,7 @@ export function orderSuccessNotificationTitle(
 }
 
 export function orderSuccessNotificationBody(mode: AppMode, orderId?: string): string {
-  if (mode === "explore") return "Explore sample fill — no broker contacted.";
+  if (mode === "explore") return "Sample fill — no broker contacted.";
   return orderId ? `Order ID ${orderId}` : "Submitted to the broker.";
 }
 

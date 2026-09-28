@@ -10,7 +10,7 @@ import type { CronJob } from "@/services/ftApi";
 import type { AppMode } from "@/stores/modeStore";
 
 export const SAMPLE_SCHEDULE_PAUSE_UNAVAILABLE =
-  "Sample schedule — control unavailable in Explore";
+  "Sample schedule — control unavailable";
 
 export const SEEDED_EXPLORE_SCHEDULE_JOBS: CronJob[] = [
   {

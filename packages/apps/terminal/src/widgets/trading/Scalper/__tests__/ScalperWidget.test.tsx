@@ -270,7 +270,7 @@ describe("ScalperWidget", () => {
   // ── FT-TRADE-009: Explore external-action gate (Telegram Send Test class) ─
 
   const EXPLORE_SCALPER_HELPER = EXPLORE_SCALPER_ORDER_HELPER;
-  const EXPLORE_ONE_CLICK_TITLE = "One-click unavailable in Explore";
+  const EXPLORE_ONE_CLICK_TITLE = "One-click is unavailable for sample data";
 
   async function renderExploreScalper(): Promise<void> {
     mockModeStore.mockImplementation((selector: (s: { mode: string }) => unknown) =>
