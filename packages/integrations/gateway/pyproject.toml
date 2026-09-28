@@ -15,7 +15,7 @@ dependencies = [
     "kotakneoapi==3.0.7",
     # uv installs this hash-locked backend before building the Git-pinned SDK
     # without isolation; pip-only paths consume the equivalent dedicated lock.
-    "packaging==26.2",
+    "packaging==26.3",
     "setuptools==84.0.0",
     "wheel==0.48.0",
     "growwapi==1.5.0",
