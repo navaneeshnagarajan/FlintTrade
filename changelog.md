@@ -19,6 +19,19 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Added
 
+- **Opt-in Laya decision sidecar for place admission (FT-LAYA-MODEL-001).**
+  After the hard rules, the sidecar may deny or clamp a place only. It
+  cannot raise a quantity or overturn a rule refusal, and it does not
+  place the order. Laya starts Down. A ping does not invent Ready.
+  Live stays fail-closed until a qualification record uses
+  LIVE_DECISION evidence for the exact model revision, weight digest,
+  and policy version. When Laya is actually Down, every mode is refused
+  with "Laya is Down. Orders are paused until it's Ready." A Practice
+  refusal never says Live. A Live place without that qualification,
+  while Ready or Degraded, says "Laya isn't qualified for Live yet.
+  Practice orders are available." Opt in with
+  `python -m flinttrade_core.laya_runtime install` or `start`.
+
 - **Mode honesty bar.** One line under the TopBar for Explore, Practice,
   and Live. Widgets no longer repeat a Sample chip. An incident, when
   one is showing, sits above that line and does not replace it.
@@ -56,6 +69,15 @@ changelog rebuilds itself from the first release cut after this baseline.
   expiry is an honest empty, not zeros-as-data.
 
 ### Changed
+
+- **Desk Laya chip follows the current mode (FT-LAYA-MODEL-001).**
+  Practice and Explore show sidecar Ready, Degraded, or Down. Live
+  shows Live-facing status. "Not qualified for Live" is the tooltip
+  and the disabled-Live reason when Live lacks qualification. Ping
+  publishes Live-facing `laya`, sidecar `laya_practice`, and
+  `laya_live_qualified`. The Live Blocked strip follows Live-facing
+  Down only. It mutes Live place and Position Mirror start. Practice
+  is not muted by that strip.
 
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
   The required path is Create operator, then Vault, then the Practice
