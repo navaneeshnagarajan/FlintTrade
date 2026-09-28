@@ -150,7 +150,8 @@ shows Can't verify the model (`unverified`). A shard index
 (`model.safetensors.index.json`), or any weights file other than the
 pinned `model.safetensors` in the pinned snapshot, shows Can't verify the
 model (`unverified`) and never reaches Ready. The sidecar loads exactly
-the file that was hashed.
+the file that was hashed. On start, the sidecar logs the exact weights
+path it was handed and that file's sha256.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down — Live orders paused."). That class closes Live place and Position
