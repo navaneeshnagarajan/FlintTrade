@@ -1044,6 +1044,7 @@ function VaultStep({ onOpened, onSessionRequired }: VaultStepProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState("");
+  const submitInFlight = useRef(false);
 
   const {
     register,
@@ -1081,6 +1082,8 @@ function VaultStep({ onOpened, onSessionRequired }: VaultStepProps) {
   }, []);
 
   async function onSubmit(values: VaultFormValues) {
+    if (submitInFlight.current) return;
+    submitInFlight.current = true;
     setIsLoading(true);
     setServerError("");
     try {
@@ -1095,6 +1098,7 @@ function VaultStep({ onOpened, onSessionRequired }: VaultStepProps) {
         error instanceof Error ? error.message : "The vault could not be opened.",
       );
     } finally {
+      submitInFlight.current = false;
       setIsLoading(false);
     }
   }
@@ -1207,14 +1211,14 @@ function PracticeDeskStep() {
 type SetupStatusFailure =
   | { reason: "network" }
   | { reason: "busy" }
-  | { reason: "http"; status: number };
+  | { reason: "http" };
 
 function statusFailureFrom(error: unknown): SetupStatusFailure {
   if (!(error instanceof AccountSetupError) || error.kind === "network") {
     return { reason: "network" };
   }
   if (error.status === 429) return { reason: "busy" };
-  return { reason: "http", status: error.status ?? 0 };
+  return { reason: "http" };
 }
 
 function SetupStatusError({
@@ -1228,13 +1232,13 @@ function SetupStatusError({
   const title = unavailable
     ? "FlintTrade backend unavailable"
     : failure.reason === "busy"
-      ? "Setup is busy"
-      : "Setup status could not be read";
+      ? "FlintTrade is busy"
+      : "Can't check setup status";
   const detail = unavailable
     ? "The FlintTrade backend did not answer. Start or restart the local FlintTrade backend, then retry."
     : failure.reason === "busy"
-      ? "The server is busy. Retry in a moment."
-      : `The server could not check setup (HTTP ${failure.status}). Retry.`;
+      ? "FlintTrade is busy right now. Wait a moment, then retry."
+      : "FlintTrade answered, but setup status couldn't be read. Retry in a moment.";
   return (
     <div role="alert" aria-labelledby="setup-status-error-title" className="space-y-4">
       <h3 id="setup-status-error-title" className="text-sm font-semibold text-text-primary">{title}</h3>

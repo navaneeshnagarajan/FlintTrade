@@ -686,38 +686,60 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(mocks.setupFlintTradeAccount).not.toHaveBeenCalled();
   });
 
-  it("shows a busy error on status 429 and does not open Create operator", async () => {
+  it.each([
+    {
+      name: "HTTP 429",
+      error: new AccountSetupError("rate limit", "server", 429),
+      title: "FlintTrade is busy",
+      body: "FlintTrade is busy right now. Wait a moment, then retry.",
+    },
+    {
+      name: "HTTP 500",
+      error: new AccountSetupError("unavailable", "server", 500),
+      title: "Can't check setup status",
+      body: "FlintTrade answered, but setup status couldn't be read. Retry in a moment.",
+    },
+    {
+      name: "HTTP 404",
+      error: new AccountSetupError("missing", "server", 404),
+      title: "Can't check setup status",
+      body: "FlintTrade answered, but setup status couldn't be read. Retry in a moment.",
+    },
+    {
+      name: "malformed JSON",
+      error: new AccountSetupError("unexpected setup status", "server", 200),
+      title: "Can't check setup status",
+      body: "FlintTrade answered, but setup status couldn't be read. Retry in a moment.",
+    },
+    {
+      name: "a 200 with missing fields",
+      error: new AccountSetupError("unexpected setup status", "server", 200),
+      title: "Can't check setup status",
+      body: "FlintTrade answered, but setup status couldn't be read. Retry in a moment.",
+    },
+    {
+      name: "a network error",
+      error: new AccountSetupError("offline", "network"),
+      title: "FlintTrade backend unavailable",
+      body: "The FlintTrade backend did not answer. Start or restart the local FlintTrade backend, then retry.",
+    },
+  ])("shows $name and does not open the fresh-install form", async ({ error, title, body }) => {
     localStorage.clear();
     useAuthStore.getState().setSetupRequired();
-    mocks.fetchSetupServerState.mockRejectedValue(
-      new AccountSetupError("rate limit", "server", 429),
-    );
+    mocks.fetchSetupServerState.mockRejectedValue(error);
 
     await renderSetup();
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Setup is busy");
-    expect(alert).toHaveTextContent("The server is busy. Retry in a moment.");
-    expect(alert).not.toHaveTextContent("FlintTrade backend unavailable");
+    expect(alert).toHaveAccessibleName(title);
+    expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
+    expect(screen.getByText(body)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Retry connection" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
-  });
-
-  it("says the backend is unavailable only when status does not answer", async () => {
-    localStorage.clear();
-    useAuthStore.getState().setSetupRequired();
-    mocks.fetchSetupServerState.mockRejectedValue(
-      new AccountSetupError("offline", "network"),
-    );
-
-    await renderSetup();
-
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("FlintTrade backend unavailable");
-    expect(alert).toHaveTextContent(/did not answer/i);
-    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
-    expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Enter your email address")).not.toBeInTheDocument();
     expect(screen.queryByText("Step 1 of 3 - Create operator")).not.toBeInTheDocument();
+    expect(screen.queryByText("Step 1 of 2 - Create operator")).not.toBeInTheDocument();
   });
 
   it("keeps Step 3 of 3 after the vault opens when it was not secured at the start", async () => {
@@ -745,6 +767,53 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(screen.getByText("2 of 3 completed - last step")).toBeInTheDocument();
     expect(screen.queryByText(/of 2/)).not.toBeInTheDocument();
     expect(screen.queryByText("Your vault is set up and secured on this machine.")).not.toBeInTheDocument();
+  });
+
+  it("sends one vault open when the form is submitted twice", async () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      vaultOpened: false,
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "operator",
+      currentStep: 1,
+    }));
+    let release: ((value: { opened: true; alreadyPresent: false }) => void) | undefined;
+    mocks.openFlintTradeVault.mockImplementation((password: string) => {
+      if (!password) {
+        return Promise.reject(new Error("Enter a master password of at least 8 characters."));
+      }
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    });
+
+    await renderSetup();
+    expect(await screen.findByLabelText("Master password")).toBeInTheDocument();
+    mocks.openFlintTradeVault.mockClear();
+
+    fireEvent.change(screen.getByLabelText("Master password"), {
+      target: { value: "VaultKey123!" },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm master password"), {
+      target: { value: "VaultKey123!" },
+    });
+    const form = screen.getByLabelText("Master password").closest("form");
+    expect(form).not.toBeNull();
+    fireEvent.submit(form!);
+    fireEvent.submit(form!);
+
+    await waitFor(() => expect(mocks.openFlintTradeVault).toHaveBeenCalledTimes(1));
+    expect(mocks.openFlintTradeVault).toHaveBeenCalledWith("VaultKey123!");
+
+    await act(async () => {
+      release?.({ opened: true, alreadyPresent: false });
+      await Promise.resolve();
+    });
+    expect(mocks.openFlintTradeVault).toHaveBeenCalledTimes(1);
   });
 
   it("shows one Start over prompt on the vault step", async () => {

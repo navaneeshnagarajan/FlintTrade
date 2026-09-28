@@ -11,7 +11,6 @@ type BackendState = "checking" | "available" | "unavailable" | "busy" | "error";
 
 interface ProbeFailure {
   reason: "network" | "busy" | "http";
-  status?: number;
 }
 
 interface SetupBackendGateProps {
@@ -38,7 +37,7 @@ async function probeSetupBackend(signal: AbortSignal): Promise<ProbeFailure | nu
   } catch {
     return { reason: "network" };
   }
-  if (response.status === 429) return { reason: "busy", status: 429 };
+  if (response.status === 429) return { reason: "busy" };
   let payload: unknown = null;
   try {
     payload = await response.json();
@@ -46,7 +45,7 @@ async function probeSetupBackend(signal: AbortSignal): Promise<ProbeFailure | nu
     payload = null;
   }
   if (!response.ok || !isSetupStatusPayload(payload)) {
-    return { reason: "http", status: response.status };
+    return { reason: "http" };
   }
   return null;
 }
@@ -60,7 +59,6 @@ async function probeSetupBackend(signal: AbortSignal): Promise<ProbeFailure | nu
 export function SetupBackendGate({ children }: SetupBackendGateProps) {
   const [attempt, setAttempt] = useState(0);
   const [backendState, setBackendState] = useState<BackendState>("checking");
-  const [httpStatus, setHttpStatus] = useState<number | null>(null);
   const alertRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -69,7 +67,6 @@ export function SetupBackendGate({ children }: SetupBackendGateProps) {
     const timeout = window.setTimeout(() => controller.abort(), BACKEND_PROBE_TIMEOUT_MS);
 
     setBackendState("checking");
-    setHttpStatus(null);
     void probeSetupBackend(controller.signal)
       .then((failure) => {
         if (!active) return;
@@ -77,7 +74,6 @@ export function SetupBackendGate({ children }: SetupBackendGateProps) {
           setBackendState("available");
           return;
         }
-        setHttpStatus(failure.status ?? null);
         if (failure.reason === "network") setBackendState("unavailable");
         else if (failure.reason === "busy") setBackendState("busy");
         else setBackendState("error");
@@ -101,10 +97,10 @@ export function SetupBackendGate({ children }: SetupBackendGateProps) {
 
   if (backendState === "busy" || backendState === "error") {
     const busy = backendState === "busy";
-    const title = busy ? "Setup is busy" : "Setup status could not be read";
+    const title = busy ? "FlintTrade is busy" : "Can't check setup status";
     const detail = busy
-      ? "The server is busy. Retry in a moment. Setup has not advanced."
-      : `The server could not check setup (HTTP ${httpStatus ?? "error"}). Retry. Setup has not advanced.`;
+      ? "FlintTrade is busy right now. Wait a moment, then retry."
+      : "FlintTrade answered, but setup status couldn't be read. Retry in a moment.";
     return (
       <main
         aria-label="Account setup"
@@ -183,7 +179,7 @@ export function SetupBackendGate({ children }: SetupBackendGateProps) {
         <div className="mt-5 flex flex-wrap gap-3">
           <Button type="button" onClick={() => setAttempt((value) => value + 1)}>
             <RefreshCw className="mr-2 size-4" aria-hidden="true" />
-            Retry connection
+            Retry
           </Button>
           <Button asChild variant="outline">
             <Link to="/welcome">Return to welcome</Link>
