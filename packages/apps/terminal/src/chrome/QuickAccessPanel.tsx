@@ -211,7 +211,7 @@ function ConnectionCard({ connected, practiceMode, exploreMode, wsFailure }: Con
 // ---------------------------------------------------------------------------
 
 const MODE_LABEL: Record<"explore" | "practice" | "live", { text: string; className: string }> = {
-  explore: { text: "Sample data", className: "text-text-secondary" },
+  explore: { text: "Example", className: "text-text-secondary" },
   practice: { text: "Practice", className: "text-amber-400" },
   live: { text: "Live", className: "text-profit" },
 };

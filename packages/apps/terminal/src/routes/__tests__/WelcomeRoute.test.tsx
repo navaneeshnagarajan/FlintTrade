@@ -259,13 +259,13 @@ describe("WelcomeRoute", () => {
     render(<WelcomeRoute />);
 
     expect(screen.getByText("Get Started")).toBeInTheDocument();
-    expect(screen.getByLabelText("Try with sample data without creating an account")).toBeInTheDocument();
+    expect(screen.getByLabelText("Try with example data without creating an account")).toBeInTheDocument();
   });
 
   it("Try with sample data enters Home in Explore mode (not ExploreRoute landing)", () => {
       render(<WelcomeRoute />);
 
-      fireEvent.click(screen.getByLabelText("Try with sample data without creating an account"));
+      fireEvent.click(screen.getByLabelText("Try with example data without creating an account"));
 
       expect(mockSetMode).toHaveBeenCalledWith("explore");
       expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Explorer", "");

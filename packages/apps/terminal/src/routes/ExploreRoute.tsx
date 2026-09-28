@@ -473,7 +473,7 @@ function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
         type="button"
         onClick={() => onNavigate(module.route, module.title)}
         className="relative text-left w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 rounded-lg"
-        aria-label={`Practice ${module.title} module`}
+        aria-label={`Example ${module.title} module`}
       >
         {/*
          * HoverCard: provides the cursor-tracking spotlight gradient.
@@ -543,11 +543,11 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
     target: null,
     title: "Welcome",
     description:
-      "This is a fully interactive preview of FlintTrade using sample data. No broker connection is needed. Let us walk you through the key sections.",
+      "This is a fully interactive preview of FlintTrade using example data. No broker connection is needed. Let us walk you through the key sections.",
     placement: "bottom",
   },
   {
-    target: "[aria-label='Practice navigation']",
+    target: "[aria-label='Demo (example data) navigation']",
     title: "Navigation & Setup",
     description:
       "Use the setup wizard to connect the recommended OpenAlgo bridge or a verified native broker. Settings keeps those connections editable later.",
@@ -557,7 +557,7 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
     target: "#explore-main",
     title: "Module Cards",
     description:
-      "Each card represents a full module — Trade, Invest, Learn, Lab, Automate, and AI. Click any card to open the module with sample data.",
+      "Each card represents a full module — Trade, Invest, Learn, Lab, Automate, and AI. Click any card to open the module with example data.",
     placement: "bottom",
   },
   {
@@ -615,12 +615,12 @@ export default function ExploreRoute() {
   return (
     <>
       <PublicRouteShell
-        mainLabel="Sample data"
-        eyebrow="Practice"
-        title="Practice FlintTrade"
-        subtitle="Open every module with simulated data, then connect OpenAlgo or a verified native broker when you are ready for live data."
+        mainLabel="Demo (example data)"
+        eyebrow="Demo (example data)"
+        title="Demo (example data)"
+        subtitle="Open every module with example data, then connect OpenAlgo or a verified native broker when you are ready for live data."
         actions={
-          <nav aria-label="Practice navigation" className="flex items-center gap-2">
+          <nav aria-label="Demo (example data) navigation" className="flex items-center gap-2">
             <Button
               type="button"
               variant="ghost"
@@ -628,7 +628,7 @@ export default function ExploreRoute() {
               className="text-xs text-text-muted hover:text-text-primary"
               onClick={startExploreMode}
             >
-              Enter Practice
+              Demo (example data)
             </Button>
             <Button
               variant="ghost"
@@ -654,7 +654,7 @@ export default function ExploreRoute() {
           <div className="mx-auto flex max-w-2xl items-start gap-2 rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-left shadow-xl shadow-black/10 backdrop-blur-xl">
             <Info className="mt-0.5 size-4 shrink-0 text-accent" />
             <p className="text-xs leading-relaxed text-accent">
-              <strong>Sample data</strong> only. Connect a broker in Settings to see live prices.
+              <strong>Example</strong> only. Connect a broker in Settings to see live prices.
             </p>
           </div>
 
@@ -675,7 +675,7 @@ export default function ExploreRoute() {
                 className="w-full sm:w-auto"
                 onClick={startExploreMode}
               >
-                Enter Practice
+                Demo (example data)
                 <ArrowRight className="size-3.5" aria-hidden="true" />
               </Button>
               <Button

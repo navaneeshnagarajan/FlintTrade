@@ -22,15 +22,15 @@ function resolve(
 }
 
 describe("FT-CORE-002 feed freshness", () => {
-  it("Explore is always Sample, even when a leftover live feed is connected", () => {
+  it("Explore is always Example, even when a leftover live feed is connected", () => {
     const freshness = resolve({
       mode: "explore",
       wsConnected: true,
       lastTickAt: NOW - 200,
     });
     expect(freshness.state).toBe("sample");
-    expect(freshness.label).toBe("Sample");
-    expect(freshness.chipText).toBe("Sample");
+    expect(freshness.label).toBe("Example");
+    expect(freshness.chipText).toBe("Example");
     expect(freshness.muted).toBe(false);
     expect(freshness.chipText).not.toMatch(/Live|Practice/i);
   });

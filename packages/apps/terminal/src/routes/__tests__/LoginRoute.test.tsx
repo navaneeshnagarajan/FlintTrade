@@ -225,7 +225,7 @@ describe("LoginRoute", () => {
     const onExplore = vi.fn();
     render(<LoginRoute onSuccess={vi.fn()} onExplore={onExplore} mode="full" />);
 
-    fireEvent.click(screen.getByLabelText("Try with sample data without signing in"));
+    fireEvent.click(screen.getByLabelText("Try with example data without signing in"));
     expect(onExplore).toHaveBeenCalledOnce();
   });
 

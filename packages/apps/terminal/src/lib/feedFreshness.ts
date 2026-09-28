@@ -2,7 +2,7 @@
  * FT-CORE-002 — feed-freshness honesty.
  *
  * Execution mode (Explore / Practice / Live) is independent of quote
- * provenance. Explore is always Sample. Practice and Live may show Live,
+ * provenance. Explore is always Example. Practice and Live may show Live,
  * Delayed, Stale, or Unknown. Quotes are never silently stale.
  */
 
@@ -13,7 +13,7 @@ export type FeedFreshnessState = "live" | "delayed" | "sample" | "stale" | "unkn
 export const FEED_FRESHNESS_LABEL: Record<FeedFreshnessState, string> = {
   live: "Live",
   delayed: "Delayed",
-  sample: "Sample",
+  sample: "Example",
   stale: "Stale",
   unknown: "Unknown",
 };
@@ -64,7 +64,7 @@ function withAge(label: string, ageLabel: string | null): string {
 /**
  * Resolve the source chip for TopBar, ticker, and Market Clock.
  *
- * Explore is Sample even if a leftover WebSocket is connected (Mode honesty).
+ * Explore is Example even if a leftover WebSocket is connected (Mode honesty).
  * Live execution mode does not imply a Live feed.
  */
 export function resolveFeedFreshness(input: FeedFreshnessInput): FeedFreshness {

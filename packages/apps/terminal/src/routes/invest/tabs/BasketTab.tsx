@@ -63,7 +63,7 @@ import { DemoBanner } from "@/components/ui/DemoBanner";
 import { useModeStore } from "@/stores/modeStore";
 import { formatINR, formatPercent } from "../formatters";
 
-const SAMPLE_BASKET_EDIT_UNAVAILABLE = "Sample basket — editing unavailable";
+const SAMPLE_BASKET_EDIT_UNAVAILABLE = "Example basket — editing unavailable";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

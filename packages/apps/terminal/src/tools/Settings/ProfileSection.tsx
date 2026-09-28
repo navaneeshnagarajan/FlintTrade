@@ -29,7 +29,7 @@ const MODE_META: Record<
   { label: string; icon: typeof Compass; className: string }
 > = {
   explore: {
-    label: "Sample data",
+    label: "Example",
     icon: Compass,
     className: "bg-text-muted/15 text-text-secondary border-text-muted/25",
   },

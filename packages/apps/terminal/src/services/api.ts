@@ -2088,7 +2088,7 @@ function mockOrders(): Order[] {
     orderType: order.orderType,
     status: order.status,
     product: order.product,
-    strategy: "Practice",
+    strategy: "Example",
     timestamp: order.timestamp,
   }));
 }
@@ -2448,7 +2448,7 @@ function getExploreGetFallback<T>(endpoint: string): T | undefined {
 
 function getExploreBrokerCapabilities(): BrokerCapabilities {
   return {
-    broker_name: "Practice",
+    broker_name: "Example",
     broker_type: "multi",
     supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
     features: {

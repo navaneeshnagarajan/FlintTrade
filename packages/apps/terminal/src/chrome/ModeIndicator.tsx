@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Eye, FlaskConical, Zap } from "lucide-react";
+import { Compass, Eye, FlaskConical, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -53,6 +53,8 @@ export interface ModeIndicatorProps {
 }
 
 const CHIP_CLASS = {
+  example:
+    "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-text-muted/15 text-text-secondary border border-text-muted/25 hover:bg-text-muted/25 hover:text-text-secondary",
   practice:
     "h-7 gap-1 px-2.5 rounded text-xs font-medium font-heading bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 hover:text-amber-400",
   connectedRead:
@@ -81,8 +83,14 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
   const [pinError, setPinError] = useState("");
   const [toggleError, setToggleError] = useState("");
 
-  const showConnectedRead = readPosture && brokerConnected && mode !== "live";
-  const chipLabel = mode === "live" ? "Live" : showConnectedRead ? "Connected (read)" : "Practice";
+  const showConnectedRead = readPosture && brokerConnected && mode === "practice";
+  const chipLabel = mode === "live"
+    ? "Live"
+    : showConnectedRead
+      ? "Connected (read)"
+      : mode === "practice"
+        ? "Practice"
+        : "Example";
 
   useEffect(() => {
     setConnectedReadPosture(showConnectedRead);
@@ -92,7 +100,9 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
     ? CHIP_CLASS.live
     : showConnectedRead
       ? CHIP_CLASS.connectedRead
-      : CHIP_CLASS.practice;
+      : mode === "practice"
+        ? CHIP_CLASS.practice
+        : CHIP_CLASS.example;
 
   const switchToPractice = useCallback(async () => {
     setToggleError("");
@@ -163,7 +173,7 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
     setPinError("");
   }, []);
 
-  const ChipIcon = mode === "live" ? Zap : showConnectedRead ? Eye : FlaskConical;
+  const ChipIcon = mode === "live" ? Zap : showConnectedRead ? Eye : mode === "practice" ? FlaskConical : Compass;
 
   return (
     <div className="flex items-center gap-2">

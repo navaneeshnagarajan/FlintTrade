@@ -86,7 +86,7 @@ Object.defineProperty(globalThis, "localStorage", { value: localStorageMock });
 import { useModeStore } from "@/stores/modeStore";
 import { BasketTab } from "../BasketTab";
 
-const SAMPLE_BASKET_EDIT_UNAVAILABLE = "Sample basket — editing unavailable";
+const SAMPLE_BASKET_EDIT_UNAVAILABLE = "Example basket — editing unavailable";
 
 const USER_BASKET = {
   id: "custom-1",

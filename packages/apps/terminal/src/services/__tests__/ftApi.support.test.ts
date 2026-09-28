@@ -61,7 +61,7 @@ describe("ftApi.support", () => {
   it("does not call the authenticated endpoint for a frontend-only Explore session", async () => {
     storeState.token = "demo-user";
 
-    await expect(getSupportDiagnostics()).rejects.toThrow("Diagnostics are unavailable for sample data");
+    await expect(getSupportDiagnostics()).rejects.toThrow("Diagnostics are unavailable for Example");
     expect(fetch).not.toHaveBeenCalled();
 
     storeState.token = "session-token";

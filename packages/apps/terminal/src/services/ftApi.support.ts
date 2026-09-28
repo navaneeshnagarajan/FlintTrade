@@ -38,7 +38,7 @@ export type SupportDiagnostics = z.infer<typeof supportDiagnosticsSchema>;
 
 export async function getSupportDiagnostics(): Promise<SupportDiagnostics> {
   if (isDemoAuthSession()) {
-    throw new Error("Diagnostics are unavailable for sample data. Sign in to export local diagnostics.");
+    throw new Error("Diagnostics are unavailable for Example. Sign in to export local diagnostics.");
   }
   const value = await getV1<unknown>("support/diagnostics");
   const parsed = supportDiagnosticsSchema.safeParse(value);

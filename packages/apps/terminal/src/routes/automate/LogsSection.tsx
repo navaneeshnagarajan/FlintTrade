@@ -22,7 +22,7 @@ import { VerdictBadge, verdictClass } from "./shared";
 const PAGE_SIZE = 50;
 
 export const EXPLORE_EXECUTION_LOGS_EMPTY =
-  "No execution logs for sample data. Switch to Practice or Live to see real run history.";
+  "No execution logs for Example. Switch to Practice or Live to see real run history.";
 
 export const PRACTICE_LIVE_EXECUTION_LOGS_EMPTY =
   "No execution logs for this date.";

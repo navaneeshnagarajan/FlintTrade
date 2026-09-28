@@ -354,9 +354,9 @@ export default function LoginRoute({
                 type="button"
                 onClick={onExplore}
                 className="w-full text-xs text-text-muted hover:text-text-primary transition-colors"
-                aria-label="Try with sample data without signing in"
+                aria-label="Try with example data without signing in"
               >
-                Try with sample data →
+                Try with example data →
               </button>
             )}
             {onUnfinishedSetup && (

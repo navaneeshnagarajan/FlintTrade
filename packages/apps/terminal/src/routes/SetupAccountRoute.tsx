@@ -764,7 +764,7 @@ function TotpDisplay({
 
         <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-3">
           <p className="text-xs text-text-secondary leading-relaxed">
-            An authenticator is optional for Practice. Enrol it now, or choose
+            An authenticator is optional for Example and Practice. Enrol it now, or choose
             Set up later and use your password. Live unlock still requires the authenticator
             and your PIN.
           </p>
@@ -823,7 +823,7 @@ function TotpDisplay({
           </Button>
         </div>
         <p className="text-[11px] text-text-muted text-right">
-          Practice and Connected (read) work with your password only. Enrol the
+          Example and Practice work with your password only. Enrol the
           authenticator before unlocking Live.
         </p>
 

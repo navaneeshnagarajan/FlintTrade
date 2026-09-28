@@ -40,7 +40,7 @@ describe("ProfileSection", () => {
 
   it("shows the live mode and connection context", () => {
     render(<ProfileSection />);
-    expect(screen.getByText("Sample data mode")).toBeInTheDocument();
+    expect(screen.getByText("Example mode")).toBeInTheDocument();
     expect(screen.getByText(/gateway disconnected/i)).toBeInTheDocument();
   });
 

@@ -8,7 +8,7 @@ import { UpgradeSuggestionHost } from "@/components/help/UpgradeSuggestion";
 
 const ROUTE_TITLES: Record<string, string> = {
   "/welcome": "Welcome",
-  "/explore": "Practice",
+  "/explore": "Demo (example data)",
   "/setup": "Setup",
   "/settings": "Settings",
   "/trade": "Trade",

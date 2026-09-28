@@ -634,7 +634,7 @@ test.describe('Settings page', () => {
     await expect(sectionTabs.getByRole('tab', { name: 'Report Bug' })).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('switch', { name: 'Include diagnostic summary in GitHub draft' })).not.toBeChecked();
     await expect(page.getByLabel('GitHub draft preview')).toContainText('Not included in this GitHub draft.');
-    await expect(page.getByText(/Diagnostics are unavailable for sample data/i)).toBeVisible();
+    await expect(page.getByText(/Diagnostics are unavailable for Example/i)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Download diagnostics' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Open AI Tutor' })).toHaveCount(0);
     expect(diagnosticsRequested).toBe(false);

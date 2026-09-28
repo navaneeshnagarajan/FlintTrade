@@ -45,7 +45,7 @@ describe("NotFoundRoute", () => {
     expect(screen.getByText("404")).toBeInTheDocument();
     expect(screen.getByText("Page not found")).toBeInTheDocument();
     expect(screen.getByRole("main", { name: /page not found/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Practice" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Demo (example data)" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Explore" })).not.toBeInTheDocument();
   });
 

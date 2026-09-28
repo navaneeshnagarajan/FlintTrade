@@ -65,9 +65,9 @@ describe("FT-CORE-002 FeedFreshnessChip", () => {
     renderChip();
 
     const chip = screen.getByTestId("feed-freshness-chip");
-    expect(chip).toHaveTextContent("Sample");
+    expect(chip).toHaveTextContent("Example");
     expect(chip).toHaveAttribute("data-state", "sample");
-    expect(chip).toHaveAttribute("aria-label", expect.stringMatching(/feed source: sample/i));
+    expect(chip).toHaveAttribute("aria-label", expect.stringMatching(/feed source: example/i));
     expect(chip).not.toHaveTextContent("Live");
   });
 

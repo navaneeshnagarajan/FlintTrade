@@ -8,7 +8,7 @@
 import type { AppMode } from "@/stores/modeStore";
 
 export const MODE_HONESTY_COPY: Record<AppMode, string> = {
-  explore: "Sample data only. No broker session, no live orders.",
+  explore: "Example. No broker session, no live orders.",
   practice: "Practice — simulated fills, no real money.",
   // Execution mode only. Live can be selected while the broker is disconnected,
   // so this line must not claim a session is already open.

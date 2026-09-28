@@ -68,6 +68,16 @@ describe("ModeIndicator", () => {
   });
 
   describe("mode menu", () => {
+    it("names Example on the chip for sample data and does not say Practice", () => {
+      resetStore("explore");
+      render(<ModeIndicator />);
+
+      const chip = screen.getByTestId("execution-mode");
+      expect(chip).toHaveTextContent("Example");
+      expect(chip).not.toHaveTextContent("Practice");
+      expect(chip).not.toHaveTextContent(/explore/i);
+    });
+
     it("names Practice on the chip and does not say Explore", () => {
       resetStore("practice");
       render(<ModeIndicator />);

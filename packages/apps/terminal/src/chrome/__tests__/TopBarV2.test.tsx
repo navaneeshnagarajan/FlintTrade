@@ -526,8 +526,8 @@ describe("TopBarV2", () => {
 
   it("mounts the trading mode indicator (Explore by default)", () => {
     renderTopBarV2();
-    // ModeIndicator renders the EXPLORE pill when modeStore is at its default.
-    expect(screen.getByText("Practice")).toBeInTheDocument();
+    // Sample data is Example. Practice is a Mode and is not the default chip.
+    expect(screen.getByTestId("execution-mode")).toHaveTextContent("Example");
   });
 
   it("uses adaptive glass chrome tokens for the background", () => {
@@ -597,7 +597,8 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
   it("keeps Mode visible and tappable at ~390px", () => {
     renderTopBarV2();
 
-    const mode = screen.getByText("Practice");
+    const mode = screen.getByTestId("execution-mode");
+    expect(mode).toHaveTextContent("Example");
     expect(mode).toBeVisible();
     expect(mode.closest("button")).toBeEnabled();
   });
@@ -689,7 +690,7 @@ describe("TopBarV2 skinny-window collapse (FT-MOBILE-002)", () => {
 
     expect(screen.queryByTestId("ticker-marquee")).not.toBeInTheDocument();
     expect(useDeskChromeStore.getState().tickerForcedOnNarrow).toBe(false);
-    expect(screen.getByText("Practice")).toBeVisible();
+    expect(screen.getByTestId("execution-mode")).toBeVisible();
     expect(screen.getByTestId("topbar-more-btn")).toBeInTheDocument();
     expect(screen.queryByTestId("workspace-switcher")).not.toBeInTheDocument();
   });
@@ -737,7 +738,7 @@ describe("FT-UX-001 Compact desk chrome at 1280", () => {
     mockTimingsQuery.dataUpdatedAt = Date.now();
     renderTopBarV2();
 
-    expect(screen.getByText("Practice")).toBeVisible();
+    expect(screen.getByTestId("execution-mode")).toHaveTextContent("Example");
     const session = screen.getByTestId("market-session-status");
     expect(session).toHaveAccessibleName(/market status: continuous/i);
     expect(session).toHaveTextContent(/continuous/i);
@@ -790,7 +791,7 @@ describe("FT-UX-001 Compact desk chrome at 1280", () => {
     useSettingsStore.setState({ density: "comfortable" });
     renderTopBarV2();
 
-    expect(screen.getByText("Practice")).toBeVisible();
+    expect(screen.getByTestId("execution-mode")).toBeVisible();
     expect(screen.getByTestId("tools-btn")).toBeInTheDocument();
     expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument();
     expect(screen.queryByTestId("topbar-desk-tools-btn")).not.toBeInTheDocument();

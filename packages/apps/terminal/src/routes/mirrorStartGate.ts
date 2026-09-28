@@ -9,7 +9,7 @@
 import type { AppMode } from "@/stores/modeStore";
 
 export const EXPLORE_MIRROR_START_HELPER =
-  "Mirroring is blocked for sample data. Switch to Practice or Live with broker accounts connected.";
+  "Mirroring is blocked for Example. Switch to Practice or Live with broker accounts connected.";
 
 export const PRACTICE_MIRROR_START_HELPER =
   "Mirroring requires Live with broker accounts connected.";

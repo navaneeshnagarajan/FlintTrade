@@ -1,4 +1,4 @@
-import { operatorModeName, visibleServiceNote } from "@/lib/operatorModeLabel";
+import { EXAMPLE_LABEL, visibleServiceNote } from "@/lib/operatorModeLabel";
 import { noteObservedFailure } from "@/stores/operatorSignalStore";
 
 import {
@@ -214,18 +214,17 @@ const DEMO_SECURITY_SETTINGS: SecuritySettings = {
 };
 
 /**
- * Sample-session fallback when the install host cannot be read.
+ * Example-data fallback when the install host cannot be read.
  *
- * Service rows use the operator Mode name: Practice, Connected (read), or
- * Live. Host disk, RAM, CPU, GPU, and network stay unavailable — sample
+ * Service rows say Example. They are not a Mode: Practice means simulated
+ * fills. Host disk, RAM, CPU, GPU, and network stay unavailable — sample
  * gigabytes must not be painted as this machine.
  */
 function sampleHealthFallback(): SystemHealth {
-  const note = operatorModeName();
   return {
     status: "degraded",
-    broker: { status: "degraded", note, scope: "unavailable" },
-    duckdb: { status: "degraded", note, scope: "unavailable" },
+    broker: { status: "degraded", note: EXAMPLE_LABEL, scope: "unavailable" },
+    duckdb: { status: "degraded", note: EXAMPLE_LABEL, scope: "unavailable" },
     disk: { status: "unavailable", scope: "unavailable", note: "Unavailable" },
     memory: { status: "unavailable", scope: "unavailable", note: "Unavailable" },
   };

@@ -268,7 +268,7 @@ describe("AppLayout", () => {
     const bar = screen.getByTestId("mode-honesty-bar");
     expect(bar).toHaveAttribute("data-mode", "explore");
     expect(bar).toHaveTextContent(
-      "Sample data only. No broker session, no live orders.",
+      "Example. No broker session, no live orders.",
     );
     expect(screen.queryByTestId("incident-strip")).not.toBeInTheDocument();
   });

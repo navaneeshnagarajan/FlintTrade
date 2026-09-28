@@ -8,9 +8,9 @@
 import type { AppMode } from "@/stores/modeStore";
 
 export const EXPLORE_SCALPER_ORDER_HELPER =
-  "Orders are blocked for sample data. Switch to Practice or Live with a broker connected to trade.";
+  "Orders are blocked for Example. Switch to Practice or Live with a broker connected to trade.";
 
-export const EXPLORE_ONE_CLICK_TITLE = "One-click is unavailable for sample data";
+export const EXPLORE_ONE_CLICK_TITLE = "One-click is unavailable for Example";
 
 /** True when Scalper may open Confirm or accept a one-click place. */
 export function scalperOrdersArmed(mode: AppMode): boolean {

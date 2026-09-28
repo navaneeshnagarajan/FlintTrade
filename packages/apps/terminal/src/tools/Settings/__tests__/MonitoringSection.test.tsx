@@ -122,26 +122,28 @@ describe("MonitoringSection host resources", () => {
     expect(screen.getByTestId("process-resources")).toHaveTextContent("VMS 900 MB");
 
     const services = screen.getByTestId("subsystem-status");
-    expect(within(services).getByText("Broker — Practice")).toBeInTheDocument();
+    expect(within(services).getByText("Broker — Example")).toBeInTheDocument();
     expect(within(services).queryByText(/Explore/)).not.toBeInTheDocument();
     expect(within(services).getByText("DuckDB — Healthy")).toBeInTheDocument();
     expect(within(host).queryByText(/Broker/)).not.toBeInTheDocument();
   });
 
-  it("renders a retired Explore service note as Connected (read) or Live", async () => {
+  it("renders a retired Explore service note as Example in every Mode", async () => {
     useModeStore.setState({ mode: "practice" });
     setConnectedReadPosture(true);
     api.getHealth.mockResolvedValue(health());
     const { unmount } = renderSection();
 
-    expect(await screen.findByText("Broker — Connected (read)")).toBeInTheDocument();
+    expect(await screen.findByText("Broker — Example")).toBeInTheDocument();
+    expect(screen.queryByText("Broker — Connected (read)")).not.toBeInTheDocument();
     expect(screen.queryByText(/Explore/)).not.toBeInTheDocument();
     unmount();
 
     useModeStore.setState({ mode: "live" });
     api.getHealth.mockResolvedValue(health());
     renderSection();
-    expect(await screen.findByText("Broker — Live")).toBeInTheDocument();
+    expect(await screen.findByText("Broker — Example")).toBeInTheDocument();
+    expect(screen.queryByText("Broker — Live")).not.toBeInTheDocument();
     expect(screen.getByText("Disk").parentElement).toHaveTextContent("60.0 GB / 100 GB");
   });
 

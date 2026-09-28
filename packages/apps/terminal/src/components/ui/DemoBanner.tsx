@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { Info } from "lucide-react";
 
 export function DemoBanner({
-  message = "Showing sample data — connect a broker for live data",
+  message = "Showing Example — connect a broker for live data",
 }: {
   message?: ReactNode;
 }) {

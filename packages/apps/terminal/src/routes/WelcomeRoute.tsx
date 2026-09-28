@@ -698,9 +698,9 @@ export default function WelcomeRoute() {
                       variant="ghost"
                       onClick={handleExplore}
                       className="text-sm text-text-muted hover:text-text-primary"
-                      aria-label="Try with sample data without creating an account"
+                      aria-label="Try with example data without creating an account"
                     >
-                      Try with sample data →
+                      Try with example data →
                     </Button>
                   </>
                 ) : (

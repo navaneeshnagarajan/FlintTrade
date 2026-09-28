@@ -166,8 +166,8 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     const health = await getHealth();
 
     expect(fetchSpy).toHaveBeenCalledOnce();
-    expect(health.broker.note).toBe("Practice");
-    expect(health.duckdb.note).toBe("Practice");
+    expect(health.broker.note).toBe("Example");
+    expect(health.duckdb.note).toBe("Example");
     expect(JSON.stringify(health)).not.toContain("Explore");
     expect(health.disk.scope).not.toBe("host");
     expect(health.memory.scope).not.toBe("host");
@@ -232,19 +232,19 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     expect(health.disk.total_gb).toBeUndefined();
     expect(health.memory.total_mb).toBeUndefined();
     expect(health.cpu?.used_pct).toBeUndefined();
-    expect(health.broker.note).toBe("Practice");
-    expect(health.duckdb.note).toBe("Practice");
+    expect(health.broker.note).toBe("Example");
+    expect(health.duckdb.note).toBe("Example");
     expect(JSON.stringify(health)).not.toContain("Explore");
   });
 
-  it("names the sample health fallback after Practice, Connected (read), or Live", async () => {
+  it("names the sample health fallback Example in every Mode", async () => {
     authState.token = "demo-user";
 
     modeState.mode = "explore";
     fetchSpy.mockRejectedValueOnce(new TypeError("offline"));
     await expect(getHealth()).resolves.toMatchObject({
-      broker: { note: "Practice", scope: "unavailable" },
-      duckdb: { note: "Practice", scope: "unavailable" },
+      broker: { note: "Example", scope: "unavailable" },
+      duckdb: { note: "Example", scope: "unavailable" },
       disk: { scope: "unavailable", note: "Unavailable" },
       memory: { scope: "unavailable", note: "Unavailable" },
     });
@@ -253,17 +253,21 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     setConnectedReadPosture(true);
     fetchSpy.mockRejectedValueOnce(new TypeError("offline"));
     const connected = await getHealth();
-    expect(connected.broker.note).toBe("Connected (read)");
-    expect(connected.duckdb.note).toBe("Connected (read)");
+    expect(connected.broker.note).toBe("Example");
+    expect(connected.duckdb.note).toBe("Example");
     expect(connected.disk.scope).toBe("unavailable");
     expect(connected.disk.total_gb).toBeUndefined();
     expect(connected.memory.total_mb).toBeUndefined();
+    expect(JSON.stringify(connected)).not.toContain("128");
+    expect(JSON.stringify(connected)).not.toContain("256");
+    expect(JSON.stringify(connected)).not.toContain("2048");
+    expect(JSON.stringify(connected)).not.toContain("8192");
 
     modeState.mode = "live";
     fetchSpy.mockRejectedValueOnce(new TypeError("offline"));
     const live = await getHealth();
-    expect(live.broker.note).toBe("Live");
-    expect(live.duckdb.note).toBe("Live");
+    expect(live.broker.note).toBe("Example");
+    expect(live.duckdb.note).toBe("Example");
     expect(live.disk.free_gb).toBeUndefined();
     expect(live.memory.total_mb).toBeUndefined();
   });

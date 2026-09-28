@@ -419,7 +419,7 @@ describe("DOMHeatmapWidget — Explore demo data", () => {
     render(<DOMHeatmapWidget {...liveProps} />);
     expect(
       screen.getByTestId("domheatmap-container").getAttribute("aria-label"),
-    ).toContain("sample data");
+    ).toContain("Example");
   });
 
   it("fills the ring from the deterministic generator", () => {

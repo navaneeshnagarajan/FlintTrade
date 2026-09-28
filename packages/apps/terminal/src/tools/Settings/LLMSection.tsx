@@ -1585,7 +1585,7 @@ export function LLMSection({
         >
           <p className="text-sm font-medium text-text-primary">No LLM provider configured</p>
           <p className="text-xs text-text-secondary">
-            Practice uses sample data and cannot load or persist LLM secrets. This is not a broken
+            Example uses example data and cannot load or persist LLM secrets. This is not a broken
             session. Switch to Live or Practice on this machine to configure a provider, or retry
             if an authenticated session is available.
           </p>

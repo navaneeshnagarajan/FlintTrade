@@ -127,7 +127,7 @@ describe("TickerBar", () => {
     renderTickerBar();
 
     const chip = screen.getByTestId("feed-freshness-chip");
-    expect(chip).toHaveTextContent("Sample");
+    expect(chip).toHaveTextContent("Example");
     expect(chip).toHaveAttribute("data-state", "sample");
     expect(chip).not.toHaveTextContent("Live");
   });

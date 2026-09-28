@@ -148,11 +148,11 @@ describe("ExploreRoute", () => {
   it("renders the explore page immediately without a demo-choice interstitial", () => {
     renderExplore();
 
-    const main = screen.getByRole("main", { name: "Sample data" });
+    const main = screen.getByRole("main", { name: "Demo (example data)" });
     expect(main).toBeInTheDocument();
     expect(main).toHaveClass("h-screen", "overflow-y-auto", "overflow-x-hidden");
-    expect(screen.getByText("Practice FlintTrade")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^enter practice$/i }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Demo (example data)").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("button", { name: /^demo \(example data\)$/i }).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText(/Explore/)).not.toBeInTheDocument();
     expect(screen.queryByText(/demo mode/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/demo workspace/i)).not.toBeInTheDocument();
@@ -163,7 +163,7 @@ describe("ExploreRoute", () => {
   it("enters Explore mode workspace from the Enter Explore button", () => {
     renderExplore();
 
-    fireEvent.click(screen.getAllByRole("button", { name: /^enter practice$/i })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^demo \(example data\)$/i })[0]);
 
     expect(mockSetMode).toHaveBeenCalledWith("explore");
     expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Explorer", "");
@@ -183,11 +183,11 @@ describe("ExploreRoute", () => {
   it("shows all six module preview cards", () => {
     renderExplore();
 
-    expect(screen.getByLabelText("Practice Trade module")).toBeInTheDocument();
-    expect(screen.getByLabelText("Practice Invest module")).toBeInTheDocument();
-    expect(screen.getByLabelText("Practice Learn module")).toBeInTheDocument();
-    expect(screen.getByLabelText("Practice Strategy Lab module")).toBeInTheDocument();
-    expect(screen.getByLabelText("Practice Automate module")).toBeInTheDocument();
-    expect(screen.getByLabelText("Practice AI module")).toBeInTheDocument();
+    expect(screen.getByLabelText("Example Trade module")).toBeInTheDocument();
+    expect(screen.getByLabelText("Example Invest module")).toBeInTheDocument();
+    expect(screen.getByLabelText("Example Learn module")).toBeInTheDocument();
+    expect(screen.getByLabelText("Example Strategy Lab module")).toBeInTheDocument();
+    expect(screen.getByLabelText("Example Automate module")).toBeInTheDocument();
+    expect(screen.getByLabelText("Example AI module")).toBeInTheDocument();
   });
 });

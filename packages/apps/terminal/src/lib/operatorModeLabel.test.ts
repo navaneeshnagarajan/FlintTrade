@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { useModeStore } from "@/stores/modeStore";
 import {
+  EXAMPLE_LABEL,
   operatorModeName,
   setConnectedReadPosture,
   visibleServiceNote,
@@ -13,9 +14,10 @@ describe("operatorModeName", () => {
     setConnectedReadPosture(false);
   });
 
-  it("names the sample session Practice", () => {
-    expect(operatorModeName("explore")).toBe("Practice");
-    expect(operatorModeName()).toBe("Practice");
+  it("names the sample session Example, never Practice", () => {
+    expect(operatorModeName("explore")).toBe(EXAMPLE_LABEL);
+    expect(operatorModeName()).toBe("Example");
+    expect(operatorModeName("explore", true)).toBe("Example");
   });
 
   it("names a practice session Practice until Connected (read) is posted", () => {
@@ -30,15 +32,12 @@ describe("operatorModeName", () => {
     expect(operatorModeName("live", true)).toBe("Live");
   });
 
-  it("does not treat the sample session as Connected (read)", () => {
-    expect(operatorModeName("explore", true)).toBe("Practice");
-  });
-
-  it("rewrites a retired Explore service note to the current Mode name", () => {
-    expect(visibleServiceNote("Explore")).toBe("Practice");
+  it("rewrites a retired Explore service note to Example in every Mode", () => {
+    expect(visibleServiceNote("Explore")).toBe("Example");
     expect(visibleServiceNote("connected")).toBe("connected");
     expect(visibleServiceNote(undefined)).toBeUndefined();
     useModeStore.setState({ mode: "live" });
-    expect(visibleServiceNote("Explore")).toBe("Live");
+    setConnectedReadPosture(true);
+    expect(visibleServiceNote("Explore")).toBe("Example");
   });
 });

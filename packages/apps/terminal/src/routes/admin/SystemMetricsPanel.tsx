@@ -217,7 +217,7 @@ export function SystemMetricsPanel() {
       <div className="flex flex-col items-center justify-center py-12 gap-3 text-sm text-text-muted">
         <AlertCircle className="w-5 h-5 text-amber-400" />
         <p>System metrics require a live admin session.</p>
-        <p className="text-xs">Sample data keeps backend admin endpoints offline.</p>
+        <p className="text-xs">Example keeps backend admin endpoints offline.</p>
       </div>
     );
   }
