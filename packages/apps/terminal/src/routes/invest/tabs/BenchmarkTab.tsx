@@ -1,24 +1,19 @@
 /**
  * BenchmarkTab.tsx — Portfolio vs Indian benchmark comparison.
  *
- * Shows portfolio returns against NIFTY 50, NIFTY Next 50, NIFTY Midcap 150,
- * SENSEX, and NIFTY Bank across multiple time periods.
- * Alpha (portfolio - benchmark) is highlighted green/red.
- *
- * Uses sample data for portfolio and realistic benchmark returns.
+ * Index rows are sample figures and keep the Example chip. The portfolio row
+ * shows the book return only when the holdings are the account, with no chip.
+ * Alpha and other verdicts stay hidden until the indices are real.
  */
 
-import { useMemo } from "react";
 import {
   TrendingUp,
-  ArrowUpRight,
-  ArrowDownRight,
   Activity,
 } from "lucide-react";
 import { GlassCard } from "@/components/ui/GlassCard";
-import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { cn } from "@/lib/utils";
+import { formatPercent } from "../formatters";
 import { useInvest } from "../InvestContext";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -45,16 +40,7 @@ interface BenchmarkRow {
 
 const PERIODS: PeriodKey[] = ["1D", "1W", "1M", "3M", "6M", "1Y", "3Y", "5Y"];
 
-const PORTFOLIO_RETURNS: PeriodReturns = {
-  "1D": 0.42,
-  "1W": 1.15,
-  "1M": 2.31,
-  "3M": 5.87,
-  "6M": 9.12,
-  "1Y": 18.45,
-  "3Y": 52.3,
-  "5Y": 112.5,
-};
+const COMPARISON_NOTE = "Comparison needs real index data.";
 
 const BENCHMARKS: BenchmarkRow[] = [
   {
@@ -127,26 +113,38 @@ const BENCHMARKS: BenchmarkRow[] = [
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatReturn(value: number): string {
-  const sign = value >= 0 ? "+" : "";
-  return `${sign}${value.toFixed(2)}%`;
+  return formatPercent(value);
+}
+
+/**
+ * Cost-basis return of a holdings book, in percent.
+ *
+ * This is the account figure (total P&L over amount invested). It is not a
+ * 1D/1Y index return, and it is not comparable with the sample index rows.
+ */
+export function portfolioBookReturn(
+  holdings: readonly { averagePrice: number; quantity: number; pnl: number }[],
+): number | null {
+  let invested = 0;
+  let pnl = 0;
+  for (const holding of holdings) {
+    const price = Number.isFinite(holding.averagePrice) ? holding.averagePrice : 0;
+    const quantity = Number.isFinite(holding.quantity) ? Math.abs(holding.quantity) : 0;
+    const linePnl = Number.isFinite(holding.pnl) ? holding.pnl : 0;
+    invested += price * quantity;
+    pnl += linePnl;
+  }
+  if (invested <= 0) return null;
+  return (pnl / invested) * 100;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function BenchmarkTab() {
-  const { holdings } = useInvest();
+  const { holdings, isSampleData } = useInvest();
   const hasHoldings = holdings.length > 0;
-  const alphaRows = useMemo(
-    () =>
-      BENCHMARKS.map((b) => {
-        const alpha: PeriodReturns = {} as PeriodReturns;
-        for (const p of PERIODS) {
-          alpha[p] = PORTFOLIO_RETURNS[p] - b.returns[p];
-        }
-        return { name: b.name, alpha };
-      }),
-    [],
-  );
+  const hasRealHoldings = hasHoldings && !isSampleData;
+  const bookReturn = portfolioBookReturn(holdings);
 
   return (
     <div className="space-y-6">
@@ -156,9 +154,8 @@ export function BenchmarkTab() {
           <Activity className="size-4 text-accent" />
         </div>
         <div>
-          <h2 className="font-heading font-semibold text-base text-text-primary inline-flex items-center gap-2">
+          <h2 className="font-heading font-semibold text-base text-text-primary">
             Benchmark Comparison
-            <ExampleLabel testId="benchmark-example" />
           </h2>
           <p className="text-xs text-text-muted">
             Portfolio performance vs major Indian indices
@@ -187,37 +184,39 @@ export function BenchmarkTab() {
             </thead>
             <tbody>
               {/* Portfolio row — highlighted */}
-              <tr className="border-b border-border-default bg-accent/5">
+              <tr className="border-b border-border-default bg-accent/5" data-testid="benchmark-portfolio-row">
                 <td className="px-4 py-3 font-heading font-semibold text-accent whitespace-nowrap sticky left-0 bg-accent/5 z-10">
                   <div className="flex items-center gap-2">
                     <TrendingUp className="size-3.5" />
                     Your Portfolio
+                    {hasHoldings && (
+                      <span
+                        data-testid="benchmark-portfolio-return"
+                        className={cn(
+                          "font-mono tabular-nums",
+                          bookReturn == null
+                            ? "text-text-muted"
+                            : bookReturn >= 0
+                              ? "text-profit"
+                              : "text-loss",
+                        )}
+                      >
+                        {bookReturn == null ? "—" : formatReturn(bookReturn)}
+                      </span>
+                    )}
+                    {hasHoldings && !hasRealHoldings && (
+                      <ExampleLabel testId="benchmark-portfolio-example" />
+                    )}
                   </div>
                 </td>
-                {PERIODS.map((p) => {
-                  if (!hasHoldings) {
-                    return (
-                      <td
-                        key={p}
-                        className="text-right px-3 py-3 font-mono tabular-nums text-text-muted"
-                      >
-                        —
-                      </td>
-                    );
-                  }
-                  const val = PORTFOLIO_RETURNS[p];
-                  return (
-                    <td
-                      key={p}
-                      className={cn(
-                        "text-right px-3 py-3 font-mono tabular-nums font-semibold",
-                        val >= 0 ? "text-profit" : "text-loss",
-                      )}
-                    >
-                      {formatReturn(val)}
-                    </td>
-                  );
-                })}
+                {PERIODS.map((p) => (
+                  <td
+                    key={p}
+                    className="text-right px-3 py-3 font-mono tabular-nums text-text-muted"
+                  >
+                    —
+                  </td>
+                ))}
               </tr>
 
               {/* Benchmark rows */}
@@ -227,7 +226,10 @@ export function BenchmarkTab() {
                   className="border-b border-border-default last:border-0 hover:bg-surface-elevated/30 transition-colors"
                 >
                   <td className="px-4 py-3 font-heading font-medium text-text-primary whitespace-nowrap sticky left-0 bg-surface-card z-10">
-                    {b.name}
+                    <div className="flex items-center gap-2">
+                      {b.name}
+                      <ExampleLabel testId="benchmark-row-example" />
+                    </div>
                   </td>
                   {PERIODS.map((p) => {
                     const val = b.returns[p];
@@ -257,125 +259,9 @@ export function BenchmarkTab() {
       )}
 
       {hasHoldings && (
-      <>
-      {/* Alpha table */}
-      <GlassCard className="p-0 gap-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-border-default">
-          <h3 className="font-heading font-semibold text-sm text-text-primary">
-            <GlossaryTooltip term="Alpha">Alpha</GlossaryTooltip>{" "}
-            <span className="font-normal text-text-muted">(Portfolio - Benchmark)</span>
-          </h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs" role="table">
-            <thead>
-              <tr className="border-b border-border-default bg-surface-elevated/50">
-                <th className="text-left px-4 py-3 font-heading font-semibold text-text-secondary whitespace-nowrap sticky left-0 bg-surface-elevated/50 z-10">
-                  vs Index
-                </th>
-                {PERIODS.map((p) => (
-                  <th
-                    key={p}
-                    className="text-right px-3 py-3 font-mono font-semibold text-text-secondary whitespace-nowrap"
-                  >
-                    {p}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {alphaRows.map((row) => (
-                <tr
-                  key={row.name}
-                  className="border-b border-border-default last:border-0 hover:bg-surface-elevated/30 transition-colors"
-                >
-                  <td className="px-4 py-3 font-heading font-medium text-text-primary whitespace-nowrap sticky left-0 bg-surface-card z-10">
-                    {row.name}
-                  </td>
-                  {PERIODS.map((p) => {
-                    const val = row.alpha[p];
-                    return (
-                      <td key={p} className="text-right px-3 py-3">
-                        <span
-                          className={cn(
-                            "inline-flex items-center gap-0.5 font-mono tabular-nums font-semibold",
-                            val >= 0 ? "text-profit" : "text-loss",
-                          )}
-                        >
-                          {val >= 0 ? (
-                            <ArrowUpRight className="size-3" />
-                          ) : (
-                            <ArrowDownRight className="size-3" />
-                          )}
-                          {formatReturn(val)}
-                        </span>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </GlassCard>
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <GlassCard className="p-4 gap-2">
-          <p className="text-xxs text-text-muted uppercase tracking-wider font-medium">
-            Best 1Y Alpha
-          </p>
-          {(() => {
-            const best = alphaRows.reduce((best, row) =>
-              row.alpha["1Y"] > best.alpha["1Y"] ? row : best,
-            );
-            return (
-              <>
-                <div className="text-lg font-mono font-bold tabular-nums text-profit">
-                  {formatReturn(best.alpha["1Y"])}
-                </div>
-                <p className="text-xs text-text-muted">vs {best.name}</p>
-              </>
-            );
-          })()}
-        </GlassCard>
-
-        <GlassCard className="p-4 gap-2">
-          <p className="text-xxs text-text-muted uppercase tracking-wider font-medium">
-            Worst 1Y Alpha
-          </p>
-          {(() => {
-            const worst = alphaRows.reduce((worst, row) =>
-              row.alpha["1Y"] < worst.alpha["1Y"] ? row : worst,
-            );
-            const val = worst.alpha["1Y"];
-            return (
-              <>
-                <div
-                  className={cn(
-                    "text-lg font-mono font-bold tabular-nums",
-                    val >= 0 ? "text-profit" : "text-loss",
-                  )}
-                >
-                  {formatReturn(val)}
-                </div>
-                <p className="text-xs text-text-muted">vs {worst.name}</p>
-              </>
-            );
-          })()}
-        </GlassCard>
-
-        <GlassCard className="p-4 gap-2">
-          <p className="text-xxs text-text-muted uppercase tracking-wider font-medium">
-            Benchmarks Beaten (1Y)
-          </p>
-          <div className="text-lg font-mono font-bold tabular-nums text-text-primary">
-            {alphaRows.filter((r) => r.alpha["1Y"] > 0).length}/{alphaRows.length}
-          </div>
-          <p className="text-xs text-text-muted">indices outperformed</p>
-        </GlassCard>
-      </div>
-      </>
+        <p className="text-xs text-text-muted" data-testid="benchmark-comparison-note">
+          {COMPARISON_NOTE}
+        </p>
       )}
 
       <p className="text-xs text-text-muted">

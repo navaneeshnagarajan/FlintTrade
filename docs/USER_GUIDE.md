@@ -778,7 +778,11 @@ snapshot, labelled Example. Practice does not substitute that book.
 
 **Example views.** Sample figures on Baskets, Sector Rotation, Benchmark,
 Shareholding, ETF Screener, Social, ETFs, Risk-Return, and Correlation
-carry the Example chip. Benchmark keeps that chip on the comparison.
+carry the Example chip. Benchmark keeps that chip on the index rows.
+With holdings, Your Portfolio shows the book return and does not carry
+the chip. Comparisons against the sample indices, including Benchmarks
+beaten and alpha, stay hidden. In their place:
+`Comparison needs real index data.`
 With no holdings, Benchmark still shows the index lines, a `—` on the
 Your Portfolio row, and `Add holdings to compare against benchmarks.`
 The comparison carries `Benchmark data is illustrative. Live index data requires a market data subscription.`
