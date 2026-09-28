@@ -32,8 +32,10 @@ changelog rebuilds itself from the first release cut after this baseline.
   Practice orders are available." Opt in with
   `python -m flinttrade_core.laya_runtime install` or `start`.
   The CPU install pins `torch==2.14.0+cpu` and `laya[serve]==0.3.21`
-  in one constraints file, and installs torch first from the CPU index.
+  in `laya_sidecar_constraints.txt`, installs torch first from the CPU
+  index, and can share the base interpreter with FlintTrade.
   `LAYA_PORT` defaults to 8000. The host stays `127.0.0.1`.
+  It is not Ready by default.
 
 - **Mode honesty bar.** One line under the TopBar for Explore, Practice,
   and Live. Widgets no longer repeat a Sample chip. An incident, when
@@ -76,7 +78,7 @@ changelog rebuilds itself from the first release cut after this baseline.
 - **Desk Laya chip follows the current mode (FT-LAYA-MODEL-001).**
   Practice and Explore show sidecar Ready, Degraded, or Down. Live
   shows Live-facing status. "Not qualified for Live" is the tooltip
-  and the disabled-Live reason when Live lacks qualification. Ping
+  and the popover line when Live lacks qualification. Ping
   publishes Live-facing `laya`, sidecar `laya_practice`, and
   `laya_live_qualified`, plus a reason code and port. During the first
   load the chip says Still loading and does not read Down. Orders stay
@@ -84,14 +86,23 @@ changelog rebuilds itself from the first release cut after this baseline.
   The Live Blocked strip follows Live-facing
   Down only. It mutes Live place and Position Mirror start. Practice
   is not muted by that strip. Clicking the chip opens a popover with the
-  plain-words reason. A signed-in operator can start the sidecar from
-  there (`POST /api/v1/laya/start`); the chip then says Still loading
-  until Laya is Ready or a failure reason arrives. The guide link is
-  `#start-laya`. A dead sidecar is reaped and reported Stopped. A clamp
-  says "Not placed. Laya allows up to N." and waits for Place N. A Down
-  refusal does not show a quantity ceiling. The Order Pad note is an
-  optional collapsed line under Quantity. An empty note is an uncertain
-  Practice clamp, not a hard reject.
+  plain-words reason, the link "How to start Laya"
+  (`docs/USER_GUIDE.md#start-laya`), and an operator-only "Start Laya"
+  button. The chip tooltip carries
+  `python -m flinttrade_core.laya_runtime start`. Reason codes are
+  `not_started`, `stopped`, `port_in_use`, `still_loading`,
+  `unreachable`, and `wrong_revision`. A signed-in operator can start
+  the sidecar from the popover (`POST /api/v1/laya/start`); the chip
+  then says Still loading until Laya is Ready or a failure reason
+  arrives. A dead sidecar is reaped and reported Stopped. A clamp says
+  "Not placed. Laya allows up to N." with Place N and Cancel, and never
+  auto-places. A Down refusal is "Laya is Down. Orders are paused until
+  it's Ready." and does not show a quantity ceiling. A Live place that
+  is not qualified says "Laya isn't qualified for Live yet. Practice
+  orders are available." The Order Pad note is the collapsed line "Add a
+  reason (optional)" under Quantity. A place with no note still gets
+  Laya's policy decision: Practice clamps and Live denies. It is not a
+  hard reject. Desk place surfaces go through this admission.
 
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
   The required path is Create operator, then Vault, then the Practice

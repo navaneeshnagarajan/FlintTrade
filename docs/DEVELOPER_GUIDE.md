@@ -500,7 +500,10 @@ around them.
 
 ### Laya decision sidecar
 
-Place admission asks the Laya model only after Down and the hard rules.
+Operator steps, the chip, and the reason codes are in
+[Start Laya](USER_GUIDE.md#start-laya). Desk place surfaces go through
+this admission. Place admission asks the Laya model only after Down and
+the hard rules.
 The host is opt-in. Install and supervise it with the FlintTrade
 environment (the project `.venv` after `uv sync`, or `uv run python`),
 so `flinttrade_core` and `flinttrade_engine` import. Do not run these
@@ -515,25 +518,28 @@ python -m flinttrade_core.laya_runtime stop
 
 `install` creates `<workspace>/runtime/laya/venv`. On Linux the default
 workspace is `~/.flinttrade`. `FLINTTRADE_WORKSPACE_DIR` overrides it.
-The default install puts CPU torch in that environment from
+The sidecar environment can share the base interpreter with FlintTrade:
+its `python` is often a symlink to the same executable, and the prefix
+compared at install time is the environment directory, not that symlink.
+The install refuses a command whose prefix is the FlintTrade environment.
+The default install puts CPU torch in the sidecar environment from
 `https://download.pytorch.org/whl/cpu`, then `laya[serve]==0.3.21`, so
 the CUDA wheels stay out. Those two pins live together in
 `packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`
 (`torch==2.14.0+cpu` and `laya[serve]==0.3.21`). The CPU install applies
 that file to both pip commands, and installs torch first. CUDA and ROCm
-installs do not use the CPU pin. That environment is about 1.2 GB. The
-default-index torch build, which pulls CUDA wheels, was about 5.6 GB. `install --accelerator cuda` opts into the
+installs do not use the CPU pin. `install --accelerator cuda` opts into the
 PyPI torch build. `install --accelerator rocm` needs `LAYA_TORCH_INDEX`
 set to an https PyTorch ROCm wheel index. `start` still uses CPU
 (`LAYA_DEVICE=cpu`). The host stays `127.0.0.1`. `LAYA_PORT` chooses the
-port and defaults to 8000. A fresh API key is
+port and defaults to 8000. A clash on that port is Down with
+`port_in_use`. A fresh API key is
 written to `<workspace>/runtime/laya/api.key` and removed on `stop`, and
 on a start that fails after the key was written.
 
-The first successful load downloads the english `model.safetensors`
-checkpoint, about 843 MB, into the default Hugging Face cache rather
-than the runtime directory. A snapshot that also includes the
-multilingual weights is about 1.5 GB. Later boots stay offline. The
+The first successful load may download the pinned english
+`model.safetensors` checkpoint into the default Hugging Face cache rather
+than the runtime directory. Later boots stay offline. The
 pinned revision and `model.safetensors` digest live in `laya_policy.toml`.
 
 A backend that was started with `LAYA_HOST=127.0.0.1`, `LAYA_PORT` (or
@@ -562,9 +568,13 @@ host, a timeout, a malformed response, or a revision or digest mismatch
 is Down, and Practice refuses too. The decision response must include
 `revision` and `sha256`. A health document without the weight digest is
 Down. Stopping the sidecar records Down before an in-flight probe can
-publish Ready. An empty admission note is uncertain: Practice clamps and
-Live denies. Order Pad sends that note as `rationale`, including when
-the field is empty.
+publish Ready. An empty note is uncertain and is not a hard reject:
+Practice clamps and Live denies. The Practice server reason is "Laya is
+uncertain. Quantity stays inside the tighter limit." The Live server
+reason is "Laya is uncertain. Live stays closed." The desk clamp sentence
+is "Not placed. Laya allows up to N." and nothing is placed until Place N.
+Order Pad sends that note as `rationale`, including when the field is
+empty. The collapsed control is "Add a reason (optional)".
 
 The same client speaks `POST /v1/systemone`. An operator may point it at
 another loopback host, including one on port 8888, without adding that

@@ -98,28 +98,33 @@ gate. The model can deny or clamp. It cannot raise a quantity or overturn a
 rule refusal. An unreachable host, a timeout, a malformed response, or a
 revision or digest mismatch is Down. Down refuses Practice as well as Live.
 Down copy is the same in every mode: "Laya is Down. Orders are paused
-until it's Ready." A Practice refusal never says Live. When Laya is Ready
+until it's Ready." That refusal carries no quantity ceiling. A Practice
+refusal never says Live. When Laya is Ready
 or Degraded and a Live place is refused only because Live is not qualified,
 the reason is "Laya isn't qualified for Live yet. Practice orders are
-available." An uncertain answer clamps in Practice and denies in Live.
-Practice uncertain copy is "Laya is uncertain. Quantity stays inside
-the tighter limit." Live uncertain copy is "Laya is uncertain. Live
-stays closed." An empty note is a normal case of that same uncertain
-outcome. It is not a blanket refusal. A
+available." An uncertain answer, including an empty note, clamps in
+Practice and denies in Live. It is not a hard reject. The Practice server
+reason is "Laya is uncertain. Quantity stays inside the tighter limit."
+The Live server reason is "Laya is uncertain. Live stays closed." The desk
+does not auto-place. Order Pad and Quick Trade show "Not placed. Laya
+allows up to N." with Place N and Cancel. A
 decision response that omits `revision` or `sha256`, and a health document
-that omits the weight digest, are Down. Stopping the sidecar records Down
-before an in-flight probe can publish Ready.
+that omits the weight digest, are Down. The health case is chip reason
+`wrong_revision` ("Wrong model revision"). Stopping the sidecar records Down
+before an in-flight probe can publish Ready. Desk place surfaces go through
+this admission.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down — Live orders paused."). That class closes Live place and Position
 Mirror start on the shared client place path. Kill All stays reachable.
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
 `GET /health` records Ready, Degraded, or Down from the opt-in sidecar when
-one is registered. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`, and
-`laya_live_qualified`. It does not invent Ready. The Laya chip label follows
+one is registered. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`,
+`laya_live_qualified`, `laya_reason`, and `laya_port`. It does not invent Ready. The Laya chip label follows
 the current mode, so Practice shows the sidecar and does not read Down while
-Practice orders are being admitted. "Not qualified for Live" is the chip
-tooltip and the disabled-Live reason. A base checkpoint is not
+Practice orders are being admitted. During the first load the chip says
+Still loading. "Not qualified for Live" is the chip tooltip and the popover
+line when the sidecar is up and Live is not qualified. A base checkpoint is not
 qualified for Live, so Live stays Down until a qualification record exists
 for the exact model revision, weight digest, and policy version
 (`EvidenceUseScope.LIVE_DECISION`). Practice can be Ready or Degraded from
@@ -129,6 +134,7 @@ does not add a second deny under a Live control that is already muted.
 Other Live write verbs still reach SafetySystem without this admission.
 Other Practice verbs go straight to the sandbox. The sidecar install is in
 [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#laya-decision-sidecar).
+Operator steps are in [Start Laya](USER_GUIDE.md#start-laya).
 
 | Concern | Automate risk note | SafetySystem | Ticket guards | Laya |
 | --- | --- | --- | --- | --- |

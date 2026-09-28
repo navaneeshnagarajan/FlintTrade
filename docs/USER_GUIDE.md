@@ -365,14 +365,16 @@ cancelled broker orders.
 
 The TopBar desk status cluster shows **Broker**, **Laya**, and **LLM** as
 separate labels. Broker is **Connected**, **Connected (read)**, or
-**Unavailable**. The Laya chip is **Ready**, **Degraded**, or **Down**.
-The chip label follows the current mode. In Practice and Explore it shows
-sidecar status (**Ready**, **Degraded**, or **Down**). In Practice the chip
-does not read **Down** while Practice orders are being admitted, when the
-sidecar is **Ready** or **Degraded** and Live-facing status is **Down** for
-missing qualification. In Live the chip shows Live-facing status. **Not
-qualified for Live** is the chip tooltip and the Mode-menu disabled-Live
-reason. It is not painted as **Down** on the Practice chip. The desk ping
+**Unavailable**. The Laya chip is **Ready**, **Degraded**, **Down**, or
+**Still loading**. The label follows the active mode. Practice shows the
+sidecar. Live shows Live-facing status. During the first load the label is
+**Still loading** and does not read **Down**. In Practice the chip does not
+read **Down** while Practice orders are being admitted, when the sidecar is
+**Ready** or **Degraded** and Live-facing status is **Down** for missing
+qualification. **Not qualified for Live** is the chip tooltip, and the
+popover line, when the sidecar is up and Live is not qualified. It is not
+painted as **Down** on the Practice chip. How to start the sidecar is
+[Start Laya](#start-laya). The desk ping
 still publishes Live-facing `laya`, sidecar `laya_practice`, and
 `laya_live_qualified`. Laya starts **Down**, including before a heartbeat
 and when the ping omits `laya`. Missing status is never painted **Ready**.
@@ -397,7 +399,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Broker stream (`broker_stream`) | A Dhan or Kotak Neo market/order stream dropped. Kotak Neo's local v3 lifecycle coverage is not live-account proof. | Wait for the stream. Do not treat stale REST quotes or a reconnecting socket as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
-| Laya (`laya`) | Blocked — the strip follows Live-facing Down only ("Laya is Down — Live orders paused."). Live place and Position Mirror start stay closed. Practice is not muted by this strip. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. Kill All stays available. Laya starts Down. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`, and `laya_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. The Laya chip label follows the current mode. In Practice and Explore it shows Ready, Degraded, or Down from the sidecar, and it does not read Down while Practice orders are being admitted. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the Mode-menu disabled-Live reason. A base checkpoint leaves Live unqualified. | While the strip is open, Live place stays muted on that strip. A Practice place is refused when Practice itself is Down, with "Laya is Down. Orders are paused until it's Ready." Start the opt-in Laya model before a Down engine can admit. Live-facing Ready or Degraded allows a Live place attempt. Do not treat Chat as a substitute. |
+| Laya (`laya`) | Blocked — the strip follows Live-facing Down only ("Laya is Down — Live orders paused."). Live place and Position Mirror start stay closed. Practice is not muted by this strip. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. Kill All stays available. Laya starts Down. The desk ping publishes Live-facing `laya`, sidecar `laya_practice`, and `laya_live_qualified`, and does not invent Ready. Live-facing Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. The Laya chip label follows the current mode. Practice shows Ready, Degraded, or Down from the sidecar, and it does not read Down while Practice orders are being admitted. During the first load the chip says Still loading. In Live the chip shows Live-facing status. "Not qualified for Live" is the chip tooltip and the popover line when the sidecar is up and Live is not qualified. See [Start Laya](#start-laya). A base checkpoint leaves Live unqualified.  | While the strip is open, Live place stays muted on that strip. A Practice place is refused when Practice itself is Down, with "Laya is Down. Orders are paused until it's Ready." Start the opt-in Laya model before a Down engine can admit. Live-facing Ready or Degraded allows a Live place attempt. Do not treat Chat as a substitute. |
 | Chat provider (`llm_provider`) | Info — Chat is unavailable. Trading chrome stays as it was. A Laya denial is not this strip. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
@@ -410,44 +412,137 @@ regulator's — not a FlintTrade claims desk:
 - Kotak Neo trade API: https://www.kotakneo.com/support/trading/trade-api-and-terminals/ and the complaint procedure: https://www.kotakneo.com/support/procedure-for-filing-a-complaint-with-kotak-securities/
 - SEBI SCORES: https://scores.sebi.gov.in and SMART ODR: https://smartodr.in
 
+### Start Laya
+
+Laya is opt-in and starts **Down**. The desk does not paint it **Ready**
+until a health probe says so. Admission is fail-closed: while Laya is
+**Down**, including the first load, orders are refused. **Degraded** is
+not Ready, and it is not a refusal of every order: a place inside the
+tighter ceiling can continue. See [Laya on place](#laya-on-place).
+
+**Chip.** The label follows the active mode. Practice shows the sidecar:
+**Ready**, **Degraded**, or **Down**. Live shows the Live-facing status.
+During the first load the label is **Still loading** and does not read
+**Down**. Orders are still refused with **Laya is Down. Orders are paused
+until it's Ready.**
+
+The chip tooltip carries the next step when a reason code is set:
+the plain words, then `Next: python -m flinttrade_core.laya_runtime start`.
+When the sidecar is **Ready** or **Degraded** and Live is not qualified,
+the tooltip is **Not qualified for Live**. That line is not painted as
+**Down** on the Practice chip.
+
+Clicking the chip opens a popover. It shows the plain-words reason, the
+link **How to start Laya** (this section), and an operator-only **Start
+Laya** button. The button is there for a signed-in operator while the
+sidecar is not **Ready** or **Degraded**. A signed-out desk does not
+get it, and neither does a demo session. While the start request is in flight the button reads **Starting…**.
+If the start fails, the popover says **Laya could not be started.**
+**Start Laya** calls `POST /api/v1/laya/start`. After that click the chip
+stays on **Still loading** until Laya is **Ready** or **Degraded**, or
+the probe reports a reason other than `not_started`.
+
+The popover prints the plain words, not the raw code. These are the
+codes the desk can show:
+
+| Code | Plain words | Meaning |
+|---|---|---|
+| `not_started` | Not started | No sidecar is running. This is also the fallback line when the chip is **Down** and no reason code is set. `stop` records this code. |
+| `stopped` | Stopped | A sidecar this desk started has exited. The health probe reaps that child and records **Down**. |
+| `port_in_use` | Port N in use | Something else is listening on the Laya port. The chip stays **Down**. N is that port. |
+| `still_loading` | Still loading | The first load, before health is usable. The chip says **Still loading**. Admission stays **Down**. |
+| `unreachable` | Unreachable | A later miss, after one successful load. |
+| `wrong_revision` | Wrong model revision | A health document claims a loaded checkpoint whose revision or weight digest (`sha256`) is missing or does not match the pin. |
+
+A decision response that omits `revision` or `sha256` is also **Down** for
+that place. It uses the Down sentence below. It is not a seventh chip code.
+
+**Command line.** From the FlintTrade environment (the project `.venv`
+after setup, or `uv run python`):
+
+```text
+python -m flinttrade_core.laya_runtime install
+python -m flinttrade_core.laya_runtime start
+python -m flinttrade_core.laya_runtime status
+python -m flinttrade_core.laya_runtime stop
+```
+
+`install` creates the sidecar environment at
+`<workspace>/runtime/laya/venv` (on Linux, `~/.flinttrade/runtime/laya/venv`,
+unless `FLINTTRADE_WORKSPACE_DIR` is set). That environment can share the
+base interpreter with FlintTrade: its `python` is often a symlink to the
+same executable, and the packages stay in the sidecar environment. The
+install refuses to put them in the FlintTrade environment. The default
+install is CPU-only torch from `https://download.pytorch.org/whl/cpu`,
+then `laya[serve]==0.3.21`. Both pins live in one constraints file,
+`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`
+(`torch==2.14.0+cpu` and `laya[serve]==0.3.21`). Torch is installed
+first. `install --accelerator cuda` and `install --accelerator rocm` are
+opt-in. `start` still uses CPU (`LAYA_DEVICE=cpu`).
+
+`start` listens on `127.0.0.1` only. The port comes from `LAYA_PORT` and
+defaults to 8000. A port clash is **Down** with `port_in_use`. `start`
+writes a fresh API key to `<workspace>/runtime/laya/api.key`. `stop`
+stops the sidecar, deletes that key, and records **Down** with
+`not_started`. `status` prints the report, including `reason` and the
+plain-words `detail`, and does not print the API key. The first
+successful load may download the pinned `english` checkpoint
+(`model.safetensors`) into the Hugging Face cache. Later boots stay
+offline.
+
+Start the backend with `LAYA_HOST=127.0.0.1`, the same `LAYA_PORT`, and
+`LAYA_API_KEY_FILE` set to that `api.key` when the sidecar was started
+separately. The next health probe attaches. The host must stay
+`127.0.0.1`.
+
+A base checkpoint leaves Live-facing status **Down**. Live stays **Down**
+until that exact revision, weight digest, and policy version are qualified
+with LIVE_DECISION evidence. Laya is never **Ready** by default.
+
 ### Laya on place
 
-Live-facing **Ready** and **Degraded** allow a Live place attempt.
-Practice **Ready** and **Degraded** allow a Practice place attempt,
-including while Live itself is still unqualified. The chip then shows the
-Practice state, with tooltip **Not qualified for Live**. On Live, operator place
-and automate place run Mode guard → Laya.admit → SafetySystem →
-gate_order → BrokerRouter. Laya does not place the order and does not
-replace those layers. A refusal or a quantity clamp stops before
-SafetySystem. Practice place is admitted before the sandbox and does not
-enter SafetySystem. Explore stays a mode refusal. Chat is not an
+Desk place surfaces go through Laya admission. Live-facing **Ready** and
+**Degraded** allow a Live place attempt. Practice **Ready** and
+**Degraded** allow a Practice place attempt, including while Live itself
+is still unqualified. The chip then shows the Practice state, with
+tooltip **Not qualified for Live**. On Live, operator place and automate
+place run Mode guard → Laya.admit → SafetySystem → gate_order →
+BrokerRouter. Laya does not place the order and does not replace those
+layers. A refusal or a quantity clamp stops before SafetySystem. Practice
+place is admitted before the sandbox and does not enter SafetySystem.
+Explore stays a mode refusal before admit. Chat is not an
 admission source. The model can deny or clamp. It cannot raise a
 quantity or overturn a hard-rule refusal.
 
-**Admission note.** On the Order Pad the note is collapsed. **Add a reason
-(optional)** sits under Quantity and opens a single line. It is not a
-required step. Quick Trade, Positions square-off, Order Ladder, Scalper,
-and Option Chain keep an optional note field. An empty note does not
-block Place. An empty or uncertain note clamps in Practice and denies in
-Live. Practice shows **Laya is uncertain. Quantity stays inside the
-tighter limit.** Live shows **Laya is uncertain. Live stays closed.**
+**Reason.** On the Order Pad the note is collapsed under Quantity.
+**Add a reason (optional)** opens a single line. The placeholder is
+**Optional note for this order**. Once open, the field's accessible name
+is **Admission note**. It is not a required step, and an empty field does
+not block Place. Quick Trade, Positions square-off, Order Ladder, Scalper,
+and Option Chain keep an optional note. A place with no note still gets
+Laya's policy decision. Practice clamps. Live denies. It is not a hard
+reject. The server reason for that Practice clamp is **Laya is uncertain.
+Quantity stays inside the tighter limit.** The server reason for that
+Live denial is **Laya is uncertain. Live stays closed.** The Order Pad
+clamp notice shows the clamp sentence below, not the Practice reason line.
 
 **Deny.** Order Pad and Quick Trade show **Laya denied**, then the server
 reason. When the server sent a quantity ceiling, the next line is
-**Max quantity N.** A Down refusal does not show a quantity. The reason
+**Max quantity N.** A Down refusal does not show that line. The reason
 is **Laya is Down. Orders are paused until it's Ready.** Place controls
 stay off until Laya or the mode changes; you can then retry. Kill All
 stays reachable.
 A denial is not a Chat outage: the LLM label stays **Not configured** or
 **Connected (suggest only)**, and the Chat strip stays Info.
 
-**Clamp.** Nothing is placed until you click. Order Pad and Quick Trade
-show **Not placed. Laya allows up to N.** with **Place N** and **Cancel**.
-**Place N** sends that quantity through the same place path: admit again,
-then SafetySystem and gate_order when the new quantity is allowed.
-Practice still reaches the sandbox only after that admit. **Cancel**
-places nothing. The same sentence covers a quantity above the ceiling and
-an uncertain note that holds the quantity inside the tighter limit.
+**Clamp.** Nothing is placed until you click. Laya never auto-places the
+reduced quantity. Order Pad and Quick Trade show **Not placed. Laya allows
+up to N.** with **Place N** and **Cancel**. **Place N** sends that
+quantity through the same place path: admit again, then SafetySystem and
+gate_order when the new quantity is allowed. Practice still reaches the
+sandbox only after that admit. **Cancel** places nothing. The same
+sentence covers a quantity above the ceiling and an uncertain note that
+holds the quantity inside the tighter limit.
 
 **Degraded.** Live-facing Degraded leaves Live open. The desk says
 **Laya Degraded — tighter limits** on the status cluster and under those
@@ -457,56 +552,20 @@ itself is Degraded. Practice Degraded applies the tighter ceiling to a
 Practice place.
 
 **Down.** Laya starts **Down**. The chip label follows the current mode.
-In Practice it shows the sidecar state and does not read Down while a
-Practice place can be admitted. **Not qualified for Live** is the chip
-tooltip. Only Live-facing **Down** opens the Laya Blocked strip and mutes
-Live place and Position Mirror start. Practice is not muted by that strip.
-While that mute is up, the Live place control does not also show **Laya
-denied**. Kill All stays reachable. Broker may stay **Connected** or
-**Connected (read)**. A Practice place is refused when Practice itself is
-Down. The server reason, in every mode, is **Laya is Down. Orders are
-paused until it's Ready.** A Practice refusal never says Live. A Live
-place while Laya is Ready or Degraded, without a matching qualification
-record, says **Laya isn't qualified for Live yet. Practice orders are
-available.** Start the opt-in model before a Down engine can admit.
+See [Start Laya](#start-laya). In Practice it shows the sidecar state and
+does not read Down while a Practice place can be admitted. **Not qualified
+for Live** is the chip tooltip. Only Live-facing **Down** opens the Laya
+Blocked strip and mutes Live place and Position Mirror start. Practice is
+not muted by that strip. While that mute is up, the Live place control
+does not also show **Laya denied**. Kill All stays reachable. Broker may
+stay **Connected** or **Connected (read)**. A Practice place is refused
+when Practice itself is Down. The server reason, in every mode, is
+**Laya is Down. Orders are paused until it's Ready.** There is no
+quantity-ceiling line. A Practice refusal never says Live. A Live place
+while Laya is Ready or Degraded, without a matching qualification record,
+says **Laya isn't qualified for Live yet. Practice orders are available.**
+Start the opt-in model before a Down engine can admit.
 
-From the FlintTrade environment (the project `.venv` after setup, or
-`uv run python`):
-
-```text
-python -m flinttrade_core.laya_runtime install
-python -m flinttrade_core.laya_runtime start
-```
-
-`install` creates the sidecar environment at
-`<workspace>/runtime/laya/venv` (on Linux, `~/.flinttrade/runtime/laya/venv`,
-unless `FLINTTRADE_WORKSPACE_DIR` is set). It installs a CPU build of
-torch, then the pinned model package, from one constraints file in the
-repository. That environment is about 1.2 GB.
-A CUDA or ROCm build is opt-in and is not what `start` runs. `start`
-listens on `127.0.0.1`. The port comes from `LAYA_PORT` and defaults to
-8000. The first download of the english
-checkpoint is about 843 MB, in the
-Hugging Face cache. `stop` removes the API key from that runtime
-directory. Start the backend with `LAYA_HOST=127.0.0.1`,
-`LAYA_PORT` set to that same port, and `LAYA_API_KEY_FILE` set to
-`<workspace>/runtime/laya/api.key`. Its next health probe attaches to
-a sidecar that was started separately.
-
-During the first load the chip says **Still loading** and does not read
-Down. Orders are still refused with **Laya is Down. Orders are paused
-until it's Ready.** A port clash, or another process on that port, is
-Down and the chip says which port is in use. Click the chip for a short
-popover with that reason in plain words. The guide link is
-`#start-laya`. A signed-in operator also sees **Start Laya**, which
-calls `POST /api/v1/laya/start`. After that click the chip stays on
-**Still loading** until Laya is Ready or the probe reports a clear
-failure. A sidecar that has exited says **Stopped**. In Practice, a
-Ready sidecar never shows a red Down chip.
-
-A base checkpoint leaves Live Down. Live stays Down until that
-exact revision, weight digest, and policy version are qualified with
-LIVE_DECISION evidence.
 
 **Chat.** Chat never shows **Admit** or **Approved by Laya**. Chat being
 offline does not close Live.
@@ -709,7 +768,8 @@ software safeguards, prompts, and recovery controls in a local setup.
       unqualified.
       **Degraded** keeps Live open and shows **Laya Degraded — tighter
       limits**. A Practice place is refused when Practice itself is Down.
-      Start the opt-in model before Practice can admit.
+      Start the opt-in model before Practice can admit. See
+      [Start Laya](#start-laya).
 - [ ] Daily P&L pause and hard-stop percentages are configured in Settings → Risk.
 - [ ] You have read the risk and user-responsibility notes in
       [disclaimer.md](../disclaimer.md).
@@ -717,7 +777,7 @@ software safeguards, prompts, and recovery controls in a local setup.
 Operator and automate Live place run Mode guard → Laya.admit →
 SafetySystem → gate_order → BrokerRouter. Laya does not place the
 order. A refusal or a quantity clamp stops before SafetySystem.
-See [Laya on place](#laya-on-place).
+See [Start Laya](#start-laya) and [Laya on place](#laya-on-place).
 
 ### Walkthrough
 
@@ -1148,10 +1208,12 @@ the action or label it successful.
 Chat is suggest-only. A connected LLM is labelled **Connected (suggest only)**.
 It does not place Live orders, and it is not Laya. Chat is not an admission
 source: it never shows **Admit** or **Approved by Laya**. The desk Laya chip
-is a separate status: **Ready**, **Degraded**, or **Down**. The chip
-follows the current mode. In Practice it shows the sidecar and does not
-read Down while Practice orders are being admitted. **Not qualified for
-Live** is the tooltip. Laya starts **Down** and does not invent Ready. A
+is a separate status: **Ready**, **Degraded**, **Down**, or **Still
+loading**. The chip follows the current mode. In Practice it shows the
+sidecar and does not read Down while Practice orders are being admitted.
+During the first load the label is **Still loading**. **Not qualified for
+Live** is the tooltip. Laya starts **Down** and does not invent Ready.
+How to start it is [Start Laya](#start-laya). A
 base checkpoint leaves Live unqualified. Only Live-facing **Down** closes
 Live orders and mirror start.
 Practice is not muted by that strip. A Practice place is refused when
@@ -1480,21 +1542,23 @@ as a toast.
    Practice place is refused when Practice itself is Down, with **Laya is
    Down. Orders are paused until it's Ready.** Start the opt-in model
    before a Down engine can admit.
-   The Laya chip follows the current mode. In Practice and Explore it shows
-   the sidecar. When Practice can admit, the chip shows **Ready** or
-   **Degraded**, not **Down**. In Live the chip shows Live-facing status.
-   **Not qualified for Live** is the chip tooltip and the Mode-menu
-   disabled-Live reason. A Live place while Ready or Degraded, without a
-   matching qualification record, says **Laya isn't qualified for Live yet.
+   The Laya chip follows the current mode. Practice shows the sidecar.
+   When Practice can admit, the chip shows **Ready** or **Degraded**, not
+   **Down**. During the first load it says **Still loading**. In Live the
+   chip shows Live-facing status. **Not qualified for Live** is the chip
+   tooltip and the popover line when the sidecar is up and Live is not
+   qualified. A Live place while Ready or Degraded, without a matching
+   qualification record, says **Laya isn't qualified for Live yet.
    Practice orders are available.** A base checkpoint leaves Live
-   unqualified. Laya starts **Down** and does not invent Ready. Chat
-   cannot place instead.
-2. **Not placed. Laya allows up to N.** Nothing was placed. **Place N**
-   sends that quantity through admit again, then SafetySystem and
-   gate_order when it is allowed. **Cancel** places nothing. The model does not raise
-   quantity. A Down refusal does not show **Max quantity** and does not say
-   to start the model. **Laya Degraded — tighter limits** means Live-facing Degraded:
-   Live is open with a tighter ceiling. It is not a Blocked strip.
+   unqualified. Laya starts **Down** and does not invent Ready. Start it
+   from [Start Laya](#start-laya). Chat cannot place instead.
+2. **Not placed. Laya allows up to N.** Nothing was placed. Laya does not
+   auto-place. **Place N** sends that quantity through admit again, then
+   SafetySystem and gate_order when it is allowed. **Cancel** places
+   nothing. The model does not raise quantity. A Down refusal does not
+   show **Max quantity** and does not say to start the model. **Laya
+   Degraded — tighter limits** means Live-facing Degraded: Live is open
+   with a tighter ceiling. It is not a Blocked strip.
 3. Explore still refuses as a mode refusal. A safety-layer rejection names
    the layer and is a separate message.
 
