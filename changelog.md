@@ -128,7 +128,9 @@ changelog rebuilds itself from the first release cut after this baseline.
   status, and overflow — not a second quote rail. Three
   Settings/Tools entries collapse into one Tools overflow
   menu plus at most one primary Settings entry. App chrome
-  is a flex column: TopBar → TickerStrip → route body.
+  is a flex column: TopBar, then the operator status strip when
+  one is showing, then the Mode honesty line, then TickerStrip,
+  then the route body.
   Trade ships first; the same shell then rolls to Invest,
   Automate, Learn, and Ditto. Not a silent widen of
   FT-UX-001 Compact-only-on-Trade, and not a big-bang
