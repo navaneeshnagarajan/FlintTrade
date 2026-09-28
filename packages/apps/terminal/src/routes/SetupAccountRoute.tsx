@@ -823,7 +823,7 @@ function TotpDisplay({
           </Button>
         </div>
         <p className="text-[11px] text-text-muted text-right">
-          Explore and Practice work with your password only. Enrol the
+          Practice and Connected (read) work with your password only. Enrol the
           authenticator before unlocking Live.
         </p>
 

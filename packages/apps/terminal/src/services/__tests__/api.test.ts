@@ -1279,7 +1279,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     }));
 
     await expect(getBrokerCapabilities()).resolves.toEqual({
-      broker_name: "Explore",
+      broker_name: "Practice",
       broker_type: "multi",
       supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
       features: {
@@ -1307,7 +1307,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     resolveDiscovery(jsonResponse({ status: "success", data: { accounts: [] } }));
 
     await expect(capabilities).resolves.toEqual({
-      broker_name: "Explore",
+      broker_name: "Practice",
       broker_type: "multi",
       supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
       features: {
@@ -3514,7 +3514,7 @@ describe("OpenAlgo API client (api.ts)", () => {
         },
         { mode: "live" },
       ),
-    ).rejects.toThrow(/mode changed from live to explore/i);
+    ).rejects.toThrow(/mode changed from Live to Practice/i);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

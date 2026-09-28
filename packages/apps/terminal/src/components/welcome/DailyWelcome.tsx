@@ -64,7 +64,7 @@ export function getTimeContext(now = new Date()): TimeContext | null {
   return {
     greeting: "Good evening",
     message: "",
-    suggestion: "Explore learning modules",
+    suggestion: "Open learning modules",
   };
 }
 
@@ -267,7 +267,7 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
                   ? openTradeJournal
                   : ctx.suggestion === "Review overnight global indices"
                     ? goToDefaultWorkspace
-                    : ctx.suggestion === "Explore learning modules"
+                    : ctx.suggestion === "Open learning modules"
                       ? () => {
                           onDismiss();
                           navigate("/learn");

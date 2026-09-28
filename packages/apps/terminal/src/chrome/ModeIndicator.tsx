@@ -9,7 +9,7 @@
  * after the operator chooses an eligible Live item.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Eye, FlaskConical, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +38,7 @@ import {
   ENROL_2FA_AND_CONNECT_BROKER,
   liveMenuLockReasons,
 } from "@/chrome/liveLockReasons";
+import { setConnectedReadPosture } from "@/lib/operatorModeLabel";
 
 export const CONNECT_BROKER_FIRST = "Connect a broker first";
 export const LIVE_LOCKED_REASON = ENROL_2FA_AND_CONNECT_BROKER;
@@ -82,6 +83,11 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
 
   const showConnectedRead = readPosture && brokerConnected && mode !== "live";
   const chipLabel = mode === "live" ? "Live" : showConnectedRead ? "Connected (read)" : "Practice";
+
+  useEffect(() => {
+    setConnectedReadPosture(showConnectedRead);
+    return () => setConnectedReadPosture(false);
+  }, [showConnectedRead]);
   const chipClass = mode === "live"
     ? CHIP_CLASS.live
     : showConnectedRead

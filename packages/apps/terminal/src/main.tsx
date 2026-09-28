@@ -36,7 +36,7 @@ function ExplorePathElement() {
     return <Navigate to={policy.to} replace />;
   }
   return (
-    <RouteErrorBoundary routeName="Explore">
+    <RouteErrorBoundary routeName="Practice">
       <Suspense fallback={<Loading />}>
         <ExploreRoute />
       </Suspense>

@@ -42,6 +42,7 @@ import type {
 import { useConnectionStore } from "@/stores/connectionStore";
 import { readOperatorIncident } from "@/hooks/useOperatorIncident";
 import { liveWritesMuted } from "@/lib/operatorIncident";
+import { operatorModeName } from "@/lib/operatorModeLabel";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
@@ -2087,7 +2088,7 @@ function mockOrders(): Order[] {
     orderType: order.orderType,
     status: order.status,
     product: order.product,
-    strategy: "Explore",
+    strategy: "Practice",
     timestamp: order.timestamp,
   }));
 }
@@ -2447,7 +2448,7 @@ function getExploreGetFallback<T>(endpoint: string): T | undefined {
 
 function getExploreBrokerCapabilities(): BrokerCapabilities {
   return {
-    broker_name: "Explore",
+    broker_name: "Practice",
     broker_type: "multi",
     supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
     features: {
@@ -2623,7 +2624,7 @@ async function postOrder<T>(
   if (currentModeForExplore === "explore" && ftEndpoint === "place") {
     if (authority?.mode === "live") {
       throw new Error(
-        `Order blocked: mode changed from ${authority.mode} to ${currentModeForExplore} before submission.`,
+        `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentModeForExplore, false)} before submission.`,
       );
     }
     return placeExploreSampleOrder(body as PlaceOrderParams) as T;
@@ -2638,7 +2639,7 @@ async function postOrder<T>(
   const currentMode = useModeStore.getState().mode;
   if (authority?.mode && authority.mode !== currentMode) {
     throw new Error(
-      `Order blocked: mode changed from ${authority.mode} to ${currentMode} before submission.`,
+      `Order blocked: mode changed from ${operatorModeName(authority.mode, false)} to ${operatorModeName(currentMode, false)} before submission.`,
     );
   }
   if (isExactOrderAuthorityPin(authority) && !exactOrderAuthorityMatchesCurrent(authority, currentMode)) {

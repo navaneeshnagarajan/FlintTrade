@@ -473,7 +473,7 @@ function ModuleCard({ module, index, onNavigate }: ModuleCardProps) {
         type="button"
         onClick={() => onNavigate(module.route, module.title)}
         className="relative text-left w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 rounded-lg"
-        aria-label={`Explore ${module.title} module`}
+        aria-label={`Practice ${module.title} module`}
       >
         {/*
          * HoverCard: provides the cursor-tracking spotlight gradient.
@@ -547,7 +547,7 @@ const EXPLORE_TOUR_STEPS: TourStep[] = [
     placement: "bottom",
   },
   {
-    target: "[aria-label='Explore navigation']",
+    target: "[aria-label='Practice navigation']",
     title: "Navigation & Setup",
     description:
       "Use the setup wizard to connect the recommended OpenAlgo bridge or a verified native broker. Settings keeps those connections editable later.",
@@ -616,11 +616,11 @@ export default function ExploreRoute() {
     <>
       <PublicRouteShell
         mainLabel="Sample data"
-        eyebrow="Explore"
-        title="Explore FlintTrade"
+        eyebrow="Practice"
+        title="Practice FlintTrade"
         subtitle="Open every module with simulated data, then connect OpenAlgo or a verified native broker when you are ready for live data."
         actions={
-          <nav aria-label="Explore navigation" className="flex items-center gap-2">
+          <nav aria-label="Practice navigation" className="flex items-center gap-2">
             <Button
               type="button"
               variant="ghost"
@@ -628,7 +628,7 @@ export default function ExploreRoute() {
               className="text-xs text-text-muted hover:text-text-primary"
               onClick={startExploreMode}
             >
-              Enter Explore
+              Enter Practice
             </Button>
             <Button
               variant="ghost"
@@ -675,7 +675,7 @@ export default function ExploreRoute() {
                 className="w-full sm:w-auto"
                 onClick={startExploreMode}
               >
-                Enter Explore
+                Enter Practice
                 <ArrowRight className="size-3.5" aria-hidden="true" />
               </Button>
               <Button
