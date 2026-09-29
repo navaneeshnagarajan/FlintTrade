@@ -43,6 +43,8 @@ const positionsQuery = vi.hoisted(() => ({
     ltp: number;
     quantity: number;
     averagePrice?: number;
+    settlementPrice?: number;
+    markSource?: "avg" | "fallback";
     pnl?: number;
   }[] | undefined,
   isLoading: false,
@@ -57,7 +59,15 @@ vi.mock("@/hooks/useAccountReadsEnabled", () => ({
   useAccountReadsEnabled: () => true,
 }));
 
-import { accountCharges, accountLedgerCash, accountNetWorth, NET_WORTH_POSITIONS_NOTE } from "@/lib/accountNetWorth";
+import {
+  accountCharges,
+  accountLedgerCash,
+  accountNetWorth,
+  accountNetWorthAccessibleName,
+  approximateNetWorthTooltip,
+  formatAccountNetWorth,
+  NET_WORTH_POSITIONS_NOTE,
+} from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import { PortfolioCard } from "../PortfolioCard";
 
@@ -145,6 +155,143 @@ describe("PortfolioCard allocation provenance (Slice 3)", () => {
     expect(screen.queryByTestId("allocation-example-label")).not.toBeInTheDocument();
     expect(screen.getByTestId("portfolio-allocation")).toHaveTextContent("Cash 99.92%");
     expect(screen.getByTestId("portfolio-allocation")).toHaveTextContent("Positions 0.08%");
+    expect(screen.getByTestId("portfolio-allocation")).not.toHaveTextContent("≈");
+  });
+});
+
+const BROKER_FUNDS = {
+  availableCash: 950_000,
+  usedMargin: 50_000,
+  totalBalance: 1_000_000,
+  ledgerBalance: 1_000_000,
+  futuresMtmInLedger: true,
+};
+
+function futurePosition(overrides: Record<string, unknown> = {}) {
+  return {
+    symbol: "NIFTY-JUN2026-FUT",
+    exchange: "NFO",
+    product: "NRML",
+    ltp: 22_150,
+    quantity: 50,
+    averagePrice: 22_000,
+    settlementPrice: 22_000,
+    markSource: "fallback" as const,
+    pnl: 0,
+    ...overrides,
+  };
+}
+
+describe("PortfolioCard approximate net worth", () => {
+  it("shows ≈ for a Dhan future missing its average and names the symbol", () => {
+    const positions = [futurePosition()];
+    setBook(fundsQuery, "success", BROKER_FUNDS);
+    setBook(holdingsQuery, "success", []);
+    setBook(positionsQuery, "success", positions);
+    useModeStore.setState({ mode: "live" });
+    const worth = accountNetWorth([], BROKER_FUNDS.ledgerBalance, positions, 0, true);
+    render(<PortfolioCard />);
+
+    const figure = screen.getByTestId("portfolio-net-worth");
+    expect(figure).toHaveTextContent(formatAccountNetWorth(worth, true));
+    expect(figure).toHaveAccessibleName(accountNetWorthAccessibleName(worth));
+    expect(screen.getByText("Net Worth").closest("p")).toHaveAttribute(
+      "title",
+      approximateNetWorthTooltip(["NIFTY-JUN2026-FUT"]) ?? "",
+    );
+    expect(screen.getByTestId("portfolio-allocation")).not.toHaveTextContent("≈");
+    expect(screen.getByTestId("portfolio-allocation")).toHaveTextContent("%");
+  });
+
+  it("uses the count when two futures fall back", () => {
+    const positions = [
+      futurePosition(),
+      futurePosition({ symbol: "BANKNIFTY-JUN2026-FUT" }),
+    ];
+    setBook(fundsQuery, "success", BROKER_FUNDS);
+    setBook(holdingsQuery, "success", []);
+    setBook(positionsQuery, "success", positions);
+    useModeStore.setState({ mode: "live" });
+    render(<PortfolioCard />);
+
+    expect(screen.getByText("Net Worth").closest("p")).toHaveAttribute(
+      "title",
+      "Approximate. Your broker didn't send an average price for 2 futures positions, so profit or loss from earlier days may be counted twice.",
+    );
+    expect(screen.getByTestId("portfolio-net-worth")).toHaveTextContent("≈");
+    expect(screen.getByTestId("portfolio-allocation")).not.toHaveTextContent("≈");
+  });
+
+  it("shows ≈ for a Neo open-leg average", () => {
+    const positions = [futurePosition({
+      symbol: "NIFTY25JUNFUT",
+      settlementPrice: undefined,
+      averagePrice: 22_000,
+      ltp: 22_100,
+    })];
+    setBook(fundsQuery, "success", BROKER_FUNDS);
+    setBook(holdingsQuery, "success", []);
+    setBook(positionsQuery, "success", positions);
+    useModeStore.setState({ mode: "live" });
+    render(<PortfolioCard />);
+
+    expect(screen.getByTestId("portfolio-net-worth")).toHaveTextContent("≈");
+    expect(screen.getByText("Net Worth").closest("p")).toHaveAttribute(
+      "title",
+      approximateNetWorthTooltip(["NIFTY25JUNFUT"]) ?? "",
+    );
+  });
+
+  it("shows no ≈ when the future has an average", () => {
+    const positions = [futurePosition({ markSource: "avg", settlementPrice: 22_100 })];
+    setBook(fundsQuery, "success", BROKER_FUNDS);
+    setBook(holdingsQuery, "success", []);
+    setBook(positionsQuery, "success", positions);
+    useModeStore.setState({ mode: "live" });
+    render(<PortfolioCard />);
+
+    expect(screen.getByTestId("portfolio-net-worth")).not.toHaveTextContent("≈");
+    expect(screen.getByText("Net Worth").closest("p")).toHaveAttribute("title", NET_WORTH_POSITIONS_NOTE);
+    expect(screen.getByTestId("portfolio-net-worth")).not.toHaveAttribute("aria-label");
+  });
+
+  it("clears ≈ when the fallback position goes flat or its average arrives", () => {
+    const positions = [futurePosition()];
+    setBook(fundsQuery, "success", BROKER_FUNDS);
+    setBook(holdingsQuery, "success", []);
+    setBook(positionsQuery, "success", positions);
+    useModeStore.setState({ mode: "live" });
+    const { rerender } = render(<PortfolioCard />);
+
+    expect(screen.getByTestId("portfolio-net-worth")).toHaveTextContent("≈");
+
+    positionsQuery.data = [futurePosition({ quantity: 0, pnl: 1_950 })];
+    rerender(<PortfolioCard />);
+    expect(screen.getByTestId("portfolio-net-worth")).not.toHaveTextContent("≈");
+
+    positionsQuery.data = [futurePosition({ markSource: "avg", settlementPrice: 22_100 })];
+    rerender(<PortfolioCard />);
+    expect(screen.getByTestId("portfolio-net-worth")).not.toHaveTextContent("≈");
+    expect(screen.getByText("Net Worth").closest("p")).toHaveAttribute("title", NET_WORTH_POSITIONS_NOTE);
+  });
+
+  it("never shows ≈ for Practice", () => {
+    const positions = [futurePosition({
+      symbol: "NIFTY24APRFUT",
+      markSource: undefined,
+      settlementPrice: undefined,
+      ltp: 1_100,
+      quantity: 1,
+      averagePrice: 1_000,
+    })];
+    setBook(fundsQuery, "success", PRACTICE_FUNDS);
+    setBook(holdingsQuery, "success", []);
+    setBook(positionsQuery, "success", positions);
+    useModeStore.setState({ mode: "practice" });
+    render(<PortfolioCard />);
+
+    expect(screen.getByTestId("portfolio-net-worth")).not.toHaveTextContent("≈");
+    expect(screen.getByTestId("portfolio-allocation")).not.toHaveTextContent("≈");
   });
 });
 

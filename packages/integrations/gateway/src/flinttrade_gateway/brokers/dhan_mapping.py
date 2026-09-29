@@ -1347,7 +1347,8 @@ def _attach_dhan_futures_settlement(d: dict[str, Any], position: dict[str, Any],
 
     Fallback: when that MTM average is absent, use ``costPrice``. That is
     the actual cost, not the daily settlement, and can recount MTM already
-    in the start-of-day balance.
+    in the start-of-day balance. ``mark_source`` is ``avg`` for the MTM
+    average and ``fallback`` for ``costPrice``. Practice never sets it.
     """
     option_type = str(position.get("option_type") or "").upper()
     if option_type in {"CE", "PE", "CALL", "PUT"}:
@@ -1367,10 +1368,14 @@ def _attach_dhan_futures_settlement(d: dict[str, Any], position: dict[str, Any],
     mtm = _response_number(d, mtm_field)
     if mtm is not _RESPONSE_MISSING:
         position["settlement_price"] = mtm
+        position["mark_source"] = "avg"
         return
     cost = _response_number(d, "costPrice")
     if cost is not _RESPONSE_MISSING:
+        # costPrice is not the daily settlement. Net worth treats this as
+        # approximate. Do not derive a settlement from carried value ÷ qty.
         position["settlement_price"] = cost
+        position["mark_source"] = "fallback"
 
 
 def from_dhan_holding(d: dict[str, Any]) -> dict[str, Any]:

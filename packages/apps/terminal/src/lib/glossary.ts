@@ -69,5 +69,5 @@ export const GLOSSARY: Record<string, string> = {
   "Day P&L":
     "Profit and Loss for the current trading day based on unrealised position values.",
   "Net Worth":
-    `Ledger cash, including blocked margin, plus the market value of holdings. Options and equity positions that are not already holdings add signed market value. Futures add unrealised P&L. ${NET_WORTH_POSITIONS_NOTE}`,
+    `Ledger cash, including blocked margin, plus the market value of holdings. Options and equity positions that are not already holdings add signed market value. Futures add unrealised P&L. ${NET_WORTH_POSITIONS_NOTE} A fallback futures mark is shown as approximate.`,
 };

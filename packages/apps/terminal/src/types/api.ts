@@ -51,6 +51,9 @@ export interface Position {
   ltp: number;
   pnl: number;
   pnlPercent: number;
+  /** Futures mark base. `fallback` means the figure is approximate. */
+  markSource?: "avg" | "fallback";
+  settlementPrice?: number;
 }
 
 export interface Order {

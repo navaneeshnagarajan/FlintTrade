@@ -20,6 +20,9 @@
  * ledger is Net + MarginUsed and also includes earlier MTM, but a position
  * has no settlement or previous close: the documented fallback is the
  * open-leg average, which can recount carry-forward MTM already in cash.
+ * That fallback is marked `markSource: "fallback"` and the figure is
+ * approximate. Carried value divided by quantity, and Neo `upldPrc`, stay
+ * unused until a funded overnight position confirms they match settlement.
  */
 
 /** Invest Dashboard total. Home uses the shorter "Net Worth" label. */
@@ -27,6 +30,9 @@ export const NET_WORTH_LABEL = "Net Worth (Cash + Holdings + Positions)";
 
 /** Tooltip and description for how open positions enter the total. */
 export const NET_WORTH_POSITIONS_NOTE = "Options at market value, futures at unrealised P&L.";
+
+/** How a future's mark base was chosen. Practice does not set this. */
+export type FuturesMarkSource = "avg" | "fallback";
 
 /**
  * Charges on the account book. Practice funds have no charges field today,
@@ -46,13 +52,37 @@ export interface MarkedLine {
 }
 
 /** Same rupee string Home and Invest use for the net-worth headline. */
-export function formatAccountNetWorth(value: number): string {
+export function formatAccountNetWorth(value: number, approximate = false): string {
   const safe = Number.isFinite(value) ? value : 0;
-  return safe.toLocaleString("en-IN", {
+  const formatted = safe.toLocaleString("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
   });
+  return approximate ? `≈ ${formatted}` : formatted;
+}
+
+/** Screen-reader name when the figure uses a fallback futures mark. */
+export function accountNetWorthAccessibleName(value: number): string {
+  return `Net Worth, approximately ${formatAccountNetWorth(value)}`;
+}
+
+/**
+ * Tooltip while any open future uses the fallback mark.
+ * One position names the symbol. Several name the count.
+ */
+export function approximateNetWorthTooltip(symbols: readonly string[]): string | null {
+  if (symbols.length === 0) return null;
+  const subject = symbols.length === 1
+    ? symbols[0]
+    : `${symbols.length} futures positions`;
+  return `Approximate. Your broker didn't send an average price for ${subject}, so profit or loss from earlier days may be counted twice.`;
+}
+
+/** Positions note, or the approximate tooltip when a fallback mark is in use. */
+export function netWorthFigureTitle(approximate: boolean, symbols: readonly string[]): string {
+  if (!approximate) return NET_WORTH_POSITIONS_NOTE;
+  return approximateNetWorthTooltip(symbols) ?? NET_WORTH_POSITIONS_NOTE;
 }
 
 /** Mark of a holdings book. Quantity is absolute so a long and a listed holding agree. */
@@ -81,6 +111,12 @@ export interface PositionLine {
   avg_price?: number;
   settlementPrice?: number;
   settlement_price?: number;
+  /**
+   * `avg` is the broker mark-to-market average. `fallback` is Dhan `costPrice`
+   * or Kotak Neo's open-leg average. Absent on Practice.
+   */
+  markSource?: FuturesMarkSource;
+  mark_source?: FuturesMarkSource;
   pnl?: number;
   /** True when this row's funds source already includes earlier days' futures MTM. */
   futuresMtmInLedger?: boolean;
@@ -221,6 +257,36 @@ export function positionNetWorthContribution(
   }
   const mark = ltp > 0 ? ltp : entry;
   return mark * quantity;
+}
+
+function positionUsesFallbackMark(position: PositionLine, futuresMtmInLedger: boolean): boolean {
+  if (lineNumber(position, "quantity") === 0) return false;
+  if (!isFuture(position)) return false;
+  const source = position.markSource ?? position.mark_source;
+  if (source !== "fallback") return false;
+  // The fallback can recount MTM only when earlier days are already in cash.
+  return (position.futuresMtmInLedger ?? futuresMtmInLedger) === true;
+}
+
+export interface NetWorthApproximation {
+  approximate: boolean;
+  fallbackSymbols: string[];
+}
+
+/**
+ * Open futures whose mark is the fallback, not a change to the formula.
+ * A flat row and a row whose average has arrived drop out immediately.
+ */
+export function netWorthApproximation(
+  positions: readonly PositionLine[],
+  futuresMtmInLedger = false,
+): NetWorthApproximation {
+  const fallbackSymbols: string[] = [];
+  for (const position of positions) {
+    if (!positionUsesFallbackMark(position, futuresMtmInLedger)) continue;
+    fallbackSymbols.push(String(position.symbol ?? "").trim());
+  }
+  return { approximate: fallbackSymbols.length > 0, fallbackSymbols };
 }
 
 /** Sum of open positions' net-worth contributions. */

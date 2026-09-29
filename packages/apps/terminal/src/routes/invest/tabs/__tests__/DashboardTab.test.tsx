@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
-import { accountNetWorth, formatAccountNetWorth, NET_WORTH_LABEL, NET_WORTH_POSITIONS_NOTE } from "@/lib/accountNetWorth";
+import { accountNetWorth, accountNetWorthAccessibleName, formatAccountNetWorth, NET_WORTH_LABEL, NET_WORTH_POSITIONS_NOTE } from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import { formatCurrencyCompact } from "@/lib/formatters";
 import type { Holding } from "@/types/api";
@@ -84,6 +84,9 @@ const investState = vi.hoisted(() => ({
     totalPnlPercent: 1.64,
     availableCash: 50000,
     netWorth: 220100,
+    positionValue: 0,
+    approximateNetWorth: false,
+    fallbackSymbols: [] as string[],
     sectorCount: 2,
     holdingCount: 2,
   },
@@ -123,6 +126,9 @@ describe("DashboardTab", () => {
       totalPnlPercent: 1.64,
       availableCash: 50000,
       netWorth: 220100,
+      positionValue: 0,
+      approximateNetWorth: false,
+      fallbackSymbols: [],
       sectorCount: 2,
       holdingCount: LIVE_ROWS.length,
     };
@@ -164,6 +170,9 @@ describe("DashboardTab", () => {
       totalPnlPercent: totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0,
       availableCash,
       netWorth: expectedNetWorth,
+      positionValue: 0,
+      approximateNetWorth: false,
+      fallbackSymbols: [],
       sectorCount: 2,
       holdingCount: demo.length,
     };
@@ -190,6 +199,9 @@ describe("DashboardTab", () => {
       totalPnlPercent: 0,
       availableCash: practiceCash,
       netWorth: practiceCash,
+      positionValue: 0,
+      approximateNetWorth: false,
+      fallbackSymbols: [],
       sectorCount: 0,
       holdingCount: 0,
     };
@@ -250,6 +262,26 @@ describe("DashboardTab", () => {
     expect(screen.getByText(/Practice account/)).toBeInTheDocument();
     expect(screen.queryByText(/from your connected broker/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Connect a broker to see movers/)).not.toBeInTheDocument();
+  });
+
+  it("marks the total row approximate and leaves allocation unmarked", () => {
+    investState.summary = {
+      ...investState.summary,
+      netWorth: 452_300,
+      positionValue: 2_500,
+      approximateNetWorth: true,
+      fallbackSymbols: ["NIFTY-JUN2026-FUT"],
+    };
+
+    render(<DashboardTab />);
+
+    expect(screen.getByText(NET_WORTH_LABEL).closest("p")).toHaveAttribute(
+      "title",
+      "Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.",
+    );
+    expect(screen.getByTestId("invest-net-worth")).toHaveTextContent(formatAccountNetWorth(452_300, true));
+    expect(screen.getByTestId("invest-net-worth")).toHaveAccessibleName(accountNetWorthAccessibleName(452_300));
+    expect(screen.getByRole("list", { name: "Portfolio allocation values" })).not.toHaveTextContent("≈");
   });
 });
 

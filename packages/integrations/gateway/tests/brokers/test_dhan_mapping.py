@@ -135,6 +135,7 @@ def test_dhan_option_position_preserves_contract_identity_for_portfolio_greeks()
 
     assert position["option_type"] == "CE"
     assert "settlement_price" not in position
+    assert "mark_source" not in position
     assert position["expiry"] == "2026-07-30"
     assert position["strike_price"] == 25_000.0
     assert position["underlying"] == "NIFTY"
@@ -379,8 +380,11 @@ def test_dhan_future_marks_from_the_mtm_average_and_falls_back_to_cost() -> None
     assert marked["exchange"] == "NFO"
     assert marked["average_price"] == "22000"
     assert marked["settlement_price"] == "22100"
+    assert marked["mark_source"] == "avg"
     assert short["settlement_price"] == "21900"
+    assert short["mark_source"] == "avg"
     assert fallback["settlement_price"] == "22000"
+    assert fallback["mark_source"] == "fallback"
 
 
 def test_dhan_funds_keep_sod_limit_as_opening_risk_capital() -> None:

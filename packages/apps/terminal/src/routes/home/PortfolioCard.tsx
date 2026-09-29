@@ -12,9 +12,11 @@ import {
   accountCharges,
   accountLedgerCash,
   accountNetWorth,
+  accountNetWorthAccessibleName,
   formatAccountNetWorth,
   fundsFuturesMtmInLedger,
-  NET_WORTH_POSITIONS_NOTE,
+  netWorthApproximation,
+  netWorthFigureTitle,
   positionsNetWorthContribution,
 } from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
@@ -78,6 +80,8 @@ export function PortfolioCard() {
   );
   const futuresMtmInLedger = fundsFuturesMtmInLedger(funds);
   const positionValue = positionsNetWorthContribution(positions, holdings ?? [], futuresMtmInLedger);
+  const { approximate, fallbackSymbols } = netWorthApproximation(positions, futuresMtmInLedger);
+  const figureTitle = netWorthFigureTitle(approximate, fallbackSymbols);
   const cash = accountLedgerCash(funds);
   const netWorth = accountNetWorth(
     holdings ?? [],
@@ -102,7 +106,7 @@ export function PortfolioCard() {
         <div>
           <p
             className="text-[10px] text-text-muted mb-0.5 flex items-center gap-1.5"
-            title={NET_WORTH_POSITIONS_NOTE}
+            title={figureTitle}
           >
             Net Worth
             {netWorthIsExample && <ExampleLabel testId="portfolio-net-worth-example" />}
@@ -111,9 +115,11 @@ export function PortfolioCard() {
             className="font-mono text-xl font-semibold text-text-primary"
             data-testid="portfolio-net-worth"
             data-value={netWorth}
+            title={figureTitle}
+            aria-label={approximate && netWorth > 0 ? accountNetWorthAccessibleName(netWorth) : undefined}
           >
             {netWorth > 0
-              ? formatAccountNetWorth(netWorth)
+              ? formatAccountNetWorth(netWorth, approximate)
               : isExplore || accountReadsEnabled ? "—" : "Connect broker"}
           </p>
         </div>

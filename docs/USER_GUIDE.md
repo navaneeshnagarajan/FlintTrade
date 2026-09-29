@@ -746,6 +746,12 @@ includes earlier days' mark-to-market, and from the entry price when it
 does not. Equity positions that are not already holdings add signed market
 value. The positions note reads
 `Options at market value, futures at unrealised P&L.`
+When an open future is marked from the broker's fallback price, the
+figure, the positions line, and that total show `≈` before the amount,
+in the same size and colour, until the position is flat or the average
+arrives. The tooltip says earlier days' profit or loss may be counted
+twice. Allocation percentages are not marked approximate. Practice does
+not show `≈`.
 The Home portfolio card labels the total `Net Worth`. Invest Dashboard
 labels it `Net Worth (Cash + Holdings + Positions)`. The Net Worth view
 labels it `Known Total (Cash + Holdings + Positions)`. Those labels do not

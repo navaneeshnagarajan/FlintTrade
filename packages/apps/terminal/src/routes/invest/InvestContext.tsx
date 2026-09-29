@@ -25,6 +25,7 @@ import {
   accountLedgerCash,
   accountNetWorth,
   fundsFuturesMtmInLedger,
+  netWorthApproximation,
   positionsNetWorthContribution,
 } from "@/lib/accountNetWorth";
 import { classifySector } from "@/lib/sectors";
@@ -48,6 +49,10 @@ export interface PortfolioSummary {
   positionValue: number;
   /** Ledger cash, holdings market value, and open positions. */
   netWorth: number;
+  /** True while an open future uses the fallback mark. Not sticky. */
+  approximateNetWorth?: boolean;
+  /** Symbols of those fallback futures, one entry per open position. */
+  fallbackSymbols?: readonly string[];
   sectorCount: number;
   holdingCount: number;
 }
@@ -190,6 +195,10 @@ export function InvestProvider({ children }: { children: ReactNode }) {
   );
 
   const netWorth = accountNetWorth(holdings, ledgerCash, positions, charges, futuresMtmInLedger);
+  const { approximate: approximateNetWorth, fallbackSymbols } = netWorthApproximation(
+    positions,
+    futuresMtmInLedger,
+  );
 
   const summary: PortfolioSummary = useMemo(
     () => ({
@@ -201,6 +210,8 @@ export function InvestProvider({ children }: { children: ReactNode }) {
       ledgerCash,
       positionValue,
       netWorth,
+      approximateNetWorth,
+      fallbackSymbols,
       sectorCount,
       holdingCount: holdings.length,
     }),
@@ -213,6 +224,8 @@ export function InvestProvider({ children }: { children: ReactNode }) {
       ledgerCash,
       positionValue,
       netWorth,
+      approximateNetWorth,
+      fallbackSymbols,
       sectorCount,
       holdings.length,
     ],

@@ -3,7 +3,11 @@ import {
   accountCharges,
   accountLedgerCash,
   accountNetWorth,
+  accountNetWorthAccessibleName,
+  approximateNetWorthTooltip,
+  formatAccountNetWorth,
   markedValue,
+  netWorthApproximation,
   NET_WORTH_LABEL,
   NET_WORTH_POSITIONS_NOTE,
   positionNetWorthContribution,
@@ -195,5 +199,80 @@ describe("accountNetWorth", () => {
     expect(positionsNetWorthContribution(positions)).toBe(0);
     expect(total).toBe(1_000_000);
     expect(total).not.toBe(practiceBook.availableCash);
+    expect(netWorthApproximation(positions, practiceBook.futuresMtmInLedger).approximate).toBe(false);
+  });
+});
+
+describe("fallback futures marks are approximate", () => {
+  const dhanFallback: PositionLine = {
+    symbol: "NIFTY-JUN2026-FUT",
+    exchange: "NFO",
+    quantity: 50,
+    ltp: 22_150,
+    averagePrice: 22_000,
+    settlementPrice: 22_000,
+    markSource: "fallback",
+  };
+
+  it("names one Dhan costPrice fallback and leaves the contribution unchanged", () => {
+    const withAverage: PositionLine = { ...dhanFallback, markSource: "avg", settlementPrice: 22_100 };
+    const marked = netWorthApproximation([dhanFallback], true);
+    const exact = netWorthApproximation([withAverage], true);
+
+    expect(marked).toEqual({ approximate: true, fallbackSymbols: ["NIFTY-JUN2026-FUT"] });
+    expect(exact.approximate).toBe(false);
+    expect(positionNetWorthContribution(dhanFallback, [], true)).toBe(
+      positionNetWorthContribution({ ...dhanFallback, markSource: undefined }, [], true),
+    );
+    expect(approximateNetWorthTooltip(marked.fallbackSymbols)).toBe(
+      "Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.",
+    );
+    expect(accountNetWorthAccessibleName(452_300)).toBe(
+      `Net Worth, approximately ${formatAccountNetWorth(452_300)}`,
+    );
+    expect(formatAccountNetWorth(452_300, true)).toBe(`≈ ${formatAccountNetWorth(452_300)}`);
+  });
+
+  it("counts two fallback positions in the tooltip", () => {
+    const second: PositionLine = { ...dhanFallback, symbol: "BANKNIFTY-JUN2026-FUT", mark_source: "fallback", markSource: undefined };
+    const marked = netWorthApproximation([dhanFallback, second], true);
+
+    expect(marked.fallbackSymbols).toEqual(["NIFTY-JUN2026-FUT", "BANKNIFTY-JUN2026-FUT"]);
+    expect(approximateNetWorthTooltip(marked.fallbackSymbols)).toBe(
+      "Approximate. Your broker didn't send an average price for 2 futures positions, so profit or loss from earlier days may be counted twice.",
+    );
+  });
+
+  it("treats a Neo open-leg average as a fallback and an arrived average as exact", () => {
+    const neo: PositionLine = {
+      symbol: "NIFTY25JUNFUT",
+      exchange: "NFO",
+      quantity: 50,
+      ltp: 22_100,
+      averagePrice: 22_000,
+      mark_source: "fallback",
+    };
+
+    expect(netWorthApproximation([neo], true).approximate).toBe(true);
+    expect(netWorthApproximation([{ ...neo, mark_source: "avg" }], true).approximate).toBe(false);
+  });
+
+  it("clears when the fallback position goes flat or its average arrives", () => {
+    expect(netWorthApproximation([dhanFallback], true).approximate).toBe(true);
+    expect(netWorthApproximation([{ ...dhanFallback, quantity: 0, pnl: 1_950 }], true).approximate).toBe(false);
+    expect(netWorthApproximation([{ ...dhanFallback, markSource: "avg" }], true).approximate).toBe(false);
+  });
+
+  it("stays exact for Practice, which never sets a mark source", () => {
+    const practice: PositionLine = {
+      symbol: "NIFTY24APRFUT",
+      exchange: "NFO",
+      quantity: 1,
+      ltp: 1_100,
+      averagePrice: 1_000,
+    };
+
+    expect(netWorthApproximation([practice], false)).toEqual({ approximate: false, fallbackSymbols: [] });
+    expect(netWorthApproximation([{ ...practice, markSource: "fallback" }], false).approximate).toBe(false);
   });
 });

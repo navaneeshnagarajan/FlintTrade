@@ -493,6 +493,7 @@ class TestNetWorthLedger:
         assert funds["futures_mtm_in_ledger"] is False
         assert position["unrealised_pnl"] == pytest.approx(100.0)
         assert "settlement_price" not in position
+        assert "mark_source" not in position
 
     def test_equity_notional_is_booked_into_the_ledger_without_removing_margin_twice(self, engine: SandboxEngine) -> None:
         engine.place_order("SBIN", "NSE", "BUY", 1, 800.0)

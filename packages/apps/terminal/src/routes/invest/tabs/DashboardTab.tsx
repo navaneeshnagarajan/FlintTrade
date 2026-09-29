@@ -30,9 +30,10 @@ import { DemoBanner } from "@/components/ui/DemoBanner";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
 import {
   accountNetWorth,
+  accountNetWorthAccessibleName,
   formatAccountNetWorth,
   NET_WORTH_LABEL,
-  NET_WORTH_POSITIONS_NOTE,
+  netWorthFigureTitle,
 } from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import { useInvest } from "../InvestContext";
@@ -102,7 +103,10 @@ export function DashboardTab() {
   // Wrap the compact-INR formatter so masked mode hides the figure everywhere it
   // is passed to a counter/list without changing each call site's shape.
   const money = (v: number) => maskValue(formatINRCompact(v), valuesHidden);
-  const netWorthLabel = (v: number) => maskValue(formatAccountNetWorth(v), valuesHidden);
+  const approximate = liveSummary.approximateNetWorth === true;
+  const fallbackSymbols = liveSummary.fallbackSymbols ?? [];
+  const figureTitle = netWorthFigureTitle(approximate, fallbackSymbols);
+  const netWorthLabel = (v: number) => maskValue(formatAccountNetWorth(v, approximate), valuesHidden);
 
   const positionValue = liveSummary.positionValue ?? 0;
 
@@ -192,7 +196,7 @@ export function DashboardTab() {
           <div className="space-y-1">
             <p
               className="text-xxs text-text-muted uppercase tracking-wider font-medium flex items-center gap-1.5"
-              title={NET_WORTH_POSITIONS_NOTE}
+              title={figureTitle}
             >
               <GlossaryTooltip term="Net Worth">{NET_WORTH_LABEL}</GlossaryTooltip>
               {isDemo && <ExampleLabel testId="invest-net-worth-example" />}
@@ -201,12 +205,21 @@ export function DashboardTab() {
               <span
                 className="text-4xl font-mono font-bold tabular-nums text-text-primary"
                 data-testid="invest-net-worth"
+                title={figureTitle}
+                aria-label={
+                  netWorthPublished && approximate && !valuesHidden
+                    ? accountNetWorthAccessibleName(netWorth)
+                    : undefined
+                }
                 {...(netWorthPublished ? { "data-value": netWorth } : {})}
               >
                 {netWorthPublished ? (
                   <AnimatedCounter
                     value={netWorth}
                     formatter={netWorthLabel}
+                    accessibleLabel={
+                      approximate && !valuesHidden ? accountNetWorthAccessibleName(netWorth) : undefined
+                    }
                     duration={1.2}
                   />
                 ) : "—"}

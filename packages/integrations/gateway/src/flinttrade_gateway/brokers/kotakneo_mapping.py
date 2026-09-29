@@ -1231,6 +1231,20 @@ def _fmt_qty(value: float) -> str:
     return str(int(round(value)))
 
 
+def _kotak_open_future(symbol: str, exchange: str) -> bool:
+    """True for a future, not an option or an equity line.
+
+    Neo has no settlement price. The open-leg average is the net-worth
+    fallback, so only this row is marked ``mark_source`` ``fallback``.
+    """
+    compact = "".join(symbol.strip().upper().split())
+    if any(character.isdigit() for character in compact) and compact.endswith(("CE", "PE")):
+        return False
+    if compact.endswith("FUT"):
+        return True
+    return exchange.strip().upper() in {"NFO", "BFO", "MCX", "CDS"}
+
+
 def from_kotak_position(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise a NEO position record.
 
@@ -1333,6 +1347,10 @@ def from_kotak_position(d: dict[str, Any]) -> dict[str, Any]:
             "accounting_complete": True,
         }
     )
+    # The open-leg average is not the daily settlement. An open future is
+    # marked approximate. Do not use upldPrc or carried value ÷ qty yet.
+    if net_qty != 0 and _kotak_open_future(str(position["symbol"]), str(position["exchange"])):
+        position["mark_source"] = "fallback"
     return position
 
 

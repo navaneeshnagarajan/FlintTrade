@@ -28,8 +28,9 @@ import { useInvest } from "../InvestContext";
 import { DisabledActionButton } from "../DisabledActionButton";
 import {
   accountNetWorth,
+  accountNetWorthAccessibleName,
   formatAccountNetWorth,
-  NET_WORTH_POSITIONS_NOTE,
+  netWorthFigureTitle,
 } from "@/lib/accountNetWorth";
 import { formatINRCompact, formatPercent } from "../formatters";
 import { maskValue } from "@/lib/formatters";
@@ -73,6 +74,8 @@ export function NetWorthTab() {
   const { currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash } = summary;
   const ledgerCash = summary.ledgerCash ?? availableCash;
   const positionValue = summary.positionValue ?? 0;
+  const approximate = summary.approximateNetWorth === true;
+  const figureTitle = netWorthFigureTitle(approximate, summary.fallbackSymbols ?? []);
   const sourceNote = isPractice ? "Practice account" : "Live from broker";
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);
 
@@ -153,7 +156,7 @@ export function NetWorthTab() {
       tailwindText: "text-emerald-400",
       icon: TrendingUp,
       addLabel: "Add Position",
-      addTooltip: NET_WORTH_POSITIONS_NOTE,
+      addTooltip: figureTitle,
     });
   }
 
@@ -180,7 +183,7 @@ export function NetWorthTab() {
         <GlassCard className="p-5 flex flex-col justify-between gap-3">
           <div
             className="text-xxs text-text-muted uppercase tracking-wider flex items-center gap-1.5"
-            title={NET_WORTH_POSITIONS_NOTE}
+            title={figureTitle}
           >
             Known Total (Cash + Holdings + Positions)
             {isSampleData && <ExampleLabel testId="net-worth-tab-example" />}
@@ -190,8 +193,15 @@ export function NetWorthTab() {
               "font-mono text-2xl font-bold tabular-nums",
               netWorthPublished ? "text-text-primary" : "text-text-muted",
             )}
+            data-testid="net-worth-known-total"
+            title={figureTitle}
+            aria-label={
+              netWorthPublished && approximate && !valuesHidden
+                ? accountNetWorthAccessibleName(knownTotal)
+                : undefined
+            }
           >
-            {netWorthPublished ? maskValue(formatAccountNetWorth(knownTotal), valuesHidden) : "—"}
+            {netWorthPublished ? maskValue(formatAccountNetWorth(knownTotal, approximate), valuesHidden) : "—"}
           </div>
           {!isLoading && (
             <div
@@ -247,7 +257,7 @@ export function NetWorthTab() {
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                   <span className="text-xxs text-text-muted">tracked</span>
                   <span className="font-mono text-xs font-bold text-text-primary tabular-nums">
-                    {netWorthPublished ? maskValue(formatAccountNetWorth(knownTotal), valuesHidden) : "—"}
+                    {netWorthPublished ? maskValue(formatAccountNetWorth(knownTotal, approximate), valuesHidden) : "—"}
                   </span>
                 </div>
               </div>
@@ -303,12 +313,21 @@ export function NetWorthTab() {
                   {cat.value !== null ? (
                     <span
                       className="font-mono tabular-nums text-xs text-text-primary"
-                      data-testid={cat.label === "Cash" ? "net-worth-available-cash" : undefined}
+                      data-testid={
+                        cat.label === "Cash"
+                          ? "net-worth-available-cash"
+                          : cat.label === "Open Positions"
+                            ? "net-worth-open-positions"
+                            : undefined
+                      }
+                      title={cat.label === "Open Positions" ? figureTitle : undefined}
                     >
                       {maskValue(
-                        cat.label === "Cash" || cat.label === "Open Positions"
-                          ? formatAccountNetWorth(cat.value)
-                          : formatINRCompact(cat.value),
+                        cat.label === "Open Positions"
+                          ? formatAccountNetWorth(cat.value, approximate)
+                          : cat.label === "Cash"
+                            ? formatAccountNetWorth(cat.value)
+                            : formatINRCompact(cat.value),
                         valuesHidden,
                       )}
                     </span>
