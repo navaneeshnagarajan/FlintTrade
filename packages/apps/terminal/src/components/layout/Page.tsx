@@ -84,7 +84,7 @@ export function PageHeader({
             {meta ? <div className="flex flex-wrap items-center gap-2">{meta}</div> : null}
           </div>
           {description ? (
-            <p className="ft-text-body mt-1 max-w-3xl text-text-secondary">{description}</p>
+            <p className="ft-text-prose mt-1 max-w-3xl text-text-secondary">{description}</p>
           ) : null}
         </div>
         {actions ? (

@@ -6,7 +6,7 @@
 
 /* ---------- Typography roles ----------
    One class per role so page chrome shares a single type scale:
-   page title 20/28, section title 16/24, card title 14/20, body 14/22,
+   page title 20/28, section title 16/24, card title 14/20, prose 14/22,
    caption 12/16, overline 11/16. Readable copy never goes below 11px. */
 @utility ft-text-page-title {
   font-family: var(--font-heading);
@@ -26,7 +26,7 @@
   line-height: 1.25rem;
   font-weight: 600;
 }
-@utility ft-text-body {
+@utility ft-text-prose {
   font-size: 0.875rem;
   line-height: 1.375rem;
 }
