@@ -60,11 +60,13 @@ the mode gate runs, but those verbs are **not** gated like regular
 rejected GTT — the sandbox does not simulate price triggers. Live requires
 the unlocked JWT, then `gtt-*` returns HTTP 501 (they do not call
 `gate_order` → `BrokerRouter`, and they do not forward an upstream
-OpenAlgo 501). Gated forever/GTT is:
+OpenAlgo 501). A GTT order is placed on `POST /api/v1/orders/place`
+with `"variety": "gtt"`, through the same Laya admission as a regular
+place. `POST /api/v1/orders/forever` does not place one.
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/v1/orders/forever` | Place a forever (GTT) order. Live only. SafetySystem L1–L5 → `gate_order` → `BrokerRouter.place_order` with `variety="gtt"`. |
+| `POST /api/v1/orders/forever` | Does not place. Live session required. A body that fails the GTT contract is HTTP 400. A valid body is HTTP 501 with `Orders are placed through /api/v1/orders/place.` |
 | `PUT /api/v1/orders/forever/<order_id>` | Modify a resting forever order (`changes` object). Gated `modify_forever`. |
 | `DELETE /api/v1/orders/forever/<order_id>` | Cancel a resting forever order. Gated `cancel_forever`. |
 | `GET /api/v1/orders/forever` | List resting forever orders (`?broker=` / `?account_id=`). |
@@ -138,6 +140,54 @@ under `packages/*/src/`. Externally clients call `/ft-api/v1/…`;
 internally blueprints are registered at `/v1/…` (or `/api/v1/…` for the
 OpenAlgo-style paths). Both shapes route to the same handler thanks to
 the WSGI prefix-strip.
+
+### Order submission
+
+Three routes submit an order. Nothing else does, including
+`POST /api/v1/orders/place-smart`, `POST /api/v1/orders/open-position`,
+and `POST /api/v1/orders/close-position`, which are not mounted. The
+Practice book under `/v1/sandbox/` can cancel or modify a resting order.
+It has no place route and no square-off route. Practice square-off is
+an opposite order on `POST /api/v1/orders/place`. Settings → Practice
+adjusts virtual capital and square-off times; it does not place.
+
+| Route | What it does |
+|---|---|
+| `POST /api/v1/orders/place` | The only place route for Practice and Live. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. A GTT body sets `"variety": "gtt"` and uses that same admission. Explore is HTTP 403 `mode_blocked`. |
+| `POST /api/v1/orders/<broker>/place` | Live only. `<broker>` is the adapter id. The same dispatcher admits through Laya and then runs SafetySystem. A non-Live session is HTTP 400 (`The routed order path serves live mode only. Use /api/v1/orders/place for explore/practice.`). |
+| `POST /api/v1/positions/exit-all` | Live, PIN-unlocked. Body must include boolean `"confirm": true` or the route returns HTTP 400. The server classifies every open contract and records a reduce-only proof before the gated `exit_all_positions` verb. A row that is not an exit stops the request with HTTP 409 and `Square-off stopped because a position is not a reduce-only exit.` An unreadable book still records one reduce-only proof. |
+
+`POST /api/v1/orders/cancel-all` cancels open orders. Practice cancels
+pending sandbox orders. Live uses the gated `cancel_all_orders` verb and
+does not place. A Live body with `strategy` set is HTTP 400, because that
+verb cannot narrow by strategy.
+
+Reduce-only is decided on the server. A close qualifies when it is the
+same contract, the opposite side, and the quantity is no more than the
+open quantity minus pending exits. On Live, pending exits include the
+broker's open orders on that contract when that book can be read. When
+the broker order book cannot be read, the cap is the open quantity minus
+this desk's own pending exits, and the close can still qualify. When the
+position book cannot be read, the place is not classified as a close.
+A second exit while one of this desk's exits on that contract is still
+unfilled is HTTP 409 `exit_pending`, with `message` and `reason` both
+`An exit for this contract is already pending.` The Positions row shows
+**Exit pending**.
+
+While Laya is Down, a new order is paused and a qualifying close is still
+admitted. Live still runs SafetySystem after that record. The desk line is
+`Laya is Down. New orders are paused until it's Ready. You can still close positions.`
+A filled reducing close can show `Closed. Exits are allowed while Laya is Down.`
+
+A position whose sign flips after the broker book has loaded keeps its
+row, tagged **Unexpected**, and the Positions book shows
+`Position changed after your broker's orders loaded. You're now <long or short> <quantity> <symbol>. Close it if that wasn't intended.`
+until dismissed.
+
+Layer 5 (`POST /api/v1/safety/kill-switch`) and Ditto Kill All
+(`POST /api/v1/ditto/kill-all`) cancel resting orders and then flatten.
+They are not cancel-only, and they are not a fourth submit route: the
+flatten runs as the emergency `exit_all_positions` verb after the cancel.
 
 ### Analysis (`/api/v1/*`; Vite proxy `/ft-api/api/v1/*`)
 
@@ -362,9 +412,11 @@ Native virtual-capital paper trading. Source: `packages/core/data/src/flinttrade
 | `sandbox/status` (**GET**) | Combined status: current + initial capital, P&L, trade count. |
 | `sandbox/capital` (**GET**) | Full capital state (initial / current / available / used margin). |
 | `sandbox/capital/adjust` (**POST**) | Add or remove virtual capital (`{amount}`). |
-| `sandbox/positions` · `sandbox/orders` · `sandbox/pnl` (**GET**) | Book and P&L reads. Orders are placed through `POST /api/v1/orders/place`. |
+| `sandbox/positions` · `sandbox/orders` · `sandbox/trades` · `sandbox/pnl` (**GET**) | Book, fill, and P&L reads. Orders are placed through `POST /api/v1/orders/place`. |
+| `sandbox/order/<order_id>` (**DELETE** / **PATCH**) | Cancel or modify one pending Practice order. |
+| `sandbox/orders/cancel-all` (**POST**) | Cancel every pending Practice order. Does not place. |
 | `sandbox/reset` (**POST**) | Clear all paper data (returns a backup). |
-| `sandbox/export` (**GET**) · `sandbox/import` (**POST**) | Export sandbox state, or restore it in Practice Mode. Restored fills are stored as records marked "Restored from backup" and are not sent to a broker. |
+| `sandbox/export` (**GET**) · `sandbox/import` (**POST**) | Export sandbox state, or restore it. Restore requires a Practice session JWT. Any other session, including an API key, is HTTP 403 `Restore is available in Practice Mode only.` Restored fills are stored with strategy `Restored from backup`. They are not sent to a broker and do not re-enter the order path. The desk shows a **Restored** tag whose tooltip is `Restored from backup. Not sent to a broker or checked by Laya.` Laya, strategy, benchmark, and training readers omit them. P&L still counts them. Performance shows `Excludes 1 restored fill` or `Excludes N restored fills`, and hides that line when the count is 0. |
 
 ### Strategies (`/api/v1/strategies/*`; Vite proxy `/ft-api/api/v1/strategies/*`)
 
@@ -455,12 +507,12 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 | `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. |
 | `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and an Explore setup-session JWT (`setup_session`). That token is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for Explore and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. |
 | `POST auth/setup/vault` | Open the credential vault during first-run Setup. Requires the account-create setup-session JWT. Daily-login tokens are rejected. Body `{ "master_password" }` (at least 8 characters when the vault file is missing). Persists the secret when it is missing and leaves an existing secret untouched. Success is `{ "opened": true, "already_present": bool }` under `data`. The response never returns the secret. |
-| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Before authenticator enrolment, the account-create setup JWT can start over with an empty body, and a session plus the password can wipe the account. Once an authenticator is enrolled, recovery requires a session, the password, and the current authenticator code (`totp_code`). A signed-out request on a finished account is refused with "Sign in to reset this account. You'll need your password and authenticator code." and changes nothing. |
+| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Before authenticator enrolment, the account-create setup JWT can start over with an empty body, and a session plus the password can wipe the account. Once an authenticator is enrolled, recovery requires an active session, the password, and the current authenticator code (`totp_code`). An API key is not a session. A signed-out request on a finished account is HTTP 403 `Sign in to reset this account. You'll need your password and authenticator code.` and changes nothing. A successful wipe bumps the account epoch, so other session tokens stop working. |
 | `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret and clear `totp_enabled` until a live code is confirmed again. Before enrolment, a session and the password are enough. Once an authenticator is enrolled, the current authenticator code is required as well. A signed-out request on a finished account returns the same sign-in message as reset and changes nothing. |
 | `POST auth/login` | Sign in with password (argon2id-hashed). `totp_code` (or a backup code) is required only after authenticator enrolment (`totp_enabled`). Issues a JWT. |
 | `POST auth/totp/enable` | Confirm optional authenticator enrolment. Session-bound. Body `{ "totp_code" }`. Sets `totp_enabled`; later logins then require a TOTP or backup code. |
-| `POST auth/pin` | Quick Unlock with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin" }`. Reopens the Mode already on that session and never changes it. Practice stays Practice. An Example (sample-data) session stays that session. A session that is already Live stays Live and keeps the authenticator enrolment check (403 `totp_required` until enrolled). Connected (read) is a broker status, not a session Mode. There is no `/auth/me`. |
-| `POST auth/live` | Explicit Live switch, and the only route that enters Live. Requires an existing session JWT. Body `{ "pin" }`. Requires authenticator enrolment and mints a Live JWT with `live_mode_unlocked=true`. Refuses 403 `totp_required` until the authenticator is enabled. |
+| `POST auth/pin` | Quick Unlock with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin" }`. Reopens the Mode already on that session and never changes it. Practice stays Practice. An Example (sample-data) session stays that session. A session that is already Live stays Live and keeps the authenticator enrolment check (403 `totp_required` until enrolled). Connected (read) is a broker status, not a session Mode. A successful unlock revokes the presented session and returns a new token. The previous token stops working. There is no `/auth/me`. |
+| `POST auth/live` | Explicit Live switch, and the only route that enters Live. Requires an existing session JWT. Body `{ "pin" }`. Requires authenticator enrolment and mints a Live JWT with `live_mode_unlocked=true`, after revoking the presented session. Refuses 403 `totp_required` until the authenticator is enabled. |
 | `POST auth/pin/set` | Set or change the PIN (password re-confirm). Requires an existing session JWT. Does not change Mode. |
 | `POST auth/mode` | **Downgrade only** to `practice` or `explore`. Requires an existing session JWT. Issues a fresh JWT and revokes the old `jti`. Switching to Live uses `POST /v1/auth/live`. |
 | `POST auth/logout` | Revoke the current JWT by `jti`. Requires an existing session JWT. |
@@ -495,8 +547,8 @@ The terminal has two development proxy namespaces:
 | `/api/v1/latency/recent` | Recent latency records. |
 | `/api/v1/reconciliation/outcomes` | Unresolved broker-write outcomes, including the exact selector, business date, non-secret persisted intent, fresh-snapshot evidence and any retryable `PENDING_AUDIT` or `PENDING_ROUTER_CLEAR` decision. Requires an authenticated session with `admin.observability.read`; results and remaining-outcome counts are filtered through the current router's account ACL. |
 | `/api/v1/reconciliation/outcomes/<attempt_id>/resolve` (**POST**) | Record `confirmed_applied`, `confirmed_not_applied`, or basket-only `confirmed_partial` after broker verification. Requires an authenticated, PIN-unlocked Live JWT, session scope `admin.observability.run`, current-router selector ACL, exact `CONFIRM <APPLIED\|NOT_APPLIED\|PARTIAL> <broker>:<account>:<attempt>` confirmation, a newly adopted exact-selector reconciliation generation, and a durable hash-chained audit receipt. Snapshots are monotonic; same-time conflicts and malformed reports fail closed, and historical observations remain evidence. Applied placement IDs must be first observed after invocation and match every persisted material identity field; basket requests map applied IDs to `broker_order_item_indexes` and partition all remaining children in `not_applied_item_indexes`. Modify and cancel recovery require operation-specific evidence. A `PENDING_AUDIT` retry requires newer evidence, archives the prior revision and receives a new resolution ID; a `PENDING_ROUTER_CLEAR` retry resumes the committed decision without another broker read. Success and structured-error responses carry the exact attempt and canonical decision; the terminal runtime-validates identity, status and primitive types before updating state. Ambiguous and unsupported cases remain blocked; this route performs no broker write. |
-| `/health`, `/health/detail` | Process health. Session required. `/health/detail` includes per-check detail. |
-| `/healthz`, `/readyz` | Public process probes. The body is status only. |
+| `/health`, `/health/detail` | Process health. Not public: a session JWT or `FLINTTRADE_API_KEY` is required. `/health` returns `status` (`healthy`, `degraded`, or `unhealthy`) and `timestamp`. `/health/detail` includes per-check detail. |
+| `/healthz`, `/readyz` | Public process probes. The body is status only: `/healthz` is HTTP 200 `{"status": "ok"}`; `/readyz` is HTTP 200 `{"status": "ready"}` or HTTP 503 `{"status": "not_ready"}`. Signed-out probes use these, not `/health`. |
 | `GET /api/v1/ping` | Process liveness. The body includes `laya` (`ready`, `degraded`, or `down`). |
 | `/v1/admin/system` | CPU, memory, disk, network, uptime, and process metrics for the Admin system panel. |
 | `/v1/audit/*` | Scoped audit trail (`admin.audit.read` where required). |
@@ -504,7 +556,7 @@ The terminal has two development proxy namespaces:
 | `/api/v1/audit/logs` | Audit-log read on the operations blueprint (not `/v1/operations/…`). |
 
 `GET /api/v1/ping` is the FlintTrade process probe, not the OpenAlgo
-passthrough `ping` (POST). It is exempt from the API-key check. The
+passthrough `ping` (POST). It is on the public allowlist. The
 response is JSON
 `{"status": "ok", "timestamp": "<ISO8601 IST>", "laya": "ready"|"degraded"|"down"}`.
 `status` is `"ok"`, `timestamp` is ISO8601 IST, and `laya` is `"ready"`,
@@ -604,28 +656,74 @@ heartbeat.
 
 ### JWT (FlintTrade backend)
 
-`require_auth` accepts a session JWT **or** an `X-API-Key` header
-(`FLINTTRADE_API_KEY`, with `OPENALGO_API_KEY` as a compatibility
-fallback) on every mounted route that is not on the public allowlist in
+`require_auth` accepts a session JWT **or** an API key on every mounted
+route that is not on the public allowlist in
 `flinttrade_core.public_routes`. That allowlist is the only exemption, and
 it is checked before the handler runs, so a new route is protected until
-it is added there. Broker account-management writes still require the
+it is added there. `OPTIONS` is always public. `HEAD` follows `GET`. The
+SPA shell (`/` and `/<path:path>`) is public only for a non-API path;
+unknown `/v1/`, `/api/`, and `/ft-api/` paths that fall through stay
+authenticated. Broker account-management writes still require the
 operator's session JWT after that check.
 
-The allowlist covers first-run setup and login, auth status, password
-recovery, the public process probes, public docs and the changelog,
-frontend error reports, the setup-wizard OpenAlgo and connectivity probes,
-signed webhook intake, broker OAuth callbacks and postbacks, and the
-browser CSP report. `POST /v1/auth/setup/vault` is on that list so the
-setup wizard can reach it, and the handler still requires the
-setup-session JWT and rejects a daily-login token. `POST
-/v1/auth/setup/reset` and `POST /v1/auth/setup/regenerate-2fa` stay
-reachable during first-run. Once an authenticator is enrolled, account
-recovery requires a session, the password, and the current authenticator
-code. A signed-out reset or authenticator change on a finished account
-returns "Sign in to reset this account. You'll need your password and authenticator code." `POST /v1/auth/totp/enable`, `/pin`, `/pin/set`, `/mode`, and
-`/logout` are not on the list: they need an existing session JWT and
-return 401 without one.
+A non-public route behaves as follows.
+
+| Credential | Result |
+|---|---|
+| `Authorization: Bearer` session JWT (`type` `session`) | The global check allows the request. Handlers may still require a mode, a Live unlock, or an operator scope. |
+| `X-API-Key`, or the same Bearer value, matching `FLINTTRADE_API_KEY` | The global check allows the request. `OPENALGO_API_KEY` is the fallback when `FLINTTRADE_API_KEY` is unset. An API key is not a session: it has no mode and no account epoch. Order place still requires a JWT mode claim. Practice restore still requires a Practice session. Account recovery on a finished account still requires a session. |
+| Missing, revoked, or non-matching credential | HTTP 401 `{"status": "error", "message": "Unauthorized"}`. When an API key is configured, a presented credential that fails is recorded as an auth failure. When no key is configured, a missing session is still HTTP 401 and is not recorded as a ban event. |
+
+The public allowlist, method and rule, is exactly:
+
+| Method | Rule |
+|---|---|
+| GET | `/healthz` |
+| GET | `/readyz` |
+| GET | `/api/v1/ping` |
+| GET | `/v1/auth/status` |
+| POST | `/v1/auth/login` |
+| POST | `/v1/auth/setup` |
+| POST | `/v1/auth/setup/vault` |
+| POST | `/v1/auth/setup/reset` |
+| POST | `/v1/auth/setup/regenerate-2fa` |
+| POST | `/v1/auth/forgot-password` |
+| POST | `/v1/auth/reset-password` |
+| POST | `/v1/auth/forgot-password-otp` |
+| POST | `/v1/auth/reset-password-otp` |
+| POST | `/v1/errors` |
+| POST | `/api/v1/errors` |
+| GET | `/v1/changelog` |
+| GET | `/v1/docs/search` |
+| GET | `/v1/docs/document` |
+| GET | `/v1/docs/changelog` |
+| GET | `/v1/config/openalgo` |
+| POST | `/v1/config/openalgo` |
+| POST | `/v1/test-connection` |
+| POST | `/v1/webhook/<source>` |
+| POST | `/v1/webhook/<source>/<path:webhook_id>` |
+| POST | `/csp-report` |
+| GET | `/v1/auth/oauth/callback` |
+| GET | `/api/v1/native/oauth/callback` |
+| POST | `/api/v1/native/postbacks/<adapter_id>` |
+
+`POST /v1/auth/setup/vault` is on that list so the setup wizard can reach
+it, and the handler still requires the setup-session JWT and rejects a
+daily-login token. `POST /v1/auth/setup/reset` and `POST
+/v1/auth/setup/regenerate-2fa` stay reachable during first-run. Once an
+authenticator is enrolled, account recovery requires an active session,
+the password, and the current authenticator code (`totp_code`). A
+signed-out reset or authenticator change on a finished account returns
+`Sign in to reset this account. You'll need your password and authenticator code.`
+A successful wipe bumps the account epoch. `POST /v1/auth/totp/enable`,
+`/pin`, `/pin/set`, `/mode`, and `/logout` are not on the list: they need
+an existing session JWT and return 401 without one. `POST /csp-report` is
+public because the browser cannot attach a session. The shared
+content-type gate accepts `application/csp-report` and
+`application/reports+json` (and any type whose name contains `json`).
+The handler reads a legacy `csp-report` object or a Reporting API list
+and answers HTTP 204. A non-empty body of any other type is HTTP 415
+`Content-Type must be application/json` before the handler runs.
 
 `GET /healthz` and `GET /readyz` are public and return only a status.
 `GET /api/v1/ping` is the desk liveness probe and stays public; its body
@@ -650,8 +748,8 @@ The JWT carries three claims you care about:
 | `sub` | User identifier. |
 | `exp` | Expiry timestamp. **Every token expires at 8 AM IST the next day.** Refresh by signing in again. |
 | `mode` | One of `explore`, `practice`, `live`. Server-enforced on every order path. |
-| `live_mode_unlocked` | `true` on a Live session issued by the Live switch `POST /v1/auth/live`. Required for live order paths. Quick Unlock (`POST /v1/auth/pin`) keeps it when that session is already Live, and leaves it false on every other session. |
-| `oid`, `epoch` | Operator id and account epoch. Reset and operator re-creation bump the epoch. |
+| `live_mode_unlocked` | `true` on a Live session issued by the Live switch `POST /v1/auth/live`. Required for live order paths. Quick Unlock (`POST /v1/auth/pin`) keeps it when that session is already Live, and leaves it false on every other session. Both calls revoke the presented `jti` and return a new token. |
+| `oid`, `epoch` | Operator id and account epoch. Reset and operator re-creation bump the epoch, which ends other sessions. |
 
 A `jti` (JWT ID) is included so the server can revoke individual tokens
 when the user logs out or switches mode. The revocation blocklist lives
@@ -707,7 +805,7 @@ the guard returns one of three verdicts:
 |---|---|
 | `explore` | Reject order placement with HTTP 403 and `code: "mode_blocked"`. Explore is for reading, learning, and demo data only. |
 | `practice` | Route supported single-leg order flows to FlintTrade's native `SandboxEngine`; never touch OpenAlgo or a broker. Practice **place** is admitted by `Laya.admit` before that sandbox. A Down refusal or a quantity clamp returns before any fill. Advanced executor-direct routes that do not yet have sandbox parity fail closed with `practice_unsupported`. |
-| `live` | Require a JWT with `live_mode_unlocked=true`. Core operator **place** (`POST /api/v1/orders/place` and the routed live place that shares that dispatcher) and automate place run `Laya.admit` before SafetySystem, then the gated `BrokerRouter`. Modify, cancel, `cancel-all`, smart, multi, forever, and other write verbs still reach SafetySystem without this admission. The core modify, cancel, `cancel-all`, and `/orders/forever` paths go through the gated `BrokerRouter`. Other legacy write verbs (`gtt-*` and similar) return HTTP 501 until they have a gated `BrokerRouter` verb — they do not forward ungated to OpenAlgo. A Practice close is an opposite order on `POST /api/v1/orders/place`. |
+| `live` | Require a JWT with `live_mode_unlocked=true`. The only submit routes are `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, and `POST /api/v1/positions/exit-all`. Both place routes run `Laya.admit` before SafetySystem, then the gated `BrokerRouter`. A GTT order is `"variety": "gtt"` on place. Exit-all records a server reduce-only proof before `exit_all_positions`. Modify and cancel go through the gated router without this place admission. `cancel-all` only cancels, through `cancel_all_orders`, and does not create an order. `POST /api/v1/orders/forever`, basket, split, options-strategy, and conditional-trigger place return HTTP 501 and do not place; each leg belongs on `POST /api/v1/orders/place`. `gtt-*` returns HTTP 501 and does not forward to OpenAlgo. A Practice close is an opposite order on `POST /api/v1/orders/place`. |
 
 `POST /v1/auth/mode` issues a fresh JWT and revokes the previous `jti`,
 but it accepts **only** downgrades to `practice` or `explore`. Switching
@@ -950,6 +1048,7 @@ Not every endpoint emits `code`:
 | `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` Explore refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` Explore refusals (same header/claim gate). Explore place stays on this code. |
 | `laya_denied` | Operator place was refused by `Laya.admit` before SafetySystem or the Practice sandbox — HTTP 403. Body: `status: "error"`, `code: "laya_denied"`, `message` and `reason` (the same server text), and `limits.max_quantity`. There is no `applied_quantity`. |
 | `laya_clamp` | Operator place asked for more than the active quantity ceiling — HTTP 409. Body: `status: "error"`, `code: "laya_clamp"`, `message` (`Qty reduced to <applied_quantity> (Laya limit)`), `reason` (empty string), `limits.max_quantity`, and `applied_quantity`. Neither quantity is placed. The caller places `applied_quantity` itself if it still wants that size. |
+| `exit_pending` | A second reduce-only exit while one of this desk's exits on that contract is still unfilled — HTTP 409. `message` and `reason` are `An exit for this contract is already pending.` |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
 | `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true`, issued by the Live switch `POST /v1/auth/live`. |
 | HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |
@@ -960,9 +1059,10 @@ place puts `code`, `reason`, `limits`, and (on a clamp) `applied_quantity`
 on the dispatcher result; the webhook HTTP receiver wraps a dispatcher
 error as HTTP 422 with that result under `data`. A strategy dispatch
 raises the server `message` and does not place the reduced quantity.
-Modify, cancel, smart, multi, forever, and other write verbs are not
-admitted. Chat is not an admission source. Details of the place path are
-in [ORDER_SAFETY.md](ORDER_SAFETY.md).
+Modify, cancel, and cancel-all are not admitted as place. Forever,
+basket, split, and conditional-trigger place do not submit; the legs go
+through `POST /api/v1/orders/place`. Chat is not an admission source.
+Details of the place path are in [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 Auth failures are typically HTTP 401 with a `message` (expired, revoked,
 or missing token). Broker-session expiry arrives as the upstream

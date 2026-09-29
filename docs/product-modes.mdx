@@ -10,8 +10,8 @@ FlintTrade distinguishes operating modes from data provenance. Provenance is ind
 ## Operating Modes
 
 - **Explore**: sample-only discovery; no Live broker order authority. On `/trade`, Order Pad **Sample Buy** opens a sample review and records a local sample fill (no broker, order-proxy, or SafetySystem). Live-intent submits remain blocked.
-- **Practice**: FlintTrade `SandboxEngine` fills (primary paper); no real broker order or capital movement. Kotak Neo has no sandbox — never offer “Neo Practice”.
-- **Live**: fail-closed until native Dhan + Neo Connected (read) is trusted and funded unlock is explicit. Non-funded live reads show **Connected (read)** — never placeable Live orders. Broker-connect helper copy may describe that read check as API smoke. Copy for Neo is `Live read only until funded unlock.`
+- **Practice**: FlintTrade `SandboxEngine` fills (primary paper); no real broker order or capital movement. Orders are placed on `POST /api/v1/orders/place` after Laya admission. Square-off is that same place. Settings → Practice does not place. Restore of a Practice backup is Practice only; restored fills are tagged **Restored** and left out of Laya, strategy, benchmark, and training readers. Kotak Neo has no sandbox — never offer “Neo Practice”.
+- **Live**: fail-closed until native Dhan + Neo Connected (read) is trusted and funded unlock is explicit. Connected (read) is a broker status, not a Mode. Non-funded live reads are never placeable Live orders. Live place is `POST /api/v1/orders/place` or `POST /api/v1/orders/<broker>/place` (Laya, then SafetySystem). A GTT order uses `"variety": "gtt"` on place. Exit-all requires a server reduce-only proof. Broker-connect helper copy may describe that read check as API smoke. Copy for Neo is `Live read only until funded unlock.` Laya is not Ready by default.
 
 ## Provenance Labels
 

@@ -378,16 +378,20 @@ deployment can split that state.
 
 Every **Live** order placed through FlintTrade is checked by five safety
 layers inside `packages/services/engine/`. Practice orders skip this
-safety chain. Explore placement is refused by the backend
+safety chain. The only submit routes are `POST /api/v1/orders/place`,
+`POST /api/v1/orders/<broker>/place` (Live only), and
+`POST /api/v1/positions/exit-all` (a server reduce-only proof, then the
+flatten verb). Explore placement is refused by the backend
 (`mode_blocked`); Order Pad Sample Buy is a local client fill (no HTTP
 order route, no Laya admit, no SafetySystem). Operator and automate
-**place** run the mode guard, then `Laya.admit`. Live place then runs
-SafetySystem L1–L5, `gate_order`, and `BrokerRouter`. A refusal or a
-quantity clamp stops before SafetySystem. Practice place is admitted
-before `SandboxEngine` and does not enter those Live layers; other
-Practice verbs go straight to the sandbox. Explore remains
-`mode_blocked` and does not enter `Laya.admit`. Other Live write verbs
-still reach SafetySystem without this admission. See
+**place** run the mode guard, then `Laya.admit`. Live place, including
+`"variety": "gtt"`, then runs SafetySystem L1–L5, `gate_order`, and
+`BrokerRouter`. A refusal or a quantity clamp stops before SafetySystem.
+Practice place is admitted before `SandboxEngine` and does not enter
+those Live layers. Practice square-off is place. The sandbox book
+cancels and modifies; it does not place. `cancel-all` only cancels.
+Explore remains `mode_blocked` and does not enter `Laya.admit`. Other
+Live write verbs still reach SafetySystem without this admission. See
 [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 `_check_order_locked` fail-fasts in this runtime order (not L1–L5
@@ -640,9 +644,21 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
 - **Expires at 8 AM IST the next day.** No refresh tokens — sign in
   again.
 - Carries `sub` (user), `exp` (expiry), `mode` (Explore / Practice /
-  Live), `jti` (unique ID).
+  Live), `jti` (unique ID), plus `oid` and `epoch`.
+- PIN unlock (`POST /v1/auth/pin`) revokes the presented `jti` and
+  returns a new token. The previous token stops working. The Live
+  switch does the same rotation when it enters Live.
+- Reset of a finished account needs an active session, the password,
+  and the current authenticator code. The wipe bumps `epoch`, so other
+  sessions end. A signed-out reset is refused with "Sign in to reset
+  this account. You'll need your password and authenticator code."
 - Revocation blocklist keyed by `jti` in
   `packages/core/core/src/flinttrade_core/auth_state.py`.
+- Non-public routes accept a session JWT or `FLINTTRADE_API_KEY`. An
+  API key is not a session. `GET /healthz` and `GET /readyz` are public
+  and return status only. `GET /health` is not public. The allowlist is
+  `flinttrade_core.public_routes.PUBLIC_ROUTES`. `POST /csp-report`
+  accepts `application/csp-report` and `application/reports+json`.
 
 ### Server-side mode enforcement
 

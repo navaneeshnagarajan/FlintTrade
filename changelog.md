@@ -57,6 +57,16 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
+- **Order, session, and probe reference.** Orders are submitted on
+  `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, and
+  `POST /api/v1/positions/exit-all`. A GTT order is `"variety": "gtt"`
+  on place. A reduce-only close can be admitted while new orders are
+  paused. PIN unlock replaces the session token. Reset of a finished
+  account needs a session, the password, and an authenticator code, and
+  ends other sessions. Practice restore marks fills and leaves them out
+  of the Laya, strategy, benchmark, and training readers. `GET /healthz`
+  and `GET /readyz` are public and return status only.
+
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
   The required path is Create operator, then Vault, then the Practice
   desk (Step N of 3). Affirming Practice lands on `/trade`.
