@@ -131,6 +131,20 @@ describe("createWorkspaceApi", () => {
     expect(doc).toContain('"NIFTY"');
   });
 
+  it("focuses the open Order Pad instead of adding a second one", () => {
+    const { api, getModel } = makeApi(emptyWorkspaceJson());
+    api.addPanel({ component: "orderpad", title: "Order Pad" });
+    api.addPanel({ component: "chart", title: "Chart" });
+    expect(api.panelCount()).toBe(2);
+    expect(getModel().getActiveTabset()?.getSelectedNode()?.getComponent()).toBe("chart");
+
+    expect(api.retargetOrderPad({})).toBe(true);
+
+    expect(api.panelCount()).toBe(2);
+    expect(JSON.stringify(api.toJSON()).match(/"component":"orderpad"/g)).toHaveLength(1);
+    expect(getModel().getActiveTabset()?.getSelectedNode()?.getComponent()).toBe("orderpad");
+  });
+
   it("retargets an existing Order Pad instead of adding another", () => {
     const { api, getModel } = makeApi(emptyWorkspaceJson());
     expect(api.retargetOrderPad({ symbol: "SBIN", exchange: "NSE", action: "BUY" }, "Order — SBIN")).toBe(false);

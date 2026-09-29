@@ -185,13 +185,21 @@ html.density-compact {
   display: flex;
 }
 
+/* Dark unselected tray and panel tabs. colourMix.unselectedTabColour
+   resolves the same mix and themeStore publishes it here. The color-mix
+   below is that colour before a theme has been applied. */
+html {
+  --fl-color-tab-unselected: color-mix(in srgb, var(--color-text-primary, #e8e8ed) 62%, var(--color-text-secondary, #8b8b95));
+}
+
 /* Tray tabs — selected state is weight + underline + raised fill, not colour alone.
    FlexLayout 0.11 paints a lone tab as tab_button_stretch (no --selected class)
    and a multi-tab strip as tab_button / --selected / --unselected.
    Light unselected text stays on the secondary token (graphite #52525b on
    white is about 7.7:1). Dark Graphite secondary (#5e5e78) is about 2.6:1
    on the elevated tray and 2.9:1 on the card header, so dark unselected
-   text is mixed toward primary until it clears 4.5:1 on those surfaces.
+   text uses --fl-color-tab-unselected (primary mixed 62% with secondary)
+   until it clears 4.5:1 on those surfaces.
    The 2px accent underline is a non-text graphic (≥3:1 on the raised fill). */
 .flexlayout__theme_light .flexlayout__tab_button,
 .flexlayout__theme_light .flexlayout__tab_button_stretch,
@@ -205,7 +213,7 @@ html.density-compact {
 .flexlayout__theme_dark .flexlayout__tab_button,
 .flexlayout__theme_dark .flexlayout__tab_button_stretch,
 html[data-mode="dark"] .ft-tray-tab:not([aria-selected="true"]) {
-  color: color-mix(in srgb, var(--color-text-primary, #e8e8ed) 62%, var(--color-text-secondary, #8b8b95));
+  color: var(--fl-color-tab-unselected);
   background-color: transparent;
   font-weight: 500;
   box-shadow: none;
