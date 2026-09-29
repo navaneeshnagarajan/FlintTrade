@@ -171,6 +171,7 @@ import WelcomeRoute, { CINEMATIC_STEP_SCHEDULE, SLOGAN } from "../WelcomeRoute";
 describe("WelcomeRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
     authState.status = "setup-required";
     settingsPersona.value = "trader";
   });
@@ -211,14 +212,22 @@ describe("WelcomeRoute", () => {
     localStorage.removeItem("flinttrade:setup-progress");
   });
 
-  it("restores a tab-scoped signed-in session before the public auth probe", async () => {
+  it("restores a tab-scoped signed-in session when the update is not paused", async () => {
     authState.status = "unknown";
     writePersistedAuthSession({
       token: "jwt-alice",
       username: "alice",
       expiresAt: "2099-01-01T02:30:00Z",
     });
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "success",
+          data: { is_setup: true, migration_blocked: null },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
 
     render(<WelcomeRoute />);
 
@@ -230,7 +239,34 @@ describe("WelcomeRoute", () => {
       ),
     );
     expect(mockSetLoggedOut).not.toHaveBeenCalled();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("shows the two-operator screen instead of starting the desk", async () => {
+    authState.status = "unknown";
+    writePersistedAuthSession({
+      token: "jwt-alice",
+      username: "alice",
+      expiresAt: "2099-01-01T02:30:00Z",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "success",
+          data: { is_setup: true, migration_blocked: "two_operators" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    render(<WelcomeRoute />);
+
+    expect(await screen.findByRole("heading", { name: "FlintTrade couldn't finish updating" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open troubleshooting" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(mockSetLoggedIn).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
 

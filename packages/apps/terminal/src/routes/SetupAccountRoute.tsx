@@ -50,6 +50,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import PublicRouteShell from "@/components/layout/PublicRouteShell";
+import TwoOperatorUpdateScreen from "@/routes/TwoOperatorUpdateScreen";
 import { StepIndicator } from "@/routes/setup/StepIndicator";
 import type { Persona } from "@/routes/setup/PersonaStep";
 import { ConnectionStep } from "@/routes/setup/ConnectionStep";
@@ -1899,13 +1900,15 @@ export default function SetupAccountRoute({
   ]);
 
   useEffect(() => {
+    if (serverSetup?.migrationBlocked === "two_operators") return;
     if (!setupFinished || authStatus !== "logged-in") return;
     navigate("/trade", { replace: true });
-  }, [setupFinished, authStatus, navigate]);
+  }, [serverSetup, setupFinished, authStatus, navigate]);
 
   function handleResumed(nextToken: string, username: string) {
     useAuthStore.getState().setLoggedIn(nextToken, username, "");
     setSessionRejected(false);
+    if (serverSetup?.migrationBlocked === "two_operators") return;
     if (serverSetup?.setupFinished) {
       navigate("/trade", { replace: true });
     }
@@ -1913,6 +1916,17 @@ export default function SetupAccountRoute({
 
   function handleSessionRequired() {
     setSessionRejected(true);
+  }
+
+  if (serverSetup?.migrationBlocked === "two_operators") {
+    return (
+      <TwoOperatorUpdateScreen
+        onRetry={() => {
+          setServerSetup(null);
+          setStatusAttempt((attempt) => attempt + 1);
+        }}
+      />
+    );
   }
 
   return (

@@ -32,6 +32,11 @@ export interface SetupServerState {
   vaultPresecured: boolean | null;
   /** True only after the operator has finished Setup. */
   setupFinished: boolean;
+  /**
+   * `two_operators` when an update paused because more than one operator
+   * row exists. Null when the desk may open.
+   */
+  migrationBlocked: "two_operators" | null;
 }
 
 export interface SetupResumeResult {
@@ -213,6 +218,7 @@ export async function fetchSetupServerState(): Promise<SetupServerState> {
     vaultOpen: payload.data.vault_open === true,
     vaultPresecured: typeof presecured === "boolean" ? presecured : null,
     setupFinished: payload.data.setup_finished === true,
+    migrationBlocked: payload.data.migration_blocked === "two_operators" ? "two_operators" : null,
   };
 }
 

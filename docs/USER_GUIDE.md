@@ -1434,6 +1434,32 @@ files under `<workspace>/secrets/`. They are never written to
 
 ## 12. Troubleshooting
 
+### Two operator accounts
+
+FlintTrade keeps one operator account on this machine. If an update finds
+more than one, it pauses and leaves the database unchanged. The app shows
+**FlintTrade couldn't finish updating**, with **Open troubleshooting** and
+**Retry**. There is no delete button.
+
+List the accounts. The list shows the id, username, and created time:
+
+```bash
+flinttrade operators list
+```
+
+Keep one account. This writes a timestamped backup beside the database,
+removes the other operator accounts and session rows that belong to them,
+then continues the update:
+
+```bash
+flinttrade operators keep <id>
+```
+
+The backup file is `auth.db.bak-YYYYMMDDTHHMMSSZ` in the same directory as
+`auth.db` (the workspace directory, `~/.flinttrade/` on Linux). After the
+command finishes, one operator account remains. Open FlintTrade and choose
+**Retry**.
+
 ### "Connection refused" on the OpenAlgo port
 
 OpenAlgo is not running, or it is bound to a different port. In Settings →

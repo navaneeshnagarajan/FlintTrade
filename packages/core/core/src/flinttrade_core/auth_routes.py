@@ -486,6 +486,22 @@ def require_operator_session() -> tuple[Any, int] | None:
     return None
 
 
+def _migration_paused_response(svc: Any) -> tuple[Any, int] | None:
+    """Refuse to mint a session while the single-operator update is paused.
+
+    Status still reports the state. Login and setup resume must not start
+    the desk by issuing a token.
+    """
+    blocked = svc.migration_blocked()
+    if not blocked:
+        return None
+    return jsonify({
+        "status": "error",
+        "message": "FlintTrade couldn't finish updating.",
+        "migration_blocked": blocked,
+    }), 409
+
+
 @auth_bp.route("/status", methods=["GET"])
 @_rate_limit("30 per minute")
 def auth_status() -> tuple[Any, int]:
@@ -516,6 +532,9 @@ def auth_status() -> tuple[Any, int]:
             # Frozen at operator creation. Live ``vault_open`` can become
             # true later without changing the step total.
             "vault_presecured": svc.setup_vault_presecured(),
+            # ``two_operators`` pauses startup. Null when the desk may open.
+            # The field is a state name, not an account list.
+            "migration_blocked": svc.migration_blocked(),
         },
     }), 200
 
@@ -845,6 +864,9 @@ def auth_setup_resume() -> tuple[Any, int]:
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
+    paused = _migration_paused_response(svc)
+    if paused is not None:
+        return paused
     if svc.is_locked():
         return jsonify({
             "status": "error",
@@ -949,6 +971,10 @@ def auth_login() -> tuple[Any, int]:
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
+
+    paused = _migration_paused_response(svc)
+    if paused is not None:
+        return paused
 
     if svc.is_locked():
         return jsonify({

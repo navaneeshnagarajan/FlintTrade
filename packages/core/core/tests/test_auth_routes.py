@@ -285,6 +285,7 @@ class TestStatusEndpoint:
         resp = c.get("/v1/auth/status")
         data = resp.get_json()
         assert data["data"]["is_setup"] is False
+        assert data["data"]["migration_blocked"] is None
 
     def test_status_after_setup(self, client):
         c, svc = client
@@ -1192,3 +1193,88 @@ def test_verified_operator_session_rejects_non_full_or_invalid_identity(monkeypa
     verify = getattr(auth_routes, "verify_operator_session_token", lambda token: None)
     with pytest.raises(Exception):
         verify("signed.jwt.value")
+
+
+def _seed_two_operators(db_path) -> None:
+    """An older account table with two rows and no single-operator constraint."""
+    import sqlite3
+    from datetime import UTC, datetime
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("""
+            CREATE TABLE account (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL,
+                email TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                pin_hash TEXT NOT NULL,
+                totp_secret_encrypted BLOB NOT NULL,
+                totp_salt BLOB NOT NULL,
+                totp_enabled INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        """)
+        created = datetime.now(UTC).isoformat()
+        for operator_id, username in ((1, "alice"), (2, "bob")):
+            conn.execute(
+                """INSERT INTO account (
+                       id, username, email, password_hash, pin_hash,
+                       totp_secret_encrypted, totp_salt, totp_enabled, created_at
+                   ) VALUES (?, ?, ?, 'hash', '', ?, ?, 0, ?)""",
+                (operator_id, username, f"{username}@example.com", b"secret", b"salt", created),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.mark.unit
+def test_status_pauses_when_two_operators_exist_and_login_does_not_start(tmp_path, monkeypatch):
+    """Two operator rows set migration_blocked and do not mint a desk session."""
+    import sqlite3
+
+    from flinttrade_core.auth_service import AuthService
+
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    db_path = tmp_path / "auth.db"
+    _seed_two_operators(db_path)
+    before = sqlite3.connect(db_path)
+    try:
+        before_rows = before.execute(
+            "SELECT id, username, email, created_at FROM account ORDER BY id"
+        ).fetchall()
+    finally:
+        before.close()
+
+    svc = AuthService(db_path=db_path)
+    with patch("flinttrade_core.auth_routes._get_auth_service", return_value=svc):
+        app = create_flask_app()
+        app.config["TESTING"] = True
+        with app.test_client() as c:
+            status = c.get("/v1/auth/status")
+            data = status.get_json()["data"]
+            assert status.status_code == 200
+            assert data["migration_blocked"] == "two_operators"
+            login = c.post(
+                "/v1/auth/login",
+                json={"password": "StrongP@ss123!", "totp_code": ""},
+                headers={"Content-Type": "application/json"},
+            )
+            body = login.get_json()
+            assert login.status_code == 409
+            assert body["migration_blocked"] == "two_operators"
+            assert "token" not in body.get("data", {})
+            assert "alice" not in login.get_data(as_text=True)
+            assert "bob" not in login.get_data(as_text=True)
+
+    after = sqlite3.connect(db_path)
+    try:
+        after_rows = after.execute(
+            "SELECT id, username, email, created_at FROM account ORDER BY id"
+        ).fetchall()
+    finally:
+        after.close()
+    assert after_rows == before_rows
+    assert len(after_rows) == 2

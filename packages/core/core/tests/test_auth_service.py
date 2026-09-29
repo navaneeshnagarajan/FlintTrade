@@ -657,8 +657,9 @@ class TestSingleOperatorMigration:
         db_path = tmp_path / "auth.db"
         _seed_unchecked_operators(db_path, ["alice"])
 
-        AuthService(db_path=db_path)
+        svc = AuthService(db_path=db_path)
 
+        assert svc.migration_blocked() is None
         assert "account_one_operator" in _index_names(db_path)
         assert _operator_count(db_path) == 1
         conn = sqlite3.connect(db_path)
@@ -689,11 +690,16 @@ class TestSingleOperatorMigration:
 
         assert _operator_count(db_path) == 2
         assert "account_one_operator" not in _index_names(db_path)
-        assert any(
-            "Refusing the single-operator migration" in record.message
-            and "2 operator rows already exist" in record.message
-            and "Leaving the existing rows in place" in record.message
-            for record in caplog.records
+        assert svc.migration_blocked() == "two_operators"
+        paused = (
+            "Update paused: this database has 2 operator accounts; "
+            "FlintTrade supports one. No data was changed."
+        )
+        messages = [record.message for record in caplog.records]
+        assert messages.count(paused) == 1
+        assert all(
+            "alice" not in message and "bob" not in message and str(db_path) not in message
+            for message in messages
         )
         with pytest.raises(RuntimeError, match="Account already set up"):
             svc.setup_account(

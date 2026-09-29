@@ -172,6 +172,7 @@ describe("setupAccountApi", () => {
       vaultOpen: true,
       vaultPresecured: null,
       setupFinished: false,
+      migrationBlocked: null,
     });
   });
 

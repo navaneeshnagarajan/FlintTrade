@@ -6,9 +6,13 @@
  */
 
 import { useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { isDemoSessionActive } from "@/lib/demoSession";
 import { decideHomeEntry, readPersistedAuthSession, WELCOME_GATE_PATH } from "@/lib/homeEntry";
+import {
+  isTwoOperatorGuideLocation,
+  migrationBlockedFromStatus,
+} from "@/lib/twoOperatorGuide";
 import {
   captureAuthSessionFence,
   isAuthSessionFenceCurrent,
@@ -22,21 +26,47 @@ export function useAuthGuard(): {
   isLoading: boolean;
 } {
   const navigate = useNavigate();
+  const location = useLocation();
   const status = useAuthStore((s) => s.status);
+  const guideOnly = isTwoOperatorGuideLocation(location);
 
   useEffect(() => {
+    if (guideOnly) return;
     if (status === "unknown") {
       const probeFence = captureAuthSessionFence();
       const persisted = readPersistedAuthSession();
       if (persisted) {
-        useAuthStore
-          .getState()
-          .setLoggedInIfCurrent(
-            persisted.token,
-            persisted.username,
-            persisted.expiresAt,
-            probeFence,
-          );
+        fetch(`${getBase()}/v1/auth/status`, { headers: buildHeaders(false) })
+          .then((response) => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json() as Promise<unknown>;
+          })
+          .then((raw: unknown) => {
+            if (!isAuthSessionFenceCurrent(probeFence)) return;
+            if (migrationBlockedFromStatus(raw)) {
+              navigate(WELCOME_GATE_PATH, { replace: true });
+              return;
+            }
+            useAuthStore
+              .getState()
+              .setLoggedInIfCurrent(
+                persisted.token,
+                persisted.username,
+                persisted.expiresAt,
+                probeFence,
+              );
+          })
+          .catch(() => {
+            if (!isAuthSessionFenceCurrent(probeFence)) return;
+            useAuthStore
+              .getState()
+              .setLoggedInIfCurrent(
+                persisted.token,
+                persisted.username,
+                persisted.expiresAt,
+                probeFence,
+              );
+          });
         return;
       }
       if (isDemoSessionActive()) {
@@ -70,6 +100,10 @@ export function useAuthGuard(): {
             );
           }
           const data = result.success ? result.data : undefined;
+          if (migrationBlockedFromStatus(raw)) {
+            navigate(WELCOME_GATE_PATH, { replace: true });
+            return;
+          }
           if (!data?.data?.is_setup) {
             useAuthStore.getState().setSetupRequired();
           } else {
@@ -99,12 +133,13 @@ export function useAuthGuard(): {
     if (entry.kind === "gate") {
       navigate(WELCOME_GATE_PATH, { replace: true });
     }
-  }, [status, navigate]);
+  }, [guideOnly, status, navigate]);
 
   return {
-    isAuthenticated: status === "logged-in",
+    isAuthenticated: status === "logged-in" || guideOnly,
     // Status is the source of truth, so a competing auth transition clears
-    // the loader without waiting for an obsolete probe to settle.
-    isLoading: status === "unknown",
+    // the loader without waiting for an obsolete probe to settle. The
+    // troubleshooting guide is not the desk and does not wait on a session.
+    isLoading: status === "unknown" && !guideOnly,
   };
 }

@@ -50,6 +50,10 @@ from .workspace import workspace_dir as _workspace_dir
 
 logger = logging.getLogger("flinttrade.auth")
 
+# Status value when an existing database already has more than one operator.
+# The migration does not delete those rows.
+MIGRATION_BLOCKED_TWO_OPERATORS = "two_operators"
+
 # Evaluated at import time — set FLINTTRADE_WORKSPACE_DIR *before* importing
 # this module (pytest fixtures that use monkeypatch.setenv should scope at
 # session level, or pass db_path explicitly to AuthService).
@@ -62,6 +66,18 @@ _KDF_ITERATIONS: int = 390_000  # NIST-recommended minimum for PBKDF2-SHA256
 # ASCII [0-9] only. Python ``\\d`` matches Unicode Nd (fullwidth digits
 # would otherwise pass); JS ``^\\d{6}$`` is [0-9]{6}.
 _PIN_RE = re.compile(r"^[0-9]{6}$")
+
+
+def migration_update_paused_line(count: int) -> str:
+    """One log line for a refused single-operator migration.
+
+    The count is the only variable. Usernames, paths, and other personal
+    data stay out of the line.
+    """
+    return (
+        f"Update paused: this database has {count} operator accounts; "
+        "FlintTrade supports one. No data was changed."
+    )
 
 
 def _is_six_digit_pin(pin: str) -> bool:
@@ -242,34 +258,42 @@ class AuthService:
         self._migrate_single_operator()
         self._db.commit()
 
+    def _operator_count(self) -> int:
+        row = self._db.execute("SELECT COUNT(*) FROM account").fetchone()
+        return int(row[0]) if row is not None else 0
+
     def _migrate_single_operator(self) -> None:
         """Refuse a second operator row without discarding an existing account.
 
         New databases already declare ``CHECK (id = 1)``. Older files may
         not. A unique index on a constant allows one row and is safe to add
         when zero or one operator is present. Two or more rows are left as
-        they are: the migration is refused and logged.
+        they are: the migration is refused and one line is logged. The line
+        carries the row count only — no path and no account names.
         """
-        row = self._db.execute("SELECT COUNT(*) FROM account").fetchone()
-        count = int(row[0]) if row is not None else 0
+        count = self._operator_count()
         if count > 1:
-            logger.error(
-                "Refusing the single-operator migration on %s: %s operator rows already exist. "
-                "Leaving the existing rows in place.",
-                self._db_path,
-                count,
-            )
+            logger.error("%s", migration_update_paused_line(count))
             return
         try:
             self._db.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS account_one_operator ON account ((1))"
             )
         except sqlite3.IntegrityError:
-            logger.error(
-                "Refusing the single-operator migration on %s: more than one operator row is present. "
-                "Leaving the existing rows in place.",
-                self._db_path,
-            )
+            raced = self._operator_count()
+            if raced > 1:
+                logger.error("%s", migration_update_paused_line(raced))
+
+    def migration_blocked(self) -> str | None:
+        """Return the paused-update state, or ``None`` when the desk may start.
+
+        ``two_operators`` means more than one operator row is present. The
+        value is read from the database so a later recovery is visible on the
+        next status check without restarting this process.
+        """
+        if self._operator_count() > 1:
+            return MIGRATION_BLOCKED_TWO_OPERATORS
+        return None
 
     def is_setup(self) -> bool:
         """Check if the account has been created."""

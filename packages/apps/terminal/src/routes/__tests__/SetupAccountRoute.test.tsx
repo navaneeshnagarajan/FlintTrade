@@ -1044,4 +1044,45 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(screen.queryByText("Step 1 of 3 - Create operator")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
   });
+
+  it("shows the two-operator screen and does not open the desk", async () => {
+    mocks.fetchSetupServerState.mockResolvedValue({
+      isSetup: true,
+      vaultOpen: true,
+      vaultPresecured: null,
+      setupFinished: true,
+      migrationBlocked: "two_operators",
+    });
+    const listener = vi.fn();
+    window.addEventListener("flinttrade:openDoc", listener);
+
+    await renderSetup();
+
+    expect(await screen.findByRole("heading", { name: "FlintTrade couldn't finish updating" })).toBeInTheDocument();
+    expect(screen.getByText(
+      "This machine has two operator accounts, and FlintTrade supports one. Your data hasn't been changed. See Troubleshooting → Two operator accounts to choose which one to keep.",
+    )).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open troubleshooting" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
+    expect(mocks.navigate).not.toHaveBeenCalledWith("/trade", { replace: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open troubleshooting" }));
+    expect(listener).toHaveBeenCalledTimes(1);
+    const event = listener.mock.calls[0]?.[0] as CustomEvent<{ path: string; anchor: string }>;
+    expect(event.detail).toEqual({
+      path: "USER_GUIDE.md",
+      anchor: "two-operator-accounts",
+    });
+    expect(mocks.navigate).toHaveBeenCalledWith("/learn", {
+      state: {
+        selectedDocPath: "USER_GUIDE.md",
+        docAnchor: "two-operator-accounts",
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(mocks.fetchSetupServerState).toHaveBeenCalledTimes(2));
+    window.removeEventListener("flinttrade:openDoc", listener);
+  });
 });
