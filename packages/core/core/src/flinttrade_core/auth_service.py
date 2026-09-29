@@ -151,9 +151,12 @@ class AuthService:
 
         ``BEGIN IMMEDIATE`` takes the write lock before the body reads, so
         a stale "no operator" answer cannot insert a second account.
+        ``busy_timeout`` makes a concurrent creator wait for that lock and
+        then see the committed operator, instead of failing as busy.
         """
         with self._write_lock:
             db = self._db
+            db.execute("PRAGMA busy_timeout = 5000")
             db.execute("BEGIN IMMEDIATE")
             try:
                 yield db
@@ -236,7 +239,37 @@ class AuthService:
             )
         except sqlite3.OperationalError:
             pass
+        self._migrate_single_operator()
         self._db.commit()
+
+    def _migrate_single_operator(self) -> None:
+        """Refuse a second operator row without discarding an existing account.
+
+        New databases already declare ``CHECK (id = 1)``. Older files may
+        not. A unique index on a constant allows one row and is safe to add
+        when zero or one operator is present. Two or more rows are left as
+        they are: the migration is refused and logged.
+        """
+        row = self._db.execute("SELECT COUNT(*) FROM account").fetchone()
+        count = int(row[0]) if row is not None else 0
+        if count > 1:
+            logger.error(
+                "Refusing the single-operator migration on %s: %s operator rows already exist. "
+                "Leaving the existing rows in place.",
+                self._db_path,
+                count,
+            )
+            return
+        try:
+            self._db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS account_one_operator ON account ((1))"
+            )
+        except sqlite3.IntegrityError:
+            logger.error(
+                "Refusing the single-operator migration on %s: more than one operator row is present. "
+                "Leaving the existing rows in place.",
+                self._db_path,
+            )
 
     def is_setup(self) -> bool:
         """Check if the account has been created."""

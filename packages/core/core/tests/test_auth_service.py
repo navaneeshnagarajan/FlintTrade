@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -405,6 +407,64 @@ def _login_attempt_count(db_path: Path) -> int:
     return int(row[0])
 
 
+def _assert_already_has_operator(errors: list[BaseException]) -> None:
+    """Losers take the normal already-set-up refusal, not a lock or busy error."""
+    assert errors
+    for exc in errors:
+        assert type(exc) is RuntimeError
+        assert str(exc) == "Account already set up"
+        assert exc.__cause__ is None
+
+
+def _index_names(db_path: Path) -> set[str]:
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index'"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {str(row[0]) for row in rows}
+
+
+def _seed_unchecked_operators(db_path: Path, usernames: list[str]) -> None:
+    """Create an account table that does not yet enforce a single operator."""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("""
+            CREATE TABLE account (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL,
+                email TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                pin_hash TEXT NOT NULL,
+                totp_secret_encrypted BLOB NOT NULL,
+                totp_salt BLOB NOT NULL,
+                totp_enabled INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        """)
+        created = datetime.now(UTC).isoformat()
+        for operator_id, username in enumerate(usernames, start=1):
+            conn.execute(
+                """INSERT INTO account (
+                       id, username, email, password_hash, pin_hash,
+                       totp_secret_encrypted, totp_salt, totp_enabled, created_at
+                   ) VALUES (?, ?, ?, 'hash', '', ?, ?, 0, ?)""",
+                (
+                    operator_id,
+                    username,
+                    f"{username}@example.com",
+                    b"secret",
+                    b"salt",
+                    created,
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _backup_code_count(db_path: Path) -> int:
     conn = sqlite3.connect(db_path)
     try:
@@ -545,7 +605,7 @@ class TestAuthStoreConcurrency:
         assert all(not thread.is_alive() for thread in threads)
         assert successes == []
         assert len(errors) == callers
-        assert all(isinstance(exc, RuntimeError) for exc in errors)
+        _assert_already_has_operator(errors)
         assert _operator_count(db_path) == 1
         assert _backup_code_count(db_path) == 8
         assert svc.get_profile()["username"] == "alice"
@@ -584,6 +644,71 @@ class TestAuthStoreConcurrency:
         assert len(successes) == 1
         assert len(successes[0]) == 8
         assert len(errors) == callers - 1
-        assert all(isinstance(exc, RuntimeError) for exc in errors)
+        _assert_already_has_operator(errors)
         assert _operator_count(db_path) == 1
         assert _backup_code_count(db_path) == 8
+
+
+class TestSingleOperatorMigration:
+    """A second operator row is refused, and an already-duplicated file is kept."""
+
+    @pytest.mark.unit
+    def test_one_existing_operator_gains_the_single_row_index(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "auth.db"
+        _seed_unchecked_operators(db_path, ["alice"])
+
+        AuthService(db_path=db_path)
+
+        assert "account_one_operator" in _index_names(db_path)
+        assert _operator_count(db_path) == 1
+        conn = sqlite3.connect(db_path)
+        try:
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    """INSERT INTO account (
+                           id, username, email, password_hash, pin_hash,
+                           totp_secret_encrypted, totp_salt, created_at
+                       )
+                       SELECT 2, 'bob', email, password_hash, pin_hash,
+                              totp_secret_encrypted, totp_salt, created_at
+                       FROM account WHERE id = 1"""
+                )
+        finally:
+            conn.close()
+        assert _operator_count(db_path) == 1
+
+    @pytest.mark.unit
+    def test_existing_duplicate_operators_are_kept_and_the_migration_is_refused(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        db_path = tmp_path / "auth.db"
+        _seed_unchecked_operators(db_path, ["alice", "bob"])
+
+        with caplog.at_level(logging.ERROR, logger="flinttrade.auth"):
+            svc = AuthService(db_path=db_path)
+
+        assert _operator_count(db_path) == 2
+        assert "account_one_operator" not in _index_names(db_path)
+        assert any(
+            "Refusing the single-operator migration" in record.message
+            and "2 operator rows already exist" in record.message
+            and "Leaving the existing rows in place" in record.message
+            for record in caplog.records
+        )
+        with pytest.raises(RuntimeError, match="Account already set up"):
+            svc.setup_account(
+                username="carol",
+                email="carol@example.com",
+                password="StrongP@ss123!",
+                pin="123456",
+            )
+        assert _operator_count(db_path) == 2
+        conn = sqlite3.connect(db_path)
+        try:
+            names = {
+                str(row[0])
+                for row in conn.execute("SELECT username FROM account ORDER BY id")
+            }
+        finally:
+            conn.close()
+        assert names == {"alice", "bob"}
