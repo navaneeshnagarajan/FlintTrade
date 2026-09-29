@@ -147,8 +147,8 @@ export function BenchmarkTab() {
 
   return (
     <div className="space-y-6">
-      {/* Demo banner */}
-      <ExampleChip />
+      {/* These returns are hard-coded examples in every mode. */}
+      <ExampleChip always />
 
       {/* Header */}
       <div className="flex items-center gap-3">

@@ -2,8 +2,10 @@
  * SecuritySection — quick-unlock PIN, banned IP management, threat statistics.
  *
  * APIs:
- *   GET  /ft-api/v1/auth/status         → account status incl. has_pin
+ *   GET  /ft-api/v1/auth/status         → account status incl. has_pin, totp_enabled
  *   POST /ft-api/v1/auth/pin/set        → set/change the quick-unlock PIN
+ *   POST /ft-api/v1/auth/setup/regenerate-2fa → fresh authenticator QR
+ *   POST /ft-api/v1/auth/totp/enable    → confirm authenticator enrolment
  *   GET  /ft-api/api/v1/security/stats  → threat overview counters
  *   GET  /ft-api/api/v1/security/bans   → list of banned IPs
  *   POST /ft-api/api/v1/security/ban    → ban an IP
@@ -20,6 +22,7 @@ import {
   Ban,
   KeyRound,
 } from "lucide-react";
+import { AuthenticatorEnrolment } from "./AuthenticatorEnrolment";
 import { SectionTitle, TextInput, Toggle } from "./shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -419,6 +422,9 @@ export function SecuritySection() {
 
       {/* Quick-unlock PIN */}
       <QuickUnlockPinBlock />
+
+      {/* Authenticator enrolment after "Set up later" */}
+      <AuthenticatorEnrolment />
 
       {/* Stats grid */}
       <div>

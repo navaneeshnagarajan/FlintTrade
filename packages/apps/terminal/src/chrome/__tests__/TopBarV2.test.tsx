@@ -236,7 +236,8 @@ describe("TopBarV2", () => {
 
   it("reports the market session as unavailable until timing data is trustworthy", () => {
     renderTopBarV2();
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed · opens 09:15");
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market closed");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
   });
 
@@ -327,7 +328,8 @@ describe("TopBarV2", () => {
 
     renderTopBarV2();
 
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed · opens 09:15");
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market closed");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
   });
 
@@ -340,7 +342,8 @@ describe("TopBarV2", () => {
 
     renderTopBarV2();
 
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed · opens 09:15");
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market closed");
     expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
   });
 

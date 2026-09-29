@@ -3,14 +3,36 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render as rtlRender, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter, useLocation } from "react-router";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerStore } from "@/stores/brokerStore";
 import { useConnectionStore } from "@/stores/connectionStore";
-import ModeIndicator from "../ModeIndicator";
+import ModeIndicator, { ENROL_AUTHENTICATOR_LINK } from "../ModeIndicator";
+import { CREATE_A_PIN } from "../liveLockReasons";
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="route-location">{`${location.pathname}${location.hash}`}</div>;
+}
+
+function render(ui: React.ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return rtlRender(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        {ui}
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
 
 function resetStore(mode: "explore" | "practice" | "live" = "explore") {
   useModeStore.setState({ mode });
@@ -48,10 +70,10 @@ function jsonResponse(body: object, status = 200): Response {
   });
 }
 
-function statusResponse(totpEnabled: boolean): Response {
+function statusResponse(totpEnabled: boolean, hasPin = true): Response {
   return jsonResponse({
     status: "success",
-    data: { is_setup: true, is_locked: false, has_pin: true, totp_enabled: totpEnabled },
+    data: { is_setup: true, is_locked: false, has_pin: hasPin, totp_enabled: totpEnabled },
   });
 }
 
@@ -171,6 +193,54 @@ describe("ModeIndicator", () => {
       fireEvent.click(screen.getByRole("menuitem", { name: /Not qualified for Live/ }));
 
       expect(screen.queryByText("Switch to Live Trading?")).not.toBeInTheDocument();
+    });
+
+    it("links a deferred authenticator to Settings enrolment", async () => {
+      resetStore("practice");
+      connectBroker();
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => statusResponse(false, true));
+      render(<ModeIndicator />);
+      const user = await openMenu();
+
+      await waitFor(() => {
+        expect(screen.getByTestId("live-lock-reasons")).toHaveTextContent(
+          "Enrol 2FA and connect a broker",
+        );
+      });
+      expect(screen.getByTestId("live-lock-reasons")).not.toHaveTextContent(CREATE_A_PIN);
+      const link = screen.getByTestId("live-enrol-link");
+      expect(link).toHaveAttribute("href", "/settings#security");
+      expect(link).toHaveTextContent(ENROL_AUTHENTICATOR_LINK);
+
+      await user.click(link);
+
+      expect(screen.getByTestId("route-location")).toHaveTextContent("/settings#security");
+      expect(screen.queryByText("Switch to Live Trading?")).not.toBeInTheDocument();
+    });
+
+    it("keeps Live locked when no PIN has been created", async () => {
+      resetStore("practice");
+      connectBroker();
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => statusResponse(true, false));
+      render(<ModeIndicator />);
+      await openMenu();
+
+      await waitFor(() => {
+        expect(screen.getByTestId("live-lock-reasons")).toHaveTextContent(CREATE_A_PIN);
+      });
+      expect(screen.getByTestId("live-lock-reasons")).not.toHaveTextContent(
+        "Enrol 2FA and connect a broker",
+      );
+      expect(screen.getByRole("menuitem", { name: /^Live/ })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
+      const link = screen.getByTestId("live-pin-link");
+      expect(link).toHaveAttribute("href", "/settings#security");
+      fireEvent.click(screen.getByRole("menuitem", { name: /^Live/ }));
+
+      expect(screen.queryByText("Switch to Live Trading?")).not.toBeInTheDocument();
+      expect(screen.queryByPlaceholderText("6-digit PIN")).not.toBeInTheDocument();
     });
   });
 

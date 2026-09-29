@@ -29,4 +29,14 @@ describe("ExampleChip", () => {
     render(<ExampleChip />);
     expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
   });
+
+  it("marks always-example figures in Practice and Live", () => {
+    useModeStore.setState({ mode: "practice" });
+    const { rerender } = render(<ExampleChip always />);
+    expect(screen.getByTestId("example-chip")).toHaveTextContent("Example");
+
+    useModeStore.setState({ mode: "live" });
+    rerender(<ExampleChip always />);
+    expect(screen.getByTestId("example-chip")).toHaveTextContent("Example");
+  });
 });

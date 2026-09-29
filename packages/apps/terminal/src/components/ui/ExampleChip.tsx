@@ -2,16 +2,17 @@
  * One example marker for a view that is showing example data.
  *
  * Invest uses this chip instead of the sample-data banner, so a view does
- * not show both. Practice never shows it: Practice is simulated fills.
+ * not show both. Practice hides it unless the figures are example data in
+ * every mode (`always`): Practice itself is simulated fills, not sample prices.
  */
 
 import { Compass } from "lucide-react";
 
 import { useModeStore } from "@/stores/modeStore";
 
-export function ExampleChip() {
+export function ExampleChip({ always = false }: { always?: boolean }) {
   const isExample = useModeStore((s) => s.mode === "explore");
-  if (!isExample) return null;
+  if (!always && !isExample) return null;
   return (
     <span
       data-testid="example-chip"

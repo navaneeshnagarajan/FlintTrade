@@ -147,6 +147,65 @@ export async function openFlintTradeVault(masterPassword: string): Promise<Vault
   };
 }
 
+export interface TotpEnrolmentMaterial {
+  totpUri: string;
+  backupCodes: string[];
+}
+
+/**
+ * Issue a fresh authenticator QR and backup codes for an existing account.
+ *
+ * Password-confirmed. Used when the operator chose "Set up later" and later
+ * enrols from Settings → Security. The new secret is not enrolled until
+ * {@link enableFlintTradeTotp} accepts a live code.
+ */
+export async function regenerateFlintTradeTotp(password: string): Promise<TotpEnrolmentMaterial> {
+  let response: Response;
+  try {
+    response = await fetch(`${getBase()}/v1/auth/setup/regenerate-2fa`, {
+      method: "POST",
+      headers: buildHeaders(true),
+      body: JSON.stringify({ password }),
+    });
+  } catch {
+    throw new AccountSetupError(
+      "Cannot reach server. Is the FlintTrade backend running?",
+      "network",
+    );
+  }
+
+  const payload = await parseJsonBody(response);
+  if (!response.ok) {
+    throw new AccountSetupError(
+      extractMessage(payload) ?? httpMessage(response),
+      "server",
+      response.status,
+    );
+  }
+
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    throw new AccountSetupError(
+      "FlintTrade backend returned an unexpected authenticator response.",
+      "server",
+      response.status,
+    );
+  }
+
+  const totpUri = typeof payload.data.totp_uri === "string" ? payload.data.totp_uri : "";
+  const backupCodes = Array.isArray(payload.data.backup_codes)
+    ? payload.data.backup_codes.filter((code): code is string => typeof code === "string")
+    : [];
+  if (!totpUri) {
+    throw new AccountSetupError(
+      "FlintTrade backend did not return an authenticator QR.",
+      "server",
+      response.status,
+    );
+  }
+
+  return { totpUri, backupCodes };
+}
+
 /** Confirm optional authenticator enrolment with a live TOTP code. */
 export async function enableFlintTradeTotp(totpCode: string): Promise<void> {
   let response: Response;

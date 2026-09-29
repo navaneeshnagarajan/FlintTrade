@@ -4,12 +4,15 @@
  * The chip opens a menu of Practice, Connected (read), and Live.
  * Connected (read) stays disabled until a broker is connected.
  * Live stays disabled while any lock reason applies: missing 2FA or broker,
- * and, when the place gate reports it, Laya qualification.
+ * no quick-unlock PIN, and, when the place gate reports it, Laya qualification.
+ * A deferred authenticator or a skipped PIN links to Settings → Security,
+ * outside the disabled Live item so the link can be followed.
  * Opening the menu never opens the Live dialog. The PIN unlock runs only
  * after the operator chooses an eligible Live item.
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router";
 import { Compass, Eye, FlaskConical, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,9 +35,10 @@ import {
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { useTotpEnrolled } from "@/hooks/useTotpEnrolled";
+import { useLiveArmFactors } from "@/hooks/useTotpEnrolled";
 import { confirmLiveMode, downgradeMode } from "@/lib/modeAuth";
 import {
+  CREATE_A_PIN,
   ENROL_2FA_AND_CONNECT_BROKER,
   liveMenuLockReasons,
 } from "@/chrome/liveLockReasons";
@@ -42,6 +46,8 @@ import { setConnectedReadPosture } from "@/lib/operatorModeLabel";
 
 export const CONNECT_BROKER_FIRST = "Connect a broker first";
 export const LIVE_LOCKED_REASON = ENROL_2FA_AND_CONNECT_BROKER;
+export const ENROL_AUTHENTICATOR_HREF = "/settings#security";
+export const ENROL_AUTHENTICATOR_LINK = "Enrol authenticator in Settings";
 
 export interface ModeIndicatorProps {
   /**
@@ -69,10 +75,11 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
   const token = useAuthStore((s) => s.token);
   const updateToken = useAuthStore((s) => s.updateToken);
   const brokerConnected = useBrokerConnected();
-  const totpEnrolled = useTotpEnrolled();
+  const { totpEnrolled, hasPin } = useLiveArmFactors();
   const liveReasons = liveMenuLockReasons({
     brokerConnected,
     totpEnrolled,
+    hasPin,
     layaQualifiedForLive,
   });
   const liveEligible = liveReasons.length === 0;
@@ -225,6 +232,26 @@ export default function ModeIndicator({ layaQualifiedForLive }: ModeIndicatorPro
               ) : null}
             </span>
           </DropdownMenuItem>
+          {!totpEnrolled ? (
+            <DropdownMenuItem asChild>
+              <Link
+                to={ENROL_AUTHENTICATOR_HREF}
+                data-testid="live-enrol-link"
+              >
+                {ENROL_AUTHENTICATOR_LINK}
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
+          {!hasPin ? (
+            <DropdownMenuItem asChild>
+              <Link
+                to={ENROL_AUTHENTICATOR_HREF}
+                data-testid="live-pin-link"
+              >
+                {CREATE_A_PIN}
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
 

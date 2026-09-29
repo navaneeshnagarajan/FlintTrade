@@ -77,6 +77,18 @@ describe("BenchmarkTab", () => {
     expect(screen.getByTestId("example-chip")).toBeInTheDocument();
   });
 
+  it("keeps the Example chip on hard-coded returns in Practice and Live", () => {
+    useModeStore.setState({ mode: "practice" });
+    const { rerender } = render(<BenchmarkTab />);
+    expect(screen.getByTestId("example-chip")).toHaveTextContent("Example");
+    expect(screen.getByText("Your Portfolio")).toBeInTheDocument();
+
+    useModeStore.setState({ mode: "live" });
+    rerender(<BenchmarkTab />);
+    expect(screen.getByTestId("example-chip")).toHaveTextContent("Example");
+    expect(screen.getByText("+18.45%")).toBeInTheDocument();
+  });
+
   it("shows the portfolio row", () => {
     render(<BenchmarkTab />);
     expect(screen.getByText("Your Portfolio")).toBeInTheDocument();

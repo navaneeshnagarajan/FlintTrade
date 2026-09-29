@@ -2,8 +2,9 @@ import { useAtomValue } from "jotai";
 import { Link } from "react-router";
 import { indicesSummaryAtom } from "@/atoms/marketAtoms";
 import FeedFreshnessChip from "@/components/FeedFreshnessChip";
+import { useFeedFreshness } from "@/hooks/useFeedFreshness";
 import { useOperatorMarketSession } from "@/hooks/useOperatorMarketSession";
-import { isMarketHours, MARKET_CLOSED_LABEL, operatorMarketLabel } from "@/lib/market";
+import { isMarketHours, operatorMarketLabel } from "@/lib/market";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 import TickerMarquee, { type TickerMode } from "./TickerMarquee";
@@ -45,9 +46,17 @@ export default function TickerBar({ mode = "marquee" }: TickerBarProps) {
   const session = useOperatorMarketSession();
   const deskMode = useModeStore((s) => s.mode);
   const liveFeedConnected = useConnectionStore((s) => s.wsConnected);
-  const showLastClose = deskMode === "practice" && !liveFeedConnected;
+  const freshness = useFeedFreshness();
+  // A disconnected socket is when the REST fallback can still be fresh.
+  // "Last close" waits until neither source has fresh quotes, and an
+  // unconfirmed session is never labelled as closed.
+  const restQuotesFresh = freshness.state === "delayed";
+  const socketQuotesFresh = liveFeedConnected && freshness.state !== "stale";
+  const quotesFresh = freshness.state === "live" || restQuotesFresh || socketQuotesFresh;
+  const showLastClose =
+    deskMode === "practice" && session.status !== "unavailable" && !quotesFresh;
   const marketLabel = operatorMarketLabel(session);
-  const sharedClosed = marketLabel === MARKET_CLOSED_LABEL;
+  const sharedClosed = session.status === "closed";
   const venueStrip = deriveTickerVenueStrip(
     indices,
     (exchange) => isMarketHours(exchange),
