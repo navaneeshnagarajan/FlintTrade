@@ -514,14 +514,14 @@ response is JSON
 Practice chip shows. `laya_live_qualified` is true only when a qualification
 record covers the pin. `laya_reason` is one of `not_started`, `stopped`,
 `port_in_use`, `still_loading`, `downloading`, `download_failed`,
-`unreachable`, `wrong_revision`, `unverified`, or `key_rejected`, or
+`unreachable`, `wrong_revision`, `unverified`, `key_rejected`, or `key_missing`, or
 `null` when Ready or Degraded has cleared it. `identity_absent` is not a
 `laya_reason`. While `laya_reason` is `downloading`, `laya_download_bytes`
 and `laya_download_total` are the live byte counts; otherwise both are
 `null`. Chip labels are Not started, Stopped, `Port <n> in use`,
 Still loading, Downloading the model · 1.2 of 3.4 GB, Can't download the
 model, Unreachable, Can't verify the model, Wrong model version,
-and Can't reach Laya. `<n>` is `laya_port`. Tooltips for `not_started`,
+Can't reach Laya, and The Laya API key file is missing. `<n>` is `laya_port`. Tooltips for `not_started`,
 `stopped`, `port_in_use`, `still_loading`, and `unreachable` are the label
 followed by `. Next: python -m flinttrade_core.laya_runtime start`.
 `downloading` has no tooltip and no Next line. Its status word is Down,

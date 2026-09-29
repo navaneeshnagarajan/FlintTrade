@@ -74,6 +74,7 @@ LAYA_REASON_UNREACHABLE = "unreachable"
 LAYA_REASON_WRONG_REVISION = "wrong_revision"
 LAYA_REASON_UNVERIFIED = "unverified"
 LAYA_REASON_KEY_REJECTED = "key_rejected"
+LAYA_REASON_KEY_MISSING = "key_missing"
 LAYA_REASON_CODES = frozenset(
     {
         LAYA_REASON_NOT_STARTED,
@@ -86,6 +87,7 @@ LAYA_REASON_CODES = frozenset(
         LAYA_REASON_WRONG_REVISION,
         LAYA_REASON_UNVERIFIED,
         LAYA_REASON_KEY_REJECTED,
+        LAYA_REASON_KEY_MISSING,
     }
 )
 
@@ -102,6 +104,7 @@ _REASON_TOOLTIPS = {
     ),
     LAYA_REASON_WRONG_REVISION: "Laya is running a different model than FlintTrade expects.",
     LAYA_REASON_KEY_REJECTED: "Laya restarted with a new key. Reconnecting…",
+    LAYA_REASON_KEY_MISSING: "The Laya API key file is missing.",
     LAYA_REASON_DOWNLOAD_FAILED: LAYA_DOWNLOAD_FAILED_TOOLTIP,
 }
 
@@ -137,6 +140,7 @@ def laya_reason_detail(
         LAYA_REASON_WRONG_REVISION: "Wrong model version",
         LAYA_REASON_UNVERIFIED: "Can't verify the model",
         LAYA_REASON_KEY_REJECTED: "Can't reach Laya",
+        LAYA_REASON_KEY_MISSING: "The Laya API key file is missing.",
     }
     if reason is None:
         return None
@@ -253,6 +257,7 @@ class Laya:
         self._live_qualified = status is not DecisionStatus.DOWN
         self._reason: str | None = LAYA_REASON_NOT_STARTED if status is DecisionStatus.DOWN else None
         self._reason_port = 8000
+        self._sticky_refusal = False
         self._download_progress: tuple[int, int] | None = None
         self._decision_client: Any = None
         self._qualification: Any = None
@@ -282,6 +287,7 @@ class Laya:
             self._live_qualified = status is not DecisionStatus.DOWN
             if status is not DecisionStatus.DOWN:
                 self._reason = None
+                self._sticky_refusal = False
                 self._download_progress = None
 
     def apply_runtime_status(self, status: DecisionStatus, *, live_qualified: bool) -> None:
@@ -295,6 +301,7 @@ class Laya:
             self._live_qualified = bool(live_qualified) and status is not DecisionStatus.DOWN
             if status is not DecisionStatus.DOWN:
                 self._reason = None
+                self._sticky_refusal = False
                 self._download_progress = None
 
     def set_runtime_reason(
@@ -303,11 +310,14 @@ class Laya:
         port: int,
         *,
         progress: tuple[int, int] | None = None,
+        sticky: bool = False,
     ) -> None:
         """Record why the sidecar is Down, and the port that status checked.
 
         ``progress`` is ``(done_bytes, total_bytes)`` while ``reason`` is
-        ``downloading``. Any other reason clears it.
+        ``downloading``. Any other reason clears it. ``sticky`` keeps a
+        refused start in place until the next start or an explicit clear.
+        A health check must not replace that reason with ``not_started``.
         """
         if reason is not None and reason not in LAYA_REASON_CODES:
             raise ValueError("Laya reason is not recognised")
@@ -324,10 +334,21 @@ class Laya:
         with self._lock:
             self._reason = reason
             self._reason_port = port
+            self._sticky_refusal = bool(sticky) and reason is not None
             if reason != LAYA_REASON_DOWNLOADING:
                 self._download_progress = None
             elif progress is not None:
                 self._download_progress = (progress[0], progress[1])
+
+    def refusal_is_sticky(self) -> bool:
+        """True when a refused start must survive the next health check."""
+        with self._lock:
+            return self._sticky_refusal
+
+    def clear_sticky_refusal(self) -> None:
+        """Drop a sticky refusal so the next start or an explicit clear can move on."""
+        with self._lock:
+            self._sticky_refusal = False
 
     def runtime_reason(self) -> tuple[str | None, int]:
         """Reason code and port. ``None`` when Ready or Degraded has cleared it."""

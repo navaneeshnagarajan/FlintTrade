@@ -1,5 +1,8 @@
 # CPU wheels are installed first from https://download.pytorch.org/whl/cpu.
-# The index stays on that pip command. This file pins the two packages together.
+# The index stays on that pip command. This file pins the packages together.
 # Extras are not allowed here. The install requirement is laya[serve]==0.3.21.
+# huggingface_hub 1.33.0 is the revision the download progress class was
+# tested against. A later hub calls set_description_str and set_postfix_str.
 torch==2.14.0+cpu
 laya==0.3.21
+huggingface_hub==1.33.0

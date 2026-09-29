@@ -53,6 +53,7 @@ describe("Laya heartbeat on desk ping", () => {
     expect(layaReasonFromBody({ laya_reason: "unverified" })).toBe("unverified");
     expect(layaReasonFromBody({ laya_reason: "identity_absent" })).toBeNull();
     expect(layaReasonFromBody({ laya_reason: "key_rejected" })).toBe("key_rejected");
+    expect(layaReasonFromBody({ laya_reason: "key_missing" })).toBe("key_missing");
     expect(layaReasonFromBody({ laya_reason: "booting" })).toBeNull();
     expect(layaReasonFromBody({ status: "ok" })).toBeNull();
     expect(layaPortFromBody({ laya_port: 8123 })).toBe(8123);

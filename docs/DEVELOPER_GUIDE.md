@@ -524,8 +524,8 @@ compared at install time is the environment directory, not that symlink.
 The install refuses a command whose prefix is the FlintTrade environment.
 The default install puts CPU torch in the sidecar environment from
 `https://download.pytorch.org/whl/cpu`, then `laya[serve]==0.3.21`, so
-the CUDA wheels stay out. The constraints file pins `torch==2.14.0+cpu`
-and `laya==0.3.21` with no extras
+the CUDA wheels stay out. The constraints file pins `torch==2.14.0+cpu`,
+`laya==0.3.21`, and `huggingface_hub==1.33.0` with no extras
 (`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`).
 The `serve` extra stays on the install requirement. The CPU install applies
 that file to both pip commands, and installs torch first. The install size
@@ -606,7 +606,9 @@ download above; the sidecar does not start on that tree. Laya does not
 reach Ready in these cases. A verified boot sets
 `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
-id or a revision. The launch log line is
+id or a revision. When that sidecar's health document leaves the revision
+null, FlintTrade fills the pinned revision from the verified manifest, so
+the chip can reach Ready without a download in this process. The launch log line is
 `laya weights path=<path> sha256=<digest>`. Those identity values are
 rechecked, without hashing again, when Laya reports Ready and on each
 watch tick, about every 1.5 seconds. A mismatch is `unverified`
@@ -626,11 +628,14 @@ version. Restart Laya. If it keeps happening, reinstall it."
 
 `status` carries a reason code: `not_started`, `stopped`, `port_in_use`,
 `still_loading`, `downloading`, `download_failed`, `unreachable`,
-`wrong_revision`, `unverified`, or `key_rejected`. `identity_absent` is
+`wrong_revision`, `unverified`, `key_rejected`, or `key_missing`. `identity_absent` is
 not a status code. The desk shows Not started, Stopped,
 `Port <n> in use`, Still loading, Downloading the model · 1.2 of 3.4 GB,
 Can't download the model, Unreachable, Wrong model version, Can't verify
-the model, and Can't reach Laya. `unverified` applies when this start did
+the model, Can't reach Laya, and The Laya API key file is missing.
+`key_missing` stays until the next start or an explicit stop. A health
+check does not replace it with Not started. The download progress line
+counts the model once. `unverified` applies when this start did
 not download. A failed download, including one over an older unverified
 snapshot, is `download_failed` ("Can't download the model"). `<n>` is the
 sidecar port. Tooltips for

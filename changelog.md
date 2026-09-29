@@ -31,7 +31,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   while Ready or Degraded, says "Laya isn't qualified for Live yet.
   Practice orders are available." Opt in with
   `python -m flinttrade_core.laya_runtime install` or `start`.
-  The CPU install pins `torch==2.14.0+cpu` and `laya==0.3.21`
+  The CPU install pins `torch==2.14.0+cpu`, `laya==0.3.21`, and
+  `huggingface_hub==1.33.0`
   in `laya_sidecar_constraints.txt` (no extras; the install requirement
   is still `laya[serve]==0.3.21`), installs torch first from the CPU
   index, and can share the base interpreter with FlintTrade.
@@ -127,8 +128,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   `downloading` (Downloading the model · 1.2 of 3.4 GB),
   `download_failed` (Can't download the model),
   `unreachable` (Unreachable), `wrong_revision` (Wrong model version),
-  `unverified` (Can't verify the model), and `key_rejected` (Can't reach
-  Laya). `downloading` has no Next line. The `download_failed` tooltip is
+  `unverified` (Can't verify the model), `key_rejected` (Can't reach
+  Laya), and `key_missing` (The Laya API key file is missing.). `downloading` has no Next line. The `download_failed` tooltip is
   "Check your connection, then Start Laya again." A signed-in operator can start the sidecar from the popover
   (`POST /api/v1/laya/start`); the chip then says Still loading until
   Laya is Ready or a failure reason arrives. A dead sidecar is reaped

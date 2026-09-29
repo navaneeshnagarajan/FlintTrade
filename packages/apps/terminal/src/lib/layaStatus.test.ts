@@ -51,6 +51,7 @@ describe("Laya chip status", () => {
     expect(layaReasonPlain("unverified", 8000)).toBe("Can't verify the model");
     expect(layaReasonPlain("identity_absent", 8000)).toBeNull();
     expect(layaReasonPlain("key_rejected", 8000)).toBe("Can't reach Laya");
+    expect(layaReasonPlain("key_missing", 8000)).toBe("The Laya API key file is missing.");
     expect(layaReasonPlain(null, 8000)).toBeNull();
     const loading = layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "still_loading" });
     expect(loading).toBe("Still loading");
@@ -67,6 +68,7 @@ describe("Laya chip status", () => {
       "Laya is running a different model than FlintTrade expects.",
     );
     expect(layaReasonTooltip("key_rejected", 8000)).toBe("Laya restarted with a new key. Reconnecting…");
+    expect(layaReasonTooltip("key_missing", 8000)).toBe("The Laya API key file is missing.");
     expect(LAYA_START_DOCS_HREF).toContain("USER_GUIDE.md#start-laya");
     expect(layaChipLabel({ mode: "practice", practice: "down", live: "down", reason: "not_started" })).toBe("Down");
   });

@@ -26,6 +26,7 @@ export const LAYA_REASON_CODES = [
   "wrong_revision",
   "unverified",
   "key_rejected",
+  "key_missing",
 ] as const;
 
 export type LayaReasonCode = (typeof LAYA_REASON_CODES)[number];
@@ -75,6 +76,7 @@ export function layaReasonPlain(
   if (reason === "wrong_revision") return "Wrong model version";
   if (reason === "unverified") return "Can't verify the model";
   if (reason === "key_rejected") return "Can't reach Laya";
+  if (reason === "key_missing") return "The Laya API key file is missing.";
   return null;
 }
 
@@ -83,6 +85,7 @@ const LAYA_REASON_TOOLTIPS: Record<string, string> = {
     "The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.",
   wrong_revision: "Laya is running a different model than FlintTrade expects.",
   key_rejected: "Laya restarted with a new key. Reconnecting…",
+  key_missing: "The Laya API key file is missing.",
   download_failed: LAYA_DOWNLOAD_FAILED_TOOLTIP,
 };
 

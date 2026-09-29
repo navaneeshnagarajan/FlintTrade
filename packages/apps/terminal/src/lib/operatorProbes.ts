@@ -64,6 +64,7 @@ const LAYA_REASON_CODES = new Set([
   "wrong_revision",
   "unverified",
   "key_rejected",
+  "key_missing",
 ]);
 
 function layaStatusValue(value: unknown): LayaHeartbeat | null {

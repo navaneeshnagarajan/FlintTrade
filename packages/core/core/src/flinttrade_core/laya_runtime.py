@@ -118,9 +118,13 @@ LAYA_DOWNLOAD_BOOTSTRAP = textwrap.dedent(
     bars = []
 
     class _Progress:
+        # huggingface_hub 1.33.0 keeps a transfer bar and a reconstruct bar
+        # for the same bytes, then calls set_description_str and
+        # set_postfix_str. A later hub method named set_* is ignored.
         def __init__(self, *args, total=None, **kwargs):
             self.n = 0
             self.total = int(total or 0)
+            self.unit = kwargs.get("unit", "it")
             bars.append(self)
             _emit()
 
@@ -149,9 +153,31 @@ LAYA_DOWNLOAD_BOOTSTRAP = textwrap.dedent(
         def set_description(self, *args, **kwargs):
             return None
 
+        def set_description_str(self, *args, **kwargs):
+            return None
+
+        def set_postfix_str(self, *args, **kwargs):
+            return None
+
+        def __getattr__(self, name):
+            if isinstance(name, str) and name.startswith("set_"):
+                def _ignored(*_args, **_kwargs):
+                    return None
+                return _ignored
+            raise AttributeError(name)
+
     def _emit():
-        done = sum(bar.n for bar in bars)
-        total = sum(bar.total for bar in bars)
+        # Two byte bars describe one download. Summing them reports the
+        # model twice. The file-count bar is not bytes. The real size is
+        # the largest byte bar, once.
+        byte_bars = [bar for bar in bars if getattr(bar, "unit", "it") == "B"]
+        chosen = byte_bars or bars
+        if chosen:
+            done = max(int(bar.n) for bar in chosen)
+            total = max(int(bar.total) for bar in chosen)
+        else:
+            done = 0
+            total = 0
         sys.stdout.write(f"laya download progress {done} {total}\\n")
         sys.stdout.flush()
 
@@ -364,7 +390,11 @@ def refresh_process_laya_status() -> None:
     an already-running backend attaches to that loopback sidecar first.
     A dead child is reaped here and recorded Down.
     """
+    from flinttrade_engine.laya import process_laya  # noqa: PLC0415
+
     runtime = process_runtime()
+    if runtime is None and process_laya().refusal_is_sticky():
+        return
     if runtime is None:
         runtime = attach_from_environment()
     if runtime is None:
@@ -410,7 +440,7 @@ def attach_from_environment(workspace: Path | None = None) -> LayaRuntime | None
     runtime = LayaRuntime(root, host=host, port=port)
     key_path = Path(key_file).expanduser()
     if not key_path.is_file():
-        _record_attach_down(port)
+        _record_missing_key(port)
         return None
     runtime.attach(key_path)
     return runtime
@@ -1078,6 +1108,9 @@ class LayaRuntime:
             self._clear_run_record()
             self._launch_refusal = None
             self._weight_drift = None
+            process_laya().clear_sticky_refusal()
+            if _api_key_file_missing():
+                self._refuse_missing_key()
             self._settle_checkpoint_dirs()
             weighed = self._weigh_before_launch(policy)
             if self._artifact_checker is None and self._checkpoint_needs_download(policy, weighed):
@@ -1242,6 +1275,7 @@ class LayaRuntime:
         """
         from flinttrade_engine.laya import (  # noqa: PLC0415
             LAYA_REASON_KEY_REJECTED,
+            LAYA_REASON_NOT_STARTED,
             LAYA_REASON_UNVERIFIED,
             DecisionStatus,
             process_laya,
@@ -1254,7 +1288,11 @@ class LayaRuntime:
         if self._launch_refusal is not None:
             engine = process_laya()
             engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
-            engine.set_runtime_reason(self._launch_refusal.reason or LAYA_REASON_UNVERIFIED, self._port)
+            engine.set_runtime_reason(
+                self._launch_refusal.reason or LAYA_REASON_UNVERIFIED,
+                self._port,
+                sticky=True,
+            )
             return engine.status
         if self._key_rejected:
             engine = process_laya()
@@ -1274,6 +1312,7 @@ class LayaRuntime:
             managed = self._managed_locked()
         port_open = True if managed else self._port_is_open()
         payload = self._safe_health() if managed or port_open else None
+        payload = self._health_with_verified_revision(payload, artifact)
         self._last_health = payload if isinstance(payload, Mapping) else None
         with self._lock:
             if generation != self._generation:
@@ -1290,6 +1329,8 @@ class LayaRuntime:
                 artifact_reason=None if artifact.ok else artifact.reason,
             )
             engine = process_laya()
+            if reason == LAYA_REASON_NOT_STARTED and engine.refusal_is_sticky():
+                return engine.status
             if reason is None:
                 status = publish_probe(
                     engine,
@@ -1379,6 +1420,44 @@ class LayaRuntime:
         except Exception:
             return None
         return payload if isinstance(payload, Mapping) else None
+
+    def _health_with_verified_revision(
+        self,
+        payload: Mapping[str, Any] | None,
+        artifact: ArtifactCheck,
+    ) -> Mapping[str, Any] | None:
+        """Fill a null sidecar revision from the verified checkpoint manifest.
+
+        A local directory load reports ``revision: null``. The pin is the
+        revision recorded when the files were hashed, including a start that
+        did not download. A revision the sidecar actually names is left as it
+        is, so a real mismatch stays a mismatch.
+        """
+        if not isinstance(payload, Mapping) or not artifact.ok:
+            return payload
+        from flinttrade_engine.laya_decision import load_policy  # noqa: PLC0415
+
+        policy = load_policy()
+        if artifact.revision != policy.revision or artifact.sha256 != policy.sha256:
+            return payload
+        revisions = payload.get("revisions")
+        claimed = ""
+        if isinstance(revisions, Mapping):
+            claimed = str(revisions.get(policy.checkpoint) or "")
+        if claimed and claimed != policy.revision:
+            return payload
+        top = payload.get("revision")
+        top_text = top if isinstance(top, str) else ""
+        if claimed == policy.revision and top_text == policy.revision:
+            return payload
+        copied = dict(payload)
+        revised = dict(revisions) if isinstance(revisions, Mapping) else {}
+        if not str(revised.get(policy.checkpoint) or ""):
+            revised[policy.checkpoint] = policy.revision
+        copied["revisions"] = revised
+        if not top_text:
+            copied["revision"] = policy.revision
+        return copied
 
     def _reason_code(
         self,
@@ -1866,7 +1945,17 @@ class LayaRuntime:
         engine = process_laya()
         engine.set_decision_client(None)
         engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
-        engine.set_runtime_reason(check.reason or "unverified", self._port)
+        engine.set_runtime_reason(check.reason or "unverified", self._port, sticky=True)
+        set_process_runtime(self)
+
+    def _refuse_missing_key(self) -> None:
+        """Refuse start when ``LAYA_API_KEY_FILE`` is set and the file is absent."""
+        from flinttrade_engine.laya_decision import load_policy  # noqa: PLC0415
+
+        policy = load_policy()
+        self._refuse_before_launch(
+            ArtifactCheck(ok=False, reason="key_missing", revision=policy.revision, sha256="")
+        )
 
     def _stamp_weighed(self, weighed: ArtifactCheck, token: str) -> ArtifactCheck:
         """Bind a hash taken before launch to the process that just started."""
@@ -2407,7 +2496,29 @@ def _launch_refusal_message(check: ArtifactCheck) -> str:
         return "Can't download the model"
     if check.reason == "wrong_revision":
         return "Wrong model version"
+    if check.reason == "key_missing":
+        return "The Laya API key file is missing."
     return "Can't verify the model"
+
+
+def _api_key_file_missing() -> bool:
+    """True when ``LAYA_API_KEY_FILE`` names a file that is not there."""
+    text = os.environ.get("LAYA_API_KEY_FILE", "").strip()
+    if not text:
+        return False
+    return not Path(text).expanduser().is_file()
+
+
+def _record_missing_key(port: int = _DEFAULT_PORT) -> None:
+    """Keep the missing-key refusal. A later health check must not clear it."""
+    from flinttrade_engine.laya import LAYA_REASON_KEY_MISSING, DecisionStatus, process_laya  # noqa: PLC0415
+
+    engine = process_laya()
+    if engine.refusal_is_sticky():
+        return
+    engine.set_decision_client(None)
+    engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
+    engine.set_runtime_reason(LAYA_REASON_KEY_MISSING, port, sticky=True)
 
 
 def _file_signature(path: Path) -> tuple[object, ...]:

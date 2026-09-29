@@ -120,7 +120,7 @@ Chip reason codes are `not_started` (Not started), `stopped` (Stopped),
 `downloading` (Downloading the model · 1.2 of 3.4 GB), `download_failed`
 (Can't download the model), `unreachable` (Unreachable), `unverified`
 (Can't verify the model), `wrong_revision` (Wrong model version), and
-`key_rejected` (Can't reach Laya). `<n>` is the sidecar port. For
+`key_rejected` (Can't reach Laya), and `key_missing` (The Laya API key file is missing.). `<n>` is the sidecar port. For
 `not_started`, `stopped`, `port_in_use`, `still_loading`, and
 `unreachable`, the tooltip is the label followed by
 `. Next: python -m flinttrade_core.laya_runtime start`. `downloading`

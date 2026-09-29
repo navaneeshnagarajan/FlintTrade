@@ -140,6 +140,7 @@ def test_install_command_pins_the_sidecar_venv_not_the_main_interpreter(tmp_path
     pinned = constraints.read_text(encoding="utf-8")
     assert "torch==2.14.0+cpu" in pinned
     assert "laya==0.3.21" in pinned
+    assert "huggingface_hub==1.33.0" in pinned
     assert constraint_lines_with_extras(pinned) == []
     assert LAYA_SERVE_REQUIREMENT == "laya[serve]==0.3.21"
     assert CPU_TORCH_INDEX in pinned
@@ -1956,4 +1957,145 @@ def test_crash_between_renames_restores_the_old_checkpoint(
     assert (runtime.checkpoint_dir / policy.weight_file).read_bytes() == b"pinned-weights"
     assert _old_checkpoint_names(runtime) == []
     assert not junk.exists()
+    reset_process_laya_for_tests()
+
+
+def _load_download_progress() -> tuple[type, Any]:
+    """Execute the download bootstrap's progress class. This is the class the hub calls."""
+    import io
+    import types
+
+    source = LAYA_DOWNLOAD_BOOTSTRAP
+    start = source.index("bars = []\n")
+    end = source.index("from huggingface_hub import snapshot_download")
+    stdout = io.StringIO()
+    fake_sys = types.ModuleType("sys")
+    fake_sys.stdout = stdout
+    namespace: dict[str, Any] = {"sys": fake_sys}
+    exec(source[start:end], namespace)  # noqa: S102
+    return namespace["_Progress"], stdout
+
+
+def _progress_lines(stdout: Any) -> list[tuple[int, int]]:
+    found: list[tuple[int, int]] = []
+    for line in stdout.getvalue().splitlines():
+        parts = line.split()
+        if parts[:3] != ["laya", "download", "progress"] or len(parts) != 5:
+            continue
+        found.append((int(parts[3]), int(parts[4])))
+    return found
+
+
+@pytest.mark.unit
+def test_download_progress_accepts_hub_tqdm_methods() -> None:
+    """huggingface_hub 1.33.0 calls set_description_str and set_postfix_str after the bytes land."""
+    progress, stdout = _load_download_progress()
+    bar = progress(total=2_370_000_000, unit="B")
+    bar.update(2_370_000_000)
+    bar.set_description("Downloading bytes")
+    bar.set_description_str("Download complete")
+    bar.set_postfix_str("1.2MB/s", refresh=False)
+    bar.set_postfix(rate="1.2MB/s")
+    assert _progress_lines(stdout)[-1] == (2_370_000_000, 2_370_000_000)
+
+
+@pytest.mark.unit
+def test_download_progress_counts_coexisting_staged_and_final_files_once(tmp_path: Path) -> None:
+    """Staged and final copies of the same model are one size, not both trees."""
+    staging = tmp_path / "staging"
+    final = tmp_path / "checkpoint"
+    _write_pinned_tree(staging)
+    _write_pinned_tree(final)
+    staged_bytes = sum(path.stat().st_size for path in staging.rglob("*") if path.is_file())
+    final_bytes = sum(path.stat().st_size for path in final.rglob("*") if path.is_file())
+    assert staged_bytes == final_bytes
+    assert staged_bytes > 0
+    progress, stdout = _load_download_progress()
+    transfer = progress(total=0, unit="B", desc="Downloading bytes")
+    reconstruct = progress(total=0, unit="B", desc="Reconstructing")
+    progress(total=4, unit="it", desc="Fetching 4 files")
+    transfer.total = staged_bytes
+    reconstruct.total = staged_bytes
+    transfer.update(staged_bytes)
+    reconstruct.update(staged_bytes)
+    transfer.set_description_str("Download complete")
+    reconstruct.set_description("Reconstruction complete")
+    done, total = _progress_lines(stdout)[-1]
+    assert (done, total) == (staged_bytes, staged_bytes)
+    assert total != staged_bytes + final_bytes
+
+
+class _PidProcess(_Process):
+    def __init__(self) -> None:
+        super().__init__()
+        self.pid = 424242
+
+
+@pytest.mark.unit
+def test_verified_checkpoint_reports_the_pinned_revision_without_a_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A verified snapshot that this process did not download still reports its pin."""
+    policy = load_policy()
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "empty-hub"))
+    _accept_pinned_digests(monkeypatch, policy)
+    _accept_only(monkeypatch, 424242)
+    _write_pinned_tree(tmp_path / "runtime" / "laya" / "checkpoint")
+    calls = {"n": 0}
+
+    def download(*_args: object) -> int:
+        calls["n"] += 1
+        return 1
+
+    health = {
+        "status": "ok",
+        "loaded": [policy.checkpoint],
+        "revision": None,
+        "revisions": {policy.checkpoint: None},
+        "device": "cpu",
+        "cpu_fallbacks": {policy.checkpoint: {"count": 0}},
+    }
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _PidProcess(),
+        downloader=download,
+        health_reader=lambda _url: dict(health),
+        watch=False,
+    )
+    runtime.start()
+    assert calls["n"] == 0
+    report = runtime.status()
+    assert report["health"]["revision"] == policy.revision
+    assert report["health"]["revisions"][policy.checkpoint] == policy.revision
+    assert report["reason"] is None
+    assert report["detail"] != "Still loading"
+    assert process_laya().effective_status("practice") is DecisionStatus.READY
+    assert process_laya().runtime_reason()[0] is None
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_missing_key_refusal_survives_a_health_tick(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A refused start keeps its reason. The next health check does not say Not started."""
+    from flinttrade_core.laya_runtime import refresh_process_laya_status
+
+    monkeypatch.setenv("LAYA_API_KEY_FILE", str(tmp_path / "missing.key"))
+    monkeypatch.setenv("LAYA_HOST", "127.0.0.1")
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "empty-hub"))
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _Process(),
+        watch=False,
+    )
+    with pytest.raises(LayaRuntimeError, match="API key file is missing"):
+        runtime.start()
+    assert process_laya().runtime_reason()[0] == "key_missing"
+    assert laya_reason_detail("key_missing", runtime._port) == "The Laya API key file is missing."  # noqa: SLF001
+    refresh_process_laya_status()
+    assert process_laya().runtime_reason()[0] == "key_missing"
+    report = runtime.status()
+    assert report["reason"] == "key_missing"
+    assert report["detail"] == "The Laya API key file is missing."
+    runtime.stop()
+    assert process_laya().runtime_reason()[0] == "not_started"
     reset_process_laya_for_tests()

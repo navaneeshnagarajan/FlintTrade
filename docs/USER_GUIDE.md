@@ -469,6 +469,7 @@ loading**. A download in progress stays **Down** and is not **Still loading**.
 | `unverified` | Can't verify the model | `The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.` Applies when this start did not download. A failed download shows **Can't download the model** instead. |
 | `wrong_revision` | Wrong model version | `Laya is running a different model than FlintTrade expects.` |
 | `key_rejected` | Can't reach Laya | `Laya restarted with a new key. Reconnecting…` |
+| `key_missing` | The Laya API key file is missing. | `The Laya API key file is missing.` A health check does not replace this with Not started. |
 
 `downloading` and `download_failed` use the status word **Down**. Neither
 is **Still loading**. Orders are refused with
@@ -571,7 +572,7 @@ install refuses to put them in the FlintTrade environment. The default
 install is CPU-only torch from `https://download.pytorch.org/whl/cpu`,
 then `laya[serve]==0.3.21`. The constraints file pins `laya==0.3.21`
 with no extras (`packages/core/core/src/flinttrade_core/laya_sidecar_constraints.txt`,
-`torch==2.14.0+cpu` and `laya==0.3.21`). The `serve` extra stays on the
+`torch==2.14.0+cpu`, `laya==0.3.21`, and `huggingface_hub==1.33.0`). The `serve` extra stays on the
 install requirement, because a constraints file cannot name extras. Torch is installed
 first. The install size is roughly 1.2 GB. `install --accelerator cuda` and `install --accelerator rocm` are
 opt-in. `start` still uses CPU (`LAYA_DEVICE=cpu`).
