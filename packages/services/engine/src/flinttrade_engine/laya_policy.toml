@@ -13,7 +13,7 @@ file = "model.safetensors"
 sha256 = "891102d372688fc2a094dac56a384bc537b87c63f21f9f3dac0be2b7cbc8d86c"
 
 # Every other file the launcher reads from the checkpoint directory.
-# A digest mismatch is the wrong revision. An extra loadable file is unverified.
+# A missing or extra loadable file is unverified. A changed byte is the wrong revision.
 [checkpoint.manifest]
 "rl_agent_config.json" = "ae287b56bbcf5f8c4f4541ae9dfd00c914c4c48b940b8398c3058af37ba92bbd"
 "encoder/config.json" = "bf3ab80598fdccf414855a2ce80f22859e4492d06ca8a62ddd1cfb63972f8979"

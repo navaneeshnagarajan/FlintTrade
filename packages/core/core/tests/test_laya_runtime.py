@@ -1056,11 +1056,10 @@ def test_clean_weight_is_logged_and_launched_offline(
     assert launched
     argv, env = launched[0]
     resolved = str(path.resolve())
-    launch = runtime.runtime_root / "launch"
-    private_weights = launch / policy.weight_file
+    assert not (runtime.runtime_root / "launch").exists()
     assert env["HF_HUB_OFFLINE"] == "1"
     assert env["TRANSFORMERS_OFFLINE"] == "1"
-    assert env["LAYA_WEIGHTS_PATH"] == str(private_weights)
+    assert env["LAYA_WEIGHTS_PATH"] == resolved
     digests = json.loads(env["LAYA_SHA256_DIGESTS"])
     assert digests[policy.weight_file] == policy.sha256
     assert dict(policy.manifest).items() <= digests.items()
@@ -1079,15 +1078,11 @@ def test_clean_weight_is_logged_and_launched_offline(
     recorded = json.loads((runtime.runtime_root / "verification.json").read_text(encoding="utf-8"))
     stat = path.stat()
     assert recorded["weights_path"] == resolved
-    assert recorded["launch_path"] == str(private_weights)
+    assert "launch_path" not in recorded
     assert recorded["sha256"] == policy.sha256
     assert recorded["inode"] == stat.st_ino
     assert recorded["size"] == stat.st_size
     assert recorded["mtime_ns"] == stat.st_mtime_ns
-    assert private_weights.stat().st_ino == stat.st_ino
-    staged = sorted(item.relative_to(launch).as_posix() for item in launch.rglob("*") if item.is_file())
-    assert staged == sorted([policy.weight_file, *(name for name, _digest in policy.manifest)])
-    assert "README.md" not in staged
     for name, digest in policy.manifest:
         source = path.parent / name
         source_stat = source.stat()
@@ -1097,8 +1092,6 @@ def test_clean_weight_is_logged_and_launched_offline(
         assert remembered["inode"] == source_stat.st_ino
         assert remembered["size"] == source_stat.st_size
         assert remembered["mtime_ns"] == source_stat.st_mtime_ns
-        copied = next(item for item in recorded["files"] if item["path"] == str(launch / name))
-        assert copied["inode"] and copied["size"] and copied["mtime_ns"]
     reset_process_laya_for_tests()
 
 
@@ -1247,6 +1240,36 @@ def test_changed_companion_is_wrong_revision_and_does_not_launch(
     assert process_laya().runtime_reason()[0] == "wrong_revision"
     assert laya_reason_detail("wrong_revision", runtime._port) == "Wrong model version"  # noqa: SLF001
     assert process_laya().effective_status("practice") is not DecisionStatus.READY
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", ["encoder/config.json", "tokenizer/tokenizer.json"])
+def test_missing_companion_is_unverified_and_does_not_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    path = _plant_snapshot(tmp_path, monkeypatch, extra=None)
+    (path.parent / name).unlink()
+    policy = load_policy()
+    _accept_pinned_digests(monkeypatch, policy)
+    launched: list[object] = []
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: launched.append(1) or _Process(),
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    with pytest.raises(LayaRuntimeError, match="Can't verify the model"):
+        runtime.start()
+    assert launched == []
+    refusal = runtime._launch_refusal  # noqa: SLF001
+    assert refusal is not None
+    assert refusal.reason == "unverified"
+    assert refusal.weights_path.endswith(name)
+    runtime.publish_status()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "unverified"
+    assert laya_reason_detail("unverified", runtime._port) == "Can't verify the model"  # noqa: SLF001
     reset_process_laya_for_tests()
 
 

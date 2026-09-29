@@ -551,13 +551,11 @@ client uses the same revision and digest checks. On each sidecar start
 the verified record is hashed from `model.safetensors` and from each
 file in `[checkpoint.manifest]`, and stamped with that run's pid and a
 fresh start token, plus each file's inode, size, and modification time
-in nanoseconds. A digest that is not the pin is `wrong_revision`. An
-extra file the launcher could read is `unverified`. A verified boot
-copies those files into `<workspace>/runtime/laya/launch` (the weights
-file is hardlinked when the filesystem allows it) and passes that
-private `model.safetensors` path to the sidecar with `HF_HUB_OFFLINE=1`
-and `TRANSFORMERS_OFFLINE=1`. It does not pass a repo id or revision.
-The startup log still names the hashed source path and its sha256.
+in nanoseconds. A missing file or an extra file the launcher could read
+is `unverified`. A changed byte is `wrong_revision`. A verified boot
+passes that hashed `model.safetensors` path to the sidecar with
+`HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`, and does not pass a
+repo id or revision. The startup log names that path and its sha256.
 Those identity values are rechecked, without hashing again, when Laya
 reports Ready and about every 1.5 seconds. A mismatch is `unverified`
 ("Can't verify the model"). The log line is

@@ -5,10 +5,10 @@ FlintTrade environment. The default install puts CPU torch in that
 environment, from the PyTorch CPU index, before the pinned ``laya[serve]``
 package. CUDA and ROCm builds stay opt-in. It binds ``127.0.0.1`` (the
 upstream default binds every interface with no authentication), mints a
-fresh API key on each boot, and pins the checkpoint revision and weight
-digest. A verified boot starts the sidecar from a private directory
-that holds only the hashed weights file and the pinned companion files,
-with hub lookups switched off. After the first successful load,
+fresh API key on each boot, and pins the checkpoint revision, the
+weight digest, and every other file that launcher reads. A verified boot
+starts the sidecar on the hashed weights file, with hub lookups switched
+off. After the first successful load,
 later boots stay offline. CPU is the only device this runtime starts.
 
 Run ``python -m flinttrade_core.laya_runtime install|start|stop|status``
@@ -24,7 +24,6 @@ import json
 import logging
 import os
 import secrets
-import shutil
 import signal
 import socket
 import subprocess
@@ -352,7 +351,6 @@ class ArtifactCheck:
     size: int = 0
     mtime_ns: int = 0
     files: tuple[PinnedFile, ...] = ()
-    launch_path: str = ""
 
 
 def huggingface_cache_roots() -> list[Path]:
@@ -382,19 +380,6 @@ def _checkpoint_digests(policy: Any) -> dict[str, str]:
     for name, digest in policy.manifest:
         mapped[str(name)] = str(digest)
     return mapped
-
-
-def _snapshot_directory(check: ArtifactCheck) -> Path:
-    """Checkpoint directory the launcher reads, not a resolved blob folder.
-
-    Hugging Face stores the snapshot name as a symlink. ``weights_path`` may
-    follow that link. Companion paths stay on the snapshot name, so their
-    directory is the one that also holds the tokenizer and the encoder.
-    """
-    for item in check.files:
-        if item.sha256 and item.path:
-            return Path(item.path).parents[item.name.count("/")]
-    return Path(check.weights_path).parent
 
 
 def _recorded_identities(check: ArtifactCheck) -> tuple[tuple[str, int, int, int], ...]:
@@ -763,58 +748,6 @@ def verify_installed_model(
     return replace(check, files=tuple(files))
 
 
-def stage_verified_launch(
-    runtime_root: Path,
-    snapshot_dir: Path,
-    names: tuple[str, ...],
-) -> tuple[Path, tuple[PinnedFile, ...]]:
-    """Place only the verified files where the sidecar will read them.
-
-    The weights file is hardlinked when the filesystem allows it. Smaller
-    files are copied, so a loader rewrite cannot change the cache. The
-    returned path is the private ``model.safetensors``.
-    """
-    launch = runtime_root / "launch"
-    if launch.exists():
-        shutil.rmtree(launch)
-    launch.mkdir(parents=True)
-    harden_directory(launch)
-    private: list[PinnedFile] = []
-    weights: Path | None = None
-    for name in names:
-        source = snapshot_dir / name
-        if not source.is_file():
-            raise OSError(name)
-        dest = launch / name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        harden_directory(dest.parent)
-        if name.endswith(".safetensors"):
-            try:
-                os.link(source, dest, follow_symlinks=True)
-            except OSError:
-                shutil.copy2(source, dest, follow_symlinks=True)
-                harden(dest)
-        else:
-            shutil.copy2(source, dest, follow_symlinks=True)
-            harden(dest)
-        inode, size, mtime_ns = _file_identity(dest)
-        private.append(
-            PinnedFile(
-                name=name,
-                path=str(dest),
-                sha256="",
-                inode=inode,
-                size=size,
-                mtime_ns=mtime_ns,
-            )
-        )
-        if name.endswith(".safetensors"):
-            weights = dest
-    if weights is None:
-        raise OSError("model.safetensors")
-    return weights, tuple(private)
-
-
 class LayaRuntime:
     """Install and supervise one loopback ``laya-serve`` process."""
 
@@ -921,8 +854,6 @@ class LayaRuntime:
             self._launch_refusal = None
             self._weight_drift = None
             weighed = self._weigh_before_launch(policy)
-            if weighed.ok and weighed.weights_path:
-                weighed = self._stage_private_launch(weighed, policy)
             if self._weights_block_launch(weighed):
                 _reap_runtimes.discard(self)
                 self._record_launch_refusal(weighed)
@@ -951,7 +882,7 @@ class LayaRuntime:
                     }
                 )
                 if pinned:
-                    env["LAYA_WEIGHTS_PATH"] = weighed.launch_path
+                    env["LAYA_WEIGHTS_PATH"] = weighed.weights_path
                     env["HF_HUB_OFFLINE"] = "1"
                     env["TRANSFORMERS_OFFLINE"] = "1"
                     for name in (
@@ -1320,7 +1251,6 @@ class LayaRuntime:
             size=raw.size,
             mtime_ns=raw.mtime_ns,
             files=raw.files,
-            launch_path=raw.launch_path,
         )
 
     def _sidecar_pid(self) -> int:
@@ -1399,25 +1329,6 @@ class LayaRuntime:
         self._api_key = key
         self._key_rejected = False
 
-    def _stage_private_launch(self, weighed: ArtifactCheck, policy: Any) -> ArtifactCheck:
-        """Copy the verified files into the runtime directory and remember them."""
-        names = (policy.weight_file, *(name for name, _digest in policy.manifest))
-        try:
-            launch_weights, private = stage_verified_launch(
-                self.runtime_root,
-                _snapshot_directory(weighed),
-                names,
-            )
-        except OSError:
-            return ArtifactCheck(
-                ok=False,
-                reason="unverified",
-                revision=weighed.revision,
-                sha256=weighed.sha256,
-                weights_path=weighed.weights_path,
-            )
-        return replace(weighed, files=weighed.files + private, launch_path=str(launch_weights))
-
     def _weigh_before_launch(self, policy: Any) -> ArtifactCheck:
         """Hash the pinned file before the sidecar process exists."""
         if self._artifact_checker is not None:
@@ -1462,7 +1373,6 @@ class LayaRuntime:
             size=weighed.size,
             mtime_ns=weighed.mtime_ns,
             files=weighed.files,
-            launch_path=weighed.launch_path,
         )
         self._write_run_record(token, check.pid)
         self._write_recorded_verification(check)
@@ -1656,9 +1566,6 @@ class LayaRuntime:
         weights_path = payload.get("weights_path")
         if not isinstance(weights_path, str):
             weights_path = ""
-        launch_path = payload.get("launch_path")
-        if not isinstance(launch_path, str):
-            launch_path = ""
         inode = _record_int(payload.get("inode"))
         size = _record_int(payload.get("size"))
         mtime_ns = _record_int(payload.get("mtime_ns"))
@@ -1676,7 +1583,6 @@ class LayaRuntime:
                 size=size,
                 mtime_ns=mtime_ns,
                 files=files,
-                launch_path=launch_path,
             )
         if payload.get("reason") == "wrong_revision":
             return ArtifactCheck(
@@ -1691,7 +1597,6 @@ class LayaRuntime:
                 size=size,
                 mtime_ns=mtime_ns,
                 files=files,
-                launch_path=launch_path,
             )
         return None
 
@@ -1710,7 +1615,6 @@ class LayaRuntime:
                 "inode": check.inode,
                 "size": check.size,
                 "mtime_ns": check.mtime_ns,
-                "launch_path": check.launch_path,
                 "files": [
                     {
                         "name": item.name,

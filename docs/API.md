@@ -533,12 +533,12 @@ Laya's decision couldn't be verified. Try again." On each sidecar start
 the verified record is hashed from `model.safetensors` and from each
 file in `[checkpoint.manifest]`, and stamped with that run's pid and a
 fresh start token, plus each file's inode, size, and modification time.
-A digest that is not the pin is `wrong_revision` ("Wrong model version").
-An extra file the launcher could read is `unverified`. A verified boot
-passes the private `model.safetensors` under `<workspace>/runtime/laya/launch`
-to the sidecar with `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`, and
-does not pass a repo id or revision. The startup log still names the
-hashed source path and its sha256. Those identity values are rechecked,
+A missing file or an extra file the launcher could read is `unverified`
+("Can't verify the model"). A changed byte is `wrong_revision` ("Wrong
+model version"). A verified boot passes that hashed `model.safetensors`
+path to the sidecar with `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`,
+and does not pass a repo id or revision. The startup log names that path
+and its sha256. Those identity values are rechecked,
 without hashing again, when Laya reports Ready and about every 1.5
 seconds. A mismatch is `unverified` ("Can't verify the model"). The log
 line is `laya weights path=<path> changed=<field>`, and `<path>` is the
