@@ -1041,7 +1041,6 @@ interface VaultStepProps {
 }
 
 function VaultStep({ onOpened, onSessionRequired }: VaultStepProps) {
-  const [phase, setPhase] = useState<"checking" | "form" | "ready">("checking");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState("");
@@ -1052,37 +1051,6 @@ function VaultStep({ onOpened, onSessionRequired }: VaultStepProps) {
     handleSubmit,
     formState: { errors },
   } = useForm<VaultFormValues>({ resolver: zodResolver(vaultSchema) });
-  const onOpenedRef = useRef(onOpened);
-  const onSessionRequiredRef = useRef(onSessionRequired);
-  onOpenedRef.current = onOpened;
-  onSessionRequiredRef.current = onSessionRequired;
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await openFlintTradeVault("");
-        if (cancelled) return;
-        if (result.alreadyPresent) {
-          onOpenedRef.current();
-          return;
-        }
-        setPhase("form");
-      } catch (error) {
-        // A 401 still counts after cleanup. Leaving it unreported keeps the
-        // vault step mounted, and the next mount probes again.
-        if (isSetupSessionError(error)) {
-          onSessionRequiredRef.current();
-          return;
-        }
-        if (cancelled) return;
-        setPhase("form");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   async function onSubmit(values: VaultFormValues) {
     if (submitInFlight.current) return;
@@ -1118,25 +1086,7 @@ function VaultStep({ onOpened, onSessionRequired }: VaultStepProps) {
         after you save it.
       </p>
 
-      {phase === "checking" && (
-        <p className="text-xs text-text-muted">Checking the vault…</p>
-      )}
-
-      {phase === "ready" && (
-        <div className="space-y-4">
-          <p className="text-sm text-text-primary">
-            The vault is already open on this machine.
-          </p>
-          <div className="flex justify-end">
-            <Button type="button" onClick={onOpened}>
-              Continue
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {phase === "form" && (
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
           {serverError && (
             <div role="alert" className="flex items-start gap-3 p-3 rounded-lg border text-sm bg-loss/10 border-loss/30 text-loss">
               <AlertTriangle className="size-4 shrink-0 mt-0.5" />
@@ -1193,7 +1143,6 @@ function VaultStep({ onOpened, onSessionRequired }: VaultStepProps) {
             </Button>
           </div>
         </form>
-      )}
 
     </div>
   );

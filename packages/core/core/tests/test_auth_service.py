@@ -2,8 +2,13 @@
 """Tests for auth service — credential storage, hashing, verification."""
 
 from __future__ import annotations
-import pytest
+
+import sqlite3
+import threading
 from pathlib import Path
+
+import pytest
+
 from flinttrade_core.auth_service import AuthService
 
 
@@ -378,3 +383,207 @@ class TestPasswordChangedAtStamp:
         assert svc.update_password("bob", "NewStrongP@ss!234") is False
         # Stamp stays at the post-setup zero because no row was updated.
         assert svc.get_password_changed_at() == 0.0
+
+
+def _operator_count(db_path: Path) -> int:
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM account").fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    return int(row[0])
+
+
+def _login_attempt_count(db_path: Path) -> int:
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM login_attempts").fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    return int(row[0])
+
+
+def _backup_code_count(db_path: Path) -> int:
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM backup_codes").fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    return int(row[0])
+
+
+class TestAuthStoreConcurrency:
+    """Status reads stay consistent while writes run, and setup cannot double-create."""
+
+    @pytest.mark.unit
+    def test_status_reads_stay_consistent_during_writes(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "auth.db"
+        svc = AuthService(db_path=db_path)
+        svc.setup_account(
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
+        )
+        svc.record_setup_vault_presecured(True)
+        svc.mark_setup_finished()
+
+        journal = svc._db.execute("PRAGMA journal_mode").fetchone()
+        busy = svc._db.execute("PRAGMA busy_timeout").fetchone()
+        assert journal is not None
+        assert str(journal[0]).lower() == "wal"
+        assert busy is not None
+        assert int(busy[0]) >= 5000
+
+        reader_count = 8
+        reads_each = 1_500
+        stop = threading.Event()
+        errors: list[BaseException] = []
+        wrong_setup: list[object] = []
+        missing_vault: list[object] = []
+        wrong_finished: list[object] = []
+        wrong_profile: list[object] = []
+        record: threading.Lock = threading.Lock()
+
+        def reader() -> None:
+            try:
+                for _ in range(reads_each):
+                    setup = svc.is_setup()
+                    finished = svc.is_setup_finished()
+                    vault = svc.setup_vault_presecured()
+                    profile = svc.get_profile()
+                    locked = svc.is_locked()
+                    has_pin = svc.has_pin()
+                    if setup is not True:
+                        with record:
+                            wrong_setup.append(setup)
+                    if vault is None or vault is not True:
+                        with record:
+                            missing_vault.append(vault)
+                    if finished is not True:
+                        with record:
+                            wrong_finished.append(finished)
+                    if profile.get("username") != "alice" or locked is not False or has_pin is not True:
+                        with record:
+                            wrong_profile.append((profile, locked, has_pin))
+            except BaseException as exc:
+                with record:
+                    errors.append(exc)
+
+        def writer() -> None:
+            while not stop.is_set():
+                svc.mark_setup_finished()
+                svc.record_setup_vault_presecured(False)
+                svc._record_attempt(success=True)
+
+        readers = [threading.Thread(target=reader) for _ in range(reader_count)]
+        writer_thread = threading.Thread(target=writer)
+        writer_thread.start()
+        for thread in readers:
+            thread.start()
+        for thread in readers:
+            thread.join(timeout=30)
+        stop.set()
+        writer_thread.join(timeout=5)
+
+        read_total = reader_count * reads_each
+        assert all(not thread.is_alive() for thread in readers)
+        assert not writer_thread.is_alive()
+        attempts = _login_attempt_count(db_path)
+        assert errors == [], f"{len(errors)} exceptions in {read_total} reads: {errors[:3]}"
+        assert wrong_setup == [], f"is_setup was wrong {len(wrong_setup)} times in {read_total} reads"
+        assert missing_vault == [], (
+            f"vault state was missing or wrong {len(missing_vault)} times in {read_total} reads"
+        )
+        assert wrong_finished == [], f"setup_finished was wrong {len(wrong_finished)} times in {read_total} reads"
+        assert wrong_profile == []
+        assert attempts > 0, "status reads finished before any concurrent write"
+        assert _operator_count(db_path) == 1
+
+    @pytest.mark.unit
+    def test_parallel_setup_against_existing_operator_all_refuse(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "auth.db"
+        svc = AuthService(db_path=db_path)
+        svc.setup_account(
+            username="alice",
+            email="alice@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
+        )
+        # A stale "not set up" answer must still refuse inside the write.
+        svc.is_setup = lambda: False  # type: ignore[method-assign]
+
+        callers = 8
+        errors: list[BaseException] = []
+        successes: list[list[str]] = []
+        record = threading.Lock()
+
+        def attempt(index: int) -> None:
+            try:
+                codes = svc.setup_account(
+                    username=f"user{index}",
+                    email=f"user{index}@example.com",
+                    password="StrongP@ss123!",
+                    pin="654321",
+                )
+            except BaseException as exc:
+                with record:
+                    errors.append(exc)
+            else:
+                with record:
+                    successes.append(codes)
+
+        threads = [threading.Thread(target=attempt, args=(index,)) for index in range(callers)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+
+        assert all(not thread.is_alive() for thread in threads)
+        assert successes == []
+        assert len(errors) == callers
+        assert all(isinstance(exc, RuntimeError) for exc in errors)
+        assert _operator_count(db_path) == 1
+        assert _backup_code_count(db_path) == 8
+        assert svc.get_profile()["username"] == "alice"
+
+    @pytest.mark.unit
+    def test_fresh_setup_race_lets_exactly_one_create_win(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "auth.db"
+        svc = AuthService(db_path=db_path)
+        callers = 8
+        errors: list[BaseException] = []
+        successes: list[list[str]] = []
+        record = threading.Lock()
+
+        def attempt(index: int) -> None:
+            try:
+                codes = svc.setup_account(
+                    username=f"user{index}",
+                    email=f"user{index}@example.com",
+                    password="StrongP@ss123!",
+                    pin="123456",
+                )
+            except BaseException as exc:
+                with record:
+                    errors.append(exc)
+            else:
+                with record:
+                    successes.append(codes)
+
+        threads = [threading.Thread(target=attempt, args=(index,)) for index in range(callers)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+
+        assert all(not thread.is_alive() for thread in threads)
+        assert len(successes) == 1
+        assert len(successes[0]) == 8
+        assert len(errors) == callers - 1
+        assert all(isinstance(exc, RuntimeError) for exc in errors)
+        assert _operator_count(db_path) == 1
+        assert _backup_code_count(db_path) == 8

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  AccountSetupError,
   completeFlintTradeSetup,
   enableFlintTradeTotp,
   fetchSetupServerState,
@@ -172,6 +173,24 @@ describe("setupAccountApi", () => {
       vaultPresecured: null,
       setupFinished: false,
     });
+  });
+
+  it("classifies a rejecting status body as an unreadable server response", async () => {
+    const response = new Response("", {
+      status: 200,
+      headers: { "Content-Length": "400" },
+    });
+    vi.spyOn(response, "text").mockRejectedValue(new TypeError("body stream truncated"));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+
+    try {
+      await fetchSetupServerState();
+      expect.fail("truncated status body should reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AccountSetupError);
+      expect(error).toMatchObject({ kind: "server", status: 200 });
+      expect(error).not.toMatchObject({ kind: "network" });
+    }
   });
 
   it("resumes a setup session with the operator password", async () => {

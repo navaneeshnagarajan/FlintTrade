@@ -24,6 +24,7 @@ Usage::
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import hmac
 import logging
@@ -32,6 +33,7 @@ import re
 import secrets
 import sqlite3
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -101,11 +103,12 @@ def _derive_fernet_key(master: str, salt: bytes) -> Fernet:
 class AuthService:
     """Single-user authentication service.
 
-    Thread-safety: the SQLite connection is opened with
-    ``check_same_thread=False`` and every write goes through a single
-    :class:`threading.Lock` (``self._write_lock``). Reads are safe in
-    WAL mode without the lock; writes must hold it so concurrent Flask
-    request threads do not interleave statements mid-transaction.
+    Each thread uses its own SQLite connection. Sharing one connection
+    across Flask request threads made status reads return a missing
+    operator, a null vault fact, or an exception. Connections open in
+    WAL mode with a busy timeout (via :func:`open_sqlite`). Writes take
+    ``self._write_lock`` and, for operator creation, a reserved
+    transaction so the existence check and the insert commit together.
     """
 
     def __init__(self, db_path: Path | str | None = None) -> None:
@@ -116,18 +119,49 @@ class AuthService:
         self._hasher = argon2.PasswordHasher(
             time_cost=3, memory_cost=65536, parallelism=4,
         )
-        self._conn: sqlite3.Connection | None = None
+        self._local = threading.local()
+        self._connections: list[sqlite3.Connection] = []
+        self._connections_lock = threading.Lock()
+        self._connection_generation = 0
         self._write_lock: threading.Lock = threading.Lock()
         self._init_db()
 
     @property
     def _db(self) -> sqlite3.Connection:
-        if self._conn is None:
-            # check_same_thread=False + per-write Lock — reads safe via WAL,
-            # writes serialised so interleaving cannot corrupt transactions.
-            self._conn = open_sqlite(str(self._db_path), durability="full")
-            self._conn.row_factory = sqlite3.Row
-        return self._conn
+        """Return this thread's connection, opening it on first use."""
+        generation = self._connection_generation
+        conn = getattr(self._local, "conn", None)
+        if conn is None or getattr(self._local, "generation", -1) != generation:
+            conn = open_sqlite(str(self._db_path), durability="full")
+            conn.row_factory = sqlite3.Row
+            # open_sqlite already sets WAL and a 5s busy timeout. Repeat
+            # them here so a status read does not depend on that helper
+            # staying unchanged.
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA busy_timeout = 5000")
+            self._local.conn = conn
+            self._local.generation = generation
+            with self._connections_lock:
+                self._connections.append(conn)
+        return conn
+
+    @contextlib.contextmanager
+    def _immediate_write(self) -> Iterator[sqlite3.Connection]:
+        """Run one reserved write transaction on this thread's connection.
+
+        ``BEGIN IMMEDIATE`` takes the write lock before the body reads, so
+        a stale "no operator" answer cannot insert a second account.
+        """
+        with self._write_lock:
+            db = self._db
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                yield db
+                db.commit()
+            except BaseException:
+                with contextlib.suppress(sqlite3.Error):
+                    db.rollback()
+                raise
 
     # ------------------------------------------------------------------
     # Write helpers — always acquire the write lock so concurrent Flask
@@ -327,28 +361,35 @@ class AuthService:
         fernet = _derive_fernet_key(password, totp_salt)
         encrypted = fernet.encrypt(totp_secret.encode("utf-8"))
 
-        # Generate 8 backup codes — insert all rows + account under a
-        # single write-lock acquisition so a concurrent reader never sees
-        # a half-populated row set.
+        # Hash backup codes before the reserved transaction so argon2 does
+        # not hold the write lock. The insert below re-checks the operator
+        # inside that transaction; a stale is_setup() answer cannot commit
+        # a second account, and a reader never sees a half-written row.
         backup_codes: list[str] = []
-        with self._write_lock:
-            for _ in range(8):
-                code = secrets.token_hex(4).upper()  # 8-char hex
-                backup_codes.append(code)
-                code_hash = self._hasher.hash(code)
-                self._db.execute(
-                    "INSERT INTO backup_codes (code_hash, used) VALUES (?, 0)",
-                    [code_hash],
+        code_hashes: list[str] = []
+        for _ in range(8):
+            code = secrets.token_hex(4).upper()  # 8-char hex
+            backup_codes.append(code)
+            code_hashes.append(self._hasher.hash(code))
+        try:
+            with self._immediate_write() as db:
+                existing = db.execute("SELECT 1 FROM account WHERE id = 1").fetchone()
+                if existing is not None:
+                    raise RuntimeError("Account already set up")
+                for code_hash in code_hashes:
+                    db.execute(
+                        "INSERT INTO backup_codes (code_hash, used) VALUES (?, 0)",
+                        [code_hash],
+                    )
+                db.execute(
+                    """INSERT INTO account (id, username, email, password_hash, pin_hash,
+                       totp_secret_encrypted, totp_salt, totp_enabled, created_at)
+                       VALUES (1, ?, ?, ?, ?, ?, ?, 0, ?)""",
+                    [username, email, password_hash, pin_hash, encrypted, totp_salt,
+                     datetime.now(UTC).isoformat()],
                 )
-            # Store account in the same transaction.
-            self._db.execute(
-                """INSERT INTO account (id, username, email, password_hash, pin_hash,
-                   totp_secret_encrypted, totp_salt, totp_enabled, created_at)
-                   VALUES (1, ?, ?, ?, ?, ?, ?, 0, ?)""",
-                [username, email, password_hash, pin_hash, encrypted, totp_salt,
-                 datetime.now(UTC).isoformat()],
-            )
-            self._db.commit()
+        except sqlite3.IntegrityError as exc:
+            raise RuntimeError("Account already set up") from exc
 
         # Cache the TOTP secret in memory for immediate use
         self._totp_secret_cache = totp_secret
@@ -766,6 +807,15 @@ class AuthService:
         return (self.get_totp_provisioning_uri(), backup_codes)
 
     def close(self) -> None:
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        """Close every connection this service opened, on any thread."""
+        with self._connections_lock:
+            self._connection_generation += 1
+            conns = list(self._connections)
+            self._connections.clear()
+        for conn in conns:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+        self._local.conn = None
+        self._local.generation = self._connection_generation

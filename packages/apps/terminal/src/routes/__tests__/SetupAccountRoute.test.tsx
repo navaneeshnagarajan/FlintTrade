@@ -723,6 +723,12 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
       title: "FlintTrade backend unavailable",
       body: "The FlintTrade backend did not answer. Start or restart the local FlintTrade backend, then retry.",
     },
+    {
+      name: "a truncated status body",
+      error: new AccountSetupError("FlintTrade backend responded with HTTP 200.", "server", 200),
+      title: "Can't check setup status",
+      body: "FlintTrade answered, but setup status couldn't be read. Retry in a moment.",
+    },
   ])("shows $name and does not open the fresh-install form", async ({ error, title, body }) => {
     localStorage.clear();
     useAuthStore.getState().setSetupRequired();
@@ -769,7 +775,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(screen.queryByText("Your vault is set up and secured on this machine.")).not.toBeInTheDocument();
   });
 
-  it("shows Continue setup when the vault step reloads into a setup-session 401", async () => {
+  it("shows Continue setup when the vault submit is refused for a missing setup session", async () => {
     localStorage.setItem(PROGRESS_KEY, JSON.stringify({
       accountCreated: true,
       vaultOpened: false,
@@ -787,12 +793,24 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
 
     await renderSetup();
 
+    expect(await screen.findByLabelText("Master password")).toBeInTheDocument();
+    expect(screen.queryByText("Checking the vault…")).not.toBeInTheDocument();
+    expect(mocks.openFlintTradeVault).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Master password"), {
+      target: { value: "VaultKey123!" },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm master password"), {
+      target: { value: "VaultKey123!" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open vault" }));
+
     expect(await screen.findByRole("heading", { name: "Continue setup" })).toBeInTheDocument();
     expect(screen.getByText("This machine already has an operator. Sign in to finish setup.")).toBeInTheDocument();
     expect(screen.queryByText("A setup session is required.")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
     expect(mocks.openFlintTradeVault).toHaveBeenCalledTimes(1);
+    expect(mocks.openFlintTradeVault).toHaveBeenCalledWith("VaultKey123!");
 
     await act(async () => {
       await Promise.resolve();
@@ -826,6 +844,7 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
 
     await renderSetup();
     expect(await screen.findByLabelText("Master password")).toBeInTheDocument();
+    expect(mocks.openFlintTradeVault).not.toHaveBeenCalled();
     mocks.openFlintTradeVault.mockClear();
 
     fireEvent.change(screen.getByLabelText("Master password"), {

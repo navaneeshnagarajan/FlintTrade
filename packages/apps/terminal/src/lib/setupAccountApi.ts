@@ -182,7 +182,18 @@ export async function fetchSetupServerState(): Promise<SetupServerState> {
     );
   }
 
-  const payload = await parseJsonBody(response);
+  let payload: unknown;
+  try {
+    payload = await parseJsonBody(response);
+  } catch {
+    // A truncated or closed body means the server answered and the read
+    // failed. That is not a network failure.
+    throw new AccountSetupError(
+      httpMessage(response),
+      "server",
+      response.status,
+    );
+  }
   if (
     !response.ok
     || !isRecord(payload)
