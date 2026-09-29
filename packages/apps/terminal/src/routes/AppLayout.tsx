@@ -439,6 +439,12 @@ export default function AppLayout() {
 
   const { kind: primaryBannerKind, incident: operatorIncident } = usePrimaryBanner();
 
+  // The locked session leaves the desk. Panels and their data are not kept
+  // rendered behind the lock.
+  if (authStatus === "pin-required") {
+    return <LockScreen />;
+  }
+
   return (
     <div className="relative h-screen flex flex-col bg-surface-base overflow-hidden">
       <style>{`
@@ -516,7 +522,6 @@ export default function AppLayout() {
         </main>
       </div>
       <NoConnectionOverlay suppress={primaryBannerKind === "live_risk"} />
-      {authStatus === "pin-required" && <LockScreen />}
       <KeyboardShortcutsDialog
         isOpen={showShortcuts}
         onClose={handleCloseShortcuts}

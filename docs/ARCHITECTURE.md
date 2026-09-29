@@ -446,7 +446,7 @@ not go through the write router.
 stateDiagram-v2
     [*] --> Explore
     Explore --> Practice: /auth/mode {mode:practice}
-    Practice --> Live: /auth/pin {mode:live} +\n6-digit PIN
+    Practice --> Live: /auth/live +\n6-digit PIN
     Live --> Practice: /auth/mode {mode:practice}
     Practice --> Explore: /auth/mode {mode:explore}
     Live --> Explore: /auth/mode {mode:explore}\n(JWT downgrade only;\nno kill-switch)
@@ -465,10 +465,12 @@ stateDiagram-v2
     }
 ```
 
-Each transition issues a fresh JWT with the new `mode` claim and revokes
-the old token's `jti`. Practice → Live is `POST /v1/auth/pin` (PIN
-re-auth). `/v1/auth/mode` accepts only downgrades to `practice` or
-`explore` and does not latch the kill switch. The ModeIndicator UI
+Downgrades issue a fresh JWT with the new `mode` claim and revoke the old
+token's `jti`. Practice → Live is `POST /v1/auth/live` (PIN re-auth plus
+authenticator enrolment). Quick unlock `POST /v1/auth/pin` restores the
+existing session and never changes Mode. `/v1/auth/mode`
+accepts only downgrades to `practice` or `explore` and does not latch the
+kill switch. The ModeIndicator UI
 toggles Explore → Practice and Practice ↔ Live; a Live → Explore
 downgrade is available on the API. The guard lives at
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.
