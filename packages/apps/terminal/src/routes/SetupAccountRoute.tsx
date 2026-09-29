@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1279,7 +1280,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
           type="button"
           variant="outline"
           size="sm"
-          className="h-7 w-16 shrink-0 px-2 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+          className="h-7 w-16 shrink-0 px-2 text-xs text-text-primary hover:bg-surface-hover hover:text-text-primary"
           aria-expanded={expanded}
           onClick={() => {
             setExpanded((open) => !open);
@@ -1293,7 +1294,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
             type="button"
             variant="ghost"
             size="sm"
-            className="h-7 shrink-0 px-2 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+            className="h-7 shrink-0 px-2 text-xs text-text-primary hover:bg-surface-hover hover:text-text-primary"
             onClick={dismiss}
           >
             Dismiss
@@ -1311,14 +1312,18 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
                   className="space-y-2 rounded-lg border border-border-default p-3"
                 >
                   <div>
-                    <p className="text-sm text-text-primary">
-                      {item.title}
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-text-primary">{item.title}</p>
                       {tray.skipped.includes(item.id) ? (
-                        <span className="text-text-muted"> — later</span>
+                        <Badge variant="outline" className="px-1.5 py-0 text-xxs text-text-primary">
+                          Skipped
+                        </Badge>
                       ) : tray.completed.includes(item.id) ? (
-                        <span className="text-text-muted"> — done</span>
+                        <Badge variant="outline" className="px-1.5 py-0 text-xxs text-text-primary">
+                          Done
+                        </Badge>
                       ) : null}
-                    </p>
+                    </div>
                     <p className="text-xs text-text-muted">{item.detail}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1336,7 +1341,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
                     >
                       Set up
                     </Button>
-                    {!tray.skipped.includes(item.id) && item.id !== "broker" && (
+                    {!tray.skipped.includes(item.id) && !tray.completed.includes(item.id) && item.id !== "broker" && (
                       <Button
                         type="button"
                         variant="ghost"

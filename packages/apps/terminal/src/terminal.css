@@ -173,6 +173,14 @@ html.density-compact {
   --color-float-window-header-background: var(--color-surface-card, #16161f);
 }
 
+/* FlexLayout 0.11 defines --fl-color-tab-unselected on .flexlayout__layout
+   as var(--flexlayout-color-tab-unselected, gray). A mix set on html is
+   shadowed there, and unselected panel tabs then paint gray (about 4.74:1
+   on the dark tab bar). Feed the public variable on the layout itself. */
+.flexlayout__theme_dark .flexlayout__layout.flexlayout__layout {
+  --flexlayout-color-tab-unselected: color-mix(in srgb, var(--color-text-primary, #e8e8ed) 62%, var(--color-text-secondary, #8b8b95));
+}
+
 /* Hide close buttons on tabs — less visual noise; show only on hover of the
    selected tab. (aria-keyshortcuts still advertises the keyboard close.) */
 .flexlayout__theme_dark .flexlayout__tab_button_trailing,
