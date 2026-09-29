@@ -3119,6 +3119,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       ltp: 1505,
       pnl: 150,
       pnlPercent: 1,
+      restored: false,
     }]);
     expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/v1/sandbox/positions");
   });
@@ -4359,7 +4360,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     });
 
     const [placeUrl, placeInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(placeUrl).toContain("/api/v1/orders/forever");
+    expect(placeUrl).toContain("/api/v1/orders/place");
     expect(placeInit.method).toBe("POST");
     const placeBody = JSON.parse(placeInit.body as string);
     expect(placeBody).toMatchObject({

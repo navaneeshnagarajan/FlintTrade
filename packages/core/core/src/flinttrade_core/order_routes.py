@@ -104,6 +104,9 @@ _MODE_LIVE = "live"
 
 _VALID_MODES = frozenset({_MODE_EXPLORE, _MODE_PRACTICE, _MODE_LIVE})
 
+# Other place-shaped routes delegate here. They do not call the sandbox or a broker.
+_PLACE_ROUTE_REQUIRED = "Orders are placed through /api/v1/orders/place."
+
 # ---------------------------------------------------------------------------
 # OpenAlgo endpoint map — FlintTrade route suffix → OpenAlgo endpoint name
 # ---------------------------------------------------------------------------
@@ -2204,8 +2207,6 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
         }), 401
 
     adapter_id, account_id = _gated_target(body)
-    if ft_action == "place":
-        return _dispatch_live_order(ft_action, body, live_payload, adapter_id=adapter_id, account_id=account_id)
     if ft_action == "modify":
         return _dispatch_live_modify(body, live_payload, adapter_id=adapter_id, account_id=account_id)
     if ft_action == "cancel":
@@ -2483,6 +2484,135 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
     return jsonify(result), 200
 
 
+def _variety_from_body(body: Mapping[str, Any]) -> str | None:
+    """Return a normalised variety, or ``None`` for a regular place."""
+    raw = body.get("variety")
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip().lower()
+    return text or None
+
+
+def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tuple[Any, int]:
+    """Admit one live or Practice place, then SafetySystem or the sandbox.
+
+    This is the only request entry that may create an order. A GTT body
+    (``variety="gtt"``) uses the same admission as a regular place.
+    """
+    mode = _get_mode_from_jwt()
+    mismatch = _mode_header_mismatch_response(mode, route_label="Order request to /place")
+    if mismatch is not None:
+        return mismatch
+    if not mode:
+        return jsonify({
+            "status": "error",
+            "message": "Authentication required — provide a valid JWT with a mode claim",
+        }), 401
+    if mode not in _VALID_MODES:
+        return jsonify({
+            "status": "error",
+            "message": (
+                f"Invalid mode '{mode}' in JWT claim. "
+                "Expected one of: explore, practice, live"
+            ),
+        }), 400
+    payload_body = body if body is not None else (request.get_json(silent=True) or {})
+    if mode == _MODE_EXPLORE:
+        return jsonify({
+            "status": "error",
+            "message": "Orders are not available in Explore mode. Switch to Practice or Live to trade.",
+            "code": "mode_blocked",
+        }), 403
+    if mode == _MODE_PRACTICE:
+        return _dispatch_practice_place(payload_body)
+    if not _is_live_mode_unlocked():
+        return jsonify({
+            "status": "error",
+            "message": "Live mode not unlocked — verify PIN first",
+        }), 403
+    live_payload = _decode_request_payload()
+    if live_payload is None:
+        return jsonify({
+            "status": "error",
+            "message": "Authentication required — JWT could not be decoded",
+        }), 401
+    adapter_id, account_id = _gated_target(payload_body)
+    variety = _variety_from_body(payload_body)
+    if variety == "gtt":
+        contract_error = _forever_contract_error(payload_body, adapter_id)
+        if contract_error is not None:
+            return jsonify({"status": "error", "message": contract_error}), 400
+    return _dispatch_live_order(
+        "place",
+        payload_body,
+        live_payload,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        variety=variety,
+    )
+
+
+def _prove_exit_all_reduce_only(adapter_id: str, account_id: str) -> tuple[Any, int] | None:
+    """Record the server-side reduce-only proof for a square-off.
+
+    Exit-all only flattens. When the book can be read, each open contract
+    is classified. A row that is not an exit stops the square-off. An
+    unreadable book still records one reduce-only proof: the broker verb
+    cannot open a position.
+    """
+    from flinttrade_engine.reduce_only import classify_reduce_only  # noqa: PLC0415
+
+    positions, our_orders, broker_orders = _live_exit_books(adapter_id, account_id)
+    open_rows = []
+    for row in positions:
+        try:
+            quantity = int(float(row.get("net_qty", row.get("quantity", 0)) or 0))
+        except (TypeError, ValueError):
+            continue
+        if quantity == 0:
+            continue
+        open_rows.append((row, quantity))
+    if not open_rows:
+        _record_reduce_only(
+            {
+                "symbol": "",
+                "exchange": "",
+                "action": "SELL",
+                "quantity": 0,
+                "product": "MIS",
+            },
+            _MODE_LIVE,
+        )
+        return None
+    for row, quantity in open_rows:
+        action = "SELL" if quantity > 0 else "BUY"
+        body = {
+            "symbol": str(row.get("symbol") or ""),
+            "exchange": str(row.get("exchange") or ""),
+            "product": str(row.get("product") or "MIS"),
+            "action": action,
+            "quantity": abs(quantity),
+        }
+        decision = classify_reduce_only(
+            symbol=body["symbol"],
+            exchange=body["exchange"],
+            product=body["product"],
+            action=action,
+            quantity=abs(quantity),
+            positions=positions,
+            our_orders=our_orders,
+            broker_orders=broker_orders,
+            live=True,
+        )
+        if not decision.qualifies:
+            return jsonify({
+                "status": "error",
+                "message": "Square-off stopped because a position is not a reduce-only exit.",
+            }), 409
+        _record_reduce_only(body, _MODE_LIVE)
+    return None
+
+
 @orders_bp.route("/place", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_order() -> tuple[Any, int]:
@@ -2507,14 +2637,7 @@ def place_order() -> tuple[Any, int]:
         JSON with ``status``, ``order_id``, and ``message``.
         HTTP 200 on success, 400/403/500/502 on error.
     """
-    mode = _get_mode_from_jwt()
-    mismatch = _mode_header_mismatch_response(mode, route_label="Order request to /place")
-    if mismatch is not None:
-        return mismatch
-    if mode == _MODE_PRACTICE:
-        body = request.get_json(silent=True) or {}
-        return _dispatch_practice_place(body)
-    return _dispatch_order("place")
+    return _dispatch_live_place_from_request()
 
 
 def _decode_request_payload() -> dict[str, Any] | None:
@@ -3310,18 +3433,11 @@ def _check_legs_through_safety(
 @orders_bp.route("/forever", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def forever_place() -> tuple[Any, int]:
-    """Place a forever (GTT) order through the gated place path (live only).
+    """Refuse a forever (GTT) place. Post the same body to ``/orders/place``.
 
-    Builds a typed ``Order`` with ``variety="gtt"`` — including Dhan OCO fields
-    or Upstox TARGET/STOPLOSS rules — and dispatches it through the SAME channel
-    as a regular placement:
-    SafetySystem L1–L5 → ``gate_order`` → ``BrokerRouter.place_order``. The
-    variety and leg fields live on the Order, so the SafetyContext HMAC covers
-    them.
-
-    Request JSON: standard order fields plus ``trigger_price`` (required by the
-    broker), broker-specific protective fields, and optional ``broker`` and
-    ``account_id``. With no target fields, ``brokers.execution.default`` is used.
+    A body that does not match the GTT contract is HTTP 400. A valid body does
+    not reach a broker from this route. ``POST /api/v1/orders/place`` with
+    ``variety="gtt"`` is the place path.
     """
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
@@ -3331,10 +3447,13 @@ def forever_place() -> tuple[Any, int]:
     contract_error = _forever_contract_error(body, adapter_id)
     if contract_error is not None:
         return jsonify({"status": "error", "message": contract_error}), 400
-    return _dispatch_live_order(
-        "forever-place", body, payload,
-        adapter_id=adapter_id, account_id=account_id, variety="gtt",
-    )
+    from pydantic import ValidationError  # noqa: PLC0415
+
+    try:
+        _body_to_order(body, variety="gtt")
+    except (ValueError, ValidationError):
+        return jsonify({"status": "error", "message": "Order validation failed"}), 400
+    return jsonify({"status": "error", "message": _PLACE_ROUTE_REQUIRED}), 501
 
 
 @orders_bp.route("/forever/<order_id>", methods=["PUT"])
@@ -3516,46 +3635,20 @@ def super_order_cancel(order_id: str) -> tuple[Any, int]:
 @orders_bp.route("/triggers", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def trigger_place() -> tuple[Any, int]:
-    """Place a conditional trigger — gated ``place_conditional_trigger`` verb.
+    """Refuse a conditional-trigger place.
 
-    Request JSON: ``condition`` (non-empty object) + ``orders`` (non-empty list
-    of order objects; each is coerced to a typed ``Order`` so the signed
-    payload covers every leg field), optional ``broker`` / ``account_id``.
-    Trade-affecting placement → kill-switch gated.
+    A bad condition or leg is HTTP 400. A valid trigger does not reach a
+    broker from this route. Each leg is posted to ``/api/v1/orders/place``.
     """
-    payload, err = _require_live_payload(require_unlock=True)
+    _payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
     body = request.get_json(silent=True) or {}
     try:
-        condition, legs = _trigger_legs_from_body(body)
+        _trigger_legs_from_body(body)
     except ValueError:
         return jsonify({"status": "error", "message": "Trigger validation failed"}), 400
-    adapter_id, account_id = _gated_target(body)
-    try:
-        safety = _require_live_safety()
-    except Exception as exc:  # noqa: BLE001 - readiness failures are admission refusals
-        logger.error("Conditional-trigger safety runtime unavailable: %s", type(exc).__name__)
-        return _safety_runtime_unavailable_response()
-    with safety.order_admission(f"{adapter_id}:{account_id}") as lease:
-        blocked, exposure_positions = _check_legs_through_safety(
-            legs,
-            adapter_id,
-            account_id=account_id,
-            lease=lease,
-        )
-        if blocked is not None:
-            return blocked
-        return _gated_verb_write(
-            "place_conditional_trigger", {"condition": condition, "orders": legs}, payload,
-            adapter_id=adapter_id, account_id=account_id,
-            audit_event="TRIGGER_PLACED", fail_message="Conditional trigger placement failed",
-            kill_switch_gated=True,
-            admission_lease=lease,
-            exposure_orders=legs,
-            exposure_positions=exposure_positions,
-            reservation_id_factory=lambda result, index: f"{result}:{index}",
-        )
+    return jsonify({"status": "error", "message": _PLACE_ROUTE_REQUIRED}), 501
 
 
 @orders_bp.route("/triggers", methods=["GET"])
@@ -3636,96 +3729,29 @@ def trigger_cancel(alert_id: str) -> tuple[Any, int]:
 @orders_bp.route("/multi", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def multi_order_place() -> tuple[Any, int]:
-    """Place multiple orders sequentially through individually gated writes.
+    """Refuse a batch place. Each leg is posted to ``/api/v1/orders/place``.
 
-    Request JSON: ``orders`` (non-empty list of order objects), optional
-    ``broker`` / ``account_id``. EVERY leg is coerced to a typed ``Order`` and
-    admitted through the full SafetySystem (L1-L5) against the state and
-    unresolved exposure left by earlier legs. Processing stops at the first
-    refusal or broker failure; ``placed_order_ids`` reports any prior success.
+    Request JSON: ``orders`` (non-empty list of order objects). A leg that
+    does not match the order model is HTTP 400. A valid batch does not
+    reach a broker from this route.
     """
     from pydantic import ValidationError  # noqa: PLC0415
 
-    from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
-    from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
-    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
-
-    payload, err = _require_live_payload(require_unlock=True)
+    _payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
     body = request.get_json(silent=True) or {}
     raw_orders = body.get("orders")
     if not isinstance(raw_orders, list) or not raw_orders:
         return jsonify({"status": "error", "message": "'orders' must be a non-empty list of order objects"}), 400
-    adapter_id, account_id = _gated_target(body)
-
-    try:
-        safety = _require_live_safety()
-    except Exception as exc:  # noqa: BLE001 - readiness failures are an admission refusal
-        logger.error("Multi-order safety runtime unavailable: %s", type(exc).__name__)
-        return _safety_runtime_unavailable_response()
-    legs: list[Any] = []
-    try:
-        for index, leg in enumerate(raw_orders):
-            if not isinstance(leg, dict):
-                raise ValueError(f"orders[{index}] must be an object")
-            legs.append(_body_to_order(leg))
-    except (ValueError, ValidationError):
-        return jsonify({"status": "error", "message": "Order validation failed"}), 400
-    router = current_app.config.get("BROKER_ROUTER")
-    if router is None:
-        return jsonify({"status": "error", "message": "Order routing unavailable"}), 503
-    request_ctx = RequestContext(
-        jti=str(payload.get("jti") or ""),
-        actor_type="human",
-        actor_id=str(payload.get("sub") or payload.get("actor_id") or "unknown"),
-        mode=_MODE_LIVE,
-        selector=f"{adapter_id}:{account_id}",
-    )
-    order_ids: list[str] = []
-    for index, (typed, raw_leg) in enumerate(zip(legs, raw_orders, strict=True)):
+    for leg in raw_orders:
+        if not isinstance(leg, dict):
+            return jsonify({"status": "error", "message": "Order validation failed"}), 400
         try:
-            admitted, outcome = _admit_and_route_live_order(
-                safety=safety,
-                router=router,
-                typed_order=typed,
-                request_ctx=request_ctx,
-                adapter_id=adapter_id,
-                account_id=account_id,
-                ft_action=f"multi-order-{index}",
-                body=raw_leg,
-            )
-        except SafetyBypassError:
-            return jsonify({
-                "status": "error",
-                "message": "Multi-order placement was refused; no later leg was sent.",
-                "placed_order_ids": order_ids,
-            }), 403
-        except (BrokerNotFoundError, KeyError):
-            return jsonify({
-                "status": "error",
-                "message": "Broker is not connected; no later leg was sent.",
-                "placed_order_ids": order_ids,
-            }), 503
-        except (NotImplementedError, UnsupportedCapabilityError):
-            return jsonify({
-                "status": "error",
-                "message": "Multi-order placement is not available for this broker; no later leg was sent.",
-                "placed_order_ids": order_ids,
-            }), 501
-        except Exception:
-            logger.exception("Sequential multi-order leg failed | adapter=%s index=%s", adapter_id, index)
-            return jsonify({
-                "status": "error",
-                "message": "Multi-order placement failed; no later leg was sent.",
-                "placed_order_ids": order_ids,
-            }), 502
-        if not admitted:
-            return outcome
-        order_ids.append(str(outcome))
-
-    _audit_write_event("MULTI_ORDER_PLACED", adapter_id, account_id, request_ctx.actor_id, "")
-    return jsonify({"status": "success", "data": {"order_ids": order_ids}}), 200
+            _body_to_order(leg)
+        except (ValueError, ValidationError):
+            return jsonify({"status": "error", "message": "Order validation failed"}), 400
+    return jsonify({"status": "error", "message": _PLACE_ROUTE_REQUIRED}), 501
 
 
 @orders_bp.route("/smart/<order_id>", methods=["DELETE"])
@@ -3831,14 +3857,11 @@ _ADVANCED_STRATEGY_NAMES = {
 @_require_live_unlocked
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_basket() -> tuple[Any, int]:
-    """Execute a basket of multi-leg orders atomically.
+    """Refuse a basket place. Each leg is posted to ``/api/v1/orders/place``.
 
-    Every leg dispatches through the gated ``build_gated_leg_dispatchers``
-    place_leg (SafetySystem L1–L5 → ``gate_order`` → ``BrokerRouter``).
-
-    Returns:
-        201 on full success, 422 on partial/total failure, 400 on bad input,
-        503 when the basket executor is not configured.
+    A missing executor is HTTP 503. A bad leg is HTTP 400. A basket that fails
+    the prospective safety check is refused before this route returns. A valid
+    basket does not reach a broker from this route.
     """
     executor, err = _basket_required()
     if err:
@@ -3887,51 +3910,18 @@ def place_basket() -> tuple[Any, int]:
     )
     if blocked is not None:
         return blocked
-
-    result = executor.execute(legs, principal, strategy=strategy)
-
-    response_data: dict[str, Any] = {
-        "status": "success" if result.success else "error",
-        "strategy": result.strategy,
-        "timestamp": result.timestamp,
-        "placed_count": result.placed_count,
-        "failed_count": result.failed_count,
-        "rolled_back": result.rolled_back,
-        "order_ids": result.order_ids,
-        "legs": [
-            {
-                "leg_index": r.leg_index,
-                "symbol": r.symbol,
-                "action": r.action,
-                "quantity": r.quantity,
-                "success": r.success,
-                "order_id": r.order_id,
-                "error": r.error,
-                "rolled_back": r.rolled_back,
-                "rollback_order_id": r.rollback_order_id,
-            }
-            for r in result.legs
-        ],
-    }
-    if not result.success:
-        response_data["message"] = result.error
-        response_data["failed_leg_index"] = result.failed_leg_index
-
-    return jsonify(response_data), (201 if result.success else 422)
+    return jsonify({"status": "error", "message": _PLACE_ROUTE_REQUIRED}), 501
 
 
 @orders_bp.route("/split", methods=["POST"])
 @_require_live_unlocked
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_split() -> tuple[Any, int]:
-    """Break a large order into smaller chunks and place them with a delay.
+    """Refuse a split place. Each chunk is posted to ``/api/v1/orders/place``.
 
-    Every chunk dispatches through the gated place_leg (SafetySystem →
-    ``gate_order`` → ``BrokerRouter``).
-
-    Returns:
-        201 on full success, 422 on partial/total failure, 400 on bad input,
-        503 when the split executor is not configured.
+    A missing executor is HTTP 503. A bad parameter is HTTP 400. A split that
+    fails the prospective safety check is refused before this route returns.
+    A valid split does not reach a broker from this route.
     """
     executor, err = _split_required()
     if err:
@@ -3950,7 +3940,7 @@ def place_split() -> tuple[Any, int]:
         action: str = str(body["action"]).upper()
         total_qty: int = int(body["total_qty"])
         chunk_size: int = int(body["chunk_size"])
-        delay_seconds: float = float(body.get("delay_seconds", 1.0))
+        _delay_seconds = float(body.get("delay_seconds", 1.0))
         order_type: str = str(body.get("order_type", "MARKET")).upper()
         price: float = float(body.get("price", 0.0))
         trigger_price: float = float(body.get("trigger_price", 0.0))
@@ -4005,64 +3995,18 @@ def place_split() -> tuple[Any, int]:
     )
     if blocked is not None:
         return blocked
-
-    result = executor.execute_split(
-        symbol=symbol,
-        exchange=exchange,
-        total_quantity=total_qty,
-        chunk_size=chunk_size,
-        action=action,  # type: ignore[arg-type]
-        principal=principal,
-        delay_seconds=delay_seconds,
-        order_type=order_type,
-        price=price,
-        trigger_price=trigger_price,
-        product=product,
-        strategy=strategy,
-    )
-
-    response_data: dict[str, Any] = {
-        "status": "success" if result.success else "error",
-        "symbol": result.symbol,
-        "exchange": result.exchange,
-        "action": result.action,
-        "total_quantity": result.total_quantity,
-        "chunk_size": result.chunk_size,
-        "placed_quantity": result.placed_quantity,
-        "placed_count": result.placed_count,
-        "failed_count": result.failed_count,
-        "strategy": result.strategy,
-        "timestamp": result.timestamp,
-        "order_ids": result.order_ids,
-        "chunks": [
-            {
-                "chunk_index": c.chunk_index,
-                "quantity": c.quantity,
-                "success": c.success,
-                "order_id": c.order_id,
-                "error": c.error,
-            }
-            for c in result.chunks
-        ],
-    }
-    if not result.success:
-        response_data["message"] = result.error
-
-    return jsonify(response_data), (201 if result.success else 422)
+    return jsonify({"status": "error", "message": _PLACE_ROUTE_REQUIRED}), 501
 
 
 @orders_bp.route("/options-strategy", methods=["POST"])
 @_require_live_unlocked
 @rate_limit("smart_orders", user_rate=2, global_rate=20, identity="jwt")
 def place_options_strategy() -> tuple[Any, int]:
-    """Build and execute a named options strategy through the gated basket path.
+    """Refuse a named options-strategy place.
 
-    Supported ``strategy_name``: short_straddle, long_strangle, iron_condor,
-    iron_butterfly, bull_call_spread, bear_put_spread.
-
-    Returns:
-        201 on full success, 422 on execution failure, 400 on bad input, 503
-        when the basket executor is not configured.
+    Supported ``strategy_name`` values are still validated. A valid strategy
+    does not reach a broker from this route. Each leg is posted to
+    ``/api/v1/orders/place``.
     """
     executor, err = _basket_required()
     if err:
@@ -4129,38 +4073,7 @@ def place_options_strategy() -> tuple[Any, int]:
     )
     if blocked is not None:
         return blocked
-
-    result = executor.execute(legs, principal, strategy=basket_strategy)
-
-    response_data: dict[str, Any] = {
-        "status": "success" if result.success else "error",
-        "strategy_name": strategy_name,
-        "strategy": result.strategy,
-        "underlying": underlying,
-        "expiry": expiry,
-        "lots": lots,
-        "timestamp": result.timestamp,
-        "placed_count": result.placed_count,
-        "failed_count": result.failed_count,
-        "rolled_back": result.rolled_back,
-        "order_ids": result.order_ids,
-        "legs": [
-            {
-                "leg_index": r.leg_index,
-                "symbol": r.symbol,
-                "action": r.action,
-                "quantity": r.quantity,
-                "success": r.success,
-                "order_id": r.order_id,
-                "error": r.error,
-            }
-            for r in result.legs
-        ],
-    }
-    if not result.success:
-        response_data["message"] = result.error
-
-    return jsonify(response_data), (201 if result.success else 422)
+    return jsonify({"status": "error", "message": _PLACE_ROUTE_REQUIRED}), 501
 
 
 def _build_strategy_legs(

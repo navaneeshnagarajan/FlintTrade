@@ -77,7 +77,7 @@ class WebhookOrderDispatcher:
         self._authority_provider = authority_provider
 
     async def place_order(self, payload: WebhookPayload) -> dict[str, Any]:
-        """Place a webhook-derived order through the gated broker router."""
+        """Refuse a webhook place. Orders are posted to ``/api/v1/orders/place``."""
         authority, authority_error = self._require_authority(payload, "place_order")
         if authority_error:
             return _error("place_order", payload, authority_error)
@@ -100,7 +100,6 @@ class WebhookOrderDispatcher:
             return _error("place_order", payload, body_error)
 
         safe_account = account_ref(account_id)
-        acknowledgement_failed = False
         try:
             typed_order = _body_to_order(body, variety=_variety_from_payload(payload))
             try:
@@ -159,48 +158,11 @@ class WebhookOrderDispatcher:
                         f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
                     )
 
-                nonce, nonce_hash = _nonce_and_hash(payload)
-                request_ctx = RequestContext(
-                    jti=f"webhook-{payload.source}-{uuid.uuid4().hex}",
-                    actor_type="external_intent",
-                    actor_id=authority.actor_id,
-                    mode="live",
-                    intent_source=payload.source,
-                    external_nonce_hash=nonce_hash,
-                    selector=selector,
+                return _error(
+                    "place_order",
+                    payload,
+                    "Orders are placed through /api/v1/orders/place.",
                 )
-                safety_ctx = gate_order(
-                    typed_order,
-                    request_ctx,
-                    backend_lease_proof=router.backend_lease_proof,
-                    adapter_id=adapter_id,
-                    account_id=account_id,
-                    actor_type="external_intent",
-                    intent_source=payload.source,
-                    external_nonce=nonce,
-                )
-                reservation = lease.reserve(typed_order, admission.positions)
-                result = await router.place_order(
-                    request_ctx,
-                    order=typed_order,
-                    safety_ctx=safety_ctx,
-                    hint=RoutingHint(adapter_id=adapter_id, account_id=account_id),
-                )
-                try:
-                    lease.acknowledge(reservation, result)
-                except Exception:
-                    # The broker write has already succeeded. Reporting this as
-                    # refused invites a duplicate retry; retain the unresolved
-                    # reservation and surface a placed-with-warning result.
-                    acknowledgement_failed = True
-                    logger.critical(
-                        "Webhook order placed but reservation acknowledgement failed | "
-                        "source=%s adapter=%s account=%s",
-                        payload.source,
-                        adapter_id,
-                        safe_account,
-                        exc_info=True,
-                    )
         except (ValueError, ValidationError) as exc:
             logger.warning(
                 "Webhook place rejected by validation | source=%s adapter=%s: %s",
@@ -256,41 +218,6 @@ class WebhookOrderDispatcher:
                 safe_account,
             )
             return _error("place_order", payload, "Webhook order dispatch failed.")
-
-        audit_event = (
-            "WEBHOOK_ORDER_PLACED_RESERVATION_UNACKNOWLEDGED"
-            if acknowledgement_failed
-            else "WEBHOOK_ORDER_PLACED"
-        )
-        self._audit(audit_event, adapter_id, account_id, authority.actor_id, payload, result)
-        self._journal(
-            typed_order,
-            str(result),
-            adapter_id=adapter_id,
-            account_id=account_id,
-            strategy=f"webhook:{payload.source}",
-        )
-        logger.info(
-            "Webhook place dispatched | source=%s adapter=%s account=%s symbol=%s",
-            payload.source,
-            adapter_id,
-            safe_account,
-            payload.symbol or "?",
-        )
-        response = {
-            "status": "placed",
-            "action": "place_order",
-            "symbol": payload.symbol,
-            "exchange": payload.exchange,
-            "adapter_id": adapter_id,
-            "orderid": result,
-        }
-        if acknowledgement_failed:
-            response["warning"] = (
-                "Order was submitted, but local reservation tracking could not be acknowledged. "
-                "Verify broker status before retrying."
-            )
-        return response
 
     async def cancel_order(self, payload: WebhookPayload) -> dict[str, Any]:
         """Cancel a webhook-specified order through the gated broker router."""

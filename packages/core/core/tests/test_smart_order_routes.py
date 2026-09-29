@@ -382,47 +382,36 @@ def test_unknown_job_404(live_auth, *, backend_lease_factory):
     assert resp.status_code == 404
 
 
+def _assert_place_required(resp, adapter=None) -> None:
+    """A valid smart-route body is refused before any child is submitted."""
+    assert resp.status_code == 501
+    assert resp.get_json()["message"] == "Orders are placed through /api/v1/orders/place."
+    if adapter is not None:
+        assert adapter.orders == []
+
+
 # ---------------------------------------------------------------------------
-# End-to-end through the REAL gate + router
+# Valid smart-route bodies refuse before a job can submit
 # ---------------------------------------------------------------------------
 
 
 def test_high_urgency_places_one_gated_child(live_auth, *, backend_lease_factory):
-    """A high-urgency order yields one child placed through the real gate."""
+    """A high-urgency order does not start a child place."""
     app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
-    client = app.test_client()
-
-    resp = client.post(
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
             "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
             "quantity": 10, "urgency": "high",
         },
     )
-    assert resp.status_code == 202
-    job_id = resp.get_json()["data"]["job_id"]
-
-    final = _wait_done(client, job_id)
-    assert final["status"] == "done"
-    assert final["completed"] is True
-    assert final["filled_quantity"] == 10
-    assert len(final["child_orders"]) == 1
-    assert final["child_orders"][0]["status"] == "placed"
-    assert final["child_orders"][0]["order_id"] == "OID-1"
-
-    # The adapter saw exactly one typed child order — and it can ONLY have
-    # been reached through BrokerRouter (token-guarded), proving the child
-    # traversed gate_order → BrokerRouter → adapter.
-    assert len(adapter.orders) == 1
-    assert adapter.orders[0].quantity == "10"
+    _assert_place_required(resp, adapter)
 
 
 def test_native_high_urgency_does_not_require_openalgo_client(live_auth, *, backend_lease_factory):
-    """Native high urgency can execute through BrokerRouter without bridge data."""
+    """A native high-urgency body does not reach the broker."""
     app, adapter = _make_app(adapter_id="upstox", openalgo_client=None, backend_lease_factory=backend_lease_factory)
-    client = app.test_client()
-
-    resp = client.post(
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
             "symbol": "RELIANCE",
@@ -434,25 +423,17 @@ def test_native_high_urgency_does_not_require_openalgo_client(live_auth, *, back
             "account_id": "U1",
         },
     )
-
-    assert resp.status_code == 202
-    final = _wait_done(client, resp.get_json()["data"]["job_id"])
-    assert final["status"] == "done"
-    assert final["filled_quantity"] == 3
-    assert len(adapter.orders) == 1
-    assert adapter.orders[0].quantity == "3"
+    _assert_place_required(resp, adapter)
 
 
 def test_omitted_target_uses_configured_execution_default(live_auth, *, backend_lease_factory):
-    """Direct API callers inherit brokers.execution.default when target fields are absent."""
+    """An omitted target still does not submit a smart-route child."""
     app, adapter = _make_app(
         adapter_id="upstox",
         openalgo_client=None,
         execution_default="upstox:U1", backend_lease_factory=backend_lease_factory
     )
-    client = app.test_client()
-
-    resp = client.post(
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
             "symbol": "RELIANCE",
@@ -462,22 +443,14 @@ def test_omitted_target_uses_configured_execution_default(live_auth, *, backend_
             "urgency": "high",
         },
     )
-
-    assert resp.status_code == 202
-    final = _wait_done(client, resp.get_json()["data"]["job_id"])
-    assert final["status"] == "done"
-    assert len(adapter.orders) == 1
-    assert adapter.orders[0].quantity == "3"
-    assert adapter.sessions[0].adapter_id == "upstox"
-    assert adapter.sessions[0].account_id == "U1"
+    _assert_place_required(resp, adapter)
+    assert adapter.sessions == []
 
 
 def test_native_medium_urgency_fails_closed_without_openalgo_depth(live_auth, *, backend_lease_factory):
-    """Native medium urgency is depth-aware; no bridge depth means no dispatch."""
+    """Medium urgency does not dispatch when the route refuses first."""
     app, adapter = _make_app(adapter_id="upstox", openalgo_client=None, backend_lease_factory=backend_lease_factory)
-    client = app.test_client()
-
-    resp = client.post(
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
             "symbol": "RELIANCE",
@@ -489,43 +462,25 @@ def test_native_medium_urgency_fails_closed_without_openalgo_depth(live_auth, *,
             "account_id": "U1",
         },
     )
-
-    assert resp.status_code == 202
-    final = _wait_done(client, resp.get_json()["data"]["job_id"])
-    assert final["status"] == "error"
-    assert "no market depth available" in final["error"]
-    assert adapter.orders == []
+    _assert_place_required(resp, adapter)
 
 
 def test_twap_splits_into_gated_slices(live_auth, *, backend_lease_factory):
-    """Low urgency TWAP: each slice is its own independently gated child."""
-    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)  # twap_slices=2, window=1s
-    client = app.test_client()
-
-    resp = client.post(
+    """Low urgency does not submit TWAP slices from this route."""
+    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
             "symbol": "RELIANCE", "exchange": "NSE", "action": "SELL",
             "quantity": 10, "urgency": "low",
         },
     )
-    assert resp.status_code == 202
-    job_id = resp.get_json()["data"]["job_id"]
-
-    final = _wait_done(client, job_id)
-    assert final["status"] == "done"
-    assert final["filled_quantity"] == 10
-    assert [c["status"] for c in final["child_orders"]] == ["placed", "placed"]
-    # Two distinct gated dispatches — one SafetyContext each (the one-shot
-    # gate cannot be reused, so two placements REQUIRE two mints).
-    assert len(adapter.orders) == 2
-    assert sorted(int(o.quantity) for o in adapter.orders) == [5, 5]
+    _assert_place_required(resp, adapter)
 
 
 def test_twap_resolves_a_rebuilt_router_before_its_next_child(live_auth, *, backend_lease_factory):
-    app, stale_adapter = _make_app( backend_lease_factory=backend_lease_factory)
-    client = app.test_client()
-    response = client.post(
+    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
+    response = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
             "symbol": "RELIANCE",
@@ -535,54 +490,20 @@ def test_twap_resolves_a_rebuilt_router_before_its_next_child(live_auth, *, back
             "urgency": "low",
         },
     )
-    assert response.status_code == 202
-    job_id = response.get_json()["data"]["job_id"]
-
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline and not stale_adapter.orders:
-        time.sleep(0.02)
-    assert len(stale_adapter.orders) == 1
-
-    stale_router = app.config["BROKER_ROUTER"]
-    current_adapter = _NoIoAdapter()
-    app.config["BROKER_ROUTER"] = BrokerRouter({"openalgo": current_adapter}, _session, backend_lease_proof=backend_lease_factory())
-    assert stale_router.revoke_and_drain(timeout=0.5) is True
-
-    final = _wait_done(client, job_id)
-    assert final["status"] == "done"
-    assert len(stale_adapter.orders) == 1
-    assert len(current_adapter.orders) == 1
+    _assert_place_required(response, adapter)
 
 
 def test_status_shows_children_mid_flight(live_auth, *, backend_lease_factory):
-    """The live snapshot must expose children WHILE the route runs — TWAP
-    jobs take minutes and the widget polls. Pins the result_observer wiring
-    (deleting it would keep every end-state test green while live polling
-    silently regressed to an empty list until completion)."""
-    app, _adapter = _make_app( backend_lease_factory=backend_lease_factory)  # twap window 1s / 2 slices
-    client = app.test_client()
-
-    resp = client.post(
+    """The route does not create a job whose children can appear mid-flight."""
+    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
             "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
             "quantity": 10, "urgency": "low",
         },
     )
-    job_id = resp.get_json()["data"]["job_id"]
-
-    saw_mid_flight_child = False
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline:
-        data = client.get(f"/api/v1/orders/smart-route/{job_id}").get_json()["data"]
-        if data["status"] == "running" and len(data["child_orders"]) >= 1:
-            saw_mid_flight_child = True
-            break
-        if data["status"] != "running":
-            break
-        time.sleep(0.02)
-    assert saw_mid_flight_child, "snapshot never showed children mid-flight (result_observer regressed)"
-    _wait_done(client, job_id)
+    _assert_place_required(resp, adapter)
 
 
 def test_app_factory_wires_smart_routing_from_workspace(monkeypatch, tmp_path, *, backend_lease_factory):
@@ -607,7 +528,7 @@ def test_app_factory_wires_smart_routing_from_workspace(monkeypatch, tmp_path, *
 
 
 def test_jobs_list_returns_snapshots(live_auth, *, backend_lease_factory):
-    app, _ = _make_app( backend_lease_factory=backend_lease_factory)
+    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
     client = app.test_client()
     resp = client.post(
         "/api/v1/orders/smart-route",
@@ -616,14 +537,11 @@ def test_jobs_list_returns_snapshots(live_auth, *, backend_lease_factory):
             "quantity": 4, "urgency": "high",
         },
     )
-    job_id = resp.get_json()["data"]["job_id"]
-    _wait_done(client, job_id)
+    _assert_place_required(resp, adapter)
 
     listing = client.get("/api/v1/orders/smart-route")
     assert listing.status_code == 200
-    jobs = listing.get_json()["data"]
-    assert jobs[0]["job_id"] == job_id
-    assert jobs[0]["symbol"] == "RELIANCE"
+    assert listing.get_json()["data"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -1073,8 +991,7 @@ def test_shutdown_owns_running_jobs_and_closes_new_submissions(live_auth, *, bac
             "urgency": "high",
         },
     )
-    assert response.status_code == 503
-    assert adapter.orders == []
+    _assert_place_required(response, adapter)
 
 
 # ---------------------------------------------------------------------------
@@ -1083,56 +1000,32 @@ def test_shutdown_owns_running_jobs_and_closes_new_submissions(live_auth, *, bac
 
 
 def test_cancel_endpoint_aborts_a_running_twap(live_auth, *, backend_lease_factory):
-    """Cancelling between TWAP slices stops further children."""
-    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)  # twap window 1s / 2 slices → ~1s between slices
-    client = app.test_client()
-
-    resp = client.post(
+    """A TWAP body is refused, so there is no running job to cancel."""
+    app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
             "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
             "quantity": 10, "urgency": "low",
         },
     )
-    assert resp.status_code == 202
-    job_id = resp.get_json()["data"]["job_id"]
-
-    # Wait for the FIRST child to land, then cancel before the second slice.
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline and len(adapter.orders) == 0:
-        time.sleep(0.02)
-    assert len(adapter.orders) >= 1
-
-    cancel = client.post(f"/api/v1/orders/smart-route/{job_id}/cancel")
-    assert cancel.status_code == 200
-    assert cancel.get_json()["data"]["cancel_requested"] is True
-
-    final = _wait_done(client, job_id)
-    assert final["status"] == "cancelled"
-    assert "cancelled" in final["error"]
-    assert len(adapter.orders) == 1  # the second slice never dispatched
+    _assert_place_required(resp, adapter)
 
 
 def test_revoked_jti_aborts_mid_route(live_auth, monkeypatch, *, backend_lease_factory):
-    """Logout / mode-downgrade revoke the jti — a running job must stop."""
+    """A revoked session does not let a smart-route body reach the broker."""
     import flinttrade_core.auth_routes as auth_routes_mod
 
     monkeypatch.setattr(auth_routes_mod, "_is_jti_revoked", lambda jti: True)
     app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
-    client = app.test_client()
-
-    resp = client.post(
+    resp = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={
             "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY",
             "quantity": 10, "urgency": "high",
         },
     )
-    assert resp.status_code == 202
-    final = _wait_done(client, resp.get_json()["data"]["job_id"])
-    assert final["status"] == "error"
-    assert "revoked" in final["error"]
-    assert adapter.orders == []  # not a single child reached the broker
+    _assert_place_required(resp, adapter)
 
 
 def test_cancel_unknown_job_404(live_auth, *, backend_lease_factory):
@@ -1154,8 +1047,7 @@ def test_running_job_cap_409(live_auth, *, backend_lease_factory):
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 5},
     )
-    assert resp.status_code == 409
-    assert "Too many" in resp.get_json()["message"]
+    _assert_place_required(resp)
 
 
 def test_dup_guard_is_atomic_with_insert(live_auth, *, backend_lease_factory):
@@ -1164,19 +1056,16 @@ def test_dup_guard_is_atomic_with_insert(live_auth, *, backend_lease_factory):
     closing the check-then-insert TOCTOU window."""
     app, _ = _make_app( backend_lease_factory=backend_lease_factory)
     client = app.test_client()
-    # First submit registers the job atomically (status "running").
     r1 = client.post(
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10, "urgency": "low"},
     )
-    assert r1.status_code == 202
-    # An immediate duplicate sees the already-registered running job and is refused.
+    _assert_place_required(r1)
     r2 = client.post(
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10, "urgency": "low"},
     )
-    assert r2.status_code == 409
-    _wait_done(client, r1.get_json()["data"]["job_id"])
+    _assert_place_required(r2)
 
 
 def test_duplicate_symbol_action_409(live_auth, *, backend_lease_factory):
@@ -1186,14 +1075,12 @@ def test_duplicate_symbol_action_409(live_auth, *, backend_lease_factory):
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 5},
     )
-    assert resp.status_code == 409
-    assert "already running" in resp.get_json()["message"]
-    # The OPPOSITE side is not a duplicate.
+    _assert_place_required(resp)
     resp2 = app.test_client().post(
         "/api/v1/orders/smart-route",
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "SELL", "quantity": 5, "urgency": "high"},
     )
-    assert resp2.status_code == 202
+    _assert_place_required(resp2)
 
 
 def test_store_eviction_never_drops_a_running_job():
@@ -1230,10 +1117,7 @@ def test_status_endpoints_require_auth(monkeypatch, *, backend_lease_factory):
 
 
 def test_twap_children_use_distinct_safety_contexts(live_auth, *, backend_lease_factory):
-    """Each TWAP child must carry its OWN SafetyContext object — the one-shot
-    gate cannot be reused, so reuse would fail the second child."""
-    from flinttrade_engine.safety import SafetyContext
-
+    """TWAP children are not minted from this route."""
     app, adapter = _make_app( backend_lease_factory=backend_lease_factory)
     router = app.config["BROKER_ROUTER"]
     seen_ctx: list[object] = []
@@ -1253,9 +1137,5 @@ def test_twap_children_use_distinct_safety_contexts(live_auth, *, backend_lease_
             "quantity": 10, "urgency": "low",
         },
     )
-    assert resp.status_code == 202
-    final = _wait_done(client, resp.get_json()["data"]["job_id"])
-    assert final["status"] == "done"
-    assert len(seen_ctx) == 2
-    assert all(isinstance(c, SafetyContext) for c in seen_ctx)
-    assert seen_ctx[0] is not seen_ctx[1]
+    _assert_place_required(resp, adapter)
+    assert seen_ctx == []

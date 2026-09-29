@@ -126,12 +126,11 @@ def _request_principal(body: Mapping[str, Any]) -> BracketPrincipal:
 @require_live_unlocked
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def place_bracket() -> Response:
-    """Place a bracket order — entry plus ONE protective exit leg.
+    """Refuse a bracket place. Each leg is posted to ``/api/v1/orders/place``.
 
-    Every leg traverses the gated live chain (SafetySystem L1–L5 →
-    ``gate_order`` one-shot HMAC ``SafetyContext`` → ``BrokerRouter``).
     Practice-mode JWTs are refused with 403 ``practice_unsupported`` by the
-    route guard — the sandbox cannot execute multi-leg brackets.
+    route guard. A valid entry plus one exit does not reach a broker from
+    this route.
 
     Supported today: entry + EXACTLY ONE of ``stoploss`` (stop-loss exit leg)
     or ``target`` (limit exit leg). Refused honestly with HTTP 422:
@@ -165,13 +164,11 @@ def place_bracket() -> Response:
     ``brokers.execution.default`` selector is the fallback target.
 
     Returns:
-        201 with bracket details on success; 400 on bad input; 401/403 from
-        the mode guard; 422 for unsupported/failed placement — a bracket with
-        ``status="partial"`` in ``data`` means the entry leg is live but
-        UNPROTECTED (the exit leg failed) and needs operator action; 503 when
-        the service or broker routing is unavailable.
+        501 after a valid single-exit payload; 400 on bad input; 401/403 from
+        the mode guard; 422 for an OCO pair or a trailing stop; 503 when the
+        bracket service is not configured.
     """
-    svc, err = _service_required()
+    _svc, err = _service_required()
     if err:
         return err
 
@@ -250,36 +247,14 @@ def place_bracket() -> Response:
             400,
         )
 
-    principal = _request_principal(body)
-    result = svc.place_bracket(
-        entry,
-        stoploss=stoploss,
-        target=target,
-        trailing_sl=None,
-        principal=principal,
-    )
-
-    if not result.success:
-        payload: dict[str, Any] = {
-            "status": "error",
-            "message": result.message,
-            "error": result.error,
-        }
-        # A "partial" bracket (entry live, exit leg failed) MUST reach the
-        # caller so the unprotected position is visible and actionable.
-        if result.bracket is not None:
-            payload["data"] = result.bracket.to_dict()
-        return jsonify(payload), 422
-
     return (
         jsonify(
             {
-                "status": "success",
-                "message": result.message,
-                "data": result.bracket.to_dict() if result.bracket else None,
+                "status": "error",
+                "message": "Orders are placed through /api/v1/orders/place.",
             }
         ),
-        201,
+        501,
     )
 
 

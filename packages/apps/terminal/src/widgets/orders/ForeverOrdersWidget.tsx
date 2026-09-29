@@ -2,7 +2,7 @@
  * ForeverOrdersWidget — Forever (GTT, Good Till Triggered) order management.
  *
  * Front-end for the gated forever-order routes:
- *   POST   /api/v1/orders/forever            (place — SafetySystem L1–L5 gated)
+ *   POST   /api/v1/orders/place              (place with variety gtt)
  *   GET    /api/v1/orders/forever            (list resting triggers)
  *   PUT    /api/v1/orders/forever/<id>       (modify — kill-switch gated)
  *   DELETE /api/v1/orders/forever/<id>       (cancel)

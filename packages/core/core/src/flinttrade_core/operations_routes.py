@@ -2738,6 +2738,7 @@ def positions_exit_all() -> tuple[Any, int]:
     from .order_routes import (  # noqa: PLC0415
         _gated_target,
         _gated_verb_write,
+        _prove_exit_all_reduce_only,
         _require_live_payload,
     )
 
@@ -2761,6 +2762,9 @@ def positions_exit_all() -> tuple[Any, int]:
     if body.get("segment") is not None:
         fields["segment"] = str(body["segment"])
     adapter_id, account_id = _gated_target(body)
+    proof_block = _prove_exit_all_reduce_only(adapter_id, account_id)
+    if proof_block is not None:
+        return proof_block
     return _gated_verb_write(
         "exit_all_positions",
         fields,

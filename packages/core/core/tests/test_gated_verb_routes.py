@@ -330,18 +330,24 @@ def test_gated_target_uses_execution_default_only_when_target_omitted(*, backend
 
 
 def test_forever_place_routes_variety_gtt_with_oco_fields(*, backend_lease_factory) -> None:
-    """POST /forever rides the gated place trio with variety="gtt" + OCO legs."""
+    """GTT fields ride POST /place. POST /forever does not call the broker."""
+    from flinttrade_engine.laya import DecisionStatus, process_laya
+
+    process_laya().set_status(DecisionStatus.READY)
     router = MagicMock()
     router.place_order = AsyncMock(return_value="GTT-77")
     client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
     body = {
         "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 1,
         "pricetype": "LIMIT", "price": "2900", "trigger_price": "2890",
-        "product": "CNC", "validity": "DAY",
+        "product": "CNC", "validity": "DAY", "variety": "gtt",
         "price1": "2800", "trigger_price1": "2805", "quantity1": "5",
         "broker": "dhan",
     }
-    resp = client.post("/api/v1/orders/forever", json=body, headers=_live_headers())
+    refused = client.post("/api/v1/orders/forever", json=body, headers=_live_headers())
+    assert refused.status_code == 501
+    router.place_order.assert_not_called()
+    resp = client.post("/api/v1/orders/place", json=body, headers=_live_headers())
     assert resp.status_code == 200
     assert resp.get_json()["status"] == "success"
     kw = router.place_order.await_args.kwargs
@@ -354,6 +360,9 @@ def test_forever_place_routes_variety_gtt_with_oco_fields(*, backend_lease_facto
 
 def test_forever_place_keeps_upstox_protective_rules_inside_gated_order(*, backend_lease_factory) -> None:
     """Upstox TARGET/STOPLOSS prices survive typing and SafetyContext minting."""
+    from flinttrade_engine.laya import DecisionStatus, process_laya
+
+    process_laya().set_status(DecisionStatus.READY)
     router = MagicMock()
     router.place_order = AsyncMock(return_value="GTT-88")
     safety = _passing_safety()
@@ -370,11 +379,12 @@ def test_forever_place_keeps_upstox_protective_rules_inside_gated_order(*, backe
         "target_trigger_type": "IMMEDIATE",
         "stop_loss_trigger_type": "IMMEDIATE",
         "product": "CNC",
+        "variety": "gtt",
         "broker": "upstox",
         "account_id": "U1",
     }
 
-    resp = client.post("/api/v1/orders/forever", json=body, headers=_live_headers())
+    resp = client.post("/api/v1/orders/place", json=body, headers=_live_headers())
 
     assert resp.status_code == 200
     kw = router.place_order.await_args.kwargs
@@ -1171,18 +1181,9 @@ def test_trigger_place_happy_path_carries_typed_legs(*, backend_lease_factory) -
     router = _gated_router(result="AL-9")
     client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
     resp = client.post("/api/v1/orders/triggers", json=_TRIGGER_BODY, headers=_live_headers())
-    assert resp.status_code == 200
-    assert resp.get_json()["data"] == "AL-9"
-    kw = router.execute_gated.await_args.kwargs
-    assert kw["verb"] == "place_conditional_trigger"
-    assert kw["payload"]["condition"]["field"] == "LTP"
-    # Legs are typed Orders, so the signed canonical hash covers every field.
-    from flinttrade_core.models import Order
-
-    leg = kw["payload"]["orders"][0]
-    assert isinstance(leg, Order)
-    assert leg.symbol == "RELIANCE"
-    assert leg.quantity == "5"
+    assert resp.status_code == 501
+    assert "Orders are placed through /api/v1/orders/place." in resp.get_json()["message"]
+    router.execute_gated.assert_not_called()
 
 
 def test_trigger_place_missing_condition_returns_400(*, backend_lease_factory) -> None:
@@ -1249,11 +1250,9 @@ def test_trigger_place_runs_full_safetysystem_per_leg(*, backend_lease_factory) 
     safety = _passing_safety()
     client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
     resp = client.post("/api/v1/orders/triggers", json=_TRIGGER_BODY, headers=_live_headers())
-    assert resp.status_code == 200
-    # The single leg cleared the full risk pipeline before the gate was minted.
-    assert safety.check_order.call_count == 1
-    leg = safety.check_order.call_args.args[0]
-    assert leg.symbol == "RELIANCE"
+    assert resp.status_code == 501
+    safety.check_order.assert_not_called()
+    router.execute_gated.assert_not_called()
 
 
 def test_trigger_place_over_limit_leg_blocked_by_l1_before_gate(*, backend_lease_factory) -> None:
@@ -1271,9 +1270,8 @@ def test_trigger_place_over_limit_leg_blocked_by_l1_before_gate(*, backend_lease
         "broker": "dhan",
     }
     resp = client.post("/api/v1/orders/triggers", json=body, headers=_live_headers())
-    assert resp.status_code == 403
-    assert "L1_ORDER" in resp.get_json()["message"]
-    router.execute_gated.assert_not_called()  # no gate minted
+    assert resp.status_code == 501
+    router.execute_gated.assert_not_called()
 
 
 def test_trigger_modify_over_limit_leg_blocked_by_l1(*, backend_lease_factory) -> None:
@@ -1311,12 +1309,9 @@ def test_trigger_place_native_l2_blocks_before_gate(*, backend_lease_factory) ->
     body = {**_TRIGGER_BODY, "account_id": "D1"}
     resp = app.test_client().post("/api/v1/orders/triggers", json=body, headers=_live_headers())
 
-    assert resp.status_code == 403
-    assert "L2_POSITION" in resp.get_json()["message"]
+    assert resp.status_code == 501
     router.execute_gated.assert_not_called()
-    registry.get_session_for.assert_called_once_with("dhan", "D1")
-    assert adapter.positions.await_count == 2
-    adapter.funds.assert_awaited_once()
+    registry.get_session_for.assert_not_called()
 
 
 def test_gated_verb_bounds_broker_rejection_message(*, backend_lease_factory) -> None:
@@ -1329,8 +1324,8 @@ def test_gated_verb_bounds_broker_rejection_message(*, backend_lease_factory) ->
     )
     client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
     resp = client.post("/api/v1/orders/triggers", json=_TRIGGER_BODY, headers=_live_headers())
-    assert resp.status_code == 502
-    assert resp.get_json()["message"] == "Conditional trigger placement failed"
+    assert resp.status_code == 501
+    assert resp.get_json()["message"] == "Orders are placed through /api/v1/orders/place."
 
 
 def test_gated_verb_bounds_mapping_value_error_message(*, backend_lease_factory) -> None:
@@ -1419,12 +1414,10 @@ def test_batch_writes_accumulate_position_count_before_gate(
         headers=_live_headers(),
     )
 
-    assert response.status_code == 403
-    assert "L2_POSITION" in response.get_json()["message"]
-    if path.endswith("/multi"):
-        router.place_order.assert_awaited_once()
-    else:
-        router.execute_gated.assert_not_called()
+    assert response.status_code == 501
+    assert "Orders are placed through /api/v1/orders/place." in response.get_json()["message"]
+    router.place_order.assert_not_called()
+    router.execute_gated.assert_not_called()
 
 
 @pytest.mark.parametrize("path", ["/api/v1/orders/triggers", "/api/v1/orders/multi"])
@@ -1450,12 +1443,10 @@ def test_batch_writes_accumulate_margin_before_gate(
         headers=_live_headers(),
     )
 
-    assert response.status_code == 403
-    assert "L2_POSITION" in response.get_json()["message"]
-    if path.endswith("/multi"):
-        router.place_order.assert_awaited_once()
-    else:
-        router.execute_gated.assert_not_called()
+    assert response.status_code == 501
+    assert "Orders are placed through /api/v1/orders/place." in response.get_json()["message"]
+    router.place_order.assert_not_called()
+    router.execute_gated.assert_not_called()
 
 
 @pytest.mark.parametrize("path", ["/api/v1/orders/triggers", "/api/v1/orders/multi"])
@@ -1481,12 +1472,10 @@ def test_batch_writes_accumulate_greeks_before_gate(
         headers=_live_headers(),
     )
 
-    assert response.status_code == 403
-    assert "L3_PORTFOLIO" in response.get_json()["message"]
-    if path.endswith("/multi"):
-        router.place_order.assert_awaited_once()
-    else:
-        router.execute_gated.assert_not_called()
+    assert response.status_code == 501
+    assert "Orders are placed through /api/v1/orders/place." in response.get_json()["message"]
+    router.place_order.assert_not_called()
+    router.execute_gated.assert_not_called()
 
 
 def test_multi_place_happy_path(*, backend_lease_factory) -> None:
@@ -1495,11 +1484,10 @@ def test_multi_place_happy_path(*, backend_lease_factory) -> None:
     safety = _passing_safety()
     client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
     resp = client.post("/api/v1/orders/multi", json=_MULTI_BODY, headers=_live_headers())
-    assert resp.status_code == 200
-    assert resp.get_json()["data"] == {"order_ids": ["OID-0", "OID-1"]}
-    assert [call.kwargs["order"].symbol for call in router.place_order.await_args_list] == ["RELIANCE", "TCS"]
-    # L1-L5 ran immediately before each independently gated leg.
-    assert safety.check_order.call_count == 2
+    assert resp.status_code == 501
+    assert "Orders are placed through /api/v1/orders/place." in resp.get_json()["message"]
+    router.place_order.assert_not_called()
+    safety.check_order.assert_not_called()
 
 
 def test_multi_place_safety_block_returns_403(*, backend_lease_factory) -> None:
@@ -1509,8 +1497,7 @@ def test_multi_place_safety_block_returns_403(*, backend_lease_factory) -> None:
     router = _gated_router()
     client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
     resp = client.post("/api/v1/orders/multi", json=_MULTI_BODY, headers=_live_headers())
-    assert resp.status_code == 403
-    assert "L1_ORDER" in resp.get_json()["message"]
+    assert resp.status_code == 501
     router.place_order.assert_not_called()
 
 
@@ -1530,12 +1517,9 @@ def test_multi_place_native_l2_blocks_before_gate(*, backend_lease_factory) -> N
     body = {**_MULTI_BODY, "account_id": "U1"}
     resp = app.test_client().post("/api/v1/orders/multi", json=body, headers=_live_headers())
 
-    assert resp.status_code == 403
-    assert "L2_POSITION" in resp.get_json()["message"]
+    assert resp.status_code == 501
     router.execute_gated.assert_not_called()
-    registry.get_session_for.assert_called_once_with("upstox", "U1")
-    assert adapter.positions.await_count == 2
-    adapter.funds.assert_awaited_once()
+    registry.get_session_for.assert_not_called()
 
 
 def test_multi_place_empty_orders_returns_400(*, backend_lease_factory) -> None:

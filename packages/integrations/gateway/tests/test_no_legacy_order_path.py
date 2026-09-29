@@ -3435,22 +3435,19 @@ def test_prospective_greek_guard_rejects_broader_protected_call_bypass_matrix() 
 # is the SHRINKING debt allowlist: every remaining entry is a known-dormant
 # native strategy/agent path tracked in PLAN.md. L5 emergency actions are NOT an
 # exemption: they traverse gate_broker_write -> BrokerRouter.execute_gated.
-_RAW_ORDER_ALLOWLIST = {
-    # Dormant — not wired to any live route/schedule (PLAN.md tracks the refactor):
-    # (flinttrade_ai/autonomous_agent.py REMOVED 2026-06-10: its order writes now
-    #  go through an injected gated executor — SafetySystem → gate_order →
-    #  BrokerRouter — and it fails closed without one.)
-    # (flinttrade_engine/bracket_order.py REMOVED 2026-07-07: every bracket leg
-    #  now dispatches through the injected gated dispatchers — SafetySystem →
-    #  gate_order → BrokerRouter — and the service holds no raw client; the pin
-    #  test_bracket_order_writes_only_through_gated_router below keeps it out.)
-    # (flinttrade_engine/router.py REMOVED 2026-07-09: the legacy ungated
-    #  OrderRouter is deleted; the only live dispatch is gate_order → BrokerRouter.)
-    # Dormant automation service, not mounted by the FlintTrade core app. It
-    # accepts an arbitrary ``order_router`` object and must be folded into the
-    # canonical gated router before becoming reachable.
-    "packages/services/automation/src/flinttrade_automation/voice_order_bridge.py",
-}
+_RAW_ORDER_ALLOWLIST: set[str] = set()
+# Dormant — not wired to any live route/schedule (PLAN.md tracks the refactor):
+# (flinttrade_ai/autonomous_agent.py REMOVED 2026-06-10: its order writes now
+#  go through an injected gated executor — SafetySystem → gate_order →
+#  BrokerRouter — and it fails closed without one.)
+# (flinttrade_engine/bracket_order.py REMOVED 2026-07-07: every bracket leg
+#  now dispatches through the injected gated dispatchers — SafetySystem →
+#  gate_order → BrokerRouter — and the service holds no raw client; the pin
+#  test_bracket_order_writes_only_through_gated_router below keeps it out.)
+# (flinttrade_engine/router.py REMOVED 2026-07-09: the legacy ungated
+#  OrderRouter is deleted; the only live dispatch is gate_order → BrokerRouter.)
+# (flinttrade_automation/voice_order_bridge.py REMOVED: BUY/SELL and EXIT
+#  return before any router write. Orders go through /api/v1/orders/place.)
 
 # Legacy engine/AI stacks that dispatch through their own ``route_order`` API
 # instead of the canonical gate_order -> BrokerRouter surface. Keep this

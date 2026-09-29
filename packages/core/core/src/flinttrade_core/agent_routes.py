@@ -392,10 +392,7 @@ def dispatch_action_center_approval(approval: Any) -> Any:
     """
     from flinttrade_engine.action_center import ApprovalDispatchResult  # noqa: PLC0415
 
-    from .order_routes import (  # noqa: PLC0415
-        _dispatch_live_order,
-        _require_live_payload,
-    )
+    from .order_routes import _require_live_payload  # noqa: PLC0415
 
     if (
         str(getattr(approval, "source", "")) != "autonomous-agent"
@@ -413,7 +410,6 @@ def dispatch_action_center_approval(approval: Any) -> Any:
         current_producer = str(_RUNNER.get("producer_ref") or "")
         trader = _RUNNER.get("trader")
         thread = _RUNNER.get("thread")
-        agent_loop = _RUNNER.get("loop")
         params = dict(_RUNNER.get("params") or {})
 
     if (
@@ -470,8 +466,6 @@ def dispatch_action_center_approval(approval: Any) -> Any:
     try:
         quantity = int(order_params.get("quantity") or 0)
         entry_price = float(context.get("entry_price") or 0.0)
-        stop_loss = float(context.get("stop_loss") or 0.0)
-        take_profit = float(context.get("take_profit") or 0.0)
     except (TypeError, ValueError):
         return ApprovalDispatchResult.refused(
             400,
@@ -485,51 +479,10 @@ def dispatch_action_center_approval(approval: Any) -> Any:
             "The persisted entry context is incomplete; the entry was not sent.",
         )
 
-    response, status_code = _dispatch_live_order(
-        "place",
-        order_params,
-        payload,
-        adapter_id=adapter_id,
-        account_id=account_id,
+    return ApprovalDispatchResult.refused(
+        501,
+        "Orders are placed through /api/v1/orders/place.",
     )
-    response_body = response.get_json(silent=True) or {}
-    if status_code != 200 or response_body.get("status") != "success":
-        return ApprovalDispatchResult.refused(
-            status_code,
-            str(response_body.get("message") or "Approval dispatch was refused."),
-            outcome_uncertain=status_code >= 500,
-        )
-
-    broker_order_id = str(response_body.get("orderid") or "")
-    if not broker_order_id:
-        return ApprovalDispatchResult.refused(
-            500,
-            "Broker acknowledgement did not include an order id; inspect the live order book.",
-            outcome_uncertain=True,
-        )
-
-    record_entry = getattr(trader, "record_approved_entry", None)
-    if callable(record_entry) and agent_loop is not None and agent_loop.is_running():
-        try:
-            future = asyncio.run_coroutine_threadsafe(
-                record_entry(
-                    symbol=symbol,
-                    action=action,
-                    quantity=quantity,
-                    entry_price=entry_price,
-                    stop_loss=stop_loss,
-                    take_profit=take_profit,
-                ),
-                agent_loop,
-            )
-            future.result(timeout=5.0)
-        except Exception:  # noqa: BLE001 - broker success remains authoritative
-            logger.exception(
-                "Approved entry %s dispatched but agent monitoring state could not be updated",
-                getattr(approval, "id", "unknown"),
-            )
-
-    return ApprovalDispatchResult.success(broker_order_id)
 
 
 def _snapshot() -> dict[str, Any]:
