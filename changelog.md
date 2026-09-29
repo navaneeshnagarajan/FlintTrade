@@ -92,13 +92,20 @@ changelog rebuilds itself from the first release cut after this baseline.
   button. The chip tooltip carries
   `python -m flinttrade_core.laya_runtime start`. Reason codes are
   `not_started`, `stopped`, `port_in_use`, `still_loading`,
-  `unreachable`, and `wrong_revision`. A signed-in operator can start
-  the sidecar from the popover (`POST /api/v1/laya/start`); the chip
-  then says Still loading until Laya is Ready or a failure reason
-  arrives. A dead sidecar is reaped and reported Stopped. A clamp says
-  "Not placed. Laya allows up to N." with Place N and Cancel, and never
-  auto-places. A Down refusal is "Laya is Down. Orders are paused until
-  it's Ready." and does not show a quantity ceiling. A Live place that
+  `unreachable` (Unreachable), `wrong_revision` (Wrong model version),
+  `unverified` (Can't verify the model), and `key_rejected` (Can't reach
+  Laya). A signed-in operator can start the sidecar from the popover
+  (`POST /api/v1/laya/start`); the chip then says Still loading until
+  Laya is Ready or a failure reason arrives. A dead sidecar is reaped
+  and reported Stopped. The pid file, key file, and runtime record are
+  watched about every 1.5 seconds, so a command-line stop or start, or
+  a key rotation, shows within that interval. When a place is refused
+  because Laya cannot be reached, or because it rejects the key, the
+  chip updates on that same order. A clamp says "Not placed. Laya allows
+  up to N." with Place N and Cancel, and never auto-places. Place N
+  sends that quantity, and the Practice review panel shows it. A Down
+  refusal is "Laya is Down. Orders are paused until it's Ready." and
+  does not show a quantity ceiling. A Live place that
   is not qualified says "Laya isn't qualified for Live yet. Practice
   orders are available." The Order Pad note is the collapsed line "Add a
   reason (optional)" under Quantity. A place with no note still gets

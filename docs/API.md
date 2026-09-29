@@ -526,25 +526,41 @@ the pinned version. Restart Laya. If it keeps happening, reinstall it."
 The `wrong_revision` tooltip is "Laya is running a different model than
 FlintTrade expects." That code is only a real mismatch. The `key_rejected`
 tooltip is "Laya restarted with a new key. Reconnecting…" The chip stays
-Down and orders are refused. Every chip-Down refusal reads "Laya is Down.
-Orders are paused until it's Ready." When the chip is Ready and a single
-decision carries no proof, place returns `laya_unverified` and "Not placed.
-Laya's decision couldn't be verified. Try again." On each sidecar start
-the verified record is hashed from `model.safetensors` and from each
-file in `[checkpoint.manifest]`, and stamped with that run's pid and a
-fresh start token, plus each file's inode, size, and modification time.
-A missing file or an extra file the launcher could read is `unverified`
-("Can't verify the model"). A changed byte is `wrong_revision` ("Wrong
-model version"). A verified boot passes that hashed `model.safetensors`
-path to the sidecar with `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`,
-and does not pass a repo id or revision. The startup log names that path
-and its sha256. Those identity values are rechecked,
-without hashing again, when Laya reports Ready and about every 1.5
-seconds. A mismatch is `unverified` ("Can't verify the model"). The log
-line is `laya weights path=<path> changed=<field>`, and `<path>` is the
-file that changed. The record is deleted on stop and on a failed start. A record from an earlier run is rejected. A decision without
-`revision` or `sha256` is checked against that record for both admitted
-and clamped orders. The decision log stores `proof=decision` or
+Down and orders are refused. When a place is refused because Laya cannot
+be reached, or because it rejects the key, the chip updates on that same
+order: Unreachable, or Can't reach Laya. Every chip-Down refusal reads
+"Laya is Down. Orders are paused until it's Ready." When the chip is Ready
+and a single decision carries no proof, place returns `laya_unverified`
+and "Not placed. Laya's decision couldn't be verified. Try again." On each
+sidecar start FlintTrade hashes `model.safetensors` and each file in
+`[checkpoint.manifest]` before launch. That manifest pins
+`rl_agent_config.json`, `encoder/config.json`,
+`tokenizer/tokenizer_config.json`, and `tokenizer/tokenizer.json` by
+sha256, beside the `[checkpoint]` weights sha256. The runtime record holds
+the sha256, pid, and start token, and each file's inode, size, and
+modification time (`<workspace>/runtime/laya/verification.json`, with the
+token and pid also in `run.json`). If the checkpoint directory is present
+and a pinned file is missing, a shard index is present, or any extra
+weights file or other file the launcher could read is present, the reason
+is `unverified` ("Can't verify the model") and the sidecar does not start.
+A changed byte is `wrong_revision` ("Wrong model version") and the sidecar
+does not start. Neither case reaches Ready. A verified boot sets
+`LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
+(`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo id
+or a revision. The launch log line is
+`laya weights path=<path> sha256=<digest>`. Those identity values are
+rechecked, without hashing again, when Laya reports Ready and on each
+watch tick, about every 1.5 seconds. A mismatch is `unverified`
+("Can't verify the model"). The log line is
+`laya weights path=<path> changed=<field>`, and `<path>` is the file that
+changed. The same watch reads the pid file (`runtime/laya/sidecar.pid`),
+the key file (`runtime/laya/api.key`), and the runtime record, so a
+command-line stop or start, or a key rotation, shows on the chip within
+that interval. Every `stop` deletes the runtime record, as does a start
+that fails after it was written. A record from an earlier run is rejected.
+A decision without `revision` or `sha256` is checked against that record
+for both admitted and clamped orders. The decision log is
+`<workspace>/runtime/laya/decisions.jsonl`. It stores `proof=decision` or
 `proof=runtime`. `laya_port` is the sidecar
 port (`LAYA_PORT`, default 8000). Laya starts Down. A ping does not invent Ready.
 `GET /health` records Ready, Degraded, or Down from the opt-in sidecar when
@@ -776,7 +792,9 @@ matching qualification record, returns "Laya isn't qualified for Live yet.
 Practice orders are available." A Practice refusal never says Live. A quantity
 greater than the allowed quantity returns HTTP 409 `laya_clamp` and places
 neither size. The clamp message is "Not placed. Laya allows up to N."
-Place 1 on "Not placed. Laya allows up to 1." places, because that request
+Place N sends that quantity. On Order Pad, "Review Practice order" then
+shows the placed quantity. Place 1 on "Not placed. Laya allows up to 1."
+places, because that request
 is already at the allowed quantity. A request that is already at the
 allowed quantity is an allow. An empty note is
 not a hard reject: Practice returns that clamp when the requested quantity

@@ -539,35 +539,50 @@ port and defaults to 8000. A clash on that port is Down with
 written to `<workspace>/runtime/laya/api.key` and removed on `stop`, and
 on a start that fails after the key was written.
 
-The first successful load may download the pinned english
-`model.safetensors` checkpoint into the default Hugging Face cache rather
-than the runtime directory. Later boots stay offline. The
-pinned revision and `model.safetensors` digest live in `laya_policy.toml`.
+If `model.safetensors` is not in the cache yet, the first successful
+load may download the pinned english checkpoint into the default
+Hugging Face cache rather than the runtime directory. That boot is not
+the verified offline launch, and Laya is not Ready until a start hashes
+files that match the pin. The pins live in `laya_policy.toml`:
+`[checkpoint]` names `model.safetensors` and its sha256, and
+`[checkpoint.manifest]` pins `rl_agent_config.json`,
+`encoder/config.json`, `tokenizer/tokenizer_config.json`, and
+`tokenizer/tokenizer.json` by sha256.
 
 A backend that was started with `LAYA_HOST=127.0.0.1`, `LAYA_PORT` (or
 the default 8000), and `LAYA_API_KEY_FILE` pointing at that `api.key`
 attaches on its health probe. The host must stay loopback. The attached
 client uses the same revision and digest checks. On each sidecar start
-the verified record is hashed from `model.safetensors` and from each
-file in `[checkpoint.manifest]`, and stamped with that run's pid and a
-fresh start token, plus each file's inode, size, and modification time
-in nanoseconds. A missing file or an extra file the launcher could read
-is `unverified`. A changed byte is `wrong_revision`. A verified boot
-passes that hashed `model.safetensors` path to the sidecar with
-`HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`, and does not pass a
-repo id or revision. The startup log names that path and its sha256.
-Those identity values are rechecked, without hashing again, when Laya
-reports Ready and about every 1.5 seconds. A mismatch is `unverified`
+FlintTrade hashes `model.safetensors` and each file in
+`[checkpoint.manifest]` before launch. The runtime record holds the
+sha256, pid, and start token, and each file's inode, size, and
+modification time in nanoseconds
+(`<workspace>/runtime/laya/verification.json`, with the token and pid
+also in `run.json`). If the checkpoint directory is present and a pinned
+file is missing, a shard index is present, or any extra weights file or
+other file the launcher could read is present, the reason is `unverified`
+("Can't verify the model") and the sidecar does not start. A changed
+byte is `wrong_revision` ("Wrong model version") and the sidecar does
+not start. Neither case reaches Ready. A verified boot sets
+`LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
+(`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
+id or a revision. The launch log line is
+`laya weights path=<path> sha256=<digest>`. Those identity values are
+rechecked, without hashing again, when Laya reports Ready and on each
+watch tick, about every 1.5 seconds. A mismatch is `unverified`
 ("Can't verify the model"). The log line is
 `laya weights path=<path> changed=<field>` where `<field>` is `inode`,
 `size`, `mtime`, or a comma-separated list of those, and `<path>` is the
-file that changed. The record is deleted on stop and on a failed start. A record from an earlier run is rejected. A
-health document without the weight digest is Ready when that record
-matches the pin. If
-the record cannot be checked, the reason is `unverified` ("Can't verify
-the model"). The tooltip is "The installed model couldn't be checked
-against the pinned version. Restart Laya. If it keeps happening, reinstall
-it."
+file that changed. The same watch reads the pid file
+(`runtime/laya/sidecar.pid`), the key file (`runtime/laya/api.key`), and
+the runtime record, so a command-line stop or start, or a key rotation,
+shows on the chip within that interval. Every `stop` deletes the runtime
+record, as does a start that fails after it was written. A record from
+an earlier run is rejected. A health document without the weight digest
+is Ready when that record matches the pin. If the record cannot be
+checked, the reason is `unverified` ("Can't verify the model"). The
+tooltip is "The installed model couldn't be checked against the pinned
+version. Restart Laya. If it keeps happening, reinstall it."
 
 `status` carries a reason code: `not_started`, `stopped`, `port_in_use`,
 `still_loading`, `unreachable`, `wrong_revision`, `unverified`, or
@@ -580,8 +595,10 @@ by `. Next: python -m flinttrade_core.laya_runtime start`. The
 `wrong_revision` tooltip is "Laya is running a different model than
 FlintTrade expects." That code is only a real mismatch. The `key_rejected`
 tooltip is "Laya restarted with a new key. Reconnecting…" The chip stays
-Down and orders are refused. Every chip-Down refusal reads "Laya is Down.
-Orders are paused until it's Ready." A
+Down and orders are refused. When a place is refused because Laya cannot
+be reached, or because it rejects the key, the chip updates on that same
+order: Unreachable, or Can't reach Laya. Every chip-Down refusal reads
+"Laya is Down. Orders are paused until it's Ready." A
 dead child is reaped on the health probe and on interpreter exit, and
 the probe records Down with Stopped. `POST /api/v1/laya/start` starts or
 restarts the managed sidecar for a signed-in operator session. A
@@ -597,18 +614,22 @@ policy version. A base checkpoint is not that record. An unreachable
 host, a timeout, a malformed response, or a revision or digest mismatch
 is Down, and Practice refuses too. A decision without `revision` or
 `sha256` is checked against this run's verified record for both admitted
-and clamped orders. The decision log stores `proof=decision` or
-`proof=runtime`. When the chip is Ready and that decision carries no
+and clamped orders. The decision log is
+`<workspace>/runtime/laya/decisions.jsonl`. It stores `proof=decision`
+or `proof=runtime`. When the chip is Ready and that decision carries no
 proof, the refusal code is `laya_unverified` and the decision log records
-`identity_absent`. The refusal reads "Not placed. Laya's decision couldn't
-be verified. Try again." Stopping the sidecar records Down before an in-flight probe can
-publish Ready. An empty note is uncertain and is not a hard reject:
+`identity_absent` with no proof. The refusal reads "Not placed. Laya's
+decision couldn't be verified. Try again." Stopping the sidecar records
+Down before an in-flight probe can publish Ready. An empty note is
+uncertain and is not a hard reject:
 Practice clamps and Live denies. The Practice server reason is "Laya is
 uncertain. Quantity stays inside the tighter limit." The Live server
 reason is "Laya is uncertain. Live stays closed." A clamp is only when
 the requested quantity is greater than the allowed one. The desk clamp
-sentence is "Not placed. Laya allows up to N." Place 1 on "Not placed.
-Laya allows up to 1." places. Nothing is placed until Place N.
+sentence is "Not placed. Laya allows up to N." Place N sends that
+quantity. On Order Pad, "Review Practice order" then shows the placed
+quantity. Place 1 on "Not placed. Laya allows up to 1." places. Nothing
+is placed until Place N.
 Order Pad sends that note as `rationale`, including when the field is
 empty. The collapsed control is "Add a reason (optional)".
 

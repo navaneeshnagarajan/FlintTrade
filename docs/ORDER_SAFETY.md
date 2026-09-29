@@ -108,9 +108,10 @@ reason is "Laya is uncertain. Quantity stays inside the tighter limit."
 The Live server reason is "Laya is uncertain. Live stays closed." The desk
 does not auto-place. A clamp is only when the requested quantity is
 greater than the allowed one. Order Pad and Quick Trade show "Not placed.
-Laya allows up to N." with Place N and Cancel. Place 1 on "Not placed.
-Laya allows up to 1." places, because that request is already at the
-allowed quantity.
+Laya allows up to N." with Place N and Cancel. Place N sends that
+quantity. On Order Pad, "Review Practice order" then shows the placed
+quantity. Place 1 on "Not placed. Laya allows up to 1." places, because
+that request is already at the allowed quantity.
 
 Chip reason codes are `not_started` (Not started), `stopped` (Stopped),
 `port_in_use` (`Port <n> in use`), `still_loading` (Still loading),
@@ -123,46 +124,58 @@ against the pinned version. Restart Laya. If it keeps happening, reinstall
 it." The `wrong_revision` tooltip is "Laya is running a different model
 than FlintTrade expects." That code is only a real mismatch. The
 `key_rejected` tooltip is "Laya restarted with a new key. Reconnecting…"
-The chip stays Down and orders are refused. Every chip-Down refusal reads
-"Laya is Down. Orders are paused until it's Ready."
+The chip stays Down and orders are refused. When a place is refused
+because Laya cannot be reached, or because it rejects the key, the chip
+updates on that same order: Unreachable, or Can't reach Laya. The
+refusal text stays "Laya is Down. Orders are paused until it's Ready."
+Every chip-Down refusal reads that sentence.
 
 `identity_absent` is not a chip code. When the chip is Ready and a single
 decision carries no proof, the refusal code is `laya_unverified` and the
 refusal reads "Not placed. Laya's decision couldn't be verified. Try again."
 
-On each sidecar start the verified record is hashed from `model.safetensors`
-and stamped with that run's pid and a fresh start token. It is deleted on
-stop and on a failed start. A record from an earlier run is rejected. A
-decision without `revision` or `sha256` is checked against that record for
-both admitted and clamped orders. The decision log stores `proof=decision`
-or `proof=runtime`. A health document that omits the digest is Ready when
-that record matches the pin. If the record cannot be checked, the chip
-reason is `unverified`. Stopping the sidecar records Down
-before an in-flight probe can publish Ready. Desk place surfaces go through
-this admission. Laya is not Ready by default.
+On each sidecar start FlintTrade hashes `model.safetensors` and every
+file in `[checkpoint.manifest]` before launch. The runtime record holds
+the sha256, pid, and start token, and the inode, size, and modification
+time of the weights file and of each pinned file
+(`<workspace>/runtime/laya/verification.json`, with the token and pid
+also in `run.json`). Every `stop` deletes that record, as does a start
+that fails after it was written. A record from an earlier run is
+rejected. A decision without `revision` or `sha256` is checked against
+that record for both admitted and clamped orders. The decision log is
+`<workspace>/runtime/laya/decisions.jsonl`. It records `proof=decision`
+or `proof=runtime`. A decision with no proof is refused with "Not placed.
+Laya's decision couldn't be verified. Try again." A health document that
+omits the digest is Ready when that record matches the pin. If the
+record cannot be checked, the chip reason is `unverified`. Stopping the
+sidecar records Down before an in-flight probe can publish Ready. Desk
+place surfaces go through this admission. Laya is not Ready by default.
 
-The model file is checked against the revision and sha256 pinned in
-`packages/services/engine/src/flinttrade_engine/laya_policy.toml`. The
-`[checkpoint]` table names repo, revision, file `model.safetensors`, and
-sha256. A tampered file or a revision mismatch shows Wrong model version
-(`wrong_revision`) and never reaches Ready. A missing or unreadable file
-shows Can't verify the model (`unverified`). A shard index
-(`model.safetensors.index.json`), or any weights file other than the
-pinned `model.safetensors` in the pinned snapshot, shows Can't verify the
-model (`unverified`) and never reaches Ready. The sidecar loads that
-file's directory. The other files it reads are pinned beside the weights
-digest in `[checkpoint.manifest]` (the agent config, `encoder/config.json`,
-and the tokenizer files). Each is hashed before launch. A missing file
-or an extra file the launcher could read shows Can't verify the model
-(`unverified`). A changed byte shows Wrong model version
-(`wrong_revision`). On start, the sidecar logs the exact weights path
-that was hashed and that file's sha256. The runtime record stores inode,
-size, and modification time for the weights file and for each of those
-files. Those are rechecked, without hashing again, when Laya
-reports Ready and about every 1.5 seconds. If one changes, the chip
-shows Can't verify the model and the log names the path and the field
-that changed (`inode`, `size`, or `mtime`). New orders stay paused. A
-reduce-only close is unchanged.
+The pins live in
+`packages/services/engine/src/flinttrade_engine/laya_policy.toml`.
+`[checkpoint]` names the weights file `model.safetensors` and its sha256.
+`[checkpoint.manifest]` pins these files by sha256: `rl_agent_config.json`,
+`encoder/config.json`, `tokenizer/tokenizer_config.json`, and
+`tokenizer/tokenizer.json`. FlintTrade hashes each of them before launch.
+If the checkpoint directory is present and a pinned file is missing, a
+shard index (`model.safetensors.index.json`) is present, or any extra
+weights file or other file the launcher could read is present, the chip
+shows Can't verify the model (`unverified`) and the sidecar does not
+start. A changed byte shows Wrong model version (`wrong_revision`) and
+the sidecar does not start. Neither case reaches Ready. A verified boot
+sets `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
+(`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
+id or a revision. The launch log line is
+`laya weights path=<path> sha256=<digest>`. The recorded inode, size,
+and modification time are rechecked, without hashing again, when Laya
+reports Ready and on each watch tick, about every 1.5 seconds. If one
+changes, the chip shows Can't verify the model and the log line is
+`laya weights path=<path> changed=<field>`, where `<field>` is `inode`,
+`size`, `mtime`, or a comma-separated list of those. The same watch
+reads the pid file (`runtime/laya/sidecar.pid`), the key file
+(`runtime/laya/api.key`), and the runtime record, so a command-line
+stop or start, or a key rotation, shows on the chip within that interval.
+New orders stay paused. A reduce-only close is unchanged.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down — Live orders paused."). That class closes Live place and Position
