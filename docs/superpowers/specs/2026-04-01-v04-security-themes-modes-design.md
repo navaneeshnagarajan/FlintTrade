@@ -1,7 +1,6 @@
+> **Superseded.** This is an earlier design note kept for history. It no longer describes how FlintTrade works. For current behaviour see [Modes](../../product-modes.mdx) and [API](../../API.md).
+
 # FlintTrade v0.4.0 — Security, Themes, Modes Design Spec
-
-> Superseded. Modes are Practice, Connected (read), and Live. Sample data is Example. The public web demo is Demo (example data). A fresh browser opens in Practice. Password sign-in on a finished Setup opens in Practice. The notes below are a retired design.
-
 
 > **Date:** 2026-04-01
 > **Author:** Navaneesh + Claude Code
