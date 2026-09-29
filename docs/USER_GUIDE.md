@@ -729,9 +729,10 @@ for unauthenticated visitors only (FT-HOME-003).
 
 ### Home
 
-The Home greeting card stays on the dashboard. Its line is `Good morning`,
-`Good afternoon`, or `Good evening` from the Asia/Kolkata hour, plus the
-operator name when one is set. There is no greeting toast.
+The Home greeting card stays on the dashboard. Until the signed-in name
+is known, its line is plain `Good morning`, `Good afternoon`, or
+`Good evening` from the Asia/Kolkata hour. Once that name is known, the
+line uses it. There is no greeting toast.
 
 Home and Invest share one net-worth figure: cash + holdings + positions
 minus charges. Charges come from the account book and are 0 in Practice
@@ -783,13 +784,13 @@ Shareholding, ETF Screener, Social, ETFs, Risk-Return, and Correlation
 carry the Example chip. On Benchmark, index rows keep the Example chip.
 With real holdings, the portfolio row is labelled
 `Your Portfolio (since first buy)`, because it shows the book return
-(total P&L ÷ invested) while the index rows are 1Y figures, and it
-carries no chip. When the holdings are Example, that row keeps the
-Example chip. Benchmarks beaten, alpha, and the other
-outperformance figures are replaced by
+(total P&L ÷ invested), and it carries no chip. When the holdings are
+Example, that row is plain `Your Portfolio` and keeps the Example chip.
+Benchmarks beaten, alpha, and the other outperformance figures are
+replaced by
 `Comparison needs real index data.`
-That note is shown when there are holdings. With no holdings, the Your
-Portfolio row shows `—` and
+That note is shown on the sample book and whenever there are holdings.
+With no holdings, the row is plain `Your Portfolio`, shows `—`, and
 `Add holdings to compare against benchmarks.`
 The view also reads
 `Benchmark data is illustrative. Live index data requires a market data subscription.`
@@ -830,9 +831,10 @@ Live use
 `Search Indian mutual funds with live NAV data from AMFI. Updated daily after market close.`
 when the live feed is in use.
 
-Baskets shows the Example chip when quotes have not arrived. Seeded
-sample baskets disable **Edit** and **Delete**. Baskets you create in
-Practice or Live keep **Edit** and **Delete**.
+Sample Baskets show the Example chip from the first frame, including
+while quotes load. Seeded sample baskets disable **Edit** and
+**Delete**. Baskets you create in Practice or Live keep **Edit** and
+**Delete**.
 
 ### The widgets (71)
 
