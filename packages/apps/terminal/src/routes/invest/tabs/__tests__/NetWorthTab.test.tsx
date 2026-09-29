@@ -65,6 +65,7 @@ vi.mock("../../InvestContext", () => ({
     },
     isLoading: false,
     isError: false,
+    isSampleData: false,
     refetchHoldings: vi.fn(),
   }),
 }));

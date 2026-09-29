@@ -118,10 +118,10 @@ describe("MutualFundTab Explore sample copy (FT-INVEST-001)", () => {
     expect(screen.queryByRole("heading", { name: "Mutual Fund Explorer" })).not.toBeInTheDocument();
   });
 
-  it("shows Sample NAVs · as of the fixture date and drops the daily-update claim", () => {
+  it("shows Example NAVs · as of the fixture date and drops the daily-update claim", () => {
     renderTab();
 
-    const asOfLines = screen.getAllByText(`Sample NAVs · as of ${EXPLORE_SAMPLE_NAV_DATE}`);
+    const asOfLines = screen.getAllByText(`Example NAVs · as of ${EXPLORE_SAMPLE_NAV_DATE}`);
     expect(asOfLines.length).toBeGreaterThan(0);
     expect(screen.queryByText(/Updated daily after market close/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Sample Data")).not.toBeInTheDocument();
@@ -133,7 +133,7 @@ describe("MutualFundTab Explore sample copy (FT-INVEST-001)", () => {
     renderTab();
 
     expect(screen.queryByText(/live NAV data from AMFI/i)).not.toBeInTheDocument();
-    expect(screen.getAllByText(/Sample NAVs · as of/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Example NAVs · as of/).length).toBeGreaterThan(0);
   });
 
   it.each(["practice", "live"] as const)(
@@ -143,7 +143,7 @@ describe("MutualFundTab Explore sample copy (FT-INVEST-001)", () => {
       renderTab();
 
       expect(screen.getAllByText(/Updated daily after market close/i).length).toBeGreaterThan(0);
-      expect(screen.queryByText(/Sample NAVs · as of /)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Example NAVs · as of /)).not.toBeInTheDocument();
       expect(screen.queryByText("Sample Data")).not.toBeInTheDocument();
     },
   );

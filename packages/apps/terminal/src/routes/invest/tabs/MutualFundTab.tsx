@@ -13,7 +13,7 @@
  *     Live fetch AMFI via the backend and keep the daily-update sentence
  *
  * Data source: AMFI NAVAll.txt parsed by the Python backend (Practice / Live).
- * Explore shows ``Sample NAVs · as of`` the fixture date and does not claim
+ * Explore shows ``Example NAVs · as of`` the fixture date and does not claim
  * a daily feed.
  */
 
@@ -44,7 +44,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useMFSearch, useMFCategories, EXPLORE_SAMPLE_NAV_DATE } from "@/hooks/useMutualFundData";
 
-const SAMPLE_NAVS_AS_OF = `Sample NAVs · as of ${EXPLORE_SAMPLE_NAV_DATE}`;
+const SAMPLE_NAVS_AS_OF = `Example NAVs · as of ${EXPLORE_SAMPLE_NAV_DATE}`;
 
 // ---------------------------------------------------------------------------
 // Debounce hook

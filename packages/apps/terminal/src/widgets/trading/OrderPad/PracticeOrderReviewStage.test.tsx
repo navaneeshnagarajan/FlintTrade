@@ -52,6 +52,8 @@ describe("PracticeOrderReviewStage", () => {
 
     const back = screen.getByRole("button", { name: "Back to edit" });
     const confirm = screen.getByRole("button", { name: "Confirm simulated Practice order" });
+    expect(confirm).toHaveTextContent("Confirm simulation");
+    expect(confirm).not.toHaveTextContent("Continue");
     expect(back).toHaveFocus();
 
     await user.tab();
@@ -111,7 +113,10 @@ describe("PracticeOrderReviewStage", () => {
     );
 
     expect(screen.getByRole("dialog", { name: "Review Example order" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Confirm Example order" })).toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "Confirm Example order" });
+    expect(confirm).toHaveTextContent("Continue");
+    expect(confirm).not.toHaveTextContent("Confirm simulation");
+    expect(screen.queryByText("Confirm simulation")).not.toBeInTheDocument();
     expect(screen.getByText(
       "Example only. Nothing is sent to a broker and no order is placed.",
     )).toBeInTheDocument();
