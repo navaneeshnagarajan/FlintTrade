@@ -13,7 +13,7 @@ A fresh browser with no saved Mode opens in Practice. Password sign-in and accou
 
 The Mode chip in the TopBar opens the Mode menu: **Practice**, **Connected (read)**, and **Live**.
 
-- **Practice**: simulated fills, no real money. The Mode line reads `Practice — simulated fills, no real money.` Order review reads `Confirm places this simulated order.` Kotak Neo has no sandbox — never offer “Neo Practice”.
+- **Practice**: simulated fills, no real money. The Mode line reads `Practice — simulated fills, no real money.` Order review reads `Confirm places this simulated order.` The confirm button reads **Confirm simulation**. Kotak Neo has no sandbox — never offer “Neo Practice”.
 - **Connected (read)**: a read-only posture on a Practice session after a broker is connected. The menu item stays disabled until then and shows `Connect a broker first`. Non-funded live reads use this label. Broker-connect helper copy may describe that read check as API smoke. Copy for Neo is `Live read only until funded unlock.`
 - **Live**: real-money capable when a broker is Connected. Orders place only on a live session. The Mode line reads `Live — real-money capable when a broker is Connected. Orders place only on a live session.` Choosing an eligible Live item asks for the 6-digit PIN (**Switch to Live Trading?**). Opening the menu does not open that dialog.
 
@@ -26,9 +26,9 @@ Live stays locked while any of these reasons apply, in this order:
 
 Example is sample data, not a Mode. The chip reads **Example**. The Mode line reads `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. The public web demo (`/demo-app`) is **Demo (example data)**.
 
-On `/trade`, Order Pad **Example Buy** opens an example review. The review reads `Example only. Nothing is sent to a broker and no order is placed.` Practice order review reads `Confirm places this simulated order.`
+On `/trade`, Order Pad **Example Buy** opens an example review. The review reads `Example only. Nothing is sent to a broker and no order is placed.` The confirm button reads **Continue** (accessible name `Confirm Example order`). Practice order review reads `Confirm places this simulated order.` and the confirm button reads **Confirm simulation**.
 
-The sample-data banner reads `Example data. Connect a broker to see your own.` It never shows in Practice. On Invest, an Example chip on each view replaces that banner, so each view has one example marker. The sample Dashboard carries that chip on the sample XIRR.
+The sample-data banner reads `Example data. Connect a broker to see your own.` It never shows in Practice. On Invest, an Example chip on each view replaces that banner, so each view has one example marker. The sample Dashboard carries that chip on the single inline sample XIRR. There is no Portfolio XIRR card. On sample figures, Net Worth reads `Example equity and cash. Connect a broker to see yours.`; the allocation label is `Allocation` with the Example chip, and each `Live from broker` note on those figures is the Example chip. The Example chip paints only on example data. A connected book keeps `Allocation (live assets only)` and `Live from broker`. Mutual Funds on example data reads `Example NAVs · as of 10-Sep-2026`.
 
 ## Status homes
 
