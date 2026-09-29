@@ -3,7 +3,8 @@
 Three classes:
 
 - :class:`HealthAggregator` — aggregate health status of broker
-  connections, DuckDB files, disk space, and memory.
+  connections, DuckDB files, and install-host resources (disk, memory,
+  CPU, GPU, network).
 - :class:`TrafficCounter` — circular-buffer request tracker with
   per-path statistics.
 - :class:`LatencyTracker` — per-broker order RTT statistics
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import subprocess
 import threading
 import time
 from collections import deque
@@ -38,6 +40,108 @@ def _default_data_dir() -> Path:
     return workspace_dir() / "data"
 
 
+_MIB = 1024 * 1024
+
+
+def _load_psutil() -> Any | None:
+    """Import psutil when it is installed.
+
+    Returns:
+        The psutil module, or ``None`` when it cannot be imported.
+    """
+    try:
+        import psutil  # type: ignore[import]
+    except ImportError:
+        return None
+    return psutil
+
+
+def _utilisation_status(percent: float, *, degraded_above: float, error_above: float) -> str:
+    """Map a host utilisation percentage to a health status.
+
+    Args:
+        percent: Utilisation from 0 to 100.
+        degraded_above: Exclusive lower bound for ``"degraded"``.
+        error_above: Exclusive lower bound for ``"error"``.
+
+    Returns:
+        ``"error"``, ``"degraded"``, or ``"ok"``.
+    """
+    if percent > error_above:
+        return "error"
+    if percent > degraded_above:
+        return "degraded"
+    return "ok"
+
+
+def _unavailable(note: str) -> dict[str, Any]:
+    """Return a host reading that must not be painted as a zero measurement.
+
+    Args:
+        note: Short reason the figure is absent.
+
+    Returns:
+        Dict with ``status`` and ``scope`` ``"unavailable"`` and no numeric
+        totals.
+    """
+    return {"status": "unavailable", "scope": "unavailable", "note": note}
+
+
+def _parse_nvidia_smi_csv(stdout: str) -> dict[str, Any] | None:
+    """Parse ``nvidia-smi`` CSV rows into host GPU totals.
+
+    Args:
+        stdout: CSV text from ``--format=csv,noheader,nounits``.
+
+    Returns:
+        Dict with summed memory and peak utilisation, or ``None`` when no
+        row yields a real memory total.
+    """
+    names: list[str] = []
+    utils: list[float] = []
+    used_mb = 0.0
+    total_mb = 0.0
+    counted = 0
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 4:
+            continue
+        name = ",".join(parts[:-3]).strip()
+        try:
+            used = float(parts[-2])
+            total = float(parts[-1])
+        except ValueError:
+            continue
+        if total <= 0 or used < 0:
+            continue
+        counted += 1
+        used_mb += used
+        total_mb += total
+        if name:
+            names.append(name)
+        try:
+            util = float(parts[-3])
+        except ValueError:
+            continue
+        if util >= 0:
+            utils.append(util)
+    if counted == 0:
+        return None
+    result: dict[str, Any] = {
+        "used_mb": round(used_mb, 1),
+        "total_mb": round(total_mb, 1),
+        "count": counted,
+    }
+    if utils:
+        result["used_pct"] = round(max(utils), 1)
+    if names:
+        result["name"] = names[0] if counted == 1 else f"{counted} GPUs"
+    return result
+
+
 # ---------------------------------------------------------------------------
 # HealthAggregator
 # ---------------------------------------------------------------------------
@@ -47,7 +151,9 @@ class HealthAggregator:
     """Aggregate health checks for all FlintTrade subsystems.
 
     All check methods return a dict with at least ``status``
-    (``"ok"`` or ``"error"``) and relevant diagnostic fields.
+    (``"ok"``, ``"degraded"``, ``"error"``, or ``"unavailable"``) and
+    relevant diagnostic fields. Host resource readings set ``scope`` to
+    ``"host"``. This process's RSS/VMS use ``scope`` ``"process"``.
 
     Example::
 
@@ -140,8 +246,10 @@ class HealthAggregator:
                 time via :func:`flinttrade_core.workspace.workspace_dir`).
 
         Returns:
-            Dict with ``status``, ``total_gb``, ``used_gb``,
-            ``free_gb``, ``percent_used``.
+            Dict with ``status``, ``scope`` ``"host"``, ``total_gb``,
+            ``used_gb``, ``free_gb``, ``percent_used``, and ``used_pct``.
+            When the volume cannot be measured, ``scope`` is
+            ``"unavailable"`` and the numeric totals are omitted.
         """
         if data_dir is None:
             data_dir = _default_data_dir()
@@ -149,63 +257,207 @@ class HealthAggregator:
 
         try:
             usage = shutil.disk_usage(str(data_dir) if data_dir.exists() else str(data_dir.parent.parent))
+            if usage.total <= 0:
+                return _unavailable("Host disk unavailable")
             total_gb = usage.total / (1024 ** 3)
             used_gb = usage.used / (1024 ** 3)
             free_gb = usage.free / (1024 ** 3)
-            pct = (usage.used / usage.total) * 100 if usage.total > 0 else 0.0
-
-            if pct > 95:
-                status = "error"
-            elif pct > 80:
-                status = "degraded"
-            else:
-                status = "ok"
+            pct = (usage.used / usage.total) * 100
+            rounded_pct = round(pct, 1)
 
             return {
-                "status": status,
+                "status": _utilisation_status(pct, degraded_above=80, error_above=95),
+                "scope": "host",
                 "total_gb": round(total_gb, 2),
                 "used_gb": round(used_gb, 2),
                 "free_gb": round(free_gb, 2),
-                "percent_used": round(pct, 1),
+                "percent_used": rounded_pct,
+                "used_pct": rounded_pct,
             }
         except Exception:
             logger.exception("Disk health check failed")
-            return {"status": "error", "message": "Disk health check failed"}
+            return {"status": "error", "scope": "unavailable", "message": "Disk health check failed"}
 
     def check_memory(self) -> dict[str, Any]:
-        """Check current process memory usage via psutil.
+        """Report install-host RAM, with this process recorded separately.
+
+        Host totals use ``used_mb``, ``total_mb``, and ``used_pct`` with
+        ``scope`` ``"host"``. Process RSS and VMS are nested under
+        ``process`` and are never copied into those host fields. When the
+        OS cannot provide host RAM, the result is ``scope`` ``"process"``
+        or ``"unavailable"`` and does not invent ``0`` totals.
 
         Returns:
-            Dict with ``status``, ``rss_mb``, ``vms_mb``,
-            ``percent`` (of system RAM).
+            Host memory dict, optionally including a ``process`` object.
+            Missing host RAM omits ``used_mb`` / ``total_mb`` / ``used_pct``.
+        """
+        psutil = _load_psutil()
+        if psutil is None:
+            return _unavailable("Host memory unavailable")
+
+        host = self._read_host_memory(psutil)
+        process = self._read_process_memory(psutil)
+        if host is not None:
+            if process is not None:
+                host["process"] = process
+            return host
+        if process is not None:
+            return {
+                "status": "unavailable",
+                "scope": "process",
+                "note": "Host memory unavailable",
+                "process": process,
+            }
+        return _unavailable("Host memory unavailable")
+
+    def check_cpu(self) -> dict[str, Any] | None:
+        """Read install-host CPU utilisation.
+
+        Returns:
+            Dict with ``scope`` ``"host"`` and ``used_pct``, or ``None``
+            when the OS cannot provide a reading. The first meaningless
+            psutil sample is not returned as zero.
+        """
+        psutil = _load_psutil()
+        if psutil is None:
+            return None
+        try:
+            # interval=None's first call is a meaningless 0.0. A short
+            # blocking sample is a real reading for this host.
+            used_pct = float(psutil.cpu_percent(interval=0.1))
+            cores = psutil.cpu_count(logical=True)
+        except Exception:
+            logger.exception("Host CPU health check failed")
+            return None
+        if used_pct < 0:
+            return None
+        result: dict[str, Any] = {
+            "status": _utilisation_status(used_pct, degraded_above=90, error_above=98),
+            "scope": "host",
+            "used_pct": round(used_pct, 1),
+        }
+        if isinstance(cores, int) and cores > 0:
+            result["cores"] = cores
+        return result
+
+    def check_gpu(self) -> dict[str, Any] | None:
+        """Read install-host GPU memory when nvidia-smi can report it.
+
+        Returns:
+            Dict with ``scope`` ``"host"`` and measured memory totals, or
+            ``None`` when no GPU reading is available.
+        """
+        binary = shutil.which("nvidia-smi")
+        if not binary:
+            return None
+        try:
+            completed = subprocess.run(
+                [
+                    binary,
+                    "--query-gpu=name,utilization.gpu,memory.used,memory.total",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=1.5,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            logger.debug("Host GPU probe did not complete", exc_info=True)
+            return None
+        if completed.returncode != 0:
+            return None
+        parsed = _parse_nvidia_smi_csv(completed.stdout)
+        if parsed is None:
+            return None
+        used_pct = parsed.get("used_pct")
+        status = "ok"
+        if isinstance(used_pct, (int, float)):
+            status = _utilisation_status(float(used_pct), degraded_above=90, error_above=98)
+        return {"status": status, "scope": "host", **parsed}
+
+    def check_network(self) -> dict[str, Any] | None:
+        """Read cumulative install-host network counters.
+
+        Returns:
+            Dict with ``scope`` ``"host"``, ``bytes_sent``, and
+            ``bytes_recv``, or ``None`` when counters cannot be read.
+        """
+        psutil = _load_psutil()
+        if psutil is None:
+            return None
+        try:
+            counters = psutil.net_io_counters()
+        except Exception:
+            logger.exception("Host network health check failed")
+            return None
+        if counters is None:
+            return None
+        try:
+            sent = int(counters.bytes_sent)
+            received = int(counters.bytes_recv)
+        except (TypeError, ValueError):
+            return None
+        if sent < 0 or received < 0:
+            return None
+        return {
+            "status": "ok",
+            "scope": "host",
+            "bytes_sent": sent,
+            "bytes_recv": received,
+        }
+
+    @staticmethod
+    def _read_host_memory(psutil: Any) -> dict[str, Any] | None:
+        """Read physical RAM totals from psutil.
+
+        Args:
+            psutil: Imported psutil module.
+
+        Returns:
+            Host memory dict, or ``None`` when totals are unavailable.
         """
         try:
-            import psutil  # type: ignore[import]
+            sys_mem = psutil.virtual_memory()
+            total = int(getattr(sys_mem, "total", 0) or 0)
+            if total <= 0:
+                return None
+            available = int(getattr(sys_mem, "available", 0) or 0)
+            used_bytes = max(total - available, 0)
+            used_pct = float(getattr(sys_mem, "percent", 0.0) or 0.0)
+        except Exception:
+            logger.exception("Host memory health check failed")
+            return None
+        return {
+            "status": _utilisation_status(used_pct, degraded_above=80, error_above=95),
+            "scope": "host",
+            "used_mb": round(used_bytes / _MIB, 1),
+            "total_mb": round(total / _MIB, 1),
+            "used_pct": round(used_pct, 1),
+        }
 
+    @staticmethod
+    def _read_process_memory(psutil: Any) -> dict[str, Any] | None:
+        """Read this process's RSS and VMS.
+
+        Args:
+            psutil: Imported psutil module.
+
+        Returns:
+            Process memory dict with ``scope`` ``"process"``, or ``None``.
+        """
+        try:
             proc = psutil.Process()
             mem = proc.memory_info()
-            rss_mb = mem.rss / (1024 * 1024)
-            vms_mb = mem.vms / (1024 * 1024)
-            pct = proc.memory_percent()
-
-            if pct > 80:
-                status = "error"
-            elif pct > 50:
-                status = "degraded"
-            else:
-                status = "ok"
-
             return {
-                "status": status,
-                "rss_mb": round(rss_mb, 1),
-                "vms_mb": round(vms_mb, 1),
-                "percent": round(pct, 2),
+                "scope": "process",
+                "rss_mb": round(mem.rss / _MIB, 1),
+                "vms_mb": round(mem.vms / _MIB, 1),
+                "percent": round(float(proc.memory_percent()), 2),
             }
-        except ImportError:
-            return {"status": "ok", "rss_mb": 0.0, "vms_mb": 0.0, "percent": 0.0, "note": "psutil not installed"}
         except Exception:
-            logger.exception("Memory health check failed")
-            return {"status": "error", "message": "Memory health check failed"}
+            logger.exception("Process memory health check failed")
+            return None
 
     def get_health(
         self,
@@ -223,7 +475,10 @@ class HealthAggregator:
         Returns:
             Dict with top-level ``status`` (``"ok"``, ``"degraded"``,
             ``"error"``) and sub-keys ``broker``, ``duckdb``,
-            ``disk``, ``memory``.
+            ``disk``, and ``memory``. ``cpu``, ``gpu``, and ``network``
+            are included only when the install host can be read. They do
+            not change the top-level status. Missing host figures are
+            omitted or marked ``unavailable`` — never zero totals.
         """
         checks: dict[str, Any] = {}
 
@@ -239,8 +494,17 @@ class HealthAggregator:
 
         checks["disk"] = self.check_disk_space(data_dir)
         checks["memory"] = self.check_memory()
+        for key, reading in (
+            ("cpu", self.check_cpu()),
+            ("gpu", self.check_gpu()),
+            ("network", self.check_network()),
+        ):
+            if reading is not None:
+                checks[key] = reading
 
-        statuses = [v.get("status", "ok") for v in checks.values()]
+        # Service and disk/RAM faults roll up. CPU, GPU, and network stay
+        # on their own rows so a busy host does not mark the backend down.
+        statuses = [checks[key].get("status", "ok") for key in ("broker", "duckdb", "disk", "memory")]
         if "error" in statuses:
             overall = "error"
         elif "degraded" in statuses:

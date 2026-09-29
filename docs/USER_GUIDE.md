@@ -189,7 +189,7 @@ For step-by-step instructions tailored to each operating system, see:
 - [Quick start (cross-platform)](setup/QUICKSTART.md)
 
 ![Welcome screen](screenshots/01-welcome.png)
-*The /welcome route — first-time cinematic introduction with persona pickers.*
+*The /welcome route — first-time cinematic introduction. Get Started opens Setup. Try with sample data stays in Explore.*
 
 ---
 
@@ -374,6 +374,11 @@ the Laya Blocked strip and mutes Live place and Position Mirror start.
 and does not look Blocked. LLM is **Not configured**, or **Connected (suggest only)**
 when Chat is ready.
 
+Install-host disk, RAM, CPU, GPU, and network stay on Settings → Monitoring
+(`/settings#monitoring`). That page is its own Settings section. See
+[Monitoring](#monitoring). It is not folded into this Broker / Laya / LLM
+cluster.
+
 FlintTrade does not hold client funds, reverse broker fills, or file a
 dispute. Rectify steps point at the broker, the exchange, or the host:
 
@@ -459,7 +464,7 @@ remain reachable. Selecting Compact again re-collapses that disclosure.
 Phone layouts are unchanged.
 
 **Desk chrome (FT-UX-002).** The desk uses one TopBar and one scrolling
-ticker strip under it. TopBar keeps Mode, session/status, and overflow —
+ticker strip. TopBar keeps Mode, session/status, and overflow —
 it is not a second quote rail, so dual index slots in TopBar are gone.
 **Tools → Quick Settings** opens density, theme, and similar controls
 without leaving the desk. **Tools → Settings** opens the full
@@ -467,11 +472,13 @@ without leaving the desk. **Tools → Settings** opens the full
 no separate Settings gear. When Compact Trade collapses the tool
 ribbon, Quick Settings stays on the TopBar; expanding desk tools puts
 it back in the Tools menu. A desk that offers only full Settings, with
-Quick Settings removed, fails this bar. Trade uses the flex shell
-TopBar → TickerStrip → route body first; the same shell then rolls to
-Invest, Automate, Learn, and Ditto. This is not a silent widen of
-Compact-only-on-Trade (FT-UX-001). Mode and status stay reachable
-(desk-first; skinny-browser defensive collapse is fine).
+Quick Settings removed, fails this bar. The flex shell is TopBar,
+then the operator status strip when one is showing, then the Mode
+honesty line, then the ticker strip, then the route body. Trade uses
+that shell first; the same shell then rolls to Invest, Automate, Learn,
+and Ditto. This is not a silent widen of Compact-only-on-Trade
+(FT-UX-001). Mode and status stay reachable (desk-first; skinny-browser
+defensive collapse is fine).
 
 **Ticker venue badges (FT-CORE-TICKER-001).** Pinned badges match the
 venues that feed the marquee: NSE, BSE, and MCX on the default tape,
@@ -621,8 +628,10 @@ software safeguards, prompts, and recovery controls in a local setup.
       authenticator code in the Live switch dialog (if you chose **Set up
       later** on the optional authenticator panel). Explore and Practice stay
       password-only until enrolment. First-run Setup does not unlock Live.
-- [ ] An **exactly 6-digit** Security PIN is set under Settings → Security
-      (`/settings#security`). Live cannot be armed until this PIN exists.
+- [ ] An **exactly 6-digit** PIN is set under Settings → Security
+      (`/settings#security`). The Live switch asks for this PIN together
+      with authenticator enrolment. Quick Unlock uses the same PIN to
+      reopen the current Mode.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
 - [ ] Laya is **Ready** or **Degraded** if you intend a place attempt.
@@ -643,15 +652,15 @@ See [Laya on place](#laya-on-place).
 1. Click the **PRACTICE** badge in the top bar, or select **Live** on
    the welcome mode picker. The dialog warns that real orders will be
    placed and asks for an **authenticator code** and your **exactly
-   6-digit PIN**. Live unlock requires both — a confirmed authenticator
+   6-digit PIN**. The Live switch requires both — a confirmed authenticator
    enrolment plus the PIN. If you deferred 2FA with **Set up later** on
    the optional authenticator panel, enter a one-time authenticator code
-   in the dialog to enrol, then the PIN. `POST /v1/auth/pin` with
-   `mode: "live"` refuses 403 `totp_required` until the authenticator
-   is enabled. The PIN
-   alone is not enough. Set the PIN under Settings → Security
+   in the dialog to enrol, then the PIN. `POST /v1/auth/live` refuses
+   403 `totp_required` until the authenticator is enabled. Quick Unlock
+   reopens the same Mode the session already had, with the correct PIN,
+   and never changes the Mode. Set the PIN under Settings → Security
    (`/settings#security`) first if you have not already — see
-   [Settings reference](#11-settings-reference).
+   [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock).
 2. Cancel the modal unless you are deliberately performing your own broker-side
    test outside this guide.
 3. Confirm the UI clearly shows Live mode, the active account, and the
@@ -689,7 +698,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 
 | Route | Purpose |
 |---|---|
-| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP, or PIN). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Explore stays reachable if setup is unfinished. There is no `/login` URL. |
+| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). An idle lock on this screen is **Quick Unlock** and reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Example stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
 | `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Later / Skip panels open on that desk after the affirm and do not change the step count. On the broker Later path, **Continue without a broker** is the first control, above FlintTrade Native and OpenAlgo Bridge. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
@@ -1250,15 +1259,34 @@ Settings panels:
 | **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives on Automate → Settings → Telegram Alerts (**Send Test**); Explore keeps that control disarmed. |
 | **Risk Limits** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
 
-On `/settings#security`, **Quick-unlock PIN** is the Live-arming
-re-auth factor (it can also unlock an idle session). The PIN is optional
-at account setup, but Live cannot be armed until one exists. New and
-Confirm accept digits only (`maxLength` 6). **Set PIN** / **Change PIN**
-stays disabled until the account password is present, both fields are
-exactly six digits, and they match. Leaving (blur) a field with 1–5
-digits shows `PIN must be exactly 6 digits`; leaving Confirm when both
-fields are filled and different shows `PINs do not match`.
-`POST /v1/auth/pin/set` rejects anything that is not `^[0-9]{6}$`.
+On `/settings#security`, **Quick-unlock PIN** is the 6-digit PIN that
+Quick Unlock and the Live switch both ask for. The PIN is optional at
+account setup. New and Confirm accept digits only (`maxLength` 6).
+**Set PIN** / **Change PIN** stays disabled until the account password
+is present, both fields are exactly six digits, and they match. Leaving
+(blur) a field with 1–5 digits shows `PIN must be exactly 6 digits`;
+leaving Confirm when both fields are filled and different shows
+`PINs do not match`. `POST /v1/auth/pin/set` rejects anything that is
+not `^[0-9]{6}$`. Setting or changing the PIN does not change Mode.
+
+### Idle lock and Quick Unlock
+
+After an idle lock, Welcome Quick Unlock titles the screen for Practice
+and Live: `Practice desk locked` or `Live desk locked`. The button reads
+`Unlock Practice desk` or `Unlock Live desk`. An Example (sample-data)
+session, or any unknown value, shows the plain heading `Locked` and the
+plain button `Unlock`. `Quick Unlock` is the small label above the PIN
+field. Connected (read) is a broker status, not a session Mode, so it
+does not choose this heading. The operator sees the Practice or Live
+heading for that session.
+
+Quick Unlock reopens the same Mode the session already had, with the
+correct PIN. It never changes the Mode. The request is
+`POST /v1/auth/pin` with body `{ "pin" }`. Live is only entered through
+the explicit Live switch (`POST /v1/auth/live`), which requires the PIN
+and authenticator enrolment. Until the authenticator is enabled, that
+call refuses 403 `totp_required`. A session that is already Live keeps
+that enrolment check when Quick Unlock reopens it.
 
 On Explore `/settings` → **LLM Config**, a demo or unconfigured session
 shows the empty state "No LLM provider configured", with **Retry** and
@@ -1278,6 +1306,67 @@ broker platform). When leverage cannot be shown — unsupported broker,
 missing snapshot, or load failure — the pane shows
 `Leverage settings unavailable.` plus **Retry**. Selecting the Leverage
 tab never leaves a highlighted tab over a blank content pane.
+
+### Monitoring
+
+Settings → **Monitoring** (`/settings#monitoring`) reads this install. It
+does not write `workspace.json`. It stays its own Settings section. The
+TopBar **Broker**, **Laya**, and **LLM** labels are a different cluster
+(FT-SET-MONITOR-001).
+
+**Connections.** Four rows: **Broker session**, **OpenAlgo bridge**,
+**WebSocket**, and **FlintTrade Backend**. Each is **Online**, **Degraded**,
+**Down**, or **Unknown**. The OpenAlgo bridge can also show a round-trip in
+milliseconds. These rows are connection state.
+
+**System Health** keeps service rows and machine rows apart.
+
+**Subsystem status** lists **Broker** and **DuckDB** on their own lines.
+Broker shows its note, otherwise its status, otherwise **unknown** — for
+example **Broker — Explore**. DuckDB reads **DuckDB — Healthy** when the
+check passes, and otherwise its note (Explore can read **DuckDB — Explore**)
+or **Error**. Explore on a service row is that service. It does not stand
+in for disk, Memory, CPU, GPU, or network, and it is not merged into the
+TopBar Broker / Laya / LLM cluster.
+
+**This host** is the machine where FlintTrade is installed. The rows are
+**Disk**, **Memory** (RAM on that machine), **CPU**, **GPU**, and
+**Network**. A measured row is labelled **This host**.
+
+- **Disk** shows used and total gigabytes.
+- **Memory** shows used and total RAM.
+- **CPU** shows utilisation against 100%, and the core count when the host
+  reports it.
+- **GPU** is **GPU**, or **GPU —** the reported name. It shows used and
+  total memory, or utilisation against 100%, when the host reports them.
+- **Network** shows cumulative **Sent** and **Received**.
+
+A missing host figure says **Unavailable**. So does a zero or absent disk
+or RAM total, a total that is not from this machine, and any sample that
+looks like real capacity — including an Explore sample disk or RAM total.
+The row stays **Unavailable**. It does not show 0/0 or invented gigabytes.
+When the backend returns a real host reading, including a degraded health
+response that still carries those totals, **This host** shows that reading
+in Explore, Practice, and Live. When Explore has no such reading, the host
+rows stay **Unavailable** while Broker and DuckDB may still say Explore.
+
+**Process (this app)** appears when FlintTrade's own memory is known. It
+shows **RSS**, and **VMS** when that figure is known. A missing RSS on that
+row reads **RSS unknown**. The label is **Process (this app)**. Process
+RSS and VMS are never labelled as host Memory.
+
+**Traffic (this backend session)** shows **Requests / sec**, **Error Rate**
+(as a percentage), and **Top Endpoints** for this backend session. An empty
+window reads **No data yet**.
+
+**Latency (this backend session)** shows **Order Latency by Broker** with
+**Avg**, **p50**, **p95**, and **p99** in milliseconds. An empty table reads
+**No latency data recorded yet**.
+
+While a block is still loading it says so (**Loading health…**, and the
+same form for traffic and latency). If the backend cannot be reached, that
+block reads **Backend unreachable — health unavailable** (traffic and
+latency use the same form).
 
 Settings → **Report Bug** prepares a GitHub issue without background telemetry.
 The form keeps runtime/error diagnostics out of the public draft by default;
