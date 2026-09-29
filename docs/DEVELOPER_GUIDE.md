@@ -630,7 +630,10 @@ version. Restart Laya. If it keeps happening, reinstall it."
 not a status code. The desk shows Not started, Stopped,
 `Port <n> in use`, Still loading, Downloading the model · 1.2 of 3.4 GB,
 Can't download the model, Unreachable, Wrong model version, Can't verify
-the model, and Can't reach Laya. `<n>` is the sidecar port. Tooltips for
+the model, and Can't reach Laya. `unverified` applies when this start did
+not download. A failed download, including one over an older unverified
+snapshot, is `download_failed` ("Can't download the model"). `<n>` is the
+sidecar port. Tooltips for
 `not_started`, `stopped`, `port_in_use`, `still_loading`, and
 `unreachable` are the label followed by
 `. Next: python -m flinttrade_core.laya_runtime start`. `downloading`
@@ -672,14 +675,17 @@ Down before an in-flight probe can publish Ready. An empty note is
 uncertain and is not a hard reject:
 Practice clamps and Live denies. The Practice server reason is "Laya is
 uncertain. Quantity stays inside the tighter limit." The Live server
-reason is "Laya is uncertain. Live stays closed." A clamp is only when
-the requested quantity is greater than the allowed one. The desk clamp
+reason is "Laya is uncertain. Live stays closed." On a denial, Order Pad
+and Quick Trade show that server reason as a status named "Laya decision".
+A clamp is only when the requested quantity is greater than the allowed one. The desk clamp
 sentence is "Not placed. Laya allows up to N." Place N sends that
 quantity. On Order Pad, "Review Practice order" then shows the placed
 quantity. Place 1 on "Not placed. Laya allows up to 1." places. Nothing
 is placed until Place N.
 Order Pad sends that note as `rationale`, including when the field is
-empty. The collapsed control is "Add a reason (optional)".
+empty. The collapsed control is "Add a reason (optional)". Once open, the
+field's accessible name is the same. Quick Trade, Positions square-off,
+Order Ladder, Scalper, and Option Chain use that accessible name too.
 
 The same client speaks `POST /v1/systemone`. An operator may point it at
 another loopback host, including one on port 8888, without adding that

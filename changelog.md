@@ -55,7 +55,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   "Laya is Down. Orders are paused until it's Ready." A dropped
   connection, a partial download, or a failed swap is `download_failed`
   ("Can't download the model"; tooltip "Check your connection, then
-  Start Laya again.") and deletes only the staging directory.   That chip
+  Start Laya again.") and deletes only the staging directory. That chip
   stays `download_failed` even when an older snapshot is still on disk,
   whether that snapshot would be `wrong_revision` or `unverified`.
   `unverified` stays when this start did not download. `wrong_revision`
@@ -143,7 +143,9 @@ changelog rebuilds itself from the first release cut after this baseline.
   does not show a quantity ceiling. A Live place that
   is not qualified says "Laya isn't qualified for Live yet. Practice
   orders are available." The Order Pad note is the collapsed line "Add a
-  reason (optional)" under Quantity. A place with no note still gets
+  reason (optional)" under Quantity. Once open, the field's accessible
+  name is the same. Under a denial, the server reason is a status named
+  "Laya decision". A place with no note still gets
   Laya's policy decision: Practice clamps and Live denies. It is not a
   hard reject. Desk place surfaces go through this admission.
 

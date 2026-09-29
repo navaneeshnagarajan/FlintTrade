@@ -466,7 +466,7 @@ loading**. A download in progress stays **Down** and is not **Still loading**.
 | `downloading` | Downloading the model · 1.2 of 3.4 GB | (none) |
 | `download_failed` | Can't download the model | `Check your connection, then Start Laya again.` |
 | `unreachable` | Unreachable | `Unreachable. Next: python -m flinttrade_core.laya_runtime start` |
-| `unverified` | Can't verify the model | `The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.` |
+| `unverified` | Can't verify the model | `The installed model couldn't be checked against the pinned version. Restart Laya. If it keeps happening, reinstall it.` Applies when this start did not download. A failed download shows **Can't download the model** instead. |
 | `wrong_revision` | Wrong model version | `Laya is running a different model than FlintTrade expects.` |
 | `key_rejected` | Can't reach Laya | `Laya restarted with a new key. Reconnecting…` |
 
@@ -483,8 +483,10 @@ same way. Your current copy stays in place until the new one is verified.
 If the download fails, you'll see **Can't download the model** and Laya
 stays **Down** until you retry. `download_failed` is that result: a
 dropped connection, a partial download, or a swap that put the previous
-copy back. An older copy whose bytes are not the pin does not change
-that chip.
+copy back. An older copy on disk does not change that chip, including
+one whose bytes are not the pin and one that is unverified (an extra
+loadable file, or a missing companion whose weight digest matches).
+The chip stays **Can't download the model**, and Laya does not start.
 
 `wrong_revision` is only a real mismatch: a complete download whose files
 do not match the pin, a copy already on disk that this start is not
@@ -658,9 +660,10 @@ quantity or overturn a hard-rule refusal.
 **Reason.** On the Order Pad the note is collapsed under Quantity.
 **Add a reason (optional)** opens a single line. The placeholder is
 **Optional note for this order**. Once open, the field's accessible name
-is **Admission note**. It is not a required step, and an empty field does
+is **Add a reason (optional)**. It is not a required step, and an empty field does
 not block Place. Quick Trade, Positions square-off, Order Ladder, Scalper,
-and Option Chain keep an optional note. A place with no note still gets
+and Option Chain use the same accessible name, **Add a reason (optional)**.
+A place with no note still gets
 Laya's policy decision. Practice clamps. Live denies. It is not a hard
 reject. The server reason for that Practice clamp is **Laya is uncertain.
 Quantity stays inside the tighter limit.** The server reason for that
@@ -669,7 +672,8 @@ requested quantity is greater than the allowed one, the Order Pad
 clamp notice shows the clamp sentence below, not the Practice reason line.
 
 **Deny.** Order Pad and Quick Trade show **Laya denied**, then the server
-reason. When the server sent a quantity ceiling, the next line is
+reason. That reason is a status named **Laya decision**. When the server
+sent a quantity ceiling, the next line is
 **Max quantity N.** A Down refusal does not show that line. The reason
 is **Laya is Down. Orders are paused until it's Ready.** Place controls
 stay off until Laya or the mode changes; you can then retry. Kill All
@@ -1749,7 +1753,8 @@ Order Pad and Quick Trade show this under the place controls. Scalper,
 Positions, Order Ladder, and Option Chain may still show a place error
 as a toast.
 
-1. **Laya denied** — read the server reason under the headline. Place
+1. **Laya denied** — read the server reason under the headline. That
+   reason is a status named **Laya decision**. Place
    controls stay off until Laya or the mode changes. **Max quantity N.**
    is the ceiling the server sent.
    The strip **Laya is Down — Live orders paused.** follows Live-facing

@@ -105,7 +105,9 @@ the reason is "Laya isn't qualified for Live yet. Practice orders are
 available." An uncertain answer, including an empty note, clamps in
 Practice and denies in Live. It is not a hard reject. The Practice server
 reason is "Laya is uncertain. Quantity stays inside the tighter limit."
-The Live server reason is "Laya is uncertain. Live stays closed." The desk
+The Live server reason is "Laya is uncertain. Live stays closed." On a
+denial, Order Pad and Quick Trade show that server reason as a status
+named "Laya decision". The desk
 does not auto-place. A clamp is only when the requested quantity is
 greater than the allowed one. Order Pad and Quick Trade show "Not placed.
 Laya allows up to N." with Place N and Cancel. Place N sends that
@@ -128,7 +130,9 @@ has no tooltip and no Next line, and it is not Still loading. The
 refused with "Laya is Down. Orders are paused until it's Ready."
 The `unverified` tooltip is "The installed model couldn't be checked
 against the pinned version. Restart Laya. If it keeps happening, reinstall
-it." The `wrong_revision` tooltip is "Laya is running a different model
+it." That code applies when this start did not download. A failed download,
+including one over an older unverified snapshot, is `download_failed`
+("Can't download the model"). The `wrong_revision` tooltip is "Laya is running a different model
 than FlintTrade expects." That code is only a real mismatch: a complete
 download whose files do not match the pin, a snapshot already on disk
 that this start is not replacing, or a running sidecar that reports
