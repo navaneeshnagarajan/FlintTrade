@@ -781,12 +781,14 @@ note on the same labels. The screen-reader name of the amount is
 `≈`. Allocation percentages are not marked.
 
 On Home, `≈` and that tooltip sit on the Net Worth amount. The `Net Worth`
-label carries the same tooltip. On Invest Dashboard, they sit on the
-amount labelled `Net Worth (Cash + Holdings + Positions)`. Available
-Funds on that dashboard uses the same amount format, so it also shows
-`≈`, and it has no tooltip. On the Net Worth view, they sit on the amount
-labelled `Known Total (Cash + Holdings + Positions)` and on the
-`Open Positions` line. That line is shown only when the positions
+label carries the same tooltip and does not itself show `≈`. On Invest
+Dashboard, the label `Net Worth (Cash + Holdings + Positions)` carries
+that tooltip, and `≈` with the same tooltip sit on the amount under it.
+Available Funds on that dashboard uses the same amount format, so it
+also shows `≈`, and it has no tooltip. On the Net Worth view, the label
+`Known Total (Cash + Holdings + Positions)` carries that tooltip, and
+`≈` with the same tooltip sit on the amount under it and on the
+`Open Positions` value. That line is shown only when the positions
 contribution is above zero. The donut centre (`tracked`) shows `≈` on
 the same total and has no tooltip. Cash on that view is not marked.
 Those labels do not name charges; the figure still subtracts them.

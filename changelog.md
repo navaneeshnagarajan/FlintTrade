@@ -68,10 +68,14 @@ changelog rebuilds itself from the first release cut after this baseline.
   An estimated futures mark shows `≈`. Dhan does this for `costPrice`.
   Kotak Neo does this for an open future. Practice never does. The
   mark clears when that position is flat or the average arrives. The
-  tooltip names one symbol, or `2 futures positions` when two fall
-  back, and the screen-reader name is `Net Worth, approximately …`.
-  Allocation percentages are not marked. Available Funds on Dashboard
-  shows the same `≈`. Home allocation stays on the Example split until
+  tooltip and `≈` sit on the Home Net Worth amount, the Known Total
+  amount, and the Open Positions value. The Invest Dashboard label
+  `Net Worth (Cash + Holdings + Positions)` carries the tooltip, and
+  `≈` sits on the amount under it. Available Funds shows that `≈`
+  with no tooltip. The tooltip names one symbol, or
+  `2 futures positions` when two fall back, and the screen-reader
+  name is `Net Worth, approximately …`. Allocation percentages are
+  not marked. Home allocation stays on the Example split until
   funds, holdings, and positions have all loaded. Invest waits for the
   position book before it publishes the total. Home's amount does not.
   The greeting uses the saved display name, then the username, and

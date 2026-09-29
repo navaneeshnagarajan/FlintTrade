@@ -546,8 +546,15 @@ future marks from the entry price.
 
 `"fallback"` on an open future, while earlier mark-to-market is already
 in the ledger, formats the amount with `≈` (`formatAccountNetWorth`).
-The tooltip is `approximateNetWorthTooltip`: one symbol is named, and
-several positions use `N futures positions`. The accessible name is
+Home puts `≈` and the tooltip on the Net Worth amount; the `Net Worth`
+label has the tooltip only. Invest Dashboard puts the tooltip on the
+label `Net Worth (Cash + Holdings + Positions)` and `≈` plus the tooltip
+on the amount under it. The Net Worth view does the same for
+`Known Total (Cash + Holdings + Positions)`, and puts both on the
+`Open Positions` value. Available Funds on Dashboard shows `≈` with no
+tooltip. The donut centre shows `≈` with no tooltip. The tooltip text
+is `approximateNetWorthTooltip`: one symbol is named, and several
+positions use `N futures positions`. The accessible name is
 `accountNetWorthAccessibleName` (`Net Worth, approximately …`). A flat
 quantity, or `mark_source: "avg"`, clears it. Practice never shows `≈`.
 Allocation percentages are not marked. Invest publishes the total only
