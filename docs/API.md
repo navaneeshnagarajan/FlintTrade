@@ -454,16 +454,16 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 | Endpoint | Purpose |
 |---|---|
 | `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. |
-| `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and a setup-session JWT (`setup_session`). That token is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for example data and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. |
+| `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and a setup-session JWT (`setup_session`) with `mode` `practice`. That token is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for example data and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. |
 | `POST auth/setup/vault` | Open the credential vault during first-run Setup. Requires the account-create setup-session JWT. Daily-login tokens are rejected. Body `{ "master_password" }` (at least 8 characters when the vault file is missing). Persists the secret when it is missing and leaves an existing secret untouched. Success is `{ "opened": true, "already_present": bool }` under `data`. The response never returns the secret. |
 | `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Body `{ "password" }`, or the account-create setup JWT (lost-QR start-over). Daily-login session JWTs are rejected. |
 | `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret (password re-confirm) and clear `totp_enabled` until a live code is confirmed again. |
-| `POST auth/login` | Sign in with password (argon2id-hashed). `totp_code` (or a backup code) is required only after authenticator enrolment (`totp_enabled`). Issues a JWT. |
+| `POST auth/login` | Sign in with password (argon2id-hashed). `totp_code` (or a backup code) is required only after authenticator enrolment (`totp_enabled`). Issues a Practice JWT (`mode` `practice`). A fresh login opens Practice. |
 | `POST auth/totp/enable` | Confirm optional authenticator enrolment. Session-bound. Body `{ "totp_code" }`. Sets `totp_enabled`; later logins then require a TOTP or backup code. |
 | `POST auth/pin` | Quick Unlock with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin" }`. Reopens the Mode already on that session and never changes it. Practice stays Practice. An Example (sample-data) session stays that session. A session that is already Live stays Live and keeps the authenticator enrolment check (403 `totp_required` until enrolled). Connected (read) is a broker status, not a session Mode. There is no `/auth/me`. |
 | `POST auth/live` | Explicit Live switch, and the only route that enters Live. Requires an existing session JWT. Body `{ "pin" }`. Requires authenticator enrolment and mints a Live JWT with `live_mode_unlocked=true`. Refuses 403 `totp_required` until the authenticator is enabled. |
 | `POST auth/pin/set` | Set or change the PIN (password re-confirm). Requires an existing session JWT. Does not change Mode. |
-| `POST auth/mode` | **Downgrade only** to `practice`. Requires an existing session JWT. Issues a fresh JWT and revokes the old `jti`. Example data is not a desk downgrade: `explore` is refused before the current session is revoked. Switching to Live uses `POST /v1/auth/live`. |
+| `POST auth/mode` | **Downgrade only** to `practice`. Requires an existing session JWT. A body of `{ "mode": "practice" }` issues a fresh JWT and revokes the old `jti`. Any other value, including `explore`, `live`, and a missing `mode`, returns HTTP 400 before the current session is revoked. The body is `{ "status": "error", "message": "Only a downgrade to practice is allowed here. Switch to Live via POST /v1/auth/live with PIN verification." }` with no `code`. Live is entered only through `POST /v1/auth/live`. |
 | `POST auth/logout` | Revoke the current JWT by `jti`. Requires an existing session JWT. |
 | `POST auth/forgot-password` | JWT-token email reset. Body `{ "email" }`. Reads Flask-Mail `MAIL` from the Flask app config. A normal backend start never assigns `MAIL` (only tests inject it), so this returns 503 (`Email service not configured.`) on a stock process. SMTP/SES env vars do not enable this pair. Missing email → 400. When `MAIL` is injected and `email` is present, always returns 200 (`If the email is registered, a reset link has been sent.`) so the address is not enumerated. Rate-limited to 3 requests per hour per client. |
 | `POST auth/reset-password` | Consume a reset JWT from `forgot-password`. Body `{ "token", "new_password" }`. The token lasts 1 hour. Password minimum 8 characters. Missing fields or an invalid / expired token → 400. Rate-limited to 5 requests per minute per client. A stock backend never issues these tokens because `forgot-password` stays 503. |
@@ -699,14 +699,16 @@ the guard returns one of three verdicts:
 | `practice` | Route supported single-leg order flows to the Practice fill path; never touch OpenAlgo or a broker. Practice **place** is admitted by `Laya.admit` before that path. A Down refusal or a quantity clamp returns before any fill. Advanced executor-direct routes that do not yet have Practice parity fail closed with `practice_unsupported`. |
 | `live` | Require a JWT with `live_mode_unlocked=true`. Core operator **place** (`POST /api/v1/orders/place` and the routed live place that shares that dispatcher) and automate place run `Laya.admit` before SafetySystem, then the gated `BrokerRouter`. Modify, cancel, `cancel-all`, smart, multi, forever, and other write verbs still reach SafetySystem without this admission. The core modify, cancel, `cancel-all`, and `/orders/forever` paths go through the gated `BrokerRouter`. Other legacy write verbs (`gtt-*`, `open-position`, `close-position`, and similar) return HTTP 501 until they have a gated `BrokerRouter` verb — they do not forward ungated to OpenAlgo. |
 
-`POST /v1/auth/mode` issues a fresh JWT and revokes the previous `jti`,
-but it accepts **only** a downgrade to `practice`. Example data is not a desk
-downgrade: `explore` is refused before the current session is revoked.
-Switching to Live is `POST /v1/auth/live` with the 6-digit PIN, after the
-authenticator is enrolled (`totp_enabled`). Without enrolment that call
-refuses 403 with `code: "totp_required"`. Quick Unlock (`POST /v1/auth/pin`)
-reopens the Mode already on the session. Its body is `{ "pin" }`. It
-never changes the Mode.
+`POST /v1/auth/mode` accepts **only** a downgrade to `practice`. That call
+issues a fresh JWT and revokes the previous `jti`. Any other value,
+including `explore`, `live`, and a missing `mode`, returns HTTP 400 before
+the current session is revoked, with message `Only a downgrade to practice
+is allowed here. Switch to Live via POST /v1/auth/live with PIN
+verification.` Live is entered only through `POST /v1/auth/live`, with the
+6-digit PIN, after the authenticator is enrolled (`totp_enabled`). Without
+enrolment that call refuses 403 with `code: "totp_required"`. Quick Unlock
+(`POST /v1/auth/pin`) reopens the Mode already on the session. Its body is
+`{ "pin" }`. It keeps that Mode.
 
 Authoritative coverage: `packages/core/core/tests/test_order_routes.py` asserts
 Example-data rejection, Practice routing, and Live gate / fail-closed

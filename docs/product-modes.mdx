@@ -9,7 +9,7 @@ FlintTrade distinguishes Modes from sample data and from data provenance.
 
 ## Modes
 
-A fresh browser with no saved Mode opens in Practice. Password sign-in on a finished Setup opens in Practice and does not arm Live. A PIN sign-in on an existing session can open Live.
+A fresh browser with no saved Mode opens in Practice. Password sign-in and account setup open in Practice. A fresh login opens Practice. Quick Unlock restores the existing session and keeps its Mode. Live is entered only through the Live switch (`POST /v1/auth/live`). `POST /v1/auth/mode` accepts only a switch to Practice.
 
 The Mode chip in the TopBar opens the Mode menu: **Practice**, **Connected (read)**, and **Live**.
 
@@ -26,15 +26,15 @@ Live stays locked while any of these reasons apply, in this order:
 
 Example is sample data, not a Mode. The chip reads **Example**. The Mode line reads `Example data. No broker is connected and no orders are sent.` Welcome and sign-in offer **Try with example data**. The public web demo (`/demo-app`) is **Demo (example data)**.
 
-On `/trade`, Order Pad **Example Buy** opens an example review. The review reads `Example only. Nothing is sent to a broker and no order is placed.`
+On `/trade`, Order Pad **Example Buy** opens an example review. The review reads `Example only. Nothing is sent to a broker and no order is placed.` Practice order review reads `Confirm places this simulated order.`
 
-The sample-data banner reads `Example data. Connect a broker to see your own.` It never shows in Practice. On Invest, an Example chip on each view replaces that banner, so each view has one example marker.
+The sample-data banner reads `Example data. Connect a broker to see your own.` It never shows in Practice. On Invest, an Example chip on each view replaces that banner, so each view has one example marker. The sample Dashboard carries that chip on the sample XIRR.
 
 ## Status homes
 
 Each status has one home.
 
-- **Feed** — the chip at the start of the ticker. Example data reads **Example**. Practice and Live may read **Live**, **Delayed**, **Stale**, or **Unknown**. Practice with no feed reads `No live feed (Practice)`.
+- **Feed** — the chip at the start of the ticker. Example data reads **Example**. Practice and Live may read **Live**, **Delayed**, **Stale**, or **Unknown**. Practice with no feed reads `No live feed (Practice)`. With no live feed, the Practice ticker also shows `Last close prices · Connect a broker for live prices →`, linking to `/settings#brokers`. The line hides once a live feed connects.
 - **Broker** — the desk-status broker chip (**Broker Connected**, **Broker Connected (read)**, or **Broker Unavailable**).
 - **Market** — the TopBar market-session chip. A closed or unavailable cash session reads `Market closed · opens 09:15`. That chip is not a Mode.
 

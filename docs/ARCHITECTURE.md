@@ -465,12 +465,15 @@ stateDiagram-v2
 
 A downgrade to Practice issues a fresh JWT with the new `mode` claim and
 revokes the old token's `jti`. Practice → Live is `POST /v1/auth/live` (PIN
-re-auth plus authenticator enrolment). Quick unlock `POST /v1/auth/pin`
-restores the existing session and never changes Mode. `/v1/auth/mode`
-accepts only a downgrade to `practice`. Example data is not a desk
-downgrade, and that call does not latch the kill switch. The Mode menu
-lists Practice, Connected (read), and Live. A fresh browser and a finished
-password sign-in open in Practice. Example data is not a menu Mode. The guard lives at
+re-auth plus authenticator enrolment), and that route is the only way into
+Live. Quick unlock `POST /v1/auth/pin` restores the existing session and
+keeps its Mode. `/v1/auth/mode` accepts only `{ "mode": "practice" }`. Any
+other value returns HTTP 400 with `Only a downgrade to practice is allowed
+here. Switch to Live via POST /v1/auth/live with PIN verification.` and
+leaves the current session in place. That call does not latch the kill
+switch. The Mode menu lists Practice, Connected (read), and Live. A fresh
+browser, account setup, and a finished password sign-in open in Practice.
+Example data is not a menu Mode. The guard lives at
 `packages/services/engine/src/flinttrade_engine/mode_guard.py`.
 
 Example data has no Live broker order authority: backend and Live-intent
@@ -629,12 +632,14 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
 ### FlintTrade JWT
 
 - Issued on `/ft-api/v1/auth/login` after argon2id password
-  verification. Login is password-only until authenticator enrolment
+  verification, with `mode` `practice`. Account setup mints the same
+  Practice session. Login is password-only until authenticator enrolment
   is confirmed (`totp_enabled`); a TOTP or backup code is required
   only after that.
 - Optional second factor: TOTP enrolment with Fernet-encrypted seed
-  (`POST /v1/auth/totp/enable`). Live PIN unlock refuses with
-  `totp_required` until enrolment is confirmed.
+  (`POST /v1/auth/totp/enable`). `POST /v1/auth/live` refuses with
+  `totp_required` until enrolment is confirmed. Quick Unlock of a session
+  that is already Live keeps that check and keeps Live.
 - **Expires at 8 AM IST the next day.** No refresh tokens — sign in
   again.
 - Carries `sub` (user), `exp` (expiry), `mode` (`explore` for example data, `practice`, or

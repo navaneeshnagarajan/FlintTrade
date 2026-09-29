@@ -301,8 +301,10 @@ funded-order, Live-promotion, and cross-platform proof remain open.
 
 Before enabling any order-capable integration, exercise the order path in
 **Practice**. A fresh browser with no saved Mode opens in Practice. Password
-sign-in on a finished Setup opens in Practice and does not arm Live. A PIN
-sign-in on an existing session can open Live.
+sign-in and account setup open in Practice. A fresh login opens Practice.
+Quick Unlock restores the existing session and keeps its Mode. Live is
+entered only through `POST /v1/auth/live`. `POST /v1/auth/mode` accepts
+only a switch to Practice.
 
 The Mode chip in the TopBar opens the Mode menu. The menu lists **Practice**,
 **Connected (read)**, and **Live**. Those three names are Modes. **Example** is
@@ -335,10 +337,11 @@ this order:
   operator is not qualified. If that report is absent, this reason is not
   shown. The desk starts **Down**. A missing heartbeat is not painted **Ready**.
 
-**Example-data banner.** Where sample figures need their own marker, the
-banner reads `Example data. Connect a broker to see your own.` It never shows
-in Practice. On Invest, an Example chip on each view replaces that banner, so
-each view has one example marker.
+**Example-data marker.** Where a sample figure still uses the shared banner,
+that banner reads `Example data. Connect a broker to see your own.` It never
+shows in Practice. On Invest, an **Example** chip on the view replaces that
+banner. The sample Dashboard carries that chip on the sample XIRR figure
+(`XIRR` plus one `Example` chip). Practice leaves the XIRR unmarked.
 
 **Order review.** Practice reads `Confirm places this simulated order.`
 Example data reads `Example only. Nothing is sent to a broker and no order is placed.`
@@ -366,7 +369,9 @@ subsystem.
 - **Feed** lives once, at the start of the ticker. The chip is feed provenance,
   not a Mode. Example data always reads **Example**. Practice and Live may
   read **Live**, **Delayed**, **Stale ·** age, or **Unknown**. Practice with
-  no feed reads `No live feed (Practice)`.
+  no feed reads `No live feed (Practice)`. With no live feed, the Practice
+  ticker also shows `Last close prices · Connect a broker for live prices →`.
+  The link opens `/settings#brokers`. The line hides once a live feed connects.
 - **Broker** lives once, in the desk-status broker chip (**Broker Connected**,
   **Broker Connected (read)**, or **Broker Unavailable**, plus a plain failure
   when a money-path incident darkens the session). Account switching does not
@@ -740,7 +745,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 
 | Route | Purpose |
 |---|---|
-| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). An idle lock on this screen is **Quick Unlock** and reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so sample data stays reachable if setup is unfinished. There is no `/login` URL. |
+| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). Password and setup logins open in Practice. An idle lock opens the Welcome lock screen: heading `Practice desk locked`, `Live desk locked`, or plain `Locked`, with **Quick Unlock** as the PIN label — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with example data** so sample data stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/demo-app` | Hosted public demo. The landing is **Demo (example data)**. Installed web and desktop builds send the old sample-data URL to `/welcome`. Enter example data from Welcome or sign-in → **Try with example data**. |
 | `/setup` | Required first-run path only: **Create operator → Vault → Practice desk** (Step N of 3). **Open Practice desk** affirms Practice and lands on `/trade`. Later / Skip panels open on that desk after the affirm and do not change the step count. On the broker Later path, **Continue without a broker** is the first control, above FlintTrade Native and OpenAlgo Bridge. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
@@ -782,7 +787,8 @@ On `/invest` → Holdings with no broker, the header
 badge matches the visible table (`N holdings`). The badge is never `0 holdings` over a populated
 sample table. Example data shows one Example chip on the view. The banner
 `Example data. Connect a broker to see your own.` is not repeated there, and
-it never shows in Practice. The Mode line on example data is
+it never shows in Practice. The sample Dashboard marks the sample XIRR with
+that same one **Example** chip and does not add a second marker. The Mode line on example data is
 `Example data. No broker is connected and no orders are sent.`
 The Practice Mode line (`Practice — simulated fills, no real money.`)
 does not call that book Example. Dashboard and "N stocks"
@@ -839,7 +845,10 @@ still runs after cash continuous ends, the TopBar may show `F&O open · till
 
 Feed provenance lives on the ticker chip. Example data reads **Example**.
 Practice and Live may read **Live**, **Delayed**, muted **Stale** or
-**Unknown** plus age when known, or `No live feed (Practice)`. Feed
+**Unknown** plus age when known, or `No live feed (Practice)`. With no
+live feed, the Practice ticker shows
+`Last close prices · Connect a broker for live prices →`, linking to
+`/settings#brokers`. That line hides once a live feed connects. Feed
 provenance is independent of Practice, Connected (read), and Live, so
 silent-stale is a fail.
 
@@ -1300,22 +1309,31 @@ not `^[0-9]{6}$`. Setting or changing the PIN does not change Mode.
 
 ### Idle lock and Quick Unlock
 
-After an idle lock, Welcome Quick Unlock titles the screen for Practice
-and Live: `Practice desk locked` or `Live desk locked`. The button reads
-`Unlock Practice desk` or `Unlock Live desk`. An Example (sample-data)
-session, or any unknown value, shows the plain heading `Locked` and the
-plain button `Unlock`. `Quick Unlock` is the small label above the PIN
-field. Connected (read) is a broker status, not a session Mode, so it
-does not choose this heading. The operator sees the Practice or Live
-heading for that session.
+An idle lock leaves the desk and opens the Welcome lock screen. The same
+screen is the PIN step on `/welcome`.
+
+The Welcome heading is `Practice desk locked` or `Live desk locked`. A
+sample-data session, a retired session claim, or any other value that is
+not Practice or Live uses the plain heading `Locked`. `Quick Unlock` is
+the small label above the PIN field, not the heading. The primary button
+reads `Unlock Practice desk`, `Unlock Live desk`, or plain `Unlock`.
+Connected (read) is a broker status on a Practice session, so that
+session keeps the Practice heading. The lock screen does not print
+Connected (read).
+
+The desk layout also defines an idle overlay. Its heading is the unlock
+label: `Unlock Practice desk`, `Unlock Live desk`, or plain `Locked`. The
+PIN field there is labelled `Enter your 6-digit PIN`. Idle lock on a
+signed-in desk unmounts that layout and shows the Welcome lock screen, so
+the heading an operator sees is `Practice desk locked`, `Live desk locked`,
+or `Locked`.
 
 Quick Unlock reopens the same Mode the session already had, with the
-correct PIN. It never changes the Mode. The request is
-`POST /v1/auth/pin` with body `{ "pin" }`. Live is only entered through
-the explicit Live switch (`POST /v1/auth/live`), which requires the PIN
-and authenticator enrolment. Until the authenticator is enabled, that
-call refuses 403 `totp_required`. A session that is already Live keeps
-that enrolment check when Quick Unlock reopens it.
+correct PIN. It keeps that Mode. The request is `POST /v1/auth/pin` with
+body `{ "pin" }`. Live is entered only through `POST /v1/auth/live`, which
+requires the PIN and authenticator enrolment. Until the authenticator is
+enabled, that call refuses 403 `totp_required`. A session that is already
+Live keeps that enrolment check when Quick Unlock reopens it.
 
 With example data, `/settings` → **LLM Config**, an unconfigured session
 shows the empty state "No LLM provider configured", with **Retry** and
