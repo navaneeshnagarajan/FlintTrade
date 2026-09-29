@@ -1,23 +1,24 @@
 /**
  * DockSidebar.tsx
  *
- * macOS dock-style vertical sidebar for FlintTrade navigation.
+ * App navigation sidebar.
  *
  * Modes:
- *   - icons (52px):      Icon-only, with tooltip on hover
- *   - expanded (160px):  Icon + label, always visible
- *   - auto-hide:         Collapses to 4px gradient strip, expands on mouse enter
- *   - hidden:            Zero width, effectively off
+ *   - expanded (224px):  icon + label, grouped under headings (default on desk)
+ *   - icons (56px):      icon rail with tooltips (Compact Trade, narrow windows)
+ *   - auto-hide:         collapses to a 4px strip, expands on hover or focus
+ *   - hidden:            off
+ * Under 768px the sidebar becomes an off-canvas drawer opened from the
+ * TopBar menu button.
  *
  * Features:
- *   - Scale 1.12x + tooltip on hover (macOS magnification)
- *   - Active route: green left-edge indicator bar (3px × 16px)
+ *   - Active route: accent edge bar, filled row, aria-current="page"
+ *   - Labelled groups (separators carry the group heading)
  *   - Drag-and-drop reorder via framer-motion Reorder
- *   - Glass background (rgba(12,12,20,0.6) + blur 12px)
- *   - Separator items between groups
+ *   - Settings pinned to the bottom
  */
 
-import { useRef, useCallback, useEffect } from "react";
+import { useRef, useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { motion, Reorder, useSpring, useTransform } from "framer-motion";
 import {
@@ -29,13 +30,22 @@ import {
   Zap,
   Bot,
   Copy,
+  Users,
   Shield,
   Settings,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { LogoIcon } from "@/components/brand/Logo";
 import { useDeskDensityChrome } from "@/hooks/useDeskDensityChrome";
+import { cn } from "@/lib/utils";
 import { useSidebarStore } from "@/stores/sidebarStore";
 import type { SidebarItem } from "@/stores/sidebarStore";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Tooltip,
   TooltipContent,
@@ -56,6 +66,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Zap,
   Bot,
   Copy,
+  Users,
   Shield,
   Settings,
 };
@@ -64,10 +75,33 @@ const ICON_MAP: Record<string, LucideIcon> = {
 // Constants
 // ---------------------------------------------------------------------------
 
-const WIDTH_ICONS = 52;
-const WIDTH_EXPANDED = 160;
+const WIDTH_ICONS = 56;
+const WIDTH_EXPANDED = 224;
 const WIDTH_STRIP = 4;
 const AUTO_HIDE_COLLAPSE_DELAY = 300;
+const DRAWER_QUERY = "(max-width: 767px)";
+
+function isRouteActive(route: string, pathname: string): boolean {
+  if (route === "/") return pathname === "/";
+  return pathname === route || pathname.startsWith(`${route}/`);
+}
+
+function useDrawerViewport(): boolean {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia(DRAWER_QUERY).matches
+      : false,
+  );
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia(DRAWER_QUERY);
+    const onChange = (event: MediaQueryListEvent) => setMatches(event.matches);
+    setMatches(media.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+  return matches;
+}
 
 // ---------------------------------------------------------------------------
 // ActiveIndicator
@@ -75,11 +109,9 @@ const AUTO_HIDE_COLLAPSE_DELAY = 300;
 
 function ActiveIndicator() {
   return (
-    <motion.span
+    <span
       data-testid="active-indicator"
-      layoutId="sidebar-active-indicator"
-      className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full bg-[var(--color-profit,#22c55e)]"
-      transition={{ type: "spring", stiffness: 400, damping: 30 }}
+      className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-accent"
       aria-hidden="true"
     />
   );
@@ -99,58 +131,30 @@ interface DockRouteItemProps {
 function DockRouteItem({ item, isActive, showLabel, onNavigate }: DockRouteItemProps) {
   const Icon = ICON_MAP[item.icon] ?? Home;
 
-  const handleClick = useCallback(() => {
-    onNavigate(item.route);
-  }, [item.route, onNavigate]);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        onNavigate(item.route);
-      }
-    },
-    [item.route, onNavigate],
-  );
-
   const button = (
-    <motion.button
+    <button
       type="button"
       aria-label={item.label}
       aria-current={isActive ? "page" : undefined}
       data-testid={`sidebar-item-${item.id}-button`}
-      onClick={handleClick}
-      onKeyDown={handleKeyDown}
-      whileHover={{ scale: 1.12 }}
-      whileTap={{ scale: 0.96 }}
-      transition={{ type: "spring", stiffness: 400, damping: 20 }}
-      className={[
-        "relative flex items-center gap-2.5 rounded-[10px] transition-colors duration-150 outline-none",
-        "focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60",
-        showLabel
-          ? "w-full px-3 py-2 justify-start"
-          : "w-9 h-9 justify-center",
+      onClick={() => onNavigate(item.route)}
+      className={cn(
+        "relative flex items-center rounded-md transition-colors duration-150 outline-none",
+        "focus-visible:ring-2 focus-visible:ring-accent/60",
+        showLabel ? "h-9 w-full gap-3 px-2.5 text-sm" : "mx-auto size-10 justify-center",
         isActive
-          ? "bg-surface-active text-text-primary"
-          : "text-text-muted hover:text-text-primary hover:bg-surface-hover",
-      ].join(" ")}
+          ? "bg-surface-hover font-medium text-text-primary"
+          : "text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary",
+      )}
     >
       <Icon
-        size={16}
+        size={18}
         strokeWidth={isActive ? 2 : 1.75}
         aria-hidden="true"
-        className="shrink-0"
+        className={cn("shrink-0", isActive ? "text-accent" : undefined)}
       />
-      {showLabel && (
-        <motion.span
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-xs font-medium truncate"
-        >
-          {item.label}
-        </motion.span>
-      )}
-    </motion.button>
+      {showLabel && <span className="truncate">{item.label}</span>}
+    </button>
   );
 
   return (
@@ -166,7 +170,7 @@ function DockRouteItem({ item, isActive, showLabel, onNavigate }: DockRouteItemP
             side="right"
             sideOffset={8}
             collisionPadding={8}
-            className="max-w-48 whitespace-normal border border-glass-chrome bg-[var(--glass-chrome-bg,rgba(20,20,32,0.94))] text-text-primary shadow-2xl"
+            className="max-w-48 whitespace-normal border border-border-default bg-surface-card text-text-primary shadow-floating"
           >
             {item.label}
           </TooltipContent>
@@ -177,21 +181,32 @@ function DockRouteItem({ item, isActive, showLabel, onNavigate }: DockRouteItemP
 }
 
 // ---------------------------------------------------------------------------
-// DockSeparator
+// DockSeparator — a group heading when labelled and expanded, else a rule
 // ---------------------------------------------------------------------------
 
-function DockSeparator({ id }: { id: string }) {
+function DockSeparator({ id, label, showLabel }: { id: string; label?: string; showLabel: boolean }) {
+  if (label && showLabel) {
+    return (
+      <div
+        data-testid={`sidebar-separator-${id}`}
+        role="presentation"
+        className="ft-text-overline select-none px-2.5 pb-1 pt-4 text-text-muted"
+      >
+        {label}
+      </div>
+    );
+  }
   return (
     <div
       data-testid={`sidebar-separator-${id}`}
       aria-hidden="true"
-      className="w-6 h-px mx-auto my-0.5 bg-border-default"
+      className="mx-auto my-2 h-px w-6 bg-border-default"
     />
   );
 }
 
 // ---------------------------------------------------------------------------
-// AutoHideStrip — 4px gradient strip shown when sidebar is collapsed
+// AutoHideStrip — 4px strip shown when the sidebar is collapsed
 // ---------------------------------------------------------------------------
 
 interface AutoHideStripProps {
@@ -222,15 +237,53 @@ function AutoHideStrip({ onEnter, onLeave }: AutoHideStripProps) {
       whileFocus={{ opacity: 1 }}
       transition={{ duration: 0.2 }}
     >
-      <div
-        className="h-full w-full rounded-r-full"
-        style={{
-          background: "linear-gradient(180deg, var(--color-profit,#22c55e) 0%, #a855f7 60%, transparent 100%)",
-          opacity: 0.7,
-        }}
-        aria-hidden="true"
-      />
+      <div className="h-full w-full rounded-r-full bg-accent/60" aria-hidden="true" />
     </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MobileNavDrawer — the whole navigation in an off-canvas sheet
+// ---------------------------------------------------------------------------
+
+function MobileNavDrawer({
+  items,
+  pathname,
+  open,
+  onOpenChange,
+  onNavigate,
+}: {
+  items: SidebarItem[];
+  pathname: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onNavigate: (route: string) => void;
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="left" className="w-72 gap-0 border-border-default bg-surface-base p-0">
+        <div className="flex h-12 items-center gap-2 border-b border-border-default px-4">
+          <LogoIcon size={20} aria-hidden />
+          <SheetTitle className="font-heading text-sm font-bold text-text-primary">FlintTrade</SheetTitle>
+          <SheetDescription className="sr-only">Go to any part of FlintTrade.</SheetDescription>
+        </div>
+        <nav aria-label="Main navigation" className="flex-1 overflow-y-auto px-2 py-2">
+          {items.map((item) =>
+            item.type === "separator" ? (
+              <DockSeparator key={item.id} id={item.id} label={item.label} showLabel />
+            ) : (
+              <DockRouteItem
+                key={item.id}
+                item={item}
+                isActive={isRouteActive(item.route, pathname)}
+                showLabel
+                onNavigate={onNavigate}
+              />
+            ),
+          )}
+        </nav>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -238,30 +291,24 @@ function AutoHideStrip({ onEnter, onLeave }: AutoHideStripProps) {
 // DockSidebar
 // ---------------------------------------------------------------------------
 
-/**
- * DockSidebar — macOS dock-style vertical navigation sidebar.
- *
- * Wire into AppLayout by replacing the current navigation with this component.
- */
 export default function DockSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { mode: storedMode, items, isHovered, setHovered } = useSidebarStore();
+  const { mode: storedMode, items, isHovered, setHovered, mobileOpen, setMobileOpen } = useSidebarStore();
   const { dockModeFor } = useDeskDensityChrome();
   const mode = dockModeFor(storedMode);
+  const drawer = useDrawerViewport();
 
-  // Auto-hide collapse timer ref
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleNavigate = useCallback(
     (route: string) => {
       if (route) navigate(route);
+      if (drawer) setMobileOpen(false);
     },
-    [navigate],
+    [drawer, navigate, setMobileOpen],
   );
 
-  // Determine if the sidebar is currently showing content
-  // (expanded strip in auto-hide while hovered)
   const isAutoHideExpanded = mode === "auto-hide" && isHovered;
   const showLabel = mode === "expanded" || isAutoHideExpanded;
 
@@ -274,13 +321,11 @@ export default function DockSidebar() {
           ? WIDTH_EXPANDED
           : WIDTH_ICONS;
 
-  const springWidth = useSpring(targetWidth, { stiffness: 320, damping: 28 });
-  // Keep spring in sync with targetWidth changes
+  const springWidth = useSpring(targetWidth, { stiffness: 380, damping: 36 });
   useEffect(() => {
     springWidth.set(targetWidth);
   }, [targetWidth, springWidth]);
 
-  // Opacity: hidden mode → 0
   const opacity = useTransform(springWidth, [0, 4, WIDTH_ICONS], [0, 1, 1]);
 
   const handleMouseEnter = useCallback(() => {
@@ -300,15 +345,19 @@ export default function DockSidebar() {
     };
   }, []);
 
-  // -------------------------------------------------------------------------
-  // Render: hidden
-  // -------------------------------------------------------------------------
+  if (drawer) {
+    return (
+      <MobileNavDrawer
+        items={items}
+        pathname={location.pathname}
+        open={Boolean(mobileOpen)}
+        onOpenChange={setMobileOpen}
+        onNavigate={handleNavigate}
+      />
+    );
+  }
 
   if (mode === "hidden") return null;
-
-  // -------------------------------------------------------------------------
-  // Render: auto-hide strip (collapsed)
-  // -------------------------------------------------------------------------
 
   if (mode === "auto-hide" && !isHovered) {
     return (
@@ -323,38 +372,32 @@ export default function DockSidebar() {
     );
   }
 
-  // -------------------------------------------------------------------------
-  // Render: expanded sidebar (icons / expanded / auto-hide expanded)
-  // -------------------------------------------------------------------------
-
-  // Separate settings from main items for fixed-bottom positioning
+  // Settings is pinned to the bottom and is not reorderable.
   const settingsItem = items.find((i) => i.id === "settings");
   const mainItems = items.filter((i) => i.id !== "settings");
 
   return (
     <motion.aside
       aria-label="Navigation sidebar"
-      className="relative h-full flex flex-col py-3 shrink-0 overflow-visible"
+      className="relative flex h-full shrink-0 flex-col overflow-hidden"
       style={{
         width: springWidth,
         opacity,
         background: "var(--glass-chrome-bg, rgba(12,12,20,0.6))",
-        backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
         borderRight: "1px solid var(--glass-chrome-border, rgba(255,255,255,0.04))",
       }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      <TooltipProvider delayDuration={0}>
-        {/* Main nav items — reorderable */}
-        <nav aria-label="Main navigation" className="flex-1 flex flex-col gap-0.5 px-2 overflow-visible">
+      <TooltipProvider delayDuration={200}>
+        <nav
+          aria-label="Main navigation"
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-2 py-3 [scrollbar-width:none]"
+        >
           <Reorder.Group
             axis="y"
             values={mainItems}
             onReorder={(newOrder) => {
-              // Find new indices relative to the full items list
-              // and reorder by rebuilding the list
               useSidebarStore.setState((state) => {
                 const settingsIdx = state.items.findIndex((i) => i.id === "settings");
                 const settingsEntry = settingsIdx >= 0 ? [state.items[settingsIdx]] : [];
@@ -372,24 +415,20 @@ export default function DockSidebar() {
                   drag={false}
                   style={{ listStyle: "none" }}
                 >
-                  <DockSeparator id={item.id} />
+                  <DockSeparator id={item.id} label={item.label} showLabel={showLabel} />
                 </Reorder.Item>
               ) : (
                 <Reorder.Item
                   key={item.id}
                   value={item}
                   style={{ listStyle: "none", position: "relative" }}
-                  whileDrag={{ scale: 1.05, zIndex: 50, cursor: "grabbing" }}
+                  whileDrag={{ scale: 1.02, zIndex: 50, cursor: "grabbing" }}
                   dragTransition={{ bounceStiffness: 600, bounceDamping: 20 }}
                   data-index={index}
                 >
                   <DockRouteItem
                     item={item}
-                    isActive={
-                      item.route === "/"
-                        ? location.pathname === "/"
-                        : location.pathname.startsWith(item.route)
-                    }
+                    isActive={isRouteActive(item.route, location.pathname)}
                     showLabel={showLabel}
                     onNavigate={handleNavigate}
                   />
@@ -399,21 +438,17 @@ export default function DockSidebar() {
           </Reorder.Group>
         </nav>
 
-        {/* Settings — always pinned at bottom, not reorderable */}
         {settingsItem && (
           <div
-            className="px-2 pt-1 mt-auto"
+            className="shrink-0 border-t border-border-subtle px-2 py-2"
             data-testid="sidebar-settings-section"
           >
-            <DockSeparator id="sep-bottom" />
-            <div className="mt-0.5">
-              <DockRouteItem
-                item={settingsItem}
-                isActive={location.pathname.startsWith("/settings")}
-                showLabel={showLabel}
-                onNavigate={handleNavigate}
-              />
-            </div>
+            <DockRouteItem
+              item={settingsItem}
+              isActive={isRouteActive(settingsItem.route, location.pathname)}
+              showLabel={showLabel}
+              onNavigate={handleNavigate}
+            />
           </div>
         )}
       </TooltipProvider>
