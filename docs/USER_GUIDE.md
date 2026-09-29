@@ -782,6 +782,14 @@ sees **Setup is complete. Sign in to open the desk.** **Sign in** is the
 primary button and opens `/welcome`. **Open Settings** is the secondary
 button.
 
+An operator database that already existed before setup completion was
+recorded is marked setup-complete the next time FlintTrade opens it.
+That mark covers only the operator rows already in the database. An
+operator created after that change starts unfinished and still walks
+through Setup. For an operator marked complete, `/setup` does not
+restart step 1. A signed-in operator is sent to `/trade`. A signed-out
+operator sees **Setup is complete. Sign in to open the desk.**
+
 **Open Practice desk** affirms Practice and lands on `/trade`. After the
 affirm, Later / Skip covers the authenticator (TOTP; the control may
 still say **Set up later**), broker connect, LLM, Monitoring, trading
@@ -1474,8 +1482,14 @@ reads: "This machine has two operator accounts, and FlintTrade supports one. You
 
 **Open troubleshooting** opens this section (`USER_GUIDE.md#two-operator-accounts`;
 on the public site, `/docs/user-guide#two-operator-accounts`). **Retry**
-checks status again. Sign-in does not create a session while the update
-is paused: `POST /v1/auth/login` returns HTTP 409 with message
+checks status again. On Welcome, **FlintTrade couldn't finish updating**
+stays on screen until that check succeeds and reports that nothing is
+pending (`migration_blocked` null). A failed check, or a check that still
+returns `two_operators`, leaves the screen up. A saved sign-in is
+restored only after that successful check. A failed check does not
+open the desk.
+Sign-in does not create a session while the update is paused:
+`POST /v1/auth/login` returns HTTP 409 with message
 `FlintTrade couldn't finish updating.` and does not issue a token.
 `GET /v1/auth/status` returns `migration_blocked` set to `two_operators`
 (null when the desk may open).
@@ -1535,7 +1549,8 @@ that named that account (`account_id`, `operator_id`, or `user_id`) to
 id 1, in one transaction. A failure rolls that transaction back, so the
 accounts are unchanged. Keeping the stored id 1 again leaves that
 account's sessions, settings, and data in place. The single-operator
-update continues. It prints:
+update continues. The success lines name the id you passed. They do not
+print the stored id:
 
 `Kept operator <id>.`
 
@@ -1544,6 +1559,20 @@ update continues. It prints:
 `One operator account remains. Open FlintTrade and choose Retry.`
 
 `This backup contains login secrets. Keep it private and delete it once FlintTrade works again.`
+
+`<id>` in `Kept operator <id>.` is the id you passed. The kept account
+is stored as id 1, so that stored id can differ from the id you passed.
+A later `flinttrade operators list` shows the kept account as id `1`.
+
+Passing `2` prints `Keeping 2 <username>`, then one
+`Removing <id> <username>` line for each other account, then
+`Remove N other operator account(s)? [y/N]`. After the transaction
+commits it prints `Kept operator 2.`, then
+`Backup: <workspace>/auth.db.bak-YYYYMMDDTHHMMSSZ`, then
+`One operator account remains. Open FlintTrade and choose Retry.`, then
+`This backup contains login secrets. Keep it private and delete it once FlintTrade works again.`
+The next `flinttrade operators list` shows that account as id `1`, not
+`2`.
 
 If that transaction does not commit, the backup file is removed and the
 command prints `The operator update could not be finished. No data was changed.`
@@ -1555,7 +1584,9 @@ operator as id 1 and points that operator's rows at id 1. Login-attempt
 rows are not stored against an operator, so they stay. It does not open
 `workspace.json` or any other database.
 
-Open FlintTrade and choose **Retry**.
+Open FlintTrade and choose **Retry**. On Welcome, **FlintTrade couldn't
+finish updating** stays up until the status check succeeds and reports
+that nothing is pending.
 
 ### "Connection refused" on the OpenAlgo port
 
