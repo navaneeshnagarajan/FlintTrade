@@ -4,6 +4,44 @@
   line-height: calc(14px * var(--ft-font-scale, 1));
 }
 
+/* ---------- Typography roles ----------
+   One class per role so page chrome shares a single type scale:
+   page title 20/28, section title 16/24, card title 14/20, body 14/22,
+   caption 12/16, overline 11/16. Readable copy never goes below 11px. */
+@utility ft-text-page-title {
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+@utility ft-text-section-title {
+  font-family: var(--font-heading);
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 600;
+}
+@utility ft-text-card-title {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+}
+@utility ft-text-body {
+  font-size: 0.875rem;
+  line-height: 1.375rem;
+}
+@utility ft-text-caption {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+@utility ft-text-overline {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 /* ---------- Base variables (shadcn/ui compat) ---------- */
 @layer base {
   :root {
@@ -74,9 +112,10 @@
     --color-border-subtle: #1e1e2e;
     --color-border-strong: #3a3a4a;
     --color-text-primary: #e4e4e7;
-    --color-text-secondary: #8b8b95;
-    --color-text-muted: #9898a4;
-    --color-text-disabled: #636370;
+    /* Secondary copy must stay brighter than muted copy on dark surfaces. */
+    --color-text-secondary: #a6a6b8;
+    --color-text-muted: #8a8aa2;
+    --color-text-disabled: #55556e;
     /* Brand accent fallback before themeStore.applyTheme() writes the live value. */
     --color-accent: #22c55e;
     --color-accent-text: #ffffff;
@@ -111,6 +150,26 @@
     --title-route: 1.5rem;
     --title-section: 1.125rem;
     --title-card: 0.9375rem;
+
+    /* App shell and page layout (4-pt spacing scale) */
+    --ft-topbar-height: 48px;
+    --ft-sidebar-width: 224px;
+    --ft-sidebar-rail-width: 56px;
+    --ft-page-gutter: 24px;
+    --ft-section-gap: 24px;
+    --ft-page-width-narrow: 48rem;
+    --ft-page-width: 72rem;
+    --ft-page-width-wide: 90rem;
+
+    /* Informational tint (callouts, Explore mode) */
+    --color-info: #38bdf8;
+  }
+
+  @media (max-width: 767px) {
+    :root {
+      --ft-page-gutter: 16px;
+      --ft-section-gap: 16px;
+    }
   }
 
   /* Prevent flash of dark colors when OS preference is light.
@@ -124,7 +183,7 @@
       --color-border-default: #d0d0da;
       --color-text-primary: #18181b;
       --color-text-secondary: #52525b;
-      --color-text-muted: #71717a;
+      --color-text-muted: #6b6b74;
       --color-text-disabled: #a1a1aa;
       --color-accent: #15803d;
       --color-accent-text: #ffffff;
@@ -136,6 +195,10 @@
       --shadow-elevated: 0 4px 12px rgba(0,0,0,0.12);
       --shadow-floating: 0 8px 24px rgba(0,0,0,0.16);
     }
+  }
+
+  html.theme-light {
+    --color-info: #0369a1;
   }
 
   /* shadcn/ui HSL tokens for light mode (when .dark class is removed) */
@@ -222,6 +285,7 @@
   --color-profit: var(--color-profit);
   --color-loss: var(--color-loss);
   --color-warning: var(--color-warning);
+  --color-info: var(--color-info);
 
   --color-bullish-bg: var(--color-bullish-bg);
   --color-bullish-border: var(--color-bullish-border);
