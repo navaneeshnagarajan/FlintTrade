@@ -1638,3 +1638,218 @@ def test_download_progress_updates_the_chip_text(tmp_path: Path, monkeypatch: py
         "Downloading the model · 1.2 of 3.4 GB",
     ]
     reset_process_laya_for_tests()
+
+
+def _write_old_tree(directory: Path) -> None:
+    """Write a previous revision: same names, bytes that are not the pin."""
+    policy = load_policy()
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / policy.weight_file).write_bytes(b"old-weights")
+    for name, _digest in policy.manifest:
+        companion = directory / name
+        companion.parent.mkdir(parents=True, exist_ok=True)
+        companion.write_bytes(b"old-" + name.encode())
+    (directory / "README.md").write_bytes(b"old-marker")
+
+
+def _accept_pinned_digests_except_old(monkeypatch: pytest.MonkeyPatch, policy: Any) -> None:
+    """Pinned digest for current bytes. A previous revision starts with ``old-``."""
+    pins = [(policy.weight_file, policy.sha256), *policy.manifest]
+
+    def fake(path: Path) -> str:
+        if path.read_bytes().startswith(b"old-"):
+            return "0" * 64
+        text = path.as_posix()
+        for name, digest in sorted(pins, key=lambda item: len(item[0]), reverse=True):
+            if text.endswith("/" + name):
+                return digest
+        raise AssertionError(text)
+
+    monkeypatch.setattr("flinttrade_core.laya_runtime.sha256_file", fake)
+
+
+def _old_checkpoint_names(runtime: LayaRuntime) -> list[str]:
+    return sorted(
+        child.name
+        for child in runtime.runtime_root.iterdir()
+        if child.name.startswith("checkpoint.old-")
+    )
+
+
+@pytest.mark.unit
+def test_pin_upgrade_replaces_the_checkpoint_and_removes_the_old_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = load_policy()
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "hub"))
+    _accept_pinned_digests_except_old(monkeypatch, policy)
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _Process(),
+        downloader=lambda _argv, env: _write_pinned_tree(Path(env["LAYA_DOWNLOAD_DIR"])) and 0,
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    runtime._ensure_dirs()  # noqa: SLF001
+    _write_old_tree(runtime.checkpoint_dir)
+    launched: list[dict[str, str]] = []
+
+    def factory(_argv: list[str], env: dict[str, str]) -> _Process:
+        launched.append(dict(env))
+        return _Process()
+
+    runtime._process_factory = factory  # noqa: SLF001
+    runtime.start()
+    assert launched
+    assert launched[0]["HF_HUB_OFFLINE"] == "1"
+    assert "checkpoint" in launched[0]["LAYA_WEIGHTS_PATH"]
+    assert (runtime.checkpoint_dir / policy.weight_file).read_bytes() == b"pinned-weights"
+    assert not (runtime.checkpoint_dir / "README.md").exists()
+    assert _old_checkpoint_names(runtime) == []
+    assert not runtime.staging_dir.exists()
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_failed_upgrade_rename_restores_the_old_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = load_policy()
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "hub"))
+    _accept_pinned_digests_except_old(monkeypatch, policy)
+    launched: list[object] = []
+    real_replace = os.replace
+
+    def flaky(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+        if Path(src).name == "staging" and Path(dst).name == "checkpoint":
+            raise OSError("second rename failed")
+        real_replace(src, dst)
+
+    monkeypatch.setattr("flinttrade_core.laya_runtime.os.replace", flaky)
+
+    def download(_argv: list[str], env: dict[str, str]) -> int:
+        _write_pinned_tree(Path(env["LAYA_DOWNLOAD_DIR"]))
+        return 0
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: launched.append(1) or _Process(),
+        downloader=download,
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    runtime._ensure_dirs()  # noqa: SLF001
+    _write_old_tree(runtime.checkpoint_dir)
+    with pytest.raises(LayaRuntimeError, match="Can't download the model"):
+        runtime.start()
+    assert launched == []
+    assert runtime._process is None  # noqa: SLF001
+    assert (runtime.checkpoint_dir / "README.md").read_bytes() == b"old-marker"
+    assert (runtime.checkpoint_dir / policy.weight_file).read_bytes() == b"old-weights"
+    assert _old_checkpoint_names(runtime) == []
+    assert not runtime.staging_dir.exists()
+    report = runtime.status()
+    assert report["reason"] == "download_failed"
+    assert report["detail"] == "Can't download the model"
+    assert report["tooltip"] == "Check your connection, then Start Laya again."
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "download_failed"
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_failed_upgrade_download_reports_download_failed_not_wrong_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = load_policy()
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "hub"))
+    _accept_pinned_digests_except_old(monkeypatch, policy)
+    launched: list[object] = []
+
+    def download(_argv: list[str], env: dict[str, str]) -> int:
+        partial = Path(env["LAYA_DOWNLOAD_DIR"]) / policy.weight_file
+        partial.parent.mkdir(parents=True, exist_ok=True)
+        partial.write_bytes(b"partial")
+        return 1
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: launched.append(1) or _Process(),
+        downloader=download,
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    runtime._ensure_dirs()  # noqa: SLF001
+    _write_old_tree(runtime.checkpoint_dir)
+    with pytest.raises(LayaRuntimeError, match="Can't download the model"):
+        runtime.start()
+    assert launched == []
+    assert (runtime.checkpoint_dir / "README.md").read_bytes() == b"old-marker"
+    assert not runtime.staging_dir.exists()
+    assert process_laya().runtime_reason()[0] == "download_failed"
+    assert laya_reason_detail("download_failed", runtime._port) == "Can't download the model"  # noqa: SLF001
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_stale_staging_and_old_checkpoint_are_removed_silently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    policy = load_policy()
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "hub"))
+    _accept_pinned_digests(monkeypatch, policy)
+    calls: list[str] = []
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _Process(),
+        downloader=lambda *_args: calls.append("download") or 1,
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    runtime._ensure_dirs()  # noqa: SLF001
+    _write_pinned_tree(runtime.checkpoint_dir)
+    stale = runtime.staging_dir / "partial"
+    stale.parent.mkdir(parents=True)
+    stale.write_bytes(b"stale-staging")
+    leftover = runtime.runtime_root / "checkpoint.old-stale"
+    leftover.mkdir()
+    (leftover / "README.md").write_bytes(b"leftover")
+    with caplog.at_level(logging.INFO, logger="flinttrade.laya"):
+        runtime.start()
+    assert calls == []
+    assert not runtime.staging_dir.exists()
+    assert _old_checkpoint_names(runtime) == []
+    assert (runtime.checkpoint_dir / policy.weight_file).is_file()
+    assert "checkpoint.old" not in caplog.text
+    assert process_laya().runtime_reason()[0] != "download_failed"
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+def test_crash_between_renames_restores_the_old_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = load_policy()
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path / "hub"))
+    _accept_pinned_digests(monkeypatch, policy)
+    calls: list[str] = []
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _Process(),
+        downloader=lambda *_args: calls.append("download") or 1,
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    runtime._ensure_dirs()  # noqa: SLF001
+    junk = runtime.runtime_root / "checkpoint.old-aaa"
+    junk.mkdir()
+    (junk / "README.md").write_bytes(b"junk")
+    restored = runtime.runtime_root / "checkpoint.old-zzz"
+    _write_pinned_tree(restored)
+    assert not runtime.checkpoint_dir.exists()
+    runtime.start()
+    assert calls == []
+    assert (runtime.checkpoint_dir / policy.weight_file).read_bytes() == b"pinned-weights"
+    assert _old_checkpoint_names(runtime) == []
+    assert not junk.exists()
+    reset_process_laya_for_tests()

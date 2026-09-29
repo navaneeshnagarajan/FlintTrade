@@ -41,8 +41,14 @@ changelog rebuilds itself from the first release cut after this baseline.
   (not the model repository's default branch) into `runtime/laya/staging`,
   hashes the files there against the `[checkpoint]` and
   `[checkpoint.manifest]` pins, and on a full match moves that directory
-  onto `runtime/laya/checkpoint` before the offline launch. While the
-  download runs the status word is Down, not Still loading, and the chip
+  onto `runtime/laya/checkpoint` before the offline launch. An upgrade
+  over a checkpoint already on disk uses the same download. On a full
+  match the current checkpoint is renamed aside to
+  `checkpoint.old-<random>` in the same runtime directory, staging is
+  renamed onto `checkpoint`, and the old copy is deleted. If that second
+  rename fails, the old checkpoint is renamed back, the chip is
+  `download_failed`, and the sidecar does not start. While the download
+  runs the status word is Down, not Still loading, and the chip
   reads "Downloading the model · 1.2 of 3.4 GB". Orders are refused with
   "Laya is Down. Orders are paused until it's Ready." A dropped connection
   or a partial download is `download_failed` ("Can't download the model";

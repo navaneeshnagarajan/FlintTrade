@@ -187,6 +187,28 @@ describe("DeskStatusCluster", () => {
     );
   });
 
+  it("shows download_failed after a restored checkpoint, not the wrong revision", () => {
+    useModeStore.setState({ mode: "practice" });
+    useOperatorSignalStore.setState({
+      decisionStatus: "down",
+      layaPracticeStatus: "down",
+      layaLiveQualified: false,
+      layaReason: "download_failed",
+      layaPort: 8000,
+    });
+    render(<DeskStatusCluster />);
+    const chip = screen.getByTestId("laya-surface");
+    expect(chip).toHaveTextContent("Laya Down");
+    expect(chip).toHaveAttribute("title", "Check your connection, then Start Laya again.");
+    fireEvent.click(chip);
+    const reason = screen.getByTestId("laya-reason");
+    expect(reason).toHaveTextContent("Can't download the model");
+    expect(reason).not.toHaveTextContent("Wrong model version");
+    expect(screen.getByTestId("laya-reason-tooltip")).toHaveTextContent(
+      "Check your connection, then Start Laya again.",
+    );
+  });
+
   it("names a port clash in the tooltip", () => {
     useModeStore.setState({ mode: "practice" });
     useOperatorSignalStore.setState({

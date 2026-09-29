@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import errno
 import hashlib
 import inspect
 import json
@@ -50,6 +51,9 @@ _LOG = logging.getLogger("flinttrade.laya")
 LAYA_WEIGHTS_LOG = "laya weights path=%s sha256=%s"
 LAYA_WEIGHTS_DRIFT_LOG = "laya weights path=%s changed=%s"
 LAYA_DOWNLOAD_LOG = "laya download repo=%s revision=%s"
+# A checkpoint moved aside during a swap. The random suffix keeps the name
+# off the launch path. Leftovers match this prefix and are removed at start.
+_OLD_CHECKPOINT_PREFIX = "checkpoint.old-"
 LAYA_WATCH_INTERVAL_SECONDS = 1.5
 LAYA_PINNED_WEIGHT_BOOTSTRAP = textwrap.dedent(
     """\
@@ -926,6 +930,21 @@ def _staged_download_refusal(directory: Path, check: ArtifactCheck, policy: Any)
     )
 
 
+def _rename_directory(src: Path, dst: Path) -> None:
+    """Rename ``src`` onto ``dst`` on the same filesystem.
+
+    ``dst`` must not exist. Replacing a directory in place fails on Linux
+    when the target is not empty, and on Windows when the target exists.
+    ``os.replace`` is atomic for a missing destination and raises
+    ``EXDEV`` rather than copying onto another filesystem.
+    """
+    if dst.exists():
+        raise OSError(errno.EEXIST, "refusing to replace an existing directory")
+    if src.stat().st_dev != dst.parent.stat().st_dev:
+        raise OSError(errno.EXDEV, "checkpoint rename crossed filesystems")
+    os.replace(src, dst)
+
+
 def _materialise_tree(directory: Path) -> None:
     """Copy symlink targets into ``directory`` and drop its private hub cache.
 
@@ -947,30 +966,6 @@ def _materialise_tree(directory: Path) -> None:
         path.write_bytes(data)
     if cache.exists():
         shutil.rmtree(cache)
-
-
-def _relocate_check(check: ArtifactCheck, source: Path, dest: Path) -> ArtifactCheck:
-    """Point a staging hash at the launch directory. Rename keeps the inode."""
-
-    def relocate(path: str) -> str:
-        relative = Path(path).resolve().relative_to(source.resolve())
-        return str(dest / relative)
-
-    weights = relocate(check.weights_path) if check.weights_path else ""
-    inode, size, mtime_ns = _file_identity(Path(weights)) if weights else (0, 0, 0)
-    files: list[PinnedFile] = []
-    for item in check.files:
-        path = relocate(item.path)
-        file_inode, file_size, file_mtime = _file_identity(Path(path))
-        files.append(replace(item, path=path, inode=file_inode, size=file_size, mtime_ns=file_mtime))
-    return replace(
-        check,
-        weights_path=weights,
-        inode=inode,
-        size=size,
-        mtime_ns=mtime_ns,
-        files=tuple(files),
-    )
 
 
 class LayaRuntime:
@@ -1083,8 +1078,9 @@ class LayaRuntime:
             self._clear_run_record()
             self._launch_refusal = None
             self._weight_drift = None
+            self._settle_checkpoint_dirs()
             weighed = self._weigh_before_launch(policy)
-            if self._artifact_checker is None and _pinned_files_missing(policy, self.checkpoint_dir):
+            if self._artifact_checker is None and self._checkpoint_needs_download(policy, weighed):
                 weighed = self._download_then_weigh(policy)
             if self._weights_block_launch(weighed):
                 self._refuse_before_launch(weighed)
@@ -1568,11 +1564,15 @@ class LayaRuntime:
         raise LayaRuntimeError(_launch_refusal_message(check))
 
     def _download_then_weigh(self, policy: Any) -> ArtifactCheck:
-        """Download into staging, hash it there, and rename it into place.
+        """Download into staging, hash it there, and swap it into place.
 
         A failed or incomplete download deletes the staging directory and
-        leaves the shared cache alone. A pre-existing incomplete snapshot
+        leaves the shared cache alone. When a runtime checkpoint is already
+        on disk, that failure is ``download_failed`` and the old tree is
+        not re-weighed. With no runtime checkpoint, a pre-existing snapshot
         is still reported as itself. An empty cache is ``download_failed``.
+        A staging tree whose hashes do not match is ``wrong_revision``.
+        The sidecar starts only after the launch directory matches the pin.
         """
         self._downloading = True
         try:
@@ -1580,6 +1580,8 @@ class LayaRuntime:
             downloaded = self._download_checkpoint(policy)
             if not downloaded:
                 self._discard_staging()
+                if self.checkpoint_dir.exists():
+                    self._refuse_download()
                 existing = self._weigh_before_launch(policy)
                 if existing.weights_path:
                     self._refuse_before_launch(existing)
@@ -1605,7 +1607,19 @@ class LayaRuntime:
             except OSError:
                 self._discard_staging()
                 self._refuse_download()
-            return _relocate_check(staged, self.staging_dir, self.checkpoint_dir)
+            try:
+                placed = verify_model_directory(
+                    self.checkpoint_dir,
+                    revision=policy.revision,
+                    filename=policy.weight_file,
+                    expected_sha256=policy.sha256,
+                    manifest=tuple(policy.manifest),
+                )
+            except OSError:
+                self._refuse_download()
+            if not placed.ok:
+                self._refuse_before_launch(placed)
+            return placed
         finally:
             self._downloading = False
 
@@ -1714,6 +1728,65 @@ class LayaRuntime:
         engine.apply_runtime_status(DecisionStatus.DOWN, live_qualified=False)
         engine.set_runtime_reason(LAYA_REASON_DOWNLOADING, self._port, progress=(done, total))
 
+    def _old_checkpoints(self) -> list[Path]:
+        """Leftover ``checkpoint.old-*`` directories, oldest name first."""
+        try:
+            children = list(self.runtime_root.iterdir())
+        except OSError:
+            return []
+        found = [
+            child
+            for child in children
+            if child.name.startswith(_OLD_CHECKPOINT_PREFIX) and not child.is_symlink() and child.is_dir()
+        ]
+        return sorted(found, key=lambda path: path.name)
+
+    def _fresh_old_checkpoint_path(self) -> Path:
+        """A ``checkpoint.old-<random>`` path that does not exist yet."""
+        for _ in range(8):
+            candidate = self.runtime_root / f"{_OLD_CHECKPOINT_PREFIX}{secrets.token_hex(8)}"
+            if not candidate.exists():
+                return candidate
+        raise OSError("could not choose a checkpoint.old name")
+
+    def _remove_old_checkpoint(self, path: Path) -> None:
+        """Delete one aside copy that is a direct child of the runtime directory."""
+        try:
+            if path.parent.resolve() != self.runtime_root.resolve():
+                return
+        except OSError:
+            return
+        if not path.name.startswith(_OLD_CHECKPOINT_PREFIX) or path.is_symlink() or not path.is_dir():
+            return
+        shutil.rmtree(path, ignore_errors=True)
+
+    def _settle_checkpoint_dirs(self) -> None:
+        """Drop stale staging and aside copies before a start. No chip, no log.
+
+        A crash between the two renames leaves ``checkpoint`` missing and a
+        ``checkpoint.old-*`` directory behind. That copy is renamed back
+        first. If the restore itself fails, the only copy stays where it is.
+        """
+        if not self.checkpoint_dir.exists():
+            olds = self._old_checkpoints()
+            if olds:
+                try:
+                    _rename_directory(olds[-1], self.checkpoint_dir)
+                except OSError:
+                    return
+        if self.checkpoint_dir.exists():
+            self._discard_staging()
+            for leftover in self._old_checkpoints():
+                self._remove_old_checkpoint(leftover)
+            return
+        self._discard_staging()
+
+    def _checkpoint_needs_download(self, policy: Any, weighed: ArtifactCheck) -> bool:
+        """True when the pin is absent, or the on-disk checkpoint is the wrong revision."""
+        if _pinned_files_missing(policy, self.checkpoint_dir):
+            return True
+        return self.checkpoint_dir.is_dir() and weighed.reason == "wrong_revision"
+
     def _discard_staging(self) -> None:
         """Delete the staging directory. The launch path and the cache stay."""
         staging = self.staging_dir
@@ -1725,25 +1798,33 @@ class LayaRuntime:
             shutil.rmtree(staging)
 
     def _move_staging_into_place(self) -> None:
-        """Rename staging onto the launch directory. Both sit on one filesystem."""
+        """Swap a verified staging tree onto the launch directory.
+
+        The current checkpoint is renamed to ``checkpoint.old-<random>`` in
+        the same runtime directory, staging is renamed onto ``checkpoint``,
+        then the old copy is deleted. Replacing a directory in place fails
+        on Linux when the target is not empty, and on Windows when the
+        target exists, so the destination of each rename must be missing.
+        If the second rename fails, the old checkpoint is renamed back.
+        Both renames stay on one filesystem.
+        """
         staging = self.staging_dir
         launch = self.checkpoint_dir
         if not staging.is_dir():
             raise OSError("staging directory is missing")
         if not launch.exists():
-            os.rename(staging, launch)
+            _rename_directory(staging, launch)
             return
-        aside = self.runtime_root / "checkpoint.aside"
-        if aside.exists():
-            shutil.rmtree(aside)
-        os.rename(launch, aside)
+        aside = self._fresh_old_checkpoint_path()
+        _rename_directory(launch, aside)
         try:
-            os.rename(staging, launch)
+            _rename_directory(staging, launch)
         except OSError:
             if not launch.exists() and aside.exists():
-                os.rename(aside, launch)
+                _rename_directory(aside, launch)
+            self._discard_staging()
             raise
-        shutil.rmtree(aside, ignore_errors=True)
+        shutil.rmtree(aside)
 
     def _refuse_download(self) -> None:
         """Chip for a download that did not finish. Does not return."""

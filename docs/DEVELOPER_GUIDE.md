@@ -547,19 +547,31 @@ does not start the sidecar. While it runs, the reason is `downloading`
 and the popover is `Downloading the model · 1.2 of 3.4 GB` (live, one
 decimal, decimal GB), with no Next line. Orders stay on the Down
 refusal. It then hashes `model.safetensors` and every manifest file in
-that staging directory. A full match renames the directory onto
-`<workspace>/runtime/laya/checkpoint` and launches the offline verified
-boot, with hub access off. A complete download whose files do not match
-the pin is `wrong_revision`. An extra loadable file in a complete download
-is `unverified`. A dropped connection, a partial or missing file, or a
-read error is `download_failed` ("Can't download the model"; tooltip
-"Check your connection, then Start Laya again."). The status word for
-`downloading` and `download_failed` is Down, not Still loading, and orders
-use "Laya is Down. Orders are paused until it's Ready." Any of those
-failures deletes the staging directory and does not touch anything else
-in the model cache. The sidecar does not start. If the download does not
-finish and an older snapshot is already in the cache, that snapshot is
-checked as itself; an empty cache is `download_failed`. The
+that staging directory. A full match renames any current
+`<workspace>/runtime/laya/checkpoint` aside to `checkpoint.old-<random>`
+in the same runtime directory, renames staging onto `checkpoint`, deletes
+the old copy, and launches the offline verified boot, with hub access off.
+If that second rename fails, the old checkpoint is renamed back and the
+reason is `download_failed`, not `wrong_revision`. A complete download
+whose files do not match the pin is `wrong_revision`; staging is deleted
+and a checkpoint already on disk is left in place. An extra loadable file
+in a complete download is `unverified`. A dropped connection, a partial
+or missing file, or a read error is `download_failed` ("Can't download
+the model"; tooltip "Check your connection, then Start Laya again.").
+The status word for `downloading` and `download_failed` is Down, not
+Still loading, and orders use "Laya is Down. Orders are paused until
+it's Ready." Any of those failures deletes the staging directory and
+does not touch anything else in the model cache. The sidecar does not
+start, including on a checkpoint whose hashes do not match the pin. If
+the download does not finish and there is no runtime checkpoint, an
+older snapshot in the cache is checked as itself; an empty cache is
+`download_failed`. A runtime checkpoint that does not match the pin is
+replaced by this download; if the download does not finish, that
+checkpoint stays and the reason is `download_failed`. Leftover staging
+directories and `checkpoint.old-*` copies are removed at the start of
+`start`, with no chip change and no message. If `checkpoint` is missing
+and a `checkpoint.old-*` copy remains, that copy is restored and then
+checked against the pin. The
 download log line is `laya download repo=<repo> revision=<revision>`.
 The pins live in `laya_policy.toml`:
 `[checkpoint]` names `revision` beside `sha256`, the weights file `model.safetensors`, and
@@ -579,8 +591,10 @@ modification time in nanoseconds
 also in `run.json`). When the files are already on disk and this start is not replacing them,
 a missing pinned file, a shard index, or any extra weights file or other
 file the launcher could read is `unverified` ("Can't verify the model")
-and the sidecar does not start. A changed byte is `wrong_revision`
-("Wrong model version") and the sidecar does not start. Neither case
+and the sidecar does not start. A changed byte in a snapshot this start
+is not replacing is `wrong_revision` ("Wrong model version") and the
+sidecar does not start. A changed byte in the runtime checkpoint is the
+upgrade above; the sidecar does not start on that tree. Neither case
 reaches Ready. A verified boot sets
 `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
@@ -615,10 +629,11 @@ the model, and Can't reach Laya. `<n>` is the sidecar port. Tooltips for
 has no tooltip. The `download_failed` tooltip is "Check your connection,
 then Start Laya again." The `wrong_revision` tooltip is "Laya is running a different model than
 FlintTrade expects." That code is only a real mismatch: a complete
-download whose files do not match the pin, a changed byte already on
-disk, or a running sidecar that claims another revision or digest. A
-dropped connection or a partial download is `download_failed`, not this
-code. The `key_rejected`
+download whose files do not match the pin, a changed byte in a snapshot
+this start is not replacing, or a running sidecar that claims another
+revision or digest. A dropped connection, a partial download, or a failed
+upgrade that puts the previous checkpoint back is `download_failed`, not
+this code. The `key_rejected`
 tooltip is "Laya restarted with a new key. Reconnecting…" The chip stays
 Down and orders are refused. When a place is refused because Laya cannot
 be reached, or because it rejects the key, the chip updates on that same

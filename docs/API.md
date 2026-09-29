@@ -534,10 +534,11 @@ tooltip is "Check your connection, then Start Laya again." The
 the pinned version. Restart Laya. If it keeps happening, reinstall it."
 The `wrong_revision` tooltip is "Laya is running a different model than
 FlintTrade expects." That code is only a real mismatch: a complete
-download whose files do not match the pin, a changed byte already on
-disk, or a running sidecar that claims another revision or digest. A
-dropped connection or a partial download is `download_failed`, not this
-code. The `key_rejected`
+download whose files do not match the pin, a changed byte in a snapshot
+this start is not replacing, or a running sidecar that claims another
+revision or digest. A dropped connection, a partial download, or a failed
+upgrade that puts the previous checkpoint back is `download_failed`, not
+this code. The `key_rejected`
 tooltip is "Laya restarted with a new key. Reconnecting…" The chip stays
 Down and orders are refused. When a place is refused because Laya cannot
 be reached, or because it rejects the key, the chip updates on that same
@@ -555,22 +556,32 @@ modification time (`<workspace>/runtime/laya/verification.json`, with the
 token and pid also in `run.json`). When the files are already on disk and this start is not replacing them,
 a missing pinned file, a shard index, or any extra weights file or other
 file the launcher could read is `unverified` ("Can't verify the model")
-and the sidecar does not start. A changed byte is `wrong_revision`
-("Wrong model version") and the sidecar does not start. Neither case
-reaches Ready. When the weights file or a
-manifest file is not on disk, `start` downloads the pinned revision
-without starting the sidecar, into `<workspace>/runtime/laya/staging`,
-then hashes those files there. The download asks for the pinned commit
-in `[checkpoint] revision`, not the default branch. A full match renames
-that directory onto `<workspace>/runtime/laya/checkpoint`. A failed or
-incomplete download (a dropped connection, a partial or missing file, or
-a read error) is `download_failed`. A complete download whose files do
-not match the pin is `wrong_revision`. An extra loadable file in a
-complete download is `unverified`. Any of those failures deletes the
-staging directory and does not touch the rest of the model cache. The
-sidecar is not started until the move, and that launch keeps hub access
-off. If the download does not finish and an older snapshot is already in
-the cache, that snapshot is checked as itself.
+and the sidecar does not start. A changed byte in a snapshot this start
+is not replacing is `wrong_revision` ("Wrong model version") and the
+sidecar does not start. A changed byte in the runtime checkpoint does
+not start the sidecar. `start` downloads the pinned revision into
+`<workspace>/runtime/laya/staging` and, on a full match, renames that
+checkpoint aside to `checkpoint.old-<random>` in the same runtime
+directory, renames staging onto `checkpoint`, then deletes the old copy.
+If that second rename fails, the old checkpoint is renamed back and the
+reason is `download_failed`, not `wrong_revision`. A complete download
+whose files do not match the pin is `wrong_revision`, staging is deleted,
+and the checkpoint already on disk stays. An extra loadable file in a
+complete download is `unverified`. A dropped connection, a partial or
+missing file, or a read error is `download_failed`. The sidecar never
+starts on a checkpoint whose hashes do not match the pin. Neither case
+reaches Ready. When the weights file or a manifest file is not on disk,
+the same download runs without starting the sidecar. The download asks
+for the pinned commit in `[checkpoint] revision`, not the default branch.
+A full match renames staging onto `checkpoint`. The sidecar is not
+started until the move, and that launch keeps hub access off. If the
+download does not finish and there is no runtime checkpoint, an older
+snapshot in the cache is checked as itself. Any failure deletes the
+staging directory and does not touch the rest of the model cache.
+Leftover staging directories and `checkpoint.old-*` copies are removed
+at the start of `start`, with no chip change. If `checkpoint` is missing
+and a `checkpoint.old-*` copy remains, that copy is restored and then
+checked against the pin.
 The download log line is `laya download repo=<repo> revision=<revision>`.
 A verified boot sets
 `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
