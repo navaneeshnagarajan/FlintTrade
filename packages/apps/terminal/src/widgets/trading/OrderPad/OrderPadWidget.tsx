@@ -44,12 +44,17 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { searchSymbol, placeOrder, getSymbol } from "@/services/api";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { searchSymbol, placeOrder, getSymbol, OrderApiError } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useMargin } from "@/hooks/useMargin";
 import { useOrders } from "@/hooks/useOrders";
 import { usePositions } from "@/hooks/usePositions";
-import { EXIT_ALREADY_PENDING, contractHasOpenExit } from "@/widgets/trading/Positions/positionReconcile";
+import {
+  contractHasOpenExit,
+  exitAlreadyPendingMessage,
+  orderRefusalMessage,
+} from "@/widgets/trading/Positions/positionReconcile";
 import { useBrokerCapabilities } from "@/hooks/useBrokerCapabilities";
 import {
   checkLotMultiple,
@@ -769,7 +774,15 @@ function OrderPadWidget(props: WidgetProps) {
         return false;
       }
       setAdmission(null);
-      const msg = err instanceof Error ? err.message : "Order failed";
+      const code = err instanceof OrderApiError && err.body && typeof err.body === "object" && "code" in err.body
+        && typeof (err.body as { code?: unknown }).code === "string"
+        ? (err.body as { code: string }).code
+        : undefined;
+      const msg = orderRefusalMessage(
+        code,
+        getValues("symbol"),
+        err instanceof Error ? err.message : "Order failed",
+      );
       const httpStatus = err instanceof Error && "status" in err && typeof err.status === "number"
         ? err.status
         : null;
@@ -1186,17 +1199,42 @@ function OrderPadWidget(props: WidgetProps) {
         {/* Order type */}
         <div className="flex flex-col gap-0.5">
           <label className="text-xxs text-text-muted uppercase tracking-wider">Order Type</label>
-          <Controller
-            control={control}
-            name="orderType"
-            render={({ field }) => (
-              <PillGroup
-                value={field.value}
-                options={ORDER_TYPES}
-                onChange={field.onChange}
-              />
-            )}
-          />
+          <div className="flex items-center gap-1">
+            <Controller
+              control={control}
+              name="orderType"
+              render={({ field }) => (
+                <PillGroup
+                  value={field.value}
+                  options={ORDER_TYPES}
+                  onChange={field.onChange}
+                  className="flex-1"
+                />
+              )}
+            />
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0} className="shrink-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled
+                      title="GTT orders aren't supported right now."
+                      aria-label="GTT"
+                      className="h-8 text-xs border-border-default text-text-muted cursor-not-allowed opacity-60"
+                    >
+                      GTT
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-56 text-xs">
+                  GTT orders aren&apos;t supported right now.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </div>
 
         {/* Options premium hint — shown for options exchanges (NFO/BFO) */}
@@ -1516,7 +1554,7 @@ function OrderPadWidget(props: WidgetProps) {
         ) : null}
         {exitAlreadyPending ? (
           <p className="text-xs text-loss" data-testid="exit-already-pending">
-            {EXIT_ALREADY_PENDING}
+            {exitAlreadyPendingMessage(symbol)}
           </p>
         ) : null}
         <Button

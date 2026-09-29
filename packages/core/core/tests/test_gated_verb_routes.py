@@ -2,8 +2,8 @@
 
 Covers the routes that expose ``BrokerRouter.execute_gated``'s 12-verb table:
 
-- ``/api/v1/orders/forever`` (place via the gated trio with ``variety="gtt"``,
-  modify/cancel via ``modify_forever`` / ``cancel_forever``, plus the listing)
+- ``/api/v1/orders/forever`` (place is refused; modify/cancel via
+  ``modify_forever`` / ``cancel_forever``, plus the listing)
 - ``/api/v1/orders/super`` (list / ``modify_super_order`` / ``cancel_super_order``)
 - ``/api/v1/orders/triggers`` (conditional trigger place/modify/cancel/list)
 - ``/api/v1/orders/multi`` (``place_multi_order``) and the gated
@@ -330,13 +330,14 @@ def test_gated_target_uses_execution_default_only_when_target_omitted(*, backend
 
 
 def test_forever_place_routes_variety_gtt_with_oco_fields(*, backend_lease_factory) -> None:
-    """GTT fields ride POST /place. POST /forever does not call the broker."""
+    """GTT is refused on place. POST /forever does not call the broker."""
     from flinttrade_engine.laya import DecisionStatus, process_laya
 
     process_laya().set_status(DecisionStatus.READY)
     router = MagicMock()
     router.place_order = AsyncMock(return_value="GTT-77")
-    client = _app(broker_router=router, safety=_passing_safety(), backend_lease_factory=backend_lease_factory).test_client()
+    safety = _passing_safety()
+    client = _app(broker_router=router, safety=safety, backend_lease_factory=backend_lease_factory).test_client()
     body = {
         "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 1,
         "pricetype": "LIMIT", "price": "2900", "trigger_price": "2890",
@@ -348,18 +349,15 @@ def test_forever_place_routes_variety_gtt_with_oco_fields(*, backend_lease_facto
     assert refused.status_code == 501
     router.place_order.assert_not_called()
     resp = client.post("/api/v1/orders/place", json=body, headers=_live_headers())
-    assert resp.status_code == 200
-    assert resp.get_json()["status"] == "success"
-    kw = router.place_order.await_args.kwargs
-    order = kw["order"]
-    assert order.variety == "gtt"
-    assert order.validity == "DAY"
-    assert (order.price1, order.trigger_price1, order.quantity1) == ("2800", "2805", "5")
-    assert kw["hint"].adapter_id == "dhan"
+    assert resp.status_code == 422
+    assert resp.get_json()["code"] == "gtt_unsupported"
+    assert resp.get_json()["message"] == "Not placed. GTT orders aren't supported right now."
+    router.place_order.assert_not_called()
+    safety.check_order.assert_not_called()
 
 
 def test_forever_place_keeps_upstox_protective_rules_inside_gated_order(*, backend_lease_factory) -> None:
-    """Upstox TARGET/STOPLOSS prices survive typing and SafetyContext minting."""
+    """An Upstox GTT body is refused before SafetySystem or the router."""
     from flinttrade_engine.laya import DecisionStatus, process_laya
 
     process_laya().set_status(DecisionStatus.READY)
@@ -379,25 +377,17 @@ def test_forever_place_keeps_upstox_protective_rules_inside_gated_order(*, backe
         "target_trigger_type": "IMMEDIATE",
         "stop_loss_trigger_type": "IMMEDIATE",
         "product": "CNC",
-        "variety": "gtt",
+        "variety": "GTT",
         "broker": "upstox",
         "account_id": "U1",
     }
 
     resp = client.post("/api/v1/orders/place", json=body, headers=_live_headers())
 
-    assert resp.status_code == 200
-    kw = router.place_order.await_args.kwargs
-    order = kw["order"]
-    assert order.variety == "gtt"
-    assert order.target_price == "3100"
-    assert order.stop_loss_price == "2800"
-    assert order.entry_trigger_type == "ABOVE"
-    assert order.target_trigger_type == "IMMEDIATE"
-    assert order.stop_loss_trigger_type == "IMMEDIATE"
-    assert kw["hint"].adapter_id == "upstox"
-    assert kw["hint"].account_id == "U1"
-    safety.check_order.assert_called_once()
+    assert resp.status_code == 422
+    assert resp.get_json()["code"] == "gtt_unsupported"
+    router.place_order.assert_not_called()
+    safety.check_order.assert_not_called()
 
 
 def test_forever_place_rejects_dhan_oco_fields_for_upstox(*, backend_lease_factory) -> None:

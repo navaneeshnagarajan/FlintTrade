@@ -692,6 +692,9 @@ def _verify_setup_session_token(token: str) -> dict[str, Any] | tuple[Any, int]:
 _RECOVERY_REQUIRES_AUTHENTICATOR = (
     "Account recovery requires your password and the current authenticator code."
 )
+_SIGN_IN_TO_RESET_PASSWORD = (
+    "Sign in to reset this account. You'll need your password."
+)
 _SIGN_IN_TO_RESET = (
     "Sign in to reset this account. You'll need your password and authenticator code."
 )
@@ -703,8 +706,10 @@ def _finished_account_recovery_refusal(svc: Any, body: dict[str, Any], token: st
     Before authenticator enrolment, first-run reset and regeneration keep
     their existing session rules. Once an authenticator is enrolled, recovery
     needs that session, the password, and the current authenticator code.
-    A signed-out request on a finished account returns a sign-in message
-    rather than a generic authentication refusal. An API key is not a session.
+    A signed-out request on a finished account returns a sign-in message.
+    The sentence includes an authenticator code only when one is enrolled,
+    and the response carries ``authenticator_enrolled``. An API key is not
+    a session. There is no separate enrolment probe.
     Returns an error response, or ``None`` when the caller may continue.
     Nothing is changed on refusal.
     """
@@ -717,8 +722,16 @@ def _finished_account_recovery_refusal(svc: Any, body: dict[str, Any], token: st
         enrolled = True
     if _operator_session_payload(token) is None:
         if enrolled:
-            return jsonify({"status": "error", "message": _SIGN_IN_TO_RESET}), 403
-        return jsonify({"status": "error", "message": "Authentication required."}), 401
+            return jsonify({
+                "status": "error",
+                "message": _SIGN_IN_TO_RESET,
+                "authenticator_enrolled": True,
+            }), 403
+        return jsonify({
+            "status": "error",
+            "message": _SIGN_IN_TO_RESET_PASSWORD,
+            "authenticator_enrolled": False,
+        }), 401
     if not enrolled:
         return None
     password = str(body.get("password", ""))

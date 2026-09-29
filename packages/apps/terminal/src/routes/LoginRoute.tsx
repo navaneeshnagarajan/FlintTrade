@@ -198,7 +198,10 @@ export default function LoginRoute({
           <div className="flex justify-center">
             <LogoIcon size={40} className="text-accent" />
           </div>
-          <TwoFactorRecovery onBack={() => setRecovering(false)} />
+          <TwoFactorRecovery
+            onBack={() => setRecovering(false)}
+            authenticatorEnrolled={totpEnabled}
+          />
         </div>
       </div>
     );
@@ -584,7 +587,19 @@ function PasswordReset({ onBack }: { onBack: () => void }) {
 // 2FA recovery — a finished account must already be signed in.
 // ---------------------------------------------------------------------------
 
-function TwoFactorRecovery({ onBack }: { onBack: () => void }) {
+export function signedOutResetCopy(authenticatorEnrolled: boolean): string {
+  return authenticatorEnrolled
+    ? "Sign in to reset this account. You'll need your password and authenticator code."
+    : "Sign in to reset this account. You'll need your password.";
+}
+
+function TwoFactorRecovery({
+  onBack,
+  authenticatorEnrolled,
+}: {
+  onBack: () => void;
+  authenticatorEnrolled: boolean;
+}) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -689,7 +704,7 @@ function TwoFactorRecovery({ onBack }: { onBack: () => void }) {
       <div className="text-center space-y-1">
         <h1 className="font-heading font-bold text-xl text-text-primary">Reset your 2FA</h1>
         <p className="text-sm text-text-muted">
-          Lost your authenticator? Confirm your password to get a fresh QR and backup codes.
+          {signedOutResetCopy(authenticatorEnrolled)}
         </p>
       </div>
 

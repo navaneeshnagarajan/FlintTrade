@@ -2738,14 +2738,18 @@ def positions_exit_all() -> tuple[Any, int]:
     from .order_routes import (  # noqa: PLC0415
         _gated_target,
         _gated_verb_write,
+        _gtt_contract_refusal,
         _prove_exit_all_reduce_only,
         _require_live_payload,
     )
 
+    body = request.get_json(silent=True) or {}
+    gtt_refusal = _gtt_contract_refusal(body)
+    if gtt_refusal is not None:
+        return gtt_refusal
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
-    body = request.get_json(silent=True) or {}
     if body.get("confirm") is not True:
         return jsonify(
             {

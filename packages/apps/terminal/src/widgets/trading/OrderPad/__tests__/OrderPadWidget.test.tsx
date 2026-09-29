@@ -432,6 +432,40 @@ describe("OrderPadWidget", () => {
     );
   });
 
+  it("keeps GTT visible and disabled", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    const gtt = screen.getByRole("button", { name: "GTT" });
+    expect(gtt).toBeDisabled();
+    expect(gtt).toHaveAttribute("title", "GTT orders aren't supported right now.");
+  });
+
+  it("shows the GTT refusal when a stale client is rejected", async () => {
+    mockPlaceOrder.mockRejectedValue(new OrderApiError("rejected", 422, {
+      code: "gtt_unsupported",
+      message: "Not placed. GTT orders aren't supported right now.",
+    }));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    await reviewAndConfirmPractice(/practice buy/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Not placed. GTT orders aren't supported right now.",
+    );
+  });
+
+  it("shows the unreadable-book exit refusal", async () => {
+    mockPlaceOrder.mockRejectedValue(new OrderApiError("rejected", 409, {
+      code: "exit_orders_unreadable",
+      message: "Not placed. One exit at a time for NIFTY until your broker's orders load.",
+    }));
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    await reviewAndConfirmPractice(/practice buy/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Not placed. One exit at a time for NIFTY until your broker's orders load.",
+    );
+  });
+
   it("does not send Close while an exit for the contract is pending", async () => {
     mockOpenPositions.rows = [{
       symbol: "NIFTY",
@@ -453,7 +487,7 @@ describe("OrderPadWidget", () => {
     render(<OrderPadWidget {...defaultProps} />);
     await screen.findByText("Lot: 1");
     expect(screen.getByTestId("exit-already-pending")).toHaveTextContent(
-      "An exit for this contract is already pending.",
+      "Not placed. An exit for NIFTY is already pending. Wait for it to fill, or cancel it and try again.",
     );
     const close = screen.getByTestId("orderpad-close");
     expect(close).toBeDisabled();

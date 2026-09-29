@@ -121,7 +121,8 @@ import {
 import { useOrders } from "@/hooks/useOrders";
 import { usePositions } from "@/hooks/usePositions";
 import {
-  EXIT_ALREADY_PENDING,
+  exitAlreadyPendingMessage,
+  orderRefusalMessage,
   EXIT_PENDING_TAG,
   UNEXPECTED_POSITION_TAG,
   contractHasOpenExit,
@@ -597,7 +598,7 @@ function ExitAllDialog({
               key: `${position.symbol}-${position.exchange}-${position.product}`,
               symbol: label,
               notice: null,
-              message: EXIT_ALREADY_PENDING,
+              message: exitAlreadyPendingMessage(label),
             });
             continue;
           }
@@ -659,7 +660,7 @@ function ExitAllDialog({
         return;
       }
       if (openRows.some((position) => hasPendingExit(position))) {
-        setErrorMsg(EXIT_ALREADY_PENDING);
+        setErrorMsg(exitAlreadyPendingMessage(openRows.find((position) => hasPendingExit(position))?.symbol ?? ""));
         return;
       }
       await postWithMode("positions/exit-all", {
@@ -1088,10 +1089,19 @@ function PositionsWidget(props: WidgetProps) {
       });
       refreshPositions(identity, getCurrentReadIdentity);
     } catch (err) {
+      const code = err && typeof err === "object" && "body" in err
+        && err.body && typeof err.body === "object" && "code" in err.body
+        && typeof err.body.code === "string"
+        ? err.body.code
+        : undefined;
       emitNotification({
         category: "alert",
         title: "Close failed",
-        body: err instanceof Error ? err.message : "Close failed.",
+        body: orderRefusalMessage(
+          code,
+          position.symbol,
+          err instanceof Error ? err.message : "Close failed.",
+        ),
       });
     }
   }, [appMode, getCurrentReadIdentity, isSquareOffAllowed, orders, refreshPositions]);
@@ -1116,7 +1126,7 @@ function PositionsWidget(props: WidgetProps) {
               void closeReduced(position);
             }}
             aria-label={`Close ${position.symbol}`}
-            title={exitPending ? EXIT_ALREADY_PENDING : `Close ${position.symbol} at market`}
+            title={exitPending ? exitAlreadyPendingMessage(position.symbol) : `Close ${position.symbol} at market`}
             className="h-5 px-1.5 text-xxs gap-1 text-text-primary hover:bg-surface-hover"
           >
             Close
@@ -1135,7 +1145,7 @@ function PositionsWidget(props: WidgetProps) {
               });
             }}
             aria-label={`Square off ${position.symbol}`}
-            title={exitPending ? EXIT_ALREADY_PENDING : `Square off ${position.symbol} at market`}
+            title={exitPending ? exitAlreadyPendingMessage(position.symbol) : `Square off ${position.symbol} at market`}
             className="h-5 px-1.5 text-xxs gap-1 text-loss hover:bg-loss/10 hover:text-loss"
           >
             <SquareX size={10} aria-hidden="true" /> Square off

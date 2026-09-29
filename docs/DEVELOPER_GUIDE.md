@@ -479,9 +479,10 @@ The only submit routes are `POST /api/v1/orders/place`,
 sandbox; a refusal or a quantity clamp stops before the sandbox. A
 Practice close and a Practice square-off are opposite orders on place.
 The sandbox routes cancel and modify only. Settings → Practice does not
-place. Live operator and automate **place**, including
-`"variety": "gtt"`, is checked when it's placed: Mode guard →
-`Laya.admit` → SafetySystem L1–L5 → `gate_order` → `BrokerRouter`.
+place. Live operator and automate **place** is checked when it's
+placed: Mode guard → `Laya.admit` → SafetySystem L1–L5 → `gate_order`
+→ `BrokerRouter`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported`
+before that path, on place, routed place, and exit-all.
 Exit-all records a server reduce-only proof before `exit_all_positions`.
 `cancel-all` only cancels. Explore
 placement is refused by the backend (`mode_blocked`); Order Pad Sample

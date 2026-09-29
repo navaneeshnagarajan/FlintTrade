@@ -154,11 +154,10 @@ under `[packages]` / gateway metadata. The 2026-05 sync added
   broker 'X' yet") on the OpenAlgo service itself. FlintTrade still
   registers `/api/v1/orders/gtt-{place,modify,cancel}` so Explore and
   Practice are refused; Live `gtt-*` returns HTTP 501 rather than
-  forwarding that upstream 501. A GTT order is `"variety": "gtt"` on
-  `POST /api/v1/orders/place`. Every order FlintTrade submits goes
-  through admission when it's placed. On Live, that place is checked by
-  Laya admission and then SafetySystem. `POST /api/v1/orders/forever`
-  does not place.
+  forwarding that upstream 501. A body with `"variety": "gtt"` on
+  place, routed place, or exit-all is HTTP 422 `gtt_unsupported`
+  before Laya, SafetySystem, and any broker call.
+  `POST /api/v1/orders/forever` does not place.
 - **New exchanges** — `NCO` (NSE Commodities), `MCX_INDEX`, `GLOBAL_INDEX`.
 - **WhatsApp bot** — `POST /api/v1/whatsapp/notify` exists upstream in
   OpenAlgo. FlintTrade no longer proxies or exposes it: WhatsApp support was

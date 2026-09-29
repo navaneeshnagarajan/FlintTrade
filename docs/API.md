@@ -60,11 +60,11 @@ the mode gate runs, but those verbs are **not** gated like regular
 rejected GTT — the sandbox does not simulate price triggers. Live requires
 the unlocked JWT, then `gtt-*` returns HTTP 501 (they do not call
 `gate_order` → `BrokerRouter`, and they do not forward an upstream
-OpenAlgo 501). A GTT order is placed on `POST /api/v1/orders/place`
-with `"variety": "gtt"`. Every order FlintTrade submits goes through
-admission when it's placed. On Live, that place is checked by Laya
-admission and then SafetySystem. `POST /api/v1/orders/forever` does not
-place one.
+OpenAlgo 501). A body with `"variety": "gtt"` (any case or separator
+spelling) on place, routed place, or exit-all is HTTP 422
+`gtt_unsupported`: `Not placed. GTT orders aren't supported right now.`
+That refusal is before Laya, SafetySystem, and any broker call.
+`POST /api/v1/orders/forever` does not place one.
 
 | Endpoint | Purpose |
 |---|---|
@@ -156,8 +156,8 @@ adjusts virtual capital and square-off times; it does not place.
 
 | Route | What it does |
 |---|---|
-| `POST /api/v1/orders/place` | The only place route for Practice and Live. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. A GTT body sets `"variety": "gtt"` and uses that same admission on the place. On Live that place is checked by Laya admission and then SafetySystem. Practice place, including that body, stays Laya then the sandbox. Explore is HTTP 403 `mode_blocked`. |
-| `POST /api/v1/orders/<broker>/place` | Live only. `<broker>` is the adapter id. The same dispatcher admits through Laya and then runs SafetySystem on that place, including a body with `"variety": "gtt"`. A non-Live session is HTTP 400 (`The routed order path serves live mode only. Use /api/v1/orders/place for explore/practice.`). |
+| `POST /api/v1/orders/place` | The only place route for Practice and Live. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before that admission. Explore is HTTP 403 `mode_blocked`. |
+| `POST /api/v1/orders/<broker>/place` | Live only. `<broker>` is the adapter id. The same dispatcher admits through Laya and then runs SafetySystem on that place. `"variety": "gtt"` is HTTP 422 `gtt_unsupported` before admission, including when the variety spelling differs only by case or separators. A non-Live session is HTTP 400 (`The routed order path serves live mode only. Use /api/v1/orders/place for explore/practice.`). |
 | `POST /api/v1/positions/exit-all` | Live, PIN-unlocked. Body must include boolean `"confirm": true` or the route returns HTTP 400. The server classifies every open contract and records a reduce-only proof before the gated `exit_all_positions` verb. A row that is not an exit stops the request with HTTP 409 and `Square-off stopped because a position is not a reduce-only exit.` An unreadable book still records one reduce-only proof. |
 
 `POST /api/v1/orders/cancel-all` cancels open orders. Practice cancels
@@ -174,8 +174,11 @@ this desk's own pending exits, and the close can still qualify. When the
 position book cannot be read, the place is not classified as a close.
 A second exit while one of this desk's exits on that contract is still
 unfilled is HTTP 409 `exit_pending`, with `message` and `reason` both
-`An exit for this contract is already pending.` The Positions row shows
-**Exit pending**.
+`Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again.`
+When that second exit is refused because the broker order book cannot be
+read, the code is `exit_orders_unreadable` and the message is
+`Not placed. One exit at a time for <symbol> until your broker's orders load.`
+The Positions row shows **Exit pending** for `exit_pending`.
 
 While Laya is Down, a new order is paused and a qualifying close is still
 admitted. Live still runs SafetySystem after that record. The desk line is
@@ -510,7 +513,7 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 | `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. |
 | `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and an Explore setup-session JWT (`setup_session`). That token is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for Explore and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. |
 | `POST auth/setup/vault` | Open the credential vault during first-run Setup. Requires the account-create setup-session JWT. Daily-login tokens are rejected. Body `{ "master_password" }` (at least 8 characters when the vault file is missing). Persists the secret when it is missing and leaves an existing secret untouched. Success is `{ "opened": true, "already_present": bool }` under `data`. The response never returns the secret. |
-| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Before authenticator enrolment, the account-create setup JWT can start over with an empty body, and a session plus the password can wipe the account. Once an authenticator is enrolled, recovery requires an active session, the password, and the current authenticator code (`totp_code`). An API key is not a session. A signed-out request on a finished account is HTTP 403 `Sign in to reset this account. You'll need your password and authenticator code.` and changes nothing. A successful wipe bumps the account epoch, so other session tokens stop working. |
+| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Before authenticator enrolment, the account-create setup JWT can start over with an empty body, and a session plus the password can wipe the account. Once an authenticator is enrolled, recovery requires an active session, the password, and the current authenticator code (`totp_code`). An API key is not a session. A signed-out request on a finished account changes nothing. When an authenticator is enrolled the response is HTTP 403 `Sign in to reset this account. You'll need your password and authenticator code.` Otherwise it is HTTP 401 `Sign in to reset this account. You'll need your password.` The body includes `authenticator_enrolled`. A successful wipe bumps the account epoch, so other session tokens stop working. |
 | `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret and clear `totp_enabled` until a live code is confirmed again. Before enrolment, a session and the password are enough. Once an authenticator is enrolled, the current authenticator code is required as well. A signed-out request on a finished account returns the same sign-in message as reset and changes nothing. |
 | `POST auth/login` | Sign in with password (argon2id-hashed). `totp_code` (or a backup code) is required only after authenticator enrolment (`totp_enabled`). Issues a JWT. |
 | `POST auth/totp/enable` | Confirm optional authenticator enrolment. Session-bound. Body `{ "totp_code" }`. Sets `totp_enabled`; later logins then require a TOTP or backup code. |
@@ -718,6 +721,8 @@ authenticator is enrolled, account recovery requires an active session,
 the password, and the current authenticator code (`totp_code`). A
 signed-out reset or authenticator change on a finished account returns
 `Sign in to reset this account. You'll need your password and authenticator code.`
+when an authenticator is enrolled, and `Sign in to reset this account. You'll need your password.`
+when it is not. The body includes `authenticator_enrolled`.
 A successful wipe bumps the account epoch. `POST /v1/auth/totp/enable`,
 `/pin`, `/pin/set`, `/mode`, and `/logout` are not on the list: they need
 an existing session JWT and return 401 without one. `POST /csp-report` is
@@ -808,7 +813,7 @@ the guard returns one of three verdicts:
 |---|---|
 | `explore` | Reject order placement with HTTP 403 and `code: "mode_blocked"`. Explore is for reading, learning, and demo data only. |
 | `practice` | Route supported single-leg order flows to FlintTrade's native `SandboxEngine`; never touch OpenAlgo or a broker. Practice **place** is admitted by `Laya.admit` before that sandbox. A Down refusal or a quantity clamp returns before any fill. Advanced executor-direct routes that do not yet have sandbox parity fail closed with `practice_unsupported`. |
-| `live` | Require a JWT with `live_mode_unlocked=true`. The only submit routes are `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, and `POST /api/v1/positions/exit-all`. Both place routes run `Laya.admit` before SafetySystem, then the gated `BrokerRouter`. Every order FlintTrade submits goes through admission when it's placed. On Live, a GTT order with `"variety": "gtt"` is checked by Laya admission and then SafetySystem on that place. Exit-all records a server reduce-only proof before `exit_all_positions`. Modify and cancel go through the gated router without this place admission. `cancel-all` only cancels, through `cancel_all_orders`, and does not create an order. `POST /api/v1/orders/forever`, basket, split, options-strategy, and conditional-trigger place return HTTP 501 and do not place; each leg belongs on `POST /api/v1/orders/place`. `gtt-*` returns HTTP 501 and does not forward to OpenAlgo. A Practice close is an opposite order on `POST /api/v1/orders/place`. |
+| `live` | Require a JWT with `live_mode_unlocked=true`. The only submit routes are `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, and `POST /api/v1/positions/exit-all`. Both place routes run `Laya.admit` before SafetySystem, then the gated `BrokerRouter`. Every order FlintTrade submits goes through admission when it's placed, except a GTT body (`"variety": "gtt"`, any case or separator spelling), which is HTTP 422 `gtt_unsupported` on all three submit routes before Laya, SafetySystem, and any broker call. Exit-all records a server reduce-only proof before `exit_all_positions`. Modify and cancel go through the gated router without this place admission. `cancel-all` only cancels, through `cancel_all_orders`, and does not create an order. `POST /api/v1/orders/forever`, basket, split, options-strategy, and conditional-trigger place return HTTP 501 and do not place; each leg belongs on `POST /api/v1/orders/place`. `gtt-*` returns HTTP 501 and does not forward to OpenAlgo. A Practice close is an opposite order on `POST /api/v1/orders/place`. |
 
 `POST /v1/auth/mode` issues a fresh JWT and revokes the previous `jti`,
 but it accepts **only** downgrades to `practice` or `explore`. Switching
@@ -1051,7 +1056,9 @@ Not every endpoint emits `code`:
 | `mode_blocked` | Explore (or another blocked mode) tried a blocked action — HTTP 403. Covers the core `/api/v1/orders/*` proxy Explore refusals, `mode_guard` order-capable engine routes, FlintTrade `POST /api/v1/telegram` when JWT `mode` or `X-FlintTrade-Mode` is `explore`, `POST /api/v1/ditto/mirror/start` and `POST /api/v1/ditto/kill-all` Explore refusals, and `POST /api/v1/cron/jobs/<name>/pause` plus `…/resume` Explore refusals (same header/claim gate). Explore place stays on this code. |
 | `laya_denied` | Operator place was refused by `Laya.admit` before SafetySystem or the Practice sandbox — HTTP 403. Body: `status: "error"`, `code: "laya_denied"`, `message` and `reason` (the same server text), and `limits.max_quantity`. There is no `applied_quantity`. |
 | `laya_clamp` | Operator place asked for more than the active quantity ceiling — HTTP 409. Body: `status: "error"`, `code: "laya_clamp"`, `message` (`Qty reduced to <applied_quantity> (Laya limit)`), `reason` (empty string), `limits.max_quantity`, and `applied_quantity`. Neither quantity is placed. The caller places `applied_quantity` itself if it still wants that size. |
-| `exit_pending` | A second reduce-only exit while one of this desk's exits on that contract is still unfilled — HTTP 409. `message` and `reason` are `An exit for this contract is already pending.` |
+| `exit_pending` | A second reduce-only exit while one of this desk's exits on that contract is still unfilled and the broker book can be read — HTTP 409. `message` and `reason` are `Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again.` |
+| `exit_orders_unreadable` | That second exit while the broker order book cannot be read — HTTP 409. `message` and `reason` are `Not placed. One exit at a time for <symbol> until your broker's orders load.` |
+| `gtt_unsupported` | `"variety": "gtt"` (any case or separator spelling) on place, routed place, or exit-all — HTTP 422. `message` is `Not placed. GTT orders aren't supported right now.` The refusal is before Laya, SafetySystem, and any broker call. |
 | `practice_unsupported` | Practice JWT hit an executor-direct route with no sandbox parity — HTTP 403. |
 | `live_locked` | A `mode_guard` Live path requires `live_mode_unlocked=true`, issued by the Live switch `POST /v1/auth/live`. |
 | HTTP 429, message `Rate limit exceeded` | FlintTrade `@rate_limit` on the order proxy. No `RATE_LIMIT_EXCEEDED` enum. |
@@ -1064,9 +1071,9 @@ error as HTTP 422 with that result under `data`. A strategy dispatch
 raises the server `message` and does not place the reduced quantity.
 Modify, cancel, and cancel-all are not admitted as place. Forever,
 basket, split, and conditional-trigger place do not submit; the legs go
-through `POST /api/v1/orders/place`. A GTT order on that route sets
-`"variety": "gtt"`. On Live it is checked by Laya admission and then
-SafetySystem when it's placed. Chat is not an admission source.
+through `POST /api/v1/orders/place`. A GTT body on place, routed
+place, or exit-all is HTTP 422 `gtt_unsupported` before that admission.
+Chat is not an admission source.
 Details of the place path are in [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 Auth failures are typically HTTP 401 with a `message` (expired, revoked,

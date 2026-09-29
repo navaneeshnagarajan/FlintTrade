@@ -4,7 +4,9 @@ The place pipeline calls this. A client flag is not an input. Live also
 counts the broker order book when that book can be read. When it cannot,
 the cap is the open quantity minus our own pending exits, and the order
 can still qualify. A second exit while one of ours is already unfilled
-is refused by the caller with ``EXIT_ALREADY_PENDING``.
+is refused by the caller. A readable book uses
+``exit_already_pending_message``. An unreadable broker book uses
+``exit_orders_unreadable_message``.
 """
 
 from __future__ import annotations
@@ -37,8 +39,24 @@ _EXIT_CLOSED = frozenset({
     "EXPIRED",
 })
 
-# One sentence for the desk and the place route. Copy may be adjusted here.
-EXIT_ALREADY_PENDING = "An exit for this contract is already pending."
+def exit_already_pending_message(contract: str) -> str:
+    """Copy when this desk's exit on ``contract`` is still unfilled.
+
+    The Positions row keeps its Exit pending tag for this case.
+    """
+    label = str(contract or "").strip() or "this contract"
+    return (
+        f"Not placed. An exit for {label} is already pending. "
+        "Wait for it to fill, or cancel it and try again."
+    )
+
+
+def exit_orders_unreadable_message(contract: str) -> str:
+    """Copy when a further exit must wait because the broker book cannot be read."""
+    label = str(contract or "").strip() or "this contract"
+    return (
+        f"Not placed. One exit at a time for {label} until your broker's orders load."
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -17,6 +17,18 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ## [Unreleased]
 
+### Changed
+
+- **GTT is refused on every submit route.** `"variety": "gtt"`, in any
+  case or separator spelling, is HTTP 422 `gtt_unsupported` on place,
+  routed place, and exit-all, before Laya, SafetySystem, and any broker
+  call. The message is `Not placed. GTT orders aren't supported right now.`
+  Dhan place does not call `/forever/orders` or `/super/orders`. Kotak Neo
+  refuses GTT. A second exit while this desk's exit is unfilled is
+  `exit_pending`. When the broker order book cannot be read, that refusal
+  is `exit_orders_unreadable`. A signed-out reset names an authenticator
+  code only when one is enrolled.
+
 ### Added
 
 - **Mode honesty bar.** One line under the TopBar for Explore, Practice,
@@ -67,10 +79,8 @@ changelog rebuilds itself from the first release cut after this baseline.
   of the Laya, strategy, benchmark, and training readers. `GET /healthz`
   and `GET /readyz` are public and return status only.
 
-- **GTT admission is at place.** Every order FlintTrade submits goes
-  through admission when it's placed. On Live, a GTT order with
-  `"variety": "gtt"` is checked by Laya admission and then SafetySystem
-  on that place.
+- **GTT is not admitted at place.** Submit routes refuse
+  `"variety": "gtt"` before Laya and SafetySystem.
 
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
   The required path is Create operator, then Vault, then the Practice

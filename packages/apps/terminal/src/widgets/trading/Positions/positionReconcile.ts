@@ -1,11 +1,28 @@
 /**
  * Position-book reconcile for one contract.
  *
- * ``EXIT_ALREADY_PENDING`` must stay in step with
- * ``EXIT_ALREADY_PENDING`` in ``flinttrade_engine.reduce_only``.
+ * Exit copy must stay in step with ``exit_already_pending_message`` and
+ * ``exit_orders_unreadable_message`` in ``flinttrade_engine.reduce_only``.
  */
 
-export const EXIT_ALREADY_PENDING = "An exit for this contract is already pending.";
+export const GTT_UNSUPPORTED_MESSAGE = "Not placed. GTT orders aren't supported right now.";
+
+export function exitAlreadyPendingMessage(contract: string): string {
+  const label = contract.trim() || "this contract";
+  return `Not placed. An exit for ${label} is already pending. Wait for it to fill, or cancel it and try again.`;
+}
+
+export function exitOrdersUnreadableMessage(contract: string): string {
+  const label = contract.trim() || "this contract";
+  return `Not placed. One exit at a time for ${label} until your broker's orders load.`;
+}
+
+export function orderRefusalMessage(code: string | undefined, contract: string, fallback: string): string {
+  if (code === "exit_pending") return exitAlreadyPendingMessage(contract);
+  if (code === "exit_orders_unreadable") return exitOrdersUnreadableMessage(contract);
+  if (code === "gtt_unsupported") return GTT_UNSUPPORTED_MESSAGE;
+  return fallback;
+}
 
 export const EXIT_PENDING_TAG = "Exit pending";
 

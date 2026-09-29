@@ -18,7 +18,8 @@ from flinttrade_core.auth_routes import _create_token
 from flinttrade_core.order_routes import orders_bp, place_order
 from flinttrade_engine.laya import LAYA_DOWN_REASON, DecisionStatus, process_laya, reset_process_laya_for_tests
 from flinttrade_engine.reduce_only import (
-    EXIT_ALREADY_PENDING,
+    exit_already_pending_message,
+    exit_orders_unreadable_message,
     classify_reduce_only,
     reset_reduce_only_for_tests,
 )
@@ -176,8 +177,8 @@ def test_a_second_practice_exit_is_refused_while_one_is_pending() -> None:
         body = refused.get_json()
         assert refused.status_code == 409, body
         assert body["code"] == "exit_pending"
-        assert body["message"] == EXIT_ALREADY_PENDING
-        assert body["reason"] == EXIT_ALREADY_PENDING
+        assert body["message"] == exit_already_pending_message("INFY")
+        assert body["reason"] == exit_already_pending_message("INFY")
         assert engine.get_positions()[0]["net_qty"] == 10
     assert process_laya().decision_log() == ()
 
@@ -373,9 +374,9 @@ def test_live_unreadable_book_is_capped_by_our_exits_and_a_second_exit_is_refuse
         )
         body = refused.get_json()
         assert refused.status_code == 409, body
-        assert body["code"] == "exit_pending"
-        assert body["message"] == EXIT_ALREADY_PENDING
-        assert body["reason"] == EXIT_ALREADY_PENDING
+        assert body["code"] == "exit_orders_unreadable"
+        assert body["message"] == exit_orders_unreadable_message("INFY")
+        assert body["reason"] == exit_orders_unreadable_message("INFY")
         assert body.get("code") != "laya_denied"
     safety.check_order.assert_not_called()
     assert process_laya().decision_log() == ()

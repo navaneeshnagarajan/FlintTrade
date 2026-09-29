@@ -1078,7 +1078,10 @@ class TestSetupSessionReset:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 401
-        assert resp.get_json()["message"] == "Authentication required."
+        assert resp.get_json()["message"] == (
+            "Sign in to reset this account. You'll need your password."
+        )
+        assert resp.get_json()["authenticator_enrolled"] is False
         assert svc.is_setup() is True
         assert svc.get_profile()["username"] == "nav"
 
@@ -1139,7 +1142,10 @@ class TestSetupRegenerateRequiresSession:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 401
-        assert resp.get_json()["message"] == "Authentication required."
+        assert resp.get_json()["message"] == (
+            "Sign in to reset this account. You'll need your password."
+        )
+        assert resp.get_json()["authenticator_enrolled"] is False
         assert svc.get_totp_secret() == before
         assert "totp_uri" not in resp.get_data(as_text=True)
 
@@ -1326,7 +1332,9 @@ class TestEnrolledAccountRecovery:
         assert reset.get_json()["message"] == (
             "Sign in to reset this account. You'll need your password and authenticator code."
         )
+        assert reset.get_json()["authenticator_enrolled"] is True
         assert regenerate.get_json()["message"] == reset.get_json()["message"]
+        assert regenerate.get_json()["authenticator_enrolled"] is True
         assert svc.is_setup() is True
         assert svc.get_profile()["username"] == "nav"
         assert svc.get_totp_secret() == before

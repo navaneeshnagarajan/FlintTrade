@@ -45,11 +45,11 @@ An allowed Practice place is admitted, then goes to the native sandbox. It
 does not enter SafetySystem, `gate_order`, or `BrokerRouter`. The routed
 place route is Live only and uses the same Live admission. Modify and
 cancel are not this admission. `POST /api/v1/orders/cancel-all` only
-cancels. On Live, a GTT order placed with `"variety": "gtt"` is checked
-by Laya admission and then SafetySystem on that place. It is not
-`POST /api/v1/orders/forever` (that route returns HTTP 501 and does not
-place). A Practice body with that variety is the Practice place above:
-Laya, then the sandbox, and not SafetySystem.
+cancels. A body with `"variety": "gtt"` is HTTP 422 `gtt_unsupported`
+before Laya, SafetySystem, and any broker call, on place, routed place,
+and exit-all. It is not `POST /api/v1/orders/forever` (that route
+returns HTTP 501 and does not place). Practice and Live both refuse
+that variety before the sandbox or a broker.
 
 **Regular modify and cancel:**
 
@@ -100,9 +100,9 @@ require the operator to place that reduced quantity. An automate clamp is
 a dispatcher error and does not place the reduced quantity on its own.
 Chat is not an admission source. Modify, cancel, and cancel-all are not
 admitted as place. Forever place, basket, split, and conditional-trigger
-place do not submit. A GTT order FlintTrade submits is `"variety": "gtt"`
-on place. On Live that place is checked by Laya admission and then
-SafetySystem.
+place do not submit. A GTT body is refused on every submit route
+before Laya admission and SafetySystem. Dhan place does not call
+`/forever/orders` or `/super/orders`.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down. New orders are paused until it's Ready. You can still close positions.").
@@ -119,8 +119,10 @@ qualifying close with proof kind `reduce_only` and does not deny or clamp
 it. Down and Degraded do not block it. Live still runs
 SafetySystem after that record. A second exit while one of this desk's
 exits on that contract is still unfilled is HTTP 409 `exit_pending`:
-"An exit for this contract is already pending." The Positions row shows
-**Exit pending**. A position whose sign flips after the broker book has
+"Not placed. An exit for <symbol> is already pending. Wait for it to fill, or cancel it and try again."
+When the broker order book cannot be read, that refusal is HTTP 409
+`exit_orders_unreadable`: "Not placed. One exit at a time for <symbol> until your broker's orders load."
+The Positions row shows **Exit pending** for the unfilled-exit case. A position whose sign flips after the broker book has
 loaded keeps that row, tagged **Unexpected**, and the book shows
 `Position changed after your broker's orders loaded. You're now <long or short> <quantity> <symbol>. Close it if that wasn't intended.`
 until dismissed.

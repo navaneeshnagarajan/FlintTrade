@@ -385,10 +385,11 @@ safety chain. The only submit routes are `POST /api/v1/orders/place`,
 flatten verb). Explore placement is refused by the backend
 (`mode_blocked`); Order Pad Sample Buy is a local client fill (no HTTP
 order route, no Laya admit, no SafetySystem). Operator and automate
-**place** run the mode guard, then `Laya.admit`. Live place, including
-`"variety": "gtt"`, is checked by Laya admission and then SafetySystem
-L1–L5, `gate_order`, and `BrokerRouter` on that place. A refusal or a
-quantity clamp stops before SafetySystem.
+**place** run the mode guard, then `Laya.admit`. Live place is checked
+by Laya admission and then SafetySystem L1–L5, `gate_order`, and
+`BrokerRouter` on that place. `"variety": "gtt"` is HTTP 422
+`gtt_unsupported` before that admission, on place, routed place, and
+exit-all. A refusal or a quantity clamp stops before SafetySystem.
 Practice place is admitted before `SandboxEngine` and does not enter
 those Live layers. Practice square-off is place. The sandbox book
 cancels and modifies; it does not place. `cancel-all` only cancels.
@@ -419,9 +420,9 @@ Position Mirror start. Degraded leaves Live open and enforces a tighter
 quantity ceiling. Chat is not an admission source. Modify, cancel,
 smart, multi, forever modify and cancel, and the other non-place write
 verbs still reach SafetySystem without this place admission.
-`POST /api/v1/orders/forever` does not place. A GTT order FlintTrade
-submits is `"variety": "gtt"` on place, checked on Live by Laya
-admission and then SafetySystem when it's placed. Laya starts Down; the three
+`POST /api/v1/orders/forever` does not place. A GTT body is refused
+before Laya, SafetySystem, and any broker call, including Dhan
+`/forever/orders` and `/super/orders`. Laya starts Down; the three
 statuses are Ready, Degraded, and Down. The desk ping publishes the
 stored status and does not invent Ready. Ready and Degraded are recorded
 by `Laya.set_status`. See [ORDER_SAFETY.md](ORDER_SAFETY.md).
@@ -653,10 +654,12 @@ paths are distinct from specialised env overrides: `DATA_DIR` only affects
 - PIN unlock (`POST /v1/auth/pin`) revokes the presented `jti` and
   returns a new token. The previous token stops working. The Live
   switch does the same rotation when it enters Live.
-- Reset of a finished account needs an active session, the password,
-  and the current authenticator code. The wipe bumps `epoch`, so other
-  sessions end. A signed-out reset is refused with "Sign in to reset
-  this account. You'll need your password and authenticator code."
+- Reset of a finished account needs an active session. Once an
+  authenticator is enrolled it also needs the password and the current
+  authenticator code. The wipe bumps `epoch`, so other sessions end. A
+  signed-out reset is refused with "Sign in to reset this account.
+  You'll need your password." When an authenticator is enrolled, that
+  sentence also asks for the authenticator code.
 - Revocation blocklist keyed by `jti` in
   `packages/core/core/src/flinttrade_core/auth_state.py`.
 - Non-public routes accept a session JWT or `FLINTTRADE_API_KEY`. An

@@ -514,19 +514,35 @@ def _quantity_from_body(body: Mapping[str, Any]) -> int:
     return 0
 
 
-def _exit_pending_response() -> tuple[Any, int]:
-    """Refuse a second exit while one of ours is still unfilled.
+def _contract_label(body: Mapping[str, Any]) -> str:
+    """Symbol shown in an exit refusal. Empty bodies say ``this contract``."""
+    symbol = str(body.get("symbol") or "").strip()
+    return symbol or "this contract"
 
-    The sentence lives in ``EXIT_ALREADY_PENDING`` so the copy can change
-    in one place.
-    """
-    from flinttrade_engine.reduce_only import EXIT_ALREADY_PENDING  # noqa: PLC0415
 
+def _exit_pending_response(contract: str) -> tuple[Any, int]:
+    """Refuse a second exit while one of ours is still unfilled."""
+    from flinttrade_engine.reduce_only import exit_already_pending_message  # noqa: PLC0415
+
+    message = exit_already_pending_message(contract)
     return jsonify({
         "status": "error",
         "code": "exit_pending",
-        "message": EXIT_ALREADY_PENDING,
-        "reason": EXIT_ALREADY_PENDING,
+        "message": message,
+        "reason": message,
+    }), 409
+
+
+def _exit_orders_unreadable_response(contract: str) -> tuple[Any, int]:
+    """Refuse another exit while the broker order book cannot be read."""
+    from flinttrade_engine.reduce_only import exit_orders_unreadable_message  # noqa: PLC0415
+
+    message = exit_orders_unreadable_message(contract)
+    return jsonify({
+        "status": "error",
+        "code": "exit_orders_unreadable",
+        "message": message,
+        "reason": message,
     }), 409
 
 
@@ -782,7 +798,10 @@ def _prepare_live_reduce_only(
             )
             cover_reserved_exit(key, covered)
         if _own_exit_pending(body, positions, our_orders, reserved_exit(key)):
-            return _exit_pending_response(), None
+            label = _contract_label(body)
+            if broker_orders is None:
+                return _exit_orders_unreadable_response(label), None
+            return _exit_pending_response(label), None
         block, qualified = _admit_place(
             body,
             mode=_MODE_LIVE,
@@ -2396,7 +2415,7 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
     sandbox = current_app.config.get("DATA_SANDBOX_ENGINE")
     positions, orders = _practice_books(sandbox)
     if _own_exit_pending(body, positions, orders):
-        return _exit_pending_response()
+        return _exit_pending_response(_contract_label(body))
     laya_block, _qualified = _admit_place(
         body,
         mode=_MODE_PRACTICE,
@@ -2493,12 +2512,41 @@ def _variety_from_body(body: Mapping[str, Any]) -> str | None:
     return text or None
 
 
+GTT_UNSUPPORTED_MESSAGE = "Not placed. GTT orders aren't supported right now."
+
+
+def _gtt_variety_token(raw: object) -> str:
+    """Fold case and separators so ``GTT``, ``g.t.t`` and ``g t t`` match."""
+    if not isinstance(raw, str):
+        return ""
+    return "".join(ch for ch in raw.casefold() if ch.isalnum())
+
+
+def _gtt_contract_refusal(body: Mapping[str, Any]) -> tuple[Any, int] | None:
+    """Refuse ``variety`` GTT before Laya, SafetySystem, or any broker call.
+
+    Any case or separator spelling of ``gtt`` is the same refusal. Other
+    varieties continue.
+    """
+    if _gtt_variety_token(body.get("variety")) != "gtt":
+        return None
+    return jsonify({
+        "status": "error",
+        "code": "gtt_unsupported",
+        "message": GTT_UNSUPPORTED_MESSAGE,
+    }), 422
+
+
 def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tuple[Any, int]:
     """Admit one live or Practice place, then SafetySystem or the sandbox.
 
     This is the only request entry that may create an order. A GTT body
-    (``variety="gtt"``) uses the same admission as a regular place.
+    is refused here, before Practice, Laya, or a live broker place.
     """
+    payload_body = body if body is not None else (request.get_json(silent=True) or {})
+    gtt_refusal = _gtt_contract_refusal(payload_body)
+    if gtt_refusal is not None:
+        return gtt_refusal
     mode = _get_mode_from_jwt()
     mismatch = _mode_header_mismatch_response(mode, route_label="Order request to /place")
     if mismatch is not None:
@@ -2516,7 +2564,6 @@ def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tup
                 "Expected one of: explore, practice, live"
             ),
         }), 400
-    payload_body = body if body is not None else (request.get_json(silent=True) or {})
     if mode == _MODE_EXPLORE:
         return jsonify({
             "status": "error",
@@ -2538,10 +2585,6 @@ def _dispatch_live_place_from_request(body: dict[str, Any] | None = None) -> tup
         }), 401
     adapter_id, account_id = _gated_target(payload_body)
     variety = _variety_from_body(payload_body)
-    if variety == "gtt":
-        contract_error = _forever_contract_error(payload_body, adapter_id)
-        if contract_error is not None:
-            return jsonify({"status": "error", "message": contract_error}), 400
     return _dispatch_live_order(
         "place",
         payload_body,
@@ -2637,7 +2680,11 @@ def place_order() -> tuple[Any, int]:
         JSON with ``status``, ``order_id``, and ``message``.
         HTTP 200 on success, 400/403/500/502 on error.
     """
-    return _dispatch_live_place_from_request()
+    body = request.get_json(silent=True) or {}
+    refusal = _gtt_contract_refusal(body)
+    if refusal is not None:
+        return refusal
+    return _dispatch_live_place_from_request(body)
 
 
 def _decode_request_payload() -> dict[str, Any] | None:
@@ -2706,12 +2753,21 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
         actor not authorised / verification failed), 503 (routing unavailable or
         the broker is not connected yet).
     """
+    body = request.get_json(silent=True) or {}
+    refusal = _gtt_contract_refusal(body)
+    if refusal is not None:
+        return refusal
     payload, error = _decode_routed_live_payload()
     if error is not None:
         return error
 
-    body = request.get_json(silent=True) or {}
-    return _dispatch_live_order("place", body, payload, adapter_id=broker)
+    return _dispatch_live_order(
+        "place",
+        body,
+        payload,
+        adapter_id=broker,
+        variety=_variety_from_body(body),
+    )
 
 
 @orders_bp.route("/modify", methods=["POST"])

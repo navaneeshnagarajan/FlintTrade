@@ -1084,7 +1084,9 @@ describe("PositionsWidget", () => {
         target: { value: "EXIT" },
       });
       fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
-      expect(screen.getByText("An exit for this contract is already pending.")).toBeInTheDocument();
+      expect(screen.getByText(
+        "Not placed. An exit for INFY is already pending. Wait for it to fill, or cancel it and try again.",
+      )).toBeInTheDocument();
       expect(mockPlaceOrder).not.toHaveBeenCalled();
     });
 
