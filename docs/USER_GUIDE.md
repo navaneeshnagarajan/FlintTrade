@@ -731,38 +731,82 @@ for unauthenticated visitors only (FT-HOME-003).
 
 ### Home
 
-The Home greeting card stays on the dashboard. Until the signed-in name
-is known, its line is plain `Good morning`, `Good afternoon`, or
-`Good evening` from the Asia/Kolkata hour. Once that name is known, the
-line uses it. There is no greeting toast.
+The Home greeting card stays on the dashboard. It uses the saved display
+name. When that name is missing, or it is the placeholder `Trader`, the
+greeting uses the username, unless the username is missing or is also
+`Trader`. Until a name is known, the line is plain `Good morning`,
+`Good afternoon`, or `Good evening` from the Asia/Kolkata hour. The card
+never greets the operator as `Trader`. Editing the display name replaces
+the greeting. There is no greeting toast.
 
 Home and Invest share one net-worth figure: ledger cash, plus the market
 value of holdings, plus open positions, minus charges. Ledger cash includes
-blocked margin. It is not the available margin. Charges come from the
-account book and are 0 in Practice for now. Options add signed market
-value, because the premium has already gone through cash. Futures add
-unrealised P&L, from the last settlement price when that ledger already
-includes earlier days' mark-to-market, and from the entry price when it
-does not. Equity positions that are not already holdings add signed market
-value. The positions note reads
+blocked margin. It is not the available margin, so opening an F&O position
+does not reduce Net Worth by its margin. Charges come from the account
+book and are 0 in Practice for now. Options add signed market value
+(last traded price × quantity when that price is positive, otherwise the
+entry price × quantity). A long is positive and a short is negative,
+because the premium has already gone through cash. Equity positions that
+are not already holdings do the same. A flat position adds nothing.
+Futures add unrealised P&L (last traded price minus a base, times signed
+quantity):
+
+- Dhan's ledger already includes earlier days' mark-to-market. The base
+  is the mark-to-market average (`buyAvg` on a long, `sellAvg` on a
+  short). When that average is absent, the base is `costPrice`, and the
+  figure is approximate.
+- Kotak Neo's ledger also includes earlier days' mark-to-market, and an
+  open future has no settlement price. The base is the open-leg average,
+  and the figure is approximate.
+- Practice does not put futures mark-to-market into the ledger and has
+  no settlement price. The base is the entry price. Practice never marks
+  the figure approximate.
+
+The positions note, while the figure is exact, reads
 `Options at market value, futures at unrealised P&L.`
-When an open future is marked from the broker's fallback price, the
-figure, the positions line, and that total show `≈` before the amount,
-in the same size and colour, until the position is flat or the average
-arrives. The tooltip says earlier days' profit or loss may be counted
-twice. Allocation percentages are not marked approximate. Practice does
-not show `≈`.
-The Home portfolio card labels the total `Net Worth`. Invest Dashboard
-labels it `Net Worth (Cash + Holdings + Positions)`. The Net Worth view
-labels it `Known Total (Cash + Holdings + Positions)`. Those labels do not
-name charges; the figure still subtracts them.
+
+When an open future uses an estimated mark, the amount shows `≈` before
+the rupees, in the same size and colour. Dhan sets that mark when the
+base is `costPrice`. Kotak Neo sets it on an open future. Practice never
+sets it. It clears when that position goes flat or its mark is the
+average. One future names its symbol in the tooltip; two or more say the
+count, for example `2 futures positions`. For one future the tooltip is
+`Approximate. Your broker didn't send an average price for NIFTY-JUN2026-FUT, so profit or loss from earlier days may be counted twice.`
+using that future's symbol. For more than one it is
+`Approximate. Your broker didn't send an average price for 2 futures positions, so profit or loss from earlier days may be counted twice.`
+with the count in place of `2`.
+While the figure is approximate, this tooltip replaces the positions
+note on the same labels. The screen-reader name of the amount is
+`Net Worth, approximately …`, using the same rupee figure and no second
+`≈`. Allocation percentages are not marked.
+
+On Home, `≈` and that tooltip sit on the Net Worth amount. The `Net Worth`
+label carries the same tooltip. On Invest Dashboard, they sit on the
+amount labelled `Net Worth (Cash + Holdings + Positions)`. Available
+Funds on that dashboard uses the same amount format, so it also shows
+`≈`, and it has no tooltip. On the Net Worth view, they sit on the amount
+labelled `Known Total (Cash + Holdings + Positions)` and on the
+`Open Positions` line. That line is shown only when the positions
+contribution is above zero. The donut centre (`tracked`) shows `≈` on
+the same total and has no tooltip. Cash on that view is not marked.
+Those labels do not name charges; the figure still subtracts them.
 
 Home allocation shows a labelled Example split (Equity, MF, Gold, F&O)
 until funds, holdings, and positions have all loaded successfully. If any
 of those books is still loading or has failed, the split stays on that
-Example mix. After all three succeed, the bar is the account split: Cash,
-Positions, and Equity. The Example chip sits on that split only while it
-is the example mix.
+Example mix. The sample-data Home keeps that mix. After all three succeed
+on an account, the bar is the account split: Cash, Positions, and Equity.
+The Example chip sits on that split only while it is the example mix.
+While holdings or funds are still loading, Invest Dashboard shows
+`Loading portfolio data...` and the Net Worth view shows `—`. After
+those books settle, both leave the total as `—` until the position
+book has loaded. A position book that is still loading or has failed
+does not publish the total.
+
+The sample book does not wait on a position book. Home's Net Worth
+amount does not wait. A missing position book counts open positions as
+none, and Home draws that amount, including `≈`, only when it is above
+zero.
 
 ### Invest
 
@@ -798,7 +842,7 @@ state.
 Shareholding, ETF Screener, Social, ETFs, Risk-Return, and Correlation
 carry the Example chip. On Benchmark, index rows keep the Example chip.
 With real holdings, the series legend is `Your holdings (unrealised)`.
-Its tooltip reads
+That legend replaces `Your Portfolio (since first buy)`. Its tooltip reads
 `Gain or loss on the shares you hold now, compared with what you paid. Sold shares and dividends aren't included.`
 The comparison's accessible name is `Unrealised return on holdings`.
 The row carries no chip. When the holdings are
@@ -830,8 +874,9 @@ subline shows `XIRR —`. That figure has no Example chip.
 **Cash.** Available Funds on Dashboard is the balance left after blocked
 margin. The Net Worth view's Cash line is the ledger, including that
 blocked margin, so opening a position does not shrink the total by the
-margin. Both show full rupees, in Indian grouping, with no paise, in the
-same format as the net-worth headline.
+margin. Both show full rupees, in Indian grouping, with no paise.
+When the total is approximate, Available Funds shows `≈` as well.
+Cash on the Net Worth view does not.
 
 **Holdings and funds.** While the sample book is showing, the Invest
 header badge is `N holdings` and matches the table, with an Example chip.

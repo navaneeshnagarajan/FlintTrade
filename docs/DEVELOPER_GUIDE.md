@@ -524,6 +524,49 @@ locally but break on every other contributor's machine.
 Each data shape enters through one path only. Duplicate data across
 stores and you guarantee a bug.
 
+### Home and Invest net worth
+
+Home and Invest share `accountNetWorth` in
+`packages/apps/terminal/src/lib/accountNetWorth.ts`. The total is ledger
+cash, including blocked margin, plus holdings at market value, plus each
+open position, minus charges. Opening an F&O position does not reduce
+the total by its margin. Options, and equity positions that are not
+already holdings, add signed market value: last traded price × quantity
+when that price is positive, otherwise the entry price × quantity.
+Futures add unrealised P&L.
+
+Dhan's funds set `futures_mtm_in_ledger`. The futures base is `buyAvg`
+on a long and `sellAvg` on a short (`mark_source: "avg"`). When that
+average is absent, the base is `costPrice` and `mark_source` is
+`"fallback"`. Kotak Neo's funds also set `futures_mtm_in_ledger`. An
+open future has no settlement price, so the base is the open-leg
+average and `mark_source` is `"fallback"`. Practice sets
+`futures_mtm_in_ledger` false and does not set a mark source, so a
+future marks from the entry price.
+
+`"fallback"` on an open future, while earlier mark-to-market is already
+in the ledger, formats the amount with `≈` (`formatAccountNetWorth`).
+The tooltip is `approximateNetWorthTooltip`: one symbol is named, and
+several positions use `N futures positions`. The accessible name is
+`accountNetWorthAccessibleName` (`Net Worth, approximately …`). A flat
+quantity, or `mark_source: "avg"`, clears it. Practice never shows `≈`.
+Allocation percentages are not marked. Invest publishes the total only
+after the position book has loaded (`positionBookReady` in
+`InvestContext`). Home's amount does not wait on that book. Home
+allocation stays on the Example split until funds, holdings, and
+positions have all succeeded (`PortfolioCard`).
+
+The Home greeting is `useOperatorGreetingName` in
+`packages/apps/terminal/src/routes/home/operatorGreetingName.ts`. The
+saved display name wins. The username is the fallback. `Trader` is the
+unset placeholder and is never shown. Hour buckets are Asia/Kolkata in
+`getIstGreeting`.
+
+Real holdings on Benchmark use `HOLDINGS_RETURN_LEGEND`
+(`Your holdings (unrealised)`), with `HOLDINGS_RETURN_TOOLTIP` and
+table label `HOLDINGS_RETURN_LABEL` (`Unrealised return on holdings`).
+Example holdings stay `Your Portfolio` with the Example chip.
+
 ### OpenAlgo bugs to work around
 
 1. **Sandbox sends real orders for some brokers.** Verify isolation

@@ -57,6 +57,30 @@ changelog rebuilds itself from the first release cut after this baseline.
 
 ### Changed
 
+- **Home and Invest net worth, greeting, and benchmark legend.**
+  Home and Invest share one total: ledger cash, including blocked
+  margin, plus holdings at market value, plus open positions, minus
+  charges. Opening an F&O position does not reduce the total by its
+  margin. Options add signed market value. Futures add unrealised
+  P&L. Dhan marks from the mark-to-market average, or from `costPrice`
+  when that average is absent. Kotak Neo marks an open future from
+  the open-leg average. Practice marks a future from the entry price.
+  An estimated futures mark shows `≈`. Dhan does this for `costPrice`.
+  Kotak Neo does this for an open future. Practice never does. The
+  mark clears when that position is flat or the average arrives. The
+  tooltip names one symbol, or `2 futures positions` when two fall
+  back, and the screen-reader name is `Net Worth, approximately …`.
+  Allocation percentages are not marked. Available Funds on Dashboard
+  shows the same `≈`. Home allocation stays on the Example split until
+  funds, holdings, and positions have all loaded. Invest waits for the
+  position book before it publishes the total. Home's amount does not.
+  The greeting uses the saved display name, then the username, and
+  stays plain `Good morning` (or afternoon or evening) until a name
+  is known. It never uses `Trader`. On Benchmark, real holdings use
+  `Your holdings (unrealised)` instead of
+  `Your Portfolio (since first buy)`. Example holdings stay
+  `Your Portfolio` with the Example chip.
+
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
   The required path is Create operator, then Vault, then the Practice
   desk (Step N of 3). Affirming Practice lands on `/trade`.
@@ -305,7 +329,7 @@ changelog rebuilds itself from the first release cut after this baseline.
   Dashboard and "N stocks" use the same N. Practice waits
   until the holdings query has settled empty before the
   sample fallback, so a cold load does not flash the
-  wrong N. Dashboard `Net Worth (Equity + Cash)` uses the
+  wrong N. Dashboard `Net Worth (Cash + Holdings + Positions)` uses the
   same shared demo book as Holdings. There is no Sample
   chip on the Holdings table or header. When the sample
   book is shown — Explore always, and Practice after that
