@@ -11,12 +11,14 @@ import {
   FileEdit,
   LayoutGrid,
   Layers,
+  Plus,
   ShieldOff,
   Star,
   Table2,
   TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import WorkspaceSwitcher from "@/chrome/WorkspaceSwitcher";
 import { classifySerializedLayout, useLayoutStore } from "@/stores/layoutStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { useTradingStore } from "@/stores/tradingStore";
@@ -783,7 +785,60 @@ export default function TerminalRoute() {
   return (
     <CinematicLayout mode="focused">
     <div className="relative h-full flex flex-col text-text-primary overflow-hidden select-none">
-      <h1 className="sr-only">Trade Workspace</h1>
+      {/* Desk toolbar: the page name, the active workspace and the two ways
+          to change the canvas are always one click away. */}
+      <div
+        className="flex h-11 shrink-0 items-center gap-3 border-b border-border-default bg-surface-base px-3"
+        data-testid="desk-toolbar"
+      >
+        <h1 className="ft-text-card-title text-text-primary">Trade</h1>
+        <span aria-hidden="true" className="h-4 w-px bg-border-default" />
+        <WorkspaceSwitcher />
+        <div className="ml-auto flex items-center gap-1">
+          {progressive && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 text-xs text-text-secondary"
+              aria-expanded={toolsExpanded}
+              aria-label="Watchlist and desk tools"
+              data-testid="desk-tools-toggle"
+              onClick={() => {
+                const next = !toolsExpanded;
+                setToolsExpanded(next);
+                const api = useLayoutStore.getState().workspaceApi;
+                if (!api) return;
+                applyCompactDeskToolsDisclosure(api, next, buildCompactDesk);
+              }}
+            >
+              {toolsExpanded ? "Hide watchlist & tools" : "Watchlist & tools"}
+            </Button>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-8 text-xs text-text-secondary"
+            onClick={() => setWidgetPickerOpen(true)}
+            data-testid="desk-add-widget"
+          >
+            <Plus aria-hidden="true" />
+            Add widget
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-8 text-xs text-text-secondary"
+            onClick={() => setPresetPickerOpen(true)}
+            data-testid="desk-layouts"
+          >
+            <Layers aria-hidden="true" />
+            Layouts
+          </Button>
+        </div>
+      </div>
       <PracticeLaterSetup />
       {layoutPersistenceError && (
         <p
@@ -794,31 +849,10 @@ export default function TerminalRoute() {
           {layoutPersistenceError}
         </p>
       )}
-      {progressive && (
-        <div className="shrink-0 flex items-center justify-end gap-2 border-b border-border-default px-3 py-1">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs"
-            aria-expanded={toolsExpanded}
-            aria-label="Watchlist and desk tools"
-            data-testid="desk-tools-toggle"
-            onClick={() => {
-              const next = !toolsExpanded;
-              setToolsExpanded(next);
-              const api = useLayoutStore.getState().workspaceApi;
-              if (!api) return;
-              applyCompactDeskToolsDisclosure(api, next, buildCompactDesk);
-            }}
-          >
-            {toolsExpanded ? "Hide watchlist & tools" : "Watchlist & tools"}
-          </Button>
-        </div>
-      )}
       {/* Hint is not a primary banner — suppress it when Explore/Practice already owns the strip. */}
       {showRouteHint && (
         <RouteBanner
+          variant="strip"
           hintId="trade-shortcuts"
           text="Press Ctrl+K to open the command palette. Use X to exit all positions and C to cancel all orders."
         />
