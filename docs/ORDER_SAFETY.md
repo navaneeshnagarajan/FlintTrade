@@ -122,12 +122,17 @@ Chip reason codes are `not_started` (Not started), `stopped` (Stopped),
 `not_started`, `stopped`, `port_in_use`, `still_loading`, and
 `unreachable`, the tooltip is the label followed by
 `. Next: python -m flinttrade_core.laya_runtime start`. `downloading`
-has no tooltip. The `download_failed` tooltip is "Check your connection,
-then Start Laya again."
+has no tooltip and no Next line, and it is not Still loading. The
+`download_failed` tooltip is "Check your connection, then Start Laya again."
+`downloading` and `download_failed` use the status word Down. Orders are
+refused with "Laya is Down. Orders are paused until it's Ready."
 The `unverified` tooltip is "The installed model couldn't be checked
 against the pinned version. Restart Laya. If it keeps happening, reinstall
 it." The `wrong_revision` tooltip is "Laya is running a different model
-than FlintTrade expects." That code is only a real mismatch. The
+than FlintTrade expects." That code is only a real mismatch: a complete
+download whose files do not match the pin, a changed byte already on disk,
+or a running sidecar that claims another revision or digest. A dropped
+connection or a partial download is not this code. The
 `key_rejected` tooltip is "Laya restarted with a new key. Reconnecting…"
 The chip stays Down and orders are refused. When a place is refused
 because Laya cannot be reached, or because it rejects the key, the chip
@@ -158,23 +163,27 @@ place surfaces go through this admission. Laya is not Ready by default.
 
 The pins live in
 `packages/services/engine/src/flinttrade_engine/laya_policy.toml`.
-`[checkpoint]` names the weights file `model.safetensors` and its sha256.
+`[checkpoint]` names `revision` beside `sha256`, and the weights file `model.safetensors`.
 `[checkpoint.manifest]` pins these files by sha256: `rl_agent_config.json`,
 `encoder/config.json`, `tokenizer/tokenizer_config.json`, and
 `tokenizer/tokenizer.json`. FlintTrade hashes each of them before launch.
-If the checkpoint directory is present and a pinned file is missing, a
-shard index (`model.safetensors.index.json`) is present, or any extra
-weights file or other file the launcher could read is present, the chip
-shows Can't verify the model (`unverified`) and the sidecar does not
-start. A changed byte shows Wrong model version (`wrong_revision`) and
-the sidecar does not start. Neither case reaches Ready. When the weights file or a manifest file is
-not on disk, `start` downloads the pinned commit into
+When the files are already on disk and this start is not replacing them,
+a missing pinned file, a shard index (`model.safetensors.index.json`),
+or any extra weights file or other file the launcher could read shows
+Can't verify the model (`unverified`) and the sidecar does not start. A
+changed byte shows Wrong model version (`wrong_revision`) and the sidecar
+does not start. Neither case reaches Ready. When the weights file or a manifest file is
+not on disk, `start` downloads the commit in `[checkpoint] revision`,
+not the model repository's default branch, into
 `<workspace>/runtime/laya/staging` without starting the sidecar, then
 hashes those files there. A full match renames that directory onto
-`<workspace>/runtime/laya/checkpoint`. A failed or incomplete download
-is `download_failed` ("Can't download the model"). A fully downloaded
-file whose hash does not match is `wrong_revision`. Either failure
-deletes the staging directory and does not touch the rest of the cache.
+`<workspace>/runtime/laya/checkpoint` and the sidecar starts with hub
+access off. A dropped connection, a partial or missing file, or a read
+error is `download_failed` ("Can't download the model"). A complete
+download whose files do not match the pin is `wrong_revision`. An extra
+loadable file in a complete download is `unverified`. Any of those
+failures deletes the staging directory and does not touch the rest of
+the model cache.
 A verified boot
 sets `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo

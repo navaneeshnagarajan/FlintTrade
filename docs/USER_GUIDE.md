@@ -470,9 +470,19 @@ loading**. A download in progress stays **Down** and is not **Still loading**.
 | `wrong_revision` | Wrong model version | `Laya is running a different model than FlintTrade expects.` |
 | `key_rejected` | Can't reach Laya | `Laya restarted with a new key. Reconnecting…` |
 
+`downloading` and `download_failed` use the status word **Down**. Neither
+is **Still loading**. Orders are refused with
+`Laya is Down. Orders are paused until it's Ready.`
+The `downloading` chip text is live progress, one decimal place, decimal
+gigabytes, as in `Downloading the model · 1.2 of 3.4 GB`. It has no
+tooltip and no Next line. `download_failed` is a dropped connection or a
+partial download.
 `wrong_revision` is only a real mismatch: a revision, a weight digest,
-or a pinned file byte is present and is not the pin. A missing digest
-is not this code. `key_rejected` keeps the chip **Down**. Orders are
+or a pinned file byte is present and is not the pin. A complete download
+whose files do not match is this code, and so is a changed byte in a
+model already on disk, or a running sidecar that claims another revision
+or digest. A dropped connection or a partial download is not this code.
+A missing digest is not this code. `key_rejected` keeps the chip **Down**. Orders are
 refused.
 
 When a place is refused because Laya cannot be reached, or because it
@@ -506,16 +516,16 @@ matches the pin. Laya is not **Ready** by default.
 
 The pins live in
 `packages/services/engine/src/flinttrade_engine/laya_policy.toml`.
-`[checkpoint]` names the weights file `model.safetensors` and its sha256.
+`[checkpoint]` names `revision` beside `sha256`, and the weights file `model.safetensors`.
 `[checkpoint.manifest]` pins these files by sha256: `rl_agent_config.json`,
 `encoder/config.json`, `tokenizer/tokenizer_config.json`, and
 `tokenizer/tokenizer.json`. FlintTrade hashes each of them before launch.
-If the checkpoint directory is present and a pinned file is missing, a
-shard index (`model.safetensors.index.json`) is present, or any extra
-weights file or other file the launcher could read is present, the chip
-shows **Can't verify the model** and the sidecar does not start. A
-changed byte shows **Wrong model version** and the sidecar does not
-start. Neither case reaches **Ready**. A verified boot sets
+When the files are already on disk and this start is not replacing them,
+a missing pinned file, a shard index (`model.safetensors.index.json`),
+or any extra weights file or other file the launcher could read shows
+**Can't verify the model** and the sidecar does not start. A changed byte
+shows **Wrong model version** and the sidecar does not start. Neither
+case reaches **Ready**. A verified boot sets
 `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
 id or a revision. The launch log line is
@@ -569,14 +579,17 @@ progress, one decimal, decimal GB). Orders are refused with **Laya is
 Down. Orders are paused until it's Ready.** FlintTrade then hashes the
 weights file and every manifest file in the staging directory. A full
 match renames that directory onto `<workspace>/runtime/laya/checkpoint`
-in one step and launches the offline verified boot. A fully downloaded
-file whose hash does not match shows **Wrong model version**. A download
-that fails or stops short (connection drop, timeout, partial file, or
-disk error) shows **Can't download the model**, with the tooltip
-**Check your connection, then Start Laya again.** Either way the staging
-directory is deleted, nothing else in the cache is touched, and the
-sidecar does not start. A missing or extra file in a checkpoint that
-was already on disk still shows **Can't verify the model**. The log line
+in one step and launches the offline verified boot. Hub access stays off
+for that launch. A complete download whose files do not match the pin
+shows **Wrong model version**. A dropped connection, a partial or missing
+file, or a read error shows **Can't download the model**, with the tooltip
+**Check your connection, then Start Laya again.** An extra loadable file
+in a complete download shows **Can't verify the model**. On any of those
+results the staging directory is deleted, nothing else in the model cache is touched,
+and the sidecar does not start. If the download does not finish and an
+older copy is already in the cache, that copy is checked as itself. A
+missing or extra file in a model already on disk still shows **Can't verify
+the model**. The log line
 for the download step is
 `laya download repo=<repo> revision=<revision>`.
 

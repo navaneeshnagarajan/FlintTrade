@@ -549,15 +549,20 @@ decimal, decimal GB), with no Next line. Orders stay on the Down
 refusal. It then hashes `model.safetensors` and every manifest file in
 that staging directory. A full match renames the directory onto
 `<workspace>/runtime/laya/checkpoint` and launches the offline verified
-boot. A fully downloaded file whose hash does not match is
-`wrong_revision`. A failed or incomplete download (connection drop,
-timeout, partial file, or disk error) is `download_failed` ("Can't
-download the model"; tooltip "Check your connection, then Start Laya
-again."). Either failure deletes the staging directory and does not
-touch anything else in the cache. The sidecar does not start. The
+boot, with hub access off. A complete download whose files do not match
+the pin is `wrong_revision`. An extra loadable file in a complete download
+is `unverified`. A dropped connection, a partial or missing file, or a
+read error is `download_failed` ("Can't download the model"; tooltip
+"Check your connection, then Start Laya again."). The status word for
+`downloading` and `download_failed` is Down, not Still loading, and orders
+use "Laya is Down. Orders are paused until it's Ready." Any of those
+failures deletes the staging directory and does not touch anything else
+in the model cache. The sidecar does not start. If the download does not
+finish and an older snapshot is already in the cache, that snapshot is
+checked as itself; an empty cache is `download_failed`. The
 download log line is `laya download repo=<repo> revision=<revision>`.
 The pins live in `laya_policy.toml`:
-`[checkpoint]` names `model.safetensors` and its sha256, and
+`[checkpoint]` names `revision` beside `sha256`, the weights file `model.safetensors`, and
 `[checkpoint.manifest]` pins `rl_agent_config.json`,
 `encoder/config.json`, `tokenizer/tokenizer_config.json`, and
 `tokenizer/tokenizer.json` by sha256.
@@ -571,12 +576,12 @@ FlintTrade hashes `model.safetensors` and each file in
 sha256, pid, and start token, and each file's inode, size, and
 modification time in nanoseconds
 (`<workspace>/runtime/laya/verification.json`, with the token and pid
-also in `run.json`). If the checkpoint directory is present and a pinned
-file is missing, a shard index is present, or any extra weights file or
-other file the launcher could read is present, the reason is `unverified`
-("Can't verify the model") and the sidecar does not start. A changed
-byte is `wrong_revision` ("Wrong model version") and the sidecar does
-not start. Neither case reaches Ready. A verified boot sets
+also in `run.json`). When the files are already on disk and this start is not replacing them,
+a missing pinned file, a shard index, or any extra weights file or other
+file the launcher could read is `unverified` ("Can't verify the model")
+and the sidecar does not start. A changed byte is `wrong_revision`
+("Wrong model version") and the sidecar does not start. Neither case
+reaches Ready. A verified boot sets
 `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
 id or a revision. The launch log line is
@@ -609,7 +614,11 @@ the model, and Can't reach Laya. `<n>` is the sidecar port. Tooltips for
 `. Next: python -m flinttrade_core.laya_runtime start`. `downloading`
 has no tooltip. The `download_failed` tooltip is "Check your connection,
 then Start Laya again." The `wrong_revision` tooltip is "Laya is running a different model than
-FlintTrade expects." That code is only a real mismatch. The `key_rejected`
+FlintTrade expects." That code is only a real mismatch: a complete
+download whose files do not match the pin, a changed byte already on
+disk, or a running sidecar that claims another revision or digest. A
+dropped connection or a partial download is `download_failed`, not this
+code. The `key_rejected`
 tooltip is "Laya restarted with a new key. Reconnecting…" The chip stays
 Down and orders are refused. When a place is refused because Laya cannot
 be reached, or because it rejects the key, the chip updates on that same
