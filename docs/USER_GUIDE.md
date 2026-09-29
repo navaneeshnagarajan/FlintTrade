@@ -495,9 +495,15 @@ never reaches **Ready**. A missing or unreadable file shows **Can't verify
 the model**. A shard index (`model.safetensors.index.json`), or any
 weights file other than the pinned `model.safetensors` in the pinned
 snapshot, shows **Can't verify the model** (`unverified`) and never
-reaches **Ready**. The sidecar loads exactly the file that was hashed.
-The runtime record stores that file's inode, size, and modification
-time. Those three are rechecked, without hashing again, when Laya
+reaches **Ready**. The sidecar loads that file together with the
+companion files pinned in `[checkpoint.manifest]` (the agent config,
+the encoder config, and the tokenizer files). Each companion is hashed
+before launch. A digest that is not the pin shows **Wrong model
+version**. An extra file the launcher could read shows **Can't verify
+the model**. The process is started from a private directory under the
+runtime folder that holds only those verified files. The runtime record
+stores inode, size, and modification time for the weights file and for
+each companion. Those are rechecked, without hashing again, when Laya
 reports Ready and about every 1.5 seconds. If one changes, the chip
 shows **Can't verify the model** and the log names the path and the
 field that changed (`inode`, `size`, or `mtime`).

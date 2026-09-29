@@ -105,6 +105,7 @@ class LayaPolicy:
     checkpoint: str
     weight_file: str
     sha256: str
+    manifest: tuple[tuple[str, str], ...]
     questions: tuple[QuestionRule, ...]
 
     def rule(self, question_id: str) -> QuestionRule:
@@ -205,6 +206,7 @@ def parse_policy(text: str) -> LayaPolicy:
         raise ValueError("Laya policy checkpoint pin is incomplete")
     if len(sha256) != 64 or any(char not in "0123456789abcdef" for char in sha256):
         raise ValueError("Laya policy digest must be 64 lower-case hex characters")
+    manifest = _parse_manifest(checkpoint.get("manifest"))
     return LayaPolicy(
         version=version,
         repo=repo,
@@ -212,8 +214,26 @@ def parse_policy(text: str) -> LayaPolicy:
         checkpoint=name,
         weight_file=weight_file,
         sha256=sha256,
+        manifest=manifest,
         questions=tuple(rules),
     )
+
+
+def _parse_manifest(raw: object) -> tuple[tuple[str, str], ...]:
+    """Return the pinned companion files as ``(relative name, sha256)`` pairs."""
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError("Laya policy checkpoint manifest is incomplete")
+    pairs: list[tuple[str, str]] = []
+    for name, digest in sorted(raw.items()):
+        relative = str(name).replace("\\", "/").strip()
+        parts = tuple(part for part in relative.split("/") if part)
+        if not parts or ".." in parts or relative.startswith("/"):
+            raise ValueError("Laya policy manifest path is unsafe")
+        text = str(digest or "").strip().lower()
+        if len(text) != 64 or any(char not in "0123456789abcdef" for char in text):
+            raise ValueError("Laya policy digest must be 64 lower-case hex characters")
+        pairs.append(("/".join(parts), text))
+    return tuple(pairs)
 
 
 def qualification_covers_live(record: LayaQualification | None, policy: LayaPolicy) -> bool:

@@ -548,17 +548,22 @@ A backend that was started with `LAYA_HOST=127.0.0.1`, `LAYA_PORT` (or
 the default 8000), and `LAYA_API_KEY_FILE` pointing at that `api.key`
 attaches on its health probe. The host must stay loopback. The attached
 client uses the same revision and digest checks. On each sidecar start
-the verified record is hashed from `model.safetensors` and stamped with
-that run's pid and a fresh start token, plus the file's inode, size,
-and modification time in nanoseconds. A verified boot passes that exact
-file path to the sidecar with `HF_HUB_OFFLINE=1` and
-`TRANSFORMERS_OFFLINE=1`, and does not pass a repo id or revision.
-Those three values are rechecked, without hashing again, when Laya
+the verified record is hashed from `model.safetensors` and from each
+file in `[checkpoint.manifest]`, and stamped with that run's pid and a
+fresh start token, plus each file's inode, size, and modification time
+in nanoseconds. A digest that is not the pin is `wrong_revision`. An
+extra file the launcher could read is `unverified`. A verified boot
+copies those files into `<workspace>/runtime/laya/launch` (the weights
+file is hardlinked when the filesystem allows it) and passes that
+private `model.safetensors` path to the sidecar with `HF_HUB_OFFLINE=1`
+and `TRANSFORMERS_OFFLINE=1`. It does not pass a repo id or revision.
+The startup log still names the hashed source path and its sha256.
+Those identity values are rechecked, without hashing again, when Laya
 reports Ready and about every 1.5 seconds. A mismatch is `unverified`
 ("Can't verify the model"). The log line is
 `laya weights path=<path> changed=<field>` where `<field>` is `inode`,
-`size`, `mtime`, or a comma-separated list of those. It is deleted on
-stop and on a failed start. A record from an earlier run is rejected. A
+`size`, `mtime`, or a comma-separated list of those, and `<path>` is the
+file that changed. The record is deleted on stop and on a failed start. A record from an earlier run is rejected. A
 health document without the weight digest is Ready when that record
 matches the pin. If
 the record cannot be checked, the reason is `unverified` ("Can't verify

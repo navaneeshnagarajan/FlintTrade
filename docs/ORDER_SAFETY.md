@@ -149,15 +149,21 @@ sha256. A tampered file or a revision mismatch shows Wrong model version
 shows Can't verify the model (`unverified`). A shard index
 (`model.safetensors.index.json`), or any weights file other than the
 pinned `model.safetensors` in the pinned snapshot, shows Can't verify the
-model (`unverified`) and never reaches Ready. The sidecar loads exactly
-the file that was hashed. On start, the sidecar logs the exact weights
-path it was handed and that file's sha256. The runtime record stores
-that file's inode, size, and modification time. Those three are
-rechecked, without hashing again, when Laya reports Ready and about
-every 1.5 seconds. If one changes, the chip shows Can't verify the
-model and the log names the path and the field that changed (`inode`,
-`size`, or `mtime`). New orders stay paused. A reduce-only close is
-unchanged.
+model (`unverified`) and never reaches Ready. The sidecar loads that
+file together with the companion files pinned in `[checkpoint.manifest]`
+(the agent config, the encoder config, and the tokenizer files). Each
+companion is hashed before launch. A digest that is not the pin shows
+Wrong model version (`wrong_revision`). An extra file the launcher
+could read shows Can't verify the model (`unverified`). The process is
+started from a private directory under the runtime folder that holds
+only those verified files. On start, the sidecar logs the exact weights
+path that was hashed and that file's sha256. The runtime record stores
+inode, size, and modification time for the weights file and for each
+companion. Those are rechecked, without hashing again, when Laya
+reports Ready and about every 1.5 seconds. If one changes, the chip
+shows Can't verify the model and the log names the path and the field
+that changed (`inode`, `size`, or `mtime`). New orders stay paused. A
+reduce-only close is unchanged.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down — Live orders paused."). That class closes Live place and Position

@@ -6,8 +6,9 @@ environment, from the PyTorch CPU index, before the pinned ``laya[serve]``
 package. CUDA and ROCm builds stay opt-in. It binds ``127.0.0.1`` (the
 upstream default binds every interface with no authentication), mints a
 fresh API key on each boot, and pins the checkpoint revision and weight
-digest. A verified boot starts the sidecar on the exact file that was
-hashed, with hub lookups switched off. After the first successful load,
+digest. A verified boot starts the sidecar from a private directory
+that holds only the hashed weights file and the pinned companion files,
+with hub lookups switched off. After the first successful load,
 later boots stay offline. CPU is the only device this runtime starts.
 
 Run ``python -m flinttrade_core.laya_runtime install|start|stop|status``
@@ -23,6 +24,7 @@ import json
 import logging
 import os
 import secrets
+import shutil
 import signal
 import socket
 import subprocess
@@ -32,7 +34,7 @@ import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -320,6 +322,18 @@ def attach_from_environment(workspace: Path | None = None) -> LayaRuntime | None
 
 
 @dataclass(frozen=True, slots=True)
+class PinnedFile:
+    """One companion file the launcher reads, with the identity recorded at hash time."""
+
+    name: str
+    path: str
+    sha256: str
+    inode: int = 0
+    size: int = 0
+    mtime_ns: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class ArtifactCheck:
     """Result of hashing the pinned weight file for one sidecar run.
 
@@ -337,6 +351,8 @@ class ArtifactCheck:
     inode: int = 0
     size: int = 0
     mtime_ns: int = 0
+    files: tuple[PinnedFile, ...] = ()
+    launch_path: str = ""
 
 
 def huggingface_cache_roots() -> list[Path]:
@@ -360,6 +376,82 @@ def snapshot_weight_path(root: Path, *, repo: str, revision: str, filename: str)
     return root / folder / "snapshots" / revision / filename
 
 
+def _checkpoint_digests(policy: Any) -> dict[str, str]:
+    """Weight digest plus the companion manifest, for the sidecar's own check."""
+    mapped = {str(policy.weight_file): str(policy.sha256)}
+    for name, digest in policy.manifest:
+        mapped[str(name)] = str(digest)
+    return mapped
+
+
+def _snapshot_directory(check: ArtifactCheck) -> Path:
+    """Checkpoint directory the launcher reads, not a resolved blob folder.
+
+    Hugging Face stores the snapshot name as a symlink. ``weights_path`` may
+    follow that link. Companion paths stay on the snapshot name, so their
+    directory is the one that also holds the tokenizer and the encoder.
+    """
+    for item in check.files:
+        if item.sha256 and item.path:
+            return Path(item.path).parents[item.name.count("/")]
+    return Path(check.weights_path).parent
+
+
+def _recorded_identities(check: ArtifactCheck) -> tuple[tuple[str, int, int, int], ...]:
+    """Paths whose inode, size, and mtime were stored when they were hashed."""
+    rows: list[tuple[str, int, int, int]] = []
+    if check.weights_path and (check.inode or check.size or check.mtime_ns):
+        rows.append((check.weights_path, check.inode, check.size, check.mtime_ns))
+    for item in check.files:
+        if item.path and (item.inode or item.size or item.mtime_ns):
+            rows.append((item.path, item.inode, item.size, item.mtime_ns))
+    return tuple(rows)
+
+
+def _identity_drift(path: str, inode: int, size: int, mtime_ns: int) -> str | None:
+    """Return the identity fields that no longer match. Does not hash."""
+    try:
+        current_inode, current_size, current_mtime = _file_identity(Path(path))
+    except OSError:
+        return "inode,size,mtime"
+    changed: list[str] = []
+    if current_inode != inode:
+        changed.append("inode")
+    if current_size != size:
+        changed.append("size")
+    if current_mtime != mtime_ns:
+        changed.append("mtime")
+    if not changed:
+        return None
+    return ",".join(changed)
+
+
+def _read_pinned_files(raw: object) -> tuple[PinnedFile, ...]:
+    """Companion identities stored beside the weights record."""
+    if not isinstance(raw, list):
+        return ()
+    files: list[PinnedFile] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        path = item.get("path")
+        digest = item.get("sha256")
+        if not isinstance(name, str) or not isinstance(path, str) or not isinstance(digest, str):
+            continue
+        files.append(
+            PinnedFile(
+                name=name,
+                path=path,
+                sha256=digest,
+                inode=_record_int(item.get("inode")),
+                size=_record_int(item.get("size")),
+                mtime_ns=_record_int(item.get("mtime_ns")),
+            )
+        )
+    return tuple(files)
+
+
 def _file_identity(path: Path) -> tuple[int, int, int]:
     """Inode, size, and mtime in nanoseconds. Symlinks are followed. Does not hash."""
     stat = path.stat()
@@ -374,10 +466,33 @@ def _record_int(value: object) -> int:
 
 
 def _has_weight_identity(check: ArtifactCheck | None) -> bool:
-    """True when ``check`` remembers the hashed file's inode, size, and mtime."""
-    if check is None or not check.ok or not check.weights_path:
+    """True when ``check`` remembers an inode, size, and mtime for a hashed file."""
+    if check is None or not check.ok:
         return False
-    return bool(check.inode or check.size or check.mtime_ns)
+    if check.weights_path and (check.inode or check.size or check.mtime_ns):
+        return True
+    return any(item.path and (item.inode or item.size or item.mtime_ns) for item in check.files)
+
+
+# Files the sidecar can read when pointed at a checkpoint directory, other than
+# the pinned weights file. Sibling checkpoints, pictures, and README files are
+# not in this set: the launcher does not open them.
+_LOADABLE_ROOT_NAMES = frozenset(
+    {
+        "rl_agent_config.json",
+        "config.json",
+        "generation_config.json",
+        "tokenizer_config.json",
+        "tokenizer.json",
+        "special_tokens_map.json",
+        "added_tokens.json",
+        "vocab.json",
+        "merges.txt",
+        "chat_template.jinja",
+        "preprocessor_config.json",
+    }
+)
+_LOADABLE_DIRS = ("tokenizer", "encoder")
 
 
 def sha256_file(path: Path) -> str:
@@ -534,30 +649,170 @@ def find_pinned_weight(
     return candidate
 
 
+def extra_loadable_file(directory: Path, allowed: set[str]) -> str | None:
+    """Return a relative path the launcher could read that is not in ``allowed``.
+
+    ``allowed`` is the weights file plus the manifest. A file under
+    ``tokenizer/`` or ``encoder/``, or a root file the loader opens, is
+    loadable. Anything else in the snapshot is left alone.
+    """
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        if entry.name in _LOADABLE_DIRS and entry.is_dir():
+            for child in entry.rglob("*"):
+                if not child.is_file():
+                    continue
+                relative = child.relative_to(directory).as_posix()
+                if relative not in allowed:
+                    return relative
+            continue
+        if entry.is_file() and entry.name in _LOADABLE_ROOT_NAMES and entry.name not in allowed:
+            return entry.name
+    return None
+
+
 def verify_installed_model(
     *,
     repo: str,
     revision: str,
     filename: str,
     expected_sha256: str,
+    manifest: tuple[tuple[str, str], ...] = (),
     cache_roots: list[Path] | None = None,
 ) -> ArtifactCheck:
-    """Verify the pinned revision and the weight file on disk.
+    """Verify the pinned revision, the weight file, and the companion manifest.
 
-    A missing file is unverified and may still be downloaded on first boot.
-    A snapshot that also holds a shard index or another weights file is
-    unverified and must not be launched. A file whose digest is not the pin
-    is a real mismatch.
+    A missing weight file is unverified and may still be downloaded on first
+    boot. A snapshot that also holds a shard index, another weights file, or
+    any other file the launcher could read is unverified and must not be
+    launched. A file whose digest is not the pin is a real mismatch.
     """
     path = snapshot_weight_file(repo=repo, revision=revision, filename=filename, cache_roots=cache_roots)
     if path is None:
         return ArtifactCheck(ok=False, reason="unverified", revision=revision, sha256="")
-    return verify_weight_file(
+    directory = path.parent
+    allowed = {filename, *(name for name, _digest in manifest)}
+    if snapshot_has_extra_weights(directory, filename):
+        return ArtifactCheck(
+            ok=False,
+            reason="unverified",
+            revision=revision,
+            sha256="",
+            weights_path=str(path),
+        )
+    extra = extra_loadable_file(directory, allowed)
+    if extra is not None:
+        return ArtifactCheck(
+            ok=False,
+            reason="unverified",
+            revision=revision,
+            sha256="",
+            weights_path=str(directory / extra),
+        )
+    check = verify_weight_file(
         path,
         revision=revision,
         expected_revision=revision,
         expected_sha256=expected_sha256,
     )
+    if not check.ok or not manifest:
+        return check
+    files: list[PinnedFile] = []
+    for name, digest in manifest:
+        companion = directory / name
+        if not companion.is_file():
+            return ArtifactCheck(
+                ok=False,
+                reason="unverified",
+                revision=revision,
+                sha256="",
+                weights_path=str(companion),
+            )
+        try:
+            actual = sha256_file(companion)
+            inode, size, mtime_ns = _file_identity(companion)
+        except OSError:
+            return ArtifactCheck(
+                ok=False,
+                reason="unverified",
+                revision=revision,
+                sha256="",
+                weights_path=str(companion),
+            )
+        if actual != digest:
+            return ArtifactCheck(
+                ok=False,
+                reason="wrong_revision",
+                revision=revision,
+                sha256=actual,
+                weights_path=str(companion),
+            )
+        files.append(
+            PinnedFile(
+                name=name,
+                path=str(companion),
+                sha256=actual,
+                inode=inode,
+                size=size,
+                mtime_ns=mtime_ns,
+            )
+        )
+    return replace(check, files=tuple(files))
+
+
+def stage_verified_launch(
+    runtime_root: Path,
+    snapshot_dir: Path,
+    names: tuple[str, ...],
+) -> tuple[Path, tuple[PinnedFile, ...]]:
+    """Place only the verified files where the sidecar will read them.
+
+    The weights file is hardlinked when the filesystem allows it. Smaller
+    files are copied, so a loader rewrite cannot change the cache. The
+    returned path is the private ``model.safetensors``.
+    """
+    launch = runtime_root / "launch"
+    if launch.exists():
+        shutil.rmtree(launch)
+    launch.mkdir(parents=True)
+    harden_directory(launch)
+    private: list[PinnedFile] = []
+    weights: Path | None = None
+    for name in names:
+        source = snapshot_dir / name
+        if not source.is_file():
+            raise OSError(name)
+        dest = launch / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        harden_directory(dest.parent)
+        if name.endswith(".safetensors"):
+            try:
+                os.link(source, dest, follow_symlinks=True)
+            except OSError:
+                shutil.copy2(source, dest, follow_symlinks=True)
+                harden(dest)
+        else:
+            shutil.copy2(source, dest, follow_symlinks=True)
+            harden(dest)
+        inode, size, mtime_ns = _file_identity(dest)
+        private.append(
+            PinnedFile(
+                name=name,
+                path=str(dest),
+                sha256="",
+                inode=inode,
+                size=size,
+                mtime_ns=mtime_ns,
+            )
+        )
+        if name.endswith(".safetensors"):
+            weights = dest
+    if weights is None:
+        raise OSError("model.safetensors")
+    return weights, tuple(private)
 
 
 class LayaRuntime:
@@ -666,6 +921,8 @@ class LayaRuntime:
             self._launch_refusal = None
             self._weight_drift = None
             weighed = self._weigh_before_launch(policy)
+            if weighed.ok and weighed.weights_path:
+                weighed = self._stage_private_launch(weighed, policy)
             if self._weights_block_launch(weighed):
                 _reap_runtimes.discard(self)
                 self._record_launch_refusal(weighed)
@@ -688,13 +945,13 @@ class LayaRuntime:
                         "LAYA_PRELOAD": "1",
                         "LAYA_MAX_LOADED": "1",
                         "LAYA_API_KEY": api_key,
-                        "LAYA_SHA256_DIGESTS": json.dumps({policy.weight_file: policy.sha256}),
+                        "LAYA_SHA256_DIGESTS": json.dumps(_checkpoint_digests(policy)),
                         "LAYA_THREADS": str(threads),
                         "HF_HUB_OFFLINE": "1" if offline else "0",
                     }
                 )
                 if pinned:
-                    env["LAYA_WEIGHTS_PATH"] = weighed.weights_path
+                    env["LAYA_WEIGHTS_PATH"] = weighed.launch_path
                     env["HF_HUB_OFFLINE"] = "1"
                     env["TRANSFORMERS_OFFLINE"] = "1"
                     for name in (
@@ -1049,6 +1306,7 @@ class LayaRuntime:
                 revision=policy.revision,
                 filename=policy.weight_file,
                 expected_sha256=policy.sha256,
+                manifest=tuple(policy.manifest),
             )
         return ArtifactCheck(
             ok=raw.ok,
@@ -1061,6 +1319,8 @@ class LayaRuntime:
             inode=raw.inode,
             size=raw.size,
             mtime_ns=raw.mtime_ns,
+            files=raw.files,
+            launch_path=raw.launch_path,
         )
 
     def _sidecar_pid(self) -> int:
@@ -1139,6 +1399,25 @@ class LayaRuntime:
         self._api_key = key
         self._key_rejected = False
 
+    def _stage_private_launch(self, weighed: ArtifactCheck, policy: Any) -> ArtifactCheck:
+        """Copy the verified files into the runtime directory and remember them."""
+        names = (policy.weight_file, *(name for name, _digest in policy.manifest))
+        try:
+            launch_weights, private = stage_verified_launch(
+                self.runtime_root,
+                _snapshot_directory(weighed),
+                names,
+            )
+        except OSError:
+            return ArtifactCheck(
+                ok=False,
+                reason="unverified",
+                revision=weighed.revision,
+                sha256=weighed.sha256,
+                weights_path=weighed.weights_path,
+            )
+        return replace(weighed, files=weighed.files + private, launch_path=str(launch_weights))
+
     def _weigh_before_launch(self, policy: Any) -> ArtifactCheck:
         """Hash the pinned file before the sidecar process exists."""
         if self._artifact_checker is not None:
@@ -1148,6 +1427,7 @@ class LayaRuntime:
             revision=policy.revision,
             filename=policy.weight_file,
             expected_sha256=policy.sha256,
+            manifest=tuple(policy.manifest),
         )
 
     @staticmethod
@@ -1181,6 +1461,8 @@ class LayaRuntime:
             inode=weighed.inode,
             size=weighed.size,
             mtime_ns=weighed.mtime_ns,
+            files=weighed.files,
+            launch_path=weighed.launch_path,
         )
         self._write_run_record(token, check.pid)
         self._write_recorded_verification(check)
@@ -1374,9 +1656,13 @@ class LayaRuntime:
         weights_path = payload.get("weights_path")
         if not isinstance(weights_path, str):
             weights_path = ""
+        launch_path = payload.get("launch_path")
+        if not isinstance(launch_path, str):
+            launch_path = ""
         inode = _record_int(payload.get("inode"))
         size = _record_int(payload.get("size"))
         mtime_ns = _record_int(payload.get("mtime_ns"))
+        files = _read_pinned_files(payload.get("files"))
         if payload.get("ok") is True:
             return ArtifactCheck(
                 ok=True,
@@ -1389,6 +1675,8 @@ class LayaRuntime:
                 inode=inode,
                 size=size,
                 mtime_ns=mtime_ns,
+                files=files,
+                launch_path=launch_path,
             )
         if payload.get("reason") == "wrong_revision":
             return ArtifactCheck(
@@ -1402,6 +1690,8 @@ class LayaRuntime:
                 inode=inode,
                 size=size,
                 mtime_ns=mtime_ns,
+                files=files,
+                launch_path=launch_path,
             )
         return None
 
@@ -1420,31 +1710,35 @@ class LayaRuntime:
                 "inode": check.inode,
                 "size": check.size,
                 "mtime_ns": check.mtime_ns,
+                "launch_path": check.launch_path,
+                "files": [
+                    {
+                        "name": item.name,
+                        "path": item.path,
+                        "sha256": item.sha256,
+                        "inode": item.inode,
+                        "size": item.size,
+                        "mtime_ns": item.mtime_ns,
+                    }
+                    for item in check.files
+                ],
             },
         )
 
     def _weight_drift_now(self) -> tuple[str, str] | None:
-        """Return the hashed path and which identity field changed.
+        """Return a hashed path and which identity field changed.
 
-        Compares inode, size, and mtime in nanoseconds. Does not hash the file.
+        Compares inode, size, and mtime in nanoseconds for the weights file
+        and every companion the launcher reads. Does not hash.
         """
         check = self._identity_record()
         if check is None:
             return None
-        try:
-            inode, size, mtime_ns = _file_identity(Path(check.weights_path))
-        except OSError:
-            return check.weights_path, "inode,size,mtime"
-        changed: list[str] = []
-        if inode != check.inode:
-            changed.append("inode")
-        if size != check.size:
-            changed.append("size")
-        if mtime_ns != check.mtime_ns:
-            changed.append("mtime")
-        if not changed:
-            return None
-        return check.weights_path, ",".join(changed)
+        for path, inode, size, mtime_ns in _recorded_identities(check):
+            drifted = _identity_drift(path, inode, size, mtime_ns)
+            if drifted is not None:
+                return path, drifted
+        return None
 
     def _identity_record(self) -> ArtifactCheck | None:
         """The hashed file's inode, size, and mtime, from memory or the record."""

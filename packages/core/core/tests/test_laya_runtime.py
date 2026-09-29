@@ -935,10 +935,33 @@ def _plant_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, extra: s
     )
     path.parent.mkdir(parents=True)
     path.write_bytes(b"pinned-weights")
+    for name, _digest in policy.manifest:
+        companion = path.parent / name
+        companion.parent.mkdir(parents=True, exist_ok=True)
+        companion.write_bytes(b"companion:" + name.encode())
+    (path.parent / "README.md").write_bytes(b"not-loaded")
     if extra is not None:
-        (path.parent / extra).write_bytes(b"not-the-pinned-file")
+        extra_path = path.parent / extra
+        extra_path.parent.mkdir(parents=True, exist_ok=True)
+        extra_path.write_bytes(b"not-the-pinned-file")
     monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(root))
     return path
+
+
+def _accept_pinned_digests(monkeypatch: pytest.MonkeyPatch, policy: Any, *, wrong: str | None = None) -> None:
+    """Return the pinned digest for each snapshot file. ``wrong`` is a mismatch."""
+    pins = [(policy.weight_file, policy.sha256), *policy.manifest]
+
+    def fake(path: Path) -> str:
+        text = path.as_posix()
+        for name, digest in sorted(pins, key=lambda item: len(item[0]), reverse=True):
+            if text.endswith("/" + name):
+                if name == wrong:
+                    return "0" * 64
+                return digest
+        raise AssertionError(text)
+
+    monkeypatch.setattr("flinttrade_core.laya_runtime.sha256_file", fake)
 
 
 @pytest.mark.unit
@@ -1015,7 +1038,7 @@ def test_clean_weight_is_logged_and_launched_offline(
 ) -> None:
     policy = load_policy()
     path = _plant_snapshot(tmp_path, monkeypatch, extra=None)
-    monkeypatch.setattr("flinttrade_core.laya_runtime.sha256_file", lambda _path: policy.sha256)
+    _accept_pinned_digests(monkeypatch, policy)
     launched: list[tuple[list[str], dict[str, str]]] = []
 
     def factory(argv: list[str], env: dict[str, str]) -> _Process:
@@ -1033,9 +1056,14 @@ def test_clean_weight_is_logged_and_launched_offline(
     assert launched
     argv, env = launched[0]
     resolved = str(path.resolve())
+    launch = runtime.runtime_root / "launch"
+    private_weights = launch / policy.weight_file
     assert env["HF_HUB_OFFLINE"] == "1"
     assert env["TRANSFORMERS_OFFLINE"] == "1"
-    assert env["LAYA_WEIGHTS_PATH"] == resolved
+    assert env["LAYA_WEIGHTS_PATH"] == str(private_weights)
+    digests = json.loads(env["LAYA_SHA256_DIGESTS"])
+    assert digests[policy.weight_file] == policy.sha256
+    assert dict(policy.manifest).items() <= digests.items()
     assert "LAYA_REVISION" not in env
     assert "LAYA_MODELS" not in env
     assert policy.repo not in env.values()
@@ -1051,10 +1079,26 @@ def test_clean_weight_is_logged_and_launched_offline(
     recorded = json.loads((runtime.runtime_root / "verification.json").read_text(encoding="utf-8"))
     stat = path.stat()
     assert recorded["weights_path"] == resolved
+    assert recorded["launch_path"] == str(private_weights)
     assert recorded["sha256"] == policy.sha256
     assert recorded["inode"] == stat.st_ino
     assert recorded["size"] == stat.st_size
     assert recorded["mtime_ns"] == stat.st_mtime_ns
+    assert private_weights.stat().st_ino == stat.st_ino
+    staged = sorted(item.relative_to(launch).as_posix() for item in launch.rglob("*") if item.is_file())
+    assert staged == sorted([policy.weight_file, *(name for name, _digest in policy.manifest)])
+    assert "README.md" not in staged
+    for name, digest in policy.manifest:
+        source = path.parent / name
+        source_stat = source.stat()
+        remembered = next(item for item in recorded["files"] if item["path"] == str(source))
+        assert remembered["name"] == name
+        assert remembered["sha256"] == digest
+        assert remembered["inode"] == source_stat.st_ino
+        assert remembered["size"] == source_stat.st_size
+        assert remembered["mtime_ns"] == source_stat.st_mtime_ns
+        copied = next(item for item in recorded["files"] if item["path"] == str(launch / name))
+        assert copied["inode"] and copied["size"] and copied["mtime_ns"]
     reset_process_laya_for_tests()
 
 
@@ -1128,7 +1172,7 @@ def test_weight_identity_drift_is_unverified(
     _accept_only(monkeypatch, live)
     policy = load_policy()
     path = _plant_snapshot(tmp_path, monkeypatch, extra=None)
-    monkeypatch.setattr("flinttrade_core.laya_runtime.sha256_file", lambda _path: policy.sha256)
+    _accept_pinned_digests(monkeypatch, policy)
 
     class _LiveProcess(_Process):
         def __init__(self) -> None:
@@ -1170,4 +1214,117 @@ def test_weight_identity_drift_is_unverified(
         changed.append("mtime")
     assert field in changed
     assert LAYA_WEIGHTS_DRIFT_LOG % (recorded["weights_path"], ",".join(changed)) in caplog.text
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "name",
+    ["encoder/config.json", "tokenizer/tokenizer_config.json", "tokenizer/tokenizer.json"],
+)
+def test_changed_companion_is_wrong_revision_and_does_not_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    _plant_snapshot(tmp_path, monkeypatch, extra=None)
+    policy = load_policy()
+    _accept_pinned_digests(monkeypatch, policy, wrong=name)
+    launched: list[object] = []
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: launched.append(1) or _Process(),
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    with pytest.raises(LayaRuntimeError, match="Wrong model version"):
+        runtime.start()
+    assert launched == []
+    refusal = runtime._launch_refusal  # noqa: SLF001
+    assert refusal is not None
+    assert refusal.reason == "wrong_revision"
+    assert refusal.weights_path.endswith(name)
+    runtime.publish_status()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "wrong_revision"
+    assert laya_reason_detail("wrong_revision", runtime._port) == "Wrong model version"  # noqa: SLF001
+    assert process_laya().effective_status("practice") is not DecisionStatus.READY
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("extra", ["config.json", "tokenizer/added_tokens.json"])
+def test_extra_loadable_file_is_unverified_and_does_not_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: str
+) -> None:
+    _plant_snapshot(tmp_path, monkeypatch, extra=extra)
+    launched: list[object] = []
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: launched.append(1) or _Process(),
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    with pytest.raises(LayaRuntimeError, match="Can't verify the model"):
+        runtime.start()
+    assert launched == []
+    refusal = runtime._launch_refusal  # noqa: SLF001
+    assert refusal is not None
+    assert refusal.reason == "unverified"
+    assert refusal.weights_path.endswith(extra)
+    runtime.publish_status()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "unverified"
+    assert laya_reason_detail("unverified", runtime._port) == "Can't verify the model"  # noqa: SLF001
+    assert process_laya().effective_status("practice") is not DecisionStatus.READY
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", ["encoder/config.json", "tokenizer/tokenizer.json"])
+@pytest.mark.parametrize("when", ["ready", "watch"])
+def test_companion_identity_drift_is_unverified(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    name: str,
+    when: str,
+) -> None:
+    live = 424242
+    _accept_only(monkeypatch, live)
+    policy = load_policy()
+    path = _plant_snapshot(tmp_path, monkeypatch, extra=None)
+    _accept_pinned_digests(monkeypatch, policy)
+
+    class _LiveProcess(_Process):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pid = live
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: _LiveProcess(),
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    runtime.start()
+
+    def hashed_again(_path: Path) -> str:
+        raise AssertionError("re-hash")
+
+    monkeypatch.setattr("flinttrade_core.laya_runtime.sha256_file", hashed_again)
+    runtime.publish_status()
+    assert process_laya().effective_status("practice") is DecisionStatus.READY
+    companion = path.parent / name
+    before = companion.stat()
+    os.utime(companion, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000))
+    with caplog.at_level(logging.INFO, logger="flinttrade.laya"):
+        if when == "ready":
+            runtime.publish_status()
+        else:
+            runtime.reconcile_watched_state()
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "unverified"
+    assert laya_reason_detail("unverified", runtime._port) == "Can't verify the model"  # noqa: SLF001
+    assert process_laya().effective_status("practice") is not DecisionStatus.READY
+    assert LAYA_WEIGHTS_DRIFT_LOG % (str(companion), "mtime") in caplog.text
+    assert name in caplog.text
     reset_process_laya_for_tests()
