@@ -26,7 +26,7 @@ test.describe('Command palette', () => {
     await seedExploreDemoSession(page);
     await page.goto('/trade');
     // Wait for the main workspace shell to be ready
-    await page.getByRole('main', { name: /Trading Workspace/i }).waitFor({ timeout: 15_000 });
+    await page.getByRole('main', { name: 'Trade', exact: true }).waitFor({ timeout: 15_000 });
   });
 
   test('Ctrl+K opens the command palette', async ({ page }) => {
