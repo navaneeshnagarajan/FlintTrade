@@ -748,7 +748,10 @@ is the button. The fresh-install form does not open.
 
 A second create while an operator already exists, including two creates
 that overlap, is refused. The account service raises `Account already
-set up`. `POST /v1/auth/setup` answers HTTP 409 with `Request conflicts
+set up`. `POST /v1/auth/setup` answers HTTP 409 with code `operator_exists`
+and message `Request conflicts with the current state`. Setup shows
+**This machine already has an operator. Sign in to finish setup.** A
+conflict that is not `operator_exists` still shows `Request conflicts
 with the current state`.
 
 Reloading `/setup` mid-flow resumes the unfinished setup in this browser

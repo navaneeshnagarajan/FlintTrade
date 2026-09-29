@@ -50,13 +50,16 @@ vi.mock("@/lib/setupAccountApi", () => ({
   AccountSetupError: class AccountSetupError extends Error {
     kind: string;
     status?: number;
+    code?: string;
 
-    constructor(message: string, kind: string, status?: number) {
+    constructor(message: string, kind: string, status?: number, code?: string) {
       super(message);
       this.kind = kind;
       this.status = status;
+      this.code = code;
     }
   },
+  OPERATOR_EXISTS_CODE: "operator_exists",
   setupFlintTradeAccount: mocks.setupFlintTradeAccount,
   openFlintTradeVault: mocks.openFlintTradeVault,
   enableFlintTradeTotp: mocks.enableFlintTradeTotp,
@@ -684,6 +687,42 @@ describe("SetupAccountRoute — mandatory Practice path", () => {
     expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
     expect(screen.queryByText("Step 1 of 3 - Create operator")).not.toBeInTheDocument();
     expect(mocks.setupFlintTradeAccount).not.toHaveBeenCalled();
+  });
+
+  it("shows the existing-operator sign-in when a racing create loses", async () => {
+    localStorage.clear();
+    useAuthStore.getState().setSetupRequired();
+    mocks.setupFlintTradeAccount.mockRejectedValue(
+      new AccountSetupError(
+        "Request conflicts with the current state",
+        "account-exists",
+        409,
+        "operator_exists",
+      ),
+    );
+
+    await renderSetup();
+    submitAccountCreation();
+
+    expect(await screen.findByRole("heading", { name: "Continue setup" })).toBeInTheDocument();
+    expect(screen.getByText("This machine already has an operator. Sign in to finish setup.")).toBeInTheDocument();
+    expect(screen.queryByText("Request conflicts with the current state")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Choose a username")).not.toBeInTheDocument();
+  });
+
+  it("keeps the generic conflict text when a 409 is not an existing operator", async () => {
+    localStorage.clear();
+    useAuthStore.getState().setSetupRequired();
+    mocks.setupFlintTradeAccount.mockRejectedValue(
+      new AccountSetupError("Request conflicts with the current state", "server", 409),
+    );
+
+    await renderSetup();
+    submitAccountCreation();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Request conflicts with the current state");
+    expect(screen.queryByText("This machine already has an operator. Sign in to finish setup.")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Choose a username")).toBeInTheDocument();
   });
 
   it.each([

@@ -560,7 +560,16 @@ def auth_setup() -> tuple[Any, int]:
         backup_codes = svc.setup_account(username, email, password, pin)
     except ValueError:
         return jsonify({"status": "error", "message": "Invalid request"}), 400
-    except RuntimeError:
+    except RuntimeError as exc:
+        # A lost race and a second create are the same refusal. The code lets
+        # Setup show the existing-operator sign-in. Other conflicts stay a
+        # plain 409 with the generic message.
+        if str(exc) == "Account already set up":
+            return jsonify({
+                "status": "error",
+                "code": "operator_exists",
+                "message": "Request conflicts with the current state",
+            }), 409
         return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
 
     # Snapshot the vault before this request can open it. A missing or

@@ -64,6 +64,9 @@ class TestSetupEndpoint:
             "password": "StrongP@ss123!", "pin": "654321",
         }, headers={"Content-Type": "application/json"})
         assert resp.status_code == 409
+        body = resp.get_json()
+        assert body["code"] == "operator_exists"
+        assert body["message"] == "Request conflicts with the current state"
 
 
 class TestSetupVault:

@@ -76,6 +76,7 @@ import {
   fetchSetupServerState,
   openFlintTradeVault,
   resumeFlintTradeSetup,
+  OPERATOR_EXISTS_CODE,
   setupFlintTradeAccount,
   type SetupServerState,
 } from "@/lib/setupAccountApi";
@@ -406,9 +407,8 @@ function AccountSecurityStep({ onComplete, onBack, onAccountAlreadyExists }: Acc
       onComplete(values, result.totpUri, result.backupCodes);
     } catch (error) {
       if (!isAuthSessionFenceCurrent(requestFence)) return;
-      if (error instanceof AccountSetupError && error.kind === "account-exists") {
-        // Unfinished first-run: open the 2FA step so Delete / Start over
-        // can wipe the account instead of a dead-end 409.
+      if (error instanceof AccountSetupError && error.code === OPERATOR_EXISTS_CODE) {
+        // The other create won. Sign in, instead of the generic conflict line.
         onAccountAlreadyExists();
         return;
       }

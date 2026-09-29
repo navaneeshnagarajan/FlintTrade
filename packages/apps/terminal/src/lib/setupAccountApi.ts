@@ -46,15 +46,20 @@ export interface SetupResumeResult {
 
 export type AccountSetupErrorKind = "account-exists" | "network" | "server";
 
+/** Lost or repeated setup-create. The setup screen maps this to sign-in. */
+export const OPERATOR_EXISTS_CODE = "operator_exists";
+
 export class AccountSetupError extends Error {
   kind: AccountSetupErrorKind;
   status?: number;
+  code?: string;
 
-  constructor(message: string, kind: AccountSetupErrorKind, status?: number) {
+  constructor(message: string, kind: AccountSetupErrorKind, status?: number, code?: string) {
     super(message);
     this.name = "AccountSetupError";
     this.kind = kind;
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -108,10 +113,13 @@ export async function setupFlintTradeAccount(input: AccountSetupInput): Promise<
   const payload = await parseJsonBody(response);
 
   if (!response.ok) {
+    const code = isRecord(payload) && typeof payload.code === "string" ? payload.code : undefined;
+    const operatorExists = response.status === 409 && code === OPERATOR_EXISTS_CODE;
     throw new AccountSetupError(
       extractMessage(payload) ?? httpMessage(response),
-      response.status === 409 ? "account-exists" : "server",
+      operatorExists ? "account-exists" : "server",
       response.status,
+      code,
     );
   }
 

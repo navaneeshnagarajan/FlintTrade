@@ -56,12 +56,38 @@ describe("setupAccountApi", () => {
     });
   });
 
-  it("keeps account-exists errors distinct from backend connectivity errors", async () => {
+  it("keeps a plain conflict distinct from an operator that already exists", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
           status: "error",
-          message: "An account already exists on this machine.",
+          message: "Request conflicts with the current state",
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      setupFlintTradeAccount({
+        username: "alice",
+        email: "alice@example.com",
+        password: "Secret123!",
+      }),
+    ).rejects.toMatchObject({
+      name: "AccountSetupError",
+      kind: "server",
+      status: 409,
+      message: "Request conflicts with the current state",
+    });
+  });
+
+  it("marks a lost setup-create as an existing operator", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "error",
+          code: "operator_exists",
+          message: "Request conflicts with the current state",
         }),
         { status: 409, headers: { "Content-Type": "application/json" } },
       ),
@@ -77,7 +103,8 @@ describe("setupAccountApi", () => {
       name: "AccountSetupError",
       kind: "account-exists",
       status: 409,
-      message: "An account already exists on this machine.",
+      code: "operator_exists",
+      message: "Request conflicts with the current state",
     });
   });
 
