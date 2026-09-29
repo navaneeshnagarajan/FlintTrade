@@ -173,6 +173,26 @@ describe("createWorkspaceApi", () => {
     expect(doc.match(/"component":"orderpad"/g)).toHaveLength(1);
   });
 
+  it("gives each Order Pad retarget its own prefill nonce", () => {
+    const { api } = makeApi(emptyWorkspaceJson());
+    api.addPanel({ component: "orderpad", title: "Order Pad" });
+    const nonces: string[] = [];
+    const prefill = (event: Event) => {
+      const detail = (event as CustomEvent<{ nonce?: string }>).detail;
+      nonces.push(detail?.nonce ?? "");
+    };
+    window.addEventListener("flinttrade:orderPadPrefill", prefill);
+    expect(api.retargetOrderPad({ symbol: "SBIN", exchange: "NSE", action: "BUY" })).toBe(true);
+    expect(api.retargetOrderPad({ symbol: "SBIN", exchange: "NSE", action: "BUY" })).toBe(true);
+    window.removeEventListener("flinttrade:orderPadPrefill", prefill);
+
+    expect(nonces).toHaveLength(2);
+    expect(nonces[0]).toEqual(expect.any(String));
+    expect(nonces[0].length).toBeGreaterThan(0);
+    expect(nonces[1].length).toBeGreaterThan(0);
+    expect(nonces[0]).not.toBe(nonces[1]);
+  });
+
   it("loadModelJson replaces the model through the load callback", () => {
     const { api, loadModel } = makeApi(emptyWorkspaceJson());
     api.loadModelJson(

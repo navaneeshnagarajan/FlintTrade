@@ -66,7 +66,9 @@ unchanged. Card titles are plain: **Two-factor authentication**,
 **Broker connect** card shows **Done** and **Set up** only. On the open
 broker panel, **Continue without a broker** is the first control, above
 **FlintTrade Native** and **OpenAlgo Bridge**, and choosing it marks
-the card **Done**. There is no Live unlock control on this path.
+the card **Skipped**, the same as on the card. A successful native or
+OpenAlgo connection still marks the card **Done**. There is no Live
+unlock control on this path.
 
 ## Out of scope
 
@@ -93,7 +95,9 @@ the card **Done**. There is no Live unlock control on this path.
    on the Practice desk. **Later** on the card row marks the card
    **Skipped** and updates the strip. **Later** inside an open
    authenticator, **LLM**, or trading-defaults panel only closes the
-   panel and leaves the card and the strip unchanged. A finished
+   panel and leaves the card and the strip unchanged. **Continue without
+   a broker** on the open broker panel marks **Broker connect**
+   **Skipped** and updates the strip. A finished
    **Broker connect** card shows **Done** and **Set up** only. The
    strip counts finished cards only, and omits `· M skipped` when
    nothing is skipped. Settings keeps the reminder after **Dismiss**,

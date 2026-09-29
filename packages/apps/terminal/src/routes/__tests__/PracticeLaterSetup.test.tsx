@@ -133,6 +133,26 @@ describe("PracticeLaterSetup", () => {
     fireEvent.click(skipBroker);
     expect(screen.getByRole("button", { name: "Set up Broker connect" })).toBeInTheDocument();
     expect(screen.queryByText(/Step \d+ of \d+/)).not.toBeInTheDocument();
+    expect(screen.getByText("Optional setup · 0 of 4 done · 1 skipped")).toBeInTheDocument();
+  });
+
+  it("records Continue without a broker on the open panel as skipped", () => {
+    markPracticeLaterPending();
+    render(<PracticeLaterSetup />);
+    expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    fireEvent.click(screen.getByRole("button", { name: "Set up Broker connect" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue without a broker" }));
+
+    expect(screen.getByText("Optional setup · 0 of 4 done · 1 skipped")).toBeInTheDocument();
+    const card = screen.getByText("Broker connect").closest("li");
+    expect(card).not.toBeNull();
+    const view = within(card as HTMLElement);
+    expect(view.getByText("Skipped")).toBeInTheDocument();
+    expect(view.queryByText("Done")).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "Continue without a broker" })).not.toBeInTheDocument();
+    expect(view.getAllByRole("button").map((button) => button.textContent)).toEqual(["Set up"]);
   });
 
   it("2FA card offers Enrol and Later only", () => {

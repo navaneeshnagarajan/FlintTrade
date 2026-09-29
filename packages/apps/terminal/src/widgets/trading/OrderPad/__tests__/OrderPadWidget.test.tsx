@@ -192,6 +192,44 @@ describe("OrderPadWidget", () => {
     expect(input.value).toBe("RELIANCE");
   });
 
+  it("reapplies the same quick-trade target when the event nonce changes", async () => {
+    vi.mocked(searchSymbol).mockResolvedValue([{ symbol: "INFY", exchange: "NSE" }]);
+    render(<OrderPadWidget {...makeWidgetPanelProps({
+      api: { id: "pad-1", updateParameters: () => {} },
+    })} />);
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: {
+          tabId: "pad-1",
+          nonce: "trade-1",
+          params: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+        },
+      }));
+    });
+    expect(screen.getByDisplayValue("SBIN")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "SELL" }));
+    fireEvent.change(screen.getByLabelText("Symbol"), { target: { value: "INFY" } });
+    fireEvent.click(await screen.findByRole("button", { name: /INFY/ }));
+    expect(screen.getByDisplayValue("INFY")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice sell/i })).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
+        detail: {
+          tabId: "pad-1",
+          nonce: "trade-2",
+          params: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+        },
+      }));
+    });
+    expect(screen.getByDisplayValue("SBIN")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /practice buy/i })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("INFY")).not.toBeInTheDocument();
+  });
+
   it("Enter selects the typed symbol and does not submit the previous one", async () => {
     vi.mocked(searchSymbol).mockResolvedValue([{ symbol: "INFY", exchange: "NSE" }]);
     render(

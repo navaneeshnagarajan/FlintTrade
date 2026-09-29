@@ -750,7 +750,8 @@ strip. The cards never appear before the affirm, never block Practice,
 and never change Step N of 3. On the broker panel,
 **Continue without a broker** stays the first control, above
 **FlintTrade Native** and **OpenAlgo Bridge**, and choosing it marks
-**Broker connect** **Done**. Persona is not a required
+**Broker connect** **Skipped**, the same as on the card. A successful
+native or OpenAlgo connection still marks the card **Done**. Persona is not a required
 first-run gate and is not part of that count. First run has no Live
 unlock. Live place stays fail-closed. A later Live unlock, outside this
 path, still needs the authenticator and PIN.

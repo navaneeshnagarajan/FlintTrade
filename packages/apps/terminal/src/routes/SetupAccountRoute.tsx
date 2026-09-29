@@ -1378,7 +1378,10 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
           )}
 
           {panel === "broker" && (
-            <ConnectionStep onComplete={() => complete("broker")} />
+            <ConnectionStep
+              onComplete={() => complete("broker")}
+              onContinueWithoutBroker={() => skip("broker")}
+            />
           )}
 
           {panel === "llm" && (

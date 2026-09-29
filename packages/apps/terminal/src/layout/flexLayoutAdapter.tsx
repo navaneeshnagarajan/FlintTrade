@@ -363,7 +363,7 @@ export function createWorkspaceApi(
       // object is unchanged, so the pad would keep the previous symbol.
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("flinttrade:orderPadPrefill", {
-          detail: { tabId, params },
+          detail: { tabId, params, nonce: crypto.randomUUID() },
         }));
       }
       return true;
