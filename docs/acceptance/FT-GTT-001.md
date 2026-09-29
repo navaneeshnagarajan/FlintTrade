@@ -51,6 +51,10 @@ back.
 5. **Route coverage.** `test_order_submit_routes.py` covers
    `variety: "gtt"`, including bracket/cover-order legs if they are ever
    sent.
+6. **Firing rejection.** If the broker rejects a stop when it fires, the
+   position row stays with a **Stop failed** tag. A sticky toast reads
+   `Your GTT stop on <symbol> was rejected by your broker when it fired. The
+   position is still open.` Its **Close** action is a reduce-only close.
 
 ## Product copy
 
@@ -60,7 +64,15 @@ back.
   targets on an open position.**
 - Refusal: **Not placed. GTT orders can only exit an open position, up to its
   open quantity.**
+- On a Stop against CNC holdings, when DDPI (the demat authorisation that lets
+  the broker debit shares when a sell fires) is missing or unknown, show this
+  non-blocking warning: **Without DDPI on your demat account, your broker may
+  reject this stop when it fires.**
 - Row tags: **GTT stop** and **GTT target**.
+- If the broker rejects a stop when it fires, keep the position row with the
+  **Stop failed** tag and show the sticky toast `Your GTT stop on <symbol> was
+  rejected by your broker when it fired. The position is still open.` Its
+  **Close** action is a reduce-only close.
 - Row tooltip: **Your broker fires this later. It can only reduce this
   position.**
 
@@ -81,5 +93,7 @@ Test with a stub broker:
 - Startup reconciliation flags an NSE_FNO MARGIN app-placed GTT as
   **Unexpected**.
 - The route-walk test covers `variety: "gtt"`.
+- A stub where the stop is rejected when it fires shows the **Stop failed**
+  tag and the sticky toast, and the row is never silently removed.
 
 Blocked on #307 merging.
