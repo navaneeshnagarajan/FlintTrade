@@ -293,6 +293,13 @@ describe("DockSidebar", () => {
     expect(screen.getByRole("navigation", { name: "Main navigation" })).toBeInTheDocument();
   });
 
+  it("keeps the pinned Settings item inside the navigation landmark", () => {
+    renderSidebar("/trade");
+
+    const nav = screen.getByRole("navigation", { name: "Main navigation" });
+    expect(nav).toContainElement(screen.getByRole("button", { name: "Settings" }));
+  });
+
   it("has an aside landmark with accessible label", () => {
     renderSidebar("/trade");
 

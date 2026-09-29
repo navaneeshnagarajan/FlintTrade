@@ -390,67 +390,66 @@ export default function DockSidebar() {
       onMouseLeave={handleMouseLeave}
     >
       <TooltipProvider delayDuration={200}>
-        <nav
-          aria-label="Main navigation"
-          className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-2 py-3 [scrollbar-width:none]"
-        >
-          <Reorder.Group
-            axis="y"
-            values={mainItems}
-            onReorder={(newOrder) => {
-              useSidebarStore.setState((state) => {
-                const settingsIdx = state.items.findIndex((i) => i.id === "settings");
-                const settingsEntry = settingsIdx >= 0 ? [state.items[settingsIdx]] : [];
-                return { items: [...newOrder, ...settingsEntry] };
-              });
-            }}
-            className="flex flex-col gap-0.5"
-            style={{ listStyle: "none", padding: 0, margin: 0 }}
-          >
-            {mainItems.map((item, index) =>
-              item.type === "separator" ? (
-                <Reorder.Item
-                  key={item.id}
-                  value={item}
-                  drag={false}
-                  style={{ listStyle: "none" }}
-                >
-                  <DockSeparator id={item.id} label={item.label} showLabel={showLabel} />
-                </Reorder.Item>
-              ) : (
-                <Reorder.Item
-                  key={item.id}
-                  value={item}
-                  style={{ listStyle: "none", position: "relative" }}
-                  whileDrag={{ scale: 1.02, zIndex: 50, cursor: "grabbing" }}
-                  dragTransition={{ bounceStiffness: 600, bounceDamping: 20 }}
-                  data-index={index}
-                >
-                  <DockRouteItem
-                    item={item}
-                    isActive={isRouteActive(item.route, location.pathname)}
-                    showLabel={showLabel}
-                    onNavigate={handleNavigate}
-                  />
-                </Reorder.Item>
-              ),
-            )}
-          </Reorder.Group>
-        </nav>
-
-        {settingsItem && (
-          <div
-            className="shrink-0 border-t border-border-subtle px-2 py-2"
-            data-testid="sidebar-settings-section"
-          >
-            <DockRouteItem
-              item={settingsItem}
-              isActive={isRouteActive(settingsItem.route, location.pathname)}
-              showLabel={showLabel}
-              onNavigate={handleNavigate}
-            />
+        <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-2 py-3 [scrollbar-width:none]">
+            <Reorder.Group
+              axis="y"
+              values={mainItems}
+              onReorder={(newOrder) => {
+                useSidebarStore.setState((state) => {
+                  const settingsIdx = state.items.findIndex((i) => i.id === "settings");
+                  const settingsEntry = settingsIdx >= 0 ? [state.items[settingsIdx]] : [];
+                  return { items: [...newOrder, ...settingsEntry] };
+                });
+              }}
+              className="flex flex-col gap-0.5"
+              style={{ listStyle: "none", padding: 0, margin: 0 }}
+            >
+              {mainItems.map((item, index) =>
+                item.type === "separator" ? (
+                  <Reorder.Item
+                    key={item.id}
+                    value={item}
+                    drag={false}
+                    style={{ listStyle: "none" }}
+                  >
+                    <DockSeparator id={item.id} label={item.label} showLabel={showLabel} />
+                  </Reorder.Item>
+                ) : (
+                  <Reorder.Item
+                    key={item.id}
+                    value={item}
+                    style={{ listStyle: "none", position: "relative" }}
+                    whileDrag={{ scale: 1.02, zIndex: 50, cursor: "grabbing" }}
+                    dragTransition={{ bounceStiffness: 600, bounceDamping: 20 }}
+                    data-index={index}
+                  >
+                    <DockRouteItem
+                      item={item}
+                      isActive={isRouteActive(item.route, location.pathname)}
+                      showLabel={showLabel}
+                      onNavigate={handleNavigate}
+                    />
+                  </Reorder.Item>
+                ),
+              )}
+            </Reorder.Group>
           </div>
-        )}
+
+          {settingsItem && (
+            <div
+              className="shrink-0 border-t border-border-subtle px-2 py-2"
+              data-testid="sidebar-settings-section"
+            >
+              <DockRouteItem
+                item={settingsItem}
+                isActive={isRouteActive(settingsItem.route, location.pathname)}
+                showLabel={showLabel}
+                onNavigate={handleNavigate}
+              />
+            </div>
+          )}
+        </nav>
       </TooltipProvider>
     </motion.aside>
   );
