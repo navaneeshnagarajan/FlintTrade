@@ -627,7 +627,7 @@ export function AITutorPill() {
     <div
       className={cn(
         "fixed z-50 hidden sm:flex flex-col items-end gap-2",
-        hidesFloatingPill(location.pathname) ? "right-3 top-14" : "bottom-24 right-4",
+        hidesFloatingPill(location.pathname) ? "right-3 top-12" : "bottom-24 right-4",
       )}
       aria-live="polite"
     >

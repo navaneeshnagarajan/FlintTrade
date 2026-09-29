@@ -788,7 +788,7 @@ export default function TerminalRoute() {
       {/* Desk toolbar: the page name, the active workspace and the two ways
           to change the canvas are always one click away. */}
       <div
-        className="flex h-11 shrink-0 items-center gap-3 border-b border-border-default bg-surface-base px-3"
+        className="flex h-9 shrink-0 items-center gap-3 border-b border-border-default bg-surface-base px-3"
         data-testid="desk-toolbar"
       >
         <h1 className="ft-text-card-title text-text-primary">Trade</h1>
@@ -800,7 +800,7 @@ export default function TerminalRoute() {
               type="button"
               size="sm"
               variant="ghost"
-              className="h-8 text-xs text-text-secondary"
+              className="h-7 text-xs text-text-secondary"
               aria-expanded={toolsExpanded}
               aria-label="Watchlist and desk tools"
               data-testid="desk-tools-toggle"
@@ -819,7 +819,7 @@ export default function TerminalRoute() {
             type="button"
             size="sm"
             variant="ghost"
-            className="h-8 text-xs text-text-secondary"
+            className="h-7 text-xs text-text-secondary"
             onClick={() => setWidgetPickerOpen(true)}
             data-testid="desk-add-widget"
           >
@@ -830,7 +830,7 @@ export default function TerminalRoute() {
             type="button"
             size="sm"
             variant="ghost"
-            className="h-8 text-xs text-text-secondary"
+            className="h-7 text-xs text-text-secondary"
             onClick={() => setPresetPickerOpen(true)}
             data-testid="desk-layouts"
           >

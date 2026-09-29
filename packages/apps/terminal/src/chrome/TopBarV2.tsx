@@ -1,5 +1,5 @@
 /**
- * TopBarV2 — the app bar (48px, single row), in three zones:
+ * TopBarV2 — the app bar (44px, single row), in three zones:
  *
  *   [Menu*] [F FlintTrade] | [Search symbols, pages, commands…  Ctrl K]
  *                                  [Account*] [Mode] [Market · IST] [Status]
@@ -464,7 +464,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
 
   return (
     <div
-      className="sticky top-0 z-100 flex h-12 shrink-0 select-none items-center gap-2 overflow-x-hidden px-3"
+      className="sticky top-0 z-100 flex h-11 shrink-0 select-none items-center gap-2 overflow-x-hidden px-3"
       style={barStyle}
       data-testid="topbar-v2"
     >
