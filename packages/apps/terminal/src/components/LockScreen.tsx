@@ -13,8 +13,8 @@ import {
   isAuthSessionFenceCurrent,
   useAuthStore,
 } from "@/stores/authStore";
-import { useModeStore } from "@/stores/modeStore";
 import { unlockWithPin } from "@/lib/modeAuth";
+import { unlockDeskLabel } from "@/lib/unlockDeskLabel";
 
 // ---------------------------------------------------------------------------
 // IST clock hook
@@ -68,9 +68,10 @@ function PinDots({ filled }: { filled: number }) {
 
 export function LockScreen() {
   const username = useAuthStore((s) => s.username);
+  const sessionToken = useAuthStore((s) => s.reauthToken ?? s.token);
   const setLoggedOut = useAuthStore((s) => s.setLoggedOut);
   const setLoggedInIfCurrent = useAuthStore((s) => s.setLoggedInIfCurrent);
-  const mode = useModeStore((s) => s.mode);
+  const deskLabel = unlockDeskLabel(sessionToken);
 
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
@@ -89,12 +90,10 @@ export function LockScreen() {
     setIsSubmitting(true);
     setError("");
     try {
-      // Mode-PRESERVING idle unlock: pass the session's current UI mode so the
-      // backend does not silently escalate an idle Explore/Practice session to
-      // a Live-unlocked JWT (Phase 1 G2 — the LockScreen previously called
-      // /auth/pin with no mode and always received a live-unlocked token,
-      // leaving the next "practice" order to dispatch down the live path).
-      const result = await unlockWithPin(value, mode);
+      // Unlock restores the existing session and never changes Mode. The
+      // server reads Mode from the session; this screen does not send one
+      // and does not apply a mode from the response.
+      const result = await unlockWithPin(value);
       setLoggedInIfCurrent(result.token, requestFence.principal ?? "", "", requestFence);
     } catch (err) {
       if (!isAuthSessionFenceCurrent(requestFence)) return;
@@ -109,7 +108,7 @@ export function LockScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [setLoggedInIfCurrent, mode]);
+  }, [setLoggedInIfCurrent]);
 
   function handlePinChange(e: React.ChangeEvent<HTMLInputElement>) {
     const val = e.target.value.replace(/\D/g, "").slice(0, 6);
@@ -189,8 +188,11 @@ export function LockScreen() {
           <div className="p-3 rounded-full bg-surface-card border border-border-default">
             <Lock className="size-5 text-text-muted" />
           </div>
+          <h1 className="text-sm font-medium text-text-primary">
+            {deskLabel ?? "Locked"}
+          </h1>
           <p className="text-sm text-text-secondary">
-            Locked — <span className="text-text-primary font-medium">{displayName}</span>
+            <span className="text-text-primary font-medium">{displayName}</span>
           </p>
         </div>
 

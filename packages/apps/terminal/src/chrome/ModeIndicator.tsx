@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
-import { downgradeMode, unlockWithPin } from "@/lib/modeAuth";
+import { confirmLiveMode, downgradeMode } from "@/lib/modeAuth";
 import { enableFlintTradeTotp } from "@/lib/setupAccountApi";
 
 // ---------------------------------------------------------------------------
@@ -88,12 +88,9 @@ export default function ModeIndicator() {
       if (totpCode.length === 6) {
         await enableFlintTradeTotp(totpCode);
       }
-      // Explicit Live arm: unlockWithPin defaults to mode "live", so the
-      // backend mints a live_mode_unlocked JWT. Capturing it is essential —
-      // otherwise the in-memory token stays at the Explore/Practice JWT from
-      // login and the server-side require_live_unlocked guard rejects every
-      // order. (Fixed 2026-05-19 per Codex audit; centralised in Phase 1.)
-      const { token: newToken } = await unlockWithPin(pin, "live");
+      // Explicit Live switch. Quick unlock does not change Mode; this call
+      // does, and only after the server accepts the PIN and enrolment check.
+      const { token: newToken } = await confirmLiveMode(pin);
       if (!updateToken(newToken, expectedGeneration)) return;
     } catch (err) {
       // Surface the server's message — the backend distinguishes a wrong PIN
