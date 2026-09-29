@@ -108,13 +108,18 @@ export function optionalSetupSkippedCount(state: OptionalSetupTrayState): number
   return skipped.size;
 }
 
-/** One-line reminder. `done` of `total` uses the live card count. */
+/**
+ * One-line reminder. `done` of `total` uses the live card count.
+ * A zero skipped count is left off the line.
+ */
 export function optionalSetupStripLabel(
   done: number,
   skipped = 0,
   total = OPTIONAL_SETUP_CARDS.length,
 ): string {
-  return `Optional setup · ${done} of ${total} done · ${skipped} skipped`;
+  const base = `Optional setup · ${done} of ${total} done`;
+  if (skipped <= 0) return base;
+  return `${base} · ${skipped} skipped`;
 }
 
 export function markPracticeLaterPending(): void {

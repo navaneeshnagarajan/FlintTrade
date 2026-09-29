@@ -36,7 +36,7 @@ describe("PracticeLaterSetup", () => {
     markPracticeLaterPending();
     render(<PracticeLaterSetup />);
 
-    expect(screen.getByText("Optional setup · 0 of 4 done · 0 skipped")).toBeInTheDocument();
+    expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
     const show = screen.getByRole("button", { name: "Show" });
     expect(show).toHaveAttribute("aria-expanded", "false");
     expect(show.className).toContain("w-16");
@@ -54,7 +54,7 @@ describe("PracticeLaterSetup", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show" }));
 
     expect(screen.getByRole("button", { name: "Hide" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("Optional setup · 0 of 4 done · 0 skipped")).toBeInTheDocument();
+    expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Hide" }).className).toContain("w-16");
     expect(screen.getByRole("button", { name: "Skip Two-factor authentication" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue without a broker" })).toBeInTheDocument();
@@ -98,7 +98,7 @@ describe("PracticeLaterSetup", () => {
     expect(localStorage.getItem(PRACTICE_LATER_KEY)).toBeNull();
 
     render(<PracticeLaterSetup surface="settings" />);
-    expect(screen.getByText("Optional setup · 0 of 4 done · 0 skipped")).toBeInTheDocument();
+    expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Optional setup" }).className).toContain("mb-4");
     expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument();
   });
