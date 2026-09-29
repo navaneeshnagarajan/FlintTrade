@@ -14,7 +14,7 @@ import {
   useAuthStore,
 } from "@/stores/authStore";
 import { unlockWithPin } from "@/lib/modeAuth";
-import { unlockDeskLabel } from "@/lib/unlockDeskLabel";
+import { lockedDeskHeading } from "@/lib/unlockDeskLabel";
 
 // ---------------------------------------------------------------------------
 // IST clock hook
@@ -71,8 +71,6 @@ export function LockScreen() {
   const sessionToken = useAuthStore((s) => s.reauthToken ?? s.token);
   const setLoggedOut = useAuthStore((s) => s.setLoggedOut);
   const setLoggedInIfCurrent = useAuthStore((s) => s.setLoggedInIfCurrent);
-  const deskLabel = unlockDeskLabel(sessionToken);
-
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -189,7 +187,7 @@ export function LockScreen() {
             <Lock className="size-5 text-text-muted" />
           </div>
           <h1 className="text-sm font-medium text-text-primary">
-            {deskLabel ?? "Locked"}
+            {lockedDeskHeading(sessionToken)}
           </h1>
           <p className="text-sm text-text-secondary">
             <span className="text-text-primary font-medium">{displayName}</span>

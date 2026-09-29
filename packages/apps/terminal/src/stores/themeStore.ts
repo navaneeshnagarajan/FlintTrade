@@ -31,6 +31,7 @@ import {
   getResolvedVariant,
 } from "@/lib/cinematicThemes";
 import type { CinematicTheme, ColorMode, ThemeDefinition } from "@/lib/cinematicThemes";
+import { elevatedSurfaceColour, unselectedTabColour } from "@/lib/colourMix";
 
 // ---------------------------------------------------------------------------
 // ThemeState
@@ -416,16 +417,8 @@ const storeImpl: StateCreator<
     style.setProperty("--color-surface-base",     variant.colors.base);
     style.setProperty("--color-surface-card",     variant.colors.card);
 
-    // Compute elevated as card lightened by ~5 L* units
-    const cardR = parseInt(variant.colors.card.slice(1, 3), 16);
-    const cardG = parseInt(variant.colors.card.slice(3, 5), 16);
-    const cardB = parseInt(variant.colors.card.slice(5, 7), 16);
-    const bump = 12;
-    const elevatedHex =
-      `#${Math.min(255, cardR + bump).toString(16).padStart(2, "0")}` +
-      `${Math.min(255, cardG + bump).toString(16).padStart(2, "0")}` +
-      `${Math.min(255, cardB + bump).toString(16).padStart(2, "0")}`;
-    style.setProperty("--color-surface-elevated", elevatedHex);
+    // Elevated tray: card lightened by a fixed channel bump (see colourMix).
+    style.setProperty("--color-surface-elevated", elevatedSurfaceColour(variant.colors.card));
     style.setProperty("--color-surface-floating", variant.colors.cardHover);
     style.setProperty("--color-surface-stripe",   hexToRgba(variant.colors.base, 0.50));
     style.setProperty("--color-surface-hover",    variant.colors.cardHover);
@@ -437,6 +430,10 @@ const storeImpl: StateCreator<
 
     style.setProperty("--color-text-primary",     variant.colors.text);
     style.setProperty("--color-text-disabled",    variant.colors.textDisabled);
+    style.setProperty(
+      "--fl-color-tab-unselected",
+      unselectedTabColour(variant.colors.text, variant.colors.textSecondary),
+    );
 
     // Warning / ATM tokens (consistent across themes)
     style.setProperty("--color-atm-text",   variant.trading.warningText);

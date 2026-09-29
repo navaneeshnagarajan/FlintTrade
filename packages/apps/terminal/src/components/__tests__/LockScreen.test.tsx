@@ -109,18 +109,21 @@ describe("LockScreen", () => {
     return `header.${payload}.sig`;
   }
 
-  it("names the desk it will reopen from the session Mode", () => {
-    // The Mode store says Live. The label must follow the session claim.
+  it("names the locked desk from the session Mode", () => {
+    // The Mode store says Live. The heading must follow the session claim.
     currentMode = "live";
     const named = [
-      ["practice", "Unlock Practice desk"],
-      ["live", "Unlock Live desk"],
+      ["practice", "Practice desk locked"],
+      ["live", "Live desk locked"],
     ] as const;
 
-    for (const [mode, label] of named) {
+    for (const [mode, heading] of named) {
       Object.assign(authState, { token: null, reauthToken: sessionJwt(mode) });
       const view = render(<LockScreen />);
-      expect(screen.getByRole("heading", { name: label })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: /unlock/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /desk/i })).not.toBeInTheDocument();
       view.unmount();
     }
 
@@ -128,22 +131,23 @@ describe("LockScreen", () => {
     expect(currentMode).toBe("live");
   });
 
-  it("keeps the plain Locked heading for an example-data session", () => {
+  it("keeps the plain Locked heading for Explore, Connected (read), and an unknown Mode", () => {
+    // Connected (read) is a broker status. The heading reads the session
+    // mode claim, so that status never becomes a desk name.
     currentMode = "live";
-    Object.assign(authState, { token: null, reauthToken: sessionJwt("explore") });
-    render(<LockScreen />);
-    expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
-    expect(screen.queryByText(/connected \(read\)/i)).not.toBeInTheDocument();
+    const claims = ["explore", "Connected (read)", "not-a-mode"];
+    for (const claim of claims) {
+      Object.assign(authState, { token: null, reauthToken: sessionJwt(claim) });
+      const view = render(<LockScreen />);
+      expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: /unlock/i })).not.toBeInTheDocument();
+      expect(screen.queryByText(/connected \(read\)/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /desk/i })).not.toBeInTheDocument();
+      view.unmount();
+    }
     expect(setMode).not.toHaveBeenCalled();
-  });
-
-  it("keeps the plain Locked heading for an unknown session value", () => {
-    currentMode = "practice";
-    Object.assign(authState, { token: null, reauthToken: sessionJwt("not-a-mode") });
-    render(<LockScreen />);
-    expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
-    expect(screen.queryByText(/connected \(read\)/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: /unlock/i })).not.toBeInTheDocument();
+    expect(currentMode).toBe("live");
   });
 
   it("renders the lock screen dialog with user name", () => {
