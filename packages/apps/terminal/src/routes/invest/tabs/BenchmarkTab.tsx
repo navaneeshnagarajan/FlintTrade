@@ -145,6 +145,9 @@ export function BenchmarkTab() {
   const hasHoldings = holdings.length > 0;
   const hasRealHoldings = hasHoldings && !isSampleData;
   const bookReturn = portfolioBookReturn(holdings);
+  const portfolioLabel = hasRealHoldings
+    ? "Your Portfolio (since first buy)"
+    : "Your Portfolio";
 
   return (
     <div className="space-y-6">
@@ -184,11 +187,15 @@ export function BenchmarkTab() {
             </thead>
             <tbody>
               {/* Portfolio row — highlighted */}
-              <tr className="border-b border-border-default bg-accent/5" data-testid="benchmark-portfolio-row">
+              <tr
+                className="border-b border-border-default bg-accent/5"
+                data-testid="benchmark-portfolio-row"
+                aria-label={portfolioLabel}
+              >
                 <td className="px-4 py-3 font-heading font-semibold text-accent whitespace-nowrap sticky left-0 bg-accent/5 z-10">
                   <div className="flex items-center gap-2">
                     <TrendingUp className="size-3.5" />
-                    Your Portfolio
+                    {portfolioLabel}
                     {hasHoldings && (
                       <span
                         data-testid="benchmark-portfolio-return"

@@ -312,17 +312,27 @@ describe("OverlapTab rendering", () => {
     expect(screen.queryByTestId("overlap-example")).not.toBeInTheDocument();
   });
 
-  it("stays empty with one holding and opens at two", () => {
+  it("stays empty with one holding", () => {
     investState.hasAccountSnapshot = true;
+    investState.isSampleData = false;
     investState.holdings = [row("SBIN")];
-    const { unmount } = render(<OverlapTab />);
-    expect(screen.getByTestId("overlap-empty")).toHaveTextContent(EMPTY_COPY);
-    unmount();
-
-    investState.holdings = [row("SBIN"), row("TCS")];
     render(<OverlapTab />);
+    expect(screen.getByTestId("overlap-empty")).toHaveTextContent(EMPTY_COPY);
+    expect(screen.queryByText("Unique Stocks")).not.toBeInTheDocument();
+  });
+
+  it("opens the overlap view when the account holds two or more funds", () => {
+    investState.hasAccountSnapshot = true;
+    investState.isSampleData = false;
+    investState.holdings = [row("SBIN"), row("SBIN"), row("TCS")];
+    render(<OverlapTab />);
+
     expect(screen.queryByTestId("overlap-empty")).not.toBeInTheDocument();
-    expect(screen.getByText("2 total holdings")).toBeInTheDocument();
+    expect(screen.getByText("3 total holdings")).toBeInTheDocument();
+    expect(screen.getByText("SBIN")).toBeInTheDocument();
+    expect(screen.getByText("2x")).toBeInTheDocument();
+    expect(screen.queryByTestId("overlap-example")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("overlap-demo-label")).not.toBeInTheDocument();
     expect(screen.queryByText("HDFCBANK")).not.toBeInTheDocument();
   });
 

@@ -101,6 +101,8 @@ describe("BenchmarkTab", () => {
     expect(within(portfolio).getByTestId("benchmark-portfolio-return")).toHaveTextContent(
       "+25.00%",
     );
+    expect(within(portfolio).getByText("Your Portfolio (since first buy)")).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: "Your Portfolio (since first buy)" })).toBe(portfolio);
     expect(within(portfolio).queryByText("Example")).not.toBeInTheDocument();
     expect(screen.queryByText(/Showing sample data/)).not.toBeInTheDocument();
 
@@ -129,7 +131,7 @@ describe("BenchmarkTab", () => {
 
   it("shows the portfolio row", () => {
     render(<BenchmarkTab />);
-    expect(screen.getByText("Your Portfolio")).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: "Your Portfolio (since first buy)" })).toBeInTheDocument();
   });
 
   it("renders all five benchmark indices", () => {
@@ -155,6 +157,8 @@ describe("BenchmarkTab", () => {
     const portfolio = screen.getByTestId("benchmark-portfolio-row");
     expect(screen.getByText("NIFTY 50")).toBeInTheDocument();
     expect(within(portfolio).getByText("Your Portfolio")).toBeInTheDocument();
+    expect(within(portfolio).queryByText(/since first buy/)).not.toBeInTheDocument();
+    expect(screen.getByRole("row", { name: "Your Portfolio" })).toBe(portfolio);
     expect(within(portfolio).queryByTestId("benchmark-portfolio-return")).not.toBeInTheDocument();
     expect(within(portfolio).getAllByText("—").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId("benchmark-empty-note")).toHaveTextContent(

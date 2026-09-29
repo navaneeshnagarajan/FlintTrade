@@ -2,7 +2,6 @@
  * WelcomeCard — Hero card (wide). Greeting + daily P&L + regime + position count.
  */
 
-import { useSettingsStore } from "@/stores/settingsStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import { usePositions } from "@/hooks/usePositions";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
@@ -12,9 +11,10 @@ import { BentoCard } from "@/components/bento/BentoCard";
 import { DemoBadge } from "./DemoBadge";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { getIstGreeting } from "./getIstGreeting";
+import { useOperatorGreetingName } from "./operatorGreetingName";
 
 export function WelcomeCard() {
-  const name = useSettingsStore((s) => s.name);
+  const name = useOperatorGreetingName();
   const isExplore = useModeStore((s) => s.mode === "explore");
   const accountReadsEnabled = useAccountReadsEnabled();
   const storePnl = useTradingStore((s) => s.totalPnl);

@@ -344,11 +344,14 @@ export function BasketTab() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
-  const isDemo = Object.keys(quotes).length === 0 && !isLoading;
+  const showsSeededSample = baskets.some((basket) => isSeededSampleBasket(basket.id));
+  // Quotes still loading must not paint seeded sample cards without a label.
+  // The chip is in the first frame whenever those cards are shown.
+  const showExampleChip = showsSeededSample || (Object.keys(quotes).length === 0 && !isLoading);
 
   return (
     <div className="space-y-6">
-      {isDemo && <ExampleLabel />}
+      {showExampleChip && <ExampleLabel />}
 
       {/* Header */}
       <div className="flex items-center justify-between">

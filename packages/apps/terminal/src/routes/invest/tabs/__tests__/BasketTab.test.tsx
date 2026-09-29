@@ -45,13 +45,14 @@ vi.mock("@/lib/cinematicThemes", () => ({
   }),
 }));
 
-// Mock TanStack Query
+const quoteQuery = vi.hoisted(() => ({
+  data: {} as Record<string, unknown> | undefined,
+  isLoading: false,
+  refetch: vi.fn(),
+}));
+
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({
-    data: {},
-    isLoading: false,
-    refetch: vi.fn(),
-  }),
+  useQuery: () => quoteQuery,
 }));
 
 // Mock API service
@@ -113,6 +114,8 @@ function expectNoCardSampleChip(): void {
 describe("BasketTab", () => {
   beforeEach(() => {
     localStorageMock.clear();
+    quoteQuery.data = {};
+    quoteQuery.isLoading = false;
     useModeStore.setState({ mode: "explore" });
   });
 
@@ -148,6 +151,20 @@ describe("BasketTab", () => {
   it("shows demo banner when no quotes loaded", () => {
     render(<BasketTab />);
     expect(screen.getByTestId("example-label")).toBeInTheDocument();
+  });
+
+  it("labels sample baskets on the first frame while quotes are still loading", () => {
+    quoteQuery.isLoading = true;
+    quoteQuery.data = undefined;
+    render(<BasketTab />);
+
+    const sampleRow = screen.queryByText("NIFTY IT");
+    if (sampleRow) {
+      expect(screen.getByTestId("example-label")).toHaveTextContent("Example");
+      expect(screen.getByText("Banking")).toBeInTheDocument();
+    } else {
+      expect(screen.queryByText("Banking")).not.toBeInTheDocument();
+    }
   });
 
   it("renders saved baskets from localStorage", () => {
