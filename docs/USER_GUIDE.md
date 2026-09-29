@@ -555,10 +555,15 @@ writes a fresh API key to `<workspace>/runtime/laya/api.key`. `stop`
 stops the sidecar, deletes that key, and records **Down** with
 `not_started`. `status` prints the report, including `reason` and the
 plain-words `detail`, and does not print the API key. If
-`model.safetensors` is not in the cache yet, the first `start` may
-download the pinned `english` checkpoint. That boot is not the verified
-offline launch, and Laya is not **Ready** until a start hashes files
-that match the pin. A verified boot does not download.
+the weights file or any pinned manifest file is not in the cache yet,
+`start` downloads the pinned revision first. That step does not start
+the sidecar. FlintTrade then hashes the weights file and every manifest
+file. A full match launches the offline verified boot. A changed byte
+shows **Wrong model version**, the files that download added are
+removed, and the sidecar does not start. A missing or extra file, or a
+failed download, shows **Can't verify the model** and the sidecar does
+not start. The log line for the download step is
+`laya download repo=<repo> revision=<revision>`.
 
 Start the backend with `LAYA_HOST=127.0.0.1`, the same `LAYA_PORT`, and
 `LAYA_API_KEY_FILE` set to that `api.key` when the sidecar was started

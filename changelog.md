@@ -36,7 +36,10 @@ changelog rebuilds itself from the first release cut after this baseline.
   is still `laya[serve]==0.3.21`), installs torch first from the CPU
   index, and can share the base interpreter with FlintTrade.
   `LAYA_PORT` defaults to 8000. The host stays `127.0.0.1`.
-  It is not Ready by default.
+  It is not Ready by default. A first start with the checkpoint missing
+  downloads the pinned revision without starting the sidecar, hashes the
+  weights file and the manifest, and launches only when they match. The
+  sidecar always runs offline.
 
 - **Mode honesty bar.** One line under the TopBar for Explore, Practice,
   and Live. Widgets no longer repeat a Sample chip. An incident, when

@@ -162,7 +162,10 @@ shard index (`model.safetensors.index.json`) is present, or any extra
 weights file or other file the launcher could read is present, the chip
 shows Can't verify the model (`unverified`) and the sidecar does not
 start. A changed byte shows Wrong model version (`wrong_revision`) and
-the sidecar does not start. Neither case reaches Ready. A verified boot
+the sidecar does not start. Neither case reaches Ready. When the weights file or a manifest file is
+not on disk, `start` downloads the pinned revision without starting the
+sidecar, then hashes those files. A failed download is `unverified`. A
+mismatch removes only the files that download added. A verified boot
 sets `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo
 id or a revision. The launch log line is

@@ -47,6 +47,7 @@ _LOG = logging.getLogger("flinttrade.laya")
 # that file's directory, with hub lookups switched off.
 LAYA_WEIGHTS_LOG = "laya weights path=%s sha256=%s"
 LAYA_WEIGHTS_DRIFT_LOG = "laya weights path=%s changed=%s"
+LAYA_DOWNLOAD_LOG = "laya download repo=%s revision=%s"
 LAYA_WATCH_INTERVAL_SECONDS = 1.5
 LAYA_PINNED_WEIGHT_BOOTSTRAP = textwrap.dedent(
     """\
@@ -81,6 +82,30 @@ LAYA_PINNED_WEIGHT_BOOTSTRAP = textwrap.dedent(
         host=os.environ.get("LAYA_HOST", "127.0.0.1"),
         port=int(os.environ.get("LAYA_PORT", "8000")),
         log_level=os.environ.get("LAYA_LOG_LEVEL", "info"),
+    )
+    """
+)
+# Downloads the pinned revision and exits. This is not a sidecar: nothing
+# here binds a port or loads the model.
+LAYA_DOWNLOAD_BOOTSTRAP = textwrap.dedent(
+    """\
+    import os
+    import sys
+
+    repo = os.environ.get("LAYA_REPO", "").strip()
+    revision = os.environ.get("LAYA_REVISION", "").strip()
+    if not repo or not revision:
+        sys.stderr.write("laya download pin is incomplete\\n")
+        raise SystemExit(1)
+    os.environ["HF_HUB_OFFLINE"] = "0"
+    os.environ.pop("TRANSFORMERS_OFFLINE", None)
+    from huggingface_hub import snapshot_download
+
+    cache = os.environ.get("HUGGINGFACE_HUB_CACHE", "").strip()
+    snapshot_download(
+        repo_id=repo,
+        revision=revision,
+        cache_dir=cache or None,
     )
     """
 )
@@ -634,6 +659,74 @@ def find_pinned_weight(
     return candidate
 
 
+def _repo_cache_dir(root: Path, repo: str) -> Path:
+    """Hugging Face cache folder for one model repository."""
+    return root / ("models--" + repo.replace("/", "--"))
+
+
+def _pinned_names(policy: Any) -> tuple[str, ...]:
+    """Weights file plus every manifest name, in pin order."""
+    return (str(policy.weight_file), *(str(name) for name, _digest in policy.manifest))
+
+
+def _pinned_files_missing(policy: Any) -> bool:
+    """True when the weights file or any manifest file is not on disk."""
+    names = _pinned_names(policy)
+    for root in huggingface_cache_roots():
+        directory = snapshot_weight_path(
+            root,
+            repo=policy.repo,
+            revision=policy.revision,
+            filename=policy.weight_file,
+        ).parent
+        if all((directory / name).is_file() for name in names):
+            return False
+    return True
+
+
+def _files_under(root: Path) -> set[str]:
+    """Files and symlinks under ``root``. The walk does not follow links."""
+    if not root.exists():
+        return set()
+    found: set[str] = set()
+    for path in root.rglob("*"):
+        if path.is_symlink() or path.is_file():
+            found.add(str(path))
+    return found
+
+
+def _inside_directory(path: Path, root: Path) -> bool:
+    """True when ``path`` itself, not a symlink target, sits inside ``root``."""
+    try:
+        path.absolute().relative_to(root.absolute())
+    except ValueError:
+        return False
+    return True
+
+
+def _remove_fetched(repo_dir: Path, fetched: tuple[Path, ...]) -> None:
+    """Delete files this start created, then empty directories they left."""
+    for path in fetched:
+        if not _inside_directory(path, repo_dir):
+            continue
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            continue
+    if not repo_dir.exists():
+        return
+    directories = [path for path in repo_dir.rglob("*") if path.is_dir() and not path.is_symlink()]
+    for directory in sorted(directories, key=lambda item: len(item.parts), reverse=True):
+        try:
+            directory.rmdir()
+        except OSError:
+            continue
+    try:
+        repo_dir.rmdir()
+    except OSError:
+        return
+
+
 def extra_loadable_file(directory: Path, allowed: set[str]) -> str | None:
     """Return a relative path the launcher could read that is not in ``allowed``.
 
@@ -670,9 +763,9 @@ def verify_installed_model(
 ) -> ArtifactCheck:
     """Verify the pinned revision, the weight file, and the companion manifest.
 
-    A missing weight file is unverified and may still be downloaded on first
-    boot. A snapshot that also holds a shard index, another weights file, or
-    any other file the launcher could read is unverified and must not be
+    A missing weight file is unverified. A snapshot that also holds a shard
+    index, another weights file, or any other file the launcher could read
+    is unverified and must not be
     launched. A file whose digest is not the pin is a real mismatch.
     """
     path = snapshot_weight_file(repo=repo, revision=revision, filename=filename, cache_roots=cache_roots)
@@ -763,6 +856,7 @@ class LayaRuntime:
         health_reader: Callable[[str], Mapping[str, Any] | None] | None = None,
         port_probe: Callable[[int], bool] | None = None,
         artifact_checker: Callable[[], ArtifactCheck] | None = None,
+        downloader: Callable[[list[str], dict[str, str]], int] | None = None,
         watch: bool = True,
         watch_interval: float | None = None,
     ) -> None:
@@ -780,6 +874,7 @@ class LayaRuntime:
         self._health_reader = health_reader
         self._port_probe = port_probe
         self._artifact_checker = artifact_checker
+        self._downloader = downloader
         self._process: Any | None = None
         self._attached = False
         self._api_key = ""
@@ -854,18 +949,26 @@ class LayaRuntime:
             self._launch_refusal = None
             self._weight_drift = None
             weighed = self._weigh_before_launch(policy)
+            if self._artifact_checker is None and _pinned_files_missing(policy):
+                repo_dir, fetched, downloaded = self._download_checkpoint(policy)
+                weighed = self._weigh_before_launch(policy)
+                if not weighed.ok:
+                    if downloaded:
+                        _remove_fetched(repo_dir, fetched)
+                    self._refuse_before_launch(weighed)
             if self._weights_block_launch(weighed):
-                _reap_runtimes.discard(self)
-                self._record_launch_refusal(weighed)
-                raise LayaRuntimeError(_launch_refusal_message(weighed))
-            if weighed.ok and weighed.weights_path:
+                self._refuse_before_launch(weighed)
+            pinned = weighed.ok and bool(weighed.weights_path)
+            if not pinned and self._artifact_checker is None:
+                self._refuse_before_launch(
+                    ArtifactCheck(ok=False, reason="unverified", revision=policy.revision, sha256="")
+                )
+            if pinned:
                 _LOG.info(LAYA_WEIGHTS_LOG, weighed.weights_path, weighed.sha256)
             api_key = secrets.token_urlsafe(32)
             token = secrets.token_urlsafe(32)
             try:
                 _write_private(self._key_path, api_key)
-                offline = weighed.ok or self._weights_cached()
-                pinned = weighed.ok and bool(weighed.weights_path)
                 threads = _thread_budget()
                 env = os.environ.copy()
                 env.update(
@@ -878,13 +981,12 @@ class LayaRuntime:
                         "LAYA_API_KEY": api_key,
                         "LAYA_SHA256_DIGESTS": json.dumps(_checkpoint_digests(policy)),
                         "LAYA_THREADS": str(threads),
-                        "HF_HUB_OFFLINE": "1" if offline else "0",
+                        "HF_HUB_OFFLINE": "1",
+                        "TRANSFORMERS_OFFLINE": "1",
                     }
                 )
                 if pinned:
                     env["LAYA_WEIGHTS_PATH"] = weighed.weights_path
-                    env["HF_HUB_OFFLINE"] = "1"
-                    env["TRANSFORMERS_OFFLINE"] = "1"
                     for name in (
                         "LAYA_REVISION",
                         "LAYA_MODELS",
@@ -898,10 +1000,6 @@ class LayaRuntime:
                 else:
                     env["LAYA_MODELS"] = policy.checkpoint
                     env["LAYA_REVISION"] = policy.revision
-                    if offline:
-                        env["TRANSFORMERS_OFFLINE"] = "1"
-                    else:
-                        env.pop("TRANSFORMERS_OFFLINE", None)
                     argv = [str(serve_executable(self.venv_dir))]
                 spawned = self._process_factory(argv, env)
                 self._process = spawned
@@ -1328,6 +1426,51 @@ class LayaRuntime:
     def _remember_key(self, key: str) -> None:
         self._api_key = key
         self._key_rejected = False
+
+    def _refuse_before_launch(self, check: ArtifactCheck) -> None:
+        """Record the chip and stop. No sidecar process is started."""
+        _reap_runtimes.discard(self)
+        self._record_launch_refusal(check)
+        raise LayaRuntimeError(_launch_refusal_message(check))
+
+    def _download_checkpoint(self, policy: Any) -> tuple[Path, tuple[Path, ...], bool]:
+        """Fetch the pinned revision. Does not start the sidecar.
+
+        Returns the repository cache directory, the files this call created,
+        and whether the download process exited 0. A failed download deletes
+        only those new files.
+        """
+        root = huggingface_cache_roots()[0]
+        repo_dir = _repo_cache_dir(root, policy.repo)
+        before = _files_under(repo_dir)
+        env = os.environ.copy()
+        env["HF_HUB_OFFLINE"] = "0"
+        env["LAYA_REPO"] = policy.repo
+        env["LAYA_REVISION"] = policy.revision
+        env["HUGGINGFACE_HUB_CACHE"] = str(root)
+        env.pop("TRANSFORMERS_OFFLINE", None)
+        argv = [str(venv_python(self.venv_dir)), "-c", LAYA_DOWNLOAD_BOOTSTRAP]
+        _LOG.info(LAYA_DOWNLOAD_LOG, policy.repo, policy.revision)
+        try:
+            if self._downloader is not None:
+                code = self._downloader(argv, env)
+            else:
+                self._ensure_dirs()
+                completed = subprocess.run(  # noqa: S603
+                    argv,
+                    env=env,
+                    cwd=self.runtime_root,
+                    check=False,
+                    stdin=subprocess.DEVNULL,
+                )
+                code = completed.returncode
+        except OSError:
+            code = 1
+        fetched = tuple(Path(path) for path in sorted(_files_under(repo_dir) - before))
+        if code != 0:
+            _remove_fetched(repo_dir, fetched)
+            return repo_dir, (), False
+        return repo_dir, fetched, True
 
     def _weigh_before_launch(self, policy: Any) -> ArtifactCheck:
         """Hash the pinned file before the sidecar process exists."""

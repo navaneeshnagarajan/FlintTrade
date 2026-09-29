@@ -544,7 +544,12 @@ and a pinned file is missing, a shard index is present, or any extra
 weights file or other file the launcher could read is present, the reason
 is `unverified` ("Can't verify the model") and the sidecar does not start.
 A changed byte is `wrong_revision` ("Wrong model version") and the sidecar
-does not start. Neither case reaches Ready. A verified boot sets
+does not start. Neither case reaches Ready. When the weights file or a
+manifest file is not on disk, `start` downloads the pinned revision
+without starting the sidecar, then hashes those files. A failed download
+is `unverified`. A mismatch removes only the files that download added.
+The download log line is `laya download repo=<repo> revision=<revision>`.
+A verified boot sets
 `LAYA_WEIGHTS_PATH` to that hashed weights file and runs offline
 (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). It does not pass a repo id
 or a revision. The launch log line is

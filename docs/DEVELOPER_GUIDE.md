@@ -539,11 +539,15 @@ port and defaults to 8000. A clash on that port is Down with
 written to `<workspace>/runtime/laya/api.key` and removed on `stop`, and
 on a start that fails after the key was written.
 
-If `model.safetensors` is not in the cache yet, the first successful
-load may download the pinned english checkpoint into the default
-Hugging Face cache rather than the runtime directory. That boot is not
-the verified offline launch, and Laya is not Ready until a start hashes
-files that match the pin. The pins live in `laya_policy.toml`:
+If the weights file or any manifest file is not in the cache yet,
+`start` downloads the pinned revision into the Hugging Face cache and
+does not start the sidecar for that step. It then hashes
+`model.safetensors` and every manifest file. A full match launches the
+offline verified boot. A changed byte is `wrong_revision`, and only the
+files that download added are removed. A missing or extra file, or a
+failed download, is `unverified`, and the sidecar does not start. The
+download log line is `laya download repo=<repo> revision=<revision>`.
+The pins live in `laya_policy.toml`:
 `[checkpoint]` names `model.safetensors` and its sha256, and
 `[checkpoint.manifest]` pins `rl_agent_config.json`,
 `encoder/config.json`, `tokenizer/tokenizer_config.json`, and
