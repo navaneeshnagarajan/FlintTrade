@@ -110,12 +110,9 @@ _VALID_MODES = frozenset({_MODE_EXPLORE, _MODE_PRACTICE, _MODE_LIVE})
 
 _ENDPOINT_MAP: dict[str, str] = {
     "place":          "placeorder",
-    "place-smart":    "placesmartorder",
     "modify":         "modifyorder",
     "cancel":         "cancelorder",
     "cancel-all":     "cancelallorder",
-    "close-position": "closeposition",
-    "open-position":  "openposition",
     "options":        "optionsorder",
     "options-multi":  "optionsmultiorder",
     # GTT — Good Till Triggered orders (added in OpenAlgo v2.0.0.9).
@@ -2244,23 +2241,6 @@ def place_order_routed(broker: str) -> tuple[Any, int]:
     return _dispatch_live_order("place", body, payload, adapter_id=broker)
 
 
-@orders_bp.route("/place-smart", methods=["POST"])
-@rate_limit("smart_orders", user_rate=2, global_rate=20, identity="jwt")
-def place_smart_order() -> tuple[Any, int]:
-    """Place a smart order — maps to OpenAlgo ``placesmartorder``.
-
-    Smart orders include bracket, cover, and other advanced order types
-    supported by the connected broker.
-
-    Request headers:
-        X-FlintTrade-Mode (str): ``explore`` | ``practice`` | ``live``
-
-    Returns:
-        JSON with ``status``, ``order_id``, and ``message``.
-    """
-    return _dispatch_order("place-smart")
-
-
 @orders_bp.route("/modify", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def modify_order() -> tuple[Any, int]:
@@ -2334,47 +2314,6 @@ def cancel_all_orders() -> tuple[Any, int]:
         JSON with ``status`` and count of cancelled orders.
     """
     return _dispatch_order("cancel-all")
-
-
-@orders_bp.route("/close-position", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
-def close_position() -> tuple[Any, int]:
-    """Close an open position — maps to OpenAlgo ``closeposition``.
-
-    Request headers:
-        X-FlintTrade-Mode (str): ``explore`` | ``practice`` | ``live``
-
-    Request JSON:
-        symbol (str): Instrument symbol.
-        exchange (str): Exchange code.
-        product (str): Product type.
-
-    Returns:
-        JSON with ``status`` and confirmation.
-    """
-    return _dispatch_order("close-position")
-
-
-@orders_bp.route("/open-position", methods=["POST"])
-@rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
-def open_position() -> tuple[Any, int]:
-    """Open a new position — maps to OpenAlgo ``openposition``.
-
-    Request headers:
-        X-FlintTrade-Mode (str): ``explore`` | ``practice`` | ``live``
-
-    Request JSON:
-        symbol (str): Instrument symbol.
-        exchange (str): Exchange code.
-        action (str): ``BUY`` or ``SELL``.
-        quantity (int): Number of units.
-        price (float): Entry price.
-        product (str): Product type.
-
-    Returns:
-        JSON with ``status``, ``order_id``, and ``message``.
-    """
-    return _dispatch_order("open-position")
 
 
 @orders_bp.route("/options", methods=["POST"])

@@ -50,13 +50,10 @@ _EXPECTED_FRONTEND_ORDER_LEAVES = {
     "basket",
     "cancel",
     "cancel-all",
-    "close-position",
     "modify",
-    "open-position",
     "options",
     "options-multi",
     "place",
-    "place-smart",
     "split",
 }
 _LOWER_KEBAB_RE = re.compile(r"[a-z][a-z0-9-]*\Z")

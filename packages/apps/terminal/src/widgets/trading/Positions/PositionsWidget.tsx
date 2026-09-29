@@ -43,7 +43,9 @@
  *
  * DATA HONESTY. Explore renders ONE sample book (`sampleBook.ts`) with no
  * per-widget Sample chip — the Mode honesty bar owns that line — and no write
- * control is reachable there (they require Live plus a connected broker). Practice reads the
+ * control is reachable there. Practice square-off and exit-all place the
+ * opposite order through the same place route as the Order Pad. Convert and
+ * the live exit-all verb stay on a connected Live book. Practice reads the
  * sandbox; Live reads the broker. A stale feed says so, and a failed feed says
  * the figures are frozen and when.
  */
@@ -80,6 +82,8 @@ import {
 import { FlintSegmentTracker } from "@flinttrade/design-system";
 import { downloadExcel } from "@/services/ftApi.data";
 import { postWithMode } from "@/services/ftApi.helpers";
+import { LayaAdmissionNotice } from "@/components/orders/LayaAdmissionNotice";
+import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { placeOrder } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -335,16 +339,32 @@ interface SquareOffDialogProps {
   position: PositionRow;
   openingIdentity: AccountAuthorityIdentity;
   canSubmit: boolean;
+  /** Practice fills need a positive mark. Live market orders keep price 0. */
+  practice: boolean;
   isActionAllowed: () => boolean;
   getCurrentIdentity: () => AccountAuthorityIdentity;
   onClose: () => void;
   onSquaredOff: (mutationIdentity: AccountAuthorityIdentity) => void;
 }
 
+function squareOffProduct(position: PositionRow): (typeof PRODUCTS)[number] | null {
+  return (PRODUCTS as readonly string[]).includes(position.product)
+    ? (position.product as (typeof PRODUCTS)[number])
+    : null;
+}
+
+function squareOffMark(position: PositionRow, practice: boolean): number {
+  if (!practice) return 0;
+  if (position.ltp > 0) return position.ltp;
+  if (position.averagePrice > 0) return position.averagePrice;
+  return 0;
+}
+
 function SquareOffDialog({
   position,
   openingIdentity,
   canSubmit,
+  practice,
   isActionAllowed,
   getCurrentIdentity,
   onClose,
@@ -352,14 +372,13 @@ function SquareOffDialog({
 }: SquareOffDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [layaNotice, setLayaNotice] = useState<LayaNotice | null>(null);
 
   const exitAction: "BUY" | "SELL" = position.quantity > 0 ? "SELL" : "BUY";
   const exitQty = Math.abs(position.quantity);
   // The counter-order must carry the position's own product, or the broker
   // opens a fresh position in a different product instead of squaring off.
-  const product = (PRODUCTS as readonly string[]).includes(position.product)
-    ? (position.product as (typeof PRODUCTS)[number])
-    : null;
+  const product = squareOffProduct(position);
 
   const handleSquareOff = useCallback(async () => {
     if (!product || !isActionAllowed()) return;
@@ -371,9 +390,10 @@ function SquareOffDialog({
     if (!mutationIdentity) return;
     setIsSubmitting(true);
     setErrorMsg(null);
+    setLayaNotice(null);
     try {
-      // Existing gated order path: SafetySystem → gate_order → BrokerRouter.
-      // Identical route to the Order Pad — no new order path is introduced.
+      // Same place route as the Order Pad: Laya, then SafetySystem on Live
+      // and the sandbox on Practice.
       await placeOrder({
         symbol: position.symbol,
         exchange: position.exchange,
@@ -381,7 +401,7 @@ function SquareOffDialog({
         product,
         orderType: "MARKET",
         quantity: exitQty,
-        price: 0,
+        price: squareOffMark(position, practice),
         triggerPrice: 0,
         strategy: "FlintPositions",
       }, mutationIdentity);
@@ -397,14 +417,22 @@ function SquareOffDialog({
       onSquaredOff(mutationIdentity);
       onClose();
     } catch (err) {
-      // Surface mode-guard 403s and broker rejections honestly — the backend
-      // message tells the operator exactly what blocked the square-off.
-      setErrorMsg(err instanceof Error ? err.message : "Square-off failed.");
+      const notice = layaNoticeFromOrderError(err);
+      if (notice) {
+        setLayaNotice(notice);
+        setErrorMsg(null);
+      } else {
+        // Surface mode-guard 403s and broker rejections honestly — the backend
+        // message tells the operator exactly what blocked the square-off.
+        setLayaNotice(null);
+        setErrorMsg(err instanceof Error ? err.message : "Square-off failed.");
+      }
     } finally {
       setIsSubmitting(false);
     }
   }, [
     position,
+    practice,
     product,
     exitAction,
     exitQty,
@@ -440,6 +468,7 @@ function SquareOffDialog({
             broker terminal instead.
           </p>
         )}
+        <LayaAdmissionNotice notice={layaNotice} />
         {errorMsg && (
           <p className="text-xs text-loss" role="alert">
             {errorMsg}
@@ -472,9 +501,18 @@ function SquareOffDialog({
 // Exit-all dialog (gated exit_all_positions verb — typed confirmation)
 // ---------------------------------------------------------------------------
 
+interface ExitAllRowFailure {
+  key: string;
+  symbol: string;
+  notice: LayaNotice | null;
+  message: string;
+}
+
 interface ExitAllDialogProps {
   open: boolean;
-  positionCount: number;
+  positions: PositionRow[];
+  /** Practice squares off each open row through place. Live uses exit-all. */
+  practice: boolean;
   openingIdentity: AccountAuthorityIdentity;
   canSubmit: boolean;
   isActionAllowed: () => boolean;
@@ -485,7 +523,8 @@ interface ExitAllDialogProps {
 
 function ExitAllDialog({
   open,
-  positionCount,
+  positions,
+  practice,
   openingIdentity,
   canSubmit,
   isActionAllowed,
@@ -496,13 +535,19 @@ function ExitAllDialog({
   const [confirmText, setConfirmText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [rowFailures, setRowFailures] = useState<ExitAllRowFailure[]>([]);
+  const [squaredOff, setSquaredOff] = useState<string[]>([]);
   const confirmed = confirmText.trim() === "EXIT";
+  const openRows = positions.filter((row) => row.quantity !== 0);
+  const positionCount = openRows.length;
 
   const close = useCallback(
     (next: boolean) => {
       if (!next) {
         setConfirmText("");
         setErrorMsg(null);
+        setRowFailures([]);
+        setSquaredOff([]);
       }
       onOpenChange(next);
     },
@@ -519,7 +564,69 @@ function ExitAllDialog({
     if (!mutationIdentity) return;
     setIsSubmitting(true);
     setErrorMsg(null);
+    setRowFailures([]);
+    setSquaredOff([]);
     try {
+      if (practice) {
+        const failures: ExitAllRowFailure[] = [];
+        const done: string[] = [];
+        for (const position of openRows) {
+          const product = squareOffProduct(position);
+          const label = position.symbol;
+          if (!product) {
+            failures.push({
+              key: `${position.symbol}-${position.exchange}-${position.product}`,
+              symbol: label,
+              notice: null,
+              message: `Cannot square off: unrecognised product${
+                position.product ? ` “${position.product}”` : ""
+              }.`,
+            });
+            continue;
+          }
+          try {
+            await placeOrder({
+              symbol: position.symbol,
+              exchange: position.exchange,
+              action: position.quantity > 0 ? "SELL" : "BUY",
+              product,
+              orderType: "MARKET",
+              quantity: Math.abs(position.quantity),
+              price: squareOffMark(position, true),
+              triggerPrice: 0,
+              strategy: "FlintPositions",
+            }, mutationIdentity);
+            done.push(label);
+          } catch (err) {
+            const notice = layaNoticeFromOrderError(err);
+            failures.push({
+              key: `${position.symbol}-${position.exchange}-${position.product}`,
+              symbol: label,
+              notice,
+              message: notice
+                ? ""
+                : (err instanceof Error ? err.message : "Square-off failed."),
+            });
+          }
+        }
+        if (
+          !isActionAllowed()
+          || !accountAuthorityMatches(mutationIdentity, getCurrentIdentity())
+        ) return;
+        if (done.length > 0) onExited(mutationIdentity);
+        if (failures.length > 0) {
+          setSquaredOff(done);
+          setRowFailures(failures);
+          return;
+        }
+        emitNotification({
+          category: "system",
+          title: "Exit-all submitted",
+          body: "Every open Practice position was squared off at market.",
+        });
+        close(false);
+        return;
+      }
       await postWithMode("positions/exit-all", {
         confirm: true,
         broker: mutationIdentity.brokerType,
@@ -545,6 +652,8 @@ function ExitAllDialog({
     }
   }, [
     confirmed,
+    openRows,
+    practice,
     openingIdentity,
     isActionAllowed,
     getCurrentIdentity,
@@ -558,9 +667,9 @@ function ExitAllDialog({
         <DialogHeader>
           <DialogTitle>Exit all positions?</DialogTitle>
           <DialogDescription>
-            This squares off EVERY open position ({positionCount}) in your live broker account at
-            market price. Fills in a fast market can land far from the last traded price, and the
-            action cannot be undone.
+            {practice
+              ? `This places an opposite market order for every open Practice position (${positionCount}). A refusal is shown on that row. Fills in a fast market can land far from the last traded price, and the action cannot be undone.`
+              : `This squares off EVERY open position (${positionCount}) in your live broker account at market price. Fills in a fast market can land far from the last traded price, and the action cannot be undone.`}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-1.5">
@@ -573,6 +682,21 @@ function ExitAllDialog({
             autoComplete="off"
           />
         </div>
+        {squaredOff.length > 0 && (
+          <p className="text-xs text-text-secondary" role="status">
+            Squared off: {squaredOff.join(", ")}.
+          </p>
+        )}
+        {rowFailures.map((failure) => (
+          <div key={failure.key} className="space-y-0.5">
+            <p className="text-xs font-medium text-text-primary">{failure.symbol}</p>
+            {failure.notice ? (
+              <LayaAdmissionNotice notice={failure.notice} />
+            ) : (
+              <p className="text-xs text-loss" role="alert">{failure.message}</p>
+            )}
+          </div>
+        ))}
         {errorMsg && (
           <p className="text-xs text-loss" role="alert">
             {errorMsg}
@@ -670,8 +794,12 @@ function PositionsWidget(props: WidgetProps) {
   const exactOpenAlgoBook = readIdentity.brokerType === "openalgo"
     && readIdentity.accountId === "default";
   const canMutateBook = appMode === "live" && queryUi.canRefetch && !isError;
-  const canSquareOff = canMutateBook && (exactActiveNativeBook || exactOpenAlgoBook);
+  const practiceBookReady = appMode === "practice" && queryUi.canRefetch && !isError;
+  const canSquareOff = practiceBookReady || (
+    canMutateBook && (exactActiveNativeBook || exactOpenAlgoBook)
+  );
   const canUseNativePositionVerbs = canMutateBook && exactActiveNativeBook;
+  const canExitAll = practiceBookReady || canUseNativePositionVerbs;
   const nativeActionGateRef = useRef(canUseNativePositionVerbs);
   const squareOffActionGateRef = useRef(canSquareOff);
   const readIdentityRef = useRef(readIdentity);
@@ -699,7 +827,7 @@ function PositionsWidget(props: WidgetProps) {
   const squareOffCanSubmit = canSquareOff
     && squareOffIntent !== null
     && accountAuthorityMatches(squareOffIntent.identity, readIdentity);
-  const exitAllCanSubmit = canUseNativePositionVerbs
+  const exitAllCanSubmit = canExitAll
     && exitAllIntent !== null
     && accountAuthorityMatches(exitAllIntent.identity, readIdentity);
 
@@ -717,12 +845,13 @@ function PositionsWidget(props: WidgetProps) {
       setSquareOffIntent(null);
     }
     if (exitAllIntent && (
-      !canUseNativePositionVerbs
+      !canExitAll
       || !accountAuthorityMatches(exitAllIntent.identity, readIdentity)
     )) {
       setExitAllIntent(null);
     }
   }, [
+    canExitAll,
     canSquareOff,
     canUseNativePositionVerbs,
     convertIntent,
@@ -850,7 +979,7 @@ function PositionsWidget(props: WidgetProps) {
 
   const renderRowActions = useCallback((position: PositionRow) => {
     if (!(canSquareOff || canUseNativePositionVerbs)) {
-      // Explore/Practice books are not Live — omit the Live-only hint.
+      // Explore has no book to trade. Practice with a frozen feed omits the hint.
       if (isExplore || appMode === "practice") return null;
       return <span className="text-xxs text-text-muted">Live only</span>;
     }
@@ -1027,7 +1156,7 @@ function PositionsWidget(props: WidgetProps) {
               Broker required
             </span>
           )}
-          {accountReadsEnabled && appMode !== "live" && (
+          {accountReadsEnabled && appMode !== "live" && appMode !== "practice" && (
             <span
               className="px-1.5 py-0.5 text-xxs bg-surface-hover text-text-muted border border-border-subtle rounded"
               role="status"
@@ -1109,7 +1238,7 @@ function PositionsWidget(props: WidgetProps) {
               <FileDown size={12} className={isExporting ? "animate-pulse" : ""} />
             </button>
           )}
-          {canUseNativePositionVerbs && rows.length > 0 && (
+          {canExitAll && rows.some((row) => row.quantity !== 0) && (
             <Button
               size="sm"
               variant="ghost"
@@ -1302,6 +1431,7 @@ function PositionsWidget(props: WidgetProps) {
           position={squareOffIntent.position}
           openingIdentity={squareOffIntent.identity}
           canSubmit={squareOffCanSubmit}
+          practice={appMode === "practice"}
           isActionAllowed={isSquareOffAllowed}
           getCurrentIdentity={getCurrentReadIdentity}
           onClose={() => setSquareOffIntent(null)}
@@ -1313,10 +1443,11 @@ function PositionsWidget(props: WidgetProps) {
       {exitAllIntent && (
         <ExitAllDialog
           open
-          positionCount={rows.length}
+          positions={rows}
+          practice={appMode === "practice"}
           openingIdentity={exitAllIntent.identity}
           canSubmit={exitAllCanSubmit}
-          isActionAllowed={isNativeActionAllowed}
+          isActionAllowed={appMode === "practice" ? isSquareOffAllowed : isNativeActionAllowed}
           getCurrentIdentity={getCurrentReadIdentity}
           onOpenChange={(open) => {
             if (!open) setExitAllIntent(null);

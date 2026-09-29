@@ -18,7 +18,6 @@ import type {
   PlaceOrderParams,
   ModifyOrderParams,
   OrderStatusParams,
-  OpenPositionParams,
   BasketOrderParams,
   BasketOrderResult,
   SplitOrderParams,
@@ -2601,8 +2600,6 @@ function placeExploreSampleOrder(params: PlaceOrderParams): { orderId: string } 
 
 const LIVE_PLACE_ENDPOINTS = new Set([
   "place",
-  "place-smart",
-  "open-position",
   "basket",
   "split",
   "options",
@@ -2910,13 +2907,13 @@ async function get<T>(
 //
 // The leaf names below MUST match the backend route registrations:
 //
-//   core   orders_bp at /api/v1/orders : place, place-smart, modify, cancel,
-//                                        cancel-all, close-position,
-//                                        open-position, options, options-multi
+//   core   orders_bp at /api/v1/orders : place, modify, cancel, cancel-all,
+//                                        options, options-multi
 //   engine order_bp  at /api/v1/orders : basket, split, options-strategy
 //
-// Pre-2026-05-19 this file mixed FT-proxy names (place, place-smart,
-// cancel-all, close-position) with OpenAlgo-style names (cancelorder,
+// Practice opens and closes are `place` (an opposite MARKET order for a
+// close). Pre-2026-05-19 this file mixed FT-proxy names (place,
+// cancel-all) with OpenAlgo-style names (cancelorder,
 // openposition, basketorder, splitorder, optionsorder, optionsmultiorder),
 // so half the order endpoints 404'd in production. Codex stop-gate review
 // caught the mismatch on 2026-05-19 (task-mpcpfmws-5rokaa). A follow-up
@@ -2934,8 +2931,6 @@ export const placeOrder = (
   params: PlaceOrderParams,
   authority?: PostOrderAuthorityPin,
 ) => postOrder<{ orderId: string }>("place", params, authority);
-export const placeSmartOrder = (params: PlaceOrderParams & { position_size: number }) =>
-  postOrder<{ orderId: string }>("place-smart", params);
 export const cancelAllOrders = () =>
   postOrder<void>("cancel-all");
 export const cancelOrder = (
@@ -2943,10 +2938,80 @@ export const cancelOrder = (
   strategy: string,
   authority: OrderAuthorityPin,
 ) => postOrderMutation<void>("cancel", { orderId, strategy }, authority);
-export const closePosition = (strategy = "Flint") =>
-  postOrder<void>("close-position", { strategy });
+
+const PRACTICE_SQUARE_OFF_PRODUCTS = new Set(["MIS", "CNC", "NRML"]);
+
+function practiceSquareOffFailure(symbol: string, err: unknown): string {
+  if (err instanceof OrderApiError && err.body && typeof err.body === "object") {
+    const body = err.body as Record<string, unknown>;
+    if (body.code === "laya_denied") {
+      const reason = typeof body.reason === "string" && body.reason
+        ? body.reason
+        : err.message;
+      const limits = body.limits;
+      const max = limits && typeof limits === "object"
+        ? (limits as { max_quantity?: unknown }).max_quantity
+        : null;
+      const limitsLine = typeof max === "number" && Number.isInteger(max) && max >= 1
+        ? ` Max quantity ${max}.`
+        : "";
+      return `${symbol}: Laya denied. ${reason}${limitsLine}`;
+    }
+    if (body.code === "laya_clamp" && typeof body.message === "string" && body.message) {
+      return `${symbol}: ${body.message}`;
+    }
+  }
+  const message = err instanceof Error ? err.message : "Square-off failed.";
+  return `${symbol}: ${message}`;
+}
+
+/** Place one opposite MARKET order per open Practice position. */
+async function squareOffPracticePositions(): Promise<void> {
+  const payload = await getFtV1<{ positions?: unknown[] }>("sandbox/positions");
+  const positions = (payload.positions ?? [])
+    .map(normalisePracticePosition)
+    .filter((position): position is Position => position !== undefined)
+    .filter((position) => position.quantity !== 0);
+  const failures: string[] = [];
+  for (const position of positions) {
+    const product = position.product.toUpperCase();
+    if (!PRACTICE_SQUARE_OFF_PRODUCTS.has(product)) {
+      failures.push(
+        `${position.symbol}: unrecognised product${position.product ? ` ${position.product}` : ""}`,
+      );
+      continue;
+    }
+    const price = position.ltp > 0
+      ? position.ltp
+      : position.averagePrice > 0
+        ? position.averagePrice
+        : 0;
+    try {
+      await postOrder("place", {
+        symbol: position.symbol,
+        exchange: position.exchange,
+        action: position.quantity > 0 ? "SELL" : "BUY",
+        product: product as "MIS" | "CNC" | "NRML",
+        orderType: "MARKET",
+        quantity: Math.abs(position.quantity),
+        price,
+        triggerPrice: 0,
+        strategy: "FlintPositions",
+      });
+    } catch (err) {
+      failures.push(practiceSquareOffFailure(position.symbol, err));
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(failures.join("\n"));
+  }
+}
+
 export const exitAllPositions = () => {
   const mode = useModeStore.getState().mode;
+  if (mode === "practice") {
+    return squareOffPracticePositions();
+  }
   const apiKey = useConnectionStore.getState().apiKey;
   if (mode !== "live") {
     throw new Error("Exit all positions is available only in Live mode. Use the Positions widget for practice trades.");
@@ -2962,8 +3027,6 @@ export const modifyOrder = (params: ModifyOrderParams, authority: OrderAuthority
   postOrderMutation<{ orderId: string }>("modify", params, authority);
 export const orderStatus = (params: OrderStatusParams) =>
   post<{ status: string }>("orderstatus", params);
-export const openPosition = (params: OpenPositionParams) =>
-  postOrder<{ orderId: string }>("open-position", params);
 // The backend basket route (order_routes `place_basket`) reads a `legs` array
 // with snake_case per-leg fields; `normaliseOrderBody` only aliases top-level
 // keys, so the nested legs are mapped onto the wire contract here. `price` /

@@ -43,12 +43,9 @@ def _create_live_token() -> str:
 # All order endpoints and their FlintTrade route suffixes
 _ORDER_ENDPOINTS = [
     "/api/v1/orders/place",
-    "/api/v1/orders/place-smart",
     "/api/v1/orders/modify",
     "/api/v1/orders/cancel",
     "/api/v1/orders/cancel-all",
-    "/api/v1/orders/close-position",
-    "/api/v1/orders/open-position",
     "/api/v1/orders/options",
     "/api/v1/orders/options-multi",
 ]
@@ -554,32 +551,24 @@ class TestPracticeMode:
         )
         recorder.request_reconnect.assert_called_once_with()
 
-    def test_practice_place_smart_order_does_not_place(self, flask_app, client):
-        """Smart placement is not a second Practice writer. Use /place."""
+    def test_removed_position_routes_are_unmounted(self, flask_app, client):
+        """place-smart, open-position and close-position are not order writers."""
         mock_sandbox = MagicMock()
-        mock_sandbox.place_order.return_value = {
-            "order_id": "SB-002",
-            "status": "COMPLETE",
-            "message": "Smart paper order filled",
-        }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
-
-        refused = client.post(
+        rules = {rule.rule for rule in flask_app.url_map.iter_rules()}
+        for path in (
             "/api/v1/orders/place-smart",
-            json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="practice"),
-        )
-        assert refused.status_code == 400
-        assert refused.get_json()["status"] == "error"
+            "/api/v1/orders/open-position",
+            "/api/v1/orders/close-position",
+        ):
+            assert path not in rules
+            resp = client.post(
+                path,
+                json=_SAMPLE_ORDER_BODY,
+                headers=_auth_headers(mode="practice"),
+            )
+            assert resp.status_code == 404
         mock_sandbox.place_order.assert_not_called()
-
-        placed = client.post(
-            "/api/v1/orders/place",
-            json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="practice"),
-        )
-        assert placed.status_code == 200
-        mock_sandbox.place_order.assert_called_once()
 
     def test_practice_cancel_order_reaches_pending_order(self, flask_app, client):
         mock_sandbox = MagicMock()
@@ -656,91 +645,70 @@ class TestPracticeMode:
         )
         recorder.add_symbols.assert_not_called()
 
-    def test_practice_close_position_uses_place(self, flask_app, client):
-        """Closing a Practice position is a SELL placed through /place."""
-        mock_sandbox = MagicMock()
-        mock_sandbox.place_order.return_value = {
-            "order_id": "SB-003",
-            "status": "COMPLETE",
-            "message": "Position closed",
-        }
-        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+    def test_practice_place_closes_long_and_short_and_squares_off(self, flask_app, client):
+        """Opposite /place orders flatten a long and a short and book net P&L.
 
-        refused = client.post(
-            "/api/v1/orders/close-position",
-            json={"symbol": "NIFTY", "exchange": "NSE", "product": "MIS", "action": "SELL", "quantity": 50},
-            headers=_auth_headers(mode="practice"),
-        )
-        assert refused.status_code == 400
-        mock_sandbox.place_order.assert_not_called()
+        Square-off of two open positions is the same place route, once per row.
+        """
+        import json
 
-        placed = client.post(
-            "/api/v1/orders/place",
-            json={
-                "symbol": "NIFTY",
+        from flinttrade_data.sandbox_engine import SandboxEngine
+
+        engine = SandboxEngine(db_path=":memory:")
+        flask_app.config["DATA_SANDBOX_ENGINE"] = engine
+        headers = _auth_headers(mode="practice")
+
+        def place(symbol: str, action: str, quantity: int, price: float) -> None:
+            resp = client.post(
+                "/api/v1/orders/place",
+                json={
+                    "symbol": symbol,
+                    "exchange": "NSE",
+                    "action": action,
+                    "quantity": quantity,
+                    "price": price,
+                    "product": "MIS",
+                    "order_type": "MARKET",
+                },
+                headers=headers,
+            )
+            assert resp.status_code == 200, resp.get_json()
+            assert resp.get_json()["status"] == "COMPLETE"
+
+        place("INFY", "BUY", 10, 100.0)
+        place("INFY", "SELL", 10, 110.0)
+        assert engine.get_positions() == []
+        assert engine.get_pnl()["realised"] == pytest.approx(100.0)
+
+        engine.import_data(json.dumps({
+            "schema_version": 2,
+            "capital": {"initial": 1_000_000.0, "current": 1_000_000.0},
+            "positions": [{
+                "symbol": "TCS",
                 "exchange": "NSE",
-                "action": "SELL",
-                "quantity": 50,
-                "price": 0,
                 "product": "MIS",
-                "order_type": "MARKET",
-            },
-            headers=_auth_headers(mode="practice"),
-        )
-        assert placed.status_code == 200
-        assert placed.get_json()["status"] == "COMPLETE"
-        mock_sandbox.place_order.assert_called_once_with(
-            symbol="NIFTY",
-            exchange="NSE",
-            action="SELL",
-            quantity=50,
-            price=0.0,
-            product="MIS",
-            order_type="MARKET",
-            trigger_price=0.0,
-            strategy="",
-        )
+                "net_qty": -8,
+                "avg_price": 200.0,
+                "sell_qty": 8,
+                "sell_value": 1600.0,
+            }],
+            "orders": [],
+            "trades": [],
+            "pnl_history": [],
+        }))
+        assert engine.get_positions()[0]["net_qty"] == -8
+        place("TCS", "BUY", 8, 190.0)
+        assert engine.get_positions() == []
+        assert engine.get_pnl()["realised"] == pytest.approx(80.0)
 
-    def test_practice_close_position_no_matching(self, flask_app, client):
-        """The legacy close route does not write the sandbox book."""
-        mock_sandbox = MagicMock()
-        mock_sandbox.get_positions.return_value = []
-        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
-
-        resp = client.post(
-            "/api/v1/orders/close-position",
-            json={"symbol": "NIFTY", "exchange": "NSE", "product": "MIS"},
-            headers=_auth_headers(mode="practice"),
-        )
-        assert resp.status_code == 400
-        data = resp.get_json()
-        assert data["status"] == "error"
-        mock_sandbox.place_order.assert_not_called()
-
-    def test_practice_open_position_uses_place(self, flask_app, client):
-        mock_sandbox = MagicMock()
-        mock_sandbox.place_order.return_value = {
-            "order_id": "SB-004",
-            "status": "COMPLETE",
-            "message": "Position opened",
-        }
-        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
-
-        refused = client.post(
-            "/api/v1/orders/open-position",
-            json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="practice"),
-        )
-        assert refused.status_code == 400
-        mock_sandbox.place_order.assert_not_called()
-
-        placed = client.post(
-            "/api/v1/orders/place",
-            json=_SAMPLE_ORDER_BODY,
-            headers=_auth_headers(mode="practice"),
-        )
-        assert placed.status_code == 200
-        mock_sandbox.place_order.assert_called_once()
+        place("RELIANCE", "BUY", 5, 50.0)
+        place("SBIN", "BUY", 4, 80.0)
+        assert {row["symbol"] for row in engine.get_positions()} == {"RELIANCE", "SBIN"}
+        place("RELIANCE", "SELL", 5, 55.0)
+        place("SBIN", "SELL", 4, 70.0)
+        assert engine.get_positions() == []
+        # 5 * (55 - 50) + 4 * (70 - 80) added to the short cover.
+        assert engine.get_pnl()["realised"] == pytest.approx(65.0)
 
     def test_practice_sandbox_not_configured_returns_500(self, flask_app, client):
         """If SandboxEngine is missing from config, return 500."""
@@ -888,9 +856,6 @@ class TestLiveModeForwarding:
     @pytest.mark.parametrize(
         "endpoint",
         [
-            "/api/v1/orders/place-smart",
-            "/api/v1/orders/close-position",
-            "/api/v1/orders/open-position",
             "/api/v1/orders/options",
             "/api/v1/orders/options-multi",
         ],

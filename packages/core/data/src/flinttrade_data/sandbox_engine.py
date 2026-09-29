@@ -1770,14 +1770,21 @@ class SandboxEngine:
                 new_buy_qty = buy_qty + quantity
                 new_buy_value = buy_value + notional
                 new_net_qty = net_qty + quantity
-                new_avg_price = (
-                    ((net_qty * avg_price) + notional) / new_net_qty
-                    if new_net_qty > 0
-                    else price
-                )
                 new_sell_qty = sell_qty
                 new_sell_value = sell_value
-                new_realised = realised_pnl
+                # Covering a short realises (entry − cover) on the closed quantity.
+                # A buy that flips through flat starts the new long at the cover price.
+                if net_qty < 0:
+                    close_qty = min(quantity, -net_qty)
+                    new_realised = realised_pnl + close_qty * (avg_price - price)
+                    new_avg_price = price if new_net_qty > 0 else avg_price
+                else:
+                    new_avg_price = (
+                        ((net_qty * avg_price) + notional) / new_net_qty
+                        if new_net_qty > 0
+                        else price
+                    )
+                    new_realised = realised_pnl
                 new_unrealised = (
                     (price - new_avg_price) * new_net_qty if new_net_qty != 0 else 0.0
                 )
