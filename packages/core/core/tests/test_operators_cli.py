@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import stat
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -68,25 +70,43 @@ def test_operators_list_shows_id_username_and_created_time(tmp_path, monkeypatch
     assert "hash" not in out
 
 
+def _account_count(db_path: Path) -> int:
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM account").fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    return int(row[0])
+
+
 @pytest.mark.unit
 def test_operators_keep_leaves_one_operator_backup_and_migrates(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     db_path = tmp_path / "auth.db"
     _seed_two_operators(db_path)
-    monkeypatch.setattr(sys, "argv", ["flinttrade", "operators", "keep", "1"])
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(sys, "argv", ["flinttrade", "operators", "keep", "1", "--yes"])
 
     from flinttrade_core.auth_service import AuthService
     from flinttrade_core.cli import main
 
-    main()
+    previous_umask = os.umask(0)
+    try:
+        main()
+    finally:
+        os.umask(previous_umask)
 
     out = capsys.readouterr().out
+    assert "Keeping 1 alice" in out
+    assert "Removing 2 bob" in out
     assert "Kept operator 1." in out
     assert "One operator account remains. Open FlintTrade and choose Retry." in out
-    assert "bob" not in out
+    assert "This backup contains login secrets. Keep it private and delete it once FlintTrade works again." in out
 
     backups = list(tmp_path.glob("auth.db.bak-*Z"))
     assert len(backups) == 1
+    assert stat.S_IMODE(backups[0].stat().st_mode) == 0o600
     assert f"Backup: {backups[0]}" in out
     backup = sqlite3.connect(backups[0])
     try:
@@ -135,3 +155,58 @@ def test_operators_keep_unknown_id_does_not_change_the_database(tmp_path, monkey
         conn.close()
     assert count is not None
     assert int(count[0]) == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("answer", ["", "n", "no", "N"])
+def test_operators_keep_aborts_unless_the_answer_is_yes(
+    tmp_path, monkeypatch, capsys, answer: str,
+) -> None:
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    db_path = tmp_path / "auth.db"
+    _seed_two_operators(db_path)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda: answer)
+    monkeypatch.setattr(sys, "argv", ["flinttrade", "operators", "keep", "1"])
+
+    from flinttrade_core.cli import main
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert "Keeping 1 alice" in captured.out
+    assert "Removing 2 bob" in captured.out
+    assert "Remove 1 other operator account(s)? [y/N]" in captured.out
+    assert "No data was changed." in captured.err
+    assert list(tmp_path.glob("auth.db.bak-*")) == []
+    assert _account_count(db_path) == 2
+
+
+@pytest.mark.unit
+def test_operators_keep_refuses_without_a_terminal(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    db_path = tmp_path / "auth.db"
+    _seed_two_operators(db_path)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    def unexpected_prompt() -> str:
+        raise AssertionError("prompted without a terminal")
+
+    monkeypatch.setattr("builtins.input", unexpected_prompt)
+    monkeypatch.setattr(sys, "argv", ["flinttrade", "operators", "keep", "1"])
+
+    from flinttrade_core.cli import main
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert "Keeping 1 alice" in captured.out
+    assert "Removing 2 bob" in captured.out
+    assert "Remove " not in captured.out
+    assert captured.err == "No data was changed. A terminal is required, or pass --yes.\n"
+    assert list(tmp_path.glob("auth.db.bak-*")) == []
+    assert _account_count(db_path) == 2

@@ -1447,17 +1447,23 @@ List the accounts. The list shows the id, username, and created time:
 flinttrade operators list
 ```
 
-Keep one account. This writes a timestamped backup beside the database,
-removes the other operator accounts and session rows that belong to them,
-then continues the update:
+Keep one account. The command prints the account it will keep and the
+accounts it will remove, then asks `Remove N other operator account(s)? [y/N]`.
+Only `y` or `yes` continues. Any other answer leaves the database unchanged.
+Without a terminal, pass `--yes` or the command refuses and changes nothing:
 
 ```bash
 flinttrade operators keep <id>
+flinttrade operators keep <id> --yes
 ```
 
-The backup file is `auth.db.bak-YYYYMMDDTHHMMSSZ` in the same directory as
-`auth.db` (the workspace directory, `~/.flinttrade/` on Linux). After the
-command finishes, one operator account remains. Open FlintTrade and choose
+A confirmed run writes a timestamped backup beside the database, removes the
+other operator accounts and session rows that belong to them, then continues
+the update. The backup is owner-only. The backup file is
+`auth.db.bak-YYYYMMDDTHHMMSSZ` in the same directory as `auth.db` (the
+workspace directory, `~/.flinttrade/` on Linux). The command then prints
+`This backup contains login secrets. Keep it private and delete it once FlintTrade works again.`
+After it finishes, one operator account remains. Open FlintTrade and choose
 **Retry**.
 
 ### "Connection refused" on the OpenAlgo port

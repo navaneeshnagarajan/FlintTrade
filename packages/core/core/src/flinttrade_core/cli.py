@@ -337,7 +337,7 @@ def cmd_operators(args: argparse.Namespace) -> None:
     if args.operators_command == "list":
         cmd_operators_list()
     elif args.operators_command == "keep":
-        cmd_operators_keep(args.operator_id)
+        cmd_operators_keep(args.operator_id, assume_yes=bool(args.yes))
     else:
         print("usage: flinttrade operators {list,keep}", file=sys.stderr)
         raise SystemExit(1)
@@ -371,6 +371,11 @@ def main() -> None:
         help="Keep one operator account and continue the update",
     )
     keep.add_argument("operator_id", type=int, help="Operator id to keep")
+    keep.add_argument(
+        "--yes",
+        action="store_true",
+        help="Remove the other operator accounts without asking.",
+    )
 
     args = parser.parse_args()
 

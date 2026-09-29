@@ -8,12 +8,14 @@ runs the single-operator migration.
 
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .secure_file import harden
 from .workspace import workspace_dir
 
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -50,19 +52,25 @@ def cmd_operators_list() -> None:
         print(f"{operator_id}\t{username}\t{created_at}")
 
 
-def cmd_operators_keep(operator_id: int) -> None:
+def cmd_operators_keep(operator_id: int, *, assume_yes: bool = False) -> None:
     """Keep one operator, then continue the single-operator migration.
 
+    Prints the account that stays and the accounts that would be removed,
+    then asks before any file is written. ``assume_yes`` skips that question.
+    Without a terminal, the command stops unless ``assume_yes`` is set.
+
     Writes ``auth.db.bak-YYYYMMDDTHHMMSSZ`` beside the database before any
-    row is removed. The delete and the session cleanup commit together. The
-    backup file is removed if that transaction does not commit.
+    row is removed. The file is owner-only. The delete and the session
+    cleanup commit together. The backup file is removed if that transaction
+    does not commit.
 
     Args:
         operator_id: The account id to keep.
+        assume_yes: Skip the confirmation prompt.
 
     Raises:
-        SystemExit: When the database or the id is missing, or the update
-            cannot be committed.
+        SystemExit: When the database or the id is missing, the operator
+            declines, there is no terminal, or the update cannot be committed.
     """
     if operator_id < 1:
         print("No operator with that id.", file=sys.stderr)
@@ -71,8 +79,16 @@ def cmd_operators_keep(operator_id: int) -> None:
     if not db_path.is_file():
         print("No operator database was found.", file=sys.stderr)
         raise SystemExit(1)
-    if not _operator_exists(db_path, operator_id):
+    operators = _operator_rows(db_path)
+    kept = next((row for row in operators if row[0] == operator_id), None)
+    if kept is None:
         print("No operator with that id.", file=sys.stderr)
+        raise SystemExit(1)
+    removed = [row for row in operators if row[0] != operator_id]
+    print(f"Keeping {kept[0]} {kept[1]}")
+    for other_id, username in removed:
+        print(f"Removing {other_id} {username}")
+    if not _confirm_removal(len(removed), assume_yes=assume_yes):
         raise SystemExit(1)
 
     backup_path = _backup_database(db_path)
@@ -94,38 +110,75 @@ def cmd_operators_keep(operator_id: int) -> None:
     print(f"Kept operator {operator_id}.")
     print(f"Backup: {backup_path}")
     print("One operator account remains. Open FlintTrade and choose Retry.")
+    print(
+        "This backup contains login secrets. Keep it private and delete it "
+        "once FlintTrade works again."
+    )
 
 
-def _operator_exists(db_path: Path, operator_id: int) -> bool:
+def _confirm_removal(remove_count: int, *, assume_yes: bool) -> bool:
+    """Ask before deleting. Only ``y`` or ``yes`` continues.
+
+    Returns:
+        ``True`` when the operator confirmed, or ``assume_yes`` is set.
+    """
+    if assume_yes:
+        return True
+    if not sys.stdin.isatty():
+        print(
+            "No data was changed. A terminal is required, or pass --yes.",
+            file=sys.stderr,
+        )
+        return False
+    print(f"Remove {remove_count} other operator account(s)? [y/N]")
+    try:
+        answer = input().strip().lower()
+    except EOFError:
+        answer = ""
+    if answer in {"y", "yes"}:
+        return True
+    print("No data was changed.", file=sys.stderr)
+    return False
+
+
+def _operator_rows(db_path: Path) -> list[tuple[int, str]]:
     conn = sqlite3.connect(db_path)
     try:
-        row = conn.execute(
-            "SELECT 1 FROM account WHERE id = ?",
-            (operator_id,),
-        ).fetchone()
+        rows = conn.execute(
+            "SELECT id, username FROM account ORDER BY id"
+        ).fetchall()
     finally:
         conn.close()
-    return row is not None
+    return [(int(row[0]), str(row[1])) for row in rows]
 
 
 def _backup_database(db_path: Path) -> Path:
-    """Copy ``db_path`` to a timestamped file in the same directory."""
+    """Copy ``db_path`` to an owner-only timestamped file beside it.
+
+    The file is created with mode ``0600`` before the database bytes are
+    copied. :func:`flinttrade_core.secure_file.harden` then applies that mode
+    again on POSIX and the owner-only ACL on Windows.
+    """
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest = db_path.with_name(f"{db_path.name}.bak-{stamp}")
     if dest.exists():
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
         dest = db_path.with_name(f"{db_path.name}.bak-{stamp}")
-    source = sqlite3.connect(db_path)
-    target = sqlite3.connect(dest)
     try:
-        source.backup(target)
-    finally:
-        target.close()
-        source.close()
-    try:
-        dest.chmod(0o600)
-    except OSError:
-        pass
+        descriptor = os.open(dest, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(descriptor)
+        harden(dest)
+        source = sqlite3.connect(db_path)
+        target = sqlite3.connect(dest)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+            source.close()
+        harden(dest)
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
     return dest
 
 
