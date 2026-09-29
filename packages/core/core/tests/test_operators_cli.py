@@ -210,3 +210,173 @@ def test_operators_keep_refuses_without_a_terminal(tmp_path, monkeypatch, capsys
     assert captured.err == "No data was changed. A terminal is required, or pass --yes.\n"
     assert list(tmp_path.glob("auth.db.bak-*")) == []
     assert _account_count(db_path) == 2
+
+
+def _seed_keep_two(db_path: Path) -> None:
+    """Two operators, with sessions, settings, and notes owned by each."""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("""
+            CREATE TABLE account (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL,
+                email TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                pin_hash TEXT NOT NULL,
+                totp_secret_encrypted BLOB NOT NULL,
+                totp_salt BLOB NOT NULL,
+                totp_enabled INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE sessions (
+                id INTEGER PRIMARY KEY,
+                account_id INTEGER NOT NULL,
+                token TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE settings (
+                operator_id INTEGER NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE desk_notes (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                body TEXT NOT NULL
+            )
+        """)
+        created = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC).isoformat()
+        rows = (
+            (1, "alice", "alice-hash", "alice-session", "light", "alice note"),
+            (2, "bob", "bob-hash", "bob-session", "dark", "bob note"),
+        )
+        for operator_id, username, password_hash, token, theme, note in rows:
+            conn.execute(
+                """INSERT INTO account (
+                       id, username, email, password_hash, pin_hash,
+                       totp_secret_encrypted, totp_salt, totp_enabled, created_at
+                   ) VALUES (?, ?, ?, ?, 'pin', ?, ?, 0, ?)""",
+                (
+                    operator_id,
+                    username,
+                    f"{username}@example.com",
+                    password_hash,
+                    b"secret",
+                    b"salt",
+                    created,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO sessions (account_id, token) VALUES (?, ?)",
+                (operator_id, token),
+            )
+            conn.execute(
+                "INSERT INTO settings (operator_id, key, value) VALUES (?, 'theme', ?)",
+                (operator_id, theme),
+            )
+            conn.execute(
+                "INSERT INTO desk_notes (user_id, body) VALUES (?, ?)",
+                (operator_id, note),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _kept_operator_snapshot(db_path: Path) -> dict[str, object]:
+    conn = sqlite3.connect(db_path)
+    try:
+        account = conn.execute(
+            "SELECT id, username, email, password_hash, created_at FROM account ORDER BY id"
+        ).fetchall()
+        sessions = conn.execute(
+            "SELECT account_id, token FROM sessions ORDER BY token"
+        ).fetchall()
+        settings = conn.execute(
+            "SELECT operator_id, key, value FROM settings ORDER BY value"
+        ).fetchall()
+        notes = conn.execute(
+            "SELECT user_id, body FROM desk_notes ORDER BY body"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        "account": account,
+        "sessions": sessions,
+        "settings": settings,
+        "notes": notes,
+    }
+
+
+@pytest.mark.unit
+def test_operators_keep_renumbers_survivor_and_is_idempotent(
+    tmp_path, monkeypatch, capsys,
+) -> None:
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    db_path = tmp_path / "auth.db"
+    _seed_keep_two(db_path)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(sys, "argv", ["flinttrade", "operators", "keep", "2", "--yes"])
+
+    from flinttrade_core.auth_service import AuthService
+    from flinttrade_core.cli import main
+
+    main()
+    captured = capsys.readouterr()
+    assert "Keeping 2 bob" in captured.out
+    assert "Removing 1 alice" in captured.out
+    assert "Kept operator 2." in captured.out
+
+    expected = {
+        "account": [(1, "bob", "bob@example.com", "bob-hash", "2026-01-02T03:04:05+00:00")],
+        "sessions": [(1, "bob-session")],
+        "settings": [(1, "theme", "dark")],
+        "notes": [(1, "bob note")],
+    }
+    assert _kept_operator_snapshot(db_path) == expected
+    assert AuthService(db_path=db_path).migration_blocked() is None
+    assert AuthService(db_path=db_path).is_setup() is True
+
+    monkeypatch.setattr(sys, "argv", ["flinttrade", "operators", "keep", "1", "--yes"])
+    main()
+    assert _kept_operator_snapshot(db_path) == expected
+    assert AuthService(db_path=db_path).is_setup() is True
+
+
+@pytest.mark.unit
+def test_operators_keep_rolls_back_when_the_renumber_fails(
+    tmp_path, monkeypatch, capsys,
+) -> None:
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    db_path = tmp_path / "auth.db"
+    _seed_keep_two(db_path)
+    before = _kept_operator_snapshot(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("""
+            CREATE TRIGGER abort_operator_renumber
+            BEFORE UPDATE OF id ON account
+            BEGIN
+                SELECT RAISE(ABORT, 'renumber failed');
+            END
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(sys, "argv", ["flinttrade", "operators", "keep", "2", "--yes"])
+
+    from flinttrade_core.cli import main
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+
+    assert exc.value.code == 1
+    assert "No data was changed." in capsys.readouterr().err
+    assert list(tmp_path.glob("auth.db.bak-*")) == []
+    assert _kept_operator_snapshot(db_path) == before

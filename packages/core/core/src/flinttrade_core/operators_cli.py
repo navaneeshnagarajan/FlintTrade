@@ -2,8 +2,8 @@
 
 ``flinttrade operators list`` prints id, username, and created time.
 ``flinttrade operators keep <id>`` copies the database beside itself, removes
-every other operator row and session rows that name those operators, then
-runs the single-operator migration.
+every other operator row and session rows that name those operators,
+renumbers the kept operator to id 1, then runs the single-operator migration.
 """
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ from .workspace import workspace_dir
 
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _OPERATOR_REF_COLUMNS = ("account_id", "operator_id", "user_id")
+# Sessions, defaults, and foreign keys address the single operator as id 1.
+_CANONICAL_OPERATOR_ID = 1
 
 
 def auth_db_path() -> Path:
@@ -60,9 +62,10 @@ def cmd_operators_keep(operator_id: int, *, assume_yes: bool = False) -> None:
     Without a terminal, the command stops unless ``assume_yes`` is set.
 
     Writes ``auth.db.bak-YYYYMMDDTHHMMSSZ`` beside the database before any
-    row is removed. The file is owner-only. The delete and the session
-    cleanup commit together. The backup file is removed if that transaction
-    does not commit.
+    row is removed. The file is owner-only. The delete, the session
+    cleanup, and the renumber to id 1 commit together. The backup file is
+    removed if that transaction does not commit. Repeating the command for
+    the stored id 1 leaves that operator's rows in place.
 
     Args:
         operator_id: The account id to keep.
@@ -187,6 +190,9 @@ def _keep_operator(db_path: Path, operator_id: int) -> None:
     try:
         conn.execute("PRAGMA busy_timeout = 5000")
         conn.execute("BEGIN IMMEDIATE")
+        # Check foreign keys at COMMIT so a mid-update reference still rolls
+        # back with the rest of the transaction when they are enabled.
+        conn.execute("PRAGMA defer_foreign_keys = ON")
         try:
             found = conn.execute(
                 "SELECT 1 FROM account WHERE id = ?",
@@ -203,6 +209,7 @@ def _keep_operator(db_path: Path, operator_id: int) -> None:
             ]
             _delete_operator_sessions(conn, removed)
             conn.execute("DELETE FROM account WHERE id != ?", (operator_id,))
+            _renumber_operator(conn, operator_id, _CANONICAL_OPERATOR_ID)
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
@@ -238,3 +245,38 @@ def _delete_operator_sessions(conn: sqlite3.Connection, removed_ids: list[int]) 
                 f'DELETE FROM "{table_name}" WHERE "{column}" IN ({placeholders})',
                 removed_ids,
             )
+
+
+def _renumber_operator(conn: sqlite3.Connection, operator_id: int, canonical_id: int) -> None:
+    """Store the kept operator as ``canonical_id`` inside this transaction.
+
+    Already-canonical rows are left unchanged, so keeping id 1 again is a
+    no-op. Every ``account_id``, ``operator_id``, and ``user_id`` that names
+    the kept operator moves with the account row. A failure here raises and
+    the caller rolls the whole transaction back.
+    """
+    if operator_id == canonical_id:
+        return
+    tables = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    for (table_name,) in tables:
+        if table_name == "account" or not _IDENTIFIER.fullmatch(str(table_name)):
+            continue
+        columns = [
+            str(row[1])
+            for row in conn.execute(f'PRAGMA table_info("{table_name}")')
+        ]
+        for column in _OPERATOR_REF_COLUMNS:
+            if column not in columns:
+                continue
+            conn.execute(
+                f'UPDATE "{table_name}" SET "{column}" = ? WHERE "{column}" = ?',
+                (canonical_id, operator_id),
+            )
+    updated = conn.execute(
+        "UPDATE account SET id = ? WHERE id = ?",
+        (canonical_id, operator_id),
+    )
+    if updated.rowcount != 1:
+        raise RuntimeError("operator disappeared before the update committed")

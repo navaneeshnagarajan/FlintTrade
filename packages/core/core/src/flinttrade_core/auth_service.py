@@ -239,14 +239,20 @@ class AuthService:
             )
         except sqlite3.OperationalError:
             pass
-        # First-run finish is distinct from account creation. Older databases
-        # predate the column; the default keeps an in-progress install unfinished.
+        # First-run finish is distinct from account creation. The column is
+        # added only when it is missing. Rows already in the table are
+        # finished installs from before this column existed, so they are
+        # marked complete in that same migration. A later operator still
+        # starts incomplete: the default stays 0, and this update does not
+        # run again once the column is present.
         try:
             self._db.execute(
                 "ALTER TABLE account ADD COLUMN setup_finished INTEGER NOT NULL DEFAULT 0"
             )
         except sqlite3.OperationalError:
             pass
+        else:
+            self._db.execute("UPDATE account SET setup_finished = 1")
         # Frozen when the operator is created. Later vault opens must not
         # rewrite it, or a reload would change Step N of M.
         try:

@@ -718,3 +718,30 @@ class TestSingleOperatorMigration:
         finally:
             conn.close()
         assert names == {"alice", "bob"}
+
+    @pytest.mark.unit
+    def test_existing_operator_is_setup_complete_and_a_new_operator_is_not(
+        self, tmp_path: Path,
+    ) -> None:
+        old_path = tmp_path / "old.db"
+        _seed_unchecked_operators(old_path, ["alice"])
+        conn = sqlite3.connect(old_path)
+        try:
+            columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(account)")}
+        finally:
+            conn.close()
+        assert "setup_finished" not in columns
+
+        migrated = AuthService(db_path=old_path)
+        assert migrated.is_setup_finished() is True
+        assert migrated.get_profile()["username"] == "alice"
+        assert AuthService(db_path=old_path).is_setup_finished() is True
+
+        fresh = AuthService(db_path=tmp_path / "new.db")
+        fresh.setup_account(
+            username="carol",
+            email="carol@example.com",
+            password="StrongP@ss123!",
+            pin="123456",
+        )
+        assert fresh.is_setup_finished() is False

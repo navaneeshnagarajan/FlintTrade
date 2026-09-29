@@ -1530,8 +1530,12 @@ On Windows, if `%APPDATA%` is unset, the directory is
 `%USERPROFILE%\AppData\Roaming\flinttrade\`.
 
 It then removes the other operator accounts and the rows in `auth.db`
-that name them, in one transaction, and the single-operator update
-continues. It prints:
+that name them, renumbers the kept account to id 1, and rewrites rows
+that named that account (`account_id`, `operator_id`, or `user_id`) to
+id 1, in one transaction. A failure rolls that transaction back, so the
+accounts are unchanged. Keeping the stored id 1 again leaves that
+account's sessions, settings, and data in place. The single-operator
+update continues. It prints:
 
 `Kept operator <id>.`
 
@@ -1546,8 +1550,9 @@ command prints `The operator update could not be finished. No data was changed.`
 
 The command edits `auth.db` only. In that transaction it removes the
 other operator rows and rows in the same file that name those operators
-through `account_id`, `operator_id`, or `user_id`. Login-attempt rows
-are not stored against an operator, so they stay. It does not open
+through `account_id`, `operator_id`, or `user_id`, then stores the kept
+operator as id 1 and points that operator's rows at id 1. Login-attempt
+rows are not stored against an operator, so they stay. It does not open
 `workspace.json` or any other database.
 
 Open FlintTrade and choose **Retry**.

@@ -5,7 +5,7 @@
  * logo, particles, meteors, shimmer CTA, and a calm glassy control layer.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useNavigate } from "react-router";
 import { AnimatePresence, motion } from "framer-motion";
@@ -278,6 +278,8 @@ export default function WelcomeRoute() {
   const [step, setStep] = useState(0);
   const [flowStep, setFlowStep] = useState<FlowStep>("cinematic");
   const [migrationBlocked, setMigrationBlocked] = useState(false);
+  const migrationBlockedRef = useRef(migrationBlocked);
+  migrationBlockedRef.current = migrationBlocked;
   const [statusAttempt, setStatusAttempt] = useState(0);
   const theme = useThemeStore((s) => s.activeThemeId);
   const reducedMotion = motionConfig.prefersReducedMotion();
@@ -354,6 +356,10 @@ export default function WelcomeRoute() {
         // effects in development. That cleanup abort is not a failed backend
         // probe and must not overwrite a valid returning-user state.
         if (cancelled) return;
+        // A paused update stays on screen until a later status check
+        // succeeds and reports that nothing is pending. A failed retry must
+        // not restore a persisted session and open the desk.
+        if (migrationBlockedRef.current) return;
         if (persisted && useAuthStore.getState().status === "unknown") {
           useAuthStore.getState().setLoggedIn(
             persisted.token,
@@ -458,7 +464,6 @@ export default function WelcomeRoute() {
     return (
       <TwoOperatorUpdateScreen
         onRetry={() => {
-          setMigrationBlocked(false);
           setStatusAttempt((attempt) => attempt + 1);
         }}
       />
