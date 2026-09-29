@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { INITIAL_MODE, useModeStore } from "../modeStore";
 import type { AppMode } from "../modeStore";
 
@@ -27,6 +27,17 @@ describe("modeStore", () => {
     it("mode defaults to Practice when localStorage is empty", () => {
       expect(INITIAL_MODE).toBe("practice");
       expect(useModeStore.getState().mode).toBe("practice");
+    });
+
+    it("a new session with no stored Mode opens in Practice", async () => {
+      localStorage.removeItem("flinttrade:mode");
+      sessionStorage.removeItem("flinttrade:mode");
+      vi.resetModules();
+      const fresh = await import("../modeStore");
+      await fresh.useModeStore.persist.rehydrate();
+      expect(fresh.INITIAL_MODE).toBe("practice");
+      expect(fresh.useModeStore.getState().mode).toBe("practice");
+      expect(fresh.useModeStore.getState().mode).not.toBe("explore");
     });
   });
 

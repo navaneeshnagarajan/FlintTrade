@@ -39,7 +39,8 @@ describe("FT-UX-001 mode vocabulary", () => {
     );
     expect(orderReviewDescription("explore")).not.toMatch(/Explore records a sample fill/i);
     expect(orderReviewDescription("practice")).toBe("Confirm places this simulated order.");
-    expect(orderReviewDescription("practice")).not.toMatch(/Explore records a sample fill/i);
+    expect(orderReviewDescription("practice")).not.toMatch(/Explore records a sample fill|Example|sample fill/i);
+    expect(orderReviewDescription("explore")).not.toMatch(/Confirm places this simulated order/);
     expect(orderReviewDescription("explore")).not.toMatch(/Practice Buy|Live/i);
     expect(orderSuccessToast("explore", "ABC")).toBe("Example order placed · ID: ABC");
     expect(orderSuccessNotificationTitle("explore", "BUY", 1, "NIFTY")).toBe(

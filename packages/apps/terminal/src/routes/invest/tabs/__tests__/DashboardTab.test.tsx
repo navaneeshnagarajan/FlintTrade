@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
 import { formatCurrencyCompact } from "@/lib/formatters";
@@ -44,10 +44,6 @@ vi.mock("@/lib/cinematicThemes", () => ({
     colors: { card: "#16161f", border: "#2a2a3a", cardHover: "#1e1e2e" },
     glass: { blur: 12, minOpacity: 0.8 },
   }),
-}));
-
-vi.mock("@/lib/xirr", () => ({
-  xirr: () => 0.15,
 }));
 
 vi.mock("@/components/magicui/animated-counter", () => ({
@@ -94,6 +90,7 @@ vi.mock("../../InvestContext", () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
+import { useModeStore } from "@/stores/modeStore";
 import { DashboardTab } from "../DashboardTab";
 
 // ---------------------------------------------------------------------------
@@ -161,5 +158,28 @@ describe("DashboardTab", () => {
     expect(screen.getByText(formatCurrencyCompact(expectedNetWorth))).toBeInTheDocument();
     expect(screen.queryByText(formatCurrencyCompact(845_000))).not.toBeInTheDocument();
     expect(expectedNetWorth).not.toBe(845_000);
+  });
+
+  it("labels the sample XIRR with one Example chip and no sample banner in Explore", () => {
+    useModeStore.setState({ mode: "explore" });
+    investState.isSampleData = true;
+    render(<DashboardTab />);
+
+    expect(screen.queryByText(/Showing sample data/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Example data. Connect a broker to see your own.")).not.toBeInTheDocument();
+    const xirr = screen.getByTestId("sample-xirr");
+    expect(xirr).toHaveTextContent("XIRR +17.44%");
+    expect(within(xirr).getByTestId("example-chip")).toHaveTextContent("Example");
+    expect(screen.getAllByTestId("example-chip")).toHaveLength(1);
+  });
+
+  it("does not mark Practice XIRR as Example", () => {
+    useModeStore.setState({ mode: "practice" });
+    investState.isSampleData = true;
+    render(<DashboardTab />);
+
+    expect(screen.queryByText(/Showing sample data/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("example-chip")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sample-xirr")).toHaveTextContent("XIRR +17.44%");
   });
 });

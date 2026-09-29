@@ -47,6 +47,8 @@ describe("PracticeOrderReviewStage", () => {
     const dialog = screen.getByRole("dialog", { name: "Review Practice order" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(dialog).toHaveAccessibleDescription("Confirm places this simulated order.");
+    expect(screen.queryByText(/Explore records a sample fill/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Example only/i)).not.toBeInTheDocument();
 
     const back = screen.getByRole("button", { name: "Back to edit" });
     const confirm = screen.getByRole("button", { name: "Confirm simulated Practice order" });

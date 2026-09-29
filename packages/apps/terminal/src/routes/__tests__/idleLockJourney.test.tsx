@@ -199,7 +199,7 @@ describe("idle lock route", () => {
     );
 
     vi.useRealTimers();
-    fireEvent.change(screen.getByLabelText("Enter your 6-digit PIN"), {
+    fireEvent.change(screen.getByLabelText("Quick Unlock"), {
       target: { value: "123456" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Unlock Practice desk" }));

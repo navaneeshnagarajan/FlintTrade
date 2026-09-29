@@ -244,9 +244,8 @@ export default function LoginRoute({
         {mode === "pin" ? (
           <div className="space-y-4">
             <div>
-              <p className="text-xs text-text-muted mb-1.5">Quick Unlock</p>
-              <label htmlFor="pin" className="text-xs text-text-secondary font-medium block mb-1.5">
-                PIN
+              <label htmlFor="pin" className="text-xs text-text-muted font-medium block mb-1.5">
+                Quick Unlock
               </label>
               <Input
                 id="pin"
@@ -256,7 +255,6 @@ export default function LoginRoute({
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
                 placeholder="6-digit PIN"
-                aria-label="Enter your 6-digit PIN"
                 className="text-center font-mono text-lg tracking-widest"
                 onKeyDown={(e) => e.key === "Enter" && handlePinLogin()}
                 autoFocus

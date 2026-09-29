@@ -156,13 +156,6 @@ export function DashboardTab() {
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      {/* Demo banner */}
-      {isDemo && (
-        <div className="lg:col-span-3">
-          <ExampleChip />
-        </div>
-      )}
-
       {/* Hero: Net Worth (full width) */}
       <GlassCard className="lg:col-span-3 p-5 gap-0">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
@@ -192,13 +185,16 @@ export function DashboardTab() {
               {portfolioXirr !== null && (
                 <>
                   {" "}&middot;{" "}
-                  <span
-                    className={cn(
-                      "font-mono font-semibold tabular-nums",
-                      portfolioXirr >= 0 ? "text-profit" : "text-loss",
-                    )}
-                  >
-                    XIRR {formatPercent(portfolioXirr * 100)}
+                  <span data-testid="sample-xirr" className="inline-flex items-center gap-1.5">
+                    <span
+                      className={cn(
+                        "font-mono font-semibold tabular-nums",
+                        portfolioXirr >= 0 ? "text-profit" : "text-loss",
+                      )}
+                    >
+                      XIRR {formatPercent(portfolioXirr * 100)}
+                    </span>
+                    {isDemo ? <ExampleChip /> : null}
                   </span>
                 </>
               )}

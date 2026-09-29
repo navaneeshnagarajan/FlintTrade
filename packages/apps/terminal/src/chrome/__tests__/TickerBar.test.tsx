@@ -55,8 +55,11 @@ vi.mock("@/hooks/useOperatorMarketSession", () => ({
   }),
 }));
 
+import { useConnectionStore } from "@/stores/connectionStore";
 import { useModeStore } from "@/stores/modeStore";
 import TickerBar from "../TickerBar";
+
+const LAST_CLOSE_LINE = "Last close prices · Connect a broker for live prices →";
 
 function renderTickerBar() {
   const store = createStore();
@@ -82,6 +85,7 @@ describe("TickerBar", () => {
     mockIndicesData.length = 0;
     mockIsMarketHours.mockReturnValue(false);
     useModeStore.setState({ mode: "explore" });
+    useConnectionStore.setState({ wsConnected: false });
   });
 
   it("renders without crashing", () => {
@@ -138,6 +142,38 @@ describe("TickerBar", () => {
 
     expect(screen.getByRole("region", { name: "Market indices" })).toBeInTheDocument();
     expect(screen.getByTestId("ticker-strip")).toBeInTheDocument();
+  });
+
+  it("shows one last-close line in Practice when no live feed is connected", () => {
+    useModeStore.setState({ mode: "practice" });
+    useConnectionStore.setState({ wsConnected: false });
+    setIndices([
+      { name: "NIFTY 50", data: { ltp: 23500.50, prevClose: 23400 } as WsTick },
+      { name: "SENSEX", data: { ltp: 77200 } as WsTick },
+    ]);
+    renderTickerBar();
+
+    const line = screen.getByTestId("ticker-last-close");
+    expect(line).toHaveTextContent(LAST_CLOSE_LINE);
+    expect(line).toHaveClass("text-text-secondary");
+    expect(screen.getAllByTestId("ticker-last-close")).toHaveLength(1);
+    const link = screen.getByRole("link", { name: "Connect a broker for live prices →" });
+    expect(link).toHaveAttribute("href", "/settings#brokers");
+    expect(screen.getAllByText("NIFTY 50").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Last close prices/)).toHaveLength(1);
+  });
+
+  it("hides the last-close line when a live feed is connected", () => {
+    useModeStore.setState({ mode: "practice" });
+    useConnectionStore.setState({ wsConnected: true });
+    setIndices([
+      { name: "NIFTY 50", data: { ltp: 23500.50 } as WsTick },
+    ]);
+    renderTickerBar();
+
+    expect(screen.queryByTestId("ticker-last-close")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Last close prices/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Connect a broker for live prices/i })).not.toBeInTheDocument();
   });
 
   it("does not show connect prompt when live data exists", () => {

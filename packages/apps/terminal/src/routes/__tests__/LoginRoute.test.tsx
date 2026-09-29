@@ -74,7 +74,7 @@ const {
     return true;
   });
   const mockSetLoggedOut = vi.fn();
-  const modeState = { mode: "explore" as "explore" | "practice" | "live" };
+  const modeState = { mode: "explore" as "explore" | "practice" | "live" | null };
   const mockSetMode = vi.fn((mode: "explore" | "practice" | "live") => {
     modeState.mode = mode;
   });
@@ -456,6 +456,44 @@ describe("LoginRoute", () => {
     expect(mockSetMode).not.toHaveBeenCalledWith("live");
   });
 
+  it("a new session with no stored Mode lands in Practice after password login", async () => {
+    modeState.mode = null;
+    const onSuccess = vi.fn();
+    mockAuthFetch({
+      onOther: (url) => {
+        if (url.includes("/v1/auth/login")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "fresh-practice", username: "alice", expires_at: "" },
+          });
+        }
+        if (url.includes("/v1/auth/mode")) {
+          return jsonResponse({
+            status: "success",
+            data: { token: "practice-session", mode: "practice", live_mode_unlocked: false },
+          });
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={onSuccess} mode="full" />);
+
+    await waitFor(() => expect(screen.getByLabelText("Enter your password")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    expect(mockSetMode).toHaveBeenCalledWith("practice");
+    expect(mockSetMode).not.toHaveBeenCalledWith("explore");
+    expect(modeState.mode).toBe("practice");
+    expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+      "practice-session",
+      "alice",
+      "",
+      { status: "logged-out", principal: null, generation: 7 },
+    );
+  });
+
   it("upgrades a missing login mode to practice when the UI was in Practice", async () => {
     // A login response with no mode claim is still upgraded to Practice
     // before the desk opens. A stored Practice UI must not keep an explore token.
@@ -582,6 +620,7 @@ describe("LoginRoute", () => {
       const heading = mode === "practice" ? "Practice desk locked" : "Live desk locked";
       expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Quick Unlock")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
       view.unmount();
     }
@@ -601,6 +640,7 @@ describe("LoginRoute", () => {
     render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
     expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Quick Unlock")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /connected \(read\)/i })).not.toBeInTheDocument();
     expect(mockSetMode).not.toHaveBeenCalled();
@@ -617,6 +657,7 @@ describe("LoginRoute", () => {
     render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
     expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Quick Unlock")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /connected \(read\)/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /desk/i })).not.toBeInTheDocument();
@@ -640,7 +681,7 @@ describe("LoginRoute", () => {
     const onSuccess = vi.fn();
     render(<LoginRoute onSuccess={onSuccess} mode="pin" />);
 
-    fireEvent.change(screen.getByLabelText("Enter your 6-digit PIN"), {
+    fireEvent.change(screen.getByLabelText("Quick Unlock"), {
       target: { value: "123456" },
     });
     fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
@@ -695,7 +736,7 @@ describe("LoginRoute", () => {
     );
     const onSuccess = vi.fn();
     render(<LoginRoute onSuccess={onSuccess} mode="pin" />);
-    fireEvent.change(screen.getByLabelText("Enter your 6-digit PIN"), {
+    fireEvent.change(screen.getByLabelText("Quick Unlock"), {
       target: { value: "123456" },
     });
     fireEvent.click(screen.getByRole("button", { name: /unlock/i }));
