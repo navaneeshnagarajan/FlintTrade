@@ -391,7 +391,7 @@ dispute. Rectify steps point at the broker, the exchange, or the host:
 | Broker stream (`broker_stream`) | A Dhan or Kotak Neo market/order stream dropped. Kotak Neo's local v3 lifecycle coverage is not live-account proof. | Wait for the stream. Do not treat stale REST quotes or a reconnecting socket as live. |
 | Broker rate limit (`broker_rate_limit`) | The broker asked us to slow down. | Wait for the window, then retry once. The account poll stays quiet until then. |
 | Broker maintenance (`broker_maintenance`) | The broker reported maintenance. | Wait, then check the broker status page. |
-| Laya (`laya`) | Blocked — Laya is Down ("Laya is Down — Live orders paused."). Live place and Position Mirror start stay closed. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. Kill All stays available. Laya starts Down. Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. | While the strip is open, Live place stays muted on that strip. Ready and Degraded allow a place attempt. Do not treat Chat as a substitute. |
+| Laya (`laya`) | Blocked — Laya is Down ("Laya is Down. New orders are paused until it's Ready. You can still close positions."). New Live place and Position Mirror start stay closed. Close and Square off stay available, with no extra confirmation. A close that only reduces an open position is still admitted; Order Pad Close caps quantity at the open quantity. A larger close is refused with that same line. The place control does not also show **Laya denied** while this mute is up. Broker and LLM keep their own labels; Broker may stay **Connected** or **Connected (read)**. Chat cannot place instead. Kill All stays available. Laya starts Down. Ready or Degraded closes this strip. Degraded keeps Live open with a tighter quantity ceiling and the quiet line **Laya Degraded — tighter limits**. | While the strip is open, a new Live place stays muted on that strip. A reducing close can still be sent. Ready and Degraded allow a place attempt. Do not treat Chat as a substitute. |
 | Chat provider (`llm_provider`) | Info — Chat is unavailable. Trading chrome stays as it was. A Laya denial is not this strip. | Retest or switch provider under Settings, or use a local model. Keep trading without Chat. |
 | Host unhealthy (`host_unhealthy`) | The desk health check failed or is degraded. | Free disk space, restart the desk, and read `/health/detail`. Live stays closed until the desk and broker trust are back. A restart does not recover fills. |
 | Backend unreachable (`backend_unreachable`) | The FlintTrade backend did not answer, or native broker HTTP returned the freeze (`503`). | Restart the desk and read `/health/detail`. The freeze line stays until the cutover replaces it. Kill All stays reachable when the risk runtime allows. |
@@ -515,11 +515,13 @@ may stay; it must not hide venue honesty.
    P&L is recorded in the **P&L Monitor** widget.
 
 A Practice place is admitted before the sandbox. While Laya is Down
-that place is refused and nothing is filled. When admission allows the
-quantity, the path is front-end → JWT guard → mode guard → Laya.admit →
-FlintTrade sandbox → simulated fill → REST refresh of Positions and
-Orders. No real money moved. A refusal or a quantity clamp stops before
-the sandbox. Explore Sample Buy never enters that path.
+a new place is refused and nothing is filled. A close that only reduces
+an open position is still filled, and the success line is **Closed. Exits
+are allowed while Laya is Down.** When admission allows the quantity, the
+path is front-end → JWT guard → mode guard → Laya.admit → FlintTrade
+sandbox → simulated fill → REST refresh of Positions and Orders. No real
+money moved. A refusal or a quantity clamp stops before the sandbox.
+Explore Sample Buy never enters that path.
 
 ![Trade workspace](screenshots/04-trade.png)
 *The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
@@ -633,8 +635,8 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
 - [ ] Laya is **Ready** or **Degraded** if you intend a place attempt.
-      **Down** shows **Laya is Down — Live orders paused.** and mutes
-      Live place. **Degraded** keeps Live open and shows **Laya Degraded —
+      **Down** shows **Laya is Down. New orders are paused until it's Ready. You can still close positions.** and mutes
+      a new Live place. Close and Square off stay available. **Degraded** keeps Live open and shows **Laya Degraded —
       tighter limits**.
 - [ ] Daily P&L pause and hard-stop percentages are configured in Settings → Risk.
 - [ ] You have read the risk and user-responsibility notes in
@@ -1457,8 +1459,8 @@ as a toast.
 1. **Laya denied** — read the server reason under the headline. Place
    controls stay off until Laya or the mode changes. **Max quantity N.**
    is the ceiling the server sent.
-   While the strip reads **Laya is Down — Live orders paused.**, Live place
-   is already muted there. Ready or Degraded allows another attempt. Chat
+   While the strip reads **Laya is Down. New orders are paused until it's Ready. You can still close positions.**, a new Live place
+   is already muted there. A close that only reduces an open position can still be sent. A close larger than the position is refused with that line. Ready or Degraded allows another attempt. Chat
    cannot place instead.
 2. **Qty reduced to N (Laya limit)** — nothing was placed. Place quantity N
    yourself if you still want that order. **Laya Degraded — tighter limits**

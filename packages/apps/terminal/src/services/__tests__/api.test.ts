@@ -3715,8 +3715,30 @@ describe("OpenAlgo API client (api.ts)", () => {
     } as unknown as Parameters<typeof placeOrder>[0];
 
     try {
-      await expect(placeOrder(order)).rejects.toThrow(/Live orders stay closed/i);
+      await expect(placeOrder(order)).rejects.toThrow(
+        "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      );
       expect(fetchSpy).not.toHaveBeenCalled();
+
+      mockConnectionState.apiKey = "";
+      mockBrokerState.accounts = [
+        { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+      ];
+      mockBrokerState.activeAccountId = "native:upstox:U1";
+      fetchSpy.mockResolvedValueOnce(
+        jsonResponse({ status: "success", data: { orderId: "EX-1" } }),
+      );
+      await placeOrder(
+        { ...order, action: "SELL" },
+        undefined,
+        { exit: true },
+      );
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const exitInit = (fetchSpy.mock.calls[0] as [string, RequestInit])[1];
+      const exitBody = JSON.parse(String(exitInit.body)) as Record<string, unknown>;
+      expect(exitBody).not.toHaveProperty("exit");
+      expect(exitBody).not.toHaveProperty("reduce_only");
+      expect(exitBody.action).toBe("SELL");
 
       mockModeState.mode = "practice";
       fetchSpy.mockResolvedValueOnce(

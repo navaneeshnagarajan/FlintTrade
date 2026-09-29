@@ -88,8 +88,18 @@ Chat is not an admission source. Modify, cancel, smart, multi, forever,
 and the other write verbs are not admitted.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
-Down — Live orders paused."). That class closes Live place and Position
-Mirror start on the shared client place path. Kill All stays reachable.
+Down. New orders are paused until it's Ready. You can still close positions.").
+That class closes a new Live place and Position Mirror start on the shared
+client place path. A close qualifies as reduce-only only inside
+`POST /api/v1/orders/place`, when it is the same contract, the opposite side,
+and the quantity is within the open quantity minus pending exits. Pending
+exits are this desk's unfilled opposite orders. On Live they also include
+the broker's open orders on that contract; if that book cannot be read, the
+order is not reduce-only and takes the full admit. Laya records a qualifying
+close with proof kind `reduce_only` and does not deny or clamp it. Down,
+Degraded, and Unverified do not block it. Live still runs SafetySystem after
+that record. Anything that would flip or add to a position takes the full
+admit. Kill All stays reachable.
 Broker may stay **Connected** or **Connected (read)**. Laya starts Down.
 Ready and Degraded are recorded only by `Laya.set_status`; the desk ping
 and `note_heartbeat` publish the stored status and do not invent Ready.

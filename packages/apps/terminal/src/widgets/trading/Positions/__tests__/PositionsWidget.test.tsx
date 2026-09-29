@@ -212,6 +212,7 @@ vi.mock("@/stores/brokerStore", () => ({
 
 import PositionsWidget from "../PositionsWidget";
 import { OrderApiError } from "@/services/api";
+import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import {
   netPositions,
   normalisePositions,
@@ -298,6 +299,7 @@ describe("PositionsWidget", () => {
     mockBrokerState.activeAccountId = null;
     mockReadState.identity = null;
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+    useOperatorSignalStore.setState({ decisionStatus: "ready" });
   });
 
   it("renders without crashing", () => {
@@ -430,7 +432,39 @@ describe("PositionsWidget", () => {
       scopeKey: "practice:sandbox:default",
       brokerType: "sandbox",
       accountId: "default",
-    });
+    }, { exit: true });
+  });
+
+  it("squares off a Practice position while Laya is Down without an extra confirmation", async () => {
+    useOperatorSignalStore.setState({ decisionStatus: "down" });
+    mockModeState.mode = "practice";
+    mockPlaceOrder.mockResolvedValue({ orderId: "PQ-DOWN" });
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          { symbol: "NIFTY24APR24000CE", pnl: 1200, quantity: 75, ltp: 150, exchange: "NFO", product: "NRML" },
+        ],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    const squareOff = screen.getByRole("button", { name: "Square off NIFTY24APR24000CE" });
+    expect(squareOff).toBeEnabled();
+    fireEvent.click(squareOff);
+    expect(screen.queryByRole("button", { name: /laya/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm square off NIFTY24APR24000CE" }));
+
+    await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "SELL", quantity: 75 }),
+      expect.objectContaining({ mode: "practice" }),
+      { exit: true },
+    );
+    await waitFor(() => expect(mockEmitNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Closed. Exits are allowed while Laya is Down.",
+      }),
+    ));
   });
 
   it("shows the header with position count", () => {
@@ -994,7 +1028,7 @@ describe("PositionsWidget", () => {
         scopeKey: "live:native:dhan:POSITIONS-A",
         brokerType: "dhan",
         accountId: "POSITIONS-A",
-      });
+      }, { exit: true });
       await waitFor(() => expect(mockRefetch).toHaveBeenCalledTimes(1));
       expect(mockEmitNotification).toHaveBeenCalledWith(
         expect.objectContaining({ category: "order", title: "Square-off submitted" }),
@@ -1024,6 +1058,7 @@ describe("PositionsWidget", () => {
           brokerType: "dhan",
           accountId: "POSITIONS-A",
         }),
+        { exit: true },
       );
     });
 
@@ -1085,7 +1120,7 @@ describe("PositionsWidget", () => {
         orderType: "MARKET",
         product: "CNC",
         price: 100,
-      }), expect.objectContaining({ mode: "practice" }));
+      }), expect.objectContaining({ mode: "practice" }), { exit: true });
       expect(mockPlaceOrder).toHaveBeenNthCalledWith(2, expect.objectContaining({
         symbol: "TCS",
         action: "BUY",
@@ -1093,7 +1128,7 @@ describe("PositionsWidget", () => {
         orderType: "MARKET",
         product: "MIS",
         price: 200,
-      }), expect.objectContaining({ mode: "practice" }));
+      }), expect.objectContaining({ mode: "practice" }), { exit: true });
       expect(await screen.findByText("Squared off: INFY.")).toBeInTheDocument();
       expect(screen.getAllByText("TCS").length).toBeGreaterThan(0);
       expect(screen.getByTestId("laya-denied")).toHaveTextContent("Laya denied");
@@ -1309,6 +1344,7 @@ describe("PositionsWidget", () => {
           brokerType: "upstox",
           accountId: "ACCOUNT-A",
         },
+        { exit: true },
       );
     });
 

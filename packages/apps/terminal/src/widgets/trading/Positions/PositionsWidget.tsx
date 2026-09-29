@@ -84,6 +84,7 @@ import { downloadExcel } from "@/services/ftApi.data";
 import { postWithMode } from "@/services/ftApi.helpers";
 import { LayaAdmissionNotice } from "@/components/orders/LayaAdmissionNotice";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
+import { LAYA_EXIT_WHILE_DOWN } from "@/lib/operatorIncident";
 import { placeOrder } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -98,6 +99,7 @@ import {
   runWithMatchingAccountAuthority,
 } from "@/lib/accountQueryState";
 import { isMarketHours } from "@/lib/market";
+import { useOperatorSignalStore } from "@/stores/operatorSignalStore";
 import { totalPositionMtm } from "@/lib/pnl";
 import { cn } from "@/lib/utils";
 import {
@@ -404,15 +406,18 @@ function SquareOffDialog({
         price: squareOffMark(position, practice),
         triggerPrice: 0,
         strategy: "FlintPositions",
-      }, mutationIdentity);
+      }, mutationIdentity, { exit: true });
       if (
         !isActionAllowed()
         || !accountAuthorityMatches(mutationIdentity, getCurrentIdentity())
       ) return;
+      const exitWhileDown = useOperatorSignalStore.getState().decisionStatus !== "ready";
       emitNotification({
         category: "order",
-        title: "Square-off submitted",
-        body: `${exitAction} ${exitQty} ${position.symbol} at market.`,
+        title: exitWhileDown ? LAYA_EXIT_WHILE_DOWN : "Square-off submitted",
+        body: exitWhileDown
+          ? LAYA_EXIT_WHILE_DOWN
+          : `${exitAction} ${exitQty} ${position.symbol} at market.`,
       });
       onSquaredOff(mutationIdentity);
       onClose();
@@ -595,7 +600,7 @@ function ExitAllDialog({
               price: squareOffMark(position, true),
               triggerPrice: 0,
               strategy: "FlintPositions",
-            }, mutationIdentity);
+            }, mutationIdentity, { exit: true });
             done.push(label);
           } catch (err) {
             const notice = layaNoticeFromOrderError(err);
@@ -619,10 +624,13 @@ function ExitAllDialog({
           setRowFailures(failures);
           return;
         }
+        const exitWhileDown = useOperatorSignalStore.getState().decisionStatus !== "ready";
         emitNotification({
           category: "system",
-          title: "Exit-all submitted",
-          body: "Every open Practice position was squared off at market.",
+          title: exitWhileDown ? LAYA_EXIT_WHILE_DOWN : "Exit-all submitted",
+          body: exitWhileDown
+            ? LAYA_EXIT_WHILE_DOWN
+            : "Every open Practice position was squared off at market.",
         });
         close(false);
         return;

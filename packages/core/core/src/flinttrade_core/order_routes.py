@@ -485,6 +485,259 @@ def _laya_place_response(body: dict[str, Any], *, mode: str, source: str) -> tup
     return jsonify(blocked), status
 
 
+def _book_rows(value: Any) -> list[dict[str, Any]]:
+    """Keep dict rows. Anything else is an unreadable book."""
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for row in value:
+        if isinstance(row, dict):
+            rows.append(row)
+        elif isinstance(row, Mapping):
+            rows.append(dict(row))
+    return rows
+
+
+def _quantity_from_body(body: Mapping[str, Any]) -> int:
+    raw = body.get("quantity")
+    if isinstance(raw, bool) or raw is None:
+        return 0
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float) and math.isfinite(raw) and raw.is_integer():
+        return int(raw)
+    if isinstance(raw, str) and raw.strip().isdigit():
+        return int(raw.strip())
+    return 0
+
+
+def _record_reduce_only(body: Mapping[str, Any], mode: str) -> None:
+    """Log a proven exit. The body cannot choose this path."""
+    from flinttrade_engine.laya import process_laya, proposal_from_place_fields  # noqa: PLC0415
+
+    proposal = proposal_from_place_fields(body, mode=mode, source="operator")
+    process_laya().admit_reduce_only(proposal)
+
+
+def _admit_place(
+    body: dict[str, Any],
+    *,
+    mode: str,
+    live: bool,
+    positions: list[dict[str, Any]],
+    our_orders: list[dict[str, Any]],
+    broker_orders: list[dict[str, Any]] | None,
+    extra_pending: int = 0,
+) -> tuple[tuple[Any, int] | None, bool]:
+    """Full-admit, or record a reduce-only exit and let the place continue.
+
+    Returns ``(response, qualified)``. ``reduce_only`` on the request body
+    is ignored. ``qualified`` is true only when this call recorded a
+    reduce-only exit.
+    """
+    from flinttrade_engine.reduce_only import classify_reduce_only  # noqa: PLC0415
+
+    decision = classify_reduce_only(
+        symbol=str(body.get("symbol") or ""),
+        exchange=str(body.get("exchange") or ""),
+        product=str(body.get("product") or "MIS"),
+        action=str(body.get("action") or ""),
+        quantity=_quantity_from_body(body),
+        positions=positions,
+        our_orders=our_orders,
+        broker_orders=broker_orders,
+        live=live,
+        extra_pending=extra_pending,
+    )
+    if decision.qualifies:
+        _record_reduce_only(body, mode)
+        return None, True
+    return _laya_place_response(body, mode=mode, source="operator"), False
+
+
+def _practice_books(sandbox: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if sandbox is None:
+        return [], []
+    try:
+        positions = sandbox.get_positions()
+    except Exception:  # noqa: BLE001 - an unreadable book is not reduce-only
+        positions = []
+    try:
+        orders = sandbox.get_orders()
+    except Exception:  # noqa: BLE001 - an unreadable book is not reduce-only
+        orders = []
+    return _book_rows(positions), _book_rows(orders)
+
+
+def _normalise_exit_positions(raw: Any) -> list[dict[str, Any]]:
+    from flinttrade_core.l2_state import _field, _rows, _text  # noqa: PLC0415
+
+    positions: list[dict[str, Any]] = []
+    for row in _rows(raw, "data", "positions", "net", "day"):
+        if not isinstance(row, Mapping):
+            continue
+        symbol = _text(_field(row, "symbol", "trading_symbol", "tradingsymbol")).strip().upper()
+        exchange = _text(_field(row, "exchange")).strip().upper()
+        product = _text(_field(row, "product")).strip().upper() or "MIS"
+        qty_raw = _field(row, "net_qty", "netQty", "net_quantity", "quantity", "qty")
+        try:
+            quantity = int(float(qty_raw))
+        except (TypeError, ValueError):
+            continue
+        if not symbol or not exchange:
+            continue
+        positions.append({
+            "symbol": symbol,
+            "exchange": exchange,
+            "product": product,
+            "net_qty": quantity,
+            "quantity": quantity,
+        })
+    return positions
+
+
+def _normalise_exit_orders(raw: Any) -> list[dict[str, Any]]:
+    from flinttrade_core.l2_state import _field, _rows, _text  # noqa: PLC0415
+
+    orders: list[dict[str, Any]] = []
+    for row in _rows(raw, "data", "orders", "orderbook", "order_book"):
+        if not isinstance(row, Mapping):
+            continue
+        symbol = _text(_field(row, "symbol", "trading_symbol", "tradingsymbol")).strip().upper()
+        exchange = _text(_field(row, "exchange")).strip().upper()
+        product = _text(_field(row, "product")).strip().upper() or "MIS"
+        action = _text(_field(row, "action", "transaction_type")).strip().upper()
+        status = _text(_field(row, "status", "order_status", "orderStatus")).strip().upper()
+        order_id = _text(_field(row, "order_id", "orderid", "orderId")).strip()
+        try:
+            quantity = int(float(_field(row, "quantity", "qty")))
+        except (TypeError, ValueError):
+            continue
+        filled_raw = _field(row, "filled_qty", "filled_quantity", "filledQty", "tradedQty")
+        try:
+            filled = int(float(filled_raw)) if filled_raw not in (None, "") else 0
+        except (TypeError, ValueError):
+            filled = 0
+        if not symbol or not exchange or action not in {"BUY", "SELL"}:
+            continue
+        orders.append({
+            "symbol": symbol,
+            "exchange": exchange,
+            "product": product,
+            "action": action,
+            "status": status,
+            "order_id": order_id,
+            "quantity": quantity,
+            "filled_qty": filled,
+        })
+    return orders
+
+
+async def _fetch_broker_exit_books(
+    adapter_id: str,
+    account_id: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Read positions and the broker order book. Raises when the book cannot be read."""
+    from flinttrade_core.l2_state import _read, _resolve_account_source  # noqa: PLC0415
+
+    source = _resolve_account_source(current_app.config, adapter_id, account_id)
+    positions_raw = await _read(source, "positionbook", "positions")
+    orders_raw = await _read(source, "orderbook", "order_book")
+    return _normalise_exit_positions(positions_raw), _normalise_exit_orders(orders_raw)
+
+
+def _live_exit_books(
+    adapter_id: str,
+    account_id: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]] | None]:
+    """Return positions, our orders, and broker orders.
+
+    Broker orders are ``None`` when the book cannot be read. A configured
+    ``REDUCE_ONLY_LIVE_BOOKS`` callable replaces the broker read.
+    """
+    hook = current_app.config.get("REDUCE_ONLY_LIVE_BOOKS")
+    if callable(hook):
+        try:
+            positions, our_orders, broker_orders = hook(adapter_id, account_id)
+        except Exception:  # noqa: BLE001 - an unreadable book is not reduce-only
+            logger.info(
+                "Broker order book unreadable; place is not a reduce-only exit | adapter=%s",
+                adapter_id,
+            )
+            return [], [], None
+        return (
+            _book_rows(positions),
+            _book_rows(our_orders),
+            None if broker_orders is None else _book_rows(broker_orders),
+        )
+    try:
+        positions, broker_orders = _run_on_client_loop(
+            _fetch_broker_exit_books(adapter_id, account_id),
+        )
+    except Exception:  # noqa: BLE001 - an unreadable book is not reduce-only
+        logger.info(
+            "Broker order book unreadable; place is not a reduce-only exit | adapter=%s",
+            adapter_id,
+        )
+        return [], [], None
+    return positions, [], broker_orders
+
+
+def _prepare_live_reduce_only(
+    body: dict[str, Any],
+    *,
+    adapter_id: str,
+    account_id: str,
+) -> tuple[tuple[Any, int] | None, tuple[tuple[str, str, str, str, str], int] | None]:
+    """Classify one live place under the contract lock.
+
+    Returns ``(laya_block, reservation)``. A reservation is held only when
+    the order qualifies, so a second close sees it before the broker book does.
+    """
+    from flinttrade_engine.reduce_only import (  # noqa: PLC0415
+        contract_key,
+        contract_lock,
+        cover_reserved_exit,
+        pending_exit_quantity,
+        reserve_exit,
+        reserved_exit,
+    )
+
+    key = contract_key(
+        mode=_MODE_LIVE,
+        account=account_id,
+        symbol=str(body.get("symbol") or ""),
+        exchange=str(body.get("exchange") or ""),
+        product=str(body.get("product") or "MIS"),
+    )
+    with contract_lock(key):
+        positions, our_orders, broker_orders = _live_exit_books(adapter_id, account_id)
+        if broker_orders is not None:
+            exit_action = "SELL" if str(body.get("action") or "").strip().upper() == "SELL" else "BUY"
+            covered = pending_exit_quantity(
+                broker_orders,
+                symbol=str(body.get("symbol") or "").strip().upper(),
+                exchange=str(body.get("exchange") or "").strip().upper(),
+                product=str(body.get("product") or "MIS").strip().upper(),
+                exit_action=exit_action,
+            )
+            cover_reserved_exit(key, covered)
+        block, qualified = _admit_place(
+            body,
+            mode=_MODE_LIVE,
+            live=True,
+            positions=positions,
+            our_orders=our_orders,
+            broker_orders=broker_orders,
+            extra_pending=reserved_exit(key),
+        )
+        if not qualified:
+            return block, None
+        quantity = _quantity_from_body(body)
+        reserve_exit(key, quantity)
+        return None, (key, quantity)
+
+
 def _safety_state_unavailable_response() -> tuple[Any, int]:
     return jsonify({
         "status": "error",
@@ -1111,13 +1364,19 @@ def _dispatch_live_order(
         )
         return jsonify({"status": "error", "message": "Order validation failed"}), 400
 
+    reduce_hold: tuple[tuple[str, str, str, str, str], int] | None = None
     if ft_action == "place":
-        laya_block = _laya_place_response(body, mode=_MODE_LIVE, source="operator")
+        laya_block, reduce_hold = _prepare_live_reduce_only(
+            body,
+            adapter_id=adapter_id,
+            account_id=account_id,
+        )
         if laya_block is not None:
             return laya_block
 
     _t0 = time.perf_counter()
     safe_account = account_ref(account_id)
+    admitted_place = False
     try:
         admitted, outcome = _admit_and_route_live_order(
             safety=safety,
@@ -1131,6 +1390,7 @@ def _dispatch_live_order(
         )
         if not admitted:
             return outcome
+        admitted_place = ft_action == "place"
         result = outcome
         # Feed the latency monitors (audit H5) — without this producer the
         # order latency stats were empty forever. ONE producer site, both
@@ -1201,6 +1461,11 @@ def _dispatch_live_order(
             ft_action, adapter_id, safe_account,
         )
         return jsonify({"status": "error", "message": "Order dispatch failed"}), 500
+    finally:
+        if reduce_hold is not None and not admitted_place:
+            from flinttrade_engine.reduce_only import release_exit  # noqa: PLC0415
+
+            release_exit(reduce_hold[0], reduce_hold[1])
 
     # Audit trail (best-effort — never break the order path).
     try:
@@ -2051,9 +2316,34 @@ def _subscribe_pending_practice_order(
 def _dispatch_practice_place(body: dict[str, Any]) -> tuple[Any, int]:
     """Admit one Practice order through Laya, then fill or rest it in the sandbox.
 
-    Only ``POST /api/v1/orders/place`` calls this helper.
+    Only ``POST /api/v1/orders/place`` calls this helper. Reduce-only is
+    decided here under the contract lock. A client flag is ignored.
     """
-    laya_block = _laya_place_response(body, mode=_MODE_PRACTICE, source="operator")
+    from flinttrade_engine.reduce_only import contract_key, contract_lock  # noqa: PLC0415
+
+    key = contract_key(
+        mode=_MODE_PRACTICE,
+        account="sandbox",
+        symbol=str(body.get("symbol") or ""),
+        exchange=str(body.get("exchange") or ""),
+        product=str(body.get("product") or "MIS"),
+    )
+    with contract_lock(key):
+        return _dispatch_practice_place_locked(body)
+
+
+def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
+    """Place one Practice order while the contract lock is held."""
+    sandbox = current_app.config.get("DATA_SANDBOX_ENGINE")
+    positions, orders = _practice_books(sandbox)
+    laya_block, _qualified = _admit_place(
+        body,
+        mode=_MODE_PRACTICE,
+        live=False,
+        positions=positions,
+        our_orders=orders,
+        broker_orders=[],
+    )
     if laya_block is not None:
         return laya_block
 

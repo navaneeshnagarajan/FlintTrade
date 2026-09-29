@@ -41,6 +41,23 @@ vi.mock("@/hooks/useBrokerCapabilities", () => ({
   useBrokerCapabilities: () => ({ data: null }),
 }));
 
+const mockOpenPositions = vi.hoisted(() => ({
+  rows: [] as Array<{
+    symbol: string;
+    exchange: string;
+    product: string;
+    quantity: number;
+    averagePrice: number;
+    ltp: number;
+    pnl: number;
+    pnlPercent: number;
+  }>,
+}));
+
+vi.mock("@/hooks/usePositions", () => ({
+  usePositions: () => ({ data: mockOpenPositions.rows, isFetching: false }),
+}));
+
 const mockMode = vi.hoisted(() => ({ current: "practice" }));
 
 vi.mock("@/stores/modeStore", () => ({
@@ -98,6 +115,7 @@ describe("OrderPadWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockMode.current = "practice";
+    mockOpenPositions.rows = [];
     useOperatorSignalStore.setState({ decisionStatus: "ready" });
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
@@ -298,10 +316,13 @@ describe("OrderPadWidget", () => {
   });
 
   it("clears a Laya denial when decision status changes and leaves confirm retryable", async () => {
-    mockPlaceOrder.mockRejectedValue(new OrderApiError("Laya is Down. Live orders are blocked.", 403, {
+    mockPlaceOrder.mockRejectedValue(new OrderApiError(
+      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      403,
+      {
       code: "laya_denied",
-      reason: "Laya is Down. Live orders are blocked.",
-      message: "Laya is Down. Live orders are blocked.",
+      reason: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+      message: "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
       limits: { max_quantity: 100 },
     }));
     useOperatorSignalStore.setState({ decisionStatus: "down" });
@@ -343,6 +364,57 @@ describe("OrderPadWidget", () => {
     expect(screen.queryByText(/TEST001/)).not.toBeInTheDocument();
     expect(screen.queryByText(/order details changed/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /confirm (simulated practice|sample) order/i })).toBeEnabled();
+  });
+
+  it("caps Close at the open quantity and keeps it enabled while Laya is Down", async () => {
+    mockMode.current = "live";
+    useOperatorSignalStore.setState({ decisionStatus: "down" });
+    mockOpenPositions.rows = [{
+      symbol: "NIFTY",
+      exchange: "NSE",
+      product: "MIS",
+      quantity: 4,
+      averagePrice: 100,
+      ltp: 101,
+      pnl: 4,
+      pnlPercent: 1,
+    }];
+    mockPlaceOrder.mockResolvedValue({ orderId: "CLOSE1" });
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+
+    expect(screen.getByRole("button", { name: /place buy order/i })).toBeDisabled();
+    expect(screen.getByTestId("live-write-rectify")).toHaveTextContent(
+      "Laya is Down. New orders are paused until it's Ready. You can still close positions.",
+    );
+    const close = screen.getByTestId("orderpad-close");
+    expect(close).toBeEnabled();
+    expect(close).toHaveTextContent("Close");
+
+    fireEvent.click(screen.getByRole("radio", { name: "SELL" }));
+    const qty = screen.getByLabelText("Quantity") as HTMLInputElement;
+    fireEvent.change(qty, { target: { value: "10" } });
+    expect(Number(qty.value)).toBe(4);
+    fireEvent.click(screen.getByLabelText("Increase Quantity"));
+    expect(Number((screen.getByLabelText("Quantity") as HTMLInputElement).value)).toBe(4);
+
+    fireEvent.click(close);
+    expect(screen.queryByRole("button", { name: /confirm/i })).not.toBeInTheDocument();
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        symbol: "NIFTY",
+        exchange: "NSE",
+        action: "SELL",
+        product: "MIS",
+        quantity: 4,
+      }),
+      { mode: "live" },
+      { exit: true },
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Closed. Exits are allowed while Laya is Down.",
+    );
   });
 
   it("shows tighter Degraded limits without Blocked chrome", async () => {

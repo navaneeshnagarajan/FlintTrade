@@ -2524,6 +2524,11 @@ export type OrderAuthorityPin = AccountAuthorityIdentity;
 
 type PostOrderAuthorityPin = ModeOrderAuthorityPin | OrderAuthorityPin;
 
+/** Client-only. Never sent on the body. The server decides reduce-only. */
+export type PlaceOrderOptions = {
+  exit?: boolean;
+};
+
 function isExactOrderAuthorityPin(
   authority: unknown,
 ): authority is OrderAuthorityPin {
@@ -2610,6 +2615,7 @@ async function postOrder<T>(
   ftEndpoint: string,
   body: object = {},
   authority?: PostOrderAuthorityPin,
+  options?: PlaceOrderOptions,
 ): Promise<T> {
   // Explore paper fill for place only. Checked before the generic mode-pin
   // mismatch so Order Pad can confirm with a Practice pin while the store is
@@ -2648,8 +2654,12 @@ async function postOrder<T>(
   const mode = authority?.mode ?? currentMode;
   if (mode === "live" && LIVE_PLACE_ENDPOINTS.has(ftEndpoint)) {
     const incident = readOperatorIncident();
-    if (liveWritesMuted(incident)) {
-      throw new Error(incident?.rectify ?? "Live orders are closed.");
+    const layaExit = options?.exit === true && incident?.failureClass === "laya";
+    if (liveWritesMuted(incident) && !layaExit) {
+      const message = incident?.failureClass === "laya"
+        ? incident.headline
+        : (incident?.rectify ?? "Live orders are closed.");
+      throw new Error(message);
     }
   }
   const apiKey = useConnectionStore.getState().apiKey;
@@ -2930,7 +2940,8 @@ async function get<T>(
 export const placeOrder = (
   params: PlaceOrderParams,
   authority?: PostOrderAuthorityPin,
-) => postOrder<{ orderId: string }>("place", params, authority);
+  options?: PlaceOrderOptions,
+) => postOrder<{ orderId: string }>("place", params, authority, options);
 export const cancelAllOrders = () =>
   postOrder<void>("cancel-all");
 export const cancelOrder = (
@@ -2997,7 +3008,7 @@ async function squareOffPracticePositions(): Promise<void> {
         price,
         triggerPrice: 0,
         strategy: "FlintPositions",
-      });
+      }, undefined, { exit: true });
     } catch (err) {
       failures.push(practiceSquareOffFailure(position.symbol, err));
     }

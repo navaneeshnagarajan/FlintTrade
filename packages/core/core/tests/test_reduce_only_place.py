@@ -1,0 +1,308 @@
+"""Reduce-only exits on POST /api/v1/orders/place.
+
+The server decides. A client flag is ignored. Practice closes run while
+Laya is Down. Live still enters SafetySystem after a proven exit.
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+from flask import Flask
+
+from flinttrade_core.auth_routes import _create_token
+from flinttrade_core.order_routes import orders_bp, place_order
+from flinttrade_engine.laya import LAYA_DOWN_REASON, DecisionStatus, process_laya, reset_process_laya_for_tests
+from flinttrade_engine.reduce_only import reset_reduce_only_for_tests
+from flinttrade_engine.safety import SafetyConfig, SafetySystem, set_safety_gate_secret
+
+_SECRET = b"0123456789abcdef0123456789abcdef"
+
+
+@pytest.fixture(autouse=True)
+def _down_laya() -> None:
+    set_safety_gate_secret(_SECRET)
+    reset_process_laya_for_tests()
+    reset_reduce_only_for_tests()
+    yield
+    reset_process_laya_for_tests()
+    reset_reduce_only_for_tests()
+
+
+def _headers(mode: str, *, unlocked: bool = False) -> dict[str, str]:
+    token = _create_token("operator", mode=mode, live_mode_unlocked=unlocked)
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+
+def _practice_app(engine: object) -> Flask:
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.config["DATA_SANDBOX_ENGINE"] = engine
+    app.register_blueprint(orders_bp)
+    return app
+
+
+def _order(symbol: str, action: str, quantity: int, price: float = 100.0) -> dict[str, object]:
+    return {
+        "symbol": symbol,
+        "exchange": "NSE",
+        "action": action,
+        "quantity": quantity,
+        "price": price,
+        "product": "MIS",
+        "order_type": "MARKET",
+    }
+
+
+def _seed(engine: object, positions: list[dict[str, object]], orders: list[dict[str, object]] | None = None) -> None:
+    engine.import_data(json.dumps({
+        "schema_version": 2,
+        "capital": {"initial": 1_000_000.0, "current": 1_000_000.0},
+        "positions": positions,
+        "orders": orders or [],
+        "trades": [],
+        "pnl_history": [],
+    }))
+
+
+@pytest.mark.unit
+def test_practice_close_of_a_long_and_a_short_succeeds_while_laya_is_down() -> None:
+    from flinttrade_data.sandbox_engine import SandboxEngine
+
+    engine = SandboxEngine(db_path=":memory:")
+    _seed(engine, [
+        {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "MIS",
+            "net_qty": 10,
+            "avg_price": 100.0,
+            "buy_qty": 10,
+            "buy_value": 1000.0,
+        },
+        {
+            "symbol": "TCS",
+            "exchange": "NSE",
+            "product": "MIS",
+            "net_qty": -8,
+            "avg_price": 200.0,
+            "sell_qty": 8,
+            "sell_value": 1600.0,
+        },
+    ])
+    client = _practice_app(engine).test_client()
+    assert process_laya().status is DecisionStatus.DOWN
+
+    long_close = client.post("/api/v1/orders/place", json=_order("INFY", "SELL", 10, 110.0), headers=_headers("practice"))
+    short_close = client.post("/api/v1/orders/place", json=_order("TCS", "BUY", 8, 190.0), headers=_headers("practice"))
+    assert long_close.status_code == 200, long_close.get_json()
+    assert short_close.status_code == 200, short_close.get_json()
+    assert engine.get_positions() == []
+    proofs = [row.proof_kind for row in process_laya().decision_log()]
+    assert proofs == ["reduce_only", "reduce_only"]
+
+
+@pytest.mark.unit
+def test_oversized_practice_close_while_down_is_refused() -> None:
+    from flinttrade_data.sandbox_engine import SandboxEngine
+
+    engine = SandboxEngine(db_path=":memory:")
+    _seed(engine, [{
+        "symbol": "INFY",
+        "exchange": "NSE",
+        "product": "MIS",
+        "net_qty": 10,
+        "avg_price": 100.0,
+        "buy_qty": 10,
+        "buy_value": 1000.0,
+    }])
+    client = _practice_app(engine).test_client()
+    response = client.post(
+        "/api/v1/orders/place",
+        json={**_order("INFY", "SELL", 11, 110.0), "reduce_only": True},
+        headers=_headers("practice"),
+    )
+    body = response.get_json()
+    assert response.status_code == 403
+    assert body["code"] == "laya_denied"
+    assert body["reason"] == LAYA_DOWN_REASON
+    assert engine.get_positions()[0]["net_qty"] == 10
+    assert process_laya().decision_log() == ()
+
+
+@pytest.mark.unit
+def test_pending_exit_reduces_the_practice_cap_while_down() -> None:
+    from flinttrade_data.sandbox_engine import SandboxEngine
+
+    engine = SandboxEngine(db_path=":memory:")
+    _seed(
+        engine,
+        [{
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "MIS",
+            "net_qty": 10,
+            "avg_price": 100.0,
+            "buy_qty": 10,
+            "buy_value": 1000.0,
+        }],
+        [{
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 4,
+            "price": 120.0,
+            "order_type": "LIMIT",
+            "status": "PENDING",
+            "filled_qty": 0,
+        }],
+    )
+    client = _practice_app(engine).test_client()
+    refused = client.post(
+        "/api/v1/orders/place",
+        json=_order("INFY", "SELL", 7, 110.0),
+        headers=_headers("practice"),
+    )
+    assert refused.status_code == 403
+    assert refused.get_json()["code"] == "laya_denied"
+    assert engine.get_positions()[0]["net_qty"] == 10
+    allowed = client.post(
+        "/api/v1/orders/place",
+        json=_order("INFY", "SELL", 6, 110.0),
+        headers=_headers("practice"),
+    )
+    assert allowed.status_code == 200, allowed.get_json()
+    assert engine.get_positions()[0]["net_qty"] == 4
+
+
+@pytest.mark.unit
+def test_two_concurrent_closes_cannot_flip_the_position() -> None:
+    from flinttrade_data.sandbox_engine import SandboxEngine
+
+    engine = SandboxEngine(db_path=":memory:")
+    _seed(engine, [{
+        "symbol": "TCS",
+        "exchange": "NSE",
+        "product": "MIS",
+        "net_qty": -10,
+        "avg_price": 200.0,
+        "sell_qty": 10,
+        "sell_value": 2000.0,
+    }])
+    app = _practice_app(engine)
+    barrier = threading.Barrier(2)
+    statuses: list[int] = []
+    lock = threading.Lock()
+
+    def close() -> None:
+        barrier.wait(timeout=5)
+        with app.test_request_context(
+            "/api/v1/orders/place",
+            method="POST",
+            json=_order("TCS", "BUY", 10, 190.0),
+            headers=_headers("practice"),
+        ):
+            _response, status = place_order()
+        with lock:
+            statuses.append(status)
+
+    threads = [threading.Thread(target=close), threading.Thread(target=close)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+    assert sorted(statuses) == [200, 403]
+    for row in engine.get_positions():
+        assert row["net_qty"] <= 0
+    assert engine.get_positions() == []
+
+
+def _passing_safety() -> SafetySystem:
+    safety = SafetySystem(SafetyConfig(check_market_hours=False))
+    blocked = MagicMock(passed=False, layer="L1_ORDER", reason="price band")
+    safety.check_order = MagicMock(return_value=[blocked])  # type: ignore[method-assign]
+    return safety
+
+
+def _live_app(safety: SafetySystem) -> Flask:
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.config["BROKER_ROUTER"] = MagicMock()
+    app.config["SAFETY"] = safety
+    app.config["SAFETY_CONFIG_READY"] = True
+    app.register_blueprint(orders_bp)
+    return app
+
+
+def _portfolio_state() -> SimpleNamespace:
+    return SimpleNamespace(
+        positions=[],
+        used_margin=0.0,
+        total_balance=100_000.0,
+        daily_pnl=0.0,
+        starting_capital=100_000.0,
+        net_delta=0.0,
+        net_vega=0.0,
+        ltp_for=lambda _order: 100.0,
+        admission_for=lambda _index: SimpleNamespace(
+            positions=[],
+            used_margin=0.0,
+            net_delta=0.0,
+            net_vega=0.0,
+        ),
+        reconciled_reservation_ids=(),
+    )
+
+
+@pytest.mark.unit
+def test_live_broker_exit_reduces_the_cap_and_an_unreadable_book_is_not_reduce_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from flinttrade_core import order_routes
+
+    safety = _passing_safety()
+    app = _live_app(safety)
+    monkeypatch.setattr(order_routes, "_gather_safety_state", lambda *_args, **_kwargs: _portfolio_state())
+    position = {"symbol": "INFY", "exchange": "NSE", "product": "MIS", "net_qty": 10}
+    broker_exit = {
+        "symbol": "INFY",
+        "exchange": "NSE",
+        "product": "MIS",
+        "action": "SELL",
+        "quantity": 4,
+        "status": "OPEN",
+        "order_id": "broker-1",
+    }
+
+    def readable(_adapter_id: str, _account_id: str):
+        return [position], [], [broker_exit]
+
+    app.config["REDUCE_ONLY_LIVE_BOOKS"] = readable
+    client = app.test_client()
+    headers = _headers("live", unlocked=True)
+    over = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 7, 0), headers=headers)
+    assert over.status_code == 403
+    assert over.get_json()["code"] == "laya_denied"
+    safety.check_order.assert_not_called()
+
+    inside = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 6, 0), headers=headers)
+    assert inside.status_code == 403
+    assert "L1_ORDER" in inside.get_json()["message"]
+    safety.check_order.assert_called_once()
+    assert process_laya().decision_log()[-1].proof_kind == "reduce_only"
+
+    def unreadable(_adapter_id: str, _account_id: str):
+        raise RuntimeError("order book unavailable")
+
+    app.config["REDUCE_ONLY_LIVE_BOOKS"] = unreadable
+    safety.check_order.reset_mock()
+    missed = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 10, 0), headers=headers)
+    assert missed.status_code == 403
+    assert missed.get_json()["code"] == "laya_denied"
+    assert missed.get_json()["reason"] == LAYA_DOWN_REASON
+    safety.check_order.assert_not_called()
