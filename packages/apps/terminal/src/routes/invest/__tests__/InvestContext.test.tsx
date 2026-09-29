@@ -11,7 +11,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { getDemoHoldings } from "@/hooks/useModeData";
-import { accountCharges, accountNetWorth, markedValue } from "@/lib/accountNetWorth";
+import { accountCharges, accountNetWorth, markedValue, positionsUnrealisedPnl } from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import type { Holding } from "@/types/api";
 
@@ -38,7 +38,12 @@ const positionsQuery = vi.hoisted(() => ({
     pnl: number;
     pnlPercent: number;
   }[] | undefined,
+  isLoading: false,
+  isError: false,
+  isSuccess: false,
 }));
+
+const accountReadsEnabled = vi.hoisted(() => ({ current: false }));
 
 vi.mock("@/hooks/useHoldings", () => ({
   useHoldings: () => holdingsQuery,
@@ -49,11 +54,11 @@ vi.mock("@/hooks/useFunds", () => ({
 }));
 
 vi.mock("@/hooks/usePositions", () => ({
-  usePositions: () => ({ data: positionsQuery.data, isLoading: false }),
+  usePositions: () => positionsQuery,
 }));
 
 vi.mock("@/hooks/useAccountReadsEnabled", () => ({
-  useAccountReadsEnabled: () => false,
+  useAccountReadsEnabled: () => accountReadsEnabled.current,
 }));
 
 const brokerConnected = vi.hoisted(() => ({ current: false }));
@@ -65,14 +70,17 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
 import { InvestProvider, useInvest } from "../InvestContext";
 
 function HoldingsCountProbe() {
-  const { holdings, summary, isSampleData, isLoading } = useInvest();
+  const { holdings, summary, isSampleData, isLoading, isError, positionBookReady } = useInvest();
+  const netWorthPublished = positionBookReady && !isLoading && !isError;
   return (
     <div>
       <span data-testid="holding-count">{holdings.length} holdings</span>
       <span data-testid="summary-count">{summary.holdingCount}</span>
       <span data-testid="sample-flag">{String(isSampleData)}</span>
       <span data-testid="loading-flag">{String(isLoading)}</span>
-      <span data-testid="net-worth">{summary.netWorth}</span>
+      <span data-testid="error-flag">{String(isError)}</span>
+      <span data-testid="position-book-ready">{String(positionBookReady)}</span>
+      <span data-testid="net-worth">{netWorthPublished ? summary.netWorth : ""}</span>
     </div>
   );
 }
@@ -81,23 +89,28 @@ function renderProbe() {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={qc}>
       <InvestProvider>
         <HoldingsCountProbe />
       </InvestProvider>
     </QueryClientProvider>,
   );
+  return { ...view, qc };
 }
 
 afterEach(() => {
   brokerConnected.current = false;
+  accountReadsEnabled.current = false;
   holdingsQuery.data = undefined;
   holdingsQuery.isLoading = false;
   holdingsQuery.isError = false;
   fundsQuery.data = undefined;
   fundsQuery.isLoading = false;
   positionsQuery.data = undefined;
+  positionsQuery.isLoading = false;
+  positionsQuery.isError = false;
+  positionsQuery.isSuccess = false;
   useModeStore.setState({ mode: "explore" });
 });
 
@@ -180,11 +193,80 @@ describe("InvestContext sample holdings count (FT-DEMO-001)", () => {
 
     renderProbe();
 
-    expect(expected).toBe(
-      markedValue([]) + markedValue(positions) + funds.availableCash - charges,
-    );
+    expect(positionsUnrealisedPnl(positions)).toBe(0);
+    expect(expected).toBe(funds.availableCash - charges);
+    expect(expected).not.toBe(markedValue(positions) + funds.availableCash - charges);
     expect(screen.getByTestId("holding-count")).toHaveTextContent("0 holdings");
+    expect(screen.getByTestId("position-book-ready")).toHaveTextContent("true");
     expect(screen.getByTestId("net-worth")).toHaveTextContent(String(expected));
+  });
+
+  it("does not publish net worth until the position book loads, even when funds and holdings are ready", () => {
+    useModeStore.setState({ mode: "practice" });
+    accountReadsEnabled.current = true;
+    brokerConnected.current = false;
+    fundsQuery.data = { availableCash: 999_200, usedMargin: 800, totalBalance: 1_000_000 };
+    fundsQuery.isLoading = false;
+    holdingsQuery.data = [];
+    holdingsQuery.isLoading = false;
+    holdingsQuery.isError = false;
+    positionsQuery.isLoading = true;
+    positionsQuery.isSuccess = false;
+    positionsQuery.isError = false;
+    positionsQuery.data = undefined;
+
+    const view = renderProbe();
+
+    expect(screen.getByTestId("loading-flag")).toHaveTextContent("false");
+    expect(screen.getByTestId("position-book-ready")).toHaveTextContent("false");
+    expect(screen.getByTestId("error-flag")).toHaveTextContent("false");
+    expect(screen.getByTestId("net-worth").textContent).toBe("");
+
+    positionsQuery.isLoading = false;
+    positionsQuery.isSuccess = true;
+    positionsQuery.data = [{
+      symbol: "NIFTY24SEP23500CE",
+      exchange: "NFO",
+      product: "NRML",
+      quantity: -65,
+      averagePrice: 235,
+      ltp: 205,
+      pnl: 0,
+      pnlPercent: 0,
+    }];
+    view.rerender(
+      <QueryClientProvider client={view.qc}>
+        <InvestProvider>
+          <HoldingsCountProbe />
+        </InvestProvider>
+      </QueryClientProvider>,
+    );
+
+    const expected = 999_200 + 1_950;
+    expect(screen.getByTestId("position-book-ready")).toHaveTextContent("true");
+    expect(screen.getByTestId("net-worth")).toHaveTextContent(String(expected));
+    expect(screen.getByTestId("net-worth").textContent).not.toContain(String(999_200 + 205 * 65));
+  });
+
+  it("does not publish net worth when the position book fails after funds and holdings are ready", () => {
+    useModeStore.setState({ mode: "practice" });
+    accountReadsEnabled.current = true;
+    fundsQuery.data = { availableCash: 999_200, usedMargin: 800, totalBalance: 1_000_000 };
+    fundsQuery.isLoading = false;
+    holdingsQuery.data = [];
+    holdingsQuery.isLoading = false;
+    holdingsQuery.isError = false;
+    positionsQuery.isLoading = false;
+    positionsQuery.isSuccess = false;
+    positionsQuery.isError = true;
+    positionsQuery.data = undefined;
+
+    renderProbe();
+
+    expect(screen.getByTestId("loading-flag")).toHaveTextContent("false");
+    expect(screen.getByTestId("error-flag")).toHaveTextContent("true");
+    expect(screen.getByTestId("position-book-ready")).toHaveTextContent("false");
+    expect(screen.getByTestId("net-worth").textContent).toBe("");
   });
 
   it("does not flash the sample book while practice funds are still loading", () => {

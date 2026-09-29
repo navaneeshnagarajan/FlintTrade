@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
-import { accountNetWorth, formatAccountNetWorth } from "@/lib/accountNetWorth";
+import { accountNetWorth, formatAccountNetWorth, NET_WORTH_LABEL, NET_WORTH_POSITIONS_NOTE } from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import { formatCurrencyCompact } from "@/lib/formatters";
 import type { Holding } from "@/types/api";
@@ -90,6 +90,7 @@ const investState = vi.hoisted(() => ({
   isLoading: false,
   isError: false,
   isSampleData: false,
+  positionBookReady: true,
   refetchHoldings: vi.fn(),
 }));
 
@@ -114,6 +115,7 @@ describe("DashboardTab", () => {
     investState.isLoading = false;
     investState.isError = false;
     investState.isSampleData = false;
+    investState.positionBookReady = true;
     investState.summary = {
       currentValue: 170100,
       totalInvested: 167250,
@@ -200,12 +202,25 @@ describe("DashboardTab", () => {
     expect(screen.queryByText(formatCurrencyCompact(demoNetWorth))).not.toBeInTheDocument();
     expect(screen.queryByText(formatAccountNetWorth(demoNetWorth))).not.toBeInTheDocument();
     expect(demoNetWorth).not.toBe(practiceCash);
-    expect(screen.getByText(/Net Worth \(Cash \+ Holdings \+ Positions\)/)).toBeInTheDocument();
+    expect(screen.getByText(NET_WORTH_LABEL)).toBeInTheDocument();
+    expect(screen.getByText(NET_WORTH_LABEL).closest("p")).toHaveAttribute("title", NET_WORTH_POSITIONS_NOTE);
     expect(screen.getByTestId("invest-available-funds")).toHaveTextContent(formatAccountNetWorth(practiceCash));
     expect(screen.getByTestId("invest-xirr")).toHaveTextContent("—");
     expect(screen.getByTestId("invest-xirr-subline")).toHaveTextContent("XIRR —");
     expect(screen.queryByTestId("invest-xirr-example")).not.toBeInTheDocument();
     expect(screen.queryByText(/XIRR -0\.00%/)).not.toBeInTheDocument();
+  });
+
+  it("does not publish net worth until the position book is ready", () => {
+    investState.positionBookReady = false;
+    investState.summary = { ...investState.summary, netWorth: 999_200 };
+
+    render(<DashboardTab />);
+
+    expect(screen.getByTestId("invest-net-worth")).toHaveTextContent("—");
+    expect(screen.getByTestId("invest-net-worth")).not.toHaveAttribute("data-value");
+    expect(screen.queryByText(formatAccountNetWorth(999_200))).not.toBeInTheDocument();
+    expect(screen.getByText(NET_WORTH_LABEL).closest("p")).toHaveAttribute("title", NET_WORTH_POSITIONS_NOTE);
   });
 
   it("computes Portfolio XIRR without an Example chip when holdings exist", () => {

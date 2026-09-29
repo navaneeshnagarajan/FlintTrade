@@ -1,10 +1,10 @@
 /**
  * Home greeting name for the signed-in operator.
  *
- * The settings display name is local and survives sign-out, so a later
- * sign-in must not keep it. The name is read from the current auth session.
- * A profile edit after that sign-in can replace it. "Trader" is the unset
- * placeholder, not an operator name.
+ * On mount, the saved display name is the greeting. The username is used
+ * only when no display name is saved, so a reload does not flash the
+ * username first. A profile edit after that replaces it. "Trader" is the
+ * unset placeholder, not an operator name.
  */
 
 import { useRef } from "react";
@@ -25,6 +25,10 @@ export interface GreetingBinding {
   name: string | null;
 }
 
+function greetingName(settingsName: string, username: string | null): string | null {
+  return realOperatorName(settingsName) ?? realOperatorName(username);
+}
+
 export function nextGreetingBinding(
   previous: GreetingBinding | null,
   input: {
@@ -38,22 +42,22 @@ export function nextGreetingBinding(
     return {
       generation: input.generation,
       settingsAtEntry: input.settingsName,
-      name: input.loggedIn ? realOperatorName(input.username) : null,
+      name: input.loggedIn ? greetingName(input.settingsName, input.username) : null,
     };
   }
   if (input.settingsName !== previous.settingsAtEntry) {
     return {
       generation: input.generation,
       settingsAtEntry: input.settingsName,
-      name: realOperatorName(input.settingsName),
+      name: greetingName(input.settingsName, input.username),
     };
   }
   // Sign-in passes through a logged-out frame on the new generation. The
-  // completed session still supplies the username.
+  // completed session still supplies the saved name, or the username.
   if (previous.name == null) {
     return {
       ...previous,
-      name: realOperatorName(input.username),
+      name: greetingName(input.settingsName, input.username),
     };
   }
   return previous;

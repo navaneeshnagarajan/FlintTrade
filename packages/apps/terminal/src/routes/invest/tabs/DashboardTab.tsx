@@ -28,7 +28,12 @@ import { cn } from "@/lib/utils";
 import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
 import { DemoBanner } from "@/components/ui/DemoBanner";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
-import { accountNetWorth, formatAccountNetWorth } from "@/lib/accountNetWorth";
+import {
+  accountNetWorth,
+  formatAccountNetWorth,
+  NET_WORTH_LABEL,
+  NET_WORTH_POSITIONS_NOTE,
+} from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import { useInvest } from "../InvestContext";
 import { formatINR, formatINRCompact, formatPercent } from "../formatters";
@@ -67,7 +72,14 @@ interface TopMover {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function DashboardTab() {
-  const { holdings, summary: liveSummary, isLoading, isSampleData } = useInvest();
+  const {
+    holdings,
+    summary: liveSummary,
+    isLoading,
+    isError,
+    isSampleData,
+    positionBookReady,
+  } = useInvest();
   const isPractice = useModeStore((s) => s.mode === "practice");
 
   // Count and rows come from InvestContext only — never a local sample
@@ -83,6 +95,7 @@ export function DashboardTab() {
   const netWorth = typeof liveSummary.netWorth === "number"
     ? liveSummary.netWorth
     : accountNetWorth(holdings, availableCash);
+  const netWorthPublished = !isError && positionBookReady !== false;
 
   const valuesHidden = useValueVisibilityStore((s) => s.hidden);
   // Wrap the compact-INR formatter so masked mode hides the figure everywhere it
@@ -176,21 +189,26 @@ export function DashboardTab() {
       <GlassCard className="lg:col-span-3 p-5 gap-0">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div className="space-y-1">
-            <p className="text-xxs text-text-muted uppercase tracking-wider font-medium flex items-center gap-1.5">
-              Net Worth (Cash + Holdings + Positions)
+            <p
+              className="text-xxs text-text-muted uppercase tracking-wider font-medium flex items-center gap-1.5"
+              title={NET_WORTH_POSITIONS_NOTE}
+            >
+              <GlossaryTooltip term="Net Worth">{NET_WORTH_LABEL}</GlossaryTooltip>
               {isDemo && <ExampleLabel testId="invest-net-worth-example" />}
             </p>
             <div className="flex items-baseline gap-3">
               <span
                 className="text-4xl font-mono font-bold tabular-nums text-text-primary"
                 data-testid="invest-net-worth"
-                data-value={netWorth}
+                {...(netWorthPublished ? { "data-value": netWorth } : {})}
               >
-                <AnimatedCounter
-                  value={netWorth}
-                  formatter={netWorthLabel}
-                  duration={1.2}
-                />
+                {netWorthPublished ? (
+                  <AnimatedCounter
+                    value={netWorth}
+                    formatter={netWorthLabel}
+                    duration={1.2}
+                  />
+                ) : "—"}
               </span>
               <span
                 className={cn(

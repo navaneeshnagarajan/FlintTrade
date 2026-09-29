@@ -26,7 +26,11 @@ import { cn } from "@/lib/utils";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
 import { useInvest } from "../InvestContext";
 import { DisabledActionButton } from "../DisabledActionButton";
-import { formatAccountNetWorth } from "@/lib/accountNetWorth";
+import {
+  accountNetWorth,
+  formatAccountNetWorth,
+  NET_WORTH_POSITIONS_NOTE,
+} from "@/lib/accountNetWorth";
 import { formatINRCompact, formatPercent } from "../formatters";
 import { maskValue } from "@/lib/formatters";
 import { useModeStore } from "@/stores/modeStore";
@@ -64,7 +68,7 @@ function buildComparison(totalInvested: number, currentValue: number): Compariso
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function NetWorthTab() {
-  const { summary, isLoading, isSampleData } = useInvest();
+  const { holdings, summary, isLoading, isError, isSampleData, positionBookReady } = useInvest();
   const isPractice = useModeStore((s) => s.mode === "practice");
   const { currentValue, totalInvested, totalPnl, totalPnlPercent, availableCash } = summary;
   const positionValue = summary.positionValue ?? 0;
@@ -73,7 +77,8 @@ export function NetWorthTab() {
 
   const knownTotal = typeof summary.netWorth === "number"
     ? summary.netWorth
-    : currentValue + availableCash + positionValue;
+    : accountNetWorth(holdings, availableCash);
+  const netWorthPublished = !isLoading && !isError && positionBookReady !== false;
   const comparison = useMemo(
     () => buildComparison(totalInvested, currentValue),
     [totalInvested, currentValue],
@@ -147,7 +152,7 @@ export function NetWorthTab() {
       tailwindText: "text-emerald-400",
       icon: TrendingUp,
       addLabel: "Add Position",
-      addTooltip: "Open positions are marked from the account book.",
+      addTooltip: NET_WORTH_POSITIONS_NOTE,
     });
   }
 
@@ -172,17 +177,20 @@ export function NetWorthTab() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {/* Known total card */}
         <GlassCard className="p-5 flex flex-col justify-between gap-3">
-          <div className="text-xxs text-text-muted uppercase tracking-wider flex items-center gap-1.5">
+          <div
+            className="text-xxs text-text-muted uppercase tracking-wider flex items-center gap-1.5"
+            title={NET_WORTH_POSITIONS_NOTE}
+          >
             Known Total (Cash + Holdings + Positions)
             {isSampleData && <ExampleLabel testId="net-worth-tab-example" />}
           </div>
           <div
             className={cn(
               "font-mono text-2xl font-bold tabular-nums",
-              isLoading ? "text-text-muted" : "text-text-primary",
+              netWorthPublished ? "text-text-primary" : "text-text-muted",
             )}
           >
-            {isLoading ? "—" : maskValue(formatAccountNetWorth(knownTotal), valuesHidden)}
+            {netWorthPublished ? maskValue(formatAccountNetWorth(knownTotal), valuesHidden) : "—"}
           </div>
           {!isLoading && (
             <div
@@ -238,7 +246,7 @@ export function NetWorthTab() {
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                   <span className="text-xxs text-text-muted">tracked</span>
                   <span className="font-mono text-xs font-bold text-text-primary tabular-nums">
-                    {isLoading ? "—" : maskValue(formatAccountNetWorth(knownTotal), valuesHidden)}
+                    {netWorthPublished ? maskValue(formatAccountNetWorth(knownTotal), valuesHidden) : "—"}
                   </span>
                 </div>
               </div>

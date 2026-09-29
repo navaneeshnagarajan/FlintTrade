@@ -8,7 +8,13 @@ import { useHoldings } from "@/hooks/useHoldings";
 import { usePositions } from "@/hooks/usePositions";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
-import { accountCharges, accountNetWorth, formatAccountNetWorth, markedValue } from "@/lib/accountNetWorth";
+import {
+  accountCharges,
+  accountNetWorth,
+  formatAccountNetWorth,
+  markedValue,
+  NET_WORTH_POSITIONS_NOTE,
+} from "@/lib/accountNetWorth";
 import { useModeStore } from "@/stores/modeStore";
 import { DemoBadge } from "./DemoBadge";
 import { ExampleLabel } from "@/components/data/ExampleLabel";
@@ -55,7 +61,14 @@ export function PortfolioCard() {
   const funds = isExplore ? getDemoFunds() : fundsQuery.data;
   const holdings = isExplore ? getDemoHoldings() : holdingsQuery.data;
   const positions = isExplore ? [] : (positionsQuery.data ?? []);
-  const hasAccountData = !isExplore && funds != null;
+  const bookReady = (query: { isSuccess: boolean; isError: boolean; isLoading: boolean }) =>
+    query.isSuccess && !query.isError && !query.isLoading;
+  // Example allocation stays until funds, holdings, and positions have all
+  // loaded. Any one of them still loading or failed keeps the split provisional.
+  const allocationIsAccount = !isExplore
+    && bookReady(fundsQuery)
+    && bookReady(holdingsQuery)
+    && bookReady(positionsQuery);
 
   const equityValue = (holdings ?? []).reduce(
     (sum, holding) => sum + holding.ltp * Math.abs(holding.quantity),
@@ -70,7 +83,7 @@ export function PortfolioCard() {
     accountCharges(isExplore ? getDemoFunds() : funds),
   );
   const netWorthIsExample = isExplore && netWorth > 0;
-  const allocation = hasAccountData
+  const allocation = allocationIsAccount
     ? realAllocation(equityValue, positionValue, cash)
     : EXAMPLE_ALLOCATION;
 
@@ -83,7 +96,10 @@ export function PortfolioCard() {
         </p>
 
         <div>
-          <p className="text-[10px] text-text-muted mb-0.5 flex items-center gap-1.5">
+          <p
+            className="text-[10px] text-text-muted mb-0.5 flex items-center gap-1.5"
+            title={NET_WORTH_POSITIONS_NOTE}
+          >
             Net Worth
             {netWorthIsExample && <ExampleLabel testId="portfolio-net-worth-example" />}
           </p>
@@ -101,7 +117,7 @@ export function PortfolioCard() {
         <div>
           <p className="text-[10px] text-text-muted mb-1.5 flex items-center gap-1.5">
             Allocation
-            {!hasAccountData && <ExampleLabel testId="allocation-example-label" />}
+            {!allocationIsAccount && <ExampleLabel testId="allocation-example-label" />}
           </p>
           <div
             className="flex h-2 rounded-full overflow-hidden"

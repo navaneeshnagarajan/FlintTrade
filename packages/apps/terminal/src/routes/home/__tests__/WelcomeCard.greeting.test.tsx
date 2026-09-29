@@ -28,6 +28,7 @@ vi.mock("@/stores/settingsStore", () => ({
 
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
+import { nextGreetingBinding } from "../operatorGreetingName";
 import { WelcomeCard } from "../WelcomeCard";
 
 beforeEach(() => {
@@ -92,6 +93,59 @@ describe("WelcomeCard IST greeting", () => {
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Good morning, Bo");
     expect(screen.getByRole("heading", { level: 2 }).textContent).not.toMatch(/Trader/);
     expect(screen.getByRole("heading", { level: 2 }).textContent).not.toMatch(/Ada/);
+  });
+
+  it("uses the saved display name on mount and does not flash the username", () => {
+    vi.setSystemTime(fromIstParts(2026, 8, 10, 11, 59));
+    settingsState.name = "Meera";
+    useAuthStore.setState({
+      status: "logged-in",
+      username: "Tester",
+      token: "tok-tester",
+      sessionGeneration: 4,
+    });
+
+    const first = nextGreetingBinding(null, {
+      generation: 4,
+      username: "Tester",
+      settingsName: "Meera",
+      loggedIn: true,
+    });
+    expect(first.name).toBe("Meera");
+
+    render(<WelcomeCard />);
+    const heading = screen.getByRole("heading", { level: 2 });
+    expect(heading).toHaveTextContent("Good morning, Meera");
+    expect(heading.textContent).not.toMatch(/Tester/);
+  });
+
+  it("falls back to the username when no display name is saved", () => {
+    vi.setSystemTime(fromIstParts(2026, 8, 10, 11, 59));
+    settingsState.name = "Trader";
+    useAuthStore.setState({
+      status: "logged-in",
+      username: "Tester",
+      token: "tok-tester",
+      sessionGeneration: 5,
+    });
+
+    expect(nextGreetingBinding(null, {
+      generation: 5,
+      username: "Tester",
+      settingsName: "Trader",
+      loggedIn: true,
+    }).name).toBe("Tester");
+    expect(nextGreetingBinding(null, {
+      generation: 5,
+      username: "Tester",
+      settingsName: "",
+      loggedIn: true,
+    }).name).toBe("Tester");
+
+    render(<WelcomeCard />);
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
+      "Good morning, Tester",
+    );
   });
 
   it("omits the name while the operator is unknown", () => {

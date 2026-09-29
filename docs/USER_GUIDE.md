@@ -736,19 +736,20 @@ is known, its line is plain `Good morning`, `Good afternoon`, or
 `Good evening` from the Asia/Kolkata hour. Once that name is known, the
 line uses it. There is no greeting toast.
 
-Home and Invest share one net-worth figure: cash + holdings + positions
-minus charges. Charges come from the account book and are 0 in Practice
-for now. Buying shares moves value from cash into positions. With an
-unchanged price and zero charges, the total stays the same. The Home
-portfolio card labels that figure `Net Worth`. Invest Dashboard labels it
+Home and Invest share one net-worth figure: cash, plus the market value of
+holdings, plus the unrealised P&L of open positions, minus charges.
+Charges come from the account book and are 0 in Practice for now.
+Positions count at unrealised P&L, not gross notional. The Home portfolio
+card labels that figure `Net Worth`. Invest Dashboard labels it
 `Net Worth (Cash + Holdings + Positions)`. The Net Worth view labels it
 `Known Total (Cash + Holdings + Positions)`. Those labels do not name
 charges; the figure still subtracts them.
 
 Home allocation shows a labelled Example split (Equity, MF, Gold, F&O)
-only until there is account data. After an account snapshot the bar is
-the account split: Cash, Positions, and Equity, including cash and
-positions after a fill. The Example chip sits on that split only while it
+until funds, holdings, and positions have all loaded successfully. If any
+of those books is still loading or has failed, the split stays on that
+Example mix. After all three succeed, the bar is the account split: Cash,
+Positions, and Equity. The Example chip sits on that split only while it
 is the example mix.
 
 ### Invest
@@ -785,8 +786,9 @@ state.
 Shareholding, ETF Screener, Social, ETFs, Risk-Return, and Correlation
 carry the Example chip. On Benchmark, index rows keep the Example chip.
 With real holdings, the portfolio row is labelled
-`Your Portfolio (since first buy)`, because it shows the book return
-(total P&L ÷ invested), and it carries no chip. When the holdings are
+`Your Portfolio (Unrealised return on holdings)`, because the figure is
+the unrealised return on current holdings (total P&L ÷ invested), and it
+carries no chip. When the holdings are
 Example, that row is plain `Your Portfolio` and keeps the Example chip.
 Benchmarks beaten, alpha, and the other outperformance figures are
 replaced by

@@ -5,6 +5,8 @@
  * Keep definitions concise (1-2 sentences) and jargon-free where possible.
  */
 
+import { NET_WORTH_POSITIONS_NOTE } from "@/lib/accountNetWorth";
+
 export const GLOSSARY: Record<string, string> = {
   "LTCG":
     "Long Term Capital Gains — profit from selling equity held over 12 months. Taxed at 12.5% above \u20b91.25 lakh.",
@@ -66,4 +68,6 @@ export const GLOSSARY: Record<string, string> = {
     "Profit and Loss — the net gain or loss on your positions for a given period.",
   "Day P&L":
     "Profit and Loss for the current trading day based on unrealised position values.",
+  "Net Worth":
+    `Cash plus the market value of holdings, plus open positions' unrealised P&L. ${NET_WORTH_POSITIONS_NOTE}`,
 };

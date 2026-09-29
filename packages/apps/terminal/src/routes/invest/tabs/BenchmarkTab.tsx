@@ -42,6 +42,12 @@ const PERIODS: PeriodKey[] = ["1D", "1W", "1M", "3M", "6M", "1Y", "3Y", "5Y"];
 
 const COMPARISON_NOTE = "Comparison needs real index data.";
 
+/**
+ * Wording for the holdings-book figure. The Designer owns the final phrase.
+ * Change this constant only.
+ */
+export const HOLDINGS_RETURN_LABEL = "Unrealised return on holdings";
+
 const BENCHMARKS: BenchmarkRow[] = [
   {
     name: "NIFTY 50",
@@ -119,8 +125,9 @@ function formatReturn(value: number): string {
 /**
  * Cost-basis return of a holdings book, in percent.
  *
- * This is the account figure (total P&L over amount invested). It is not a
- * 1D/1Y index return, and it is not comparable with the sample index rows.
+ * This is the unrealised return on current holdings (total P&L over amount
+ * invested). It is not a return since first buy, not a 1D/1Y index return,
+ * and it is not comparable with the sample index rows.
  */
 export function portfolioBookReturn(
   holdings: readonly { averagePrice: number; quantity: number; pnl: number }[],
@@ -146,7 +153,7 @@ export function BenchmarkTab() {
   const hasRealHoldings = hasHoldings && !isSampleData;
   const bookReturn = portfolioBookReturn(holdings);
   const portfolioLabel = hasRealHoldings
-    ? "Your Portfolio (since first buy)"
+    ? `Your Portfolio (${HOLDINGS_RETURN_LABEL})`
     : "Your Portfolio";
 
   return (
