@@ -33,7 +33,7 @@ import {
 } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 import { downgradeMode, unlockWithPin } from "@/lib/modeAuth";
-import { unlockDeskLabel } from "@/lib/unlockDeskLabel";
+import { lockedDeskHeading, unlockDeskLabel } from "@/lib/unlockDeskLabel";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 
 interface LoginRouteProps {
@@ -81,6 +81,7 @@ export default function LoginRoute({
   const totpRequired = totpEnabled;
   const sessionToken = useAuthStore.getState().reauthToken ?? useAuthStore.getState().token;
   const deskLabel = mode === "pin" ? unlockDeskLabel(sessionToken) : null;
+  const pinHeading = lockedDeskHeading(sessionToken);
 
   useEffect(() => {
     if (mode !== "full") return;
@@ -226,7 +227,7 @@ export default function LoginRoute({
 
         <div className="text-center space-y-1">
           <h1 className="font-heading font-bold text-xl text-text-primary">
-            {mode === "pin" ? "Quick Unlock" : "Welcome Back"}
+            {mode === "pin" ? pinHeading : "Welcome Back"}
           </h1>
           <p className="text-sm text-text-muted">
             {mode === "pin"
@@ -247,6 +248,7 @@ export default function LoginRoute({
         {mode === "pin" ? (
           <div className="space-y-4">
             <div>
+              <p className="text-xs text-text-muted mb-1.5">Quick Unlock</p>
               <label htmlFor="pin" className="text-xs text-text-secondary font-medium block mb-1.5">
                 PIN
               </label>

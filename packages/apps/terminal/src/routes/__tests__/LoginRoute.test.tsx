@@ -429,6 +429,9 @@ describe("LoginRoute", () => {
         username: "testuser",
       });
       const view = render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+      const heading = mode === "practice" ? "Practice desk locked" : "Live desk locked";
+      expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
       view.unmount();
     }
@@ -446,6 +449,8 @@ describe("LoginRoute", () => {
       username: "testuser",
     });
     render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+    expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /connected \(read\)/i })).not.toBeInTheDocument();
     expect(mockSetMode).not.toHaveBeenCalled();
@@ -460,6 +465,8 @@ describe("LoginRoute", () => {
       username: "testuser",
     });
     render(<LoginRoute onSuccess={vi.fn()} mode="pin" />);
+    expect(screen.getByRole("heading", { name: "Locked" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Quick Unlock" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /connected \(read\)/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /desk/i })).not.toBeInTheDocument();

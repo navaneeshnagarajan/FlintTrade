@@ -941,10 +941,10 @@ def auth_pin_verify() -> tuple[Any, int]:
 
     The mode is taken from the server-side session JWT. Any ``mode`` in the
     request body is ignored, and a missing session mode does not default to
-    Live. Practice, Explore, and any other non-Live session — including a
-    Connected (read) desk — unlock with the PIN alone. A session that is
-    already Live keeps the authenticator enrolment check. Switching into
-    Live is ``POST /v1/auth/live``, not this route.
+    Live. Practice, Explore, and any other non-Live session unlock with the
+    PIN alone. A session that is already Live keeps the authenticator
+    enrolment check. Switching into Live is ``POST /v1/auth/live``, not this
+    route. Connected (read) is a broker status, not a session mode.
 
     The PIN is a re-auth factor: the request must carry a valid, unrevoked
     session JWT.
@@ -969,8 +969,8 @@ def auth_pin_verify() -> tuple[Any, int]:
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
-    # Already Live: keep the authenticator enrolment check. Anything else,
-    # including Connected (read), unlocks without that Live check.
+    # Already Live: keep the authenticator enrolment check. Any other session
+    # mode unlocks without that Live check.
     if session_mode == "live" and not svc.is_totp_enabled():
         return _totp_required_for_live()
 

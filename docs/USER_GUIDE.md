@@ -1271,13 +1271,14 @@ not `^[0-9]{6}$`. Setting or changing the PIN does not change Mode.
 
 ### Idle lock and Quick Unlock
 
-After an idle lock, the lock-screen heading and the Quick Unlock button
-name the desk only for Practice and Live: `Unlock Practice desk` or
-`Unlock Live desk`. The Quick Unlock screen is titled `Quick Unlock`.
-An Example (sample-data) session, or any unknown value, shows the plain
-heading `Locked` and the plain button `Unlock`. Connected (read) is a
-broker status, not a session Mode, so a Connected (read) user sees the
-Practice or Live label for their session.
+After an idle lock, Welcome Quick Unlock titles the screen for Practice
+and Live: `Practice desk locked` or `Live desk locked`. The button reads
+`Unlock Practice desk` or `Unlock Live desk`. An Example (sample-data)
+session, or any unknown value, shows the plain heading `Locked` and the
+plain button `Unlock`. `Quick Unlock` is the small label above the PIN
+field. Connected (read) is a broker status, not a session Mode, so it
+does not choose this heading. The operator sees the Practice or Live
+heading for that session.
 
 Quick Unlock reopens the same Mode the session already had, with the
 correct PIN. It never changes the Mode. The request is

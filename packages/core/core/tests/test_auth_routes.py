@@ -743,8 +743,8 @@ class TestUnlockRestoresSession:
         assert data["live_mode_unlocked"] is False
         assert _token_claims(data["token"])["mode"] == "practice"
 
-    def test_explore_connected_read_unlocks_without_live_checks(self, client):
-        """A non-Live session, including Connected (read), needs no authenticator."""
+    def test_explore_session_unlocks_without_live_checks(self, client):
+        """A sample-data session unlocks with the PIN alone."""
         c = self._setup(client)
         resp = c.post(
             "/v1/auth/pin",

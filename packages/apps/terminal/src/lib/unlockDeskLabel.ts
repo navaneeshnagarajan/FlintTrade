@@ -20,6 +20,11 @@ const UNLOCK_DESK_LABEL = {
   live: "Unlock Live desk",
 } as const;
 
+const LOCKED_DESK_HEADING = {
+  practice: "Practice desk locked",
+  live: "Live desk locked",
+} as const;
+
 type NamedSessionMode = keyof typeof UNLOCK_DESK_LABEL;
 
 function sessionModeClaim(token: string | null | undefined): string | null {
@@ -45,11 +50,24 @@ function sessionModeClaim(token: string | null | undefined): string | null {
  * when the token cannot be read. Callers then keep the plain Locked heading
  * and Unlock button.
  */
-export function unlockDeskLabel(token: string | null | undefined): string | null {
+function namedSessionMode(token: string | null | undefined): NamedSessionMode | null {
   const mode = sessionModeClaim(token);
-  if (mode === "practice" || mode === "live") {
-    const named: NamedSessionMode = mode;
-    return UNLOCK_DESK_LABEL[named];
-  }
+  if (mode === "practice" || mode === "live") return mode;
   return null;
+}
+
+export function unlockDeskLabel(token: string | null | undefined): string | null {
+  const mode = namedSessionMode(token);
+  return mode ? UNLOCK_DESK_LABEL[mode] : null;
+}
+
+/**
+ * Welcome Quick Unlock heading.
+ *
+ * Practice and Live name the locked desk. A sample-data session, a retired
+ * claim, and any unknown value stay on the plain heading "Locked".
+ */
+export function lockedDeskHeading(token: string | null | undefined): string {
+  const mode = namedSessionMode(token);
+  return mode ? LOCKED_DESK_HEADING[mode] : "Locked";
 }
