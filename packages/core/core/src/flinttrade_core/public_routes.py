@@ -25,11 +25,13 @@ _PUBLIC_ROUTE_ENTRIES: tuple[tuple[str, str], ...] = (
     # not the daily API key, so the global check must let the request through.
     ("POST", "/v1/auth/setup/vault"),
     # First-run reset. Once an authenticator is enrolled the handler requires
-    # a session, the password, and the current authenticator code.
+    # a session, the password, and the current authenticator code. A signed-out
+    # request on a finished account is asked to sign in.
     ("POST", "/v1/auth/setup/reset"),
     # Setup-wizard authenticator regeneration. Once an authenticator is
     # enrolled the handler requires a session, the password, and the current
-    # authenticator code.
+    # authenticator code. A signed-out request on a finished account is asked
+    # to sign in.
     ("POST", "/v1/auth/setup/regenerate-2fa"),
     # Password recovery. No session exists yet.
     ("POST", "/v1/auth/forgot-password"),

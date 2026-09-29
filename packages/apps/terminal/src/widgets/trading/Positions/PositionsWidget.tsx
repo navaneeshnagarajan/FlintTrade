@@ -83,6 +83,7 @@ import { FlintSegmentTracker } from "@flinttrade/design-system";
 import { downloadExcel } from "@/services/ftApi.data";
 import { postWithMode } from "@/services/ftApi.helpers";
 import { LayaAdmissionNotice } from "@/components/orders/LayaAdmissionNotice";
+import { RestoredFillTag } from "@/components/orders/RestoredFillTag";
 import { layaNoticeFromOrderError, type LayaAdmissionNotice as LayaNotice } from "@/lib/layaAdmission";
 import { LAYA_EXIT_WHILE_DOWN } from "@/lib/operatorIncident";
 import { placeOrder } from "@/services/api";
@@ -1201,6 +1202,7 @@ function PositionsWidget(props: WidgetProps) {
               {unexpected ? (
                 <span className="text-xxs text-warning">{UNEXPECTED_POSITION_TAG}</span>
               ) : null}
+              {row.original.restored ? <RestoredFillTag /> : null}
             </span>
           );
         },

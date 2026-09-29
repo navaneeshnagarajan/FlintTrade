@@ -586,7 +586,7 @@ function PasswordReset({ onBack }: { onBack: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// 2FA recovery — password → fresh TOTP QR + backup codes (no session needed)
+// 2FA recovery — a finished account must already be signed in.
 // ---------------------------------------------------------------------------
 
 function TwoFactorRecovery({ onBack }: { onBack: () => void }) {

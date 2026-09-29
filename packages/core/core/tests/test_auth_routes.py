@@ -1240,8 +1240,12 @@ class TestEnrolledAccountRecovery:
         body = {"password": "StrongP@ss123!"}
         reset = c.post("/v1/auth/setup/reset", json=body, headers=headers)
         regenerate = c.post("/v1/auth/setup/regenerate-2fa", json=body, headers=headers)
-        assert reset.status_code == 401
-        assert regenerate.status_code == 401
+        assert reset.status_code == 403
+        assert regenerate.status_code == 403
+        assert reset.get_json()["message"] == (
+            "Sign in to reset this account. You'll need your password and authenticator code."
+        )
+        assert regenerate.get_json()["message"] == reset.get_json()["message"]
         assert svc.is_setup() is True
         assert svc.get_profile()["username"] == "nav"
         assert svc.get_totp_secret() == before

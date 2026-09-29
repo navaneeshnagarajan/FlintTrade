@@ -2151,6 +2151,7 @@ function normalisePracticePosition(value: unknown): Position | undefined {
     ltp,
     pnl,
     pnlPercent: cost > 0 ? (pnl / cost) * 100 : 0,
+    restored: value.restored === true,
   };
 }
 
@@ -2191,6 +2192,9 @@ function normalisePracticeTrade(value: unknown): Trade | undefined {
     quantity: toNumber(value.quantity),
     price: toNumber(value.price ?? value.fill_price ?? value.avg_fill_px),
     timestamp: String(value.timestamp ?? value.traded_at ?? value.fill_time ?? ""),
+    ...(typeof value.strategy === "string" && value.strategy
+      ? { strategy: value.strategy }
+      : {}),
   };
 }
 

@@ -455,8 +455,8 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 | `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. |
 | `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and an Explore setup-session JWT (`setup_session`). That token is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for Explore and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. |
 | `POST auth/setup/vault` | Open the credential vault during first-run Setup. Requires the account-create setup-session JWT. Daily-login tokens are rejected. Body `{ "master_password" }` (at least 8 characters when the vault file is missing). Persists the secret when it is missing and leaves an existing secret untouched. Success is `{ "opened": true, "already_present": bool }` under `data`. The response never returns the secret. |
-| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Before authenticator enrolment, the account-create setup JWT can start over with an empty body, and a session plus the password can wipe the account. Once an authenticator is enrolled, recovery requires a session, the password, and the current authenticator code (`totp_code`). A signed-out request is refused and changes nothing. |
-| `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret and clear `totp_enabled` until a live code is confirmed again. Before enrolment, a session and the password are enough. Once an authenticator is enrolled, the current authenticator code is required as well. A signed-out request is refused and changes nothing. |
+| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Before authenticator enrolment, the account-create setup JWT can start over with an empty body, and a session plus the password can wipe the account. Once an authenticator is enrolled, recovery requires a session, the password, and the current authenticator code (`totp_code`). A signed-out request on a finished account is refused with "Sign in to reset this account. You'll need your password and authenticator code." and changes nothing. |
+| `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret and clear `totp_enabled` until a live code is confirmed again. Before enrolment, a session and the password are enough. Once an authenticator is enrolled, the current authenticator code is required as well. A signed-out request on a finished account returns the same sign-in message as reset and changes nothing. |
 | `POST auth/login` | Sign in with password (argon2id-hashed). `totp_code` (or a backup code) is required only after authenticator enrolment (`totp_enabled`). Issues a JWT. |
 | `POST auth/totp/enable` | Confirm optional authenticator enrolment. Session-bound. Body `{ "totp_code" }`. Sets `totp_enabled`; later logins then require a TOTP or backup code. |
 | `POST auth/pin` | Re-authenticate with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin", "mode"? }`. `mode: "live"` (default) mints a Live JWT with `live_mode_unlocked=true`, and refuses 403 `totp_required` when the authenticator is not enabled. `mode: "practice"` / `"explore"` unlocks that mode without the Live claim and does not require TOTP. There is no `/auth/me`. |
@@ -621,7 +621,8 @@ setup-session JWT and rejects a daily-login token. `POST
 /v1/auth/setup/reset` and `POST /v1/auth/setup/regenerate-2fa` stay
 reachable during first-run. Once an authenticator is enrolled, account
 recovery requires a session, the password, and the current authenticator
-code. `POST /v1/auth/totp/enable`, `/pin`, `/pin/set`, `/mode`, and
+code. A signed-out reset or authenticator change on a finished account
+returns "Sign in to reset this account. You'll need your password and authenticator code." `POST /v1/auth/totp/enable`, `/pin`, `/pin/set`, `/mode`, and
 `/logout` are not on the list: they need an existing session JWT and
 return 401 without one.
 

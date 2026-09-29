@@ -60,7 +60,13 @@ def _backup() -> str:
     return json.dumps({
         "schema_version": 2,
         "capital": {"initial": 100_000.0, "current": 100_000.0},
-        "positions": [],
+        "positions": [{
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "MIS",
+            "net_qty": 1,
+            "avg_price": 1500.0,
+        }],
         "orders": [{
             "order_id": "o1",
             "symbol": "INFY",
@@ -112,6 +118,9 @@ def test_practice_restore_marks_fills_and_does_not_admit(restore_app) -> None:
     assert len(trades) == 1
     assert trades[0]["strategy"] == RESTORED_FROM_BACKUP
     assert trades[0]["symbol"] == "INFY"
+    positions = engine.get_positions()
+    assert len(positions) == 1
+    assert positions[0]["restored"] is True
     assert placed["count"] == 0
     assert process_laya().decision_log() == ()
 

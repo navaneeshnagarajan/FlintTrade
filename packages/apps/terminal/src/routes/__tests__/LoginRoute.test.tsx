@@ -640,4 +640,31 @@ describe("LoginRoute", () => {
     // Stays on the confirm view — no QR minted.
     expect(screen.queryByText("New 2FA ready")).not.toBeInTheDocument();
   });
+
+  it("shows the sign-in message when a finished account is reset while signed out", async () => {
+    mockAuthFetch({
+      totpEnabled: true,
+      onOther: (url) => {
+        if (url.includes("regenerate-2fa")) {
+          return jsonResponse({
+            status: "error",
+            message: "Sign in to reset this account. You'll need your password and authenticator code.",
+          }, 403);
+        }
+        return jsonResponse({ status: "error", message: `unmocked ${url}` }, 500);
+      },
+    });
+    render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /lost your authenticator/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /lost your authenticator/i }));
+    fireEvent.change(screen.getByLabelText("Confirm your password to reset 2FA"), { target: { value: "password" } });
+    fireEvent.click(screen.getByRole("button", { name: /^reset 2fa$/i }));
+
+    expect(await screen.findByText(
+      "Sign in to reset this account. You'll need your password and authenticator code.",
+    )).toBeInTheDocument();
+    expect(screen.queryByText("Authentication required.")).not.toBeInTheDocument();
+    expect(screen.queryByText("New 2FA ready")).not.toBeInTheDocument();
+  });
 });

@@ -1088,6 +1088,27 @@ describe("PositionsWidget", () => {
       expect(mockPlaceOrder).not.toHaveBeenCalled();
     });
 
+    it("tags a position restored from backup", () => {
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [{
+          symbol: "INFY",
+          exchange: "NSE",
+          product: "MIS",
+          quantity: 10,
+          average_price: 100,
+          ltp: 101,
+          pnl: 10,
+          restored: true,
+        }],
+      }));
+      render(<PositionsWidget {...defaultProps} />);
+      const tag = screen.getByText("Restored");
+      expect(tag).toHaveAttribute(
+        "title",
+        "Restored from backup. Not sent to a broker or checked by Laya.",
+      );
+    });
+
     it("shows a flipped position on its own row until the toast is dismissed", async () => {
       const held = {
         symbol: "INFY",

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from flinttrade_core.db import open_sqlite
+from flinttrade_core.restored_fills import RESTORED_FROM_BACKUP
 from flinttrade_core.symbol_utils import parse_future_symbol, parse_option_symbol
 
 from .sandbox_migration import LegacySandboxConflict, migrate_workspace
@@ -37,7 +38,8 @@ from .state_store import IST, ensure_schema, init_capital
 logger = logging.getLogger("flinttrade.data.sandbox_engine")
 
 # Fills restored from a backup are stored as records. They are not new orders.
-RESTORED_FROM_BACKUP = "Restored from backup"
+# The marker string lives in flinttrade_core.restored_fills so every scoring
+# reader filters on the same value. Re-exported here for existing imports.
 _IMPORT_KEYS = frozenset({
     "schema_version",
     "config",
@@ -879,6 +881,25 @@ class SandboxEngine:
     # Positions
     # ------------------------------------------------------------------
 
+    def _restored_contracts(self) -> set[tuple[str, str, str]]:
+        """Contracts whose fills are all restored from backup.
+
+        A contract is restored only when it has at least one restored fill
+        and no fill with any other strategy. A later live fill clears it.
+        """
+        rows = self._conn.execute(
+            "SELECT symbol, exchange, product, strategy FROM trades"
+        ).fetchall()
+        restored: set[tuple[str, str, str]] = set()
+        live: set[tuple[str, str, str]] = set()
+        for symbol, exchange, product, strategy in rows:
+            key = (symbol, exchange, product)
+            if strategy == RESTORED_FROM_BACKUP:
+                restored.add(key)
+            else:
+                live.add(key)
+        return restored - live
+
     def get_positions(self) -> list[dict[str, Any]]:
         """Return all open sandbox positions (net_qty != 0).
 
@@ -895,6 +916,7 @@ class SandboxEngine:
                ORDER BY updated_at DESC"""
         ).fetchall()
 
+        restored_contracts = self._restored_contracts()
         return [
             {
                 "symbol": r[0],
@@ -912,6 +934,7 @@ class SandboxEngine:
                 "realized_pnl": r[9],
                 "unrealized_pnl": r[10],
                 "updated_at": _format_ts(r[11]),
+                "restored": (r[0], r[1], r[2]) in restored_contracts,
             }
             for r in rows
         ]
