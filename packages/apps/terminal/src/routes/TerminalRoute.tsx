@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import WorkspaceSwitcher from "@/chrome/WorkspaceSwitcher";
+import { EmptyState } from "@/components/ui/states";
 import { classifySerializedLayout, useLayoutStore } from "@/stores/layoutStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { useTradingStore } from "@/stores/tradingStore";
@@ -938,40 +939,35 @@ export default function TerminalRoute() {
                   {panelCount === 0 && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
                       <div
-                        className="pointer-events-auto flex flex-col items-center gap-4 px-8 py-10 rounded-xl border border-border-default bg-surface-card/80 backdrop-blur-sm shadow-lg animate-fade-in text-center max-w-xs"
+                        className="pointer-events-auto max-w-sm rounded-xl border border-border-default bg-surface-card shadow-floating animate-fade-in"
                         role="status"
                       >
-                        <LayoutGrid className="h-10 w-10 text-text-muted" />
-                        <div className="space-y-1">
-                          <p className="font-heading font-semibold text-base text-text-primary">
-                            Your workspace is empty
-                          </p>
-                          <p className="text-sm text-text-secondary">
-                            {level === "beginner"
+                        <EmptyState
+                          icon={LayoutGrid}
+                          title="Your workspace is empty"
+                          description={
+                            level === "beginner"
                               ? "Add your first widget — start with the Watchlist or Chart"
-                              : "Add widgets or choose a template to get started"}
-                          </p>
-                        </div>
-                        <div className="flex gap-2 mt-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 text-xs border-border-default text-text-secondary hover:text-text-primary"
-                            onClick={() => setWidgetPickerOpen(true)}
-                            data-tour-target="widget-picker"
-                          >
-                            <LayoutGrid className="h-3.5 w-3.5 mr-1.5" />
-                            + Widget
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="h-8 text-xs bg-primary hover:bg-primary/90 text-primary-foreground"
-                            onClick={() => setPresetPickerOpen(true)}
-                          >
-                            <Layers className="h-3.5 w-3.5 mr-1.5" />
-                            Choose Template
-                          </Button>
-                        </div>
+                              : "Add widgets or choose a template to get started"
+                          }
+                          action={
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setWidgetPickerOpen(true)}
+                                data-tour-target="widget-picker"
+                              >
+                                <LayoutGrid aria-hidden="true" />
+                                + Widget
+                              </Button>
+                              <Button size="sm" onClick={() => setPresetPickerOpen(true)}>
+                                <Layers aria-hidden="true" />
+                                Choose Template
+                              </Button>
+                            </>
+                          }
+                        />
                       </div>
                     </div>
                   )}

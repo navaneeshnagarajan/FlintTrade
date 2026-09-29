@@ -9,6 +9,7 @@ import { Activity, Loader2, Square } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState, ErrorState } from "@/components/ui/states";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { StaggeredList } from "@/components/motion/StaggeredList";
 import {
@@ -88,22 +89,23 @@ export default function MonitorsSection() {
         </div>
 
         {isError && (
-          <p className="text-xs text-loss text-center py-6">
-            Failed to load strategies. Backend may be offline.
-          </p>
+          <ErrorState
+            title="Could not load strategies"
+            description="Failed to load strategies. Backend may be offline."
+          />
         )}
 
         {!isLoading && !isError && strategies.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 gap-2">
-            <Activity size={28} className="text-text-muted opacity-40" />
-            <p className="text-sm text-text-muted">No strategies running</p>
-            <p className="text-xs text-text-muted opacity-60">
-              Start a strategy from the Strategy Builder tool.
-            </p>
-            <Button asChild variant="outline" size="sm" className="mt-2">
-              <Link to="/lab">Open Strategy Builder</Link>
-            </Button>
-          </div>
+          <EmptyState
+            icon={Activity}
+            title="No strategies running"
+            description="Start a strategy from the Strategy Builder tool."
+            action={
+              <Button asChild variant="outline" size="sm">
+                <Link to="/lab">Open Strategy Builder</Link>
+              </Button>
+            }
+          />
         )}
 
         {strategies.length > 0 && (
