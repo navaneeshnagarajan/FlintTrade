@@ -595,8 +595,10 @@ complete download shows **Can't verify the model**. On any of those
 results the staging directory is deleted, nothing else in the model cache
 is touched, and the sidecar does not start. The sidecar never starts on a
 checkpoint whose hashes do not match the pin. If the download does not
-finish and there is no runtime checkpoint, an older copy already in the
-cache is checked as itself. A runtime checkpoint that does not match the
+finish, the chip is **Can't download the model**, not **Wrong model
+version**, even when an older copy is already in the cache or checkpoint.
+A model already on disk is **Wrong model version** only when this start
+did not download. A runtime checkpoint that does not match the
 pin is replaced by this download; if the download does not finish, that
 checkpoint stays and the chip is **Can't download the model**, not
 **Wrong model version**. Leftover staging directories and

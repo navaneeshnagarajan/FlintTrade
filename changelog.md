@@ -50,11 +50,12 @@ changelog rebuilds itself from the first release cut after this baseline.
   `download_failed`, and the sidecar does not start. While the download
   runs the status word is Down, not Still loading, and the chip
   reads "Downloading the model · 1.2 of 3.4 GB". Orders are refused with
-  "Laya is Down. Orders are paused until it's Ready." A dropped connection
+  "Laya is Down. Orders are paused until it's Ready."   A dropped connection
   or a partial download is `download_failed` ("Can't download the model";
   tooltip "Check your connection, then Start Laya again.") and deletes
-  only the staging directory. A complete download whose files do not match
-  the pin is `wrong_revision`. The sidecar always runs offline.
+  only the staging directory, even when an older snapshot is already on
+  disk. A complete download whose files do not match the pin is
+  `wrong_revision`. The sidecar always runs offline.
 
 - **Mode honesty bar.** One line under the TopBar for Explore, Practice,
   and Live. Widgets no longer repeat a Sample chip. An incident, when

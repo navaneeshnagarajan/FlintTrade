@@ -575,8 +575,10 @@ the same download runs without starting the sidecar. The download asks
 for the pinned commit in `[checkpoint] revision`, not the default branch.
 A full match renames staging onto `checkpoint`. The sidecar is not
 started until the move, and that launch keeps hub access off. If the
-download does not finish and there is no runtime checkpoint, an older
-snapshot in the cache is checked as itself. Any failure deletes the
+download does not finish, the reason is `download_failed`, not
+`wrong_revision`, even when an older snapshot is already in the cache or
+checkpoint. A snapshot already on disk is `wrong_revision` only when this
+start did not download. Any failure deletes the
 staging directory and does not touch the rest of the model cache.
 Leftover staging directories and `checkpoint.old-*` copies are removed
 at the start of `start`, with no chip change. If `checkpoint` is missing

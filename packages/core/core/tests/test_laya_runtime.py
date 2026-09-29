@@ -1792,6 +1792,42 @@ def test_failed_upgrade_download_reports_download_failed_not_wrong_revision(
 
 
 @pytest.mark.unit
+def test_failed_download_with_old_snapshot_is_download_failed_not_wrong_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = load_policy()
+    path = _plant_snapshot(tmp_path, monkeypatch, extra=None)
+    (path.parent / "encoder" / "config.json").unlink()
+    launched: list[object] = []
+
+    def download(_argv: list[str], env: dict[str, str]) -> int:
+        partial = Path(env["LAYA_DOWNLOAD_DIR"]) / policy.weight_file
+        partial.parent.mkdir(parents=True, exist_ok=True)
+        partial.write_bytes(b"partial")
+        return 1
+
+    runtime = LayaRuntime(
+        tmp_path,
+        process_factory=lambda _argv, _env: launched.append(1) or _Process(),
+        downloader=download,
+        health_reader=lambda _url: _healthy(),
+        watch=False,
+    )
+    with pytest.raises(LayaRuntimeError, match="Can't download the model"):
+        runtime.start()
+    assert launched == []
+    assert runtime._process is None  # noqa: SLF001
+    assert path.is_file()
+    assert not runtime.staging_dir.exists()
+    report = runtime.status()
+    assert report["reason"] == "download_failed"
+    assert report["detail"] == "Can't download the model"
+    assert process_laya().status is DecisionStatus.DOWN
+    assert process_laya().runtime_reason()[0] == "download_failed"
+    reset_process_laya_for_tests()
+
+
+@pytest.mark.unit
 def test_stale_staging_and_old_checkpoint_are_removed_silently(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

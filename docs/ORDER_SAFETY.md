@@ -190,8 +190,10 @@ connection, a partial or missing file, or a read error is also
 do not match the pin. Neither case reaches Ready. When the weights file
 or a manifest file is not on disk, the same download runs without
 starting the sidecar. A full match renames staging onto `checkpoint`.
-If the download does not finish and there is no runtime checkpoint, an
-older snapshot in the cache is checked as itself. Any failure deletes
+If the download does not finish, the chip is `download_failed`, not
+`wrong_revision`, even when an older snapshot is already in the cache or
+checkpoint. A snapshot already on disk is `wrong_revision` only when this
+start did not download. Any failure deletes
 the staging directory and does not touch the rest of the model cache.
 Leftover staging directories and `checkpoint.old-*` copies are removed
 at the start of `start`, with no chip change. If `checkpoint` is missing

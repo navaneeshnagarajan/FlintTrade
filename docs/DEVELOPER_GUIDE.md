@@ -563,10 +563,12 @@ Still loading, and orders use "Laya is Down. Orders are paused until
 it's Ready." Any of those failures deletes the staging directory and
 does not touch anything else in the model cache. The sidecar does not
 start, including on a checkpoint whose hashes do not match the pin. If
-the download does not finish and there is no runtime checkpoint, an
-older snapshot in the cache is checked as itself; an empty cache is
-`download_failed`. A runtime checkpoint that does not match the pin is
-replaced by this download; if the download does not finish, that
+the download does not finish, the reason is `download_failed`, not
+`wrong_revision`, even when an older snapshot is already in the cache or
+checkpoint. An empty cache is `download_failed`. A snapshot already on
+disk is `wrong_revision` only when this start did not download. A runtime
+checkpoint that does not match the pin is replaced by this download; if
+the download does not finish, that
 checkpoint stays and the reason is `download_failed`. Leftover staging
 directories and `checkpoint.old-*` copies are removed at the start of
 `start`, with no chip change and no message. If `checkpoint` is missing
