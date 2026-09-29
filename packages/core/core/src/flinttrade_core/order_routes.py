@@ -3539,11 +3539,12 @@ def _check_legs_through_safety(
 @orders_bp.route("/forever", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100, identity="jwt")
 def forever_place() -> tuple[Any, int]:
-    """Refuse a forever (GTT) place. Post the same body to ``/orders/place``.
+    """Refuse a forever (GTT) place.
 
-    A body that does not match the GTT contract is HTTP 400. A valid body does
-    not reach a broker from this route. ``POST /api/v1/orders/place`` with
-    ``variety="gtt"`` is the place path.
+    A body that does not match the GTT contract is HTTP 400. A valid body
+    returns HTTP 501 and does not reach a broker. ``POST /api/v1/orders/place``
+    with ``variety="gtt"`` is refused with ``gtt_unsupported`` before Laya,
+    SafetySystem, and any broker call.
     """
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:

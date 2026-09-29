@@ -331,6 +331,7 @@ def test_gated_target_uses_execution_default_only_when_target_omitted(*, backend
 
 def test_forever_place_routes_variety_gtt_with_oco_fields(*, backend_lease_factory) -> None:
     """GTT is refused on place. POST /forever does not call the broker."""
+    from flinttrade_core.order_routes import forever_place
     from flinttrade_engine.laya import DecisionStatus, process_laya
 
     process_laya().set_status(DecisionStatus.READY)
@@ -347,6 +348,10 @@ def test_forever_place_routes_variety_gtt_with_oco_fields(*, backend_lease_facto
     }
     refused = client.post("/api/v1/orders/forever", json=body, headers=_live_headers())
     assert refused.status_code == 501
+    forever_doc = forever_place.__doc__ or ""
+    assert "501" in forever_doc
+    assert "gtt_unsupported" in forever_doc
+    assert "is the place path" not in forever_doc
     router.place_order.assert_not_called()
     resp = client.post("/api/v1/orders/place", json=body, headers=_live_headers())
     assert resp.status_code == 422
