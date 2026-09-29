@@ -1217,3 +1217,87 @@ def test_verified_operator_session_rejects_non_full_or_invalid_identity(monkeypa
     verify = getattr(auth_routes, "verify_operator_session_token", lambda token: None)
     with pytest.raises(Exception):
         verify("signed.jwt.value")
+
+
+class TestEnrolledAccountRecovery:
+    """Once an authenticator is enrolled, recovery needs a session, password, and code."""
+
+    def _setup(self, c):
+        return c.post("/v1/auth/setup", json={
+            "username": "nav",
+            "email": "nav@example.com",
+            "password": "StrongP@ss123!",
+            "pin": "123456",
+        }, headers={"Content-Type": "application/json"})
+
+    def test_signed_out_reset_and_regenerate_are_refused(self, client, monkeypatch):
+        c, svc = client
+        self._setup(c)
+        _enable_totp(svc)
+        before = svc.get_totp_secret()
+        monkeypatch.setenv("FLINTTRADE_API_KEY", "tester-api-key")
+        headers = {"Content-Type": "application/json", "X-API-Key": "tester-api-key"}
+        body = {"password": "StrongP@ss123!"}
+        reset = c.post("/v1/auth/setup/reset", json=body, headers=headers)
+        regenerate = c.post("/v1/auth/setup/regenerate-2fa", json=body, headers=headers)
+        assert reset.status_code == 401
+        assert regenerate.status_code == 401
+        assert svc.is_setup() is True
+        assert svc.get_profile()["username"] == "nav"
+        assert svc.get_totp_secret() == before
+        assert svc.is_totp_enabled() is True
+
+    def test_signed_in_without_code_is_refused(self, client):
+        c, svc = client
+        self._setup(c)
+        _enable_totp(svc)
+        before = svc.get_totp_secret()
+        headers = _session_headers()
+        body = {"password": "StrongP@ss123!"}
+        reset = c.post("/v1/auth/setup/reset", json=body, headers=headers)
+        regenerate = c.post("/v1/auth/setup/regenerate-2fa", json=body, headers=headers)
+        assert reset.status_code == 403
+        assert regenerate.status_code == 403
+        assert reset.get_json()["message"] == (
+            "Account recovery requires your password and the current authenticator code."
+        )
+        assert svc.is_setup() is True
+        assert svc.get_totp_secret() == before
+        assert svc.is_totp_enabled() is True
+
+    def test_reset_invalidates_earlier_tokens(self, client):
+        import pyotp
+
+        from flinttrade_core.auth_routes import _create_token
+
+        c, svc = client
+        created = self._setup(c)
+        setup_token = created.get_json()["data"]["token"]
+        _enable_totp(svc)
+        code = pyotp.TOTP(svc.get_totp_secret()).now()
+        daily = _create_token("nav", mode="practice")
+        epoch_before = svc.current_session_binding()[1]
+        reset = c.post(
+            "/v1/auth/setup/reset",
+            json={"password": "StrongP@ss123!", "totp_code": code},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {setup_token}"},
+        )
+        assert reset.status_code == 200
+        assert svc.is_setup() is False
+        assert svc.current_session_binding()[1] == epoch_before + 1
+        assert c.get("/health", headers={"Authorization": f"Bearer {daily}"}).status_code == 401
+        config = c.get("/v1/config/openalgo", headers={"Authorization": f"Bearer {setup_token}"})
+        assert config.status_code == 401
+        assert c.get("/v1/config/openalgo").status_code != 401
+
+        recreated = c.post("/v1/auth/setup", json={
+            "username": "bob",
+            "email": "bob@example.com",
+            "password": "AnotherP@ss123!",
+            "pin": "654321",
+        }, headers={"Content-Type": "application/json"})
+        assert recreated.status_code == 201
+        fresh = recreated.get_json()["data"]["token"]
+        assert svc.current_session_binding()[1] == epoch_before + 2
+        assert c.get("/health", headers={"Authorization": f"Bearer {daily}"}).status_code == 401
+        assert c.get("/health", headers={"Authorization": f"Bearer {fresh}"}).status_code != 401

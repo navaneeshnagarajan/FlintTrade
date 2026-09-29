@@ -364,7 +364,7 @@ Native virtual-capital paper trading. Source: `packages/core/data/src/flinttrade
 | `sandbox/capital/adjust` (**POST**) | Add or remove virtual capital (`{amount}`). |
 | `sandbox/positions` · `sandbox/orders` · `sandbox/pnl` (**GET**) | Book and P&L reads. Orders are placed through `POST /api/v1/orders/place`. |
 | `sandbox/reset` (**POST**) | Clear all paper data (returns a backup). |
-| `sandbox/export` (**GET**) · `sandbox/import` (**POST**) | Export / import sandbox state. |
+| `sandbox/export` (**GET**) · `sandbox/import` (**POST**) | Export sandbox state, or restore it in Practice Mode. Restored fills are stored as records marked "Restored from backup" and are not sent to a broker. |
 
 ### Strategies (`/api/v1/strategies/*`; Vite proxy `/ft-api/api/v1/strategies/*`)
 
@@ -455,8 +455,8 @@ JWT-based. Source: `packages/core/core/src/flinttrade_core/auth_routes.py`.
 | `GET auth/status` | First-run probe. Returns `is_setup`, `is_locked`, `has_pin`, and `totp_enabled`. |
 | `POST auth/setup` | First-run enrolment (Create operator). Body `{ "username", "email", "password", "pin"? }`. The server generates TOTP and returns `totp_uri`, backup codes, and an Explore setup-session JWT (`setup_session`). That token is what `POST auth/setup/vault` accepts. Authenticator enrolment is optional for Explore and Practice; Live still needs a confirmed authenticator plus PIN. It does not accept a caller-supplied TOTP secret. |
 | `POST auth/setup/vault` | Open the credential vault during first-run Setup. Requires the account-create setup-session JWT. Daily-login tokens are rejected. Body `{ "master_password" }` (at least 8 characters when the vault file is missing). Persists the secret when it is missing and leaves an existing secret untouched. Success is `{ "opened": true, "already_present": bool }` under `data`. The response never returns the secret. |
-| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Once an account exists, the handler requires a session or setup-session JWT. A password alone does not wipe the account. The account-create setup JWT can still start over with an empty body. A daily-login session without the password is rejected. |
-| `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret and clear `totp_enabled` until a live code is confirmed again. Once an account exists, the handler requires a session or setup-session JWT as well as the password. A password alone does not re-key the account. |
+| `POST auth/setup/reset` | Wipe local enrolment so Setup can run again. Before authenticator enrolment, the account-create setup JWT can start over with an empty body, and a session plus the password can wipe the account. Once an authenticator is enrolled, recovery requires a session, the password, and the current authenticator code (`totp_code`). A signed-out request is refused and changes nothing. |
+| `POST auth/setup/regenerate-2fa` | Rotate the login TOTP secret and clear `totp_enabled` until a live code is confirmed again. Before enrolment, a session and the password are enough. Once an authenticator is enrolled, the current authenticator code is required as well. A signed-out request is refused and changes nothing. |
 | `POST auth/login` | Sign in with password (argon2id-hashed). `totp_code` (or a backup code) is required only after authenticator enrolment (`totp_enabled`). Issues a JWT. |
 | `POST auth/totp/enable` | Confirm optional authenticator enrolment. Session-bound. Body `{ "totp_code" }`. Sets `totp_enabled`; later logins then require a TOTP or backup code. |
 | `POST auth/pin` | Re-authenticate with the 6-digit PIN. Requires an existing session JWT. Body `{ "pin", "mode"? }`. `mode: "live"` (default) mints a Live JWT with `live_mode_unlocked=true`, and refuses 403 `totp_required` when the authenticator is not enabled. `mode: "practice"` / `"explore"` unlocks that mode without the Live claim and does not require TOTP. There is no `/auth/me`. |
@@ -494,7 +494,8 @@ The terminal has two development proxy namespaces:
 | `/api/v1/latency/recent` | Recent latency records. |
 | `/api/v1/reconciliation/outcomes` | Unresolved broker-write outcomes, including the exact selector, business date, non-secret persisted intent, fresh-snapshot evidence and any retryable `PENDING_AUDIT` or `PENDING_ROUTER_CLEAR` decision. Requires an authenticated session with `admin.observability.read`; results and remaining-outcome counts are filtered through the current router's account ACL. |
 | `/api/v1/reconciliation/outcomes/<attempt_id>/resolve` (**POST**) | Record `confirmed_applied`, `confirmed_not_applied`, or basket-only `confirmed_partial` after broker verification. Requires an authenticated, PIN-unlocked Live JWT, session scope `admin.observability.run`, current-router selector ACL, exact `CONFIRM <APPLIED\|NOT_APPLIED\|PARTIAL> <broker>:<account>:<attempt>` confirmation, a newly adopted exact-selector reconciliation generation, and a durable hash-chained audit receipt. Snapshots are monotonic; same-time conflicts and malformed reports fail closed, and historical observations remain evidence. Applied placement IDs must be first observed after invocation and match every persisted material identity field; basket requests map applied IDs to `broker_order_item_indexes` and partition all remaining children in `not_applied_item_indexes`. Modify and cancel recovery require operation-specific evidence. A `PENDING_AUDIT` retry requires newer evidence, archives the prior revision and receives a new resolution ID; a `PENDING_ROUTER_CLEAR` retry resumes the committed decision without another broker read. Success and structured-error responses carry the exact attempt and canonical decision; the terminal runtime-validates identity, status and primitive types before updating state. Ambiguous and unsupported cases remain blocked; this route performs no broker write. |
-| `/health`, `/health/detail`, `/healthz`, `/readyz` | Process health and compatibility probes. |
+| `/health`, `/health/detail` | Process health. Session required. `/health/detail` includes per-check detail. |
+| `/healthz`, `/readyz` | Public process probes. The body is status only. |
 | `GET /api/v1/ping` | Process liveness. The body includes `laya` (`ready`, `degraded`, or `down`). |
 | `/v1/admin/system` | CPU, memory, disk, network, uptime, and process metrics for the Admin system panel. |
 | `/v1/audit/*` | Scoped audit trail (`admin.audit.read` where required). |
@@ -611,20 +612,28 @@ it is added there. Broker account-management writes still require the
 operator's session JWT after that check.
 
 The allowlist covers first-run setup and login, auth status, password
-recovery, the liveness and aggregated-health probes, public docs and the
-changelog, frontend error reports, the setup-wizard OpenAlgo and
-connectivity probes, signed webhook intake, broker OAuth callbacks and
-postbacks, and the browser CSP report. `POST /v1/auth/setup/vault` is on
-that list so the setup wizard can reach it, and the handler still requires
-the setup-session JWT and rejects a daily-login token. `POST
-/v1/auth/totp/enable`, `/pin`, `/pin/set`, `/mode`, and `/logout` are not
-on the list: they need an existing session JWT and return 401 without one.
+recovery, the public process probes, public docs and the changelog,
+frontend error reports, the setup-wizard OpenAlgo and connectivity probes,
+signed webhook intake, broker OAuth callbacks and postbacks, and the
+browser CSP report. `POST /v1/auth/setup/vault` is on that list so the
+setup wizard can reach it, and the handler still requires the
+setup-session JWT and rejects a daily-login token. `POST
+/v1/auth/setup/reset` and `POST /v1/auth/setup/regenerate-2fa` stay
+reachable during first-run. Once an authenticator is enrolled, account
+recovery requires a session, the password, and the current authenticator
+code. `POST /v1/auth/totp/enable`, `/pin`, `/pin/set`, `/mode`, and
+`/logout` are not on the list: they need an existing session JWT and
+return 401 without one.
 
-The unauthenticated health surfaces are `GET /api/v1/health` and
-`GET /api/v1/ping`. `/health`, `/health/detail`, `/healthz`, and `/readyz`
-return 401 unless a session JWT or API key is supplied — do not point
-Kubernetes or load-balancer probes at those four paths. Coverage is not
-limited to `/ft-api/v1/*` — many operator routes live under `/api/v1`.
+`GET /healthz` and `GET /readyz` are public and return only a status.
+`GET /api/v1/ping` is the desk liveness probe and stays public; its body
+is status, timestamp, and Laya state, with no version, path, or config.
+`GET /health`, `GET /health/detail`, and `GET /api/v1/health` stay behind
+a session. A session is bound to the operator and an account epoch stored
+with the account. Reset, and creating the operator again, issue a new
+epoch, so earlier session tokens are refused on every route, including
+the OpenAlgo connection. Coverage is not limited to `/ft-api/v1/*` — many
+operator routes live under `/api/v1`.
 
 ```
 Authorization: Bearer <jwt>
@@ -640,6 +649,7 @@ The JWT carries three claims you care about:
 | `exp` | Expiry timestamp. **Every token expires at 8 AM IST the next day.** Refresh by signing in again. |
 | `mode` | One of `explore`, `practice`, `live`. Server-enforced on every order path. |
 | `live_mode_unlocked` | `true` only after `POST /v1/auth/pin` with `mode: "live"`. Required for live order paths. |
+| `oid`, `epoch` | Operator id and account epoch. Reset and operator re-creation bump the epoch. |
 
 A `jti` (JWT ID) is included so the server can revoke individual tokens
 when the user logs out or switches mode. The revocation blocklist lives

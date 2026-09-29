@@ -36,6 +36,19 @@ from .state_store import IST, ensure_schema, init_capital
 
 logger = logging.getLogger("flinttrade.data.sandbox_engine")
 
+# Fills restored from a backup are stored as records. They are not new orders.
+RESTORED_FROM_BACKUP = "Restored from backup"
+_IMPORT_KEYS = frozenset({
+    "schema_version",
+    "config",
+    "capital",
+    "positions",
+    "orders",
+    "trades",
+    "pnl_history",
+    "exported_at",
+})
+
 _DEFAULT_CAPITAL = 1_000_000.0  # ₹10,00,000
 
 # ---------------------------------------------------------------------------
@@ -1225,6 +1238,9 @@ class SandboxEngine:
 
         if not isinstance(data, dict):
             raise ValueError("Import data must be a JSON object")
+        unknown = set(data) - _IMPORT_KEYS
+        if unknown:
+            raise ValueError("Import data contains unsupported fields")
 
         schema_version = data.get("schema_version", 1)
         if isinstance(schema_version, bool) or schema_version not in {1, 2}:
@@ -1393,7 +1409,7 @@ class SandboxEngine:
                             "quantity": row["filled_qty"],
                             "price": row["avg_fill_px"],
                             "product": row["product"],
-                            "strategy": row["strategy"],
+                            "strategy": RESTORED_FROM_BACKUP,
                             "traded_at": row["fill_time"] or row["created_at"],
                         }
                         for row in imported_orders
@@ -1414,7 +1430,7 @@ class SandboxEngine:
                             int(trade.get("quantity", 0)),
                             float(trade.get("price", 0.0)),
                             str(trade.get("product", "MIS")).strip().upper(),
-                            str(trade.get("strategy", "")),
+                            RESTORED_FROM_BACKUP,
                             _coerce_timestamp(trade.get("traded_at"), now),
                         ),
                     )

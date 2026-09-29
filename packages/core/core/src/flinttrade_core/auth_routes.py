@@ -351,7 +351,43 @@ def _create_token(
     if setup_session:
         payload["setup_session"] = True
         payload["setup_bound"] = setup_bound
+    payload.update(_session_binding_claims())
     return jwt.encode(payload, _get_jwt_secret(), algorithm=_JWT_ALGORITHM)
+
+
+def _session_binding_claims() -> dict[str, Any]:
+    """Stamp the current operator id and account epoch, when one exists.
+
+    Called while issuing a session. A missing app context (tests that mint a
+    token before a request) leaves the claims off; decode then rejects the
+    token once a binding exists.
+    """
+    try:
+        svc = _get_auth_service()
+    except RuntimeError:
+        return {}
+    if svc is None:
+        return {}
+    try:
+        binding = svc.current_session_binding()
+    except Exception:
+        logger.debug("Session binding unavailable", exc_info=True)
+        return {}
+    if binding is None:
+        return {}
+    operator_id, epoch = binding
+    return {"oid": operator_id, "epoch": int(epoch)}
+
+
+def _session_binding_matches(payload: dict[str, Any], operator_id: str, epoch: int) -> bool:
+    """Return whether the token is bound to this operator and account epoch."""
+    token_oid = payload.get("oid")
+    token_epoch = payload.get("epoch")
+    if type(token_oid) is not str or type(token_epoch) is not int:
+        return False
+    if len(token_oid) != len(operator_id):
+        return False
+    return hmac.compare_digest(token_oid, operator_id) and token_epoch == epoch
 
 
 def _decode_token_with_signing_key(token: str, signing_key: str) -> dict[str, Any]:
@@ -406,6 +442,19 @@ def _decode_token_with_signing_key(token: str, signing_key: str) -> dict[str, An
                     raise jwt.InvalidTokenError(
                         "Token issued before most recent password change"
                     )
+
+    # Sessions are bound to the operator id and the account epoch. Reset and
+    # operator re-creation bump the epoch, so every earlier token fails here.
+    # Password-reset tokens are not sessions; their own verifier checks type.
+    if payload.get("type") != "reset":
+        svc = _get_auth_service()
+        if svc is not None:
+            try:
+                binding = svc.current_session_binding()
+            except Exception as exc:
+                raise jwt.InvalidTokenError("Account session binding unavailable") from exc
+            if binding is not None and not _session_binding_matches(payload, binding[0], binding[1]):
+                raise jwt.InvalidTokenError("Token is not bound to the current account")
 
     return payload
 
@@ -639,6 +688,42 @@ def _verify_setup_session_token(token: str) -> dict[str, Any] | tuple[Any, int]:
     return payload
 
 
+_RECOVERY_REQUIRES_AUTHENTICATOR = (
+    "Account recovery requires your password and the current authenticator code."
+)
+
+
+def _finished_account_recovery_refusal(svc: Any, body: dict[str, Any], token: str) -> tuple[Any, int] | None:
+    """Refuse account recovery that is missing a session, or a code once enrolled.
+
+    Before authenticator enrolment, first-run reset and regeneration keep
+    their existing session rules. Once an authenticator is enrolled, recovery
+    needs that session, the password, and the current authenticator code.
+    An API key is not a session. Returns an error response, or ``None`` when
+    the caller may continue. Nothing is changed on refusal.
+    """
+    if not _account_exists(svc):
+        return None
+    if _operator_session_payload(token) is None:
+        return jsonify({"status": "error", "message": "Authentication required."}), 401
+    try:
+        enrolled = bool(svc.is_totp_enabled())
+    except Exception:
+        logger.debug("Authenticator enrolment check failed", exc_info=True)
+        enrolled = True
+    if not enrolled:
+        return None
+    password = str(body.get("password", ""))
+    code = str(body.get("totp_code", ""))
+    if not password or not code:
+        return jsonify({"status": "error", "message": _RECOVERY_REQUIRES_AUTHENTICATOR}), 403
+    if not svc.verify_password(password):
+        return jsonify({"status": "error", "message": "Invalid password."}), 401
+    if not svc.verify_totp(code):
+        return jsonify({"status": "error", "message": "Invalid authenticator code."}), 403
+    return None
+
+
 @auth_bp.route("/setup/reset", methods=["POST"])
 @_rate_limit("3 per hour")
 def auth_setup_reset() -> tuple[Any, int]:
@@ -647,8 +732,10 @@ def auth_setup_reset() -> tuple[Any, int]:
     Body: ``{"password": "…"}`` (password-confirmed wipe) **or** the
     account-create setup JWT with an empty body (lost-QR start-over).
     Once an account exists, a session or setup-session JWT is required
-    before either path runs. A password alone, a password-reset token, or
-    a daily-login session without the password does not wipe the account.
+    before either path runs. Once an authenticator is enrolled, the password
+    and the current authenticator code are required as well. A password
+    alone, an API key, a password-reset token, or a signed-in request
+    without the authenticator code does not wipe the account.
     """
     svc = _get_auth_service()
     if svc is None:
@@ -656,8 +743,9 @@ def auth_setup_reset() -> tuple[Any, int]:
     body = request.get_json(silent=True) or {}
     password = str(body.get("password", ""))
     token = _session_token_from_request()
-    if _account_exists(svc) and _operator_session_payload(token) is None:
-        return jsonify({"status": "error", "message": "Authentication required."}), 401
+    refusal = _finished_account_recovery_refusal(svc, body, token)
+    if refusal is not None:
+        return refusal
     if password:
         if not svc.reset_account(password):
             return jsonify({"status": "error", "message": "Invalid password."}), 401
@@ -687,15 +775,18 @@ def auth_setup_regenerate_2fa() -> tuple[Any, int]:
     setup wizard 2FA screen — useful when the user scanned the QR into the
     wrong device or wants a clean second attempt before first login.
     Once an account exists, a session or setup-session JWT is required as
-    well as the password. A password alone does not re-key the account.
+    well as the password. Once an authenticator is enrolled, the current
+    authenticator code is required as well. A password alone, an API key,
+    or a signed-in request without that code does not re-key the account.
     """
     svc = _get_auth_service()
     if svc is None:
         return jsonify({"status": "error", "message": "Auth service not available."}), 503
     body = request.get_json(silent=True) or {}
     password = str(body.get("password", ""))
-    if _account_exists(svc) and _operator_session_payload(_session_token_from_request()) is None:
-        return jsonify({"status": "error", "message": "Authentication required."}), 401
+    refusal = _finished_account_recovery_refusal(svc, body, _session_token_from_request())
+    if refusal is not None:
+        return refusal
     if not password:
         return jsonify({"status": "error", "message": "Password required to reset 2FA."}), 400
     result = svc.regenerate_totp(password)

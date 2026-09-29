@@ -379,17 +379,50 @@ def export_data() -> Response:
     return jsonify({"status": "success", "data": engine.export_data()})
 
 
+_PRACTICE_RESTORE_ONLY = "Restore is available in Practice Mode only."
+_RESTORE_SCHEMA_REFUSED = "The backup does not match the Practice schema."
+
+
+def _request_is_practice_session() -> bool:
+    """Return whether this request carries a current Practice session JWT.
+
+    An API key has no mode and is not a Practice session.
+    """
+    import jwt
+
+    from flinttrade_core.auth_routes import decode_token  # noqa: PLC0415
+
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
+    if not token:
+        token = request.headers.get("X-FlintTrade-Token", "").strip()
+    if not token:
+        return False
+    try:
+        payload = decode_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return False
+    return payload.get("type") == "session" and payload.get("mode") == "practice"
+
+
 @data_sandbox_bp.route("/import", methods=["POST"])
 def import_data() -> Response:
-    """Import sandbox data from a previously exported JSON string.
+    """Restore a Practice backup as stored records.
 
     Request body::
 
         {"data": "<json string from /export>"}
 
+    Requires a Practice session. Restored fills are marked and written
+    straight into the Practice ledger. They are not sent to a broker and
+    do not re-enter the order path.
+
     Returns:
         JSON ``{status, stats: {capital_imported, positions_imported, orders_imported}}``.
     """
+    if not _request_is_practice_session():
+        return jsonify({"status": "error", "message": _PRACTICE_RESTORE_ONLY}), 403
+
     engine, err = _engine_required()
     if err:
         return err
@@ -397,12 +430,12 @@ def import_data() -> Response:
     body: dict[str, Any] = request.get_json(silent=True) or {}
     json_str = body.get("data", "")
 
-    if not json_str:
+    if not isinstance(json_str, str) or not json_str:
         return jsonify({"status": "error", "message": "'data' field is required"}), 400
 
     try:
         stats = engine.import_data(json_str)
     except ValueError:
-        return jsonify({"status": "error", "message": "Invalid request"}), 400
+        return jsonify({"status": "error", "message": _RESTORE_SCHEMA_REFUSED}), 400
 
     return jsonify({"status": "success", "data": {"stats": stats}})

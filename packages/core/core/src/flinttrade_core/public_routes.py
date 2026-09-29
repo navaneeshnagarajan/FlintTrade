@@ -9,10 +9,12 @@ from __future__ import annotations
 
 # (method, Flask rule). HEAD follows GET. OPTIONS is always public (CORS preflight).
 _PUBLIC_ROUTE_ENTRIES: tuple[tuple[str, str], ...] = (
-    # Liveness probe. Returns no operator data.
+    # Process probes. Status only: no version, paths, or config.
+    ("GET", "/healthz"),
+    ("GET", "/readyz"),
+    # Desk liveness. Status, timestamp, and Laya state only — no version,
+    # paths, or config. Detailed health stays behind a session.
     ("GET", "/api/v1/ping"),
-    # Aggregated subsystem health. Same public surface as the liveness probe.
-    ("GET", "/api/v1/health"),
     # Auth status is read before a session exists, including first-run setup.
     ("GET", "/v1/auth/status"),
     # Login mints the session. It cannot require the session it creates.
@@ -22,12 +24,12 @@ _PUBLIC_ROUTE_ENTRIES: tuple[tuple[str, str], ...] = (
     # Vault open during first-run. The handler requires a setup-session JWT,
     # not the daily API key, so the global check must let the request through.
     ("POST", "/v1/auth/setup/vault"),
-    # First-run reset. Once an account exists the handler requires a session
-    # or setup-session JWT and does not wipe the account from a password alone.
+    # First-run reset. Once an authenticator is enrolled the handler requires
+    # a session, the password, and the current authenticator code.
     ("POST", "/v1/auth/setup/reset"),
-    # Setup-wizard authenticator regeneration. Once an account exists the
-    # handler requires a session or setup-session JWT and does not re-key
-    # from a password alone.
+    # Setup-wizard authenticator regeneration. Once an authenticator is
+    # enrolled the handler requires a session, the password, and the current
+    # authenticator code.
     ("POST", "/v1/auth/setup/regenerate-2fa"),
     # Password recovery. No session exists yet.
     ("POST", "/v1/auth/forgot-password"),

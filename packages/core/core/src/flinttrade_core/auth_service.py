@@ -32,6 +32,7 @@ import re
 import secrets
 import sqlite3
 import time
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -169,6 +170,11 @@ class AuthService:
                 timestamp REAL NOT NULL,
                 success INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS account_session (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                operator_id TEXT NOT NULL,
+                epoch INTEGER NOT NULL
+            );
         """)
         # Idempotent migration — older DBs predate the password_changed_at
         # column. ADD COLUMN is cheap and avoids a destructive rebuild.
@@ -187,6 +193,77 @@ class AuthService:
         except sqlite3.OperationalError:
             pass
         self._db.commit()
+        self._backfill_session_binding()
+
+    def _backfill_session_binding(self) -> None:
+        """Bind an account that predates the session epoch.
+
+        The binding lives outside the account row so a reset can bump the
+        epoch after the account itself is deleted. Tokens issued before the
+        binding existed no longer match.
+        """
+        existing = self._db.execute(
+            "SELECT 1 FROM account_session WHERE id = 1"
+        ).fetchone()
+        if existing is not None or not self.is_setup():
+            return
+        self._db.execute(
+            "INSERT INTO account_session (id, operator_id, epoch) VALUES (1, ?, 1)",
+            [str(uuid.uuid4())],
+        )
+        self._db.commit()
+
+    def current_session_binding(self) -> tuple[str, int] | None:
+        """Return the operator id and account epoch, if one has been issued.
+
+        Returns:
+            ``(operator_id, epoch)`` or ``None`` before the first account exists.
+        """
+        try:
+            row = self._db.execute(
+                "SELECT operator_id, epoch FROM account_session WHERE id = 1"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        if row is None:
+            return None
+        return str(row["operator_id"]), int(row["epoch"])
+
+    def _bump_epoch_locked(self) -> None:
+        """Invalidate every previously issued session. Caller holds the write lock."""
+        row = self._db.execute(
+            "SELECT epoch FROM account_session WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            self._db.execute(
+                "INSERT INTO account_session (id, operator_id, epoch) VALUES (1, ?, 1)",
+                [str(uuid.uuid4())],
+            )
+            return
+        self._db.execute(
+            "UPDATE account_session SET epoch = ? WHERE id = 1",
+            [int(row["epoch"]) + 1],
+        )
+
+    def _bind_new_operator_locked(self) -> None:
+        """Record a new operator id. Re-creation also bumps the epoch.
+
+        Caller holds the write lock and commits.
+        """
+        row = self._db.execute(
+            "SELECT epoch FROM account_session WHERE id = 1"
+        ).fetchone()
+        operator_id = str(uuid.uuid4())
+        if row is None:
+            self._db.execute(
+                "INSERT INTO account_session (id, operator_id, epoch) VALUES (1, ?, 1)",
+                [operator_id],
+            )
+            return
+        self._db.execute(
+            "UPDATE account_session SET operator_id = ?, epoch = ? WHERE id = 1",
+            [operator_id, int(row["epoch"]) + 1],
+        )
 
     def is_setup(self) -> bool:
         """Check if the account has been created."""
@@ -203,6 +280,7 @@ class AuthService:
             self._db.execute("DELETE FROM account WHERE id = 1")
             self._db.execute("DELETE FROM backup_codes")
             self._db.execute("DELETE FROM login_attempts")
+            self._bump_epoch_locked()
             self._db.commit()
 
         if hasattr(self, "_totp_secret_cache"):
@@ -270,6 +348,7 @@ class AuthService:
                 [username, email, password_hash, pin_hash, encrypted, totp_salt,
                  datetime.now(UTC).isoformat()],
             )
+            self._bind_new_operator_locked()
             self._db.commit()
 
         # Cache the TOTP secret in memory for immediate use

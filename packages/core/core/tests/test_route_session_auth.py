@@ -6,8 +6,12 @@ rejects a new route that is neither allowlisted nor protected.
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
+import time
 
+import jwt
 import pytest
 
 from flinttrade_core.public_routes import PUBLIC_ROUTES, is_public_route
@@ -48,6 +52,31 @@ def _concrete_path(rule) -> str:
     raise AssertionError(f"could not build a path for {rule.rule!r}: {built!r}")
 
 
+def _b64url(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def _alg_none(payload: dict[str, object]) -> str:
+    """Build an ``alg: none`` bearer. The session check must reject it."""
+    header = _b64url(json.dumps({"alg": "none", "typ": "JWT"}, separators=(",", ":")).encode())
+    body = _b64url(json.dumps(payload, separators=(",", ":")).encode())
+    return f"{header}.{body}."
+
+
+def _rejected_bearers(secret: str) -> list[str]:
+    """Credentials that must not open a non-public route."""
+    now = int(time.time())
+    claims = {"sub": "operator", "type": "session", "jti": "route-table"}
+    wrong_key = "wrong-signing-key-not-used-for-sessions"
+    return [
+        "not-a-valid-token",
+        jwt.encode({**claims, "iat": now - 7200, "exp": now - 3600}, secret, algorithm="HS256"),
+        jwt.encode({**claims, "iat": now - 7200, "exp": now - 3600}, wrong_key, algorithm="HS256"),
+        jwt.encode({**claims, "iat": now, "exp": now + 3600}, wrong_key, algorithm="HS256"),
+        _alg_none({**claims, "iat": now, "exp": now + 3600}),
+    ]
+
+
 def test_non_public_routes_reject_missing_and_invalid_credentials(monkeypatch) -> None:
     """Unauthenticated and invalid-bearer calls get 401 before validation.
 
@@ -83,32 +112,66 @@ def test_non_public_routes_reject_missing_and_invalid_credentials(monkeypatch) -
         assert not missing, f"allowlist entries are not mounted: {missing}"
         assert ("GET", "/v1/sandbox/positions") in registered
 
+        from flinttrade_core.auth_routes import _get_jwt_secret
+
         client = app.test_client()
+        bearers = _rejected_bearers(_get_jwt_secret())
+        api_key = "route-table-api-key-sentinel"
+        assert all(token != api_key for token in bearers)
+
+        healthz = client.get("/healthz")
+        readyz = client.get("/readyz")
+        assert healthz.status_code == 200
+        assert set(healthz.get_json()) == {"status"}
+        assert readyz.status_code in (200, 503)
+        assert set(readyz.get_json()) == {"status"}
+        ping = client.get("/api/v1/ping")
+        assert ping.status_code == 200
+        assert set(ping.get_json()) == {"status", "timestamp", "laya"}
+        assert client.get("/api/v1/health").status_code == 401
+        assert client.get("/health").status_code == 401
+
+        for content_type, body in (
+            ("application/csp-report", '{"csp-report":{"blocked-uri":"https://example.test"}}'),
+            ("application/reports+json", '[{"type":"csp-violation","body":{"blocked-uri":"https://example.test"}}]'),
+        ):
+            report = client.post("/csp-report", data=body, content_type=content_type)
+            assert report.status_code == 204, content_type
+            assert report.get_data() == b""
+
         failures: list[str] = []
-        for rule in app.url_map.iter_rules():
-            methods = sorted((rule.methods or set()) - {"OPTIONS"})
-            probed = [method for method in methods if not is_public_route(method, rule.rule)]
-            if not probed:
-                continue
-            path = _concrete_path(rule)
-            for method in probed:
-                kwargs: dict[str, object] = {}
-                if method in _BODY_METHODS:
-                    kwargs["data"] = "{}"
-                    kwargs["content_type"] = "application/json"
-                missing_auth = client.open(path, method=method, **kwargs)
-                invalid = client.open(
-                    path,
-                    method=method,
-                    headers={"Authorization": "Bearer not-a-valid-token"},
-                    **kwargs,
-                )
-                if missing_auth.status_code != 401 or invalid.status_code != 401:
-                    failures.append(
-                        f"{method} {rule.rule} -> missing={missing_auth.status_code} "
-                        f"invalid={invalid.status_code}"
-                    )
-        assert not failures, "routes answered without a session:\n" + "\n".join(failures)
+
+        def _probe(label: str) -> None:
+            for rule in app.url_map.iter_rules():
+                methods = sorted((rule.methods or set()) - {"OPTIONS"})
+                probed = [method for method in methods if not is_public_route(method, rule.rule)]
+                if not probed:
+                    continue
+                path = _concrete_path(rule)
+                for method in probed:
+                    kwargs: dict[str, object] = {}
+                    if method in _BODY_METHODS:
+                        kwargs["data"] = "{}"
+                        kwargs["content_type"] = "application/json"
+                    missing_auth = client.open(path, method=method, **kwargs)
+                    if missing_auth.status_code != 401:
+                        failures.append(f"{label} {method} {rule.rule} missing={missing_auth.status_code}")
+                    for bearer in bearers:
+                        rejected = client.open(
+                            path,
+                            method=method,
+                            headers={"Authorization": f"Bearer {bearer}"},
+                            **kwargs,
+                        )
+                        if rejected.status_code != 401:
+                            failures.append(
+                                f"{label} {method} {rule.rule} bearer={rejected.status_code}"
+                            )
+
+        _probe("no-key")
+        monkeypatch.setenv("FLINTTRADE_API_KEY", api_key)
+        _probe("api-key")
+        assert not failures, "routes answered without a session:\n" + "\n".join(failures[:40])
     finally:
         if monitor is not None:
             monitor._auth_ban_threshold = previous_threshold

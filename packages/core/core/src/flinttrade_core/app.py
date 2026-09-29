@@ -5012,8 +5012,9 @@ def create_flask_app(
     #   health_bp                 — /health, /health/detail, /healthz, /readyz,
     #                               /api/v1/ping, /api/v1/health (K8s + LB probes
     #                               + aggregated subsystem health; canonical health
-    #                               surface; /api/v1/ping and /api/v1/health are on
-    #                               the public allowlist in public_routes.py)
+    #                               surface; /healthz, /readyz, and /api/v1/ping are
+    #                               public and status-only. /health, /health/detail,
+    #                               and /api/v1/health stay behind a session.)
     #   optimiser_bp              — /v1/portfolio/{optimise,frontier}
     #   permutation_bp            — /v1/backtest/{permutation,walkforward}
     #   admin_action_center_bp    — /admin/action-center/{pending,approve,reject,history}
@@ -5239,7 +5240,16 @@ def create_flask_app(
             ):
                 return None
             content_type = request.content_type or ""
-            if "json" not in content_type and "text/event-stream" not in content_type:
+            # Browsers post CSP reports without a session and without a JSON
+            # content type. The report endpoint stays status-only.
+            csp_report = request.path == "/csp-report" and (
+                "application/csp-report" in content_type or "application/reports+json" in content_type
+            )
+            if (
+                not csp_report
+                and "json" not in content_type
+                and "text/event-stream" not in content_type
+            ):
                 return jsonify(
                     {
                         "status": "error",
@@ -5402,6 +5412,14 @@ def create_flask_app(
         remote_is_loopback = remote in ("127.0.0.1", "::1", "localhost")
         session_authenticated = _openalgo_config_session_authenticated()
         authenticated = _openalgo_config_request_authenticated()
+        # A presented bearer that is not a current session is refused, including
+        # after reset has removed the account. Unsigned first-run calls have no
+        # bearer and stay available. An API key is not a session.
+        presented_bearer = _openalgo_config_bearer()
+        if presented_bearer and not session_authenticated:
+            expected_key = os.environ.get("FLINTTRADE_API_KEY", "") or os.environ.get("OPENALGO_API_KEY", "")
+            if not (expected_key and secrets.compare_digest(presented_bearer, expected_key)):
+                return jsonify({"status": "error", "message": "Authentication required"}), 401
         if not remote_is_loopback and (request.method != "GET" or not session_authenticated):
             return jsonify(
                 {
