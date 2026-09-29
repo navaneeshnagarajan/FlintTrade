@@ -470,7 +470,8 @@ gated-session model; never add plaintext credential storage.
 ### Safety layers
 
 The 5-layer safety system lives in `packages/services/engine/`. Every
-**Live** order placed through FlintTrade is checked by those layers.
+order FlintTrade submits goes through admission when it's placed. Every
+**Live** order placed through FlintTrade is then checked by those layers.
 The only submit routes are `POST /api/v1/orders/place`,
 `POST /api/v1/orders/<broker>/place`, and
 `POST /api/v1/positions/exit-all`. Practice orders skip L1–L5 and go to
@@ -479,9 +480,10 @@ sandbox; a refusal or a quantity clamp stops before the sandbox. A
 Practice close and a Practice square-off are opposite orders on place.
 The sandbox routes cancel and modify only. Settings → Practice does not
 place. Live operator and automate **place**, including
-`"variety": "gtt"`, is Mode guard → `Laya.admit` → SafetySystem L1–L5 →
-`gate_order` → `BrokerRouter`. Exit-all records a server reduce-only
-proof before `exit_all_positions`. `cancel-all` only cancels. Explore
+`"variety": "gtt"`, is checked when it's placed: Mode guard →
+`Laya.admit` → SafetySystem L1–L5 → `gate_order` → `BrokerRouter`.
+Exit-all records a server reduce-only proof before `exit_all_positions`.
+`cancel-all` only cancels. Explore
 placement is refused by the backend (`mode_blocked`); Order Pad Sample
 Buy is a local client fill (no HTTP order route, no Laya admit, no
 SafetySystem). Other Live write verbs still reach SafetySystem without

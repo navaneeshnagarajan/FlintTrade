@@ -408,13 +408,16 @@ regulator's — not a FlintTrade claims desk:
 
 ### Laya on place
 
-**Ready** and **Degraded** allow a place attempt. On Live, operator place
+**Ready** and **Degraded** allow a place attempt. Every order FlintTrade
+submits goes through admission when it's placed. On Live, operator place
 and automate place run Mode guard → Laya.admit → SafetySystem →
-gate_order → BrokerRouter. Laya does not place the order and does not
-replace those layers. A refusal or a quantity clamp stops before
-SafetySystem. Practice place is admitted before the sandbox and does not
-enter SafetySystem. Explore stays a mode refusal. Chat is not an
-admission source.
+gate_order → BrokerRouter. A GTT order with `"variety": "gtt"` is
+checked by Laya admission and then SafetySystem on that Live place.
+Laya does not place the order and does not replace those layers. A
+refusal or a quantity clamp stops before SafetySystem. Practice place,
+including a body with that variety, is admitted before the sandbox and
+does not enter SafetySystem. Explore stays a mode refusal. Chat is not
+an admission source.
 
 **Deny.** Order Pad and Quick Trade show **Laya denied**, then the server
 reason. When the server sent a quantity ceiling, the next line is
@@ -451,8 +454,10 @@ offline does not close Live.
 Order Pad and Quick Trade are the surfaces that show the deny and clamp
 notices. Scalper, Positions, Order Ladder, and Option Chain may still
 show a place error as a toast. An automate clamp is a dispatcher error,
-not a desk confirm. Modify, cancel, smart, multi, forever, and other
-write verbs are not on this admission.
+not a desk confirm. Modify, cancel, smart, multi, and other non-place
+write verbs are not on this admission. `POST /api/v1/orders/forever`
+does not place. A GTT order FlintTrade submits is `"variety": "gtt"`
+on place.
 
 **Feed freshness (FT-CORE-002).** Explore disclosure is that Mode line.
 Per-widget Sample chips are retired. Per-symbol ticker Sample chips are

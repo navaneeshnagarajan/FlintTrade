@@ -376,8 +376,9 @@ deployment can split that state.
 
 ### Safety layers
 
-Every **Live** order placed through FlintTrade is checked by five safety
-layers inside `packages/services/engine/`. Practice orders skip this
+Every order FlintTrade submits goes through admission when it's placed.
+Every **Live** order placed through FlintTrade is then checked by five
+safety layers inside `packages/services/engine/`. Practice orders skip this
 safety chain. The only submit routes are `POST /api/v1/orders/place`,
 `POST /api/v1/orders/<broker>/place` (Live only), and
 `POST /api/v1/positions/exit-all` (a server reduce-only proof, then the
@@ -385,8 +386,9 @@ flatten verb). Explore placement is refused by the backend
 (`mode_blocked`); Order Pad Sample Buy is a local client fill (no HTTP
 order route, no Laya admit, no SafetySystem). Operator and automate
 **place** run the mode guard, then `Laya.admit`. Live place, including
-`"variety": "gtt"`, then runs SafetySystem L1–L5, `gate_order`, and
-`BrokerRouter`. A refusal or a quantity clamp stops before SafetySystem.
+`"variety": "gtt"`, is checked by Laya admission and then SafetySystem
+L1–L5, `gate_order`, and `BrokerRouter` on that place. A refusal or a
+quantity clamp stops before SafetySystem.
 Practice place is admitted before `SandboxEngine` and does not enter
 those Live layers. Practice square-off is place. The sandbox book
 cancels and modifies; it does not place. `cancel-all` only cancels.
@@ -415,8 +417,11 @@ sandbox (Practice). It does not place an order and does not mint
 clamp stops before those next steps. Only Down mutes Live place and
 Position Mirror start. Degraded leaves Live open and enforces a tighter
 quantity ceiling. Chat is not an admission source. Modify, cancel,
-smart, multi, forever, and the other write verbs still reach
-SafetySystem without this place admission. Laya starts Down; the three
+smart, multi, forever modify and cancel, and the other non-place write
+verbs still reach SafetySystem without this place admission.
+`POST /api/v1/orders/forever` does not place. A GTT order FlintTrade
+submits is `"variety": "gtt"` on place, checked on Live by Laya
+admission and then SafetySystem when it's placed. Laya starts Down; the three
 statuses are Ready, Degraded, and Down. The desk ping publishes the
 stored status and does not invent Ready. Ready and Degraded are recorded
 by `Laya.set_status`. See [ORDER_SAFETY.md](ORDER_SAFETY.md).

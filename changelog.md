@@ -67,6 +67,11 @@ changelog rebuilds itself from the first release cut after this baseline.
   of the Laya, strategy, benchmark, and training readers. `GET /healthz`
   and `GET /readyz` are public and return status only.
 
+- **GTT admission is at place.** Every order FlintTrade submits goes
+  through admission when it's placed. On Live, a GTT order with
+  `"variety": "gtt"` is checked by Laya admission and then SafetySystem
+  on that place.
+
 - **First-run Setup finishes on the Practice desk (FT-SETUP-FLOW-001).**
   The required path is Create operator, then Vault, then the Practice
   desk (Step N of 3). Affirming Practice lands on `/trade`.

@@ -61,8 +61,10 @@ rejected GTT — the sandbox does not simulate price triggers. Live requires
 the unlocked JWT, then `gtt-*` returns HTTP 501 (they do not call
 `gate_order` → `BrokerRouter`, and they do not forward an upstream
 OpenAlgo 501). A GTT order is placed on `POST /api/v1/orders/place`
-with `"variety": "gtt"`, through the same Laya admission as a regular
-place. `POST /api/v1/orders/forever` does not place one.
+with `"variety": "gtt"`. Every order FlintTrade submits goes through
+admission when it's placed. On Live, that place is checked by Laya
+admission and then SafetySystem. `POST /api/v1/orders/forever` does not
+place one.
 
 | Endpoint | Purpose |
 |---|---|
@@ -143,7 +145,8 @@ the WSGI prefix-strip.
 
 ### Order submission
 
-Three routes submit an order. Nothing else does, including
+Three routes submit an order. Every order FlintTrade submits goes
+through admission when it's placed. Nothing else does, including
 `POST /api/v1/orders/place-smart`, `POST /api/v1/orders/open-position`,
 and `POST /api/v1/orders/close-position`, which are not mounted. The
 Practice book under `/v1/sandbox/` can cancel or modify a resting order.
@@ -153,8 +156,8 @@ adjusts virtual capital and square-off times; it does not place.
 
 | Route | What it does |
 |---|---|
-| `POST /api/v1/orders/place` | The only place route for Practice and Live. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. A GTT body sets `"variety": "gtt"` and uses that same admission. Explore is HTTP 403 `mode_blocked`. |
-| `POST /api/v1/orders/<broker>/place` | Live only. `<broker>` is the adapter id. The same dispatcher admits through Laya and then runs SafetySystem. A non-Live session is HTTP 400 (`The routed order path serves live mode only. Use /api/v1/orders/place for explore/practice.`). |
+| `POST /api/v1/orders/place` | The only place route for Practice and Live. The server admits the body through Laya. A client flag cannot choose reduce-only. Practice then fills or rests in the sandbox and does not enter SafetySystem. Live then runs SafetySystem, `gate_order`, and `BrokerRouter`. A GTT body sets `"variety": "gtt"` and uses that same admission on the place. On Live that place is checked by Laya admission and then SafetySystem. Practice place, including that body, stays Laya then the sandbox. Explore is HTTP 403 `mode_blocked`. |
+| `POST /api/v1/orders/<broker>/place` | Live only. `<broker>` is the adapter id. The same dispatcher admits through Laya and then runs SafetySystem on that place, including a body with `"variety": "gtt"`. A non-Live session is HTTP 400 (`The routed order path serves live mode only. Use /api/v1/orders/place for explore/practice.`). |
 | `POST /api/v1/positions/exit-all` | Live, PIN-unlocked. Body must include boolean `"confirm": true` or the route returns HTTP 400. The server classifies every open contract and records a reduce-only proof before the gated `exit_all_positions` verb. A row that is not an exit stops the request with HTTP 409 and `Square-off stopped because a position is not a reduce-only exit.` An unreadable book still records one reduce-only proof. |
 
 `POST /api/v1/orders/cancel-all` cancels open orders. Practice cancels
@@ -805,7 +808,7 @@ the guard returns one of three verdicts:
 |---|---|
 | `explore` | Reject order placement with HTTP 403 and `code: "mode_blocked"`. Explore is for reading, learning, and demo data only. |
 | `practice` | Route supported single-leg order flows to FlintTrade's native `SandboxEngine`; never touch OpenAlgo or a broker. Practice **place** is admitted by `Laya.admit` before that sandbox. A Down refusal or a quantity clamp returns before any fill. Advanced executor-direct routes that do not yet have sandbox parity fail closed with `practice_unsupported`. |
-| `live` | Require a JWT with `live_mode_unlocked=true`. The only submit routes are `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, and `POST /api/v1/positions/exit-all`. Both place routes run `Laya.admit` before SafetySystem, then the gated `BrokerRouter`. A GTT order is `"variety": "gtt"` on place. Exit-all records a server reduce-only proof before `exit_all_positions`. Modify and cancel go through the gated router without this place admission. `cancel-all` only cancels, through `cancel_all_orders`, and does not create an order. `POST /api/v1/orders/forever`, basket, split, options-strategy, and conditional-trigger place return HTTP 501 and do not place; each leg belongs on `POST /api/v1/orders/place`. `gtt-*` returns HTTP 501 and does not forward to OpenAlgo. A Practice close is an opposite order on `POST /api/v1/orders/place`. |
+| `live` | Require a JWT with `live_mode_unlocked=true`. The only submit routes are `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, and `POST /api/v1/positions/exit-all`. Both place routes run `Laya.admit` before SafetySystem, then the gated `BrokerRouter`. Every order FlintTrade submits goes through admission when it's placed. On Live, a GTT order with `"variety": "gtt"` is checked by Laya admission and then SafetySystem on that place. Exit-all records a server reduce-only proof before `exit_all_positions`. Modify and cancel go through the gated router without this place admission. `cancel-all` only cancels, through `cancel_all_orders`, and does not create an order. `POST /api/v1/orders/forever`, basket, split, options-strategy, and conditional-trigger place return HTTP 501 and do not place; each leg belongs on `POST /api/v1/orders/place`. `gtt-*` returns HTTP 501 and does not forward to OpenAlgo. A Practice close is an opposite order on `POST /api/v1/orders/place`. |
 
 `POST /v1/auth/mode` issues a fresh JWT and revokes the previous `jti`,
 but it accepts **only** downgrades to `practice` or `explore`. Switching
@@ -1061,7 +1064,9 @@ error as HTTP 422 with that result under `data`. A strategy dispatch
 raises the server `message` and does not place the reduced quantity.
 Modify, cancel, and cancel-all are not admitted as place. Forever,
 basket, split, and conditional-trigger place do not submit; the legs go
-through `POST /api/v1/orders/place`. Chat is not an admission source.
+through `POST /api/v1/orders/place`. A GTT order on that route sets
+`"variety": "gtt"`. On Live it is checked by Laya admission and then
+SafetySystem when it's placed. Chat is not an admission source.
 Details of the place path are in [ORDER_SAFETY.md](ORDER_SAFETY.md).
 
 Auth failures are typically HTTP 401 with a `message` (expired, revoked,

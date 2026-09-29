@@ -17,7 +17,8 @@ or script must not call a broker adapter or `OpenAlgoClient.place_order`
 directly. Placement, regular modify/cancel, and extended verbs use different
 gates — pick the matching one.
 
-**Placement.** The only HTTP routes that submit an order are
+**Placement.** Every order FlintTrade submits goes through admission
+when it's placed. The only HTTP routes that submit an order are
 `POST /api/v1/orders/place`, `POST /api/v1/orders/<broker>/place`, and
 `POST /api/v1/positions/exit-all`. Operator and automate place (core
 `/orders/place`, strategy dispatch, and webhook place) share the admission
@@ -44,9 +45,11 @@ An allowed Practice place is admitted, then goes to the native sandbox. It
 does not enter SafetySystem, `gate_order`, or `BrokerRouter`. The routed
 place route is Live only and uses the same Live admission. Modify and
 cancel are not this admission. `POST /api/v1/orders/cancel-all` only
-cancels. A GTT order is `"variety": "gtt"` on place, not
+cancels. On Live, a GTT order placed with `"variety": "gtt"` is checked
+by Laya admission and then SafetySystem on that place. It is not
 `POST /api/v1/orders/forever` (that route returns HTTP 501 and does not
-place).
+place). A Practice body with that variety is the Practice place above:
+Laya, then the sandbox, and not SafetySystem.
 
 **Regular modify and cancel:**
 
@@ -97,7 +100,9 @@ require the operator to place that reduced quantity. An automate clamp is
 a dispatcher error and does not place the reduced quantity on its own.
 Chat is not an admission source. Modify, cancel, and cancel-all are not
 admitted as place. Forever place, basket, split, and conditional-trigger
-place do not submit.
+place do not submit. A GTT order FlintTrade submits is `"variety": "gtt"`
+on place. On Live that place is checked by Laya admission and then
+SafetySystem.
 
 When decision status is Down, the desk opens incident class `laya` ("Laya is
 Down. New orders are paused until it's Ready. You can still close positions.").
