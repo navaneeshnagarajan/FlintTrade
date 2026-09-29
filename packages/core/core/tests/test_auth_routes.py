@@ -739,6 +739,51 @@ class TestPinModeParameter:
                       headers=_session_headers())
         assert resp.status_code == 401
 
+    def test_pin_unlock_rotates_the_session_token_and_keeps_the_mode(self, client):
+        import jwt
+
+        from flinttrade_core.auth_routes import _create_token, decode_token
+
+        c = self._setup(client)
+        old = _create_token("nav", mode="practice")
+        old_payload = decode_token(old)
+        resp = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456", "mode": "practice"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {old}",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        new = data["token"]
+        assert data["mode"] == "practice"
+        new_payload = decode_token(new)
+        assert new_payload["mode"] == "practice"
+        assert new_payload["jti"] != old_payload["jti"]
+        with pytest.raises(jwt.InvalidTokenError):
+            decode_token(old)
+        stale = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456", "mode": "practice"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {old}",
+            },
+        )
+        assert stale.status_code == 401
+        wrong = c.post(
+            "/v1/auth/pin",
+            json={"pin": "000000", "mode": "practice"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {new}",
+            },
+        )
+        assert wrong.status_code == 401
+        assert wrong.get_json()["message"] == "Invalid PIN."
+
 
 class TestRateLimitRegistration:
     """Codex stop-gate caught that the new `/mode`, `/forgot-password`,

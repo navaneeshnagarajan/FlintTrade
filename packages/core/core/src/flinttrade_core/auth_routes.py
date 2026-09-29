@@ -891,6 +891,10 @@ def auth_pin_verify() -> tuple[Any, int]:
     would arm Live for anything that can reach 127.0.0.1, and a session
     that expired overnight could sidestep the daily password+TOTP re-auth
     (the JWT's next-08:00-IST expiry is exactly that freshness bound).
+
+    A successful unlock revokes that previous session token and issues a
+    new one. The new token carries the requested mode (default ``live``).
+    The previous token is rejected afterwards.
     """
     svc = _get_auth_service()
     if svc is None:
@@ -956,6 +960,24 @@ def auth_pin_verify() -> tuple[Any, int]:
                 "Confirm a one-time code from your authenticator app, then retry."
             ),
         }), 403
+
+    # Revoke the presented session first, then mint. A failed revocation
+    # must not leave the old token usable beside a new one.
+    old_jti = str(session_payload.get("jti") or "")
+    old_exp = float(session_payload.get("exp") or 0)
+    if not old_jti:
+        return jsonify({
+            "status": "error",
+            "message": "Token missing jti claim — cannot rotate the session.",
+        }), 400
+    try:
+        _revoke_jti(old_jti, old_exp)
+    except Exception:
+        logger.exception("PIN unlock revocation failed | jti=%s", old_jti)
+        return jsonify({
+            "status": "error",
+            "message": "Could not revoke previous session token — try again.",
+        }), 503
 
     live_unlocked = target_mode == "live"
     profile = svc.get_profile()

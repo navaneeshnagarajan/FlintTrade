@@ -72,6 +72,11 @@ vi.mock("@/hooks/usePositions", () => ({
   usePositions: (...args: unknown[]) => mockUsePositions(...args),
 }));
 
+const mockUseOrders = vi.fn();
+vi.mock("@/hooks/useOrders", () => ({
+  useOrders: (...args: unknown[]) => mockUseOrders(...args),
+}));
+
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => mockUseBrokerConnected(),
 }));
@@ -299,6 +304,7 @@ describe("PositionsWidget", () => {
     mockBrokerState.activeAccountId = null;
     mockReadState.identity = null;
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+    mockUseOrders.mockReturnValue({ data: [] });
     useOperatorSignalStore.setState({ decisionStatus: "ready" });
   });
 
@@ -1033,6 +1039,108 @@ describe("PositionsWidget", () => {
       expect(mockEmitNotification).toHaveBeenCalledWith(
         expect.objectContaining({ category: "order", title: "Square-off submitted" }),
       );
+    });
+
+    it("tags a pending exit and refuses a second square-off", () => {
+      mockModeState.mode = "practice";
+      mockUseOrders.mockReturnValue({
+        data: [{
+          orderId: "E1",
+          symbol: "INFY",
+          exchange: "NSE",
+          action: "SELL",
+          quantity: 4,
+          price: 100,
+          orderType: "LIMIT",
+          status: "OPEN",
+          product: "MIS",
+          strategy: "",
+          timestamp: "",
+        }],
+      });
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [{
+          symbol: "INFY",
+          exchange: "NSE",
+          product: "MIS",
+          quantity: 10,
+          average_price: 100,
+          ltp: 101,
+          pnl: 10,
+        }],
+      }));
+      render(<PositionsWidget {...defaultProps} />);
+
+      expect(screen.getByText("INFY")).toBeInTheDocument();
+      expect(screen.getByText("Exit pending")).toBeInTheDocument();
+      const squareOff = screen.getByRole("button", { name: "Square off INFY" });
+      expect(squareOff).toBeDisabled();
+      fireEvent.click(squareOff);
+      expect(screen.queryByText("Square off position?")).not.toBeInTheDocument();
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Exit all positions" }));
+      fireEvent.change(screen.getByLabelText(/type EXIT \(in capitals\) to confirm/i), {
+        target: { value: "EXIT" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm exit all positions" }));
+      expect(screen.getByText("An exit for this contract is already pending.")).toBeInTheDocument();
+      expect(mockPlaceOrder).not.toHaveBeenCalled();
+    });
+
+    it("shows a flipped position on its own row until the toast is dismissed", async () => {
+      const held = {
+        symbol: "INFY",
+        exchange: "NSE",
+        product: "MIS",
+        quantity: 10,
+        average_price: 100,
+        ltp: 110,
+        pnl: 100,
+      };
+      mockUsePositions.mockReturnValue(queryResult({ data: [held] }));
+      const { rerender } = render(<PositionsWidget {...defaultProps} />);
+      expect(screen.queryByText("Unexpected")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("position-flip-toast")).not.toBeInTheDocument();
+
+      mockUsePositions.mockReturnValue(queryResult({
+        data: [{ ...held, quantity: -3, pnl: -30 }],
+      }));
+      rerender(<PositionsWidget {...defaultProps} params={{ nonce: 1 }} />);
+
+      expect(screen.getByText("INFY")).toBeInTheDocument();
+      expect(screen.getByText("Unexpected")).toBeInTheDocument();
+      expect(screen.getByTestId("position-flip-toast")).toHaveTextContent(
+        "Position changed after your broker's orders loaded. You're now short 3 INFY. Close it if that wasn't intended.",
+      );
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+      expect(screen.getByTestId("position-flip-toast")).toBeInTheDocument();
+
+      useOperatorSignalStore.setState({ decisionStatus: "down" });
+      mockPlaceOrder.mockResolvedValue({ orderId: "CLOSE1" });
+      fireEvent.click(screen.getByRole("button", { name: "Close INFY" }));
+      await waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          symbol: "INFY",
+          exchange: "NSE",
+          action: "BUY",
+          product: "MIS",
+          quantity: 3,
+        }),
+        expect.objectContaining({
+          mode: "live",
+          brokerType: "dhan",
+          accountId: "POSITIONS-A",
+        }),
+        { exit: true },
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(screen.queryByTestId("position-flip-toast")).not.toBeInTheDocument();
+      expect(screen.getByText("Unexpected")).toBeInTheDocument();
     });
 
     it("squares off a short position with a BUY market order for the absolute quantity", async () => {

@@ -117,7 +117,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useOrders } from "@/hooks/useOrders";
 import { usePositions } from "@/hooks/usePositions";
+import {
+  EXIT_ALREADY_PENDING,
+  EXIT_PENDING_TAG,
+  UNEXPECTED_POSITION_TAG,
+  contractHasOpenExit,
+  positionContractKey,
+  positionFlipMessage,
+  reconcilePositionSigns,
+  type ExitOrderFields,
+} from "./positionReconcile";
 import { useNarrowLayout } from "@/hooks/useNarrowLayout";
 import { NarrowBookCards } from "@/components/books/NarrowBookCards";
 import type { WidgetProps } from "@/types/widgets";
@@ -522,6 +533,7 @@ interface ExitAllDialogProps {
   canSubmit: boolean;
   isActionAllowed: () => boolean;
   getCurrentIdentity: () => AccountAuthorityIdentity;
+  hasPendingExit: (position: PositionRow) => boolean;
   onOpenChange: (open: boolean) => void;
   onExited: (mutationIdentity: AccountAuthorityIdentity) => void;
 }
@@ -534,6 +546,7 @@ function ExitAllDialog({
   canSubmit,
   isActionAllowed,
   getCurrentIdentity,
+  hasPendingExit,
   onOpenChange,
   onExited,
 }: ExitAllDialogProps) {
@@ -578,6 +591,15 @@ function ExitAllDialog({
         for (const position of openRows) {
           const product = squareOffProduct(position);
           const label = position.symbol;
+          if (hasPendingExit(position)) {
+            failures.push({
+              key: `${position.symbol}-${position.exchange}-${position.product}`,
+              symbol: label,
+              notice: null,
+              message: EXIT_ALREADY_PENDING,
+            });
+            continue;
+          }
           if (!product) {
             failures.push({
               key: `${position.symbol}-${position.exchange}-${position.product}`,
@@ -635,6 +657,10 @@ function ExitAllDialog({
         close(false);
         return;
       }
+      if (openRows.some((position) => hasPendingExit(position))) {
+        setErrorMsg(EXIT_ALREADY_PENDING);
+        return;
+      }
       await postWithMode("positions/exit-all", {
         confirm: true,
         broker: mutationIdentity.brokerType,
@@ -667,6 +693,7 @@ function ExitAllDialog({
     getCurrentIdentity,
     onExited,
     close,
+    hasPendingExit,
   ]);
 
   return (
@@ -737,6 +764,8 @@ function ExitAllDialog({
 // Host widget
 // ---------------------------------------------------------------------------
 
+const EMPTY_EXIT_ORDERS: ExitOrderFields[] = [];
+
 function PositionsWidget(props: WidgetProps) {
   const panelParams = props.params as PositionsPanelParams | undefined;
   const [view, setView] = useState<ViewMode>(() => resolveViewMode(panelParams?.view));
@@ -761,13 +790,23 @@ function PositionsWidget(props: WidgetProps) {
     enabled: accountReadsEnabled,
     context: accountReadContext,
   });
+  const { data: ordersData } = useOrders({
+    enabled: accountReadsEnabled && !isExplore,
+    context: accountReadContext,
+  });
+  const orders = ordersData ?? EMPTY_EXIT_ORDERS;
 
   const { isNarrow, containerRef } = useNarrowLayout<HTMLDivElement>();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [convertIntent, setConvertIntent] = useState<PositionActionIntent | null>(null);
   const [squareOffIntent, setSquareOffIntent] = useState<PositionActionIntent | null>(null);
   const [exitAllIntent, setExitAllIntent] = useState<ExitAllActionIntent | null>(null);
+  const [unexpectedKeys, setUnexpectedKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const [flipToast, setFlipToast] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const heldSignsRef = useRef<Map<string, 1 | -1>>(new Map());
+  const signsPrimedRef = useRef(false);
+  const signsScopeRef = useRef(readIdentity.scopeKey);
   const brokerAccounts = useBrokerStore((state) => state.accounts);
   const activeAccountId = useBrokerStore((state) => state.activeAccountId);
 
@@ -781,6 +820,40 @@ function PositionsWidget(props: WidgetProps) {
     () => normalisePositions(isExplore ? SAMPLE_POSITION_BOOK : positionsData),
     [isExplore, positionsData],
   );
+  const pendingExitKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const row of rows) {
+      if (contractHasOpenExit(row, orders)) keys.add(positionContractKey(row));
+    }
+    return keys;
+  }, [orders, rows]);
+
+  useEffect(() => {
+    if (isExplore) return;
+    if (signsScopeRef.current !== readIdentity.scopeKey) {
+      signsScopeRef.current = readIdentity.scopeKey;
+      heldSignsRef.current = new Map();
+      signsPrimedRef.current = false;
+      setUnexpectedKeys(new Set());
+      setFlipToast(null);
+    }
+    const reconciled = reconcilePositionSigns(heldSignsRef.current, rows);
+    heldSignsRef.current = reconciled.next;
+    if (!signsPrimedRef.current) {
+      signsPrimedRef.current = true;
+      return;
+    }
+    if (reconciled.flips.length === 0) return;
+    setUnexpectedKeys((current) => {
+      const merged = new Set(current);
+      for (const flip of reconciled.flips) merged.add(flip.key);
+      return merged;
+    });
+    const latest = reconciled.flips[reconciled.flips.length - 1];
+    if (latest) {
+      setFlipToast(positionFlipMessage(latest.side, latest.quantity, latest.symbol));
+    }
+  }, [isExplore, orders, readIdentity.scopeKey, rows]);
   const queryUi = resolveAccountQueryUi({
     accountReadsEnabled,
     fetchStatus,
@@ -985,7 +1058,46 @@ function PositionsWidget(props: WidgetProps) {
 
   // ---- Table view ---------------------------------------------------------
 
+  const closeReduced = useCallback(async (position: PositionRow) => {
+    if (contractHasOpenExit(position, orders) || position.quantity === 0) return;
+    const product = squareOffProduct(position);
+    if (!product || !isSquareOffAllowed()) return;
+    const identity = captureAccountAuthority(readIdentityRef.current);
+    const exitAction = position.quantity > 0 ? "SELL" : "BUY";
+    const exitQty = Math.abs(position.quantity);
+    try {
+      await placeOrder({
+        symbol: position.symbol,
+        exchange: position.exchange,
+        action: exitAction,
+        product,
+        orderType: "MARKET",
+        quantity: exitQty,
+        price: squareOffMark(position, appMode === "practice"),
+        triggerPrice: 0,
+        strategy: "FlintPositions",
+      }, identity, { exit: true });
+      const exitWhileDown = useOperatorSignalStore.getState().decisionStatus !== "ready";
+      emitNotification({
+        category: "order",
+        title: exitWhileDown ? LAYA_EXIT_WHILE_DOWN : "Square-off submitted",
+        body: exitWhileDown
+          ? LAYA_EXIT_WHILE_DOWN
+          : `${exitAction} ${exitQty} ${position.symbol} at market.`,
+      });
+      refreshPositions(identity, getCurrentReadIdentity);
+    } catch (err) {
+      emitNotification({
+        category: "alert",
+        title: "Close failed",
+        body: err instanceof Error ? err.message : "Close failed.",
+      });
+    }
+  }, [appMode, getCurrentReadIdentity, isSquareOffAllowed, orders, refreshPositions]);
+
   const renderRowActions = useCallback((position: PositionRow) => {
+    const exitPending = pendingExitKeys.has(positionContractKey(position));
+    const unexpected = unexpectedKeys.has(positionContractKey(position));
     if (!(canSquareOff || canUseNativePositionVerbs)) {
       // Explore has no book to trade. Practice with a frozen feed omits the hint.
       if (isExplore || appMode === "practice") return null;
@@ -993,16 +1105,36 @@ function PositionsWidget(props: WidgetProps) {
     }
     return (
       <span className="inline-flex items-center gap-0.5">
+        {canSquareOff && unexpected && position.quantity !== 0 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={exitPending}
+            onClick={() => {
+              if (exitPending) return;
+              void closeReduced(position);
+            }}
+            aria-label={`Close ${position.symbol}`}
+            title={exitPending ? EXIT_ALREADY_PENDING : `Close ${position.symbol} at market`}
+            className="h-5 px-1.5 text-xxs gap-1 text-text-primary hover:bg-surface-hover"
+          >
+            Close
+          </Button>
+        )}
         {canSquareOff && position.quantity !== 0 && (
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => setSquareOffIntent({
-              position,
-              identity: captureAccountAuthority(readIdentity),
-            })}
+            disabled={exitPending}
+            onClick={() => {
+              if (exitPending) return;
+              setSquareOffIntent({
+                position,
+                identity: captureAccountAuthority(readIdentity),
+              });
+            }}
             aria-label={`Square off ${position.symbol}`}
-            title={`Square off ${position.symbol} at market`}
+            title={exitPending ? EXIT_ALREADY_PENDING : `Square off ${position.symbol} at market`}
             className="h-5 px-1.5 text-xxs gap-1 text-loss hover:bg-loss/10 hover:text-loss"
           >
             <SquareX size={10} aria-hidden="true" /> Square off
@@ -1025,11 +1157,22 @@ function PositionsWidget(props: WidgetProps) {
         )}
       </span>
     );
-  }, [appMode, canSquareOff, canUseNativePositionVerbs, isExplore, readIdentity]);
+  }, [
+    appMode,
+    canSquareOff,
+    canUseNativePositionVerbs,
+    closeReduced,
+    isExplore,
+    pendingExitKeys,
+    readIdentity,
+    unexpectedKeys,
+  ]);
 
   const narrowCards = useMemo(
     () => rows.map((row) => ({
-      id: `${row.symbol}-${row.exchange}-${row.product}`,
+      id: `${row.symbol}-${row.exchange}-${row.product}-${
+        row.quantity > 0 ? "long" : row.quantity < 0 ? "short" : "flat"
+      }`,
       symbol: row.symbol,
       detail: `Qty ${row.quantity} · LTP ${fmtPrice(row.ltp)}`,
       pnl: fmtPnl(row.mtm),
@@ -1045,9 +1188,22 @@ function PositionsWidget(props: WidgetProps) {
       {
         accessorKey: "symbol",
         header: "Symbol",
-        cell: ({ row }) => (
-          <span className="font-mono font-medium">{row.original.symbol}</span>
-        ),
+        cell: ({ row }) => {
+          const key = positionContractKey(row.original);
+          const exitPending = pendingExitKeys.has(key);
+          const unexpected = unexpectedKeys.has(key);
+          return (
+            <span className="inline-flex items-center gap-1">
+              <span className="font-mono font-medium">{row.original.symbol}</span>
+              {exitPending ? (
+                <span className="text-xxs text-warning">{EXIT_PENDING_TAG}</span>
+              ) : null}
+              {unexpected ? (
+                <span className="text-xxs text-warning">{UNEXPECTED_POSITION_TAG}</span>
+              ) : null}
+            </span>
+          );
+        },
       },
       {
         accessorKey: "quantity",
@@ -1111,7 +1267,7 @@ function PositionsWidget(props: WidgetProps) {
         cell: ({ row }) => renderRowActions(row.original),
       },
     ],
-    [renderRowActions],
+    [pendingExitKeys, renderRowActions, unexpectedKeys],
   );
 
   const table = useTable({
@@ -1263,6 +1419,25 @@ function PositionsWidget(props: WidgetProps) {
         </div>
       </div>
 
+      {flipToast ? (
+        <div
+          role="status"
+          data-testid="position-flip-toast"
+          className="mx-3 mt-2 flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-text-primary"
+        >
+          <AlertTriangle size={12} className="mt-0.5 shrink-0 text-warning" aria-hidden="true" />
+          <span className="flex-1">{flipToast}</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setFlipToast(null)}
+            className="h-5 px-1.5 text-xxs"
+          >
+            Dismiss
+          </Button>
+        </div>
+      ) : null}
+
       {/* Position-feed failure banner — retained rows remain visible and are
           explicitly frozen. Initial no-data failures never claim figures froze. */}
       {isError && !isExplore && (
@@ -1394,7 +1569,9 @@ function PositionsWidget(props: WidgetProps) {
             <TableBody>
               {table.getRowModel().rows.map((row, idx) => (
                 <TableRow
-                  key={row.id}
+                  key={`${row.original.symbol}-${row.original.exchange}-${row.original.product}-${
+                    row.original.quantity > 0 ? "long" : row.original.quantity < 0 ? "short" : "flat"
+                  }`}
                   className={`border-t border-border-subtle hover:bg-surface-hover/50 ${
                     idx % 2 === 1 ? "bg-surface-stripe" : ""
                   }`}
@@ -1457,6 +1634,7 @@ function PositionsWidget(props: WidgetProps) {
           canSubmit={exitAllCanSubmit}
           isActionAllowed={appMode === "practice" ? isSquareOffAllowed : isNativeActionAllowed}
           getCurrentIdentity={getCurrentReadIdentity}
+          hasPendingExit={(position) => pendingExitKeys.has(positionContractKey(position))}
           onOpenChange={(open) => {
             if (!open) setExitAllIntent(null);
           }}

@@ -58,6 +58,20 @@ vi.mock("@/hooks/usePositions", () => ({
   usePositions: () => ({ data: mockOpenPositions.rows, isFetching: false }),
 }));
 
+const mockOpenOrders = vi.hoisted(() => ({
+  rows: [] as Array<{
+    symbol: string;
+    exchange: string;
+    product: string;
+    action: "BUY" | "SELL";
+    status: string;
+  }>,
+}));
+
+vi.mock("@/hooks/useOrders", () => ({
+  useOrders: () => ({ data: mockOpenOrders.rows, isFetching: false }),
+}));
+
 const mockMode = vi.hoisted(() => ({ current: "practice" }));
 
 vi.mock("@/stores/modeStore", () => ({
@@ -116,6 +130,7 @@ describe("OrderPadWidget", () => {
     vi.restoreAllMocks();
     mockMode.current = "practice";
     mockOpenPositions.rows = [];
+    mockOpenOrders.rows = [];
     useOperatorSignalStore.setState({ decisionStatus: "ready" });
     mockPlaceOrder.mockReset();
     mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
@@ -415,6 +430,35 @@ describe("OrderPadWidget", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Closed. Exits are allowed while Laya is Down.",
     );
+  });
+
+  it("does not send Close while an exit for the contract is pending", async () => {
+    mockOpenPositions.rows = [{
+      symbol: "NIFTY",
+      exchange: "NSE",
+      product: "MIS",
+      quantity: 4,
+      averagePrice: 100,
+      ltp: 101,
+      pnl: 4,
+      pnlPercent: 1,
+    }];
+    mockOpenOrders.rows = [{
+      symbol: "NIFTY",
+      exchange: "NSE",
+      product: "MIS",
+      action: "SELL",
+      status: "OPEN",
+    }];
+    render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
+    expect(screen.getByTestId("exit-already-pending")).toHaveTextContent(
+      "An exit for this contract is already pending.",
+    );
+    const close = screen.getByTestId("orderpad-close");
+    expect(close).toBeDisabled();
+    fireEvent.click(close);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 
   it("shows tighter Degraded limits without Blocked chrome", async () => {

@@ -33,7 +33,7 @@ import asyncio
 import logging
 import math
 import time
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import Any
@@ -511,6 +511,42 @@ def _quantity_from_body(body: Mapping[str, Any]) -> int:
     return 0
 
 
+def _exit_pending_response() -> tuple[Any, int]:
+    """Refuse a second exit while one of ours is still unfilled.
+
+    The sentence lives in ``EXIT_ALREADY_PENDING`` so the copy can change
+    in one place.
+    """
+    from flinttrade_engine.reduce_only import EXIT_ALREADY_PENDING  # noqa: PLC0415
+
+    return jsonify({
+        "status": "error",
+        "code": "exit_pending",
+        "message": EXIT_ALREADY_PENDING,
+        "reason": EXIT_ALREADY_PENDING,
+    }), 409
+
+
+def _own_exit_pending(
+    body: Mapping[str, Any],
+    positions: Sequence[Mapping[str, Any]],
+    our_orders: Sequence[Mapping[str, Any]],
+    extra_pending: int = 0,
+) -> bool:
+    """True when this place is another exit and one of ours is already open."""
+    from flinttrade_engine.reduce_only import own_exit_already_pending  # noqa: PLC0415
+
+    return own_exit_already_pending(
+        symbol=str(body.get("symbol") or ""),
+        exchange=str(body.get("exchange") or ""),
+        product=str(body.get("product") or "MIS"),
+        action=str(body.get("action") or ""),
+        positions=positions,
+        our_orders=our_orders,
+        extra_pending=extra_pending,
+    )
+
+
 def _record_reduce_only(body: Mapping[str, Any], mode: str) -> None:
     """Log a proven exit. The body cannot choose this path."""
     from flinttrade_engine.laya import process_laya, proposal_from_place_fields  # noqa: PLC0415
@@ -560,11 +596,11 @@ def _practice_books(sandbox: Any) -> tuple[list[dict[str, Any]], list[dict[str, 
         return [], []
     try:
         positions = sandbox.get_positions()
-    except Exception:  # noqa: BLE001 - an unreadable book is not reduce-only
+    except Exception:  # noqa: BLE001 - no position means the place cannot be an exit
         positions = []
     try:
         orders = sandbox.get_orders()
-    except Exception:  # noqa: BLE001 - an unreadable book is not reduce-only
+    except Exception:  # noqa: BLE001 - no order book means no pending exit of ours
         orders = []
     return _book_rows(positions), _book_rows(orders)
 
@@ -636,14 +672,27 @@ def _normalise_exit_orders(raw: Any) -> list[dict[str, Any]]:
 async def _fetch_broker_exit_books(
     adapter_id: str,
     account_id: str,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Read positions and the broker order book. Raises when the book cannot be read."""
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
+    """Read positions and the broker order book.
+
+    An unreadable order book returns the positions with broker orders
+    ``None``. The cap then uses our own pending exits. An unreadable
+    position book still raises, so the place cannot be classified as an exit.
+    """
     from flinttrade_core.l2_state import _read, _resolve_account_source  # noqa: PLC0415
 
     source = _resolve_account_source(current_app.config, adapter_id, account_id)
     positions_raw = await _read(source, "positionbook", "positions")
-    orders_raw = await _read(source, "orderbook", "order_book")
-    return _normalise_exit_positions(positions_raw), _normalise_exit_orders(orders_raw)
+    positions = _normalise_exit_positions(positions_raw)
+    try:
+        orders_raw = await _read(source, "orderbook", "order_book")
+    except Exception:  # noqa: BLE001 - keep the position; cap uses our own exits
+        logger.info(
+            "Broker order book unreadable; reduce-only cap uses our own pending exits | adapter=%s",
+            adapter_id,
+        )
+        return positions, None
+    return positions, _normalise_exit_orders(orders_raw)
 
 
 def _live_exit_books(
@@ -652,19 +701,26 @@ def _live_exit_books(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]] | None]:
     """Return positions, our orders, and broker orders.
 
-    Broker orders are ``None`` when the book cannot be read. A configured
-    ``REDUCE_ONLY_LIVE_BOOKS`` callable replaces the broker read.
+    Broker orders are ``None`` when that book cannot be read. The close
+    can still qualify, capped by our own pending exits. A configured
+    ``REDUCE_ONLY_LIVE_BOOKS`` callable replaces the broker read. A hook
+    or position-book failure returns no position, so the place is not an exit.
     """
     hook = current_app.config.get("REDUCE_ONLY_LIVE_BOOKS")
     if callable(hook):
         try:
             positions, our_orders, broker_orders = hook(adapter_id, account_id)
-        except Exception:  # noqa: BLE001 - an unreadable book is not reduce-only
+        except Exception:  # noqa: BLE001 - no books means the place is not an exit
             logger.info(
-                "Broker order book unreadable; place is not a reduce-only exit | adapter=%s",
+                "Broker books unreadable; place is not a reduce-only exit | adapter=%s",
                 adapter_id,
             )
             return [], [], None
+        if broker_orders is None:
+            logger.info(
+                "Broker order book unreadable; reduce-only cap uses our own pending exits | adapter=%s",
+                adapter_id,
+            )
         return (
             _book_rows(positions),
             _book_rows(our_orders),
@@ -674,9 +730,9 @@ def _live_exit_books(
         positions, broker_orders = _run_on_client_loop(
             _fetch_broker_exit_books(adapter_id, account_id),
         )
-    except Exception:  # noqa: BLE001 - an unreadable book is not reduce-only
+    except Exception:  # noqa: BLE001 - an unreadable position book is not an exit
         logger.info(
-            "Broker order book unreadable; place is not a reduce-only exit | adapter=%s",
+            "Broker books unreadable; place is not a reduce-only exit | adapter=%s",
             adapter_id,
         )
         return [], [], None
@@ -722,6 +778,8 @@ def _prepare_live_reduce_only(
                 exit_action=exit_action,
             )
             cover_reserved_exit(key, covered)
+        if _own_exit_pending(body, positions, our_orders, reserved_exit(key)):
+            return _exit_pending_response(), None
         block, qualified = _admit_place(
             body,
             mode=_MODE_LIVE,
@@ -2336,6 +2394,8 @@ def _dispatch_practice_place_locked(body: dict[str, Any]) -> tuple[Any, int]:
     """Place one Practice order while the contract lock is held."""
     sandbox = current_app.config.get("DATA_SANDBOX_ENGINE")
     positions, orders = _practice_books(sandbox)
+    if _own_exit_pending(body, positions, orders):
+        return _exit_pending_response()
     laya_block, _qualified = _admit_place(
         body,
         mode=_MODE_PRACTICE,

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from flinttrade_engine.reduce_only import classify_reduce_only, reset_reduce_only_for_tests
+from flinttrade_engine.reduce_only import (
+    classify_reduce_only,
+    own_exit_already_pending,
+    reset_reduce_only_for_tests,
+)
 
 
 def _long() -> dict[str, object]:
@@ -89,8 +93,21 @@ def test_adding_or_flipping_does_not_qualify() -> None:
     assert other.qualifies is False
 
 
+def _our_sell(quantity: int = 4) -> dict[str, object]:
+    return {
+        "symbol": "INFY",
+        "exchange": "NSE",
+        "product": "MIS",
+        "action": "SELL",
+        "quantity": quantity,
+        "filled_qty": 0,
+        "status": "PENDING",
+        "order_id": "ours-1",
+    }
+
+
 @pytest.mark.unit
-def test_live_broker_open_exit_reduces_the_cap_and_an_unreadable_book_does_not_qualify() -> None:
+def test_live_broker_open_exit_reduces_the_cap_and_an_unreadable_book_stays_capped() -> None:
     broker_exit = {
         "symbol": "INFY",
         "exchange": "NSE",
@@ -108,8 +125,18 @@ def test_live_broker_open_exit_reduces_the_cap_and_an_unreadable_book_does_not_q
     assert allowed.qualifies is True
 
     unreadable = _decision(quantity=10, live=True, broker_orders=None)
-    assert unreadable.qualifies is False
-    assert unreadable.cap == 0
+    assert unreadable.qualifies is True
+    assert unreadable.open_quantity == 10
+    assert unreadable.pending_exits == 0
+    assert unreadable.cap == 10
+
+    capped = _decision(quantity=6, live=True, broker_orders=None, our_orders=[_our_sell()])
+    assert capped.qualifies is True
+    assert capped.pending_exits == 4
+    assert capped.cap == 6
+    over = _decision(quantity=7, live=True, broker_orders=None, our_orders=[_our_sell()])
+    assert over.qualifies is False
+    assert over.cap == 6
 
     duplicate = _decision(
         quantity=6,
@@ -119,3 +146,31 @@ def test_live_broker_open_exit_reduces_the_cap_and_an_unreadable_book_does_not_q
     )
     assert duplicate.pending_exits == 4
     assert duplicate.qualifies is True
+
+
+@pytest.mark.unit
+def test_own_pending_exit_blocks_a_second_exit_and_a_broker_exit_does_not() -> None:
+    assert own_exit_already_pending(
+        symbol="INFY",
+        exchange="NSE",
+        product="MIS",
+        action="SELL",
+        positions=[_long()],
+        our_orders=[_our_sell()],
+    ) is True
+    assert own_exit_already_pending(
+        symbol="INFY",
+        exchange="NSE",
+        product="MIS",
+        action="SELL",
+        positions=[_long()],
+        our_orders=[],
+    ) is False
+    assert own_exit_already_pending(
+        symbol="INFY",
+        exchange="NSE",
+        product="MIS",
+        action="BUY",
+        positions=[_long()],
+        our_orders=[_our_sell()],
+    ) is False

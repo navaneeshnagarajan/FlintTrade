@@ -17,7 +17,11 @@ from flask import Flask
 from flinttrade_core.auth_routes import _create_token
 from flinttrade_core.order_routes import orders_bp, place_order
 from flinttrade_engine.laya import LAYA_DOWN_REASON, DecisionStatus, process_laya, reset_process_laya_for_tests
-from flinttrade_engine.reduce_only import reset_reduce_only_for_tests
+from flinttrade_engine.reduce_only import (
+    EXIT_ALREADY_PENDING,
+    classify_reduce_only,
+    reset_reduce_only_for_tests,
+)
 from flinttrade_engine.safety import SafetyConfig, SafetySystem, set_safety_gate_secret
 
 _SECRET = b"0123456789abcdef0123456789abcdef"
@@ -135,7 +139,7 @@ def test_oversized_practice_close_while_down_is_refused() -> None:
 
 
 @pytest.mark.unit
-def test_pending_exit_reduces_the_practice_cap_while_down() -> None:
+def test_a_second_practice_exit_is_refused_while_one_is_pending() -> None:
     from flinttrade_data.sandbox_engine import SandboxEngine
 
     engine = SandboxEngine(db_path=":memory:")
@@ -163,21 +167,19 @@ def test_pending_exit_reduces_the_practice_cap_while_down() -> None:
         }],
     )
     client = _practice_app(engine).test_client()
-    refused = client.post(
-        "/api/v1/orders/place",
-        json=_order("INFY", "SELL", 7, 110.0),
-        headers=_headers("practice"),
-    )
-    assert refused.status_code == 403
-    assert refused.get_json()["code"] == "laya_denied"
-    assert engine.get_positions()[0]["net_qty"] == 10
-    allowed = client.post(
-        "/api/v1/orders/place",
-        json=_order("INFY", "SELL", 6, 110.0),
-        headers=_headers("practice"),
-    )
-    assert allowed.status_code == 200, allowed.get_json()
-    assert engine.get_positions()[0]["net_qty"] == 4
+    for quantity in (7, 6):
+        refused = client.post(
+            "/api/v1/orders/place",
+            json=_order("INFY", "SELL", quantity, 110.0),
+            headers=_headers("practice"),
+        )
+        body = refused.get_json()
+        assert refused.status_code == 409, body
+        assert body["code"] == "exit_pending"
+        assert body["message"] == EXIT_ALREADY_PENDING
+        assert body["reason"] == EXIT_ALREADY_PENDING
+        assert engine.get_positions()[0]["net_qty"] == 10
+    assert process_laya().decision_log() == ()
 
 
 @pytest.mark.unit
@@ -260,7 +262,7 @@ def _portfolio_state() -> SimpleNamespace:
 
 
 @pytest.mark.unit
-def test_live_broker_exit_reduces_the_cap_and_an_unreadable_book_is_not_reduce_only(
+def test_live_broker_exit_reduces_the_cap_and_an_unreadable_book_stays_reduce_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from flinttrade_core import order_routes
@@ -297,12 +299,83 @@ def test_live_broker_exit_reduces_the_cap_and_an_unreadable_book_is_not_reduce_o
     assert process_laya().decision_log()[-1].proof_kind == "reduce_only"
 
     def unreadable(_adapter_id: str, _account_id: str):
-        raise RuntimeError("order book unavailable")
+        return [position], [], None
 
     app.config["REDUCE_ONLY_LIVE_BOOKS"] = unreadable
     safety.check_order.reset_mock()
-    missed = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 10, 0), headers=headers)
-    assert missed.status_code == 403
-    assert missed.get_json()["code"] == "laya_denied"
-    assert missed.get_json()["reason"] == LAYA_DOWN_REASON
+    assert process_laya().status is DecisionStatus.DOWN
+    closed = client.post("/api/v1/orders/openalgo/place", json=_order("INFY", "SELL", 10, 0), headers=headers)
+    assert closed.status_code == 403
+    assert closed.get_json().get("code") != "laya_denied"
+    assert "L1_ORDER" in closed.get_json()["message"]
+    safety.check_order.assert_called_once()
+    assert process_laya().decision_log()[-1].proof_kind == "reduce_only"
+
+
+@pytest.mark.unit
+def test_live_unreadable_book_is_capped_by_our_exits_and_a_second_exit_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from flinttrade_core import order_routes
+
+    safety = _passing_safety()
+    app = _live_app(safety)
+    monkeypatch.setattr(order_routes, "_gather_safety_state", lambda *_args, **_kwargs: _portfolio_state())
+    position = {"symbol": "INFY", "exchange": "NSE", "product": "MIS", "net_qty": 10}
+    our_exit = {
+        "symbol": "INFY",
+        "exchange": "NSE",
+        "product": "MIS",
+        "action": "SELL",
+        "quantity": 4,
+        "status": "PENDING",
+        "order_id": "ours-1",
+    }
+    within = classify_reduce_only(
+        symbol="INFY",
+        exchange="NSE",
+        product="MIS",
+        action="SELL",
+        quantity=6,
+        positions=[position],
+        our_orders=[our_exit],
+        broker_orders=None,
+        live=True,
+    )
+    assert within.qualifies is True
+    assert within.pending_exits == 4
+    assert within.cap == 6
+    over_cap = classify_reduce_only(
+        symbol="INFY",
+        exchange="NSE",
+        product="MIS",
+        action="SELL",
+        quantity=7,
+        positions=[position],
+        our_orders=[our_exit],
+        broker_orders=None,
+        live=True,
+    )
+    assert over_cap.qualifies is False
+    assert over_cap.cap == 6
+
+    def unreadable(_adapter_id: str, _account_id: str):
+        return [position], [our_exit], None
+
+    app.config["REDUCE_ONLY_LIVE_BOOKS"] = unreadable
+    client = app.test_client()
+    headers = _headers("live", unlocked=True)
+    for quantity in (6, 7):
+        refused = client.post(
+            "/api/v1/orders/openalgo/place",
+            json=_order("INFY", "SELL", quantity, 0),
+            headers=headers,
+        )
+        body = refused.get_json()
+        assert refused.status_code == 409, body
+        assert body["code"] == "exit_pending"
+        assert body["message"] == EXIT_ALREADY_PENDING
+        assert body["reason"] == EXIT_ALREADY_PENDING
+        assert body.get("code") != "laya_denied"
     safety.check_order.assert_not_called()
+    assert process_laya().decision_log() == ()

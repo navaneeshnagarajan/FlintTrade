@@ -47,7 +47,9 @@ import { Button } from "@/components/ui/button";
 import { searchSymbol, placeOrder, getSymbol } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useMargin } from "@/hooks/useMargin";
+import { useOrders } from "@/hooks/useOrders";
 import { usePositions } from "@/hooks/usePositions";
+import { EXIT_ALREADY_PENDING, contractHasOpenExit } from "@/widgets/trading/Positions/positionReconcile";
 import { useBrokerCapabilities } from "@/hooks/useBrokerCapabilities";
 import {
   checkLotMultiple,
@@ -464,6 +466,9 @@ function OrderPadWidget(props: WidgetProps) {
   const { data: openPositions } = usePositions({
     enabled: appMode === "practice" || appMode === "live",
   });
+  const { data: openOrders } = useOrders({
+    enabled: appMode === "practice" || appMode === "live",
+  });
   const openPosition = (openPositions ?? []).find((row) =>
     contractToken(row.symbol) === contractToken(symbol)
     && contractToken(row.exchange) === contractToken(exchange)
@@ -472,6 +477,7 @@ function OrderPadWidget(props: WidgetProps) {
   );
   const openQty = openPosition ? Math.abs(openPosition.quantity) : 0;
   const exitSide = openPosition ? exitSideForQuantity(openPosition.quantity) : null;
+  const exitAlreadyPending = openPosition != null && contractHasOpenExit(openPosition, openOrders ?? []);
   // Close caps the ticket only on the side that reduces this contract.
   const closeCap = exitSide != null && action === exitSide && openQty > 0 ? openQty : null;
 
@@ -961,6 +967,7 @@ function OrderPadWidget(props: WidgetProps) {
 
   const handleClosePosition = useCallback(async () => {
     if (loading || exitSide == null || openQty < 1) return;
+    if (exitAlreadyPending) return;
     const incident = readOperatorIncident();
     const muted = appMode === "live" && liveWritesMuted(incident);
     if (muted && incident?.failureClass !== "laya") return;
@@ -996,7 +1003,7 @@ function OrderPadWidget(props: WidgetProps) {
     lastParamsRef.current = params;
     lastSubmissionModeRef.current = authorityMode;
     await submitOrder(params, { mode: authorityMode }, { exit: true });
-  }, [appMode, exitSide, getValues, loading, ltp, openQty, setValue, submitOrder]);
+  }, [appMode, exitAlreadyPending, exitSide, getValues, loading, ltp, openQty, setValue, submitOrder]);
 
   function handleRetry() {
     const mode = useModeStore.getState().mode;
@@ -1500,12 +1507,17 @@ function OrderPadWidget(props: WidgetProps) {
           <Button
             type="button"
             data-testid="orderpad-close"
-            disabled={loading || (liveMuted && operatorIncident?.failureClass !== "laya")}
+            disabled={loading || exitAlreadyPending || (liveMuted && operatorIncident?.failureClass !== "laya")}
             onClick={() => void handleClosePosition()}
             className={`${btnBase} bg-surface-hover text-text-primary border border-border-default hover:bg-surface-card`}
           >
             Close
           </Button>
+        ) : null}
+        {exitAlreadyPending ? (
+          <p className="text-xs text-loss" data-testid="exit-already-pending">
+            {EXIT_ALREADY_PENDING}
+          </p>
         ) : null}
         <Button
           type="submit"

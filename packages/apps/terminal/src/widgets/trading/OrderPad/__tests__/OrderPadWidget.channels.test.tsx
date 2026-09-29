@@ -39,6 +39,10 @@ vi.mock("@/hooks/usePositions", () => ({
   usePositions: () => ({ data: [], isFetching: false }),
 }));
 
+vi.mock("@/hooks/useOrders", () => ({
+  useOrders: () => ({ data: [], isFetching: false }),
+}));
+
 vi.mock("@/stores/modeStore", () => ({
   useModeStore: (selector: (s: { mode: string }) => unknown) => selector({ mode: "practice" }),
 }));

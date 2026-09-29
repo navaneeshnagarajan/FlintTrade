@@ -1,8 +1,10 @@
 """Decide whether a place only reduces an open position.
 
 The place pipeline calls this. A client flag is not an input. Live also
-counts the broker order book. When that book cannot be read, the order
-does not qualify and the caller runs a full admit.
+counts the broker order book when that book can be read. When it cannot,
+the cap is the open quantity minus our own pending exits, and the order
+can still qualify. A second exit while one of ours is already unfilled
+is refused by the caller with ``EXIT_ALREADY_PENDING``.
 """
 
 from __future__ import annotations
@@ -34,6 +36,9 @@ _EXIT_CLOSED = frozenset({
     "TRADED",
     "EXPIRED",
 })
+
+# One sentence for the desk and the place route. Copy may be adjusted here.
+EXIT_ALREADY_PENDING = "An exit for this contract is already pending."
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,12 +201,11 @@ def classify_reduce_only(
     """Return whether this order only reduces one open contract.
 
     ``broker_orders is None`` on a live order means the broker book could
-    not be read. The order does not qualify. ``extra_pending`` is in-flight
-    exit quantity reserved by this process and not yet visible on a book.
+    not be read. The order can still qualify. The cap then uses our own
+    pending exits only. ``extra_pending`` is in-flight exit quantity
+    reserved by this process and not yet visible on a book.
     """
     empty = ReduceOnlyDecision(False, 0, 0, 0)
-    if live and broker_orders is None:
-        return empty
     symbol_n = _norm(symbol)
     exchange_n = _norm(exchange)
     product_n = _norm(product) or "MIS"
@@ -247,6 +251,51 @@ def classify_reduce_only(
     if cap < 1 or quantity > cap:
         return ReduceOnlyDecision(False, open_quantity, pending, max(cap, 0))
     return ReduceOnlyDecision(True, open_quantity, pending, cap)
+
+
+def own_exit_already_pending(
+    *,
+    symbol: str,
+    exchange: str,
+    product: str,
+    action: str,
+    positions: Sequence[Mapping[str, object]],
+    our_orders: Sequence[Mapping[str, object]],
+    extra_pending: int = 0,
+) -> bool:
+    """True when this order is another exit and one of ours is already unfilled.
+
+    Broker orders are not an input. An unreadable broker book does not
+    invent a pending exit, and a broker exit that is not ours does not
+    block the remainder on its own.
+    """
+    symbol_n = _norm(symbol)
+    exchange_n = _norm(exchange)
+    product_n = _norm(product) or "MIS"
+    action_n = _norm(action)
+    if action_n not in {"BUY", "SELL"}:
+        return False
+    net: int | None = None
+    for row in positions:
+        if not isinstance(row, Mapping) or not _same_contract(row, symbol_n, exchange_n, product_n):
+            continue
+        net = _position_quantity(row)
+        break
+    if net is None or net == 0:
+        return False
+    exit_action = "SELL" if net > 0 else "BUY"
+    if action_n != exit_action:
+        return False
+    pending = pending_exit_quantity(
+        our_orders,
+        symbol=symbol_n,
+        exchange=exchange_n,
+        product=product_n,
+        exit_action=exit_action,
+    )
+    if extra_pending > 0:
+        pending += extra_pending
+    return pending > 0
 
 
 def contract_key(
