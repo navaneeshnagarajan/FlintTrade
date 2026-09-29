@@ -111,6 +111,13 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("MutualFundTab Explore sample copy (FT-INVEST-001)", () => {
+  it("titles the view Browse Mutual Funds", () => {
+    renderTab();
+
+    expect(screen.getByRole("heading", { name: "Browse Mutual Funds" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Mutual Fund Explorer" })).not.toBeInTheDocument();
+  });
+
   it("shows Sample NAVs · as of the fixture date and drops the daily-update claim", () => {
     renderTab();
 

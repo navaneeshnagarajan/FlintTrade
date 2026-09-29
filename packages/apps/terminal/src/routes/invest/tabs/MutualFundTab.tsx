@@ -1,7 +1,7 @@
 /**
  * MutualFundTab.tsx
  *
- * Mutual Fund Explorer with AMFI NAV data (Practice / Live) or a static
+ * Browse Mutual Funds with AMFI NAV data (Practice / Live) or a static
  * Explore sample. Search funds by name/AMC, filter by SEBI category, view NAV.
  *
  * Features:
@@ -141,7 +141,7 @@ export function MutualFundTab() {
         <div className="flex items-center gap-2">
           <TrendingUp className="size-4 text-accent" aria-hidden="true" />
           <h3 className="font-heading font-semibold text-sm text-text-primary">
-            Mutual Fund Explorer
+            Browse Mutual Funds
           </h3>
           
         </div>
