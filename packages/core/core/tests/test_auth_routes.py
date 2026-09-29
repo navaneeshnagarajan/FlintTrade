@@ -27,15 +27,27 @@ def client(tmp_path, monkeypatch):
             yield c, svc
 
 
-def _session_headers() -> dict[str, str]:
-    """A valid session JWT — /v1/auth/pin is session-bound (policy D6): the
-    PIN is a re-auth factor, never a session-minting factor."""
+def _session_headers(
+    mode: str = "explore",
+    *,
+    live_mode_unlocked: bool = False,
+) -> dict[str, str]:
+    """A valid session JWT — PIN routes are session-bound: the PIN is a
+    re-auth factor over the existing session."""
     from flinttrade_core.auth_routes import _create_token
 
+    token = _create_token("nav", mode=mode, live_mode_unlocked=live_mode_unlocked)
     return {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {_create_token('nav', mode='explore')}",
+        "Authorization": f"Bearer {token}",
     }
+
+
+def _token_claims(token: str) -> dict:
+    """Decode a freshly minted session JWT from an auth response."""
+    from flinttrade_core.auth_routes import decode_token
+
+    return decode_token(token)
 
 
 class TestSetupEndpoint:
@@ -460,36 +472,40 @@ class TestPinEndpoint:
         assert resp.status_code == 200
 
     def test_live_pin_requires_authenticator_enrolment(self, client):
-        """FT-SETUP-002: Live unlock keeps the stronger gate. Password-only
-        Explore/Practice must not be enough to arm real-money mode."""
+        """A session that is already Live keeps the authenticator enrolment check."""
         c, svc = client
         c.post("/v1/auth/setup", json={
             "username": "nav", "email": "nav@example.com",
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
         resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                       headers=_session_headers())
+                       headers=_session_headers("live", live_mode_unlocked=True))
         assert resp.status_code == 403
         body = resp.get_json()
         assert body.get("code") == "totp_required"
         assert "authenticator" in body["message"].lower()
         _enable_totp(svc)
         ok = c.post("/v1/auth/pin", json={"pin": "123456"},
-                    headers=_session_headers())
+                    headers=_session_headers("live", live_mode_unlocked=True))
         assert ok.status_code == 200
-        assert ok.get_json()["data"]["live_mode_unlocked"] is True
+        data = ok.get_json()["data"]
+        assert data["mode"] == "live"
+        assert data["live_mode_unlocked"] is True
+        assert _token_claims(data["token"])["mode"] == "live"
 
     def test_practice_pin_unlock_without_totp(self, client):
-        """Mode-preserving idle unlock stays password/PIN — TOTP is a Live gate."""
+        """A Practice session unlocks with the PIN and stays Practice."""
         c, _svc = client
         c.post("/v1/auth/setup", json={
             "username": "nav", "email": "nav@example.com",
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
-        resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "practice"},
-                       headers=_session_headers())
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
+                       headers=_session_headers("practice"))
         assert resp.status_code == 200
-        assert resp.get_json()["data"]["live_mode_unlocked"] is False
+        data = resp.get_json()["data"]
+        assert data["mode"] == "practice"
+        assert data["live_mode_unlocked"] is False
 
     def test_pin_verify_wrong(self, client):
         c, svc = client
@@ -499,30 +515,26 @@ class TestPinEndpoint:
         assert resp.status_code == 401
 
     def test_pin_response_includes_new_token(self, client):
-        """Regression for the 2026-05-19 Codex audit finding —
-        ``/v1/auth/pin`` must return the live-unlocked JWT so the
-        frontend can replace its in-memory token. Discarding the token
-        (the old behaviour) left a Practice JWT in place, and every
-        subsequent live order was 403'd by ``require_live_unlocked``.
-        """
+        """Unlock returns a replacement token for the existing session mode."""
         c, svc = client
         self._setup_with_totp(c, svc)
         resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                       headers=_session_headers())
+                       headers=_session_headers("practice"))
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         assert isinstance(data.get("token"), str)
         assert len(data["token"]) > 20
-        assert data["live_mode_unlocked"] is True
+        assert data["mode"] == "practice"
+        assert data["live_mode_unlocked"] is False
 
 
 class TestPinSetEndpoint:
     """POST /v1/auth/pin/set — the set-PIN-later path.
 
-    The PIN is optional at setup, but Live is armed exclusively via
-    /v1/auth/pin; without this route a PIN-less account could never reach
-    Live except by wiping itself. Session-bound (G9-style) + password
-    re-confirm; mints no token (the PIN stays a re-auth factor, D6).
+    The PIN is optional at setup. Reaching Live is the explicit
+    /v1/auth/live switch; without a PIN a PIN-less account could never
+    reach Live except by wiping itself. Session-bound + password
+    re-confirm; mints no token (the PIN stays a re-auth factor).
     """
 
     def _setup_without_pin(self, c):
@@ -601,7 +613,7 @@ class TestPinSetEndpoint:
 
     def test_set_pin_then_live_unlock_works(self, client):
         """End-to-end recovery for the skipped-PIN account: set a PIN over a
-        live session, then arm Live with it via /v1/auth/pin."""
+        session, then switch to Live with it via /v1/auth/live."""
         c, svc = client
         self._setup_without_pin(c)
 
@@ -618,7 +630,7 @@ class TestPinSetEndpoint:
         assert status["has_pin"] is True
 
         _enable_totp(svc)
-        unlock = c.post("/v1/auth/pin", json={"pin": "654321"},
+        unlock = c.post("/v1/auth/live", json={"pin": "654321"},
                         headers=_session_headers())
         assert unlock.status_code == 200
         data = unlock.get_json()["data"]
@@ -647,9 +659,8 @@ class TestPinSetEndpoint:
 class TestModeSwitchEndpoint:
     """POST /v1/auth/mode — downgrade live → practice + revoke prior JWT.
 
-    Closes the 2026-05-19 Codex CRITICAL finding (UI mode toggle never
-    invalidated the PIN-unlocked JWT). Upgrades must continue to go
-    through /v1/auth/pin.
+    Closes the 2026-05-19 finding (UI mode toggle never invalidated the
+    Live JWT). Switching to Live goes through /v1/auth/live.
     """
 
     def _setup_and_pin_unlock(self, client):
@@ -659,7 +670,7 @@ class TestModeSwitchEndpoint:
             "password": "StrongP@ss123!", "pin": "123456",
         }, headers={"Content-Type": "application/json"})
         _enable_totp(svc)
-        pin_resp = c.post("/v1/auth/pin", json={"pin": "123456"},
+        pin_resp = c.post("/v1/auth/live", json={"pin": "123456"},
                           headers=_session_headers())
         return pin_resp.get_json()["data"]["token"]
 
@@ -819,11 +830,11 @@ class TestModeSwitchEndpoint:
         assert resp.status_code == 400
 
 
-class TestPinModeParameter:
-    """Phase 1 G2: /auth/pin takes an optional ``mode`` so the idle LockScreen
-    can re-authenticate WITHOUT silently escalating an Explore/Practice session
-    to a Live-unlocked JWT. Default (no mode) stays Live for the explicit
-    arm-real-money callers.
+class TestUnlockRestoresSession:
+    """Quick unlock restores the existing session and never changes Mode.
+
+    The mode comes from the server-side session. A mode in the request is
+    ignored, and a missing mode does not become Live.
     """
 
     def _setup(self, client, *, enable_totp: bool = False):
@@ -836,44 +847,113 @@ class TestPinModeParameter:
             _enable_totp(svc)
         return c
 
-    def test_pin_default_mode_is_live(self, client):
-        c = self._setup(client, enable_totp=True)
-        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
-                      headers=_session_headers())
-        assert resp.status_code == 200
-        data = resp.get_json()["data"]
-        assert data["mode"] == "live"
-        assert data["live_mode_unlocked"] is True
-
-    def test_pin_practice_mode_does_not_unlock_live(self, client):
+    def test_practice_unlock_with_right_pin_stays_practice(self, client):
         c = self._setup(client)
-        resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "practice"},
-                      headers=_session_headers())
+        resp = c.post("/v1/auth/pin", json={"pin": "123456"},
+                      headers=_session_headers("practice"))
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         assert data["mode"] == "practice"
         assert data["live_mode_unlocked"] is False
+        claims = _token_claims(data["token"])
+        assert claims["mode"] == "practice"
+        assert claims["live_mode_unlocked"] is False
 
-    def test_pin_explore_mode_does_not_unlock_live(self, client):
+    def test_wrong_pin_is_rejected(self, client):
         c = self._setup(client)
-        resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "explore"},
-                      headers=_session_headers())
+        resp = c.post("/v1/auth/pin", json={"pin": "000000"},
+                      headers=_session_headers("practice"))
+        assert resp.status_code == 401
+        assert "token" not in (resp.get_json().get("data") or {})
+
+    def test_request_mode_live_does_not_change_mode(self, client):
+        c = self._setup(client)
+        resp = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456", "mode": "live"},
+            headers=_session_headers("practice"),
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["mode"] == "practice"
+        assert data["live_mode_unlocked"] is False
+        assert _token_claims(data["token"])["mode"] == "practice"
+
+    def test_explore_session_unlocks_without_live_checks(self, client):
+        """A sample-data session unlocks with the PIN alone."""
+        c = self._setup(client)
+        resp = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456", "mode": "live"},
+            headers=_session_headers("explore"),
+        )
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         assert data["mode"] == "explore"
         assert data["live_mode_unlocked"] is False
 
-    def test_pin_rejects_unknown_mode(self, client):
-        c = self._setup(client)
-        resp = c.post("/v1/auth/pin", json={"pin": "123456", "mode": "bogus"},
-                      headers=_session_headers())
-        assert resp.status_code == 400
+    def test_live_unlock_keeps_authenticator_check(self, client):
+        c, svc = client
+        self._setup(client)
+        blocked = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456", "mode": "practice"},
+            headers=_session_headers("live", live_mode_unlocked=True),
+        )
+        assert blocked.status_code == 403
+        assert blocked.get_json().get("code") == "totp_required"
 
-    def test_pin_wrong_pin_still_401_with_mode(self, client):
-        c = self._setup(client)
-        resp = c.post("/v1/auth/pin", json={"pin": "000000", "mode": "practice"},
-                      headers=_session_headers())
-        assert resp.status_code == 401
+        _enable_totp(svc)
+        ok = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456", "mode": "practice"},
+            headers=_session_headers("live", live_mode_unlocked=True),
+        )
+        assert ok.status_code == 200
+        data = ok.get_json()["data"]
+        assert data["mode"] == "live"
+        assert data["live_mode_unlocked"] is True
+        assert _token_claims(data["token"])["mode"] == "live"
+
+    def test_explicit_live_switch_keeps_authenticator_check(self, client):
+        c, svc = client
+        self._setup(client)
+        blocked = c.post("/v1/auth/live", json={"pin": "123456"},
+                         headers=_session_headers("practice"))
+        assert blocked.status_code == 403
+        assert blocked.get_json().get("code") == "totp_required"
+
+        _enable_totp(svc)
+        ok = c.post("/v1/auth/live", json={"pin": "123456", "mode": "practice"},
+                    headers=_session_headers("practice"))
+        assert ok.status_code == 200
+        data = ok.get_json()["data"]
+        assert data["mode"] == "live"
+        assert data["live_mode_unlocked"] is True
+
+    def test_missing_session_mode_does_not_default_to_live(self, client):
+        c = self._setup(client, enable_totp=True)
+        from flinttrade_core.auth_routes import _create_token
+
+        token = _create_token("nav", mode="explore")
+        # Strip the mode claim from an otherwise valid session token.
+        import jwt as pyjwt
+
+        from flinttrade_core.auth_routes import _get_jwt_secret, _JWT_ALGORITHM
+
+        payload = pyjwt.decode(token, _get_jwt_secret(), algorithms=[_JWT_ALGORITHM])
+        payload.pop("mode", None)
+        bare = pyjwt.encode(payload, _get_jwt_secret(), algorithm=_JWT_ALGORITHM)
+        resp = c.post(
+            "/v1/auth/pin",
+            json={"pin": "123456", "mode": "live"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {bare}",
+            },
+        )
+        assert resp.status_code == 400
+        assert "no mode" in resp.get_json()["message"].lower()
 
 
 class TestRateLimitRegistration:
@@ -911,6 +991,7 @@ class TestRateLimitRegistration:
             "auth_setup",
             "auth_login",
             "auth_pin_verify",
+            "auth_live_confirm",
             "auth_logout",
             "auth_mode_switch",
             "auth_forgot_password",

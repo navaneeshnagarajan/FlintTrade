@@ -32,7 +32,8 @@ import {
   useAuthStore,
 } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
-import { downgradeMode } from "@/lib/modeAuth";
+import { downgradeMode, unlockWithPin } from "@/lib/modeAuth";
+import { lockedDeskHeading, unlockDeskLabel } from "@/lib/unlockDeskLabel";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 
 interface LoginRouteProps {
@@ -78,6 +79,9 @@ export default function LoginRoute({
   // Welcome's fail-closed default — that is the Sign Out remount bug.
   const [totpEnabled, setTotpEnabled] = useState(false);
   const totpRequired = totpEnabled;
+  const sessionToken = useAuthStore.getState().reauthToken ?? useAuthStore.getState().token;
+  const deskLabel = mode === "pin" ? unlockDeskLabel(sessionToken) : null;
+  const pinHeading = lockedDeskHeading(sessionToken);
 
   useEffect(() => {
     if (mode !== "full") return;
@@ -162,34 +166,24 @@ export default function LoginRoute({
     setIsLoading(true);
     setError("");
     try {
-      // Session-bound PIN unlock (policy D6): the backend requires the current
-      // session JWT alongside the PIN. With no (or an expired) token the 401's
-      // message tells the operator to do the full password+TOTP login — which
-      // is exactly the daily re-auth requirement.
-      const headers = buildHeaders(true);
-      const authState = useAuthStore.getState();
-      const sessionToken = authState.token ?? authState.reauthToken;
-      if (sessionToken) headers["Authorization"] = `Bearer ${sessionToken}`;
-      const resp = await fetch(`${getBase()}/v1/auth/pin`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ pin }),
-      });
-      const data = await resp.json();
-      if (resp.ok && data.data?.token) {
-        if (!useAuthStore.getState().setLoggedInIfCurrent(
-          data.data.token,
-          requestFence.principal || "user",
-          "",
-          requestFence,
-        )) return;
-        useModeStore.getState().setMode("live");
-        onSuccess();
-      } else if (isAuthSessionFenceCurrent(requestFence)) {
-        setError(data.message || "Invalid PIN.");
+      // Unlock restores the existing session. Do not send a mode, and do not
+      // set Mode from the response — the Mode store stays as it was.
+      const { token } = await unlockWithPin(pin);
+      if (!useAuthStore.getState().setLoggedInIfCurrent(
+        token,
+        requestFence.principal || "user",
+        "",
+        requestFence,
+      )) return;
+      onSuccess();
+    } catch (err) {
+      if (!isAuthSessionFenceCurrent(requestFence)) return;
+      if (err instanceof TypeError) {
+        setError("Cannot reach server.");
+        return;
       }
-    } catch {
-      if (isAuthSessionFenceCurrent(requestFence)) setError("Cannot reach server.");
+      const message = err instanceof Error ? err.message.trim() : "";
+      setError(message || "Invalid PIN.");
     } finally {
       setIsLoading(false);
     }
@@ -233,7 +227,7 @@ export default function LoginRoute({
 
         <div className="text-center space-y-1">
           <h1 className="font-heading font-bold text-xl text-text-primary">
-            {mode === "pin" ? "Quick Unlock" : "Welcome Back"}
+            {mode === "pin" ? pinHeading : "Welcome Back"}
           </h1>
           <p className="text-sm text-text-muted">
             {mode === "pin"
@@ -254,6 +248,7 @@ export default function LoginRoute({
         {mode === "pin" ? (
           <div className="space-y-4">
             <div>
+              <p className="text-xs text-text-muted mb-1.5">Quick Unlock</p>
               <label htmlFor="pin" className="text-xs text-text-secondary font-medium block mb-1.5">
                 PIN
               </label>
@@ -277,7 +272,7 @@ export default function LoginRoute({
               className="w-full"
             >
               <KeyRound className="size-4" />
-              {isLoading ? "Verifying..." : "Unlock"}
+              {isLoading ? "Verifying..." : (deskLabel ?? "Unlock")}
             </Button>
             <button
               type="button"

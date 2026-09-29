@@ -628,8 +628,10 @@ software safeguards, prompts, and recovery controls in a local setup.
       authenticator code in the Live switch dialog (if you chose **Set up
       later** on the optional authenticator panel). Explore and Practice stay
       password-only until enrolment. First-run Setup does not unlock Live.
-- [ ] An **exactly 6-digit** Security PIN is set under Settings → Security
-      (`/settings#security`). Live cannot be armed until this PIN exists.
+- [ ] An **exactly 6-digit** PIN is set under Settings → Security
+      (`/settings#security`). The Live switch asks for this PIN together
+      with authenticator enrolment. Quick Unlock uses the same PIN to
+      reopen the current Mode.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
 - [ ] Laya is **Ready** or **Degraded** if you intend a place attempt.
@@ -650,15 +652,15 @@ See [Laya on place](#laya-on-place).
 1. Click the **PRACTICE** badge in the top bar, or select **Live** on
    the welcome mode picker. The dialog warns that real orders will be
    placed and asks for an **authenticator code** and your **exactly
-   6-digit PIN**. Live unlock requires both — a confirmed authenticator
+   6-digit PIN**. The Live switch requires both — a confirmed authenticator
    enrolment plus the PIN. If you deferred 2FA with **Set up later** on
    the optional authenticator panel, enter a one-time authenticator code
-   in the dialog to enrol, then the PIN. `POST /v1/auth/pin` with
-   `mode: "live"` refuses 403 `totp_required` until the authenticator
-   is enabled. The PIN
-   alone is not enough. Set the PIN under Settings → Security
+   in the dialog to enrol, then the PIN. `POST /v1/auth/live` refuses
+   403 `totp_required` until the authenticator is enabled. Quick Unlock
+   reopens the same Mode the session already had, with the correct PIN,
+   and never changes the Mode. Set the PIN under Settings → Security
    (`/settings#security`) first if you have not already — see
-   [Settings reference](#11-settings-reference).
+   [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock).
 2. Cancel the modal unless you are deliberately performing your own broker-side
    test outside this guide.
 3. Confirm the UI clearly shows Live mode, the active account, and the
@@ -696,7 +698,7 @@ See [Settings reference](#11-settings-reference) for what else lives there.
 
 | Route | Purpose |
 |---|---|
-| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP, or PIN). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Explore stays reachable if setup is unfinished. There is no `/login` URL. |
+| `/welcome` | First-time cinematic introduction. After the first visit it is also the daily login screen (password only until an authenticator is enrolled; then password + TOTP). An idle lock on this screen is **Quick Unlock** and reopens the existing Mode — see [Idle lock and Quick Unlock](#idle-lock-and-quick-unlock). Password sign-in also offers **Forgot your password?** — an email OTP reset that sends mail only when SMTP or SES is configured (see [email setup](setup/email.md)). Welcome and sign-in also offer **Try with sample data** so Example stays reachable if setup is unfinished. There is no `/login` URL. |
 | `/explore` | On the hosted public demo (`/demo-app/`), the sample-data landing. Installed web and desktop builds redirect `/explore` to `/welcome`; enter Explore from Welcome → **Try with sample data**. |
 | `/setup` | First-run Setup. When the vault is already secured, the count is fixed from the start: **Step 1 of 2 - Create operator**, then **Step 2 of 2 - Practice desk** (that path never shows "of 3"). When the vault is not yet secured: **Step 1 of 3 - Create operator**, **Step 2 of 3 - Vault**, **Step 3 of 3 - Practice desk**. **Open Practice desk** affirms Practice and lands on `/trade`. Reloading `/setup` mid-flow resumes the unfinished setup and keeps the same step title (for example **Step 3 of 3 - Practice desk**). A fresh browser, or a reload on the vault step that needs a setup session, shows **Continue setup** and **This machine already has an operator. Sign in to finish setup.** **Start over (deletes this unfinished operator)** asks once (**Enter your password to delete this unfinished operator.**), then the red **Delete and start over** button or **Cancel**. A failed status check stays on **Retry** and does not open the fresh-install form: **FlintTrade is busy** on HTTP 429, **Can't check setup status** for any other HTTP error or an unreadable or incomplete response, and **FlintTrade backend unavailable** only when nothing answered. A second create while an operator already exists, including two creates that overlap, is refused: the account service raises `Account already set up`, and `POST /v1/auth/setup` answers HTTP 409 with `Request conflicts with the current state`. After Setup is complete, `/setup` does not restart step 1: a signed-in operator is sent to `/trade`; a signed-out operator sees **Setup is complete. Sign in to open the desk.** with **Sign in** as the primary button. Later / Skip panels open on that desk after the affirm and do not change the step count. On the broker Later path, **Continue without a broker** is the first control, above FlintTrade Native and OpenAlgo Bridge. Persona is not a required gate and is not part of that count. There is no first-run Live unlock; Live place stays fail-closed. `/setup-account` remains a compatibility alias. Daily login stays password-only until the authenticator is enrolled; Live still needs the authenticator and PIN. |
 | `/home` | Default post-login overview — a Bento dashboard of persona-adaptive cards (Alt+H). Read-only discovery; order controls live on `/trade`. Signed-in direct `/home` is this same Home, not the password Welcome Back gate (FT-HOME-003). |
@@ -1327,15 +1329,34 @@ Settings panels:
 | **Telegram** | `notifications.telegram_enabled`, `notifications.telegram_chat_id`, `notifications.telegram_bot_token_ref` | Bot enable and chat ID. The token is a hardened file under `<workspace>/secrets/`; `workspace.json` holds only the `secret://` reference. Enabling the bot applies the saved config to the running Telegram alert / kill-switch bot. A test send lives on Automate → Settings → Telegram Alerts (**Send Test**); Explore keeps that control disarmed. |
 | **Risk Limits** | `safety.pnl_pause_pct`, `safety.pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. `POST /api/v1/safety/config` accepts those same names as `pnl_pause_pct` / `pnl_kill_pct`. The Settings form's TypeScript fields are `daily_loss_pause_pct` / `daily_loss_kill_pct`; `updateSafetyConfig` remaps them to the wire fields before posting. |
 
-On `/settings#security`, **Quick-unlock PIN** is the Live-arming
-re-auth factor (it can also unlock an idle session). The PIN is optional
-at account setup, but Live cannot be armed until one exists. New and
-Confirm accept digits only (`maxLength` 6). **Set PIN** / **Change PIN**
-stays disabled until the account password is present, both fields are
-exactly six digits, and they match. Leaving (blur) a field with 1–5
-digits shows `PIN must be exactly 6 digits`; leaving Confirm when both
-fields are filled and different shows `PINs do not match`.
-`POST /v1/auth/pin/set` rejects anything that is not `^[0-9]{6}$`.
+On `/settings#security`, **Quick-unlock PIN** is the 6-digit PIN that
+Quick Unlock and the Live switch both ask for. The PIN is optional at
+account setup. New and Confirm accept digits only (`maxLength` 6).
+**Set PIN** / **Change PIN** stays disabled until the account password
+is present, both fields are exactly six digits, and they match. Leaving
+(blur) a field with 1–5 digits shows `PIN must be exactly 6 digits`;
+leaving Confirm when both fields are filled and different shows
+`PINs do not match`. `POST /v1/auth/pin/set` rejects anything that is
+not `^[0-9]{6}$`. Setting or changing the PIN does not change Mode.
+
+### Idle lock and Quick Unlock
+
+After an idle lock, Welcome Quick Unlock titles the screen for Practice
+and Live: `Practice desk locked` or `Live desk locked`. The button reads
+`Unlock Practice desk` or `Unlock Live desk`. An Example (sample-data)
+session, or any unknown value, shows the plain heading `Locked` and the
+plain button `Unlock`. `Quick Unlock` is the small label above the PIN
+field. Connected (read) is a broker status, not a session Mode, so it
+does not choose this heading. The operator sees the Practice or Live
+heading for that session.
+
+Quick Unlock reopens the same Mode the session already had, with the
+correct PIN. It never changes the Mode. The request is
+`POST /v1/auth/pin` with body `{ "pin" }`. Live is only entered through
+the explicit Live switch (`POST /v1/auth/live`), which requires the PIN
+and authenticator enrolment. Until the authenticator is enabled, that
+call refuses 403 `totp_required`. A session that is already Live keeps
+that enrolment check when Quick Unlock reopens it.
 
 On Explore `/settings` → **LLM Config**, a demo or unconfigured session
 shows the empty state "No LLM provider configured", with **Retry** and
