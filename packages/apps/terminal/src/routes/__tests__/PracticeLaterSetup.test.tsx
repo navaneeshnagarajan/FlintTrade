@@ -148,8 +148,10 @@ describe("PracticeLaterSetup", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Later" }));
     expect(screen.getByRole("button", { name: "Set up Two-factor authentication" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Skip Two-factor authentication" })).not.toBeInTheDocument();
-    expect(screen.getByText("Optional setup · 0 of 4 done · 1 skipped")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Skip Two-factor authentication" })).toBeInTheDocument();
+    expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
+    expect(screen.queryByText("Skipped")).not.toBeInTheDocument();
+    expect(screen.queryByText("Done")).not.toBeInTheDocument();
   });
 
   it("Enrol without a stored QR asks for the account password", () => {
@@ -175,6 +177,10 @@ describe("PracticeLaterSetup", () => {
     expect(screen.queryByText(/Step \d+ of \d+/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Skip Trading defaults" }));
+    expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
+    expect(screen.queryByText("Skipped")).not.toBeInTheDocument();
+    expect(screen.queryByText("Done")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip Trading defaults" }));
     expect(screen.getByText("Optional setup · 0 of 4 done · 1 skipped")).toBeInTheDocument();
     const trading = screen.getByText("Trading defaults").closest("li");
     expect(trading).not.toBeNull();
@@ -184,6 +190,83 @@ describe("PracticeLaterSetup", () => {
     expect(tradingView.getAllByRole("button").map((button) => button.textContent)).toEqual(["Set up"]);
     expect(screen.queryByRole("button", { name: "Skip Trading defaults" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Set up Trading defaults" })).toBeInTheDocument();
+  });
+
+  it("hides Continue without a broker on a finished Broker card", () => {
+    localStorage.setItem(OPTIONAL_SETUP_STATE_KEY, JSON.stringify({
+      skipped: [],
+      completed: ["broker"],
+      dismissed: false,
+    }));
+    markPracticeLaterPending();
+    render(<PracticeLaterSetup />);
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+
+    const card = screen.getByText("Broker connect").closest("li");
+    expect(card).not.toBeNull();
+    const view = within(card as HTMLElement);
+    expect(view.getByText("Done")).toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "Continue without a broker" })).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: /later/i })).not.toBeInTheDocument();
+    expect(view.getAllByRole("button").map((button) => button.textContent)).toEqual(["Set up"]);
+  });
+
+  it("keeps Continue without a broker on a Broker card that is not done", () => {
+    markPracticeLaterPending();
+    render(<PracticeLaterSetup />);
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+
+    const card = screen.getByText("Broker connect").closest("li");
+    expect(card).not.toBeNull();
+    const view = within(card as HTMLElement);
+    expect(view.queryByText("Done")).not.toBeInTheDocument();
+    expect(view.queryByText("Skipped")).not.toBeInTheDocument();
+    expect(view.getByRole("button", { name: "Continue without a broker" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "Set up Broker connect" })).toBeInTheDocument();
+  });
+
+  it("Later inside a panel closes it and does not mark the card Done or Skipped", () => {
+    markPracticeLaterPending();
+    render(<PracticeLaterSetup />);
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+
+    const panels = [
+      {
+        open: "Set up Two-factor authentication",
+        later: "Later",
+        title: "Two-factor authentication",
+      },
+      {
+        open: "Set up LLM",
+        later: "Skip LLM",
+        title: "LLM",
+      },
+      {
+        open: "Set up Trading defaults",
+        later: "Skip Trading defaults",
+        title: "Trading defaults",
+      },
+    ] as const;
+
+    for (const panel of panels) {
+      fireEvent.click(screen.getByRole("button", { name: panel.open }));
+      fireEvent.click(screen.getByRole("button", { name: panel.later }));
+
+      expect(screen.getByRole("button", { name: panel.open })).toBeInTheDocument();
+      expect(screen.getByText("Optional setup · 0 of 4 done")).toBeInTheDocument();
+      const card = screen.getByText(panel.title).closest("li");
+      expect(card).not.toBeNull();
+      const view = within(card as HTMLElement);
+      expect(view.queryByText("Done")).not.toBeInTheDocument();
+      expect(view.queryByText("Skipped")).not.toBeInTheDocument();
+    }
+
+    const stored = localStorage.getItem(OPTIONAL_SETUP_STATE_KEY);
+    if (stored !== null) {
+      const parsed = JSON.parse(stored) as { skipped: string[]; completed: string[] };
+      expect(parsed.skipped).toEqual([]);
+      expect(parsed.completed).toEqual([]);
+    }
   });
 
   it("marks a finished card Done and does not offer Later", () => {

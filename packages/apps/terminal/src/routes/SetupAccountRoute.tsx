@@ -1327,7 +1327,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
                     <p className="text-xs text-text-muted">{item.detail}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {!tray.skipped.includes(item.id) && item.id === "broker" && (
+                    {!tray.skipped.includes(item.id) && !tray.completed.includes(item.id) && item.id === "broker" && (
                       <Button type="button" size="sm" onClick={() => skip("broker")}>
                         Continue without a broker
                       </Button>
@@ -1373,7 +1373,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
                 sessionRecoveryMaterial = null;
                 setPending(false);
               }}
-              onSetUpLater={() => skip("totp")}
+              onSetUpLater={() => setPanel(null)}
             />
           )}
 
@@ -1384,7 +1384,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
           {panel === "llm" && (
             <div className="space-y-3">
               <div className="flex justify-end">
-                <Button type="button" variant="outline" aria-label="Skip LLM" onClick={() => skip("llm")}>
+                <Button type="button" variant="outline" aria-label="Skip LLM" onClick={() => setPanel(null)}>
                   Later
                 </Button>
               </div>
@@ -1399,7 +1399,7 @@ export function PracticeLaterSetup({ surface = "desk" }: { surface?: "desk" | "s
                   type="button"
                   variant="outline"
                   aria-label="Skip Trading defaults"
-                  onClick={() => skip("trading")}
+                  onClick={() => setPanel(null)}
                 >
                   Later
                 </Button>
