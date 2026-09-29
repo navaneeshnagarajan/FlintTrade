@@ -138,7 +138,7 @@ function UpgradeSuggestionCard({
           <button
             type="button"
             onClick={onUpgrade}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-accent text-accent-foreground hover:bg-accent/90 transition-colors"
           >
             <ArrowUpCircle size={12} />
             Upgrade

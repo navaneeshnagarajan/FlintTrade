@@ -219,7 +219,7 @@ function MessageBubble({ role, content, index }: MessageBubbleProps) {
         className={cn(
           "max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed",
           isUser
-            ? "bg-accent text-white rounded-br-sm"
+            ? "bg-accent text-accent-foreground rounded-br-sm"
             : [
                 "bg-surface-base border border-border-default text-text-secondary",
                 "rounded-bl-sm",
